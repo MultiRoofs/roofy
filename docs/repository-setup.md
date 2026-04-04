@@ -1,0 +1,127 @@
+# Repository Setup
+
+Status: Proposed
+
+## Purpose
+
+This document describes the target repository structure and the conventions that should guide implementation once application work begins.
+
+## Target Structure
+
+The repository does not need all of these folders on day one, but this is the intended layout to grow into:
+
+```text
+multiroof-viewer/
+  docs/
+    design-doc.md
+    roadmap.md
+    repository-setup.md
+  public/
+  src/
+    app/
+    domain/
+      citymodel/
+    features/
+    scene/
+    analytics/
+    persistence/
+    platform/
+    shared/
+  tests/
+```
+
+## Directory Responsibilities
+
+### `src/app`
+
+Application bootstrap, providers, routing, dependency wiring, and workspace-level composition.
+
+### `src/domain`
+
+Pure data structures and domain logic for city models, buildings, roof surfaces, rules, and analysis outputs.
+
+### `src/domain/citymodel`
+
+Format-agnostic city-model abstractions plus encoding-specific adapters and readers.
+
+### `src/features`
+
+User-facing workflows such as city-model loading, rule authoring, selection inspection, and saved workspaces.
+
+### `src/scene`
+
+Three.js runtime, view controls, picking, layers, and scene graph composition.
+
+### `src/analytics`
+
+Geometry-derived metrics, suitability logic, solar helpers, and DuckDB-oriented analytical transforms.
+
+### `src/persistence`
+
+Interfaces and concrete implementations for local save, restore, and share-state codecs.
+
+### `src/platform`
+
+Adapters for browser-specific and future Tauri-specific integrations.
+
+### `src/shared`
+
+Reusable utilities, UI primitives, constants, and low-level helpers that do not belong to a single feature.
+
+## Architectural Conventions
+
+- Keep rendering code out of persistence modules.
+- Keep DuckDB query logic out of view components.
+- Keep file-format parsing isolated from feature components.
+- Keep `citymodel` as the conceptual naming layer, and treat CityJSON, CityJSONSeq, and FlatCityBuf as encodings.
+- Prefer pure domain functions for analysis logic so they are testable without a scene runtime.
+- Route persistence access through interfaces and injection rather than importing local storage directly in UI code.
+
+## Recommended Initial Tooling Scope
+
+When implementation begins, the first tooling baseline should cover:
+
+- `vite` for local development and production build
+- `typescript` for typed boundaries
+- `eslint` for linting
+- `prettier` or an equivalent formatter
+- `vitest` for unit tests in a TDD workflow
+- simple unit testing for pure analysis, ingestion, and persistence logic
+
+## State Management Direction
+
+The application should maintain a single workspace-level state model, but implementation details should stay replaceable. The most important decision is not the specific state library; it is preserving clear boundaries between:
+
+- ephemeral UI state
+- persisted project state
+- derived analytical state
+- shareable URL state
+
+## Persistence Direction
+
+Planned v1 implementations:
+
+- in-memory state for transient sessions
+- local storage for saved workspaces
+- URL codec for compact shared views
+
+Future-compatible abstractions should make it straightforward to add:
+
+- server-backed project persistence
+- database storage
+- Tauri-native file or local database persistence
+
+## Recommended Coding Strategy
+
+- Build one vertical slice at a time.
+- Introduce typed contracts before concrete adapters.
+- Write a failing unit test first, then implement the smallest change to pass it, then refactor.
+- Use a small sample city-model fixture while developing the first end-to-end flows.
+- Keep geospatial assumptions explicit in code and docs.
+
+## Definition of Done for Early Features
+
+- The feature works with at least one sample city-model fixture.
+- The feature state can be serialized if it belongs to persisted workspace state.
+- The feature does not leak storage or parsing concerns into UI components.
+- The feature includes at least minimal documentation when it changes architecture.

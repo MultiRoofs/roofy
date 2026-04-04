@@ -1,0 +1,99 @@
+:root {
+  color: #102a43;
+  background:
+    radial-gradient(circle at top left, rgba(176, 221, 196, 0.45), transparent 35%),
+    linear-gradient(180deg, #f7f5ec 0%, #eef3f6 100%);
+  font-family:
+    "IBM Plex Sans",
+    "Segoe UI",
+    sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-shell {
+  display: grid;
+  gap: 2rem;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 5rem;
+}
+
+.hero {
+  display: grid;
+  gap: 1rem;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #486581;
+}
+
+.hero h1 {
+  margin: 0;
+  max-width: 12ch;
+  font-size: clamp(2.8rem, 8vw, 5rem);
+  line-height: 0.95;
+  color: #102a43;
+}
+
+.summary {
+  margin: 0;
+  max-width: 42rem;
+  font-size: 1.1rem;
+  color: #243b53;
+}
+
+.panel {
+  width: min(100%, 34rem);
+  padding: 1.5rem;
+  border: 1px solid rgba(16, 42, 67, 0.08);
+  border-radius: 1.25rem;
+  background: rgba(255, 255, 255, 0.76);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 20px 60px rgba(16, 42, 67, 0.08);
+}
+
+.panel h2 {
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+  font-size: 1.1rem;
+}
+
+.panel ol {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.panel li + li {
+  margin-top: 0.45rem;
+}
+
+@media (max-width: 640px) {
+  .app-shell {
+    padding-top: 3rem;
+  }
+
+  .hero h1 {
+    max-width: none;
+  }
+}
+
