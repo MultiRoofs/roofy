@@ -25,6 +25,10 @@ body {
   min-height: 100vh;
 }
 
+/* ---------------------------------------------------------------------------
+   Landing page
+   --------------------------------------------------------------------------- */
+
 .app-shell {
   display: grid;
   gap: 2rem;
@@ -49,7 +53,7 @@ body {
 
 .hero h1 {
   margin: 0;
-  max-width: 12ch;
+  max-width: 16ch;
   font-size: clamp(2.8rem, 8vw, 5rem);
   line-height: 0.95;
   color: #102a43;
@@ -62,29 +66,124 @@ body {
   color: #243b53;
 }
 
-.panel {
+.summary code {
+  background: rgba(16, 42, 67, 0.07);
+  padding: 0.15em 0.4em;
+  border-radius: 0.3em;
+  font-size: 0.95em;
+}
+
+.drop-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
   width: min(100%, 34rem);
-  padding: 1.5rem;
-  border: 1px solid rgba(16, 42, 67, 0.08);
+  padding: 3rem 2rem;
+  border: 2px dashed rgba(16, 42, 67, 0.2);
   border-radius: 1.25rem;
-  background: rgba(255, 255, 255, 0.76);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 20px 60px rgba(16, 42, 67, 0.08);
+  background: rgba(255, 255, 255, 0.5);
+  text-align: center;
+  transition: border-color 0.2s, background 0.2s;
 }
 
-.panel h2 {
-  margin-top: 0;
-  margin-bottom: 0.75rem;
-  font-size: 1.1rem;
+.drop-zone:hover {
+  border-color: rgba(16, 42, 67, 0.4);
+  background: rgba(255, 255, 255, 0.7);
 }
 
-.panel ol {
+.drop-zone p {
   margin: 0;
-  padding-left: 1.2rem;
+  color: #486581;
 }
 
-.panel li + li {
-  margin-top: 0.45rem;
+.drop-or {
+  font-size: 0.85rem;
+  color: #829ab1;
+}
+
+.file-label {
+  display: inline-block;
+  padding: 0.5rem 1.25rem;
+  background: #102a43;
+  color: #fff;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+
+.file-label:hover {
+  background: #243b53;
+}
+
+.error-message {
+  color: #c53030;
+  background: rgba(197, 48, 48, 0.08);
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  width: min(100%, 34rem);
+}
+
+/* ---------------------------------------------------------------------------
+   3D Viewer layout
+   --------------------------------------------------------------------------- */
+
+.viewer-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #1a1a2e;
+  color: #e0e0e0;
+}
+
+.viewer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  background: #16213e;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.viewer-title {
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #829ab1;
+}
+
+.viewer-info {
+  flex: 1;
+  font-size: 0.82rem;
+  color: #627d98;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-btn {
+  padding: 0.3rem 0.75rem;
+  background: rgba(255, 255, 255, 0.08);
+  color: #bcccdc;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.35rem;
+  cursor: pointer;
+  font-size: 0.82rem;
+  transition: background 0.15s;
+}
+
+.viewer-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.viewer-canvas {
+  flex: 1;
+  overflow: hidden;
 }
 
 @media (max-width: 640px) {
@@ -96,4 +195,3 @@ body {
     max-width: none;
   }
 }
-
