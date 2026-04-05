@@ -27,7 +27,7 @@ fi
 
 if [ -n "${REMOTE_USER}" ] && [ "${REMOTE_USER}" != "root" ]; then
   exec "${RUNTIME}" exec -it "${CONTAINER_ID}" bash -lc \
-    "cd '${CONTAINER_WORKSPACE}' && exec su '${REMOTE_USER}' -s /bin/bash -c 'cd \"${CONTAINER_WORKSPACE}\" && exec bash -i'"
+    "exec su -l '${REMOTE_USER}' -s /bin/bash -c 'cd \"${CONTAINER_WORKSPACE}\" && exec bash -i'"
 fi
 
 exec "${RUNTIME}" exec -it "${CONTAINER_ID}" bash "$@"
