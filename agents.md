@@ -103,6 +103,10 @@ Read these files before making structural decisions:
 - `docs/repository-setup.md`
 - `docs/testing-strategy.md`
 
+## UI/UX Design Reference
+
+The `design/` folder contains the wireframe and layout mockups for the viewer UI. Open `design/wireframe.html` in a browser to see the interactive wireframe with three states: Landing, Viewer (M1), and Full Layout (M2–M4). Screenshot references are also included. Consult these before making UI layout or component decisions.
+
 ## Notes
 
 `claude.md` should remain a symbolic link to this file so both entry points stay aligned.
