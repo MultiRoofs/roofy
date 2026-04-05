@@ -181,3 +181,105 @@ describe("buildCityMesh", () => {
     expect(result.triangleCount).toBe(2);
   });
 });
+
+describe("picking index", () => {
+  it("returns objectKeys matching the objects in the model", () => {
+    const roof = makeSurface("RoofSurface", [
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 1, 0],
+    ]);
+    const model = makeModel({
+      b1: makeObject("b1", [roof]),
+      b2: makeObject("b2", [roof]),
+    });
+    const result = buildCityMesh(model);
+
+    expect(result.pickingIndex.objectKeys).toEqual(["b1", "b2"]);
+  });
+
+  it("objectIndex attribute has one entry per vertex", () => {
+    const roof = makeSurface("RoofSurface", [
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 1, 0],
+    ]);
+    const model = makeModel({ b1: makeObject("b1", [roof]) });
+    const result = buildCityMesh(model);
+
+    const posAttr = result.geometry.getAttribute("position");
+    const idxAttr = result.geometry.getAttribute("objectIndex");
+    expect(idxAttr.count).toBe(posAttr.count);
+  });
+
+  it("assigns correct objectIndex for multiple objects", () => {
+    const tri = makeSurface("RoofSurface", [
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 1, 0],
+    ]);
+    const model = makeModel({
+      b1: makeObject("b1", [tri]),
+      b2: makeObject("b2", [tri]),
+    });
+    const result = buildCityMesh(model);
+
+    const idxAttr = result.geometry.getAttribute("objectIndex");
+    // b1's triangle: vertices 0,1,2 → objectIndex 0
+    expect(idxAttr.getX(0)).toBe(0);
+    expect(idxAttr.getX(1)).toBe(0);
+    expect(idxAttr.getX(2)).toBe(0);
+    // b2's triangle: vertices 3,4,5 → objectIndex 1
+    expect(idxAttr.getX(3)).toBe(1);
+    expect(idxAttr.getX(4)).toBe(1);
+    expect(idxAttr.getX(5)).toBe(1);
+  });
+
+  it("assigns correct surfaceIndex within each object", () => {
+    const roof = makeSurface("RoofSurface", [
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 1, 0],
+    ]);
+    const wall = makeSurface("WallSurface", [
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 0, 1],
+    ]);
+    const model = makeModel({
+      b1: makeObject("b1", [roof, wall]),
+    });
+    const result = buildCityMesh(model);
+
+    const surfAttr = result.geometry.getAttribute("surfaceIndex");
+    // roof triangle: vertices 0,1,2 → surfaceIndex 0
+    expect(surfAttr.getX(0)).toBe(0);
+    // wall triangle: vertices 3,4,5 → surfaceIndex 1
+    expect(surfAttr.getX(3)).toBe(1);
+  });
+
+  it("returns baseColors as a copy of the vertex color data", () => {
+    const roof = makeSurface("RoofSurface", [
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 1, 0],
+    ]);
+    const model = makeModel({ b1: makeObject("b1", [roof]) });
+    const result = buildCityMesh(model);
+
+    expect(result.baseColors).toBeInstanceOf(Float32Array);
+    expect(result.baseColors.length).toBeGreaterThan(0);
+
+    const colorAttr = result.geometry.getAttribute("color");
+    // Same values but different buffer reference
+    expect(result.baseColors[0]).toBe(colorAttr.getX(0));
+  });
+
+  it("returns empty pickingIndex for empty model", () => {
+    const model = makeModel({});
+    const result = buildCityMesh(model);
+
+    expect(result.pickingIndex.objectKeys).toEqual([]);
+    expect(result.baseColors.length).toBe(0);
+  });
+});

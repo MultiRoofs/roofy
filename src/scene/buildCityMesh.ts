@@ -11,23 +11,8 @@ import {
   BufferGeometry,
   Color,
 } from "three";
-import type { CityModel, BuildingSurfaceType, Vec3 } from "../domain/citymodel/types";
-
-// ---------------------------------------------------------------------------
-// Surface type → color mapping
-// ---------------------------------------------------------------------------
-
-const SURFACE_COLORS: Record<BuildingSurfaceType, Color> = {
-  RoofSurface: new Color(0xcc4444),
-  WallSurface: new Color(0xcccccc),
-  GroundSurface: new Color(0x886644),
-  ClosureSurface: new Color(0x999999),
-  OuterCeilingSurface: new Color(0xaaaaaa),
-  OuterFloorSurface: new Color(0x998877),
-  Window: new Color(0x6699cc),
-  Door: new Color(0x996633),
-  unknown: new Color(0x888888),
-};
+import type { CityModel, Vec3 } from "../domain/citymodel/types";
+import { SURFACE_COLORS } from "./surfaceColors";
 
 // ---------------------------------------------------------------------------
 // Fan triangulation for convex-ish polygons
@@ -45,6 +30,10 @@ function triangulateFan(
   color: Color,
   positions: number[],
   colors: number[],
+  objectIndices: number[],
+  surfaceIndices: number[],
+  objectIdx: number,
+  surfaceIdx: number,
 ): void {
   if (ring.length < 3) return;
 
@@ -60,6 +49,9 @@ function triangulateFan(
     colors.push(color.r, color.g, color.b);
     colors.push(color.r, color.g, color.b);
     colors.push(color.r, color.g, color.b);
+
+    objectIndices.push(objectIdx, objectIdx, objectIdx);
+    surfaceIndices.push(surfaceIdx, surfaceIdx, surfaceIdx);
   }
 }
 
@@ -67,9 +59,17 @@ function triangulateFan(
 // Public API
 // ---------------------------------------------------------------------------
 
+export interface PickingIndex {
+  /** Ordered list of CityObject IDs, one per unique object index. */
+  readonly objectKeys: ReadonlyArray<string>;
+}
+
 export interface CityMeshResult {
   readonly geometry: BufferGeometry;
   readonly triangleCount: number;
+  readonly pickingIndex: PickingIndex;
+  /** Snapshot of vertex colors before any highlight mutations. */
+  readonly baseColors: Float32Array;
 }
 
 /**
@@ -86,10 +86,20 @@ export function buildCityMesh(
 ): CityMeshResult {
   const positions: number[] = [];
   const vertexColors: number[] = [];
+  const objectIndices: number[] = [];
+  const surfaceIndices: number[] = [];
+  const objectKeys: string[] = [];
 
-  for (const obj of Object.values(model.objects)) {
+  // Object.entries preserves insertion order (guaranteed by the spec
+  // for string keys). The integer objectIdx assigned here is the same
+  // index used at pick-decode time via pickingIndex.objectKeys.
+  let objectIdx = 0;
+  for (const [id, obj] of Object.entries(model.objects)) {
     if (!obj) continue;
-    for (const surface of obj.surfaces) {
+    objectKeys.push(id);
+
+    for (let surfaceIdx = 0; surfaceIdx < obj.surfaces.length; surfaceIdx++) {
+      const surface = obj.surfaces[surfaceIdx]!;
       const color = SURFACE_COLORS[surface.type];
       // Only triangulate the exterior ring (index 0).
       // Interior rings are holes — proper hole handling requires
@@ -101,8 +111,19 @@ export function buildCityMesh(
         v[1] - originOffset[1],
         v[2] - originOffset[2],
       ]);
-      triangulateFan(offsetRing, color, positions, vertexColors);
+      triangulateFan(
+        offsetRing,
+        color,
+        positions,
+        vertexColors,
+        objectIndices,
+        surfaceIndices,
+        objectIdx,
+        surfaceIdx,
+      );
     }
+
+    objectIdx++;
   }
 
   const geometry = new BufferGeometry();
@@ -111,11 +132,21 @@ export function buildCityMesh(
 
   geometry.setAttribute("position", new BufferAttribute(posArray, 3));
   geometry.setAttribute("color", new BufferAttribute(colorArray, 3));
+  geometry.setAttribute(
+    "objectIndex",
+    new BufferAttribute(new Int32Array(objectIndices), 1),
+  );
+  geometry.setAttribute(
+    "surfaceIndex",
+    new BufferAttribute(new Int32Array(surfaceIndices), 1),
+  );
   geometry.computeVertexNormals();
 
   return {
     geometry,
     triangleCount: positions.length / 9,
+    pickingIndex: { objectKeys },
+    baseColors: Float32Array.from(colorArray),
   };
 }
 

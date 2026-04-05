@@ -1,15 +1,57 @@
+/* ═══════════════════════════════════════════════════════════════
+   DESIGN TOKENS — from wireframe, maps to future shadcn/ui vars
+   ═══════════════════════════════════════════════════════════════ */
+
 :root {
-  color: #102a43;
-  background:
-    radial-gradient(circle at top left, rgba(176, 221, 196, 0.45), transparent 35%),
-    linear-gradient(180deg, #f7f5ec 0%, #eef3f6 100%);
-  font-family:
-    "IBM Plex Sans",
-    "Segoe UI",
-    sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+  /* surfaces */
+  --bg-root: #0c0e14;
+  --bg-panel: #12151e;
+  --bg-panel-hover: #181c28;
+  --bg-toolbar: #10131b;
+  --bg-viewport: #0a0c12;
+  --bg-input: #1a1e2a;
+  --bg-muted: #1e2230;
+
+  /* borders */
+  --border: rgba(255, 255, 255, 0.06);
+  --border-accent: rgba(255, 255, 255, 0.10);
+
+  /* text */
+  --fg: #e8eaf0;
+  --fg-muted: #6b7280;
+  --fg-dim: #4b5060;
+  --fg-label: #8b92a0;
+
+  /* accent — warm amber for selection/interactive */
+  --accent: #e8973f;
+  --accent-soft: rgba(232, 151, 63, 0.12);
+  --accent-text: #f0b060;
+
+  /* secondary — teal for data highlights */
+  --teal: #3ecfcf;
+  --teal-soft: rgba(62, 207, 207, 0.10);
+
+  /* status colors */
+  --roof: #cc4444;
+  --wall: #8899aa;
+  --ground: #886644;
+  --selection: #e8973f;
+
+  /* radii */
+  --radius-sm: 0.375rem;
+  --radius: 0.5rem;
+  --radius-lg: 0.75rem;
+
+  /* spacing */
+  --toolbar-h: 2.75rem;
+  --statusbar-h: 1.75rem;
+  --rail-w: 2.75rem;
+  --panel-w: 320px;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   RESET & BASE
+   ═══════════════════════════════════════════════════════════════ */
 
 * {
   box-sizing: border-box;
@@ -19,15 +61,17 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  line-height: 1.5;
 }
 
 #root {
   min-height: 100vh;
 }
 
-/* ---------------------------------------------------------------------------
-   Landing page
-   --------------------------------------------------------------------------- */
+/* ═══════════════════════════════════════════════════════════════
+   LANDING PAGE
+   ═══════════════════════════════════════════════════════════════ */
 
 .app-shell {
   display: grid;
@@ -35,6 +79,11 @@ body {
   max-width: 960px;
   margin: 0 auto;
   padding: 4rem 1.5rem 5rem;
+  color: #102a43;
+  background:
+    radial-gradient(circle at top left, rgba(176, 221, 196, 0.45), transparent 35%),
+    linear-gradient(180deg, #f7f5ec 0%, #eef3f6 100%);
+  min-height: 100vh;
 }
 
 .hero {
@@ -127,65 +176,6 @@ body {
   width: min(100%, 34rem);
 }
 
-/* ---------------------------------------------------------------------------
-   3D Viewer layout
-   --------------------------------------------------------------------------- */
-
-.viewer-layout {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  background: #1a1a2e;
-  color: #e0e0e0;
-}
-
-.viewer-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 0.5rem 1rem;
-  background: #16213e;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  flex-shrink: 0;
-}
-
-.viewer-title {
-  font-weight: 700;
-  font-size: 0.85rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #829ab1;
-}
-
-.viewer-info {
-  flex: 1;
-  font-size: 0.82rem;
-  color: #627d98;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.viewer-btn {
-  padding: 0.3rem 0.75rem;
-  background: rgba(255, 255, 255, 0.08);
-  color: #bcccdc;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 0.35rem;
-  cursor: pointer;
-  font-size: 0.82rem;
-  transition: background 0.15s;
-}
-
-.viewer-btn:hover {
-  background: rgba(255, 255, 255, 0.14);
-}
-
-.viewer-canvas {
-  flex: 1;
-  overflow: hidden;
-}
-
 @media (max-width: 640px) {
   .app-shell {
     padding-top: 3rem;
@@ -194,4 +184,431 @@ body {
   .hero h1 {
     max-width: none;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   VIEWER SHELL — CSS Grid layout
+   ═══════════════════════════════════════════════════════════════ */
+
+.viewer-shell {
+  display: grid;
+  grid-template-rows: var(--toolbar-h) 1fr var(--statusbar-h);
+  grid-template-columns: var(--rail-w) 1fr var(--panel-w);
+  grid-template-areas:
+    "toolbar  toolbar  toolbar"
+    "rail     viewport panel"
+    "status   status   status";
+  height: 100vh;
+  background: var(--bg-root);
+  color: var(--fg);
+}
+
+.viewer-shell.panel-collapsed {
+  grid-template-columns: var(--rail-w) 1fr 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TOOLBAR
+   ═══════════════════════════════════════════════════════════════ */
+
+.toolbar {
+  grid-area: toolbar;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0 0.75rem;
+  background: var(--bg-toolbar);
+  border-bottom: 1px solid var(--border);
+}
+
+.toolbar-brand {
+  font-weight: 700;
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-label);
+}
+
+.toolbar-file {
+  font-size: 0.82rem;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolbar-sep {
+  width: 1px;
+  height: 1.25rem;
+  background: var(--border-accent);
+}
+
+.meta-pills {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.5rem;
+  background: var(--bg-muted);
+  border-radius: var(--radius-sm);
+  font-size: 0.7rem;
+  color: var(--fg-label);
+}
+
+.pill .value {
+  color: var(--fg);
+  font-family: "Geist Mono", monospace;
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+.tb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.tb-btn:hover {
+  background: var(--bg-panel-hover);
+  color: var(--fg);
+}
+
+.tb-btn svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TOOL RAIL
+   ═══════════════════════════════════════════════════════════════ */
+
+.tool-rail {
+  grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem 0;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+}
+
+.rail-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.rail-btn:hover {
+  background: var(--bg-panel-hover);
+  color: var(--fg);
+}
+
+.rail-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.rail-btn svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.rail-divider {
+  width: 60%;
+  height: 1px;
+  margin: 0.25rem 0;
+  background: var(--border);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   VIEWPORT
+   ═══════════════════════════════════════════════════════════════ */
+
+.viewport {
+  grid-area: viewport;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-viewport);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SELECTION TOOLTIP
+   ═══════════════════════════════════════════════════════════════ */
+
+.pick-tooltip {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  background: rgba(12, 14, 20, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius);
+  font-size: 0.75rem;
+  color: var(--fg);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.pick-tooltip .obj-type {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.pick-tooltip .obj-id {
+  color: var(--fg-muted);
+  font-family: "Geist Mono", monospace;
+  font-size: 0.7rem;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   INSPECTOR PANEL
+   ═══════════════════════════════════════════════════════════════ */
+
+.inspector {
+  grid-area: panel;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.inspector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.inspector-header h3 {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.inspector-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.inspector-tab {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.inspector-tab:hover {
+  color: var(--fg-muted);
+}
+
+.inspector-tab.active {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+
+.inspector-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem 0;
+}
+
+.inspector-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--fg-dim);
+  font-size: 0.82rem;
+  text-align: center;
+  padding: 1rem;
+}
+
+/* Attribute sections */
+
+.attr-section {
+  padding: 0.5rem 0.75rem;
+}
+
+.attr-section + .attr-section {
+  border-top: 1px solid var(--border);
+}
+
+.attr-section-title {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-dim);
+  margin-bottom: 0.4rem;
+}
+
+.attr-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0.2rem 0;
+  gap: 0.5rem;
+}
+
+.attr-key {
+  font-size: 0.75rem;
+  color: var(--fg-label);
+  flex-shrink: 0;
+}
+
+.attr-value {
+  font-size: 0.75rem;
+  font-family: "Geist Mono", monospace;
+  color: var(--fg);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attr-value.highlight {
+  color: var(--teal);
+}
+
+/* Surface breakdown */
+
+.surface-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  font-size: 0.75rem;
+  color: var(--fg-label);
+}
+
+.surface-item.selected {
+  color: var(--fg);
+  background: var(--accent-soft);
+  margin: 0 -0.75rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--radius-sm);
+}
+
+.surface-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.surface-item .count {
+  margin-left: auto;
+  font-family: "Geist Mono", monospace;
+  color: var(--fg-muted);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   STATUS BAR
+   ═══════════════════════════════════════════════════════════════ */
+
+.statusbar {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0 0.75rem;
+  background: var(--bg-toolbar);
+  border-top: 1px solid var(--border);
+  font-size: 0.7rem;
+  font-family: "Geist Mono", monospace;
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.status-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: #34d399;
+}
+
+.status-label {
+  color: var(--fg-dim);
+}
+
+.status-value {
+  color: var(--fg-muted);
+}
+
+.status-value.accent {
+  color: var(--accent);
+}
+
+.statusbar .toolbar-spacer {
+  flex: 1;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PICK MODE TOGGLE
+   ═══════════════════════════════════════════════════════════════ */
+
+.pick-mode-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.6rem;
+  color: var(--fg-dim);
+  text-align: center;
+}
+
+.pick-mode-group .label {
+  letter-spacing: 0.04em;
 }

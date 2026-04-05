@@ -24,7 +24,8 @@
     "@takram/three-geospatial": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "three": "latest"
+    "three": "latest",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@eslint/js": "latest",

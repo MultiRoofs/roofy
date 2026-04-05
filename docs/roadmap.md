@@ -36,6 +36,17 @@ Deliverables:
 - City model ingestion starting with CityJSON
 - Camera controls, selection, and inspection panel
 - Basic city-model metadata display
+- Selection modes: object-level and surface-level picking
+- Single-object selection with visual highlight
+
+Deferred to later milestones:
+
+- Multi-select (Shift+click to add to selection)
+- Derived geometry summary in inspector (footprint area, roof area, volume)
+- Layers tab in inspector panel
+- Box Select and Measure tools
+- Cursor position display (world coordinates from raycasting)
+- FPS counter in status bar
 
 Exit criteria:
 
