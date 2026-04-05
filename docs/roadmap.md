@@ -50,8 +50,10 @@ Deferred to later milestones:
 
 Exit criteria:
 
-- A user can load and inspect a sample city-model fixture end to end
-- Selection and attribute inspection are stable enough for demos
+- A user can load and inspect a sample city-model fixture end to end ✓
+- Selection and attribute inspection are stable enough for demos ✓
+
+Status: Complete. Integration tests verify the full pipeline with fixtures/two-buildings.city.json.
 
 ## Milestone 2: Roof Intelligence
 

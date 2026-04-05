@@ -50,6 +50,9 @@ export function usePickingControls(refs: PickingRefs): void {
   const raycasterRef = useRef(new Raycaster());
   const pointerRef = useRef(new Vector2());
 
+  // Note: this effect reads canvasRef.current at setup time. It works because
+  // CityScene's init useEffect (which sets canvasRef) runs before this hook's
+  // effect due to React's call-order guarantee within a single component.
   useEffect(() => {
     const canvas = refs.canvasRef.current;
     if (!canvas) return;

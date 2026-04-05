@@ -6,7 +6,7 @@ This file is the contributor guide for human and AI collaborators working in thi
 
 ## Current Phase
 
-The project is in Milestone 1: Core Viewer. Foundation (M0) is complete. M1 implementation is now feature-complete: CityJSON parsing, domain types, Three.js scene, file loading, object/surface picking with highlight, inspector panel (Object + Surfaces tabs), toolbar with metadata pills, tool rail, and status bar are all implemented. CSS design tokens have been migrated from the wireframe. Remaining: quality review and integration testing before M1 exit.
+Milestone 1 (Core Viewer) is complete. All features implemented: CityJSON parsing, domain types, Three.js scene, file loading, object/surface picking with highlight, inspector panel (Object + Surfaces tabs), toolbar with metadata pills, tool rail, status bar, and CSS design tokens. Integration tests verify the full load-to-inspect pipeline. Ready for Milestone 2 (Roof Intelligence).
 
 ## Project Context
 
