@@ -8,6 +8,7 @@ shift || true
 WORKSPACE_FOLDER="$(pwd -P)"
 CONFIG_FILE="${WORKSPACE_FOLDER}/.devcontainer/devcontainer.json"
 REMOTE_USER="$(node -p "const fs=require('node:fs'); JSON.parse(fs.readFileSync(process.argv[1], 'utf8')).remoteUser || ''" "${CONFIG_FILE}")"
+CONTAINER_WORKSPACE="/workspaces/$(basename "${WORKSPACE_FOLDER}")"
 
 if ! command -v "${RUNTIME}" >/dev/null 2>&1; then
   echo "Container runtime not found: ${RUNTIME}" >&2
@@ -24,8 +25,9 @@ if [ -z "${CONTAINER_ID}" ]; then
   exit 1
 fi
 
-if [ -n "${REMOTE_USER}" ]; then
-  exec "${RUNTIME}" exec -it --user "${REMOTE_USER}" "${CONTAINER_ID}" bash "$@"
+if [ -n "${REMOTE_USER}" ] && [ "${REMOTE_USER}" != "root" ]; then
+  exec "${RUNTIME}" exec -it "${CONTAINER_ID}" bash -lc \
+    "cd '${CONTAINER_WORKSPACE}' && exec su '${REMOTE_USER}' -s /bin/bash -c 'cd \"${CONTAINER_WORKSPACE}\" && exec bash -i'"
 fi
 
 exec "${RUNTIME}" exec -it "${CONTAINER_ID}" bash "$@"
