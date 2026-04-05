@@ -57,6 +57,7 @@
   ],
   "postCreateCommand": "bash .devcontainer/post-create.sh",
   "remoteUser": "vscode",
+  "userEnvProbe": "none",
   "forwardPorts": [
     5173,
     4173
