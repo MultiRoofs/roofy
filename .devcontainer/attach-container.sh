@@ -7,6 +7,7 @@ shift || true
 
 WORKSPACE_FOLDER="$(pwd -P)"
 CONFIG_FILE="${WORKSPACE_FOLDER}/.devcontainer/devcontainer.json"
+REMOTE_USER="$(node -p "const fs=require('node:fs'); JSON.parse(fs.readFileSync(process.argv[1], 'utf8')).remoteUser || ''" "${CONFIG_FILE}")"
 
 if ! command -v "${RUNTIME}" >/dev/null 2>&1; then
   echo "Container runtime not found: ${RUNTIME}" >&2
@@ -21,6 +22,10 @@ if [ -z "${CONTAINER_ID}" ]; then
   echo "No running devcontainer found for ${WORKSPACE_FOLDER}." >&2
   echo "Start it first with 'npm run devcontainer:up' or 'npm run devcontainer:up:podman'." >&2
   exit 1
+fi
+
+if [ -n "${REMOTE_USER}" ]; then
+  exec "${RUNTIME}" exec -it --user "${REMOTE_USER}" "${CONTAINER_ID}" bash "$@"
 fi
 
 exec "${RUNTIME}" exec -it "${CONTAINER_ID}" bash "$@"
