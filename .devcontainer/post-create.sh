@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -uo pipefail
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -14,6 +14,27 @@ warn() {
   echo -e "${YELLOW}$1${NC}"
 }
 
+FAILED_STEPS=()
+
+record_failure() {
+  FAILED_STEPS+=("$1")
+  warn "$1 failed; continuing."
+}
+
+run_as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+    return
+  fi
+
+  if command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+    return
+  fi
+
+  return 1
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
@@ -24,46 +45,54 @@ export PATH="${HOME}/.cargo/bin:${HOME}/.local/bin:${CARGO_HOME}/bin:${PATH}"
 
 log "Bootstrapping MultiRoof Viewer devcontainer..."
 
-warn "Installing system packages for native Node and Rust tooling..."
-sudo apt-get update
-sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-  cmake \
-  ninja-build \
-  libssl-dev \
-  pkg-config
+if command -v apt-get >/dev/null 2>&1; then
+  warn "Installing system packages for native Node and Rust tooling..."
+  run_as_root apt-get update || record_failure "apt-get update"
+  run_as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    cmake \
+    ninja-build \
+    libssl-dev \
+    pkg-config || record_failure "apt-get install"
+else
+  warn "apt-get is unavailable; skipping system package install."
+fi
 
 if ! command -v uv >/dev/null 2>&1; then
   warn "Installing uv..."
-  curl -LsSf https://astral.sh/uv/install.sh | sh || warn "uv installation failed; continuing."
+  curl -LsSf https://astral.sh/uv/install.sh | sh || record_failure "uv installation"
 fi
 
 if ! command -v claude >/dev/null 2>&1; then
   warn "Installing Claude Code CLI..."
-  curl -fsSL https://claude.ai/install.sh | bash || warn "Claude Code CLI installation failed; continuing."
+  curl -fsSL https://claude.ai/install.sh | bash || record_failure "Claude Code CLI installation"
 fi
 
-if [ -f package-lock.json ]; then
+if ! command -v npm >/dev/null 2>&1; then
+  warn "npm is unavailable; skipping project dependency install."
+elif [ -d node_modules ] && [ -f node_modules/react/package.json ]; then
+  warn "Existing node_modules detected; skipping npm install."
+elif [ -f package-lock.json ]; then
   warn "Installing project dependencies with npm ci..."
-  npm ci
+  npm ci || record_failure "npm ci"
 else
   warn "Installing project dependencies with npm install..."
-  npm install
+  npm install || record_failure "npm install"
 fi
 
 if command -v cargo >/dev/null 2>&1; then
   if ! command -v just >/dev/null 2>&1; then
     warn "Installing just..."
-    cargo install just --locked || warn "just installation failed; continuing."
+    cargo install just --locked || record_failure "just installation"
   fi
 
   if command -v rustup >/dev/null 2>&1; then
     warn "Adding wasm32-unknown-unknown target..."
-    rustup target add wasm32-unknown-unknown || warn "Unable to add wasm32 target; continuing."
+    rustup target add wasm32-unknown-unknown || record_failure "rustup target add wasm32-unknown-unknown"
   fi
 
   if ! command -v wasm-pack >/dev/null 2>&1; then
     warn "Installing wasm-pack..."
-    cargo install wasm-pack --locked || warn "wasm-pack installation failed; continuing."
+    cargo install wasm-pack --locked || record_failure "wasm-pack installation"
   fi
 fi
 
@@ -91,9 +120,16 @@ if command -v claude >/dev/null 2>&1; then
     ralph-loop \
     rust-analyzer-lsp \
     serena \
-    typescript-lsp
+    typescript-lsp || record_failure "Claude Code plugin bootstrap"
 else
   warn "Skipping Claude Code plugin bootstrap because the CLI is unavailable."
 fi
 
-log "Devcontainer setup complete."
+if [ "${#FAILED_STEPS[@]}" -gt 0 ]; then
+  warn "Devcontainer setup completed with warnings:"
+  for step in "${FAILED_STEPS[@]}"; do
+    warn "  - ${step}"
+  done
+else
+  log "Devcontainer setup complete."
+fi

@@ -12,6 +12,10 @@ The repository does not need all of these folders on day one, but this is the in
 
 ```text
 multiroof-viewer/
+  .devcontainer/
+    devcontainer.json
+    post-create.sh
+    install-claude-plugins.sh
   docs/
     design-doc.md
     roadmap.md
@@ -31,6 +35,10 @@ multiroof-viewer/
 ```
 
 ## Directory Responsibilities
+
+### `.devcontainer`
+
+Reproducible development environment configuration for VS Code or compatible devcontainer tooling. This layer should provision the current TypeScript workspace cleanly while leaving room for future Rust, wasm, and Tauri-adjacent tooling.
 
 ### `src/app`
 
@@ -87,6 +95,19 @@ When implementation begins, the first tooling baseline should cover:
 - `prettier` or an equivalent formatter
 - `vitest` for unit tests in a TDD workflow
 - simple unit testing for pure analysis, ingestion, and persistence logic
+- a repository-scoped devcontainer for reproducible onboarding and toolchain setup
+
+## Development Container Direction
+
+The repository should provide a devcontainer as a convenience layer for consistent onboarding and cross-machine setup.
+
+Initial expectations:
+
+- Node LTS for the Vite, React, Vitest, and ESLint workflows used today
+- Rust tooling kept available for future Tauri, wasm, and native helper experiments
+- system packages needed for native module builds
+- post-create bootstrap for project dependencies and common CLI tools
+- editor defaults aligned with the current repository formatter and linting setup
 
 ## State Management Direction
 
