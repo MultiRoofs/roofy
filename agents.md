@@ -6,7 +6,7 @@ This file is the contributor guide for human and AI collaborators working in thi
 
 ## Current Phase
 
-The project is in initialization and planning mode. Prioritize architecture, documentation, repository setup, and clear boundaries. Do not start feature implementation unless explicitly requested.
+The project is in Milestone 1: Core Viewer. Foundation (M0) is complete. CityJSON parsing, domain types, Three.js scene, and file loading are implemented. Remaining M1 work: object picking/selection, attribute inspection panel, and metadata display.
 
 ## Project Context
 
@@ -62,6 +62,18 @@ Expectations:
 - Keep tests readable and behavior-oriented.
 - Add regression tests for every bug fix.
 - When introducing an interface or abstraction, add tests around the behavior that the abstraction protects.
+
+## Code Review Workflow
+
+After completing a meaningful unit of work (e.g. a new module, feature, or bug fix batch), request a code review before committing:
+
+1. Use the `codex` skill (or dispatch a `superpowers:code-reviewer` agent) to review all changed files.
+2. The reviewer should check: code quality, architecture alignment, test coverage, type safety, and adherence to the conventions in this file.
+3. Fix all Critical and Important issues before committing.
+4. Minor issues may be deferred but should be tracked.
+5. Commit only after the review pass is clean.
+
+This applies to both human and AI contributors. The goal is to catch regressions, style drift, and architectural violations early.
 
 ## Architecture Guardrails
 
