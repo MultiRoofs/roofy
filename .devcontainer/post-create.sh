@@ -69,14 +69,28 @@ fi
 
 if ! command -v npm >/dev/null 2>&1; then
   warn "npm is unavailable; skipping project dependency install."
-elif [ -d node_modules ] && [ -f node_modules/react/package.json ]; then
-  warn "Existing node_modules detected; skipping npm install."
-elif [ -f package-lock.json ]; then
-  warn "Installing project dependencies with npm ci..."
-  npm ci || record_failure "npm ci"
 else
-  warn "Installing project dependencies with npm install..."
-  npm install || record_failure "npm install"
+  mkdir -p "${HOME}/.npm" "${HOME}/.npm-global"
+  npm config set cache "${HOME}/.npm" || record_failure "npm cache configuration"
+  npm config set prefix "${HOME}/.npm-global" || record_failure "npm prefix configuration"
+
+  if [ -f "${HOME}/.bashrc" ] && ! grep -Fq '.npm-global/bin' "${HOME}/.bashrc"; then
+    printf '\nexport PATH="$HOME/.npm-global/bin:$PATH"\n' >> "${HOME}/.bashrc"
+  fi
+
+  if [ -f "${HOME}/.zshrc" ] && ! grep -Fq '.npm-global/bin' "${HOME}/.zshrc"; then
+    printf '\nexport PATH="$HOME/.npm-global/bin:$PATH"\n' >> "${HOME}/.zshrc"
+  fi
+
+  if [ -d node_modules ] && [ -f node_modules/react/package.json ]; then
+    warn "Existing node_modules detected; skipping npm install."
+  elif [ -f package-lock.json ]; then
+    warn "Installing project dependencies with npm ci..."
+    npm ci || record_failure "npm ci"
+  else
+    warn "Installing project dependencies with npm install..."
+    npm install || record_failure "npm install"
+  fi
 fi
 
 if command -v cargo >/dev/null 2>&1; then
