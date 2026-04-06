@@ -22,8 +22,10 @@ import type { CityModel } from "../domain/citymodel/types";
 import { buildCityMesh, computeOriginOffset } from "./buildCityMesh";
 import type { PickingIndex } from "./buildCityMesh";
 import { applyHighlight, clearHighlight } from "./highlightMesh";
+import { buildRuleColors } from "./applyRuleColors";
 import { usePickingControls } from "./usePickingControls";
 import { useSelectionStore } from "../features/selection/selectionStore";
+import { useRuleStore } from "../features/rules/ruleStore";
 
 export interface CitySceneHandle {
   fitAll: () => void;
@@ -50,9 +52,16 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
     const baseColorsRef = useRef<Float32Array | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
+    // Rule-based colorization ref
+    const ruleColorsRef = useRef<Float32Array | null>(null);
+
     // Selection state from Zustand (for highlight rendering)
     const selection = useSelectionStore((s) => s.selection);
     const hovered = useSelectionStore((s) => s.hovered);
+
+    // Rule state from Zustand
+    const rules = useRuleStore((s) => s.rules);
+    const rulesEnabled = useRuleStore((s) => s.enabled);
 
     // Initialize Three.js scene on mount
     useEffect(() => {
@@ -148,10 +157,11 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
         }
       }
 
-      // Reset picking refs
+      // Reset picking and rule refs
       meshRef.current = null;
       pickingIndexRef.current = null;
       baseColorsRef.current = null;
+      ruleColorsRef.current = null;
 
       // Clear selection on model change
       useSelectionStore.getState().clear();
@@ -190,6 +200,37 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       }
     }, [model, onTriangleCount]);
 
+    // Recompute rule colors when rules or model changes
+    useEffect(() => {
+      const mesh = meshRef.current;
+      const pickingIndex = pickingIndexRef.current;
+      const baseColors = baseColorsRef.current;
+      if (!mesh || !pickingIndex || !baseColors || !model) {
+        ruleColorsRef.current = null;
+        return;
+      }
+
+      if (rulesEnabled && rules.length > 0) {
+        ruleColorsRef.current = buildRuleColors(
+          model,
+          mesh.geometry,
+          pickingIndex,
+          rules,
+          baseColors,
+        );
+      } else {
+        ruleColorsRef.current = null;
+      }
+
+      // Re-apply highlight with the new rule colors
+      const { selection: sel, hovered: hov } = useSelectionStore.getState();
+      if (!sel && !hov) {
+        clearHighlight(mesh.geometry, baseColors, ruleColorsRef.current);
+      } else {
+        applyHighlight(mesh.geometry, baseColors, sel, hov, pickingIndex, ruleColorsRef.current);
+      }
+    }, [rules, rulesEnabled, model]);
+
     // Apply highlight when selection or hover changes
     useEffect(() => {
       const mesh = meshRef.current;
@@ -198,9 +239,9 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       if (!mesh || !pickingIndex || !baseColors) return;
 
       if (!selection && !hovered) {
-        clearHighlight(mesh.geometry, baseColors);
+        clearHighlight(mesh.geometry, baseColors, ruleColorsRef.current);
       } else {
-        applyHighlight(mesh.geometry, baseColors, selection, hovered, pickingIndex);
+        applyHighlight(mesh.geometry, baseColors, selection, hovered, pickingIndex, ruleColorsRef.current);
       }
     }, [selection, hovered]);
 

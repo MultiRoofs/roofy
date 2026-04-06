@@ -24,8 +24,10 @@ function resolveObjectIdx(
 
 /**
  * Apply highlight colors to the geometry's color buffer.
- * Restores base colors first, then overwrites vertices belonging
- * to the hovered and/or selected object/surface.
+ * Restores from ruleColors (if present) or baseColors, then overwrites
+ * vertices belonging to the hovered and/or selected object/surface.
+ *
+ * Color layer stack: baseColors → ruleColors → highlight
  */
 export function applyHighlight(
   geometry: BufferGeometry,
@@ -33,6 +35,7 @@ export function applyHighlight(
   selection: Selection | null,
   hovered: Selection | null,
   pickingIndex: PickingIndex,
+  ruleColors?: Float32Array | null,
 ): void {
   const colorAttr = geometry.getAttribute("color");
   if (!colorAttr) return;
@@ -41,9 +44,9 @@ export function applyHighlight(
   const surfIdxAttr = geometry.getAttribute("surfaceIndex");
   if (!objIdxAttr || !surfIdxAttr) return;
 
-  // Restore base colors
+  // Restore from rule-colorized baseline (if active) or base colors
   const colorArray = colorAttr.array as Float32Array;
-  colorArray.set(baseColors);
+  colorArray.set(ruleColors ?? baseColors);
 
   const selectedObjIdx = resolveObjectIdx(selection, pickingIndex);
   const hoveredObjIdx = resolveObjectIdx(hovered, pickingIndex);
@@ -81,16 +84,17 @@ export function applyHighlight(
 }
 
 /**
- * Restore the geometry's color buffer to its base state.
+ * Restore the geometry's color buffer to its base or rule-colored state.
  */
 export function clearHighlight(
   geometry: BufferGeometry,
   baseColors: Float32Array,
+  ruleColors?: Float32Array | null,
 ): void {
   const colorAttr = geometry.getAttribute("color");
   if (!colorAttr) return;
 
-  (colorAttr.array as Float32Array).set(baseColors);
+  (colorAttr.array as Float32Array).set(ruleColors ?? baseColors);
   colorAttr.needsUpdate = true;
 }
 

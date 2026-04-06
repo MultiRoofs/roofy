@@ -10,6 +10,7 @@ import { InspectorPanel } from "../ui/inspector/InspectorPanel";
 import { ViewerToolbar } from "../ui/toolbar/ViewerToolbar";
 import { ToolRail } from "../ui/toolbar/ToolRail";
 import { StatusBar } from "../ui/StatusBar";
+import { LegendOverlay } from "../ui/viewport/LegendOverlay";
 
 export function App() {
   const [model, setModel] = useState<CityModel | null>(null);
@@ -93,6 +94,7 @@ export function App() {
 
         <div className="viewport">
           <CityScene ref={sceneRef} model={model} onTriangleCount={setTriangleCount} />
+          <LegendOverlay />
         </div>
 
         {inspectorOpen && (

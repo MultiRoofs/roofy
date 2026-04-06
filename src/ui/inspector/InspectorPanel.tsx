@@ -9,8 +9,10 @@ import { useState } from "react";
 import type { CityModel, CityObject, BuildingSurfaceType } from "../../domain/citymodel/types";
 import type { Selection } from "../../domain/selection/types";
 import { SURFACE_COLOR_HEX } from "../../shared/surfaceColorMap";
+import { AnalysisTab } from "./AnalysisTab";
+import { RuleBuilderTab } from "./RuleBuilderTab";
 
-type Tab = "object" | "surfaces";
+type Tab = "object" | "surfaces" | "analysis" | "rules";
 
 interface InspectorPanelProps {
   readonly model: CityModel;
@@ -36,40 +38,57 @@ export function InspectorPanel({ model, selection, onClose }: InspectorPanelProp
         </button>
       </div>
 
-      {selectedObject ? (
-        <>
-          <div className="inspector-tabs">
-            <button
-              className={`inspector-tab ${activeTab === "object" ? "active" : ""}`}
-              onClick={() => setActiveTab("object")}
-            >
-              Object
-            </button>
-            <button
-              className={`inspector-tab ${activeTab === "surfaces" ? "active" : ""}`}
-              onClick={() => setActiveTab("surfaces")}
-            >
-              Surfaces
-            </button>
+      <div className="inspector-tabs">
+        <button
+          className={`inspector-tab ${activeTab === "object" ? "active" : ""}`}
+          onClick={() => setActiveTab("object")}
+        >
+          Object
+        </button>
+        <button
+          className={`inspector-tab ${activeTab === "surfaces" ? "active" : ""}`}
+          onClick={() => setActiveTab("surfaces")}
+        >
+          Surfaces
+        </button>
+        <button
+          className={`inspector-tab ${activeTab === "analysis" ? "active" : ""}`}
+          onClick={() => setActiveTab("analysis")}
+        >
+          Analysis
+        </button>
+        <button
+          className={`inspector-tab ${activeTab === "rules" ? "active" : ""}`}
+          onClick={() => setActiveTab("rules")}
+        >
+          Rules
+        </button>
+      </div>
+      <div className="inspector-body">
+        {activeTab === "rules" ? (
+          <RuleBuilderTab model={model} />
+        ) : !selectedObject ? (
+          <div className="inspector-placeholder">
+            Select an object to inspect
           </div>
-          <div className="inspector-body">
-            {activeTab === "object" ? (
-              <ObjectTab object={selectedObject} />
-            ) : (
-              <SurfacesTab
-                object={selectedObject}
-                selectedSurfaceIndex={
-                  selection?.kind === "surface" ? selection.surfaceIndex : null
-                }
-              />
-            )}
-          </div>
-        </>
-      ) : (
-        <div className="inspector-placeholder">
-          Select an object to inspect
-        </div>
-      )}
+        ) : activeTab === "object" ? (
+          <ObjectTab object={selectedObject} />
+        ) : activeTab === "surfaces" ? (
+          <SurfacesTab
+            object={selectedObject}
+            selectedSurfaceIndex={
+              selection?.kind === "surface" ? selection.surfaceIndex : null
+            }
+          />
+        ) : (
+          <AnalysisTab
+            object={selectedObject}
+            selectedSurfaceIndex={
+              selection?.kind === "surface" ? selection.surfaceIndex : null
+            }
+          />
+        )}
+      </div>
     </aside>
   );
 }

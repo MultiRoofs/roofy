@@ -61,10 +61,20 @@ Goal: turn raw city-model geometry into planning-relevant rooftop insight.
 
 Deliverables:
 
-- Roof normalization pipeline
-- Derived metrics such as slope, aspect, and area
-- Rule builder for user-defined colorization
-- Visual legend and filter integration
+- Roof metrics pipeline: surface area, azimuth, inclination for RoofSurface polygons
+- Rule builder with AND/OR conditions, typed comparisons (>, <, = on boolean/string/numeric)
+- Rule-based colorization applied to roof surfaces on the 3D mesh
+- Visual legend overlay with toggle, auto-shown when a rule is active
+- Analysis tab in inspector with user-selectable scope (surface vs building aggregate)
+- Rule builder UI integrated into inspector panel
+
+Deferred to later milestones:
+
+- Additional metrics: elevation, solar score, usable area, normal vector display
+- Preset/built-in rules (e.g. "Roof suitability" template)
+- Layer concept: grouping multiple files into named layers with per-layer rule scope
+- Bottom panel for rules/statistics (keep in inspector for M2)
+- Compound rule presets and rule import/export
 
 Exit criteria:
 

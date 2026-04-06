@@ -3,6 +3,7 @@
  */
 
 import type { CityModel } from "../../domain/citymodel/types";
+import { useRuleStore } from "../../features/rules/ruleStore";
 
 interface ViewerToolbarProps {
   readonly model: CityModel;
@@ -21,8 +22,11 @@ export function ViewerToolbar({
 }: ViewerToolbarProps) {
   const objectCount = Object.keys(model.objects).length;
   const crs = extractCrsCode(model.metadata.referenceSystem);
-
   const lod = findPrimaryLod(model);
+
+  const rulesEnabled = useRuleStore((s) => s.enabled);
+  const ruleCount = useRuleStore((s) => s.rules.filter((r) => r.enabled).length);
+  const toggleRules = useRuleStore((s) => s.toggleEnabled);
 
   return (
     <header className="toolbar">
@@ -45,6 +49,20 @@ export function ViewerToolbar({
           </div>
         )}
       </div>
+
+      {ruleCount > 0 && (
+        <>
+          <div className="toolbar-sep" />
+          <div
+            className={`pill rule-pill ${rulesEnabled ? "rule-pill-active" : ""}`}
+            onClick={toggleRules}
+            role="button"
+            tabIndex={0}
+          >
+            Rules <span className="value">{ruleCount} active</span>
+          </div>
+        </>
+      )}
 
       <div className="toolbar-spacer" />
 

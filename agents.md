@@ -6,7 +6,7 @@ This file is the contributor guide for human and AI collaborators working in thi
 
 ## Current Phase
 
-Milestone 1 (Core Viewer) is complete. All features implemented: CityJSON parsing, domain types, Three.js scene, file loading, object/surface picking with highlight, inspector panel (Object + Surfaces tabs), toolbar with metadata pills, tool rail, status bar, and CSS design tokens. Integration tests verify the full load-to-inspect pipeline. Ready for Milestone 2 (Roof Intelligence).
+Milestone 1 (Core Viewer) is complete. Milestone 2 (Roof Intelligence) is in progress: roof metrics pipeline (area, inclination, azimuth), rule-based colorization with AND/OR conditions and typed comparisons, Analysis and Rules tabs in inspector, legend overlay, and three-layer color stack (base → rules → highlight) are implemented. Quality review and integration testing remain.
 
 ## Project Context
 
