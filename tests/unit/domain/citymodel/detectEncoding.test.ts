@@ -48,4 +48,22 @@ describe("detectEncoding", () => {
     expect(detectEncoding("Data.JSONL")).toBe("cityjsonseq");
     expect(detectEncoding("Buildings.FCB")).toBe("flatcitybuf");
   });
+
+  // Edge cases
+  it("returns cityjson for an empty string", () => {
+    expect(detectEncoding("")).toBe("cityjson");
+  });
+
+  it("returns cityjson for a filename with no extension", () => {
+    expect(detectEncoding("modelfile")).toBe("cityjson");
+  });
+
+  it("handles path-only strings (no URL scheme)", () => {
+    expect(detectEncoding("/data/model.city.jsonl")).toBe("cityjsonseq");
+    expect(detectEncoding("/data/buildings.fcb")).toBe("flatcitybuf");
+  });
+
+  it("ignores extensions in query strings — only pathname matters", () => {
+    expect(detectEncoding("https://example.com/data?file=model.city.jsonl")).toBe("cityjson");
+  });
 });

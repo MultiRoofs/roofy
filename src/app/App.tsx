@@ -1,11 +1,9 @@
 import { useCallback, useRef, useState } from "react";
 import "./app.css";
 import type { CityModel } from "../domain/citymodel/types";
-import type { CityJSONRoot } from "../domain/citymodel/cityjson/types";
-import { parseCityJSON } from "../domain/citymodel/cityjson/parseCityJSON";
-import { parseCityJSONSeq } from "../domain/citymodel/cityjsonseq/parseCityJSONSeq";
-import { loadFlatCityBuf } from "../domain/citymodel/flatcitybuf/loadFlatCityBuf";
 import { detectEncoding } from "../domain/citymodel/detectEncoding";
+import { loadFlatCityBuf } from "../domain/citymodel/flatcitybuf/loadFlatCityBuf";
+import { parseText, loadFromUrl, fileNameFromUrl } from "../domain/citymodel/loadCityModel";
 import { CityScene } from "../scene/CityScene";
 import type { CitySceneHandle } from "../scene/CityScene";
 import { useSelectionStore } from "../features/selection/selectionStore";
@@ -36,8 +34,6 @@ export function App() {
       let parsed: CityModel;
 
       if (detectEncoding(file.name) === "flatcitybuf") {
-        // FlatCityBuf needs the WASM HttpFcbReader which works with URLs.
-        // Create a temporary blob URL so the reader can fetch from it.
         const blobUrl = URL.createObjectURL(file);
         try {
           parsed = await loadFlatCityBuf(blobUrl);
@@ -64,8 +60,7 @@ export function App() {
     try {
       const parsed = await loadFromUrl(url);
       setModel(parsed);
-      const segments = url.split("/");
-      setFileName(segments[segments.length - 1] ?? url);
+      setFileName(fileNameFromUrl(url));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load remote file.");
     } finally {
@@ -179,49 +174,6 @@ export function App() {
       {error && <p className="error-message">{error}</p>}
     </main>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Format detection and loading
-// ---------------------------------------------------------------------------
-
-/**
- * Parse local file text by detecting format from file name.
- */
-function parseText(name: string, text: string): CityModel {
-  const encoding = detectEncoding(name);
-
-  if (encoding === "cityjsonseq") {
-    return parseCityJSONSeq(text);
-  }
-
-  const json = JSON.parse(text) as CityJSONRoot;
-  if (json.type !== "CityJSON") {
-    throw new Error("Not a CityJSON file \u2014 expected \"type\": \"CityJSON\".");
-  }
-  return parseCityJSON(json);
-}
-
-/**
- * Load a city model from a remote URL.
- * Format is detected from the URL path extension.
- *  - .fcb → FlatCityBuf (WASM HTTP range-request reader)
- *  - .city.jsonl / .jsonl → CityJSONSeq (fetch + parse)
- *  - everything else → CityJSON (fetch + parse)
- */
-async function loadFromUrl(url: string): Promise<CityModel> {
-  const encoding = detectEncoding(url);
-
-  if (encoding === "flatcitybuf") {
-    return loadFlatCityBuf(url);
-  }
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
-  }
-  const text = await response.text();
-  return parseText(url, text);
 }
 
 // ---------------------------------------------------------------------------
