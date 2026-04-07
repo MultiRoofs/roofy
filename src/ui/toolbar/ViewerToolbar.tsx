@@ -12,6 +12,7 @@ interface ViewerToolbarProps {
   readonly onClose: () => void;
   readonly onToggleInspector: () => void;
   readonly onFitAll: () => void;
+  readonly onSave?: () => void;
 }
 
 export function ViewerToolbar({
@@ -20,6 +21,7 @@ export function ViewerToolbar({
   onClose,
   onToggleInspector,
   onFitAll,
+  onSave,
 }: ViewerToolbarProps) {
   const objectCount = Object.keys(model.objects).length;
   const crs = extractCrsCode(model.metadata.referenceSystem);
@@ -79,6 +81,14 @@ export function ViewerToolbar({
 
       <div className="toolbar-spacer" />
 
+      {onSave && (
+        <button className="tb-btn" title="Save workspace" onClick={onSave}>
+          <svg viewBox="0 0 24 24">
+            <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
+            <path d="M17 21v-8H7v8M7 3v5h8" />
+          </svg>
+        </button>
+      )}
       <button className="tb-btn" title="Toggle inspector" onClick={onToggleInspector}>
         <svg viewBox="0 0 24 24">
           <rect x="3" y="3" width="18" height="18" rx="2" />

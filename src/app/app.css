@@ -220,6 +220,83 @@ body {
   cursor: not-allowed;
 }
 
+.snapshot-list {
+  width: min(100%, 34rem);
+  margin-top: 1.5rem;
+}
+
+.snapshot-list-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #486581;
+  margin-bottom: 0.5rem;
+}
+
+.snapshot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid rgba(16, 42, 67, 0.1);
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.5);
+  margin-bottom: 0.4rem;
+}
+
+.snapshot-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.snapshot-label {
+  font-size: 0.9rem;
+  color: #102a43;
+  font-weight: 500;
+}
+
+.snapshot-date {
+  font-size: 0.75rem;
+  color: #829ab1;
+}
+
+.snapshot-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.snapshot-btn {
+  padding: 0.3rem 0.75rem;
+  background: #102a43;
+  color: #fff;
+  border: none;
+  border-radius: 0.35rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: background 0.15s;
+}
+
+.snapshot-btn:hover:not(:disabled) {
+  background: #243b53;
+}
+
+.snapshot-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.snapshot-btn-delete {
+  background: transparent;
+  color: #829ab1;
+  border: 1px solid rgba(16, 42, 67, 0.15);
+}
+
+.snapshot-btn-delete:hover:not(:disabled) {
+  background: rgba(197, 48, 48, 0.08);
+  color: #c53030;
+  border-color: rgba(197, 48, 48, 0.2);
+}
+
 .error-message {
   color: #c53030;
   background: rgba(197, 48, 48, 0.08);

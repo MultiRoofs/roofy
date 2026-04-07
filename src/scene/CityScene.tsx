@@ -31,6 +31,14 @@ import { useSolarStore } from "../features/solar/solarStore";
 
 export interface CitySceneHandle {
   fitAll: () => void;
+  getCameraState: () => {
+    position: readonly [number, number, number];
+    target: readonly [number, number, number];
+  } | null;
+  setCameraState: (
+    position: readonly [number, number, number],
+    target: readonly [number, number, number],
+  ) => void;
 }
 
 export interface CitySceneProps {
@@ -325,7 +333,29 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       }
     }, [model]);
 
-    useImperativeHandle(ref, () => ({ fitAll }), [fitAll]);
+    const getCameraState = useCallback(() => {
+      const camera = cameraRef.current;
+      const controls = controlsRef.current;
+      if (!camera || !controls) return null;
+      return {
+        position: [camera.position.x, camera.position.y, camera.position.z] as const,
+        target: [controls.target.x, controls.target.y, controls.target.z] as const,
+      };
+    }, []);
+
+    const setCameraState = useCallback(
+      (position: readonly [number, number, number], target: readonly [number, number, number]) => {
+        const camera = cameraRef.current;
+        const controls = controlsRef.current;
+        if (!camera || !controls) return;
+        camera.position.set(position[0], position[1], position[2]);
+        controls.target.set(target[0], target[1], target[2]);
+        controls.update();
+      },
+      [],
+    );
+
+    useImperativeHandle(ref, () => ({ fitAll, getCameraState, setCameraState }), [fitAll, getCameraState, setCameraState]);
 
     // Tooltip for hovered object
     const hoveredObject = hovered
