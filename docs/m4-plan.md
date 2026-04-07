@@ -91,12 +91,20 @@ It is broken into four sub-milestones, each independently committable.
 - Add a DuckDB-powered stats section to the StatsTab (SQL-derived metrics)
 - Vite config: add COOP/COEP headers for SharedArrayBuffer (required by DuckDB-wasm)
 
-**Risk**: The `cityjson` DuckDB extension may not load in the browser WASM runtime. If it fails:
-- Disable DuckDB features with a feature flag
-- Document the issue and plan a fallback for M5 (populate DuckDB tables from in-memory CityModel data instead of using the extension readers)
-- The M4.2 pure-function stats remain fully functional as the primary stats path
+**Implementation status**: The `duckdb.ts` module is implemented with:
+- Lazy singleton initialization via `initDuckDB()` (race-safe Promise caching)
+- MVP bundle (no SharedArrayBuffer needed — avoids COOP/COEP header requirement)
+- `getDuckDBStatus()` exposes a discriminated union: uninitialized / initializing / ready / failed
+- `extensionLoaded` flag tracks whether the cityjson extension loaded successfully
+- `queryDuckDB(sql)` returns null if DuckDB is not ready — safe to call anytime
+- `loadModelIntoDuckDB(url, encoding)` creates a `city_objects` table from a URL source
 
-**Tests**: Integration test that initializes DuckDB, loads a fixture, and runs a simple query.
+**Risk**: The `cityjson` DuckDB extension may not have a WASM build in the community repository. If it fails:
+- The module catches the error and sets `extensionLoaded: false`
+- The M4.2 pure-function stats remain fully functional as the primary stats path
+- Fallback for M5: populate DuckDB tables from in-memory CityModel data instead of using the extension readers
+
+**Tests**: Status tracking and query-guard tests (DuckDB Worker initialization requires browser environment, so full init tests are deferred to browser integration testing).
 
 ---
 
