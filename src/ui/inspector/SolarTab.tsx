@@ -8,11 +8,12 @@
 import type { ChangeEvent } from "react";
 import { useSolarStore } from "../../features/solar/solarStore";
 
-// Preset dates: summer/winter solstice, spring equinox
+// Preset dates: summer/winter solstice, spring equinox.
+// Month values are 0-indexed (JS Date convention): 5=June, 2=March, 11=December.
 const PRESET_DATES = [
-  { label: "Summer", month: 5, day: 21 },
-  { label: "Equinox", month: 2, day: 20 },
-  { label: "Winter", month: 11, day: 21 },
+  { label: "Summer", month: 5, day: 21 },   // June 21
+  { label: "Equinox", month: 2, day: 20 },  // March 20
+  { label: "Winter", month: 11, day: 21 },  // December 21
 ] as const;
 
 // Preset times of day (hours)

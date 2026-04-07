@@ -94,8 +94,28 @@ Deliverables:
 
 Exit criteria:
 
-- A user can change datetime and clearly see the scene respond
-- The current datetime is preserved in saved state
+- A user can change datetime and clearly see the scene respond ✓
+- The current datetime is preserved in saved state (pending M4 persistence)
+
+Status: Complete. Solar pipeline integration tests verify the CRS → lat/lon → sun position → Three.js light chain. All three encoding formats (CityJSON, CityJSONSeq, FlatCityBuf) support solar via the shared CRS metadata.
+
+## Multi-Format Ingestion (cross-cutting, delivered alongside M3)
+
+Goal: support all three planned city-model encodings.
+
+Deliverables:
+
+- CityJSON (.city.json) parser — local file drop ✓
+- CityJSON Text Sequences (.city.jsonl) parser — local file drop ✓
+- FlatCityBuf (.fcb) loader — HTTP URL via @cityjson/flatcitybuf WASM bindings ✓
+- Shared parsing helpers extracted for reuse across formats ✓
+- Format detection by file extension in the app shell ✓
+
+Notes:
+
+- All parsers produce the same normalized CityModel type
+- FlatCityBuf uses HTTP range requests (cloud-optimized), so loading is URL-based rather than file-based
+- The WASM bindings return Map objects which are converted to plain objects before parsing
 
 ## Milestone 4: Statistics and Saved Workspaces
 

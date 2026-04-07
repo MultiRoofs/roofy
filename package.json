@@ -17,6 +17,7 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
+    "@cityjson/flatcitybuf": "^0.2.0",
     "@duckdb/duckdb-wasm": "latest",
     "@takram/three-geospatial": "latest",
     "proj4": "^2.20.8",
