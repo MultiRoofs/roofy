@@ -8,6 +8,8 @@ import type { CityModelReference, ProjectStateStore, SnapshotSummary } from "../
 import { LocalStorageProjectStateStore } from "../persistence/localStorage";
 import { captureSnapshot } from "../persistence/captureSnapshot";
 import { restoreSnapshot } from "../persistence/restoreSnapshot";
+import { encodeShareState, decodeShareState, buildShareUrl } from "../persistence/urlShare";
+import type { ShareableViewState } from "../persistence/urlShare";
 import { CityScene } from "../scene/CityScene";
 import type { CitySceneHandle } from "../scene/CityScene";
 import { useSelectionStore } from "../features/selection/selectionStore";
@@ -174,6 +176,58 @@ export function App({ persistenceStore = defaultStore }: AppProps) {
     await refreshSnapshots();
   }, [persistenceStore, refreshSnapshots]);
 
+  const handleShare = useCallback(() => {
+    const cameraState = sceneRef.current?.getCameraState();
+    if (!cameraState) return;
+
+    const { datetime } = useSolarStore.getState();
+    const { rules, enabled: rulesEnabled } = useRuleStore.getState();
+    const { mode: pickMode } = useSelectionStore.getState();
+
+    const state: ShareableViewState = {
+      modelUrl: modelRef?.type === "url" ? modelRef.url : null,
+      cp: cameraState.position,
+      ct: cameraState.target,
+      dt: datetime.toISOString(),
+      rules: [...rules],
+      re: rulesEnabled,
+      pm: pickMode,
+    };
+
+    const url = buildShareUrl(state);
+    navigator.clipboard.writeText(url).then(
+      () => { /* success — could show a toast */ },
+      () => { /* clipboard write failed */ },
+    );
+  }, [modelRef]);
+
+  // On mount: check URL hash for a share token
+  useEffect(() => {
+    const hash = location.hash;
+    if (!hash) return;
+
+    const shared = decodeShareState(hash);
+    if (!shared) return;
+
+    // Clear the hash so it doesn't re-trigger on refresh
+    history.replaceState(null, "", location.pathname);
+
+    if (shared.modelUrl) {
+      handleUrl(shared.modelUrl).then(() => {
+        // Apply camera and state after model loads
+        useRuleStore.setState({ rules: [...shared.rules], enabled: shared.re });
+        useSelectionStore.setState({ mode: shared.pm, selection: null, hovered: null });
+        const dt = new Date(shared.dt);
+        if (!isNaN(dt.getTime())) {
+          useSolarStore.getState().setDatetime(dt);
+        }
+        setTimeout(() => {
+          sceneRef.current?.setCameraState(shared.cp, shared.ct);
+        }, 100);
+      });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
@@ -216,6 +270,8 @@ export function App({ persistenceStore = defaultStore }: AppProps) {
           onToggleInspector={() => setInspectorOpen((o) => !o)}
           onFitAll={handleFitAll}
           onSave={handleSave}
+          onShare={handleShare}
+          canShare={modelRef?.type === "url"}
         />
 
         <ToolRail

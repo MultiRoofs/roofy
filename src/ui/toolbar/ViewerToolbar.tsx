@@ -13,6 +13,8 @@ interface ViewerToolbarProps {
   readonly onToggleInspector: () => void;
   readonly onFitAll: () => void;
   readonly onSave?: () => void;
+  readonly onShare?: () => void;
+  readonly canShare?: boolean;
 }
 
 export function ViewerToolbar({
@@ -22,6 +24,8 @@ export function ViewerToolbar({
   onToggleInspector,
   onFitAll,
   onSave,
+  onShare,
+  canShare,
 }: ViewerToolbarProps) {
   const objectCount = Object.keys(model.objects).length;
   const crs = extractCrsCode(model.metadata.referenceSystem);
@@ -86,6 +90,15 @@ export function ViewerToolbar({
           <svg viewBox="0 0 24 24">
             <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
             <path d="M17 21v-8H7v8M7 3v5h8" />
+          </svg>
+        </button>
+      )}
+      {onShare && canShare && (
+        <button className="tb-btn" title="Copy share link" onClick={onShare}>
+          <svg viewBox="0 0 24 24">
+            <path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8" />
+            <polyline points="16 6 12 2 8 6" />
+            <line x1="12" y1="2" x2="12" y2="15" />
           </svg>
         </button>
       )}

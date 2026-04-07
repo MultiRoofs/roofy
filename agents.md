@@ -6,7 +6,7 @@ This file is the contributor guide for human and AI collaborators working in thi
 
 ## Current Phase
 
-Milestones 1 (Core Viewer), 2 (Roof Intelligence), and 3 (Solar and Shading) are complete. M3 includes sun position from suncalc, CRS→WGS84 reprojection via proj4, datetime Zustand store, directional light with shadow maps, Solar inspector tab with presets, toolbar datetime pill, integration tests, and quality review. Multi-format ingestion is also complete: CityJSON (.city.json), CityJSON Text Sequences (.city.jsonl), and FlatCityBuf (.fcb via HTTP/WASM) are supported. Milestone 4 (Statistics and Saved Workspaces) is next.
+Milestones 1–4 are complete. M3: solar/shading with suncalc, proj4, shadow maps. Multi-format ingestion: CityJSON, CityJSONSeq, FlatCityBuf (WASM). Remote URL loading for all formats. M4: statistics tab (model + selection metrics), local workspace save/restore (LocalStorage), DuckDB-wasm integration (cityjson extension — may need WASM build validation), URL share codec (base64url hash). Milestone 5 (Hardening and Platform Readiness) is next.
 
 ## Project Context
 
