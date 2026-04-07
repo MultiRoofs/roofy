@@ -5,6 +5,7 @@ import type { CityJSONRoot } from "../domain/citymodel/cityjson/types";
 import { parseCityJSON } from "../domain/citymodel/cityjson/parseCityJSON";
 import { parseCityJSONSeq } from "../domain/citymodel/cityjsonseq/parseCityJSONSeq";
 import { loadFlatCityBuf } from "../domain/citymodel/flatcitybuf/loadFlatCityBuf";
+import { detectEncoding } from "../domain/citymodel/detectEncoding";
 import { CityScene } from "../scene/CityScene";
 import type { CitySceneHandle } from "../scene/CityScene";
 import { useSelectionStore } from "../features/selection/selectionStore";
@@ -30,41 +31,43 @@ export function App() {
 
   const handleFile = useCallback(async (file: File) => {
     setError(null);
+    setLoading(true);
     try {
-      const text = await file.text();
-      const name = file.name.toLowerCase();
-
       let parsed: CityModel;
 
-      if (name.endsWith(".city.jsonl") || name.endsWith(".jsonl")) {
-        parsed = parseCityJSONSeq(text);
-      } else {
-        const json = JSON.parse(text) as CityJSONRoot;
-        if (json.type !== "CityJSON") {
-          setError("Not a CityJSON file \u2014 expected \"type\": \"CityJSON\".");
-          return;
+      if (detectEncoding(file.name) === "flatcitybuf") {
+        // FlatCityBuf needs the WASM HttpFcbReader which works with URLs.
+        // Create a temporary blob URL so the reader can fetch from it.
+        const blobUrl = URL.createObjectURL(file);
+        try {
+          parsed = await loadFlatCityBuf(blobUrl);
+        } finally {
+          URL.revokeObjectURL(blobUrl);
         }
-        parsed = parseCityJSON(json);
+      } else {
+        const text = await file.text();
+        parsed = parseText(file.name, text);
       }
 
       setModel(parsed);
       setFileName(file.name);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to parse file.");
+    } finally {
+      setLoading(false);
     }
   }, []);
 
-  const handleFcbUrl = useCallback(async (url: string) => {
+  const handleUrl = useCallback(async (url: string) => {
     setError(null);
     setLoading(true);
     try {
-      const parsed = await loadFlatCityBuf(url);
+      const parsed = await loadFromUrl(url);
       setModel(parsed);
-      // Use the last path segment as the display name
       const segments = url.split("/");
       setFileName(segments[segments.length - 1] ?? url);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load FlatCityBuf file.");
+      setError(e instanceof Error ? e.message : "Failed to load remote file.");
     } finally {
       setLoading(false);
     }
@@ -147,8 +150,9 @@ export function App() {
         <p className="eyebrow">MultiRoof Viewer</p>
         <h1>Rooftop analysis starts here.</h1>
         <p className="summary">
-          Drop a <code>.city.json</code> or <code>.city.jsonl</code> file, or
-          load a <code>.fcb</code> file from a URL.
+          Drop a file or load from a URL.
+          Supports <code>.city.json</code>, <code>.city.jsonl</code>,
+          and <code>.fcb</code>.
         </p>
       </div>
 
@@ -157,20 +161,20 @@ export function App() {
         onDrop={handleDrop}
         onDragOver={(e) => e.preventDefault()}
       >
-        <p>Drop a CityJSON or CityJSONSeq file here</p>
+        <p>Drop a CityJSON, CityJSONSeq, or FlatCityBuf file here</p>
         <p className="drop-or">or</p>
         <label className="file-label">
           Browse files
           <input
             type="file"
-            accept=".json,.city.json,.jsonl,.city.jsonl"
+            accept=".json,.city.json,.jsonl,.city.jsonl,.fcb"
             onChange={handleInputChange}
             hidden
           />
         </label>
       </div>
 
-      <FcbUrlInput onLoad={handleFcbUrl} loading={loading} />
+      <UrlInput onLoad={handleUrl} loading={loading} />
 
       {error && <p className="error-message">{error}</p>}
     </main>
@@ -178,10 +182,53 @@ export function App() {
 }
 
 // ---------------------------------------------------------------------------
-// FlatCityBuf URL input
+// Format detection and loading
 // ---------------------------------------------------------------------------
 
-function FcbUrlInput({
+/**
+ * Parse local file text by detecting format from file name.
+ */
+function parseText(name: string, text: string): CityModel {
+  const encoding = detectEncoding(name);
+
+  if (encoding === "cityjsonseq") {
+    return parseCityJSONSeq(text);
+  }
+
+  const json = JSON.parse(text) as CityJSONRoot;
+  if (json.type !== "CityJSON") {
+    throw new Error("Not a CityJSON file \u2014 expected \"type\": \"CityJSON\".");
+  }
+  return parseCityJSON(json);
+}
+
+/**
+ * Load a city model from a remote URL.
+ * Format is detected from the URL path extension.
+ *  - .fcb → FlatCityBuf (WASM HTTP range-request reader)
+ *  - .city.jsonl / .jsonl → CityJSONSeq (fetch + parse)
+ *  - everything else → CityJSON (fetch + parse)
+ */
+async function loadFromUrl(url: string): Promise<CityModel> {
+  const encoding = detectEncoding(url);
+
+  if (encoding === "flatcitybuf") {
+    return loadFlatCityBuf(url);
+  }
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
+  }
+  const text = await response.text();
+  return parseText(url, text);
+}
+
+// ---------------------------------------------------------------------------
+// URL input component
+// ---------------------------------------------------------------------------
+
+function UrlInput({
   onLoad,
   loading,
 }: {
@@ -199,13 +246,13 @@ function FcbUrlInput({
   return (
     <form className="fcb-url-form" onSubmit={handleSubmit}>
       <label className="fcb-url-label">
-        Or load a FlatCityBuf file from URL:
+        Or load from URL:
       </label>
       <div className="fcb-url-row">
         <input
           type="url"
           className="fcb-url-input"
-          placeholder="https://example.com/data.fcb"
+          placeholder="https://example.com/model.city.json"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           disabled={loading}
