@@ -13,6 +13,7 @@ import {
   Mesh,
   MeshStandardMaterial,
   PerspectiveCamera,
+  PCFSoftShadowMap,
   Scene,
   WebGLRenderer,
   Group,
@@ -26,6 +27,7 @@ import { buildRuleColors } from "./applyRuleColors";
 import { usePickingControls } from "./usePickingControls";
 import { useSelectionStore } from "../features/selection/selectionStore";
 import { useRuleStore } from "../features/rules/ruleStore";
+import { useSolarStore } from "../features/solar/solarStore";
 
 export interface CitySceneHandle {
   fitAll: () => void;
@@ -55,6 +57,9 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
     // Rule-based colorization ref
     const ruleColorsRef = useRef<Float32Array | null>(null);
 
+    // Directional light ref (for sun position updates)
+    const dirLightRef = useRef<DirectionalLight | null>(null);
+
     // Selection state from Zustand (for highlight rendering)
     const selection = useSelectionStore((s) => s.selection);
     const hovered = useSelectionStore((s) => s.hovered);
@@ -62,6 +67,9 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
     // Rule state from Zustand
     const rules = useRuleStore((s) => s.rules);
     const rulesEnabled = useRuleStore((s) => s.enabled);
+
+    // Solar state from Zustand
+    const sunPosition = useSolarStore((s) => s.sunPosition);
 
     // Initialize Three.js scene on mount
     useEffect(() => {
@@ -76,6 +84,8 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       renderer.setSize(width, height);
       renderer.setPixelRatio(window.devicePixelRatio);
       renderer.setClearColor(0x0a0c12);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = PCFSoftShadowMap;
       container.appendChild(renderer.domElement);
       rendererRef.current = renderer;
       canvasRef.current = renderer.domElement;
@@ -102,7 +112,12 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
 
       const directional = new DirectionalLight(0xffffff, 0.8);
       directional.position.set(50, 100, 50);
+      directional.castShadow = true;
+      directional.shadow.mapSize.set(1024, 1024);
+      directional.shadow.camera.near = 0.5;
+      directional.shadow.camera.far = 2000;
       scene.add(directional);
+      dirLightRef.current = directional;
 
       // City group (will hold the mesh)
       const cityGroup = new Group();
@@ -186,6 +201,8 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       // CityJSON uses Y for northing and Z for height.
       // Three.js uses Y-up, so we rotate the mesh: swap Y↔Z.
       mesh.rotation.x = -Math.PI / 2;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
       cityGroup.add(mesh);
 
       // Store refs for picking and highlighting
@@ -193,6 +210,26 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       pickingIndexRef.current = pickingIndex;
       baseColorsRef.current = baseColors;
       onTriangleCount(triangleCount);
+
+      // Configure shadow camera frustum from model bbox
+      if (model.bbox && dirLightRef.current) {
+        const extentX = model.bbox[3] - model.bbox[0];
+        const extentY = model.bbox[4] - model.bbox[1];
+        const extentZ = model.bbox[5] - model.bbox[2];
+        const halfSize = Math.max(extentX, extentY, extentZ) * 0.7;
+        const light = dirLightRef.current;
+        light.shadow.camera.left = -halfSize;
+        light.shadow.camera.right = halfSize;
+        light.shadow.camera.top = halfSize;
+        light.shadow.camera.bottom = -halfSize;
+        // near/far are updated dynamically in the sun-position effect
+        light.shadow.camera.updateProjectionMatrix();
+        // Compute bounding sphere for sun-position distance scaling
+        geometry.computeBoundingSphere();
+      }
+
+      // Initialize solar lat/lon from model CRS
+      useSolarStore.getState().initFromModel(model.metadata.referenceSystem, model.bbox);
 
       // Frame the camera on the model
       if (camera && controls && model.bbox) {
@@ -230,6 +267,32 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
         applyHighlight(mesh.geometry, baseColors, sel, hov, pickingIndex, ruleColorsRef.current);
       }
     }, [rules, rulesEnabled, model]);
+
+    // Update directional light position when sun position changes
+    useEffect(() => {
+      const light = dirLightRef.current;
+      if (!light || !sunPosition) return;
+
+      const [dx, dy, dz] = sunPosition.direction;
+      // Scale light distance to scene extent so shadow frustum always covers the model
+      const mesh = meshRef.current;
+      const dist = mesh ? mesh.geometry.boundingSphere?.radius ?? 500 : 500;
+      const lightDist = Math.max(dist * 2, 100);
+
+      if (sunPosition.altitudeDeg > 0) {
+        light.position.set(dx * lightDist, dy * lightDist, dz * lightDist);
+        light.intensity = 0.8;
+        light.castShadow = true;
+        light.shadow.camera.near = lightDist * 0.1;
+        light.shadow.camera.far = lightDist * 3;
+      } else {
+        // Sun below horizon — dim light, no shadows
+        light.position.set(0, 10, 0);
+        light.intensity = 0.1;
+        light.castShadow = false;
+      }
+      light.shadow.camera.updateProjectionMatrix();
+    }, [sunPosition]);
 
     // Apply highlight when selection or hover changes
     useEffect(() => {

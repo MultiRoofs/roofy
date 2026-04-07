@@ -11,8 +11,9 @@ import type { Selection } from "../../domain/selection/types";
 import { SURFACE_COLOR_HEX } from "../../shared/surfaceColorMap";
 import { AnalysisTab } from "./AnalysisTab";
 import { RuleBuilderTab } from "./RuleBuilderTab";
+import { SolarTab } from "./SolarTab";
 
-type Tab = "object" | "surfaces" | "analysis" | "rules";
+type Tab = "object" | "surfaces" | "analysis" | "rules" | "solar";
 
 interface InspectorPanelProps {
   readonly model: CityModel;
@@ -63,10 +64,18 @@ export function InspectorPanel({ model, selection, onClose }: InspectorPanelProp
         >
           Rules
         </button>
+        <button
+          className={`inspector-tab ${activeTab === "solar" ? "active" : ""}`}
+          onClick={() => setActiveTab("solar")}
+        >
+          Solar
+        </button>
       </div>
       <div className="inspector-body">
         {activeTab === "rules" ? (
           <RuleBuilderTab model={model} />
+        ) : activeTab === "solar" ? (
+          <SolarTab />
         ) : !selectedObject ? (
           <div className="inspector-placeholder">
             Select an object to inspect

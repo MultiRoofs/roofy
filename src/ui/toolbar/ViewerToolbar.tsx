@@ -4,6 +4,7 @@
 
 import type { CityModel } from "../../domain/citymodel/types";
 import { useRuleStore } from "../../features/rules/ruleStore";
+import { useSolarStore } from "../../features/solar/solarStore";
 
 interface ViewerToolbarProps {
   readonly model: CityModel;
@@ -28,6 +29,9 @@ export function ViewerToolbar({
   const ruleCount = useRuleStore((s) => s.rules.filter((r) => r.enabled).length);
   const toggleRules = useRuleStore((s) => s.toggleEnabled);
 
+  const datetime = useSolarStore((s) => s.datetime);
+  const sunPosition = useSolarStore((s) => s.sunPosition);
+
   return (
     <header className="toolbar">
       <span className="toolbar-brand">MultiRoof</span>
@@ -49,6 +53,15 @@ export function ViewerToolbar({
           </div>
         )}
       </div>
+
+      {sunPosition && (
+        <>
+          <div className="toolbar-sep" />
+          <div className={`pill sun-pill ${sunPosition.altitudeDeg > 0 ? "sun-pill-up" : ""}`}>
+            Sun <span className="value">{formatDatetimePill(datetime)}</span>
+          </div>
+        </>
+      )}
 
       {ruleCount > 0 && (
         <>
@@ -90,6 +103,15 @@ function extractCrsCode(referenceSystem: string | undefined): string | null {
   if (!referenceSystem) return null;
   const parts = referenceSystem.split("/");
   return parts.at(-1) ?? null;
+}
+
+function formatDatetimePill(dt: Date): string {
+  return dt.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function findPrimaryLod(model: CityModel): string | null {

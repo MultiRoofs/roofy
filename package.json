@@ -22,8 +22,10 @@
   "dependencies": {
     "@duckdb/duckdb-wasm": "latest",
     "@takram/three-geospatial": "latest",
+    "proj4": "^2.20.8",
     "react": "latest",
     "react-dom": "latest",
+    "suncalc": "^1.9.0",
     "three": "latest",
     "zustand": "^5.0.12"
   },
@@ -33,8 +35,10 @@
     "@testing-library/react": "latest",
     "@testing-library/user-event": "latest",
     "@types/node": "latest",
+    "@types/proj4": "^2.5.6",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "@types/suncalc": "^1.9.2",
     "@types/three": "latest",
     "@vitejs/plugin-react": "latest",
     "eslint": "latest",

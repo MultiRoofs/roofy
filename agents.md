@@ -6,7 +6,7 @@ This file is the contributor guide for human and AI collaborators working in thi
 
 ## Current Phase
 
-Milestone 1 (Core Viewer) is complete. Milestone 2 (Roof Intelligence) is in progress: roof metrics pipeline (area, inclination, azimuth), rule-based colorization with AND/OR conditions and typed comparisons, Analysis and Rules tabs in inspector, legend overlay, and three-layer color stack (base → rules → highlight) are implemented. Quality review and integration testing remain.
+Milestone 1 (Core Viewer) and Milestone 2 (Roof Intelligence) are complete. Milestone 3 (Solar and Shading) is in progress: sun position from suncalc, CRS→WGS84 reprojection via proj4, datetime Zustand store, directional light following sun position with shadow maps, Solar inspector tab with presets, and toolbar datetime pill are implemented. Quality review and integration testing remain.
 
 ## Project Context
 
