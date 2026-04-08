@@ -3,6 +3,7 @@ import {
   computeArea,
   computeInclination,
   computeAzimuth,
+  computeElevation,
   computeRoofMetrics,
 } from "../../../../src/domain/roofMetrics/metrics";
 import type { Vec3 } from "../../../../src/domain/citymodel/types";
@@ -129,6 +130,26 @@ describe("computeAzimuth", () => {
   });
 });
 
+describe("computeElevation", () => {
+  it("returns minimum Z for a ring", () => {
+    const ring: ReadonlyArray<Vec3> = [
+      [0, 0, 5],
+      [1, 0, 10],
+      [1, 1, 7],
+      [0, 1, 5],
+    ];
+    expect(computeElevation(ring)).toBe(5);
+  });
+
+  it("returns 0 for empty ring", () => {
+    expect(computeElevation([])).toBe(0);
+  });
+
+  it("returns 0 for ground-level ring", () => {
+    expect(computeElevation(FLAT_SQUARE)).toBe(0);
+  });
+});
+
 describe("computeRoofMetrics", () => {
   it("returns all metrics for a RoofSurface", () => {
     const surface: Surface = {
@@ -141,6 +162,23 @@ describe("computeRoofMetrics", () => {
     expect(metrics.areaSqM).toBeCloseTo(1.0, 5);
     expect(metrics.inclinationDeg).toBeCloseTo(0, 1);
     expect(metrics.azimuthDeg).toBe(0);
+    expect(metrics.elevationM).toBe(0);
+  });
+
+  it("computes elevation for elevated surfaces", () => {
+    const elevated: ReadonlyArray<Vec3> = [
+      [0, 0, 10],
+      [1, 0, 10],
+      [1, 1, 10],
+      [0, 1, 10],
+    ];
+    const surface: Surface = {
+      type: "RoofSurface",
+      rings: [elevated],
+      attributes: {},
+    };
+    const metrics = computeRoofMetrics(surface);
+    expect(metrics.elevationM).toBe(10);
   });
 
   it("handles surface with no exterior ring", () => {
@@ -154,5 +192,6 @@ describe("computeRoofMetrics", () => {
     expect(metrics.areaSqM).toBe(0);
     expect(metrics.inclinationDeg).toBe(0);
     expect(metrics.azimuthDeg).toBe(0);
+    expect(metrics.elevationM).toBe(0);
   });
 });
