@@ -18,6 +18,8 @@ import { SURFACE_COLORS } from "./surfaceColors";
 // ---------------------------------------------------------------------------
 
 export interface PickingIndex {
+  /** ID of the layer this mesh belongs to. */
+  readonly layerId: string;
   /** Ordered list of CityObject IDs, one per unique object index. */
   readonly objectKeys: ReadonlyArray<string>;
 }
@@ -44,6 +46,7 @@ export interface CityMeshResult {
  */
 export function buildCityMesh(
   model: CityModel,
+  layerId: string,
   originOffset: Vec3 = [0, 0, 0],
 ): CityMeshResult {
   const objectKeys: string[] = [];
@@ -138,7 +141,7 @@ export function buildCityMesh(
   return {
     geometry,
     triangleCount: totalTriangles,
-    pickingIndex: { objectKeys },
+    pickingIndex: { layerId, objectKeys },
     baseColors: Float32Array.from(colorArray),
   };
 }
