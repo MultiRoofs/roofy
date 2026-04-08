@@ -66,6 +66,20 @@ export function buildRuleColors(
   return anyChange ? result : null;
 }
 
+/**
+ * Pre-parsed rule colors to avoid allocating new Color objects in tight loops.
+ */
+const ruleColorCache = new Map<string, Color>();
+
+function getCachedColor(hex: string): Color {
+  let c = ruleColorCache.get(hex);
+  if (!c) {
+    c = new Color(hex);
+    ruleColorCache.set(hex, c);
+  }
+  return c;
+}
+
 function resolveRuleColor(
   objIdx: number,
   surfIdx: number,
@@ -89,5 +103,5 @@ function resolveRuleColor(
   const colorHex = matchRule(attributes, metrics, rules);
   if (!colorHex) return null;
 
-  return new Color(colorHex);
+  return getCachedColor(colorHex);
 }

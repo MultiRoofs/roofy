@@ -60,8 +60,32 @@ describe("parseText", () => {
     );
   });
 
-  it("throws for invalid JSON", () => {
-    expect(() => parseText("model.city.json", "not json")).toThrow();
+  it("throws descriptive error for invalid JSON", () => {
+    expect(() => parseText("model.city.json", "not json")).toThrow(
+      /Invalid JSON/,
+    );
+  });
+
+  it("throws for CityJSON missing CityObjects", () => {
+    const noObjects = JSON.stringify({
+      type: "CityJSON",
+      version: "2.0",
+      vertices: [],
+    });
+    expect(() => parseText("model.city.json", noObjects)).toThrow(
+      /missing "CityObjects"/,
+    );
+  });
+
+  it("throws for CityJSON missing vertices", () => {
+    const noVertices = JSON.stringify({
+      type: "CityJSON",
+      version: "2.0",
+      CityObjects: {},
+    });
+    expect(() => parseText("model.city.json", noVertices)).toThrow(
+      /missing or invalid "vertices"/,
+    );
   });
 });
 

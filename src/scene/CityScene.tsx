@@ -87,6 +87,17 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       const width = container.clientWidth;
       const height = container.clientHeight;
 
+      // Check WebGL availability
+      const testCanvas = document.createElement("canvas");
+      const gl = testCanvas.getContext("webgl2") ?? testCanvas.getContext("webgl");
+      if (!gl) {
+        container.innerHTML =
+          '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#6b7280;font-size:0.9rem;text-align:center;padding:2rem;">' +
+          "WebGL is not available. Please enable hardware acceleration in your browser settings." +
+          "</div>";
+        return;
+      }
+
       // Renderer
       const renderer = new WebGLRenderer({ antialias: true });
       renderer.setSize(width, height);
