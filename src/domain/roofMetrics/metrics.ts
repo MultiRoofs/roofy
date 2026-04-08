@@ -105,17 +105,30 @@ export function computeAzimuth(ring: ReadonlyArray<Vec3>): number {
 }
 
 /**
+ * Compute the minimum elevation (Z coordinate) of a polygon ring.
+ */
+export function computeElevation(ring: ReadonlyArray<Vec3>): number {
+  if (ring.length === 0) return 0;
+  let min = ring[0]![2];
+  for (let i = 1; i < ring.length; i++) {
+    if (ring[i]![2] < min) min = ring[i]![2];
+  }
+  return min;
+}
+
+/**
  * Compute all roof metrics for a surface from its exterior ring.
  */
 export function computeRoofMetrics(surface: Surface): RoofMetrics {
   const ring = surface.rings[0];
   if (!ring || ring.length < 3) {
-    return { areaSqM: 0, inclinationDeg: 0, azimuthDeg: 0 };
+    return { areaSqM: 0, inclinationDeg: 0, azimuthDeg: 0, elevationM: 0 };
   }
 
   return {
     areaSqM: computeArea(ring),
     inclinationDeg: computeInclination(ring),
     azimuthDeg: computeAzimuth(ring),
+    elevationM: computeElevation(ring),
   };
 }

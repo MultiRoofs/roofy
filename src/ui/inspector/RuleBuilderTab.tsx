@@ -5,17 +5,18 @@
  * via applyRuleColors in CityScene.
  */
 
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { CityModel } from "../../domain/citymodel/types";
 import { useRuleStore } from "../../features/rules/ruleStore";
 import type { Condition, ConditionOperator, LogicMode, Rule } from "../../features/rules/types";
+import { RULE_PRESETS } from "../../features/rules/presets";
 
 interface RuleBuilderTabProps {
   readonly model: CityModel;
 }
 
 // Metric fields always available for conditions
-const METRIC_FIELDS = ["areaSqM", "inclinationDeg", "azimuthDeg"] as const;
+const METRIC_FIELDS = ["areaSqM", "inclinationDeg", "azimuthDeg", "elevationM"] as const;
 
 const OPERATORS: ConditionOperator[] = [">", "<", "=", ">=", "<="];
 
@@ -29,10 +30,45 @@ export function RuleBuilderTab({ model }: RuleBuilderTabProps) {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const importRef = useRef<HTMLInputElement>(null);
 
   // Collect attribute fields from all objects for the field dropdown
   const attributeFields = collectAttributeFields(model);
   const allFields = [...METRIC_FIELDS, ...attributeFields];
+
+  const handleExport = useCallback(() => {
+    const json = JSON.stringify(rules, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "rules.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [rules]);
+
+  const handleImport = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      file.text().then((text) => {
+        try {
+          const imported = JSON.parse(text) as Rule[];
+          if (!Array.isArray(imported)) return;
+          for (const rule of imported) {
+            if (rule.name && rule.color && Array.isArray(rule.conditions)) {
+              addRule({ ...rule, id: crypto.randomUUID() });
+            }
+          }
+        } catch {
+          // Invalid JSON — silently ignore
+        }
+      });
+      // Reset so the same file can be re-imported
+      e.target.value = "";
+    },
+    [addRule],
+  );
 
   return (
     <>
@@ -96,6 +132,50 @@ export function RuleBuilderTab({ model }: RuleBuilderTabProps) {
             + Add Rule
           </button>
         )}
+      </div>
+
+      {/* Preset rules */}
+      <div className="attr-section">
+        <div className="attr-section-title">Presets</div>
+        <div className="preset-grid">
+          {RULE_PRESETS.map((preset) => (
+            <button
+              key={preset.label}
+              className="preset-btn"
+              title={preset.description}
+              onClick={() => addRule(preset.create())}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Import / Export */}
+      <div className="attr-section">
+        <div className="attr-section-title">Import / Export</div>
+        <div className="rule-io-row">
+          <button
+            className="rule-io-btn"
+            onClick={handleExport}
+            disabled={rules.length === 0}
+          >
+            Export rules
+          </button>
+          <button
+            className="rule-io-btn"
+            onClick={() => importRef.current?.click()}
+          >
+            Import rules
+          </button>
+          <input
+            ref={importRef}
+            type="file"
+            accept=".json"
+            onChange={handleImport}
+            hidden
+          />
+        </div>
       </div>
     </>
   );

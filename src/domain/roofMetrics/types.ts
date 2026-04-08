@@ -10,4 +10,6 @@ export interface RoofMetrics {
   readonly inclinationDeg: number;
   /** Compass bearing the surface faces in degrees. 0=N, 90=E, 180=S, 270=W. */
   readonly azimuthDeg: number;
+  /** Minimum elevation (Z coordinate) of the surface in model units. */
+  readonly elevationM: number;
 }
