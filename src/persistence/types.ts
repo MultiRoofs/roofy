@@ -26,6 +26,18 @@ export interface FileModelRef {
 export type CityModelReference = UrlModelRef | FileModelRef;
 
 // ---------------------------------------------------------------------------
+// Per-layer snapshot data
+// ---------------------------------------------------------------------------
+
+export interface LayerSnapshot {
+  readonly name: string;
+  readonly modelRef: CityModelReference;
+  readonly rules: ReadonlyArray<Rule>;
+  readonly rulesEnabled: boolean;
+  readonly visible: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // View state — camera, datetime, and display settings
 // ---------------------------------------------------------------------------
 
@@ -43,10 +55,14 @@ export interface ProjectSnapshot {
   readonly version: string;
   readonly savedAt: string; // ISO 8601
   readonly label: string;
-  readonly modelRef: CityModelReference | null;
+  /** @deprecated Use `layers` instead. Kept for backward compatibility. */
+  readonly modelRef?: CityModelReference | null;
+  /** @deprecated Use `layers` instead. */
+  readonly rules?: ReadonlyArray<Rule>;
+  /** @deprecated Use `layers` instead. */
+  readonly rulesEnabled?: boolean;
+  readonly layers?: ReadonlyArray<LayerSnapshot>;
   readonly viewState: ViewState;
-  readonly rules: ReadonlyArray<Rule>;
-  readonly rulesEnabled: boolean;
   readonly pickMode: PickMode;
 }
 

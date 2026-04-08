@@ -5,20 +5,17 @@
  * The caller (app shell) reads from stores and passes values in.
  */
 
-import type { Rule } from "../features/rules/types";
 import type { PickMode } from "../domain/selection/types";
-import type { CityModelReference, ProjectSnapshot, ViewState } from "./types";
+import type { LayerSnapshot, ProjectSnapshot, ViewState } from "./types";
 
-const SNAPSHOT_VERSION = "1";
+const SNAPSHOT_VERSION = "2";
 
 export interface CaptureInput {
   readonly label: string;
-  readonly modelRef: CityModelReference | null;
+  readonly layers: ReadonlyArray<LayerSnapshot>;
   readonly cameraPosition: readonly [number, number, number];
   readonly cameraTarget: readonly [number, number, number];
   readonly datetime: Date;
-  readonly rules: ReadonlyArray<Rule>;
-  readonly rulesEnabled: boolean;
   readonly pickMode: PickMode;
 }
 
@@ -33,10 +30,8 @@ export function captureSnapshot(input: CaptureInput): ProjectSnapshot {
     version: SNAPSHOT_VERSION,
     savedAt: new Date().toISOString(),
     label: input.label,
-    modelRef: input.modelRef,
+    layers: input.layers,
     viewState,
-    rules: [...input.rules],
-    rulesEnabled: input.rulesEnabled,
     pickMode: input.pickMode,
   };
 }

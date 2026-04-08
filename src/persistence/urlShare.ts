@@ -1,10 +1,8 @@
 /**
  * URL hash-based share state codec.
  *
- * Encodes a lightweight view state (camera, datetime, model URL, rules)
- * into a URL hash fragment for sharing. Only works fully when the model
- * was loaded from a URL — local file models can encode the state but
- * the model won't auto-load on another device.
+ * Encodes a lightweight view state (camera, datetime, layers with rules)
+ * into a URL hash fragment for sharing. Only URL-based layers can be shared.
  *
  * Format: #share=<base64url-encoded JSON>
  */
@@ -16,21 +14,29 @@ import type { PickMode } from "../domain/selection/types";
 // Types
 // ---------------------------------------------------------------------------
 
+export interface ShareableLayerState {
+  readonly name: string;
+  readonly modelUrl: string;
+  readonly rules: ReadonlyArray<Rule>;
+  readonly rulesEnabled: boolean;
+  readonly visible: boolean;
+}
+
 export interface ShareableViewState {
-  /** Model source URL, or null for local files. */
-  readonly modelUrl: string | null;
+  /** Per-layer state (v2). */
+  readonly layers: ReadonlyArray<ShareableLayerState>;
   /** Camera position [x, y, z]. */
   readonly cp: readonly [number, number, number];
   /** Camera target [x, y, z]. */
   readonly ct: readonly [number, number, number];
   /** ISO 8601 datetime. */
   readonly dt: string;
-  /** Active rules (compact). */
-  readonly rules: ReadonlyArray<Rule>;
-  /** Rules enabled toggle. */
-  readonly re: boolean;
   /** Pick mode. */
   readonly pm: PickMode;
+  // Legacy fields for backward compat (v1)
+  readonly modelUrl?: string | null;
+  readonly rules?: ReadonlyArray<Rule>;
+  readonly re?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +72,11 @@ export function decodeShareState(hash: string): ShareableViewState | null {
     if (!Array.isArray(parsed.cp) || parsed.cp.length !== 3) return null;
     if (!Array.isArray(parsed.ct) || parsed.ct.length !== 3) return null;
     if (typeof parsed.dt !== "string") return null;
+
+    // Normalize: ensure layers array exists (backward compat with v1)
+    if (!Array.isArray(parsed.layers)) {
+      return { ...parsed, layers: [] };
+    }
 
     return parsed;
   } catch {
