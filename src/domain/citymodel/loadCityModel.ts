@@ -24,7 +24,7 @@ export function parseText(nameOrUrl: string, text: string): CityModel {
 
   const json = JSON.parse(text) as CityJSONRoot;
   if (json.type !== "CityJSON") {
-    throw new Error("Not a CityJSON file \u2014 expected \"type\": \"CityJSON\".");
+    throw new Error('Not a CityJSON file \u2014 expected "type": "CityJSON".');
   }
   return parseCityJSON(json);
 }
@@ -44,7 +44,9 @@ export async function loadFromUrl(url: string): Promise<CityModel> {
 
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
+    throw new Error(
+      `Failed to fetch: ${response.status} ${response.statusText}`,
+    );
   }
   const text = await response.text();
 
@@ -54,7 +56,7 @@ export async function loadFromUrl(url: string): Promise<CityModel> {
 
   const json = JSON.parse(text) as CityJSONRoot;
   if (json.type !== "CityJSON") {
-    throw new Error("Not a CityJSON file \u2014 expected \"type\": \"CityJSON\".");
+    throw new Error('Not a CityJSON file \u2014 expected "type": "CityJSON".');
   }
   return parseCityJSON(json);
 }

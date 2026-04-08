@@ -5,7 +5,7 @@
  * restoreSnapshot writes to Zustand stores.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { captureSnapshot } from "../../../src/persistence/captureSnapshot";
 import { restoreSnapshot } from "../../../src/persistence/restoreSnapshot";
 import { useRuleStore } from "../../../src/features/rules/ruleStore";
@@ -24,7 +24,11 @@ const testRule: Rule = {
 
 beforeEach(() => {
   useRuleStore.setState({ rules: [], enabled: true });
-  useSelectionStore.setState({ mode: "object", selection: null, hovered: null });
+  useSelectionStore.setState({
+    mode: "object",
+    selection: null,
+    hovered: null,
+  });
   useSolarStore.setState({
     datetime: new Date(Date.UTC(2025, 5, 21, 12, 0, 0)),
     latLon: null,
@@ -47,7 +51,10 @@ describe("captureSnapshot", () => {
 
     expect(snapshot.version).toBe("1");
     expect(snapshot.label).toBe("Test");
-    expect(snapshot.modelRef).toEqual({ type: "url", url: "https://example.com/model.city.json" });
+    expect(snapshot.modelRef).toEqual({
+      type: "url",
+      url: "https://example.com/model.city.json",
+    });
     expect(snapshot.viewState.cameraPosition).toEqual([10, 20, 30]);
     expect(snapshot.viewState.cameraTarget).toEqual([0, 5, 0]);
     expect(snapshot.viewState.datetime).toBe("2025-12-21T10:00:00.000Z");
@@ -159,7 +166,10 @@ describe("restoreSnapshot", () => {
     });
 
     // Manually corrupt the datetime
-    const corrupted = { ...snapshot, viewState: { ...snapshot.viewState, datetime: "not-a-date" } };
+    const corrupted = {
+      ...snapshot,
+      viewState: { ...snapshot.viewState, datetime: "not-a-date" },
+    };
 
     // Should not throw
     const before = useSolarStore.getState().datetime;

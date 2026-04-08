@@ -6,7 +6,11 @@
  */
 
 import { useState } from "react";
-import type { CityModel, CityObject, BuildingSurfaceType } from "../../domain/citymodel/types";
+import type {
+  CityModel,
+  CityObject,
+  BuildingSurfaceType,
+} from "../../domain/citymodel/types";
 import type { Selection } from "../../domain/selection/types";
 import { SURFACE_COLOR_HEX } from "../../shared/surfaceColorMap";
 import { AnalysisTab } from "./AnalysisTab";
@@ -22,7 +26,11 @@ interface InspectorPanelProps {
   readonly onClose: () => void;
 }
 
-export function InspectorPanel({ model, selection, onClose }: InspectorPanelProps) {
+export function InspectorPanel({
+  model,
+  selection,
+  onClose,
+}: InspectorPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>("object");
 
   const selectedObject: CityObject | undefined = selection
@@ -130,10 +138,7 @@ function ObjectTab({ object }: { object: CityObject }) {
           />
         )}
         {object.parents.length > 0 && (
-          <AttrRow
-            label="Parent"
-            value={object.parents.join(", ")}
-          />
+          <AttrRow label="Parent" value={object.parents.join(", ")} />
         )}
       </div>
 
@@ -236,5 +241,8 @@ function AttrRow({ label, value }: { label: string; value: string }) {
 function formatValue(value: unknown): string {
   if (value === null || value === undefined) return "\u2014";
   if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
+  return JSON.stringify(value);
 }

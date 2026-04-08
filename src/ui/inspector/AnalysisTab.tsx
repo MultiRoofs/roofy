@@ -17,7 +17,10 @@ interface AnalysisTabProps {
 
 type Scope = "building" | "surface";
 
-export function AnalysisTab({ object, selectedSurfaceIndex }: AnalysisTabProps) {
+export function AnalysisTab({
+  object,
+  selectedSurfaceIndex,
+}: AnalysisTabProps) {
   const [scope, setScope] = useState<Scope>("building");
 
   const roofSurfaces = object.surfaces
@@ -73,12 +76,22 @@ function BuildingMetrics({ roofSurfaces }: { roofSurfaces: Surface[] }) {
 
   return (
     <div className="attr-section">
-      <div className="attr-section-title" style={{ color: "var(--accent-text)" }}>
+      <div
+        className="attr-section-title"
+        style={{ color: "var(--accent-text)" }}
+      >
         Roof Analysis
       </div>
       <AttrRow label="Roof surfaces" value={String(agg.count)} />
-      <AttrRow label="Total roof area" value={`${agg.totalArea.toFixed(1)} m\u00B2`} highlight />
-      <AttrRow label="Avg inclination" value={`${agg.avgInclination.toFixed(1)}\u00B0`} />
+      <AttrRow
+        label="Total roof area"
+        value={`${agg.totalArea.toFixed(1)} m\u00B2`}
+        highlight
+      />
+      <AttrRow
+        label="Avg inclination"
+        value={`${agg.avgInclination.toFixed(1)}\u00B0`}
+      />
       <AttrRow label="Avg azimuth" value={formatAzimuth(agg.avgAzimuth)} />
     </div>
   );
@@ -105,12 +118,25 @@ function SurfaceMetricsList({
             key={index}
             className={`attr-section ${isSelected ? "section-highlight" : ""}`}
           >
-            <div className="attr-section-title" style={{ color: "var(--accent-text)" }}>
+            <div
+              className="attr-section-title"
+              style={{ color: "var(--accent-text)" }}
+            >
               Roof Surface #{index}
             </div>
-            <AttrRow label="Area" value={`${metrics.areaSqM.toFixed(1)} m\u00B2`} highlight />
-            <AttrRow label="Inclination" value={`${metrics.inclinationDeg.toFixed(1)}\u00B0`} />
-            <AttrRow label="Azimuth" value={formatAzimuth(metrics.azimuthDeg)} />
+            <AttrRow
+              label="Area"
+              value={`${metrics.areaSqM.toFixed(1)} m\u00B2`}
+              highlight
+            />
+            <AttrRow
+              label="Inclination"
+              value={`${metrics.inclinationDeg.toFixed(1)}\u00B0`}
+            />
+            <AttrRow
+              label="Azimuth"
+              value={formatAzimuth(metrics.azimuthDeg)}
+            />
           </div>
         );
       })}
@@ -134,7 +160,9 @@ function AttrRow({
   return (
     <div className="attr-row">
       <span className="attr-key">{label}</span>
-      <span className={`attr-value ${highlight ? "highlight" : ""}`}>{value}</span>
+      <span className={`attr-value ${highlight ? "highlight" : ""}`}>
+        {value}
+      </span>
     </div>
   );
 }

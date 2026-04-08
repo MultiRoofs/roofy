@@ -7,12 +7,15 @@
  * "A user can load and inspect a sample city-model fixture end to end."
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { CityJSONRoot } from "../../src/domain/citymodel/cityjson/types";
 import { parseCityJSON } from "../../src/domain/citymodel/cityjson/parseCityJSON";
-import { buildCityMesh, computeOriginOffset } from "../../src/scene/buildCityMesh";
+import {
+  buildCityMesh,
+  computeOriginOffset,
+} from "../../src/scene/buildCityMesh";
 import { resolveSelection } from "../../src/scene/usePickingControls";
 import { applyHighlight, clearHighlight } from "../../src/scene/highlightMesh";
 
@@ -20,8 +23,13 @@ import { applyHighlight, clearHighlight } from "../../src/scene/highlightMesh";
 // Load fixture
 // ---------------------------------------------------------------------------
 
-const fixturePath = path.resolve(import.meta.dirname!, "../../fixtures/two-buildings.city.json");
-const fixtureJson = JSON.parse(fs.readFileSync(fixturePath, "utf-8")) as CityJSONRoot;
+const fixturePath = path.resolve(
+  import.meta.dirname!,
+  "../../fixtures/two-buildings.city.json",
+);
+const fixtureJson = JSON.parse(
+  fs.readFileSync(fixturePath, "utf-8"),
+) as CityJSONRoot;
 
 // ---------------------------------------------------------------------------
 // Pipeline stages
@@ -104,15 +112,22 @@ describe("load-to-inspect pipeline", () => {
 
     it("picking index covers all three objects", () => {
       expect(meshResult.pickingIndex.objectKeys).toHaveLength(3);
-      expect(meshResult.pickingIndex.objectKeys).toContain("NL.IMBAG.Pand.0001");
-      expect(meshResult.pickingIndex.objectKeys).toContain("NL.IMBAG.Pand.0001-part1");
-      expect(meshResult.pickingIndex.objectKeys).toContain("NL.IMBAG.Pand.0002");
+      expect(meshResult.pickingIndex.objectKeys).toContain(
+        "NL.IMBAG.Pand.0001",
+      );
+      expect(meshResult.pickingIndex.objectKeys).toContain(
+        "NL.IMBAG.Pand.0001-part1",
+      );
+      expect(meshResult.pickingIndex.objectKeys).toContain(
+        "NL.IMBAG.Pand.0002",
+      );
     });
 
     it("objectIndex attribute has same count as position attribute", () => {
       const posCount = meshResult.geometry.getAttribute("position").count;
       const objIdxCount = meshResult.geometry.getAttribute("objectIndex").count;
-      const surfIdxCount = meshResult.geometry.getAttribute("surfaceIndex").count;
+      const surfIdxCount =
+        meshResult.geometry.getAttribute("surfaceIndex").count;
       expect(objIdxCount).toBe(posCount);
       expect(surfIdxCount).toBe(posCount);
     });
@@ -169,7 +184,9 @@ describe("load-to-inspect pipeline", () => {
       );
 
       expect(selection).not.toBeNull();
-      expect(selection!.objectId).toBe(meshResult.pickingIndex.objectKeys[lastIdx]);
+      expect(selection!.objectId).toBe(
+        meshResult.pickingIndex.objectKeys[lastIdx],
+      );
     });
 
     it("resolves surface index in surface mode", () => {

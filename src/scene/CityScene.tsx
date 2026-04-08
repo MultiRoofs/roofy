@@ -6,7 +6,13 @@
  * buffer mutation) for object/surface selection.
  */
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+} from "react";
 import {
   AmbientLight,
   DirectionalLight,
@@ -195,10 +201,8 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       }
 
       const originOffset = computeOriginOffset(model);
-      const { geometry, triangleCount, pickingIndex, baseColors } = buildCityMesh(
-        model,
-        originOffset,
-      );
+      const { geometry, triangleCount, pickingIndex, baseColors } =
+        buildCityMesh(model, originOffset);
 
       const material = new MeshStandardMaterial({
         vertexColors: true,
@@ -237,7 +241,9 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       }
 
       // Initialize solar lat/lon from model CRS
-      useSolarStore.getState().initFromModel(model.metadata.referenceSystem, model.bbox);
+      useSolarStore
+        .getState()
+        .initFromModel(model.metadata.referenceSystem, model.bbox);
 
       // Frame the camera on the model
       if (camera && controls && model.bbox) {
@@ -272,7 +278,14 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       if (!sel && !hov) {
         clearHighlight(mesh.geometry, baseColors, ruleColorsRef.current);
       } else {
-        applyHighlight(mesh.geometry, baseColors, sel, hov, pickingIndex, ruleColorsRef.current);
+        applyHighlight(
+          mesh.geometry,
+          baseColors,
+          sel,
+          hov,
+          pickingIndex,
+          ruleColorsRef.current,
+        );
       }
     }, [rules, rulesEnabled, model]);
 
@@ -284,7 +297,7 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       const [dx, dy, dz] = sunPosition.direction;
       // Scale light distance to scene extent so shadow frustum always covers the model
       const mesh = meshRef.current;
-      const dist = mesh ? mesh.geometry.boundingSphere?.radius ?? 500 : 500;
+      const dist = mesh ? (mesh.geometry.boundingSphere?.radius ?? 500) : 500;
       const lightDist = Math.max(dist * 2, 100);
 
       if (sunPosition.altitudeDeg > 0) {
@@ -312,7 +325,14 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       if (!selection && !hovered) {
         clearHighlight(mesh.geometry, baseColors, ruleColorsRef.current);
       } else {
-        applyHighlight(mesh.geometry, baseColors, selection, hovered, pickingIndex, ruleColorsRef.current);
+        applyHighlight(
+          mesh.geometry,
+          baseColors,
+          selection,
+          hovered,
+          pickingIndex,
+          ruleColorsRef.current,
+        );
       }
     }, [selection, hovered]);
 
@@ -338,13 +358,24 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       const controls = controlsRef.current;
       if (!camera || !controls) return null;
       return {
-        position: [camera.position.x, camera.position.y, camera.position.z] as const,
-        target: [controls.target.x, controls.target.y, controls.target.z] as const,
+        position: [
+          camera.position.x,
+          camera.position.y,
+          camera.position.z,
+        ] as const,
+        target: [
+          controls.target.x,
+          controls.target.y,
+          controls.target.z,
+        ] as const,
       };
     }, []);
 
     const setCameraState = useCallback(
-      (position: readonly [number, number, number], target: readonly [number, number, number]) => {
+      (
+        position: readonly [number, number, number],
+        target: readonly [number, number, number],
+      ) => {
         const camera = cameraRef.current;
         const controls = controlsRef.current;
         if (!camera || !controls) return;
@@ -355,7 +386,11 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       [],
     );
 
-    useImperativeHandle(ref, () => ({ fitAll, getCameraState, setCameraState }), [fitAll, getCameraState, setCameraState]);
+    useImperativeHandle(
+      ref,
+      () => ({ fitAll, getCameraState, setCameraState }),
+      [fitAll, getCameraState, setCameraState],
+    );
 
     // Tooltip for hovered object
     const hoveredObject = hovered

@@ -6,11 +6,14 @@
  * and pickable mesh. This ensures format-agnostic downstream behavior.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseCityJSONSeq } from "../../src/domain/citymodel/cityjsonseq/parseCityJSONSeq";
-import { buildCityMesh, computeOriginOffset } from "../../src/scene/buildCityMesh";
+import {
+  buildCityMesh,
+  computeOriginOffset,
+} from "../../src/scene/buildCityMesh";
 import { resolveSelection } from "../../src/scene/usePickingControls";
 
 const fixturePath = path.resolve(
@@ -32,15 +35,22 @@ describe("CityJSONSeq load-to-inspect pipeline", () => {
 
     it("picking index covers all three objects", () => {
       expect(meshResult.pickingIndex.objectKeys).toHaveLength(3);
-      expect(meshResult.pickingIndex.objectKeys).toContain("NL.IMBAG.Pand.0001");
-      expect(meshResult.pickingIndex.objectKeys).toContain("NL.IMBAG.Pand.0001-part1");
-      expect(meshResult.pickingIndex.objectKeys).toContain("NL.IMBAG.Pand.0002");
+      expect(meshResult.pickingIndex.objectKeys).toContain(
+        "NL.IMBAG.Pand.0001",
+      );
+      expect(meshResult.pickingIndex.objectKeys).toContain(
+        "NL.IMBAG.Pand.0001-part1",
+      );
+      expect(meshResult.pickingIndex.objectKeys).toContain(
+        "NL.IMBAG.Pand.0002",
+      );
     });
 
     it("vertex attributes are consistent", () => {
       const posCount = meshResult.geometry.getAttribute("position").count;
       const objIdxCount = meshResult.geometry.getAttribute("objectIndex").count;
-      const surfIdxCount = meshResult.geometry.getAttribute("surfaceIndex").count;
+      const surfIdxCount =
+        meshResult.geometry.getAttribute("surfaceIndex").count;
       expect(objIdxCount).toBe(posCount);
       expect(surfIdxCount).toBe(posCount);
     });

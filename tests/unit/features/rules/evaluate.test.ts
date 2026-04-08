@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import {
   evaluateCondition,
   evaluateRule,
@@ -167,7 +167,9 @@ describe("evaluateRule", () => {
       conditions: [{ field: "roofType", operator: "=", value: "flat" }],
     });
     expect(evaluateRule({ roofType: "flat" }, FLAT_METRICS, rule)).toBe(true);
-    expect(evaluateRule({ roofType: "gabled" }, FLAT_METRICS, rule)).toBe(false);
+    expect(evaluateRule({ roofType: "gabled" }, FLAT_METRICS, rule)).toBe(
+      false,
+    );
   });
 });
 

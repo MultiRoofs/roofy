@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import {
   CITYMODEL_ENCODING_PRIORITY,
   getPreferredCityModelEncoding,
@@ -30,13 +30,12 @@ describe("isSupportedCityModelEncoding", () => {
 
 describe("getPreferredCityModelEncoding", () => {
   it("returns the highest-priority supported encoding", () => {
-    expect(
-      getPreferredCityModelEncoding(["flatcitybuf", "cityjsonseq"]),
-    ).toBe("cityjsonseq");
+    expect(getPreferredCityModelEncoding(["flatcitybuf", "cityjsonseq"])).toBe(
+      "cityjsonseq",
+    );
   });
 
   it("returns null when no encodings are provided", () => {
     expect(getPreferredCityModelEncoding([])).toBeNull();
   });
 });
-

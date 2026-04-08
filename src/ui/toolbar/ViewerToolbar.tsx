@@ -32,7 +32,9 @@ export function ViewerToolbar({
   const lod = findPrimaryLod(model);
 
   const rulesEnabled = useRuleStore((s) => s.enabled);
-  const ruleCount = useRuleStore((s) => s.rules.filter((r) => r.enabled).length);
+  const ruleCount = useRuleStore(
+    (s) => s.rules.filter((r) => r.enabled).length,
+  );
   const toggleRules = useRuleStore((s) => s.toggleEnabled);
 
   const datetime = useSolarStore((s) => s.datetime);
@@ -63,7 +65,9 @@ export function ViewerToolbar({
       {sunPosition && (
         <>
           <div className="toolbar-sep" />
-          <div className={`pill sun-pill ${sunPosition.altitudeDeg > 0 ? "sun-pill-up" : ""}`}>
+          <div
+            className={`pill sun-pill ${sunPosition.altitudeDeg > 0 ? "sun-pill-up" : ""}`}
+          >
             Sun <span className="value">{formatDatetimePill(datetime)}</span>
           </div>
         </>
@@ -102,7 +106,11 @@ export function ViewerToolbar({
           </svg>
         </button>
       )}
-      <button className="tb-btn" title="Toggle inspector" onClick={onToggleInspector}>
+      <button
+        className="tb-btn"
+        title="Toggle inspector"
+        onClick={onToggleInspector}
+      >
         <svg viewBox="0 0 24 24">
           <rect x="3" y="3" width="18" height="18" rx="2" />
           <path d="M15 3v18" />

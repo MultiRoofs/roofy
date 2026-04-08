@@ -33,9 +33,7 @@ function classifyOrientation(azimuthDeg: number): string {
   return "N"; // fallback for exactly 360
 }
 
-function countByOrientation(
-  metrics: RoofMetrics[],
-): OrientationCount[] {
+function countByOrientation(metrics: RoofMetrics[]): OrientationCount[] {
   const counts = new Map<string, number>();
   for (const band of ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]) {
     counts.set(band, 0);
@@ -91,10 +89,14 @@ export function computeModelStats(model: CityModel): ModelStats {
     surfaceCount,
     roofSurfaceCount,
     totalRoofArea,
-    avgBuildingHeight: heights.length > 0 ? heights.reduce((a, b) => a + b, 0) / heights.length : 0,
+    avgBuildingHeight:
+      heights.length > 0
+        ? heights.reduce((a, b) => a + b, 0) / heights.length
+        : 0,
     minBuildingHeight: heights.length > 0 ? Math.min(...heights) : 0,
     maxBuildingHeight: heights.length > 0 ? Math.max(...heights) : 0,
-    avgRoofSlope: roofSlopeWeightSum > 0 ? avgRoofSlope / roofSlopeWeightSum : 0,
+    avgRoofSlope:
+      roofSlopeWeightSum > 0 ? avgRoofSlope / roofSlopeWeightSum : 0,
     roofsByOrientation: countByOrientation(roofMetricsList),
   };
 }
@@ -103,7 +105,10 @@ export function computeModelStats(model: CityModel): ModelStats {
 // Per-object stats
 // ---------------------------------------------------------------------------
 
-export function computeObjectStats(model: CityModel, objectId: string): ObjectStats | null {
+export function computeObjectStats(
+  model: CityModel,
+  objectId: string,
+): ObjectStats | null {
   const obj: CityObject | undefined = model.objects[objectId];
   if (!obj) return null;
 

@@ -6,7 +6,7 @@
  * behavior without attempting full initialization.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import { getDuckDBStatus, queryDuckDB } from "../../../src/analytics/duckdb";
 
 describe("DuckDB status", () => {

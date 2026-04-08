@@ -5,11 +5,13 @@
  * via beforeEach clear.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { LocalStorageProjectStateStore } from "../../../src/persistence/localStorage";
 import type { ProjectSnapshot } from "../../../src/persistence/types";
 
-function makeSnapshot(overrides: Partial<ProjectSnapshot> = {}): ProjectSnapshot {
+function makeSnapshot(
+  overrides: Partial<ProjectSnapshot> = {},
+): ProjectSnapshot {
   return {
     version: "1",
     savedAt: "2025-06-21T12:00:00Z",
@@ -45,7 +47,10 @@ describe("LocalStorageProjectStateStore", () => {
     const loaded = await store.load(id);
     expect(loaded).not.toBeNull();
     expect(loaded!.label).toBe("Test snapshot");
-    expect(loaded!.modelRef).toEqual({ type: "url", url: "https://example.com/model.city.json" });
+    expect(loaded!.modelRef).toEqual({
+      type: "url",
+      url: "https://example.com/model.city.json",
+    });
     expect(loaded!.viewState.cameraPosition).toEqual([50, 50, 50]);
   });
 
@@ -105,7 +110,10 @@ describe("LocalStorageProjectStateStore", () => {
     const id = await store.save(snapshot);
     const loaded = await store.load(id);
 
-    expect(loaded!.modelRef).toEqual({ type: "file", fileName: "delft.city.json" });
+    expect(loaded!.modelRef).toEqual({
+      type: "file",
+      fileName: "delft.city.json",
+    });
   });
 
   it("handles null modelRef", async () => {

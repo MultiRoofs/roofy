@@ -8,4 +8,3 @@ Recommended layout:
 - `tests/integration/` for broader flows that span modules
 
 Follow the red-green-refactor cycle documented in `docs/testing-strategy.md`.
-

@@ -65,7 +65,8 @@ export function usePickingControls(refs: PickingRefs): void {
 
       const rect = canvas!.getBoundingClientRect();
       pointerRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      pointerRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      pointerRef.current.y =
+        -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
       raycasterRef.current.setFromCamera(pointerRef.current, camera);
       const intersects = raycasterRef.current.intersectObject(mesh);
@@ -73,12 +74,7 @@ export function usePickingControls(refs: PickingRefs): void {
       if (!hit?.face) return null;
 
       const mode = useSelectionStore.getState().mode;
-      return resolveSelection(
-        hit.face.a,
-        mesh.geometry,
-        pickingIndex,
-        mode,
-      );
+      return resolveSelection(hit.face.a, mesh.geometry, pickingIndex, mode);
     }
 
     function onPointerMove(event: PointerEvent) {

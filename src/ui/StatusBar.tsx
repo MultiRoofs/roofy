@@ -8,7 +8,11 @@ interface StatusBarProps {
   readonly selectedCount: number;
 }
 
-export function StatusBar({ objectCount, triangleCount, selectedCount }: StatusBarProps) {
+export function StatusBar({
+  objectCount,
+  triangleCount,
+  selectedCount,
+}: StatusBarProps) {
   return (
     <footer className="statusbar">
       <div className="status-item">

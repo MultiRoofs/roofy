@@ -8,7 +8,10 @@
 import { useMemo } from "react";
 import type { CityModel } from "../../domain/citymodel/types";
 import type { Selection } from "../../domain/selection/types";
-import { computeModelStats, computeObjectStats } from "../../analytics/computeStats";
+import {
+  computeModelStats,
+  computeObjectStats,
+} from "../../analytics/computeStats";
 
 interface StatsTabProps {
   readonly model: CityModel;
@@ -19,8 +22,7 @@ export function StatsTab({ model, selection }: StatsTabProps) {
   const modelStats = useMemo(() => computeModelStats(model), [model]);
 
   const objectStats = useMemo(
-    () =>
-      selection ? computeObjectStats(model, selection.objectId) : null,
+    () => (selection ? computeObjectStats(model, selection.objectId) : null),
     [model, selection],
   );
 
@@ -29,18 +31,36 @@ export function StatsTab({ model, selection }: StatsTabProps) {
       {/* Per-object stats when selected */}
       {objectStats && (
         <div className="attr-section">
-          <div className="attr-section-title" style={{ color: "var(--accent-text)" }}>
+          <div
+            className="attr-section-title"
+            style={{ color: "var(--accent-text)" }}
+          >
             Selected: {objectStats.objectType}
           </div>
           {objectStats.height !== null && (
-            <StatRow label="Height" value={`${objectStats.height.toFixed(1)} m`} />
+            <StatRow
+              label="Height"
+              value={`${objectStats.height.toFixed(1)} m`}
+            />
           )}
           <StatRow label="Surfaces" value={String(objectStats.surfaceCount)} />
-          <StatRow label="Roof surfaces" value={String(objectStats.roofSurfaceCount)} />
-          <StatRow label="Roof area" value={`${objectStats.totalRoofArea.toFixed(1)} m\u00B2`} />
-          <StatRow label="Avg slope" value={`${objectStats.avgRoofSlope.toFixed(1)}\u00B0`} />
+          <StatRow
+            label="Roof surfaces"
+            value={String(objectStats.roofSurfaceCount)}
+          />
+          <StatRow
+            label="Roof area"
+            value={`${objectStats.totalRoofArea.toFixed(1)} m\u00B2`}
+          />
+          <StatRow
+            label="Avg slope"
+            value={`${objectStats.avgRoofSlope.toFixed(1)}\u00B0`}
+          />
           {objectStats.avgRoofAzimuth > 0 && (
-            <StatRow label="Avg azimuth" value={`${cardinalFromDeg(objectStats.avgRoofAzimuth)} (${objectStats.avgRoofAzimuth.toFixed(0)}\u00B0)`} />
+            <StatRow
+              label="Avg azimuth"
+              value={`${cardinalFromDeg(objectStats.avgRoofAzimuth)} (${objectStats.avgRoofAzimuth.toFixed(0)}\u00B0)`}
+            />
           )}
         </div>
       )}
@@ -51,21 +71,42 @@ export function StatsTab({ model, selection }: StatsTabProps) {
           {objectStats ? "Model Summary" : "Statistics"}
         </div>
         <StatRow label="Buildings" value={String(modelStats.buildingCount)} />
-        <StatRow label="Total surfaces" value={String(modelStats.surfaceCount)} />
-        <StatRow label="Roof surfaces" value={String(modelStats.roofSurfaceCount)} />
-        <StatRow label="Total roof area" value={`${modelStats.totalRoofArea.toFixed(1)} m\u00B2`} />
+        <StatRow
+          label="Total surfaces"
+          value={String(modelStats.surfaceCount)}
+        />
+        <StatRow
+          label="Roof surfaces"
+          value={String(modelStats.roofSurfaceCount)}
+        />
+        <StatRow
+          label="Total roof area"
+          value={`${modelStats.totalRoofArea.toFixed(1)} m\u00B2`}
+        />
       </div>
 
       <div className="attr-section">
         <div className="attr-section-title">Heights</div>
-        <StatRow label="Average" value={`${modelStats.avgBuildingHeight.toFixed(1)} m`} />
-        <StatRow label="Min" value={`${modelStats.minBuildingHeight.toFixed(1)} m`} />
-        <StatRow label="Max" value={`${modelStats.maxBuildingHeight.toFixed(1)} m`} />
+        <StatRow
+          label="Average"
+          value={`${modelStats.avgBuildingHeight.toFixed(1)} m`}
+        />
+        <StatRow
+          label="Min"
+          value={`${modelStats.minBuildingHeight.toFixed(1)} m`}
+        />
+        <StatRow
+          label="Max"
+          value={`${modelStats.maxBuildingHeight.toFixed(1)} m`}
+        />
       </div>
 
       <div className="attr-section">
         <div className="attr-section-title">Roof Slope</div>
-        <StatRow label="Average" value={`${modelStats.avgRoofSlope.toFixed(1)}\u00B0`} />
+        <StatRow
+          label="Average"
+          value={`${modelStats.avgRoofSlope.toFixed(1)}\u00B0`}
+        />
       </div>
 
       <div className="attr-section">
@@ -78,7 +119,13 @@ export function StatsTab({ model, selection }: StatsTabProps) {
   );
 }
 
-function StatRow({ label, value }: { readonly label: string; readonly value: string }) {
+function StatRow({
+  label,
+  value,
+}: {
+  readonly label: string;
+  readonly value: string;
+}) {
   return (
     <div className="attr-row">
       <span className="attr-key">{label}</span>

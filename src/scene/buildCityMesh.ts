@@ -6,11 +6,7 @@
  * and assigns vertex colors based on semantic surface type.
  */
 
-import {
-  BufferAttribute,
-  BufferGeometry,
-  Color,
-} from "three";
+import { BufferAttribute, BufferGeometry, Color } from "three";
 import type { CityModel, Vec3 } from "../domain/citymodel/types";
 import { SURFACE_COLORS } from "./surfaceColors";
 

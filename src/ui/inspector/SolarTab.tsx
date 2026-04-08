@@ -11,9 +11,9 @@ import { useSolarStore } from "../../features/solar/solarStore";
 // Preset dates: summer/winter solstice, spring equinox.
 // Month values are 0-indexed (JS Date convention): 5=June, 2=March, 11=December.
 const PRESET_DATES = [
-  { label: "Summer", month: 5, day: 21 },   // June 21
-  { label: "Equinox", month: 2, day: 20 },  // March 20
-  { label: "Winter", month: 11, day: 21 },  // December 21
+  { label: "Summer", month: 5, day: 21 }, // June 21
+  { label: "Equinox", month: 2, day: 20 }, // March 20
+  { label: "Winter", month: 11, day: 21 }, // December 21
 ] as const;
 
 // Preset times of day (hours)
@@ -56,8 +56,8 @@ export function SolarTab() {
   if (!latLon) {
     return (
       <div className="inspector-placeholder">
-        No geographic location derived from model CRS.
-        Solar controls require a supported coordinate reference system.
+        No geographic location derived from model CRS. Solar controls require a
+        supported coordinate reference system.
       </div>
     );
   }
@@ -118,19 +118,25 @@ export function SolarTab() {
       {/* Sun position readout */}
       {sunPosition && (
         <div className="attr-section">
-          <div className="attr-section-title" style={{ color: "var(--accent-text)" }}>
+          <div
+            className="attr-section-title"
+            style={{ color: "var(--accent-text)" }}
+          >
             Sun Position
           </div>
           <div className="attr-row">
             <span className="attr-key">Altitude</span>
-            <span className={`attr-value ${sunPosition.altitudeDeg > 0 ? "highlight" : ""}`}>
+            <span
+              className={`attr-value ${sunPosition.altitudeDeg > 0 ? "highlight" : ""}`}
+            >
               {sunPosition.altitudeDeg.toFixed(1)}&deg;
             </span>
           </div>
           <div className="attr-row">
             <span className="attr-key">Azimuth</span>
             <span className="attr-value">
-              {cardinalFromDeg(sunPosition.azimuthDeg)} ({sunPosition.azimuthDeg.toFixed(0)}&deg;)
+              {cardinalFromDeg(sunPosition.azimuthDeg)} (
+              {sunPosition.azimuthDeg.toFixed(0)}&deg;)
             </span>
           </div>
           <div className="attr-row">

@@ -41,7 +41,10 @@ export interface SolarActions {
   setDatetime: (dt: Date) => void;
   setLatLon: (latLon: LatLon | null) => void;
   /** Extract lat/lon from model CRS and bbox, then compute sun position. */
-  initFromModel: (referenceSystem: string | undefined, bbox: BBox3 | null) => void;
+  initFromModel: (
+    referenceSystem: string | undefined,
+    bbox: BBox3 | null,
+  ) => void;
 }
 
 export type SolarStore = SolarState & SolarActions;
@@ -127,7 +130,7 @@ const RD_NEW_DEF =
 
 const KNOWN_PROJ4_DEFS: Record<number, string> = {
   28992: RD_NEW_DEF, // EPSG:28992 — RD New (Netherlands) horizontal
-  7415: RD_NEW_DEF,  // EPSG:7415 — compound CRS, horizontal component is RD New
+  7415: RD_NEW_DEF, // EPSG:7415 — compound CRS, horizontal component is RD New
 };
 
 function ensureProj4Def(epsgCode: number): boolean {
@@ -154,7 +157,10 @@ export function reprojectToLatLon(
   const cy = (bbox[1] + bbox[4]) / 2;
 
   try {
-    const [lon, lat] = proj4(`EPSG:${epsgCode}`, "WGS84", [cx, cy]) as [number, number];
+    const [lon, lat] = proj4(`EPSG:${epsgCode}`, "WGS84", [cx, cy]) as [
+      number,
+      number,
+    ];
     return { lat, lon };
   } catch {
     return null;

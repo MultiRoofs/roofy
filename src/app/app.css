@@ -14,7 +14,7 @@
 
   /* borders */
   --border: rgba(255, 255, 255, 0.06);
-  --border-accent: rgba(255, 255, 255, 0.10);
+  --border-accent: rgba(255, 255, 255, 0.1);
 
   /* text */
   --fg: #e8eaf0;
@@ -29,7 +29,7 @@
 
   /* secondary — teal for data highlights */
   --teal: #3ecfcf;
-  --teal-soft: rgba(62, 207, 207, 0.10);
+  --teal-soft: rgba(62, 207, 207, 0.1);
 
   /* status colors */
   --roof: #cc4444;
@@ -81,7 +81,11 @@ body {
   padding: 4rem 1.5rem 5rem;
   color: #102a43;
   background:
-    radial-gradient(circle at top left, rgba(176, 221, 196, 0.45), transparent 35%),
+    radial-gradient(
+      circle at top left,
+      rgba(176, 221, 196, 0.45),
+      transparent 35%
+    ),
     linear-gradient(180deg, #f7f5ec 0%, #eef3f6 100%);
   min-height: 100vh;
 }
@@ -134,7 +138,9 @@ body {
   border-radius: 1.25rem;
   background: rgba(255, 255, 255, 0.5);
   text-align: center;
-  transition: border-color 0.2s, background 0.2s;
+  transition:
+    border-color 0.2s,
+    background 0.2s;
 }
 
 .drop-zone:hover {
@@ -408,7 +414,9 @@ body {
   background: transparent;
   color: var(--fg-muted);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .tb-btn:hover {
@@ -452,7 +460,9 @@ body {
   background: transparent;
   color: var(--fg-muted);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .rail-btn:hover {
@@ -572,7 +582,9 @@ body {
   font-size: 0.75rem;
   font-weight: 500;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .inspector-tab:hover {
@@ -762,7 +774,9 @@ body {
   color: var(--fg-dim);
   font-size: 0.7rem;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .scope-btn.active {
@@ -871,7 +885,9 @@ body {
   color: var(--fg-dim);
   font-size: 0.6rem;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .rule-action-btn:hover {
@@ -889,7 +905,9 @@ body {
   color: var(--fg-muted);
   font-size: 0.75rem;
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
+  transition:
+    border-color 0.15s,
+    color 0.15s;
   margin-top: 0.35rem;
 }
 
@@ -1162,7 +1180,10 @@ body {
   cursor: pointer;
   text-align: center;
   line-height: 1.3;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .solar-preset-btn:hover {

@@ -29,14 +29,11 @@ export const useRuleStore = create<RuleStore>((set) => ({
   rules: [],
   enabled: true,
 
-  addRule: (rule) =>
-    set((state) => ({ rules: [...state.rules, rule] })),
+  addRule: (rule) => set((state) => ({ rules: [...state.rules, rule] })),
 
   updateRule: (id, patch) =>
     set((state) => ({
-      rules: state.rules.map((r) =>
-        r.id === id ? { ...r, ...patch } : r,
-      ),
+      rules: state.rules.map((r) => (r.id === id ? { ...r, ...patch } : r)),
     })),
 
   deleteRule: (id) =>
@@ -52,9 +49,7 @@ export const useRuleStore = create<RuleStore>((set) => ({
       return { rules };
     }),
 
-  toggleEnabled: () =>
-    set((state) => ({ enabled: !state.enabled })),
+  toggleEnabled: () => set((state) => ({ enabled: !state.enabled })),
 
-  clearRules: () =>
-    set({ rules: [] }),
+  clearRules: () => set({ rules: [] }),
 }));

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vite-plus/test";
 import { useRuleStore } from "../../../../src/features/rules/ruleStore";
 import type { Rule } from "../../../../src/features/rules/types";
 

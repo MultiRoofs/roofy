@@ -1,1526 +1,2047 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>MultiRoof Viewer — UI Wireframe</title>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..800;1,9..40,300..800&family=Geist+Mono:wght@300..800&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
-<style>
-/* ═══════════════════════════════════════════════════════════════
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MultiRoof Viewer — UI Wireframe</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..800;1,9..40,300..800&family=Geist+Mono:wght@300..800&family=Instrument+Serif:ital@0;1&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ═══════════════════════════════════════════════════════════════
    DESIGN TOKENS — maps to future shadcn/ui CSS variables
    ═══════════════════════════════════════════════════════════════ */
-:root {
-  /* surfaces */
-  --bg-root:        #0c0e14;
-  --bg-panel:       #12151e;
-  --bg-panel-hover: #181c28;
-  --bg-toolbar:     #10131b;
-  --bg-viewport:    #0a0c12;
-  --bg-input:       #1a1e2a;
-  --bg-muted:       #1e2230;
+      :root {
+        /* surfaces */
+        --bg-root: #0c0e14;
+        --bg-panel: #12151e;
+        --bg-panel-hover: #181c28;
+        --bg-toolbar: #10131b;
+        --bg-viewport: #0a0c12;
+        --bg-input: #1a1e2a;
+        --bg-muted: #1e2230;
 
-  /* borders */
-  --border:         rgba(255,255,255,0.06);
-  --border-accent:  rgba(255,255,255,0.10);
+        /* borders */
+        --border: rgba(255, 255, 255, 0.06);
+        --border-accent: rgba(255, 255, 255, 0.1);
 
-  /* text */
-  --fg:             #e8eaf0;
-  --fg-muted:       #6b7280;
-  --fg-dim:         #4b5060;
-  --fg-label:       #8b92a0;
+        /* text */
+        --fg: #e8eaf0;
+        --fg-muted: #6b7280;
+        --fg-dim: #4b5060;
+        --fg-label: #8b92a0;
 
-  /* accent — warm amber for selection/interactive */
-  --accent:         #e8973f;
-  --accent-soft:    rgba(232,151,63,0.12);
-  --accent-text:    #f0b060;
+        /* accent — warm amber for selection/interactive */
+        --accent: #e8973f;
+        --accent-soft: rgba(232, 151, 63, 0.12);
+        --accent-text: #f0b060;
 
-  /* secondary — teal for data highlights */
-  --teal:           #3ecfcf;
-  --teal-soft:      rgba(62,207,207,0.10);
+        /* secondary — teal for data highlights */
+        --teal: #3ecfcf;
+        --teal-soft: rgba(62, 207, 207, 0.1);
 
-  /* status colors */
-  --roof:           #cc4444;
-  --wall:           #8899aa;
-  --ground:         #886644;
-  --selection:      #e8973f;
+        /* status colors */
+        --roof: #cc4444;
+        --wall: #8899aa;
+        --ground: #886644;
+        --selection: #e8973f;
 
-  /* radii — matches shadcn defaults */
-  --radius-sm:      0.375rem;
-  --radius:         0.5rem;
-  --radius-lg:      0.75rem;
+        /* radii — matches shadcn defaults */
+        --radius-sm: 0.375rem;
+        --radius: 0.5rem;
+        --radius-lg: 0.75rem;
 
-  /* spacing */
-  --toolbar-h:      3rem;
-  --statusbar-h:    1.75rem;
-  --rail-w:         3rem;
-  --panel-w:        320px;
-}
+        /* spacing */
+        --toolbar-h: 3rem;
+        --statusbar-h: 1.75rem;
+        --rail-w: 3rem;
+        --panel-w: 320px;
+      }
 
-/* ═══════════════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════════════
    RESET & BASE
    ═══════════════════════════════════════════════════════════════ */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
 
-html, body {
-  height: 100%;
-  font-family: 'DM Sans', sans-serif;
-  background: var(--bg-root);
-  color: var(--fg);
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-}
+      html,
+      body {
+        height: 100%;
+        font-family: "DM Sans", sans-serif;
+        background: var(--bg-root);
+        color: var(--fg);
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+      }
 
-.mono {
-  font-family: 'Geist Mono', monospace;
-  font-size: 0.78rem;
-  letter-spacing: -0.01em;
-}
+      .mono {
+        font-family: "Geist Mono", monospace;
+        font-size: 0.78rem;
+        letter-spacing: -0.01em;
+      }
 
-.serif {
-  font-family: 'Instrument Serif', serif;
-}
+      .serif {
+        font-family: "Instrument Serif", serif;
+      }
 
-/* ═══════════════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════════════
    STATE SWITCHER (wireframe navigation)
    ═══════════════════════════════════════════════════════════════ */
-.state-nav {
-  position: fixed;
-  top: 0; left: 0; right: 0;
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.4rem 0.75rem;
-  background: #000;
-  border-bottom: 1px solid var(--accent);
-  font-size: 0.75rem;
-}
+      .state-nav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0.4rem 0.75rem;
+        background: #000;
+        border-bottom: 1px solid var(--accent);
+        font-size: 0.75rem;
+      }
 
-.state-nav span {
-  color: var(--accent);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin-right: 0.75rem;
-}
+      .state-nav span {
+        color: var(--accent);
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-right: 0.75rem;
+      }
 
-.state-nav button {
-  padding: 0.3rem 0.7rem;
-  background: var(--bg-panel);
-  color: var(--fg-muted);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 0.75rem;
-  transition: all 0.15s;
-}
+      .state-nav button {
+        padding: 0.3rem 0.7rem;
+        background: var(--bg-panel);
+        color: var(--fg-muted);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 0.75rem;
+        transition: all 0.15s;
+      }
 
-.state-nav button:hover { background: var(--bg-panel-hover); color: var(--fg); }
-.state-nav button.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+      .state-nav button:hover {
+        background: var(--bg-panel-hover);
+        color: var(--fg);
+      }
+      .state-nav button.active {
+        background: var(--accent-soft);
+        color: var(--accent);
+        border-color: var(--accent);
+      }
 
-.state-view { display: none; height: 100%; padding-top: 2rem; }
-.state-view.active { display: flex; flex-direction: column; }
+      .state-view {
+        display: none;
+        height: 100%;
+        padding-top: 2rem;
+      }
+      .state-view.active {
+        display: flex;
+        flex-direction: column;
+      }
 
-/* ═══════════════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════════════
    PAGE 1 — LANDING / FILE DROP
    ═══════════════════════════════════════════════════════════════ */
-.landing {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background:
-    radial-gradient(ellipse at 30% 40%, rgba(62,207,207,0.04) 0%, transparent 50%),
-    radial-gradient(ellipse at 70% 60%, rgba(232,151,63,0.03) 0%, transparent 50%),
-    var(--bg-root);
-}
+      .landing {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background:
+          radial-gradient(
+            ellipse at 30% 40%,
+            rgba(62, 207, 207, 0.04) 0%,
+            transparent 50%
+          ),
+          radial-gradient(
+            ellipse at 70% 60%,
+            rgba(232, 151, 63, 0.03) 0%,
+            transparent 50%
+          ),
+          var(--bg-root);
+      }
 
-.landing-inner {
-  text-align: center;
-  max-width: 520px;
-  padding: 3rem;
-}
+      .landing-inner {
+        text-align: center;
+        max-width: 520px;
+        padding: 3rem;
+      }
 
-.landing-logo {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 2.5rem;
-}
+      .landing-logo {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 2.5rem;
+      }
 
-.landing-logo .mark {
-  width: 2.25rem;
-  height: 2.25rem;
-  background: linear-gradient(135deg, var(--accent), var(--teal));
-  border-radius: 0.5rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+      .landing-logo .mark {
+        width: 2.25rem;
+        height: 2.25rem;
+        background: linear-gradient(135deg, var(--accent), var(--teal));
+        border-radius: 0.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
 
-.landing-logo .mark svg { width: 1.2rem; height: 1.2rem; }
+      .landing-logo .mark svg {
+        width: 1.2rem;
+        height: 1.2rem;
+      }
 
-.landing-logo .wordmark {
-  font-size: 1.1rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
+      .landing-logo .wordmark {
+        font-size: 1.1rem;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
 
-.landing h1 {
-  font-family: 'Instrument Serif', serif;
-  font-size: 2.8rem;
-  font-weight: 400;
-  line-height: 1.05;
-  letter-spacing: -0.03em;
-  margin-bottom: 0.75rem;
-  color: var(--fg);
-}
+      .landing h1 {
+        font-family: "Instrument Serif", serif;
+        font-size: 2.8rem;
+        font-weight: 400;
+        line-height: 1.05;
+        letter-spacing: -0.03em;
+        margin-bottom: 0.75rem;
+        color: var(--fg);
+      }
 
-.landing h1 em {
-  font-style: italic;
-  color: var(--accent-text);
-}
+      .landing h1 em {
+        font-style: italic;
+        color: var(--accent-text);
+      }
 
-.landing .subtitle {
-  font-size: 1rem;
-  color: var(--fg-muted);
-  max-width: 360px;
-  margin: 0 auto 2.5rem;
-}
+      .landing .subtitle {
+        font-size: 1rem;
+        color: var(--fg-muted);
+        max-width: 360px;
+        margin: 0 auto 2.5rem;
+      }
 
-.drop-zone {
-  border: 1.5px dashed rgba(255,255,255,0.12);
-  border-radius: var(--radius-lg);
-  padding: 2.5rem 2rem;
-  background: rgba(255,255,255,0.015);
-  transition: all 0.25s;
-  cursor: pointer;
-}
+      .drop-zone {
+        border: 1.5px dashed rgba(255, 255, 255, 0.12);
+        border-radius: var(--radius-lg);
+        padding: 2.5rem 2rem;
+        background: rgba(255, 255, 255, 0.015);
+        transition: all 0.25s;
+        cursor: pointer;
+      }
 
-.drop-zone:hover {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
+      .drop-zone:hover {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+      }
 
-.drop-zone .icon {
-  width: 3rem;
-  height: 3rem;
-  margin: 0 auto 1rem;
-  background: var(--bg-muted);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+      .drop-zone .icon {
+        width: 3rem;
+        height: 3rem;
+        margin: 0 auto 1rem;
+        background: var(--bg-muted);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
 
-.drop-zone .icon svg { opacity: 0.5; }
+      .drop-zone .icon svg {
+        opacity: 0.5;
+      }
 
-.drop-zone p { color: var(--fg-muted); font-size: 0.9rem; }
-.drop-zone .or { color: var(--fg-dim); font-size: 0.8rem; margin: 0.4rem 0; }
+      .drop-zone p {
+        color: var(--fg-muted);
+        font-size: 0.9rem;
+      }
+      .drop-zone .or {
+        color: var(--fg-dim);
+        font-size: 0.8rem;
+        margin: 0.4rem 0;
+      }
 
-.drop-zone .browse-btn {
-  display: inline-block;
-  margin-top: 0.25rem;
-  padding: 0.45rem 1rem;
-  background: var(--fg);
-  color: var(--bg-root);
-  border: none;
-  border-radius: var(--radius-sm);
-  font-weight: 600;
-  font-size: 0.82rem;
-  cursor: pointer;
-  transition: opacity 0.15s;
-}
+      .drop-zone .browse-btn {
+        display: inline-block;
+        margin-top: 0.25rem;
+        padding: 0.45rem 1rem;
+        background: var(--fg);
+        color: var(--bg-root);
+        border: none;
+        border-radius: var(--radius-sm);
+        font-weight: 600;
+        font-size: 0.82rem;
+        cursor: pointer;
+        transition: opacity 0.15s;
+      }
 
-.drop-zone .browse-btn:hover { opacity: 0.85; }
+      .drop-zone .browse-btn:hover {
+        opacity: 0.85;
+      }
 
-.landing-footer {
-  margin-top: 2rem;
-  display: flex;
-  gap: 1.5rem;
-  justify-content: center;
-  font-size: 0.75rem;
-  color: var(--fg-dim);
-}
+      .landing-footer {
+        margin-top: 2rem;
+        display: flex;
+        gap: 1.5rem;
+        justify-content: center;
+        font-size: 0.75rem;
+        color: var(--fg-dim);
+      }
 
-.landing-footer span::before {
-  content: '·';
-  margin-right: 0.4rem;
-  color: var(--fg-dim);
-}
+      .landing-footer span::before {
+        content: "·";
+        margin-right: 0.4rem;
+        color: var(--fg-dim);
+      }
 
-/* ═══════════════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════════════
    PAGE 2 — VIEWER LAYOUT
    ═══════════════════════════════════════════════════════════════ */
-.viewer-shell {
-  flex: 1;
-  display: grid;
-  grid-template-rows: var(--toolbar-h) 1fr var(--statusbar-h);
-  grid-template-columns: var(--rail-w) 1fr var(--panel-w);
-  grid-template-areas:
-    "toolbar  toolbar  toolbar"
-    "rail     viewport panel"
-    "status   status   status";
-  overflow: hidden;
-}
+      .viewer-shell {
+        flex: 1;
+        display: grid;
+        grid-template-rows: var(--toolbar-h) 1fr var(--statusbar-h);
+        grid-template-columns: var(--rail-w) 1fr var(--panel-w);
+        grid-template-areas:
+          "toolbar  toolbar  toolbar"
+          "rail     viewport panel"
+          "status   status   status";
+        overflow: hidden;
+      }
 
-.viewer-shell.panel-collapsed {
-  grid-template-columns: var(--rail-w) 1fr 0;
-}
+      .viewer-shell.panel-collapsed {
+        grid-template-columns: var(--rail-w) 1fr 0;
+      }
 
-/* ——— TOOLBAR ——— */
-.toolbar {
-  grid-area: toolbar;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0 0.75rem;
-  background: var(--bg-toolbar);
-  border-bottom: 1px solid var(--border);
-}
+      /* ——— TOOLBAR ——— */
+      .toolbar {
+        grid-area: toolbar;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0 0.75rem;
+        background: var(--bg-toolbar);
+        border-bottom: 1px solid var(--border);
+      }
 
-.toolbar .logo-sm {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding-right: 0.75rem;
-  border-right: 1px solid var(--border);
-}
+      .toolbar .logo-sm {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding-right: 0.75rem;
+        border-right: 1px solid var(--border);
+      }
 
-.toolbar .logo-sm .mark {
-  width: 1.5rem;
-  height: 1.5rem;
-  background: linear-gradient(135deg, var(--accent), var(--teal));
-  border-radius: 0.3rem;
-}
+      .toolbar .logo-sm .mark {
+        width: 1.5rem;
+        height: 1.5rem;
+        background: linear-gradient(135deg, var(--accent), var(--teal));
+        border-radius: 0.3rem;
+      }
 
-.toolbar .logo-sm span {
-  font-size: 0.8rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
+      .toolbar .logo-sm span {
+        font-size: 0.8rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
 
-.toolbar .file-info {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8rem;
-}
+      .toolbar .file-info {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.8rem;
+      }
 
-.toolbar .file-info .filename {
-  color: var(--fg);
-  font-weight: 500;
-}
+      .toolbar .file-info .filename {
+        color: var(--fg);
+        font-weight: 500;
+      }
 
-.toolbar .file-info .meta {
-  color: var(--fg-dim);
-}
+      .toolbar .file-info .meta {
+        color: var(--fg-dim);
+      }
 
-.toolbar .sep { width: 1px; height: 1.25rem; background: var(--border); }
+      .toolbar .sep {
+        width: 1px;
+        height: 1.25rem;
+        background: var(--border);
+      }
 
-.toolbar .meta-pills {
-  display: flex;
-  gap: 0.35rem;
-}
+      .toolbar .meta-pills {
+        display: flex;
+        gap: 0.35rem;
+      }
 
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.2rem 0.5rem;
-  background: var(--bg-muted);
-  border-radius: var(--radius-sm);
-  font-size: 0.7rem;
-  color: var(--fg-label);
-}
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        padding: 0.2rem 0.5rem;
+        background: var(--bg-muted);
+        border-radius: var(--radius-sm);
+        font-size: 0.7rem;
+        color: var(--fg-label);
+      }
 
-.pill .value {
-  color: var(--fg);
-  font-family: 'Geist Mono', monospace;
-  font-size: 0.7rem;
-}
+      .pill .value {
+        color: var(--fg);
+        font-family: "Geist Mono", monospace;
+        font-size: 0.7rem;
+      }
 
-.toolbar .spacer { flex: 1; }
+      .toolbar .spacer {
+        flex: 1;
+      }
 
-.tb-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  color: var(--fg-muted);
-  cursor: pointer;
-  transition: all 0.12s;
-}
+      .tb-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 2rem;
+        height: 2rem;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: var(--radius-sm);
+        color: var(--fg-muted);
+        cursor: pointer;
+        transition: all 0.12s;
+      }
 
-.tb-btn:hover { background: var(--bg-muted); color: var(--fg); }
-.tb-btn.active { background: var(--accent-soft); color: var(--accent); border-color: rgba(232,151,63,0.2); }
+      .tb-btn:hover {
+        background: var(--bg-muted);
+        color: var(--fg);
+      }
+      .tb-btn.active {
+        background: var(--accent-soft);
+        color: var(--accent);
+        border-color: rgba(232, 151, 63, 0.2);
+      }
 
-/* ——— TOOL RAIL ——— */
-.tool-rail {
-  grid-area: rail;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.5rem 0;
-  background: var(--bg-panel);
-  border-right: 1px solid var(--border);
-}
+      /* ——— TOOL RAIL ——— */
+      .tool-rail {
+        grid-area: rail;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0.5rem 0;
+        background: var(--bg-panel);
+        border-right: 1px solid var(--border);
+      }
 
-.rail-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  width: 2.25rem;
-  height: 2.25rem;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--fg-dim);
-  cursor: pointer;
-  transition: all 0.12s;
-  position: relative;
-}
+      .rail-btn {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        width: 2.25rem;
+        height: 2.25rem;
+        background: transparent;
+        border: none;
+        border-radius: var(--radius-sm);
+        color: var(--fg-dim);
+        cursor: pointer;
+        transition: all 0.12s;
+        position: relative;
+      }
 
-.rail-btn:hover { background: var(--bg-muted); color: var(--fg-muted); }
-.rail-btn.active { background: var(--accent-soft); color: var(--accent); }
+      .rail-btn:hover {
+        background: var(--bg-muted);
+        color: var(--fg-muted);
+      }
+      .rail-btn.active {
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
 
-.rail-btn .label {
-  position: absolute;
-  left: calc(100% + 0.5rem);
-  top: 50%;
-  transform: translateY(-50%);
-  padding: 0.2rem 0.5rem;
-  background: var(--bg-root);
-  border: 1px solid var(--border-accent);
-  border-radius: var(--radius-sm);
-  font-size: 0.65rem;
-  color: var(--fg-muted);
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.15s;
-}
+      .rail-btn .label {
+        position: absolute;
+        left: calc(100% + 0.5rem);
+        top: 50%;
+        transform: translateY(-50%);
+        padding: 0.2rem 0.5rem;
+        background: var(--bg-root);
+        border: 1px solid var(--border-accent);
+        border-radius: var(--radius-sm);
+        font-size: 0.65rem;
+        color: var(--fg-muted);
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s;
+      }
 
-.rail-btn:hover .label { opacity: 1; }
+      .rail-btn:hover .label {
+        opacity: 1;
+      }
 
-.rail-divider {
-  width: 60%;
-  height: 1px;
-  background: var(--border);
-  margin: 0.25rem 0;
-}
+      .rail-divider {
+        width: 60%;
+        height: 1px;
+        background: var(--border);
+        margin: 0.25rem 0;
+      }
 
-/* ——— VIEWPORT ——— */
-.viewport {
-  grid-area: viewport;
-  position: relative;
-  background: var(--bg-viewport);
-  overflow: hidden;
-}
+      /* ——— VIEWPORT ——— */
+      .viewport {
+        grid-area: viewport;
+        position: relative;
+        background: var(--bg-viewport);
+        overflow: hidden;
+      }
 
-/* Fake 3D scene with grid */
-.viewport-scene {
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(180deg, #0d0f18 0%, #0a0d14 40%, #0f121c 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+      /* Fake 3D scene with grid */
+      .viewport-scene {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(
+          180deg,
+          #0d0f18 0%,
+          #0a0d14 40%,
+          #0f121c 100%
+        );
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
 
-.viewport-grid {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
-  background-size: 40px 40px;
-  background-position: center;
-  perspective: 600px;
-}
+      .viewport-grid {
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+          linear-gradient(
+            90deg,
+            rgba(255, 255, 255, 0.015) 1px,
+            transparent 1px
+          );
+        background-size: 40px 40px;
+        background-position: center;
+        perspective: 600px;
+      }
 
-.viewport-grid-inner {
-  width: 100%;
-  height: 100%;
-  transform: rotateX(55deg) scale(2);
-  background-image:
-    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
-  background-size: 60px 60px;
-  background-position: center;
-}
+      .viewport-grid-inner {
+        width: 100%;
+        height: 100%;
+        transform: rotateX(55deg) scale(2);
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        background-size: 60px 60px;
+        background-position: center;
+      }
 
-/* Mock buildings */
-.mock-buildings {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-}
+      /* Mock buildings */
+      .mock-buildings {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+      }
 
-.mock-building {
-  position: absolute;
-  border: 1px solid rgba(255,255,255,0.08);
-  transition: all 0.2s;
-}
+      .mock-building {
+        position: absolute;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        transition: all 0.2s;
+      }
 
-.mock-building.selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 20px rgba(232,151,63,0.2), inset 0 0 20px rgba(232,151,63,0.05);
-}
+      .mock-building.selected {
+        border-color: var(--accent);
+        box-shadow:
+          0 0 20px rgba(232, 151, 63, 0.2),
+          inset 0 0 20px rgba(232, 151, 63, 0.05);
+      }
 
-/* Viewport overlays */
-.viewport-overlay-tl {
-  position: absolute;
-  top: 0.75rem;
-  left: 0.75rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
+      /* Viewport overlays */
+      .viewport-overlay-tl {
+        position: absolute;
+        top: 0.75rem;
+        left: 0.75rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
 
-.compass {
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 50%;
-  border: 1px solid var(--border-accent);
-  background: rgba(12,14,20,0.85);
-  backdrop-filter: blur(8px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.65rem;
-  font-weight: 700;
-  color: var(--fg-dim);
-}
+      .compass {
+        width: 2.5rem;
+        height: 2.5rem;
+        border-radius: 50%;
+        border: 1px solid var(--border-accent);
+        background: rgba(12, 14, 20, 0.85);
+        backdrop-filter: blur(8px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.65rem;
+        font-weight: 700;
+        color: var(--fg-dim);
+      }
 
-.compass .n { color: var(--accent-text); }
+      .compass .n {
+        color: var(--accent-text);
+      }
 
-.viewport-badge {
-  padding: 0.25rem 0.5rem;
-  background: rgba(12,14,20,0.85);
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: 0.65rem;
-  color: var(--fg-dim);
-  font-family: 'Geist Mono', monospace;
-}
+      .viewport-badge {
+        padding: 0.25rem 0.5rem;
+        background: rgba(12, 14, 20, 0.85);
+        backdrop-filter: blur(8px);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        font-size: 0.65rem;
+        color: var(--fg-dim);
+        font-family: "Geist Mono", monospace;
+      }
 
-/* Selection tooltip */
-.selection-tooltip {
-  position: absolute;
-  bottom: 1rem;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  background: rgba(12,14,20,0.9);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--border-accent);
-  border-radius: var(--radius);
-  font-size: 0.78rem;
-}
+      /* Selection tooltip */
+      .selection-tooltip {
+        position: absolute;
+        bottom: 1rem;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 0.75rem;
+        background: rgba(12, 14, 20, 0.9);
+        backdrop-filter: blur(12px);
+        border: 1px solid var(--border-accent);
+        border-radius: var(--radius);
+        font-size: 0.78rem;
+      }
 
-.selection-tooltip .obj-type {
-  padding: 0.15rem 0.4rem;
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-radius: var(--radius-sm);
-  font-size: 0.7rem;
-  font-weight: 600;
-}
+      .selection-tooltip .obj-type {
+        padding: 0.15rem 0.4rem;
+        background: var(--accent-soft);
+        color: var(--accent);
+        border-radius: var(--radius-sm);
+        font-size: 0.7rem;
+        font-weight: 600;
+      }
 
-.selection-tooltip .obj-id {
-  color: var(--fg-muted);
-  font-family: 'Geist Mono', monospace;
-  font-size: 0.72rem;
-}
+      .selection-tooltip .obj-id {
+        color: var(--fg-muted);
+        font-family: "Geist Mono", monospace;
+        font-size: 0.72rem;
+      }
 
-/* ——— INSPECTOR PANEL ——— */
-.inspector {
-  grid-area: panel;
-  background: var(--bg-panel);
-  border-left: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
+      /* ——— INSPECTOR PANEL ——— */
+      .inspector {
+        grid-area: panel;
+        background: var(--bg-panel);
+        border-left: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
 
-.inspector-header {
-  display: flex;
-  align-items: center;
-  padding: 0.6rem 0.75rem;
-  border-bottom: 1px solid var(--border);
-  gap: 0.5rem;
-}
+      .inspector-header {
+        display: flex;
+        align-items: center;
+        padding: 0.6rem 0.75rem;
+        border-bottom: 1px solid var(--border);
+        gap: 0.5rem;
+      }
 
-.inspector-header h3 {
-  font-size: 0.8rem;
-  font-weight: 600;
-  flex: 1;
-}
+      .inspector-header h3 {
+        font-size: 0.8rem;
+        font-weight: 600;
+        flex: 1;
+      }
 
-.inspector-tabs {
-  display: flex;
-  border-bottom: 1px solid var(--border);
-}
+      .inspector-tabs {
+        display: flex;
+        border-bottom: 1px solid var(--border);
+      }
 
-.inspector-tab {
-  flex: 1;
-  padding: 0.5rem;
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--fg-dim);
-  font-size: 0.75rem;
-  font-family: inherit;
-  cursor: pointer;
-  transition: all 0.12s;
-  text-align: center;
-}
+      .inspector-tab {
+        flex: 1;
+        padding: 0.5rem;
+        background: transparent;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: var(--fg-dim);
+        font-size: 0.75rem;
+        font-family: inherit;
+        cursor: pointer;
+        transition: all 0.12s;
+        text-align: center;
+      }
 
-.inspector-tab:hover { color: var(--fg-muted); }
-.inspector-tab.active { color: var(--fg); border-bottom-color: var(--accent); }
+      .inspector-tab:hover {
+        color: var(--fg-muted);
+      }
+      .inspector-tab.active {
+        color: var(--fg);
+        border-bottom-color: var(--accent);
+      }
 
-.inspector-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0.75rem;
-}
+      .inspector-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0.75rem;
+      }
 
-/* Attribute list */
-.attr-section {
-  margin-bottom: 1rem;
-}
+      /* Attribute list */
+      .attr-section {
+        margin-bottom: 1rem;
+      }
 
-.attr-section-title {
-  font-size: 0.65rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--fg-dim);
-  margin-bottom: 0.4rem;
-  padding-bottom: 0.3rem;
-  border-bottom: 1px solid var(--border);
-}
+      .attr-section-title {
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--fg-dim);
+        margin-bottom: 0.4rem;
+        padding-bottom: 0.3rem;
+        border-bottom: 1px solid var(--border);
+      }
 
-.attr-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  padding: 0.3rem 0;
-  font-size: 0.78rem;
-  border-bottom: 1px solid rgba(255,255,255,0.02);
-}
+      .attr-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        padding: 0.3rem 0;
+        font-size: 0.78rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+      }
 
-.attr-row:hover { background: rgba(255,255,255,0.015); }
+      .attr-row:hover {
+        background: rgba(255, 255, 255, 0.015);
+      }
 
-.attr-key {
-  color: var(--fg-label);
-  font-size: 0.75rem;
-}
+      .attr-key {
+        color: var(--fg-label);
+        font-size: 0.75rem;
+      }
 
-.attr-value {
-  color: var(--fg);
-  font-family: 'Geist Mono', monospace;
-  font-size: 0.75rem;
-  text-align: right;
-}
+      .attr-value {
+        color: var(--fg);
+        font-family: "Geist Mono", monospace;
+        font-size: 0.75rem;
+        text-align: right;
+      }
 
-.attr-value.highlight { color: var(--teal); }
+      .attr-value.highlight {
+        color: var(--teal);
+      }
 
-/* Surface list */
-.surface-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.5rem;
-  border-radius: var(--radius-sm);
-  font-size: 0.78rem;
-  cursor: pointer;
-  transition: background 0.1s;
-}
+      /* Surface list */
+      .surface-item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.4rem 0.5rem;
+        border-radius: var(--radius-sm);
+        font-size: 0.78rem;
+        cursor: pointer;
+        transition: background 0.1s;
+      }
 
-.surface-item:hover { background: rgba(255,255,255,0.03); }
+      .surface-item:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
 
-.surface-dot {
-  width: 0.6rem;
-  height: 0.6rem;
-  border-radius: 2px;
-  flex-shrink: 0;
-}
+      .surface-dot {
+        width: 0.6rem;
+        height: 0.6rem;
+        border-radius: 2px;
+        flex-shrink: 0;
+      }
 
-.surface-item .count {
-  margin-left: auto;
-  color: var(--fg-dim);
-  font-family: 'Geist Mono', monospace;
-  font-size: 0.7rem;
-}
+      .surface-item .count {
+        margin-left: auto;
+        color: var(--fg-dim);
+        font-family: "Geist Mono", monospace;
+        font-size: 0.7rem;
+      }
 
-/* ——— STATUS BAR ——— */
-.statusbar {
-  grid-area: status;
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 0 0.75rem;
-  background: var(--bg-toolbar);
-  border-top: 1px solid var(--border);
-  font-size: 0.7rem;
-  color: var(--fg-dim);
-  font-family: 'Geist Mono', monospace;
-}
+      /* ——— STATUS BAR ——— */
+      .statusbar {
+        grid-area: status;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        padding: 0 0.75rem;
+        background: var(--bg-toolbar);
+        border-top: 1px solid var(--border);
+        font-size: 0.7rem;
+        color: var(--fg-dim);
+        font-family: "Geist Mono", monospace;
+      }
 
-.statusbar .spacer { flex: 1; }
+      .statusbar .spacer {
+        flex: 1;
+      }
 
-.statusbar .status-item {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-}
+      .statusbar .status-item {
+        display: flex;
+        align-items: center;
+        gap: 0.3rem;
+      }
 
-.statusbar .status-label { color: var(--fg-dim); font-family: 'DM Sans', sans-serif; }
-.statusbar .status-value { color: var(--fg-label); }
-.statusbar .status-dot {
-  width: 0.4rem;
-  height: 0.4rem;
-  border-radius: 50%;
-  background: #4ade80;
-}
+      .statusbar .status-label {
+        color: var(--fg-dim);
+        font-family: "DM Sans", sans-serif;
+      }
+      .statusbar .status-value {
+        color: var(--fg-label);
+      }
+      .statusbar .status-dot {
+        width: 0.4rem;
+        height: 0.4rem;
+        border-radius: 50%;
+        background: #4ade80;
+      }
 
-/* ═══════════════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════════════
    PAGE 3 — VIEWER WITH FUTURE PANELS (M2–M4 preview)
    ═══════════════════════════════════════════════════════════════ */
-.viewer-shell.with-bottom {
-  grid-template-rows: var(--toolbar-h) 1fr 14rem var(--statusbar-h);
-  grid-template-areas:
-    "toolbar  toolbar  toolbar"
-    "rail     viewport panel"
-    "rail     bottom   panel"
-    "status   status   status";
-}
+      .viewer-shell.with-bottom {
+        grid-template-rows: var(--toolbar-h) 1fr 14rem var(--statusbar-h);
+        grid-template-areas:
+          "toolbar  toolbar  toolbar"
+          "rail     viewport panel"
+          "rail     bottom   panel"
+          "status   status   status";
+      }
 
-.bottom-panel {
-  grid-area: bottom;
-  background: var(--bg-panel);
-  border-top: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
+      .bottom-panel {
+        grid-area: bottom;
+        background: var(--bg-panel);
+        border-top: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
 
-.bottom-panel-header {
-  display: flex;
-  align-items: center;
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--border);
-  gap: 0.5rem;
-}
+      .bottom-panel-header {
+        display: flex;
+        align-items: center;
+        padding: 0.5rem 0.75rem;
+        border-bottom: 1px solid var(--border);
+        gap: 0.5rem;
+      }
 
-.bottom-panel-header h3 {
-  font-size: 0.8rem;
-  font-weight: 600;
-  flex: 1;
-}
+      .bottom-panel-header h3 {
+        font-size: 0.8rem;
+        font-weight: 600;
+        flex: 1;
+      }
 
-.bottom-tabs {
-  display: flex;
-  gap: 0;
-}
+      .bottom-tabs {
+        display: flex;
+        gap: 0;
+      }
 
-.bottom-tab {
-  padding: 0.4rem 0.75rem;
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--fg-dim);
-  font-size: 0.72rem;
-  font-family: inherit;
-  cursor: pointer;
-}
+      .bottom-tab {
+        padding: 0.4rem 0.75rem;
+        background: transparent;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: var(--fg-dim);
+        font-size: 0.72rem;
+        font-family: inherit;
+        cursor: pointer;
+      }
 
-.bottom-tab.active { color: var(--fg); border-bottom-color: var(--teal); }
+      .bottom-tab.active {
+        color: var(--fg);
+        border-bottom-color: var(--teal);
+      }
 
-.bottom-body {
-  flex: 1;
-  padding: 0.75rem;
-  overflow-y: auto;
-}
+      .bottom-body {
+        flex: 1;
+        padding: 0.75rem;
+        overflow-y: auto;
+      }
 
-/* Rule builder preview */
-.rule-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.5rem;
-  border-radius: var(--radius-sm);
-  font-size: 0.78rem;
-  border: 1px solid var(--border);
-  margin-bottom: 0.35rem;
-}
+      /* Rule builder preview */
+      .rule-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.4rem 0.5rem;
+        border-radius: var(--radius-sm);
+        font-size: 0.78rem;
+        border: 1px solid var(--border);
+        margin-bottom: 0.35rem;
+      }
 
-.rule-row .rule-color {
-  width: 1rem;
-  height: 1rem;
-  border-radius: 3px;
-  flex-shrink: 0;
-}
+      .rule-row .rule-color {
+        width: 1rem;
+        height: 1rem;
+        border-radius: 3px;
+        flex-shrink: 0;
+      }
 
-.rule-row .rule-condition {
-  flex: 1;
-  color: var(--fg-label);
-}
+      .rule-row .rule-condition {
+        flex: 1;
+        color: var(--fg-label);
+      }
 
-.rule-row .rule-condition code {
-  color: var(--teal);
-  font-family: 'Geist Mono', monospace;
-  font-size: 0.72rem;
-  background: var(--teal-soft);
-  padding: 0.1rem 0.3rem;
-  border-radius: 0.2rem;
-}
+      .rule-row .rule-condition code {
+        color: var(--teal);
+        font-family: "Geist Mono", monospace;
+        font-size: 0.72rem;
+        background: var(--teal-soft);
+        padding: 0.1rem 0.3rem;
+        border-radius: 0.2rem;
+      }
 
-/* Datetime slider preview */
-.datetime-control {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem;
-}
+      /* Datetime slider preview */
+      .datetime-control {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.5rem;
+      }
 
-.datetime-display {
-  text-align: center;
-  min-width: 8rem;
-}
+      .datetime-display {
+        text-align: center;
+        min-width: 8rem;
+      }
 
-.datetime-display .date {
-  font-size: 0.82rem;
-  color: var(--fg);
-  font-weight: 500;
-}
+      .datetime-display .date {
+        font-size: 0.82rem;
+        color: var(--fg);
+        font-weight: 500;
+      }
 
-.datetime-display .time {
-  font-size: 1.4rem;
-  font-family: 'Geist Mono', monospace;
-  color: var(--accent-text);
-  font-weight: 600;
-}
+      .datetime-display .time {
+        font-size: 1.4rem;
+        font-family: "Geist Mono", monospace;
+        color: var(--accent-text);
+        font-weight: 600;
+      }
 
-.datetime-slider {
-  flex: 1;
-  height: 2rem;
-  position: relative;
-}
+      .datetime-slider {
+        flex: 1;
+        height: 2rem;
+        position: relative;
+      }
 
-.datetime-slider .track {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  right: 0;
-  height: 4px;
-  background: var(--bg-muted);
-  border-radius: 2px;
-  transform: translateY(-50%);
-}
+      .datetime-slider .track {
+        position: absolute;
+        top: 50%;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: var(--bg-muted);
+        border-radius: 2px;
+        transform: translateY(-50%);
+      }
 
-.datetime-slider .fill {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  width: 60%;
-  height: 4px;
-  background: linear-gradient(90deg, var(--accent), var(--teal));
-  border-radius: 2px;
-  transform: translateY(-50%);
-}
+      .datetime-slider .fill {
+        position: absolute;
+        top: 50%;
+        left: 0;
+        width: 60%;
+        height: 4px;
+        background: linear-gradient(90deg, var(--accent), var(--teal));
+        border-radius: 2px;
+        transform: translateY(-50%);
+      }
 
-.datetime-slider .thumb {
-  position: absolute;
-  top: 50%;
-  left: 60%;
-  width: 0.9rem;
-  height: 0.9rem;
-  background: var(--fg);
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  box-shadow: 0 0 8px rgba(0,0,0,0.4);
-}
+      .datetime-slider .thumb {
+        position: absolute;
+        top: 50%;
+        left: 60%;
+        width: 0.9rem;
+        height: 0.9rem;
+        background: var(--fg);
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        box-shadow: 0 0 8px rgba(0, 0, 0, 0.4);
+      }
 
-/* Stats preview */
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 0.5rem;
-}
+      /* Stats preview */
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.5rem;
+      }
 
-.stat-card {
-  padding: 0.6rem;
-  background: var(--bg-muted);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-}
+      .stat-card {
+        padding: 0.6rem;
+        background: var(--bg-muted);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+      }
 
-.stat-card .stat-label {
-  font-size: 0.65rem;
-  color: var(--fg-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 0.2rem;
-}
+      .stat-card .stat-label {
+        font-size: 0.65rem;
+        color: var(--fg-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.2rem;
+      }
 
-.stat-card .stat-value {
-  font-size: 1.2rem;
-  font-family: 'Geist Mono', monospace;
-  font-weight: 600;
-  color: var(--fg);
-}
+      .stat-card .stat-value {
+        font-size: 1.2rem;
+        font-family: "Geist Mono", monospace;
+        font-weight: 600;
+        color: var(--fg);
+      }
 
-.stat-card .stat-unit {
-  font-size: 0.7rem;
-  color: var(--fg-dim);
-  margin-left: 0.2rem;
-}
+      .stat-card .stat-unit {
+        font-size: 0.7rem;
+        color: var(--fg-dim);
+        margin-left: 0.2rem;
+      }
 
-/* ═══════════════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════════════
    ANNOTATION OVERLAYS (wireframe labels)
    ═══════════════════════════════════════════════════════════════ */
-.annotation {
-  position: absolute;
-  padding: 0.3rem 0.55rem;
-  background: var(--accent);
-  color: var(--bg-root);
-  font-size: 0.6rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  border-radius: 0.2rem;
-  white-space: nowrap;
-  z-index: 10;
-  pointer-events: none;
-}
+      .annotation {
+        position: absolute;
+        padding: 0.3rem 0.55rem;
+        background: var(--accent);
+        color: var(--bg-root);
+        font-size: 0.6rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        border-radius: 0.2rem;
+        white-space: nowrap;
+        z-index: 10;
+        pointer-events: none;
+      }
 
-.annotation::after {
-  content: '';
-  position: absolute;
-  width: 0;
-  height: 0;
-}
+      .annotation::after {
+        content: "";
+        position: absolute;
+        width: 0;
+        height: 0;
+      }
 
-.annotation.arrow-down::after {
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 5px solid transparent;
-  border-top-color: var(--accent);
-}
+      .annotation.arrow-down::after {
+        top: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border: 5px solid transparent;
+        border-top-color: var(--accent);
+      }
 
-.annotation.arrow-right::after {
-  top: 50%;
-  right: -10px;
-  transform: translateY(-50%);
-  border: 5px solid transparent;
-  border-left-color: var(--accent);
-}
+      .annotation.arrow-right::after {
+        top: 50%;
+        right: -10px;
+        transform: translateY(-50%);
+        border: 5px solid transparent;
+        border-left-color: var(--accent);
+      }
 
-.annotation.arrow-left::after {
-  top: 50%;
-  left: -10px;
-  transform: translateY(-50%);
-  border: 5px solid transparent;
-  border-right-color: var(--accent);
-}
+      .annotation.arrow-left::after {
+        top: 50%;
+        left: -10px;
+        transform: translateY(-50%);
+        border: 5px solid transparent;
+        border-right-color: var(--accent);
+      }
 
-.annotation.teal {
-  background: var(--teal);
-}
+      .annotation.teal {
+        background: var(--teal);
+      }
 
-.annotation.teal.arrow-down::after { border-top-color: var(--teal); }
-.annotation.teal.arrow-right::after { border-left-color: var(--teal); }
-.annotation.teal.arrow-left::after { border-right-color: var(--teal); }
+      .annotation.teal.arrow-down::after {
+        border-top-color: var(--teal);
+      }
+      .annotation.teal.arrow-right::after {
+        border-left-color: var(--teal);
+      }
+      .annotation.teal.arrow-left::after {
+        border-right-color: var(--teal);
+      }
 
-/* ═══════════════════════════════════════════════════════════════
+      /* ═══════════════════════════════════════════════════════════════
    SVG ICONS (inline)
    ═══════════════════════════════════════════════════════════════ */
-.icon-svg { width: 1rem; height: 1rem; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.icon-svg-sm { width: 0.85rem; height: 0.85rem; }
-</style>
-</head>
-<body>
+      .icon-svg {
+        width: 1rem;
+        height: 1rem;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 1.8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .icon-svg-sm {
+        width: 0.85rem;
+        height: 0.85rem;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ═══════ STATE SWITCHER ═══════ -->
+    <nav class="state-nav">
+      <span>Wireframe</span>
+      <button class="active" onclick="showState('landing')">Landing</button>
+      <button onclick="showState('viewer')">Viewer (M1)</button>
+      <button onclick="showState('full')">Full Layout (M2–M4)</button>
+    </nav>
 
-<!-- ═══════ STATE SWITCHER ═══════ -->
-<nav class="state-nav">
-  <span>Wireframe</span>
-  <button class="active" onclick="showState('landing')">Landing</button>
-  <button onclick="showState('viewer')">Viewer (M1)</button>
-  <button onclick="showState('full')">Full Layout (M2–M4)</button>
-</nav>
-
-<!-- ═══════════════════════════════════════════════════════════════
+    <!-- ═══════════════════════════════════════════════════════════════
      PAGE 1: LANDING
      ═══════════════════════════════════════════════════════════════ -->
-<div id="state-landing" class="state-view active">
-  <div class="landing">
-    <div class="landing-inner">
-      <div class="landing-logo">
-        <div class="mark">
-          <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round">
-            <path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"/>
-          </svg>
+    <div id="state-landing" class="state-view active">
+      <div class="landing">
+        <div class="landing-inner">
+          <div class="landing-logo">
+            <div class="mark">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="white"
+                stroke-width="2"
+                stroke-linecap="round"
+              >
+                <path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6" />
+              </svg>
+            </div>
+            <span class="wordmark">MultiRoof</span>
+          </div>
+
+          <h1>See every <em>rooftop</em> in context</h1>
+          <p class="subtitle">
+            Load a CityJSON file to visualize, inspect, and analyze 3D city
+            models in your browser.
+          </p>
+
+          <div class="drop-zone">
+            <div class="icon">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                color="white"
+              >
+                <path
+                  d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+                />
+              </svg>
+            </div>
+            <p>
+              Drop <span style="color: var(--fg-label)">.city.json</span> or
+              <span style="color: var(--fg-label)">.city.jsonl</span> here
+            </p>
+            <p class="or">or</p>
+            <button class="browse-btn">Browse files</button>
+          </div>
+
+          <div class="landing-footer">
+            <span>CityJSON v2.0</span>
+            <span>CityJSONSeq</span>
+            <span>No login required</span>
+          </div>
         </div>
-        <span class="wordmark">MultiRoof</span>
-      </div>
-
-      <h1>See every <em>rooftop</em> in context</h1>
-      <p class="subtitle">
-        Load a CityJSON file to visualize, inspect, and analyze 3D city models in your browser.
-      </p>
-
-      <div class="drop-zone">
-        <div class="icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" color="white">
-            <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/>
-          </svg>
-        </div>
-        <p>Drop <span style="color:var(--fg-label)">.city.json</span> or <span style="color:var(--fg-label)">.city.jsonl</span> here</p>
-        <p class="or">or</p>
-        <button class="browse-btn">Browse files</button>
-      </div>
-
-      <div class="landing-footer">
-        <span>CityJSON v2.0</span>
-        <span>CityJSONSeq</span>
-        <span>No login required</span>
       </div>
     </div>
-  </div>
-</div>
 
-<!-- ═══════════════════════════════════════════════════════════════
+    <!-- ═══════════════════════════════════════════════════════════════
      PAGE 2: VIEWER (M1)
      ═══════════════════════════════════════════════════════════════ -->
-<div id="state-viewer" class="state-view">
-  <div class="viewer-shell" style="flex:1">
+    <div id="state-viewer" class="state-view">
+      <div class="viewer-shell" style="flex: 1">
+        <!-- TOOLBAR -->
+        <header class="toolbar">
+          <div class="logo-sm">
+            <div class="mark"></div>
+            <span>MultiRoof</span>
+          </div>
+          <div class="file-info">
+            <span class="filename">delft.city.json</span>
+            <span class="meta">— 2.4 MB</span>
+          </div>
+          <div class="sep"></div>
+          <div class="meta-pills">
+            <div class="pill">CRS <span class="value">EPSG:7415</span></div>
+            <div class="pill">Objects <span class="value">847</span></div>
+            <div class="pill">LoD <span class="value">2.2</span></div>
+          </div>
+          <div class="spacer"></div>
+          <button class="tb-btn" title="Toggle inspector">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M15 3v18" />
+            </svg>
+          </button>
+          <button class="tb-btn" title="Zoom to fit">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+            </svg>
+          </button>
+          <button class="tb-btn" title="Settings">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="3" />
+              <path
+                d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"
+              />
+            </svg>
+          </button>
+        </header>
 
-    <!-- TOOLBAR -->
-    <header class="toolbar">
-      <div class="logo-sm">
-        <div class="mark"></div>
-        <span>MultiRoof</span>
-      </div>
-      <div class="file-info">
-        <span class="filename">delft.city.json</span>
-        <span class="meta">— 2.4 MB</span>
-      </div>
-      <div class="sep"></div>
-      <div class="meta-pills">
-        <div class="pill">CRS <span class="value">EPSG:7415</span></div>
-        <div class="pill">Objects <span class="value">847</span></div>
-        <div class="pill">LoD <span class="value">2.2</span></div>
-      </div>
-      <div class="spacer"></div>
-      <button class="tb-btn" title="Toggle inspector">
-        <svg class="icon-svg" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/></svg>
-      </button>
-      <button class="tb-btn" title="Zoom to fit">
-        <svg class="icon-svg" viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
-      </button>
-      <button class="tb-btn" title="Settings">
-        <svg class="icon-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
-      </button>
-    </header>
+        <!-- TOOL RAIL -->
+        <aside class="tool-rail">
+          <button class="rail-btn active" title="Select">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
+            </svg>
+            <span class="label">Select (V)</span>
+          </button>
+          <button class="rail-btn" title="Box Select">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <rect
+                x="3"
+                y="3"
+                width="18"
+                height="18"
+                rx="1"
+                stroke-dasharray="4 2"
+              />
+            </svg>
+            <span class="label">Box Select (B)</span>
+          </button>
+          <div class="rail-divider"></div>
+          <button class="rail-btn" title="Measure">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <path
+                d="M21.3 15.3a2.4 2.4 0 010 3.4l-2.6 2.6a2.4 2.4 0 01-3.4 0L2.7 8.7a2.4 2.4 0 010-3.4l2.6-2.6a2.4 2.4 0 013.4 0z"
+              />
+              <path d="M14.5 12.5l2-2M10.5 16.5l2-2" />
+            </svg>
+            <span class="label">Measure (M)</span>
+          </button>
+          <button class="rail-btn" title="Zoom to Fit">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <path
+                d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3M3 16v3a2 2 0 002 2h3m8 0h3a2 2 0 002-2v-3"
+              />
+            </svg>
+            <span class="label">Fit All (F)</span>
+          </button>
+          <div class="rail-divider"></div>
+          <button class="rail-btn" title="Layers">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <path
+                d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
+              />
+            </svg>
+            <span class="label">Layers (L)</span>
+          </button>
+        </aside>
 
-    <!-- TOOL RAIL -->
-    <aside class="tool-rail">
-      <button class="rail-btn active" title="Select">
-        <svg class="icon-svg" viewBox="0 0 24 24"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg>
-        <span class="label">Select (V)</span>
-      </button>
-      <button class="rail-btn" title="Box Select">
-        <svg class="icon-svg" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1" stroke-dasharray="4 2"/></svg>
-        <span class="label">Box Select (B)</span>
-      </button>
-      <div class="rail-divider"></div>
-      <button class="rail-btn" title="Measure">
-        <svg class="icon-svg" viewBox="0 0 24 24"><path d="M21.3 15.3a2.4 2.4 0 010 3.4l-2.6 2.6a2.4 2.4 0 01-3.4 0L2.7 8.7a2.4 2.4 0 010-3.4l2.6-2.6a2.4 2.4 0 013.4 0z"/><path d="M14.5 12.5l2-2M10.5 16.5l2-2"/></svg>
-        <span class="label">Measure (M)</span>
-      </button>
-      <button class="rail-btn" title="Zoom to Fit">
-        <svg class="icon-svg" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3M3 16v3a2 2 0 002 2h3m8 0h3a2 2 0 002-2v-3"/></svg>
-        <span class="label">Fit All (F)</span>
-      </button>
-      <div class="rail-divider"></div>
-      <button class="rail-btn" title="Layers">
-        <svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-        <span class="label">Layers (L)</span>
-      </button>
-    </aside>
-
-    <!-- VIEWPORT -->
-    <main class="viewport">
-      <div class="viewport-scene">
-        <div class="viewport-grid">
-          <div class="viewport-grid-inner"></div>
-        </div>
-
-        <!-- Mock buildings -->
-        <div class="mock-buildings">
-          <div class="mock-building" style="left:-80px;top:-40px;width:50px;height:35px;background:linear-gradient(180deg,rgba(204,68,68,0.3),rgba(136,153,170,0.15));"></div>
-          <div class="mock-building selected" style="left:-20px;top:-55px;width:60px;height:50px;background:linear-gradient(180deg,rgba(204,68,68,0.4),rgba(136,153,170,0.2));"></div>
-          <div class="mock-building" style="left:50px;top:-30px;width:45px;height:30px;background:linear-gradient(180deg,rgba(204,68,68,0.25),rgba(136,153,170,0.12));"></div>
-          <div class="mock-building" style="left:-60px;top:10px;width:55px;height:25px;background:linear-gradient(180deg,rgba(204,68,68,0.2),rgba(136,153,170,0.1));"></div>
-          <div class="mock-building" style="left:20px;top:5px;width:40px;height:40px;background:linear-gradient(180deg,rgba(204,68,68,0.3),rgba(136,153,170,0.15));"></div>
-          <div class="mock-building" style="left:70px;top:15px;width:35px;height:25px;background:linear-gradient(180deg,rgba(204,68,68,0.2),rgba(136,153,170,0.1));"></div>
-        </div>
-      </div>
-
-      <!-- Viewport overlays -->
-      <div class="viewport-overlay-tl">
-        <div class="compass"><span class="n">N</span></div>
-        <div class="viewport-badge">LoD 2.2</div>
-      </div>
-
-      <!-- Selection tooltip at bottom of viewport -->
-      <div class="selection-tooltip">
-        <span class="obj-type">Building</span>
-        <span class="obj-id">NL.IMBAG.Pand.0503100000032571</span>
-        <span style="color:var(--fg-dim);font-size:0.7rem">↵ to inspect</span>
-      </div>
-
-      <!-- Annotations -->
-      <div class="annotation arrow-down" style="top:0.5rem;left:50%;transform:translateX(-50%)">3D Viewport — Three.js scene</div>
-      <div class="annotation teal arrow-left" style="top:50%;right:0.5rem;transform:translateY(-50%)">Raycast selection → Inspector</div>
-    </main>
-
-    <!-- INSPECTOR PANEL -->
-    <aside class="inspector">
-      <div class="inspector-header">
-        <h3>Inspector</h3>
-        <button class="tb-btn" title="Close panel" style="width:1.5rem;height:1.5rem">
-          <svg class="icon-svg icon-svg-sm" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
-        </button>
-      </div>
-
-      <div class="inspector-tabs">
-        <button class="inspector-tab active">Object</button>
-        <button class="inspector-tab">Surfaces</button>
-        <button class="inspector-tab">Layers</button>
-      </div>
-
-      <div class="inspector-body">
-        <!-- Object identity -->
-        <div class="attr-section">
-          <div class="attr-section-title">Identity</div>
-          <div class="attr-row">
-            <span class="attr-key">ID</span>
-            <span class="attr-value" style="font-size:0.68rem">NL.IMBAG...032571</span>
-          </div>
-          <div class="attr-row">
-            <span class="attr-key">Type</span>
-            <span class="attr-value highlight">Building</span>
-          </div>
-          <div class="attr-row">
-            <span class="attr-key">LoD</span>
-            <span class="attr-value">2.2</span>
-          </div>
-          <div class="attr-row">
-            <span class="attr-key">Children</span>
-            <span class="attr-value">2 parts</span>
-          </div>
-        </div>
-
-        <!-- Attributes -->
-        <div class="attr-section">
-          <div class="attr-section-title">Attributes</div>
-          <div class="attr-row">
-            <span class="attr-key">measuredHeight</span>
-            <span class="attr-value">8.4 m</span>
-          </div>
-          <div class="attr-row">
-            <span class="attr-key">roofType</span>
-            <span class="attr-value">gabled</span>
-          </div>
-          <div class="attr-row">
-            <span class="attr-key">yearOfConstruction</span>
-            <span class="attr-value">1923</span>
-          </div>
-          <div class="attr-row">
-            <span class="attr-key">status</span>
-            <span class="attr-value">in use</span>
-          </div>
-          <div class="attr-row">
-            <span class="attr-key">function</span>
-            <span class="attr-value">residential</span>
-          </div>
-        </div>
-
-        <!-- Geometry -->
-        <div class="attr-section">
-          <div class="attr-section-title">Geometry</div>
-          <div class="attr-row">
-            <span class="attr-key">Surfaces</span>
-            <span class="attr-value">24</span>
-          </div>
-          <div class="attr-row">
-            <span class="attr-key">Footprint area</span>
-            <span class="attr-value">86.2 m²</span>
-          </div>
-          <div class="attr-row">
-            <span class="attr-key">Roof area</span>
-            <span class="attr-value highlight">98.7 m²</span>
-          </div>
-          <div class="attr-row">
-            <span class="attr-key">Volume</span>
-            <span class="attr-value">724.1 m³</span>
-          </div>
-        </div>
-
-        <!-- Surfaces tab content (simulated) -->
-        <div class="attr-section">
-          <div class="attr-section-title">Surface Breakdown</div>
-          <div class="surface-item">
-            <div class="surface-dot" style="background:var(--roof)"></div>
-            <span>RoofSurface</span>
-            <span class="count">6</span>
-          </div>
-          <div class="surface-item">
-            <div class="surface-dot" style="background:var(--wall)"></div>
-            <span>WallSurface</span>
-            <span class="count">14</span>
-          </div>
-          <div class="surface-item">
-            <div class="surface-dot" style="background:var(--ground)"></div>
-            <span>GroundSurface</span>
-            <span class="count">2</span>
-          </div>
-          <div class="surface-item">
-            <div class="surface-dot" style="background:#6699cc"></div>
-            <span>Window</span>
-            <span class="count">2</span>
-          </div>
-        </div>
-      </div>
-    </aside>
-
-    <!-- STATUS BAR -->
-    <footer class="statusbar">
-      <div class="status-item">
-        <span class="status-dot"></span>
-        <span class="status-label">Ready</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">Cursor</span>
-        <span class="status-value">84732.4, 446891.2, 3.1</span>
-      </div>
-      <div class="spacer"></div>
-      <div class="status-item">
-        <span class="status-label">Objects</span>
-        <span class="status-value">847</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">Selected</span>
-        <span class="status-value" style="color:var(--accent)">1</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">Triangles</span>
-        <span class="status-value">142.3K</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">FPS</span>
-        <span class="status-value">60</span>
-      </div>
-    </footer>
-  </div>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════════════
-     PAGE 3: FULL LAYOUT (M2–M4)
-     ═══════════════════════════════════════════════════════════════ -->
-<div id="state-full" class="state-view">
-  <div class="viewer-shell with-bottom" style="flex:1">
-
-    <!-- TOOLBAR (same as M1 with additions) -->
-    <header class="toolbar">
-      <div class="logo-sm">
-        <div class="mark"></div>
-        <span>MultiRoof</span>
-      </div>
-      <div class="file-info">
-        <span class="filename">delft.city.json</span>
-      </div>
-      <div class="sep"></div>
-      <div class="meta-pills">
-        <div class="pill">CRS <span class="value">EPSG:7415</span></div>
-        <div class="pill">Objects <span class="value">847</span></div>
-      </div>
-      <div class="sep"></div>
-      <!-- M2: active rule indicator -->
-      <div class="pill" style="background:var(--accent-soft);border:1px solid rgba(232,151,63,0.2)">
-        <span style="color:var(--accent)">Rule</span>
-        <span class="value" style="color:var(--accent-text)">Roof suitability</span>
-      </div>
-      <div class="spacer"></div>
-      <!-- M4: save/share -->
-      <button class="tb-btn" title="Save workspace">
-        <svg class="icon-svg" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-      </button>
-      <button class="tb-btn" title="Share URL">
-        <svg class="icon-svg" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-      </button>
-      <button class="tb-btn" title="Toggle inspector">
-        <svg class="icon-svg" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/></svg>
-      </button>
-    </header>
-
-    <!-- TOOL RAIL -->
-    <aside class="tool-rail">
-      <button class="rail-btn active" title="Select">
-        <svg class="icon-svg" viewBox="0 0 24 24"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg>
-      </button>
-      <button class="rail-btn" title="Box Select">
-        <svg class="icon-svg" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1" stroke-dasharray="4 2"/></svg>
-      </button>
-      <div class="rail-divider"></div>
-      <button class="rail-btn" title="Measure">
-        <svg class="icon-svg" viewBox="0 0 24 24"><path d="M21.3 15.3a2.4 2.4 0 010 3.4l-2.6 2.6a2.4 2.4 0 01-3.4 0L2.7 8.7a2.4 2.4 0 010-3.4l2.6-2.6a2.4 2.4 0 013.4 0z"/></svg>
-      </button>
-      <button class="rail-btn" title="Zoom to Fit">
-        <svg class="icon-svg" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3M3 16v3a2 2 0 002 2h3m8 0h3a2 2 0 002-2v-3"/></svg>
-      </button>
-      <div class="rail-divider"></div>
-      <button class="rail-btn" title="Layers">
-        <svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-      </button>
-      <!-- M3: sun control -->
-      <button class="rail-btn" title="Solar" style="color:var(--accent-text)">
-        <svg class="icon-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-      </button>
-    </aside>
-
-    <!-- VIEWPORT -->
-    <main class="viewport">
-      <div class="viewport-scene">
-        <div class="viewport-grid">
-          <div class="viewport-grid-inner"></div>
-        </div>
-
-        <!-- Mock buildings with color-coded roofs -->
-        <div class="mock-buildings">
-          <div class="mock-building" style="left:-80px;top:-40px;width:50px;height:35px;background:linear-gradient(180deg,rgba(78,200,78,0.35),rgba(136,153,170,0.15));"></div>
-          <div class="mock-building selected" style="left:-20px;top:-55px;width:60px;height:50px;background:linear-gradient(180deg,rgba(232,151,63,0.45),rgba(136,153,170,0.2));"></div>
-          <div class="mock-building" style="left:50px;top:-30px;width:45px;height:30px;background:linear-gradient(180deg,rgba(78,200,78,0.3),rgba(136,153,170,0.12));"></div>
-          <div class="mock-building" style="left:-60px;top:10px;width:55px;height:25px;background:linear-gradient(180deg,rgba(204,68,68,0.35),rgba(136,153,170,0.1));"></div>
-          <div class="mock-building" style="left:20px;top:5px;width:40px;height:40px;background:linear-gradient(180deg,rgba(232,151,63,0.35),rgba(136,153,170,0.15));"></div>
-          <div class="mock-building" style="left:70px;top:15px;width:35px;height:25px;background:linear-gradient(180deg,rgba(78,200,78,0.25),rgba(136,153,170,0.1));"></div>
-        </div>
-      </div>
-
-      <!-- Viewport overlays -->
-      <div class="viewport-overlay-tl">
-        <div class="compass"><span class="n">N</span></div>
-        <div class="viewport-badge">LoD 2.2</div>
-        <div class="viewport-badge" style="border-color:rgba(232,151,63,0.3);color:var(--accent-text)">☀ 14:30</div>
-      </div>
-
-      <!-- Legend overlay (M2) -->
-      <div style="position:absolute;bottom:1rem;left:0.75rem;padding:0.6rem 0.75rem;background:rgba(12,14,20,0.9);backdrop-filter:blur(12px);border:1px solid var(--border-accent);border-radius:var(--radius);font-size:0.7rem;">
-        <div style="font-weight:600;margin-bottom:0.35rem;color:var(--fg-label);font-size:0.65rem;text-transform:uppercase;letter-spacing:0.06em">Roof Suitability</div>
-        <div style="display:flex;flex-direction:column;gap:0.2rem">
-          <div style="display:flex;align-items:center;gap:0.4rem"><div style="width:0.6rem;height:0.6rem;border-radius:2px;background:#4ec84e"></div><span style="color:var(--fg-muted)">High</span></div>
-          <div style="display:flex;align-items:center;gap:0.4rem"><div style="width:0.6rem;height:0.6rem;border-radius:2px;background:#e8973f"></div><span style="color:var(--fg-muted)">Medium</span></div>
-          <div style="display:flex;align-items:center;gap:0.4rem"><div style="width:0.6rem;height:0.6rem;border-radius:2px;background:#cc4444"></div><span style="color:var(--fg-muted)">Low</span></div>
-        </div>
-      </div>
-
-      <!-- Annotations -->
-      <div class="annotation teal arrow-down" style="top:0.5rem;right:6rem">M2: Rule-based colorization on roofs</div>
-      <div class="annotation arrow-down" style="top:0.5rem;left:6rem">M3: Sun position badge</div>
-    </main>
-
-    <!-- INSPECTOR PANEL (M2-enriched) -->
-    <aside class="inspector">
-      <div class="inspector-header">
-        <h3>Inspector</h3>
-        <button class="tb-btn" style="width:1.5rem;height:1.5rem">
-          <svg class="icon-svg icon-svg-sm" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
-        </button>
-      </div>
-
-      <div class="inspector-tabs">
-        <button class="inspector-tab active">Object</button>
-        <button class="inspector-tab">Surfaces</button>
-        <button class="inspector-tab">Analysis</button>
-      </div>
-
-      <div class="inspector-body">
-        <div class="attr-section">
-          <div class="attr-section-title">Identity</div>
-          <div class="attr-row">
-            <span class="attr-key">Type</span>
-            <span class="attr-value highlight">Building</span>
-          </div>
-          <div class="attr-row">
-            <span class="attr-key">measuredHeight</span>
-            <span class="attr-value">8.4 m</span>
-          </div>
-          <div class="attr-row">
-            <span class="attr-key">roofType</span>
-            <span class="attr-value">gabled</span>
-          </div>
-        </div>
-
-        <!-- M2: Analysis results in inspector -->
-        <div class="attr-section">
-          <div class="attr-section-title" style="color:var(--accent-text)">Roof Analysis</div>
-          <div class="attr-row">
-            <span class="attr-key">Suitability</span>
-            <span class="attr-value" style="color:var(--accent-text)">Medium</span>
-          </div>
-          <div class="attr-row">
-            <span class="attr-key">Slope (avg)</span>
-            <span class="attr-value">34.2°</span>
-          </div>
-          <div class="attr-row">
-            <span class="attr-key">Aspect</span>
-            <span class="attr-value">SW (215°)</span>
-          </div>
-          <div class="attr-row">
-            <span class="attr-key">Usable area</span>
-            <span class="attr-value highlight">62.4 m²</span>
-          </div>
-          <div class="attr-row">
-            <span class="attr-key">Solar score</span>
-            <span class="attr-value highlight">0.72</span>
-          </div>
-        </div>
-
-        <div class="attr-section">
-          <div class="attr-section-title">Surface Breakdown</div>
-          <div class="surface-item">
-            <div class="surface-dot" style="background:var(--roof)"></div>
-            <span>RoofSurface</span>
-            <span class="count">6</span>
-          </div>
-          <div class="surface-item">
-            <div class="surface-dot" style="background:var(--wall)"></div>
-            <span>WallSurface</span>
-            <span class="count">14</span>
-          </div>
-          <div class="surface-item">
-            <div class="surface-dot" style="background:var(--ground)"></div>
-            <span>GroundSurface</span>
-            <span class="count">2</span>
-          </div>
-        </div>
-      </div>
-    </aside>
-
-    <!-- BOTTOM PANEL (M2–M4) -->
-    <div class="bottom-panel">
-      <div class="bottom-panel-header">
-        <div class="bottom-tabs">
-          <button class="bottom-tab">Rules</button>
-          <button class="bottom-tab active" style="border-bottom-color:var(--teal);color:var(--fg)">Solar</button>
-          <button class="bottom-tab">Statistics</button>
-        </div>
-        <div style="flex:1"></div>
-        <button class="tb-btn" style="width:1.5rem;height:1.5rem" title="Collapse">
-          <svg class="icon-svg icon-svg-sm" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
-        </button>
-      </div>
-      <div class="bottom-body">
-
-        <!-- Solar tab content (M3) -->
-        <div class="datetime-control">
-          <div class="datetime-display">
-            <div class="date">21 Jun 2025</div>
-            <div class="time">14:30</div>
-          </div>
-          <div class="datetime-slider">
-            <div class="track"></div>
-            <div class="fill"></div>
-            <div class="thumb"></div>
-          </div>
-          <div style="display:flex;gap:0.35rem">
-            <div class="pill" style="cursor:pointer">Sunrise</div>
-            <div class="pill" style="cursor:pointer;background:var(--accent-soft);color:var(--accent-text)">Noon</div>
-            <div class="pill" style="cursor:pointer">Sunset</div>
-          </div>
-        </div>
-
-        <!-- Stats preview (M4) -->
-        <div style="margin-top:0.5rem;">
-          <div class="stats-grid">
-            <div class="stat-card">
-              <div class="stat-label">Total roofs</div>
-              <div class="stat-value">847</div>
+        <!-- VIEWPORT -->
+        <main class="viewport">
+          <div class="viewport-scene">
+            <div class="viewport-grid">
+              <div class="viewport-grid-inner"></div>
             </div>
-            <div class="stat-card">
-              <div class="stat-label">Usable area</div>
-              <div class="stat-value">24.8K<span class="stat-unit">m²</span></div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-label">Avg slope</div>
-              <div class="stat-value">28.3<span class="stat-unit">°</span></div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-label">High suitability</div>
-              <div class="stat-value" style="color:#4ec84e">412</div>
+
+            <!-- Mock buildings -->
+            <div class="mock-buildings">
+              <div
+                class="mock-building"
+                style="
+                  left: -80px;
+                  top: -40px;
+                  width: 50px;
+                  height: 35px;
+                  background: linear-gradient(
+                    180deg,
+                    rgba(204, 68, 68, 0.3),
+                    rgba(136, 153, 170, 0.15)
+                  );
+                "
+              ></div>
+              <div
+                class="mock-building selected"
+                style="
+                  left: -20px;
+                  top: -55px;
+                  width: 60px;
+                  height: 50px;
+                  background: linear-gradient(
+                    180deg,
+                    rgba(204, 68, 68, 0.4),
+                    rgba(136, 153, 170, 0.2)
+                  );
+                "
+              ></div>
+              <div
+                class="mock-building"
+                style="
+                  left: 50px;
+                  top: -30px;
+                  width: 45px;
+                  height: 30px;
+                  background: linear-gradient(
+                    180deg,
+                    rgba(204, 68, 68, 0.25),
+                    rgba(136, 153, 170, 0.12)
+                  );
+                "
+              ></div>
+              <div
+                class="mock-building"
+                style="
+                  left: -60px;
+                  top: 10px;
+                  width: 55px;
+                  height: 25px;
+                  background: linear-gradient(
+                    180deg,
+                    rgba(204, 68, 68, 0.2),
+                    rgba(136, 153, 170, 0.1)
+                  );
+                "
+              ></div>
+              <div
+                class="mock-building"
+                style="
+                  left: 20px;
+                  top: 5px;
+                  width: 40px;
+                  height: 40px;
+                  background: linear-gradient(
+                    180deg,
+                    rgba(204, 68, 68, 0.3),
+                    rgba(136, 153, 170, 0.15)
+                  );
+                "
+              ></div>
+              <div
+                class="mock-building"
+                style="
+                  left: 70px;
+                  top: 15px;
+                  width: 35px;
+                  height: 25px;
+                  background: linear-gradient(
+                    180deg,
+                    rgba(204, 68, 68, 0.2),
+                    rgba(136, 153, 170, 0.1)
+                  );
+                "
+              ></div>
             </div>
           </div>
-        </div>
 
-        <!-- Annotations -->
-        <div style="position:absolute;top:0.3rem;left:50%;transform:translateX(-50%);" class="annotation teal arrow-down">M3: Datetime slider · M4: DuckDB-wasm stats</div>
+          <!-- Viewport overlays -->
+          <div class="viewport-overlay-tl">
+            <div class="compass"><span class="n">N</span></div>
+            <div class="viewport-badge">LoD 2.2</div>
+          </div>
+
+          <!-- Selection tooltip at bottom of viewport -->
+          <div class="selection-tooltip">
+            <span class="obj-type">Building</span>
+            <span class="obj-id">NL.IMBAG.Pand.0503100000032571</span>
+            <span style="color: var(--fg-dim); font-size: 0.7rem"
+              >↵ to inspect</span
+            >
+          </div>
+
+          <!-- Annotations -->
+          <div
+            class="annotation arrow-down"
+            style="top: 0.5rem; left: 50%; transform: translateX(-50%)"
+          >
+            3D Viewport — Three.js scene
+          </div>
+          <div
+            class="annotation teal arrow-left"
+            style="top: 50%; right: 0.5rem; transform: translateY(-50%)"
+          >
+            Raycast selection → Inspector
+          </div>
+        </main>
+
+        <!-- INSPECTOR PANEL -->
+        <aside class="inspector">
+          <div class="inspector-header">
+            <h3>Inspector</h3>
+            <button
+              class="tb-btn"
+              title="Close panel"
+              style="width: 1.5rem; height: 1.5rem"
+            >
+              <svg class="icon-svg icon-svg-sm" viewBox="0 0 24 24">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div class="inspector-tabs">
+            <button class="inspector-tab active">Object</button>
+            <button class="inspector-tab">Surfaces</button>
+            <button class="inspector-tab">Layers</button>
+          </div>
+
+          <div class="inspector-body">
+            <!-- Object identity -->
+            <div class="attr-section">
+              <div class="attr-section-title">Identity</div>
+              <div class="attr-row">
+                <span class="attr-key">ID</span>
+                <span class="attr-value" style="font-size: 0.68rem"
+                  >NL.IMBAG...032571</span
+                >
+              </div>
+              <div class="attr-row">
+                <span class="attr-key">Type</span>
+                <span class="attr-value highlight">Building</span>
+              </div>
+              <div class="attr-row">
+                <span class="attr-key">LoD</span>
+                <span class="attr-value">2.2</span>
+              </div>
+              <div class="attr-row">
+                <span class="attr-key">Children</span>
+                <span class="attr-value">2 parts</span>
+              </div>
+            </div>
+
+            <!-- Attributes -->
+            <div class="attr-section">
+              <div class="attr-section-title">Attributes</div>
+              <div class="attr-row">
+                <span class="attr-key">measuredHeight</span>
+                <span class="attr-value">8.4 m</span>
+              </div>
+              <div class="attr-row">
+                <span class="attr-key">roofType</span>
+                <span class="attr-value">gabled</span>
+              </div>
+              <div class="attr-row">
+                <span class="attr-key">yearOfConstruction</span>
+                <span class="attr-value">1923</span>
+              </div>
+              <div class="attr-row">
+                <span class="attr-key">status</span>
+                <span class="attr-value">in use</span>
+              </div>
+              <div class="attr-row">
+                <span class="attr-key">function</span>
+                <span class="attr-value">residential</span>
+              </div>
+            </div>
+
+            <!-- Geometry -->
+            <div class="attr-section">
+              <div class="attr-section-title">Geometry</div>
+              <div class="attr-row">
+                <span class="attr-key">Surfaces</span>
+                <span class="attr-value">24</span>
+              </div>
+              <div class="attr-row">
+                <span class="attr-key">Footprint area</span>
+                <span class="attr-value">86.2 m²</span>
+              </div>
+              <div class="attr-row">
+                <span class="attr-key">Roof area</span>
+                <span class="attr-value highlight">98.7 m²</span>
+              </div>
+              <div class="attr-row">
+                <span class="attr-key">Volume</span>
+                <span class="attr-value">724.1 m³</span>
+              </div>
+            </div>
+
+            <!-- Surfaces tab content (simulated) -->
+            <div class="attr-section">
+              <div class="attr-section-title">Surface Breakdown</div>
+              <div class="surface-item">
+                <div class="surface-dot" style="background: var(--roof)"></div>
+                <span>RoofSurface</span>
+                <span class="count">6</span>
+              </div>
+              <div class="surface-item">
+                <div class="surface-dot" style="background: var(--wall)"></div>
+                <span>WallSurface</span>
+                <span class="count">14</span>
+              </div>
+              <div class="surface-item">
+                <div
+                  class="surface-dot"
+                  style="background: var(--ground)"
+                ></div>
+                <span>GroundSurface</span>
+                <span class="count">2</span>
+              </div>
+              <div class="surface-item">
+                <div class="surface-dot" style="background: #6699cc"></div>
+                <span>Window</span>
+                <span class="count">2</span>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <!-- STATUS BAR -->
+        <footer class="statusbar">
+          <div class="status-item">
+            <span class="status-dot"></span>
+            <span class="status-label">Ready</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Cursor</span>
+            <span class="status-value">84732.4, 446891.2, 3.1</span>
+          </div>
+          <div class="spacer"></div>
+          <div class="status-item">
+            <span class="status-label">Objects</span>
+            <span class="status-value">847</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Selected</span>
+            <span class="status-value" style="color: var(--accent)">1</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Triangles</span>
+            <span class="status-value">142.3K</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">FPS</span>
+            <span class="status-value">60</span>
+          </div>
+        </footer>
       </div>
     </div>
 
-    <!-- STATUS BAR -->
-    <footer class="statusbar">
-      <div class="status-item">
-        <span class="status-dot"></span>
-        <span class="status-label">Ready</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">Cursor</span>
-        <span class="status-value">84732.4, 446891.2, 3.1</span>
-      </div>
-      <div class="spacer"></div>
-      <div class="status-item">
-        <span class="status-label">Selected</span>
-        <span class="status-value" style="color:var(--accent)">1</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">Rule</span>
-        <span class="status-value" style="color:var(--accent-text)">Roof suitability</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">FPS</span>
-        <span class="status-value">60</span>
-      </div>
-    </footer>
-  </div>
-</div>
+    <!-- ═══════════════════════════════════════════════════════════════
+     PAGE 3: FULL LAYOUT (M2–M4)
+     ═══════════════════════════════════════════════════════════════ -->
+    <div id="state-full" class="state-view">
+      <div class="viewer-shell with-bottom" style="flex: 1">
+        <!-- TOOLBAR (same as M1 with additions) -->
+        <header class="toolbar">
+          <div class="logo-sm">
+            <div class="mark"></div>
+            <span>MultiRoof</span>
+          </div>
+          <div class="file-info">
+            <span class="filename">delft.city.json</span>
+          </div>
+          <div class="sep"></div>
+          <div class="meta-pills">
+            <div class="pill">CRS <span class="value">EPSG:7415</span></div>
+            <div class="pill">Objects <span class="value">847</span></div>
+          </div>
+          <div class="sep"></div>
+          <!-- M2: active rule indicator -->
+          <div
+            class="pill"
+            style="
+              background: var(--accent-soft);
+              border: 1px solid rgba(232, 151, 63, 0.2);
+            "
+          >
+            <span style="color: var(--accent)">Rule</span>
+            <span class="value" style="color: var(--accent-text)"
+              >Roof suitability</span
+            >
+          </div>
+          <div class="spacer"></div>
+          <!-- M4: save/share -->
+          <button class="tb-btn" title="Save workspace">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <path
+                d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"
+              />
+              <polyline points="17 21 17 13 7 13 7 21" />
+              <polyline points="7 3 7 8 15 8" />
+            </svg>
+          </button>
+          <button class="tb-btn" title="Share URL">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <circle cx="18" cy="5" r="3" />
+              <circle cx="6" cy="12" r="3" />
+              <circle cx="18" cy="19" r="3" />
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+            </svg>
+          </button>
+          <button class="tb-btn" title="Toggle inspector">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M15 3v18" />
+            </svg>
+          </button>
+        </header>
 
-<script>
-function showState(id) {
-  document.querySelectorAll('.state-view').forEach(v => v.classList.remove('active'));
-  document.querySelectorAll('.state-nav button').forEach(b => b.classList.remove('active'));
-  document.getElementById('state-' + id).classList.add('active');
-  event.target.classList.add('active');
-}
-</script>
-</body>
+        <!-- TOOL RAIL -->
+        <aside class="tool-rail">
+          <button class="rail-btn active" title="Select">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
+            </svg>
+          </button>
+          <button class="rail-btn" title="Box Select">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <rect
+                x="3"
+                y="3"
+                width="18"
+                height="18"
+                rx="1"
+                stroke-dasharray="4 2"
+              />
+            </svg>
+          </button>
+          <div class="rail-divider"></div>
+          <button class="rail-btn" title="Measure">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <path
+                d="M21.3 15.3a2.4 2.4 0 010 3.4l-2.6 2.6a2.4 2.4 0 01-3.4 0L2.7 8.7a2.4 2.4 0 010-3.4l2.6-2.6a2.4 2.4 0 013.4 0z"
+              />
+            </svg>
+          </button>
+          <button class="rail-btn" title="Zoom to Fit">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <path
+                d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3M3 16v3a2 2 0 002 2h3m8 0h3a2 2 0 002-2v-3"
+              />
+            </svg>
+          </button>
+          <div class="rail-divider"></div>
+          <button class="rail-btn" title="Layers">
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <path
+                d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
+              />
+            </svg>
+          </button>
+          <!-- M3: sun control -->
+          <button
+            class="rail-btn"
+            title="Solar"
+            style="color: var(--accent-text)"
+          >
+            <svg class="icon-svg" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="5" />
+              <path
+                d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"
+              />
+            </svg>
+          </button>
+        </aside>
+
+        <!-- VIEWPORT -->
+        <main class="viewport">
+          <div class="viewport-scene">
+            <div class="viewport-grid">
+              <div class="viewport-grid-inner"></div>
+            </div>
+
+            <!-- Mock buildings with color-coded roofs -->
+            <div class="mock-buildings">
+              <div
+                class="mock-building"
+                style="
+                  left: -80px;
+                  top: -40px;
+                  width: 50px;
+                  height: 35px;
+                  background: linear-gradient(
+                    180deg,
+                    rgba(78, 200, 78, 0.35),
+                    rgba(136, 153, 170, 0.15)
+                  );
+                "
+              ></div>
+              <div
+                class="mock-building selected"
+                style="
+                  left: -20px;
+                  top: -55px;
+                  width: 60px;
+                  height: 50px;
+                  background: linear-gradient(
+                    180deg,
+                    rgba(232, 151, 63, 0.45),
+                    rgba(136, 153, 170, 0.2)
+                  );
+                "
+              ></div>
+              <div
+                class="mock-building"
+                style="
+                  left: 50px;
+                  top: -30px;
+                  width: 45px;
+                  height: 30px;
+                  background: linear-gradient(
+                    180deg,
+                    rgba(78, 200, 78, 0.3),
+                    rgba(136, 153, 170, 0.12)
+                  );
+                "
+              ></div>
+              <div
+                class="mock-building"
+                style="
+                  left: -60px;
+                  top: 10px;
+                  width: 55px;
+                  height: 25px;
+                  background: linear-gradient(
+                    180deg,
+                    rgba(204, 68, 68, 0.35),
+                    rgba(136, 153, 170, 0.1)
+                  );
+                "
+              ></div>
+              <div
+                class="mock-building"
+                style="
+                  left: 20px;
+                  top: 5px;
+                  width: 40px;
+                  height: 40px;
+                  background: linear-gradient(
+                    180deg,
+                    rgba(232, 151, 63, 0.35),
+                    rgba(136, 153, 170, 0.15)
+                  );
+                "
+              ></div>
+              <div
+                class="mock-building"
+                style="
+                  left: 70px;
+                  top: 15px;
+                  width: 35px;
+                  height: 25px;
+                  background: linear-gradient(
+                    180deg,
+                    rgba(78, 200, 78, 0.25),
+                    rgba(136, 153, 170, 0.1)
+                  );
+                "
+              ></div>
+            </div>
+          </div>
+
+          <!-- Viewport overlays -->
+          <div class="viewport-overlay-tl">
+            <div class="compass"><span class="n">N</span></div>
+            <div class="viewport-badge">LoD 2.2</div>
+            <div
+              class="viewport-badge"
+              style="
+                border-color: rgba(232, 151, 63, 0.3);
+                color: var(--accent-text);
+              "
+            >
+              ☀ 14:30
+            </div>
+          </div>
+
+          <!-- Legend overlay (M2) -->
+          <div
+            style="
+              position: absolute;
+              bottom: 1rem;
+              left: 0.75rem;
+              padding: 0.6rem 0.75rem;
+              background: rgba(12, 14, 20, 0.9);
+              backdrop-filter: blur(12px);
+              border: 1px solid var(--border-accent);
+              border-radius: var(--radius);
+              font-size: 0.7rem;
+            "
+          >
+            <div
+              style="
+                font-weight: 600;
+                margin-bottom: 0.35rem;
+                color: var(--fg-label);
+                font-size: 0.65rem;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+              "
+            >
+              Roof Suitability
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 0.2rem">
+              <div style="display: flex; align-items: center; gap: 0.4rem">
+                <div
+                  style="
+                    width: 0.6rem;
+                    height: 0.6rem;
+                    border-radius: 2px;
+                    background: #4ec84e;
+                  "
+                ></div>
+                <span style="color: var(--fg-muted)">High</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.4rem">
+                <div
+                  style="
+                    width: 0.6rem;
+                    height: 0.6rem;
+                    border-radius: 2px;
+                    background: #e8973f;
+                  "
+                ></div>
+                <span style="color: var(--fg-muted)">Medium</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.4rem">
+                <div
+                  style="
+                    width: 0.6rem;
+                    height: 0.6rem;
+                    border-radius: 2px;
+                    background: #cc4444;
+                  "
+                ></div>
+                <span style="color: var(--fg-muted)">Low</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Annotations -->
+          <div
+            class="annotation teal arrow-down"
+            style="top: 0.5rem; right: 6rem"
+          >
+            M2: Rule-based colorization on roofs
+          </div>
+          <div class="annotation arrow-down" style="top: 0.5rem; left: 6rem">
+            M3: Sun position badge
+          </div>
+        </main>
+
+        <!-- INSPECTOR PANEL (M2-enriched) -->
+        <aside class="inspector">
+          <div class="inspector-header">
+            <h3>Inspector</h3>
+            <button class="tb-btn" style="width: 1.5rem; height: 1.5rem">
+              <svg class="icon-svg icon-svg-sm" viewBox="0 0 24 24">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div class="inspector-tabs">
+            <button class="inspector-tab active">Object</button>
+            <button class="inspector-tab">Surfaces</button>
+            <button class="inspector-tab">Analysis</button>
+          </div>
+
+          <div class="inspector-body">
+            <div class="attr-section">
+              <div class="attr-section-title">Identity</div>
+              <div class="attr-row">
+                <span class="attr-key">Type</span>
+                <span class="attr-value highlight">Building</span>
+              </div>
+              <div class="attr-row">
+                <span class="attr-key">measuredHeight</span>
+                <span class="attr-value">8.4 m</span>
+              </div>
+              <div class="attr-row">
+                <span class="attr-key">roofType</span>
+                <span class="attr-value">gabled</span>
+              </div>
+            </div>
+
+            <!-- M2: Analysis results in inspector -->
+            <div class="attr-section">
+              <div class="attr-section-title" style="color: var(--accent-text)">
+                Roof Analysis
+              </div>
+              <div class="attr-row">
+                <span class="attr-key">Suitability</span>
+                <span class="attr-value" style="color: var(--accent-text)"
+                  >Medium</span
+                >
+              </div>
+              <div class="attr-row">
+                <span class="attr-key">Slope (avg)</span>
+                <span class="attr-value">34.2°</span>
+              </div>
+              <div class="attr-row">
+                <span class="attr-key">Aspect</span>
+                <span class="attr-value">SW (215°)</span>
+              </div>
+              <div class="attr-row">
+                <span class="attr-key">Usable area</span>
+                <span class="attr-value highlight">62.4 m²</span>
+              </div>
+              <div class="attr-row">
+                <span class="attr-key">Solar score</span>
+                <span class="attr-value highlight">0.72</span>
+              </div>
+            </div>
+
+            <div class="attr-section">
+              <div class="attr-section-title">Surface Breakdown</div>
+              <div class="surface-item">
+                <div class="surface-dot" style="background: var(--roof)"></div>
+                <span>RoofSurface</span>
+                <span class="count">6</span>
+              </div>
+              <div class="surface-item">
+                <div class="surface-dot" style="background: var(--wall)"></div>
+                <span>WallSurface</span>
+                <span class="count">14</span>
+              </div>
+              <div class="surface-item">
+                <div
+                  class="surface-dot"
+                  style="background: var(--ground)"
+                ></div>
+                <span>GroundSurface</span>
+                <span class="count">2</span>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <!-- BOTTOM PANEL (M2–M4) -->
+        <div class="bottom-panel">
+          <div class="bottom-panel-header">
+            <div class="bottom-tabs">
+              <button class="bottom-tab">Rules</button>
+              <button
+                class="bottom-tab active"
+                style="border-bottom-color: var(--teal); color: var(--fg)"
+              >
+                Solar
+              </button>
+              <button class="bottom-tab">Statistics</button>
+            </div>
+            <div style="flex: 1"></div>
+            <button
+              class="tb-btn"
+              style="width: 1.5rem; height: 1.5rem"
+              title="Collapse"
+            >
+              <svg class="icon-svg icon-svg-sm" viewBox="0 0 24 24">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+          </div>
+          <div class="bottom-body">
+            <!-- Solar tab content (M3) -->
+            <div class="datetime-control">
+              <div class="datetime-display">
+                <div class="date">21 Jun 2025</div>
+                <div class="time">14:30</div>
+              </div>
+              <div class="datetime-slider">
+                <div class="track"></div>
+                <div class="fill"></div>
+                <div class="thumb"></div>
+              </div>
+              <div style="display: flex; gap: 0.35rem">
+                <div class="pill" style="cursor: pointer">Sunrise</div>
+                <div
+                  class="pill"
+                  style="
+                    cursor: pointer;
+                    background: var(--accent-soft);
+                    color: var(--accent-text);
+                  "
+                >
+                  Noon
+                </div>
+                <div class="pill" style="cursor: pointer">Sunset</div>
+              </div>
+            </div>
+
+            <!-- Stats preview (M4) -->
+            <div style="margin-top: 0.5rem">
+              <div class="stats-grid">
+                <div class="stat-card">
+                  <div class="stat-label">Total roofs</div>
+                  <div class="stat-value">847</div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label">Usable area</div>
+                  <div class="stat-value">
+                    24.8K<span class="stat-unit">m²</span>
+                  </div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label">Avg slope</div>
+                  <div class="stat-value">
+                    28.3<span class="stat-unit">°</span>
+                  </div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-label">High suitability</div>
+                  <div class="stat-value" style="color: #4ec84e">412</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Annotations -->
+            <div
+              style="
+                position: absolute;
+                top: 0.3rem;
+                left: 50%;
+                transform: translateX(-50%);
+              "
+              class="annotation teal arrow-down"
+            >
+              M3: Datetime slider · M4: DuckDB-wasm stats
+            </div>
+          </div>
+        </div>
+
+        <!-- STATUS BAR -->
+        <footer class="statusbar">
+          <div class="status-item">
+            <span class="status-dot"></span>
+            <span class="status-label">Ready</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Cursor</span>
+            <span class="status-value">84732.4, 446891.2, 3.1</span>
+          </div>
+          <div class="spacer"></div>
+          <div class="status-item">
+            <span class="status-label">Selected</span>
+            <span class="status-value" style="color: var(--accent)">1</span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">Rule</span>
+            <span class="status-value" style="color: var(--accent-text)"
+              >Roof suitability</span
+            >
+          </div>
+          <div class="status-item">
+            <span class="status-label">FPS</span>
+            <span class="status-value">60</span>
+          </div>
+        </footer>
+      </div>
+    </div>
+
+    <script>
+      function showState(id) {
+        document
+          .querySelectorAll(".state-view")
+          .forEach((v) => v.classList.remove("active"));
+        document
+          .querySelectorAll(".state-nav button")
+          .forEach((b) => b.classList.remove("active"));
+        document.getElementById("state-" + id).classList.add("active");
+        event.target.classList.add("active");
+      }
+    </script>
+  </body>
 </html>

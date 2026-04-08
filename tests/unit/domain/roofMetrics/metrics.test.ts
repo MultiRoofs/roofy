@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import {
   computeArea,
   computeInclination,
@@ -74,7 +74,12 @@ describe("computeArea", () => {
   });
 
   it("returns 0 for degenerate ring with < 3 vertices", () => {
-    expect(computeArea([[0, 0, 0], [1, 0, 0]])).toBe(0);
+    expect(
+      computeArea([
+        [0, 0, 0],
+        [1, 0, 0],
+      ]),
+    ).toBe(0);
   });
 
   it("returns 0 for empty ring", () => {
@@ -96,7 +101,12 @@ describe("computeInclination", () => {
   });
 
   it("returns 0 for degenerate ring", () => {
-    expect(computeInclination([[0, 0, 0], [1, 0, 0]])).toBe(0);
+    expect(
+      computeInclination([
+        [0, 0, 0],
+        [1, 0, 0],
+      ]),
+    ).toBe(0);
   });
 });
 

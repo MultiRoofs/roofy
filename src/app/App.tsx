@@ -3,12 +3,20 @@ import "./app.css";
 import type { CityModel } from "../domain/citymodel/types";
 import { detectEncoding } from "../domain/citymodel/detectEncoding";
 import { loadFlatCityBuf } from "../domain/citymodel/flatcitybuf/loadFlatCityBuf";
-import { parseText, loadFromUrl, fileNameFromUrl } from "../domain/citymodel/loadCityModel";
-import type { CityModelReference, ProjectStateStore, SnapshotSummary } from "../persistence/types";
+import {
+  parseText,
+  loadFromUrl,
+  fileNameFromUrl,
+} from "../domain/citymodel/loadCityModel";
+import type {
+  CityModelReference,
+  ProjectStateStore,
+  SnapshotSummary,
+} from "../persistence/types";
 import { LocalStorageProjectStateStore } from "../persistence/localStorage";
 import { captureSnapshot } from "../persistence/captureSnapshot";
 import { restoreSnapshot } from "../persistence/restoreSnapshot";
-import { encodeShareState, decodeShareState, buildShareUrl } from "../persistence/urlShare";
+import { decodeShareState, buildShareUrl } from "../persistence/urlShare";
 import type { ShareableViewState } from "../persistence/urlShare";
 import { CityScene } from "../scene/CityScene";
 import type { CitySceneHandle } from "../scene/CityScene";
@@ -49,7 +57,7 @@ export function App({ persistenceStore = defaultStore }: AppProps) {
   }, [persistenceStore]);
 
   useEffect(() => {
-    refreshSnapshots();
+    void refreshSnapshots();
   }, [refreshSnapshots]);
 
   const handleFile = useCallback(async (file: File) => {
@@ -123,58 +131,66 @@ export function App({ persistenceStore = defaultStore }: AppProps) {
     }
   }, [fileName, modelRef, persistenceStore, refreshSnapshots]);
 
-  const handleRestore = useCallback(async (id: string) => {
-    setError(null);
-    setLoading(true);
-    try {
-      const snapshot = await persistenceStore.load(id);
-      if (!snapshot) {
-        setError("Snapshot not found.");
-        return;
-      }
-
-      const viewState = restoreSnapshot(snapshot);
-
-      if (snapshot.modelRef?.type === "url") {
-        const parsed = await loadFromUrl(snapshot.modelRef.url);
-        setModel(parsed);
-        setFileName(fileNameFromUrl(snapshot.modelRef.url));
-        setModelRef(snapshot.modelRef);
-        // Apply camera after the scene initializes with the new model
-        setTimeout(() => {
-          sceneRef.current?.setCameraState(
-            viewState.cameraPosition,
-            viewState.cameraTarget,
-          );
-        }, 100);
-      } else if (snapshot.modelRef?.type === "file") {
-        // Cannot auto-load a local file — apply camera if model is already loaded
-        setFileName(snapshot.modelRef.fileName);
-        setModelRef(snapshot.modelRef);
-        if (model) {
-          sceneRef.current?.setCameraState(
-            viewState.cameraPosition,
-            viewState.cameraTarget,
-          );
+  const handleRestore = useCallback(
+    async (id: string) => {
+      setError(null);
+      setLoading(true);
+      try {
+        const snapshot = await persistenceStore.load(id);
+        if (!snapshot) {
+          setError("Snapshot not found.");
+          return;
         }
-        setError(
-          `Workspace "${snapshot.label}" restored. ` +
-          `Please drop "${snapshot.modelRef.fileName}" to view the model.`,
-        );
-      } else {
-        setError("Workspace restored, but no model source was saved.");
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to restore workspace.");
-    } finally {
-      setLoading(false);
-    }
-  }, [model, persistenceStore]);
 
-  const handleDeleteSnapshot = useCallback(async (id: string) => {
-    await persistenceStore.remove(id);
-    await refreshSnapshots();
-  }, [persistenceStore, refreshSnapshots]);
+        const viewState = restoreSnapshot(snapshot);
+
+        if (snapshot.modelRef?.type === "url") {
+          const parsed = await loadFromUrl(snapshot.modelRef.url);
+          setModel(parsed);
+          setFileName(fileNameFromUrl(snapshot.modelRef.url));
+          setModelRef(snapshot.modelRef);
+          // Apply camera after the scene initializes with the new model
+          setTimeout(() => {
+            sceneRef.current?.setCameraState(
+              viewState.cameraPosition,
+              viewState.cameraTarget,
+            );
+          }, 100);
+        } else if (snapshot.modelRef?.type === "file") {
+          // Cannot auto-load a local file — apply camera if model is already loaded
+          setFileName(snapshot.modelRef.fileName);
+          setModelRef(snapshot.modelRef);
+          if (model) {
+            sceneRef.current?.setCameraState(
+              viewState.cameraPosition,
+              viewState.cameraTarget,
+            );
+          }
+          setError(
+            `Workspace "${snapshot.label}" restored. ` +
+              `Please drop "${snapshot.modelRef.fileName}" to view the model.`,
+          );
+        } else {
+          setError("Workspace restored, but no model source was saved.");
+        }
+      } catch (e) {
+        setError(
+          e instanceof Error ? e.message : "Failed to restore workspace.",
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [model, persistenceStore],
+  );
+
+  const handleDeleteSnapshot = useCallback(
+    async (id: string) => {
+      await persistenceStore.remove(id);
+      await refreshSnapshots();
+    },
+    [persistenceStore, refreshSnapshots],
+  );
 
   const handleShare = useCallback(() => {
     const cameraState = sceneRef.current?.getCameraState();
@@ -196,8 +212,12 @@ export function App({ persistenceStore = defaultStore }: AppProps) {
 
     const url = buildShareUrl(state);
     navigator.clipboard.writeText(url).then(
-      () => { /* success — could show a toast */ },
-      () => { /* clipboard write failed */ },
+      () => {
+        /* success — could show a toast */
+      },
+      () => {
+        /* clipboard write failed */
+      },
     );
   }, [modelRef]);
 
@@ -213,10 +233,14 @@ export function App({ persistenceStore = defaultStore }: AppProps) {
     history.replaceState(null, "", location.pathname);
 
     if (shared.modelUrl) {
-      handleUrl(shared.modelUrl).then(() => {
+      void handleUrl(shared.modelUrl).then(() => {
         // Apply camera and state after model loads
         useRuleStore.setState({ rules: [...shared.rules], enabled: shared.re });
-        useSelectionStore.setState({ mode: shared.pm, selection: null, hovered: null });
+        useSelectionStore.setState({
+          mode: shared.pm,
+          selection: null,
+          hovered: null,
+        });
         const dt = new Date(shared.dt);
         if (!isNaN(dt.getTime())) {
           useSolarStore.getState().setDatetime(dt);
@@ -226,13 +250,13 @@ export function App({ persistenceStore = defaultStore }: AppProps) {
         }, 100);
       });
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // oxlint-disable-line react-hooks/exhaustive-deps
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       const file = e.dataTransfer.files[0];
-      if (file) handleFile(file);
+      if (file) void handleFile(file);
     },
     [handleFile],
   );
@@ -240,7 +264,7 @@ export function App({ persistenceStore = defaultStore }: AppProps) {
   const handleInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) handleFile(file);
+      if (file) void handleFile(file);
     },
     [handleFile],
   );
@@ -262,7 +286,9 @@ export function App({ persistenceStore = defaultStore }: AppProps) {
     const objectCount = Object.keys(model.objects).length;
 
     return (
-      <div className={`viewer-shell ${!inspectorOpen ? "panel-collapsed" : ""}`}>
+      <div
+        className={`viewer-shell ${!inspectorOpen ? "panel-collapsed" : ""}`}
+      >
         <ViewerToolbar
           model={model}
           fileName={fileName}
@@ -281,7 +307,11 @@ export function App({ persistenceStore = defaultStore }: AppProps) {
         />
 
         <div className="viewport">
-          <CityScene ref={sceneRef} model={model} onTriangleCount={setTriangleCount} />
+          <CityScene
+            ref={sceneRef}
+            model={model}
+            onTriangleCount={setTriangleCount}
+          />
           <LegendOverlay />
         </div>
 
@@ -309,9 +339,8 @@ export function App({ persistenceStore = defaultStore }: AppProps) {
         <p className="eyebrow">MultiRoof Viewer</p>
         <h1>Rooftop analysis starts here.</h1>
         <p className="summary">
-          Drop a file or load from a URL.
-          Supports <code>.city.json</code>, <code>.city.jsonl</code>,
-          and <code>.fcb</code>.
+          Drop a file or load from a URL. Supports <code>.city.json</code>,{" "}
+          <code>.city.jsonl</code>, and <code>.fcb</code>.
         </p>
       </div>
 
@@ -370,9 +399,7 @@ function UrlInput({
 
   return (
     <form className="fcb-url-form" onSubmit={handleSubmit}>
-      <label className="fcb-url-label">
-        Or load from URL:
-      </label>
+      <label className="fcb-url-label">Or load from URL:</label>
       <div className="fcb-url-row">
         <input
           type="url"

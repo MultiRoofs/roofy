@@ -8,7 +8,12 @@
 import { useState } from "react";
 import type { CityModel } from "../../domain/citymodel/types";
 import { useRuleStore } from "../../features/rules/ruleStore";
-import type { Condition, ConditionOperator, LogicMode, Rule } from "../../features/rules/types";
+import type {
+  Condition,
+  ConditionOperator,
+  LogicMode,
+  Rule,
+} from "../../features/rules/types";
 
 interface RuleBuilderTabProps {
   readonly model: CityModel;
@@ -40,11 +45,7 @@ export function RuleBuilderTab({ model }: RuleBuilderTabProps) {
         <div className="rule-header">
           <div className="attr-section-title">Colorization Rules</div>
           <label className="rule-toggle">
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={toggleEnabled}
-            />
+            <input type="checkbox" checked={enabled} onChange={toggleEnabled} />
             <span className="rule-toggle-label">{enabled ? "On" : "Off"}</span>
           </label>
         </div>
@@ -89,10 +90,7 @@ export function RuleBuilderTab({ model }: RuleBuilderTabProps) {
             onCancel={() => setShowForm(false)}
           />
         ) : (
-          <button
-            className="rule-add-btn"
-            onClick={() => setShowForm(true)}
-          >
+          <button className="rule-add-btn" onClick={() => setShowForm(true)}>
             + Add Rule
           </button>
         )}
@@ -160,11 +158,16 @@ function RuleForm({ initial, fields, onSave, onCancel }: RuleFormProps) {
   const [color, setColor] = useState(initial?.color ?? "#4ec84e");
   const [logic, setLogic] = useState<LogicMode>(initial?.logic ?? "AND");
   const [conditions, setConditions] = useState<Condition[]>(
-    initial ? [...initial.conditions] : [{ field: "inclinationDeg", operator: "<", value: 10 }],
+    initial
+      ? [...initial.conditions]
+      : [{ field: "inclinationDeg", operator: "<", value: 10 }],
   );
 
   const addCondition = () => {
-    setConditions([...conditions, { field: "inclinationDeg", operator: "<", value: 0 }]);
+    setConditions([
+      ...conditions,
+      { field: "inclinationDeg", operator: "<", value: 0 },
+    ]);
   };
 
   const removeCondition = (idx: number) => {
@@ -236,7 +239,9 @@ function RuleForm({ initial, fields, onSave, onCancel }: RuleFormProps) {
             className="rule-select rule-select-sm"
             value={cond.operator}
             onChange={(e) =>
-              updateCondition(idx, { operator: e.target.value as ConditionOperator })
+              updateCondition(idx, {
+                operator: e.target.value as ConditionOperator,
+              })
             }
           >
             {OPERATORS.map((op) => (
@@ -253,12 +258,22 @@ function RuleForm({ initial, fields, onSave, onCancel }: RuleFormProps) {
               if (raw === "") return; // preserve previous value when cleared
               const num = Number(raw);
               updateCondition(idx, {
-                value: raw === "true" ? true : raw === "false" ? false : isNaN(num) ? raw : num,
+                value:
+                  raw === "true"
+                    ? true
+                    : raw === "false"
+                      ? false
+                      : isNaN(num)
+                        ? raw
+                        : num,
               });
             }}
           />
           {conditions.length > 1 && (
-            <button className="rule-action-btn" onClick={() => removeCondition(idx)}>
+            <button
+              className="rule-action-btn"
+              onClick={() => removeCondition(idx)}
+            >
               x
             </button>
           )}

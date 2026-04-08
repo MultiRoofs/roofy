@@ -1,6 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import { BufferAttribute, BufferGeometry, Color } from "three";
-import { applyHighlight, clearHighlight } from "../../../src/scene/highlightMesh";
+import {
+  applyHighlight,
+  clearHighlight,
+} from "../../../src/scene/highlightMesh";
 import type { PickingIndex } from "../../../src/scene/buildCityMesh";
 
 // ---------------------------------------------------------------------------
@@ -15,8 +18,24 @@ import type { PickingIndex } from "../../../src/scene/buildCityMesh";
 function makeTwoObjectGeometry() {
   const positions = new Float32Array(18); // 6 vertices × 3
   const colors = new Float32Array([
-    1, 0, 0, 1, 0, 0, 1, 0, 0, // tri 0: red
-    0, 0, 1, 0, 0, 1, 0, 0, 1, // tri 1: blue
+    1,
+    0,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    0, // tri 0: red
+    0,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    0,
+    1, // tri 1: blue
   ]);
   const objectIndices = new Int32Array([0, 0, 0, 1, 1, 1]);
   const surfaceIndices = new Int32Array([0, 0, 0, 0, 0, 0]);
@@ -112,8 +131,7 @@ describe("applyHighlight", () => {
     // 2 surfaces in one object: surface 0 and surface 1
     const positions = new Float32Array(18);
     const colors = new Float32Array([
-      1, 0, 0, 1, 0, 0, 1, 0, 0,
-      0, 1, 0, 0, 1, 0, 0, 1, 0,
+      1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0,
     ]);
     const objectIndices = new Int32Array([0, 0, 0, 0, 0, 0]);
     const surfaceIndices = new Int32Array([0, 0, 0, 1, 1, 1]);
@@ -122,7 +140,10 @@ describe("applyHighlight", () => {
     geometry.setAttribute("position", new BufferAttribute(positions, 3));
     geometry.setAttribute("color", new BufferAttribute(colors, 3));
     geometry.setAttribute("objectIndex", new BufferAttribute(objectIndices, 1));
-    geometry.setAttribute("surfaceIndex", new BufferAttribute(surfaceIndices, 1));
+    geometry.setAttribute(
+      "surfaceIndex",
+      new BufferAttribute(surfaceIndices, 1),
+    );
 
     const baseColors = Float32Array.from(colors);
     const pickingIndex: PickingIndex = { objectKeys: ["b1"] };
