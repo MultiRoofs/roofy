@@ -81,6 +81,8 @@ Exit criteria:
 - A user can classify roofs with geometry-driven rules
 - Styled output is explainable and reproducible
 
+Status: Complete. All six deliverables implemented: roof metrics pipeline, rule builder with AND/OR conditions, rule-based colorization, visual legend overlay, analysis tab with scope toggle, and rule builder UI. Unit tests cover metrics, aggregation, rule evaluation, and rule store.
+
 ## Milestone 3: Solar and Shading
 
 Goal: make time-based rooftop exploration part of the core experience.
@@ -149,6 +151,8 @@ Exit criteria:
 
 - The application is stable for repeated demo and pilot use
 - Core modules are not tightly coupled to browser-only APIs
+
+Status: In progress. Completed: error boundaries and validation (M5.1), mesh building performance optimization (M5.2), platform adapter interfaces for Tauri (M5.3), pilot workflow documentation (M5.4). Remaining: further performance profiling with large real-world datasets.
 
 ## Cross-Cutting Workstreams
 

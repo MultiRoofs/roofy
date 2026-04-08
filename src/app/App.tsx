@@ -10,6 +10,10 @@ import { captureSnapshot } from "../persistence/captureSnapshot";
 import { restoreSnapshot } from "../persistence/restoreSnapshot";
 import { encodeShareState, decodeShareState, buildShareUrl } from "../persistence/urlShare";
 import type { ShareableViewState } from "../persistence/urlShare";
+import { initDuckDB, getDuckDBStatus, loadModelIntoDuckDB } from "../analytics/duckdb";
+import type { DuckDBStatus } from "../analytics/duckdb";
+import { browserPlatform } from "../platform/browser";
+import type { PlatformServices } from "../platform/types";
 import { CityScene } from "../scene/CityScene";
 import type { CitySceneHandle } from "../scene/CityScene";
 import { useSelectionStore } from "../features/selection/selectionStore";
@@ -25,9 +29,10 @@ const defaultStore = new LocalStorageProjectStateStore();
 
 interface AppProps {
   readonly persistenceStore?: ProjectStateStore;
+  readonly platform?: PlatformServices;
 }
 
-export function App({ persistenceStore = defaultStore }: AppProps) {
+export function App({ persistenceStore = defaultStore, platform = browserPlatform }: AppProps) {
   const [model, setModel] = useState<CityModel | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -36,6 +41,9 @@ export function App({ persistenceStore = defaultStore }: AppProps) {
   const [loading, setLoading] = useState(false);
   const [modelRef, setModelRef] = useState<CityModelReference | null>(null);
   const [savedSnapshots, setSavedSnapshots] = useState<SnapshotSummary[]>([]);
+  const [duckdbStatus, setDuckdbStatus] = useState<DuckDBStatus>({ state: "uninitialized" });
+  const [duckdbModelLoaded, setDuckdbModelLoaded] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const sceneRef = useRef<CitySceneHandle>(null);
 
   const selection = useSelectionStore((s) => s.selection);
@@ -51,6 +59,28 @@ export function App({ persistenceStore = defaultStore }: AppProps) {
   useEffect(() => {
     refreshSnapshots();
   }, [refreshSnapshots]);
+
+  // Initialize DuckDB-wasm on mount (fire-and-forget)
+  useEffect(() => {
+    initDuckDB().then(() => {
+      setDuckdbStatus(getDuckDBStatus());
+    });
+  }, []);
+
+  // Load model into DuckDB when both DuckDB and a URL-based model are ready
+  useEffect(() => {
+    if (duckdbStatus.state !== "ready") return;
+    if (!("extensionLoaded" in duckdbStatus) || !duckdbStatus.extensionLoaded) return;
+    if (!modelRef || modelRef.type !== "url") {
+      setDuckdbModelLoaded(false);
+      return;
+    }
+
+    const encoding = detectEncoding(modelRef.url);
+    loadModelIntoDuckDB(modelRef.url, encoding).then((ok) => {
+      setDuckdbModelLoaded(ok);
+    });
+  }, [duckdbStatus, modelRef]);
 
   const handleFile = useCallback(async (file: File) => {
     setError(null);
@@ -195,11 +225,16 @@ export function App({ persistenceStore = defaultStore }: AppProps) {
     };
 
     const url = buildShareUrl(state);
-    navigator.clipboard.writeText(url).then(
-      () => { /* success — could show a toast */ },
-      () => { /* clipboard write failed */ },
-    );
-  }, [modelRef]);
+    platform.clipboard.writeText(url).then((ok) => {
+      if (ok) {
+        setToast("Share link copied to clipboard");
+        setTimeout(() => setToast(null), 2500);
+      } else {
+        setToast("Failed to copy link \u2014 check clipboard permissions");
+        setTimeout(() => setToast(null), 3000);
+      }
+    });
+  }, [modelRef, platform]);
 
   // On mount: check URL hash for a share token
   useEffect(() => {
@@ -250,6 +285,7 @@ export function App({ persistenceStore = defaultStore }: AppProps) {
     setFileName(null);
     setModelRef(null);
     setTriangleCount(0);
+    setDuckdbModelLoaded(false);
     clearSelection();
   }, [clearSelection]);
 
@@ -290,6 +326,7 @@ export function App({ persistenceStore = defaultStore }: AppProps) {
             model={model}
             selection={selection}
             onClose={() => setInspectorOpen(false)}
+            duckdbModelLoaded={duckdbModelLoaded}
           />
         )}
 
@@ -297,7 +334,10 @@ export function App({ persistenceStore = defaultStore }: AppProps) {
           objectCount={objectCount}
           triangleCount={triangleCount}
           selectedCount={selection ? 1 : 0}
+          duckdbStatus={duckdbStatus}
         />
+
+        {toast && <div className="toast">{toast}</div>}
       </div>
     );
   }
@@ -342,6 +382,13 @@ export function App({ persistenceStore = defaultStore }: AppProps) {
           onDelete={handleDeleteSnapshot}
           loading={loading}
         />
+      )}
+
+      {loading && (
+        <div className="loading-indicator">
+          <div className="loading-spinner" />
+          <span>Loading model...</span>
+        </div>
       )}
 
       {error && <p className="error-message">{error}</p>}

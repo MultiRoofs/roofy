@@ -3,19 +3,28 @@
  *
  * Shows model-level aggregate stats when nothing is selected,
  * and per-object stats when a building is selected.
+ * Optionally shows DuckDB SQL-derived analytics when available.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CityModel } from "../../domain/citymodel/types";
 import type { Selection } from "../../domain/selection/types";
 import { computeModelStats, computeObjectStats } from "../../analytics/computeStats";
+import { queryDuckDB } from "../../analytics/duckdb";
+import type { QueryResult } from "../../analytics/duckdb";
 
 interface StatsTabProps {
   readonly model: CityModel;
   readonly selection: Selection | null;
+  readonly duckdbModelLoaded?: boolean;
 }
 
-export function StatsTab({ model, selection }: StatsTabProps) {
+interface DuckDBStats {
+  readonly rowCount: number;
+  readonly typeBreakdown: ReadonlyArray<{ type: string; count: number }>;
+}
+
+export function StatsTab({ model, selection, duckdbModelLoaded }: StatsTabProps) {
   const modelStats = useMemo(() => computeModelStats(model), [model]);
 
   const objectStats = useMemo(
@@ -23,6 +32,33 @@ export function StatsTab({ model, selection }: StatsTabProps) {
       selection ? computeObjectStats(model, selection.objectId) : null,
     [model, selection],
   );
+
+  const [duckdbStats, setDuckdbStats] = useState<DuckDBStats | null>(null);
+
+  useEffect(() => {
+    if (!duckdbModelLoaded) {
+      setDuckdbStats(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function fetchStats() {
+      const [countResult, typeResult] = await Promise.all([
+        queryDuckDB("SELECT COUNT(*) AS cnt FROM city_objects"),
+        queryDuckDB("SELECT type, COUNT(*) AS cnt FROM city_objects GROUP BY type ORDER BY cnt DESC"),
+      ]);
+
+      if (cancelled) return;
+
+      const rowCount = extractCount(countResult);
+      const typeBreakdown = extractTypeBreakdown(typeResult);
+      setDuckdbStats({ rowCount, typeBreakdown });
+    }
+
+    fetchStats();
+    return () => { cancelled = true; };
+  }, [duckdbModelLoaded]);
 
   return (
     <>
@@ -74,6 +110,19 @@ export function StatsTab({ model, selection }: StatsTabProps) {
           <StatRow key={o.band} label={o.band} value={String(o.count)} />
         ))}
       </div>
+
+      {/* DuckDB SQL analytics */}
+      {duckdbStats && (
+        <div className="attr-section">
+          <div className="attr-section-title" style={{ color: "var(--teal)" }}>
+            DuckDB Analytics
+          </div>
+          <StatRow label="Rows loaded" value={String(duckdbStats.rowCount)} />
+          {duckdbStats.typeBreakdown.map((t) => (
+            <StatRow key={t.type} label={t.type} value={String(t.count)} />
+          ))}
+        </div>
+      )}
     </>
   );
 }
@@ -96,4 +145,18 @@ function cardinalFromDeg(deg: number): string {
   if (deg < 247.5) return "SW";
   if (deg < 292.5) return "W";
   return "NW";
+}
+
+function extractCount(result: QueryResult | null): number {
+  if (!result || result.rows.length === 0) return 0;
+  const val = result.rows[0]!.cnt;
+  return typeof val === "number" ? val : Number(val) || 0;
+}
+
+function extractTypeBreakdown(result: QueryResult | null): Array<{ type: string; count: number }> {
+  if (!result) return [];
+  return result.rows.map((row) => ({
+    type: String(row.type ?? "unknown"),
+    count: typeof row.cnt === "number" ? row.cnt : Number(row.cnt) || 0,
+  }));
 }

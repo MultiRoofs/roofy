@@ -9,6 +9,7 @@ import { useState } from "react";
 import type { CityModel, CityObject, BuildingSurfaceType } from "../../domain/citymodel/types";
 import type { Selection } from "../../domain/selection/types";
 import { SURFACE_COLOR_HEX } from "../../shared/surfaceColorMap";
+import { ErrorBoundary } from "../ErrorBoundary";
 import { AnalysisTab } from "./AnalysisTab";
 import { RuleBuilderTab } from "./RuleBuilderTab";
 import { SolarTab } from "./SolarTab";
@@ -20,9 +21,10 @@ interface InspectorPanelProps {
   readonly model: CityModel;
   readonly selection: Selection | null;
   readonly onClose: () => void;
+  readonly duckdbModelLoaded?: boolean;
 }
 
-export function InspectorPanel({ model, selection, onClose }: InspectorPanelProps) {
+export function InspectorPanel({ model, selection, onClose, duckdbModelLoaded }: InspectorPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>("object");
 
   const selectedObject: CityObject | undefined = selection
@@ -79,33 +81,35 @@ export function InspectorPanel({ model, selection, onClose }: InspectorPanelProp
         </button>
       </div>
       <div className="inspector-body">
-        {activeTab === "rules" ? (
-          <RuleBuilderTab model={model} />
-        ) : activeTab === "solar" ? (
-          <SolarTab />
-        ) : activeTab === "stats" ? (
-          <StatsTab model={model} selection={selection} />
-        ) : !selectedObject ? (
-          <div className="inspector-placeholder">
-            Select an object to inspect
-          </div>
-        ) : activeTab === "object" ? (
-          <ObjectTab object={selectedObject} />
-        ) : activeTab === "surfaces" ? (
-          <SurfacesTab
-            object={selectedObject}
-            selectedSurfaceIndex={
-              selection?.kind === "surface" ? selection.surfaceIndex : null
-            }
-          />
-        ) : (
-          <AnalysisTab
-            object={selectedObject}
-            selectedSurfaceIndex={
-              selection?.kind === "surface" ? selection.surfaceIndex : null
-            }
-          />
-        )}
+        <ErrorBoundary fallback="inline" key={activeTab}>
+          {activeTab === "rules" ? (
+            <RuleBuilderTab model={model} />
+          ) : activeTab === "solar" ? (
+            <SolarTab />
+          ) : activeTab === "stats" ? (
+            <StatsTab model={model} selection={selection} duckdbModelLoaded={duckdbModelLoaded} />
+          ) : !selectedObject ? (
+            <div className="inspector-placeholder">
+              Select an object to inspect
+            </div>
+          ) : activeTab === "object" ? (
+            <ObjectTab object={selectedObject} />
+          ) : activeTab === "surfaces" ? (
+            <SurfacesTab
+              object={selectedObject}
+              selectedSurfaceIndex={
+                selection?.kind === "surface" ? selection.surfaceIndex : null
+              }
+            />
+          ) : (
+            <AnalysisTab
+              object={selectedObject}
+              selectedSurfaceIndex={
+                selection?.kind === "surface" ? selection.surfaceIndex : null
+              }
+            />
+          )}
+        </ErrorBoundary>
       </div>
     </aside>
   );

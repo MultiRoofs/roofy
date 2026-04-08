@@ -2,13 +2,16 @@
  * Bottom status bar showing model statistics and selection state.
  */
 
+import type { DuckDBStatus } from "../analytics/duckdb";
+
 interface StatusBarProps {
   readonly objectCount: number;
   readonly triangleCount: number;
   readonly selectedCount: number;
+  readonly duckdbStatus?: DuckDBStatus;
 }
 
-export function StatusBar({ objectCount, triangleCount, selectedCount }: StatusBarProps) {
+export function StatusBar({ objectCount, triangleCount, selectedCount, duckdbStatus }: StatusBarProps) {
   return (
     <footer className="statusbar">
       <div className="status-item">
@@ -18,6 +21,13 @@ export function StatusBar({ objectCount, triangleCount, selectedCount }: StatusB
 
       <div className="toolbar-spacer" />
 
+      {duckdbStatus && duckdbStatus.state !== "uninitialized" && (
+        <div className="status-item">
+          <span className={`status-dot ${duckdbDotClass(duckdbStatus)}`} />
+          <span className="status-label">DuckDB</span>
+          <span className="status-value">{duckdbLabel(duckdbStatus)}</span>
+        </div>
+      )}
       <div className="status-item">
         <span className="status-label">Objects</span>
         <span className="status-value">{objectCount}</span>
@@ -34,6 +44,18 @@ export function StatusBar({ objectCount, triangleCount, selectedCount }: StatusB
       </div>
     </footer>
   );
+}
+
+function duckdbDotClass(status: DuckDBStatus): string {
+  if (status.state === "ready") return status.extensionLoaded ? "dot-ready" : "dot-partial";
+  if (status.state === "initializing") return "dot-loading";
+  return "dot-failed";
+}
+
+function duckdbLabel(status: DuckDBStatus): string {
+  if (status.state === "ready") return status.extensionLoaded ? "Ready" : "No ext";
+  if (status.state === "initializing") return "Loading";
+  return "N/A";
 }
 
 function formatCount(n: number): string {

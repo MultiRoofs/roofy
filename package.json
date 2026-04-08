@@ -29,6 +29,7 @@
   },
   "devDependencies": {
     "@eslint/js": "latest",
+    "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "latest",
     "@testing-library/react": "latest",
     "@testing-library/user-event": "latest",

@@ -1,6 +1,6 @@
 # M4 Implementation Plan: Statistics and Saved Workspaces
 
-Status: In progress
+Status: Complete
 
 ## Overview
 
