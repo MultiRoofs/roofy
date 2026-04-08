@@ -9,6 +9,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from "react";
 import {
   AmbientLight,
+  Color,
   DirectionalLight,
   Mesh,
   MeshStandardMaterial,
@@ -105,12 +106,21 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       const renderer = new WebGLRenderer({ antialias: true });
       renderer.setSize(width, height);
       renderer.setPixelRatio(window.devicePixelRatio);
-      renderer.setClearColor(0x0a0c12);
+      renderer.setClearColor(readCssColor("--bg-viewport", "#0a0c12"));
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = PCFSoftShadowMap;
       container.appendChild(renderer.domElement);
       rendererRef.current = renderer;
       canvasRef.current = renderer.domElement;
+
+      // Observe theme changes to update clear color
+      const themeObserver = new MutationObserver(() => {
+        renderer.setClearColor(readCssColor("--bg-viewport", "#0a0c12"));
+      });
+      themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["data-theme"],
+      });
 
       // Scene
       const scene = new Scene();
@@ -167,6 +177,7 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       resizeObserver.observe(container);
 
       return () => {
+        themeObserver.disconnect();
         resizeObserver.disconnect();
         cancelAnimationFrame(animationIdRef.current);
         controls.dispose();
@@ -489,4 +500,9 @@ function fitCamera(
 function truncateId(id: string): string {
   if (id.length <= 24) return id;
   return id.slice(0, 10) + "..." + id.slice(-10);
+}
+
+function readCssColor(varName: string, fallback: string): Color {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  return new Color(raw || fallback);
 }
