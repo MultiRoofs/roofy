@@ -95,7 +95,7 @@ describe("load-to-inspect pipeline", () => {
 
   // Stage 2: Mesh build
   const originOffset = computeOriginOffset(model);
-  const meshResult = buildCityMesh(model, originOffset);
+  const meshResult = buildCityMesh(model, "test-layer", originOffset);
 
   describe("mesh construction", () => {
     it("produces non-zero triangles", () => {
@@ -210,7 +210,7 @@ describe("load-to-inspect pipeline", () => {
       applyHighlight(
         meshResult.geometry,
         meshResult.baseColors,
-        { kind: "object", objectId: firstObjectId },
+        { kind: "object", layerId: "test-layer", objectId: firstObjectId },
         null,
         meshResult.pickingIndex,
       );

@@ -1,9 +1,9 @@
 /**
  * React component that hosts the Three.js scene.
  *
- * Takes a CityModel and renders it in a 3D viewport with orbit controls.
- * Integrates picking (via usePickingControls) and highlight (via color
- * buffer mutation) for object/surface selection.
+ * Reads layers from useLayerStore and renders each as a separate mesh
+ * in a shared Group. Supports multi-layer picking, per-layer rule
+ * colorization, and per-layer highlight.
  */
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from "react";
@@ -19,15 +19,25 @@ import {
   Group,
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import type { CityModel } from "../domain/citymodel/types";
+import type { CityModel, BBox3 } from "../domain/citymodel/types";
 import { buildCityMesh, computeOriginOffset } from "./buildCityMesh";
 import type { PickingIndex } from "./buildCityMesh";
 import { applyHighlight, clearHighlight } from "./highlightMesh";
 import { buildRuleColors } from "./applyRuleColors";
 import { usePickingControls } from "./usePickingControls";
 import { useSelectionStore } from "../features/selection/selectionStore";
-import { useRuleStore } from "../features/rules/ruleStore";
+import { useLayerStore } from "../features/layers/layerStore";
+import type { Layer } from "../features/layers/layerStore";
 import { useSolarStore } from "../features/solar/solarStore";
+import type { Rule } from "../features/rules/types";
+
+/** Per-layer GPU state tracked in a ref map. */
+export interface LayerSceneState {
+  mesh: Mesh;
+  pickingIndex: PickingIndex;
+  baseColors: Float32Array;
+  ruleColors: Float32Array | null;
+}
 
 export interface CitySceneHandle {
   fitAll: () => void;
@@ -42,12 +52,11 @@ export interface CitySceneHandle {
 }
 
 export interface CitySceneProps {
-  readonly model: CityModel | null;
   readonly onTriangleCount: (count: number) => void;
 }
 
 export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
-  function CityScene({ model, onTriangleCount }, ref) {
+  function CityScene({ onTriangleCount }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const rendererRef = useRef<WebGLRenderer | null>(null);
     const sceneRef = useRef<Scene | null>(null);
@@ -55,15 +64,10 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
     const controlsRef = useRef<OrbitControls | null>(null);
     const cityGroupRef = useRef<Group | null>(null);
     const animationIdRef = useRef<number>(0);
-
-    // Picking-related refs
-    const meshRef = useRef<Mesh | null>(null);
-    const pickingIndexRef = useRef<PickingIndex | null>(null);
-    const baseColorsRef = useRef<Float32Array | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-    // Rule-based colorization ref
-    const ruleColorsRef = useRef<Float32Array | null>(null);
+    // Per-layer scene state
+    const layerSceneMapRef = useRef<Map<string, LayerSceneState>>(new Map());
 
     // Directional light ref (for sun position updates)
     const dirLightRef = useRef<DirectionalLight | null>(null);
@@ -72,9 +76,8 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
     const selection = useSelectionStore((s) => s.selection);
     const hovered = useSelectionStore((s) => s.hovered);
 
-    // Rule state from Zustand
-    const rules = useRuleStore((s) => s.rules);
-    const rulesEnabled = useRuleStore((s) => s.enabled);
+    // Layer state from Zustand
+    const layers = useLayerStore((s) => s.layers);
 
     // Solar state from Zustand
     const sunPosition = useSolarStore((s) => s.sunPosition);
@@ -138,7 +141,7 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       scene.add(directional);
       dirLightRef.current = directional;
 
-      // City group (will hold the mesh)
+      // City group (will hold per-layer meshes)
       const cityGroup = new Group();
       scene.add(cityGroup);
       cityGroupRef.current = cityGroup;
@@ -167,125 +170,143 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
         resizeObserver.disconnect();
         cancelAnimationFrame(animationIdRef.current);
         controls.dispose();
+        // Dispose all per-layer GPU resources
+        for (const state of layerSceneMapRef.current.values()) {
+          state.mesh.geometry.dispose();
+          if (state.mesh.material instanceof MeshStandardMaterial) {
+            state.mesh.material.dispose();
+          }
+        }
+        layerSceneMapRef.current.clear();
         renderer.dispose();
         container.removeChild(renderer.domElement);
       };
     }, []);
 
-    // Update city mesh when model changes
+    // Manage per-layer meshes: add/remove/visibility
     useEffect(() => {
       const cityGroup = cityGroupRef.current;
       const camera = cameraRef.current;
       const controls = controlsRef.current;
       if (!cityGroup) return;
 
-      // Clear previous meshes
-      while (cityGroup.children.length > 0) {
-        const child = cityGroup.children[0]!;
-        cityGroup.remove(child);
-        if (child instanceof Mesh) {
-          child.geometry.dispose();
-          if (child.material instanceof MeshStandardMaterial) {
-            child.material.dispose();
+      const map = layerSceneMapRef.current;
+      const currentIds = new Set(layers.map((l) => l.id));
+
+      // Remove meshes for deleted layers
+      for (const id of map.keys()) {
+        if (!currentIds.has(id)) {
+          const state = map.get(id)!;
+          cityGroup.remove(state.mesh);
+          state.mesh.geometry.dispose();
+          if (state.mesh.material instanceof MeshStandardMaterial) {
+            state.mesh.material.dispose();
           }
+          map.delete(id);
         }
       }
 
-      // Reset picking and rule refs
-      meshRef.current = null;
-      pickingIndexRef.current = null;
-      baseColorsRef.current = null;
-      ruleColorsRef.current = null;
+      // Add meshes for new layers (check map directly, after removals)
+      let needsFit = false;
+      const hadLayersBefore = map.size > 0;
+      let solarInitialized = false;
+      for (const layer of layers) {
+        if (!map.has(layer.id)) {
+          const model = layer.model;
+          if (Object.keys(model.objects).length === 0) continue;
 
-      // Clear selection on model change
-      useSelectionStore.getState().clear();
+          const originOffset = computeOriginOffset(model);
+          const { geometry, pickingIndex, baseColors } = buildCityMesh(
+            model,
+            layer.id,
+            originOffset,
+          );
 
-      if (!model || Object.keys(model.objects).length === 0) {
-        onTriangleCount(0);
-        return;
+          const material = new MeshStandardMaterial({
+            vertexColors: true,
+            flatShading: true,
+          });
+
+          const mesh = new Mesh(geometry, material);
+          mesh.userData.layerId = layer.id;
+          mesh.rotation.x = -Math.PI / 2;
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          mesh.visible = layer.visible;
+          cityGroup.add(mesh);
+
+          map.set(layer.id, { mesh, pickingIndex, baseColors, ruleColors: null });
+
+          // Configure shadow camera and solar from the first non-empty layer
+          if (!hadLayersBefore && !solarInitialized) {
+            if (model.bbox && dirLightRef.current) {
+              configureShadowCamera(dirLightRef.current, model.bbox);
+              geometry.computeBoundingSphere();
+            }
+            useSolarStore.getState().initFromModel(model.metadata.referenceSystem, model.bbox);
+            solarInitialized = true;
+          }
+
+          needsFit = true;
+        }
       }
 
-      const originOffset = computeOriginOffset(model);
-      const { geometry, triangleCount, pickingIndex, baseColors } = buildCityMesh(
-        model,
-        originOffset,
-      );
-
-      const material = new MeshStandardMaterial({
-        vertexColors: true,
-        flatShading: true,
-      });
-
-      const mesh = new Mesh(geometry, material);
-      // CityJSON uses Y for northing and Z for height.
-      // Three.js uses Y-up, so we rotate the mesh: swap Y↔Z.
-      mesh.rotation.x = -Math.PI / 2;
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      cityGroup.add(mesh);
-
-      // Store refs for picking and highlighting
-      meshRef.current = mesh;
-      pickingIndexRef.current = pickingIndex;
-      baseColorsRef.current = baseColors;
-      onTriangleCount(triangleCount);
-
-      // Configure shadow camera frustum from model bbox
-      if (model.bbox && dirLightRef.current) {
-        const extentX = model.bbox[3] - model.bbox[0];
-        const extentY = model.bbox[4] - model.bbox[1];
-        const extentZ = model.bbox[5] - model.bbox[2];
-        const halfSize = Math.max(extentX, extentY, extentZ) * 0.7;
-        const light = dirLightRef.current;
-        light.shadow.camera.left = -halfSize;
-        light.shadow.camera.right = halfSize;
-        light.shadow.camera.top = halfSize;
-        light.shadow.camera.bottom = -halfSize;
-        // near/far are updated dynamically in the sun-position effect
-        light.shadow.camera.updateProjectionMatrix();
-        // Compute bounding sphere for sun-position distance scaling
-        geometry.computeBoundingSphere();
+      // Update visibility for existing layers
+      for (const layer of layers) {
+        const state = map.get(layer.id);
+        if (state) {
+          state.mesh.visible = layer.visible;
+        }
       }
 
-      // Initialize solar lat/lon from model CRS
-      useSolarStore.getState().initFromModel(model.metadata.referenceSystem, model.bbox);
-
-      // Frame the camera on the model
-      if (camera && controls && model.bbox) {
-        fitCamera(camera, controls, model);
+      // Update triangle count
+      let totalTriangles = 0;
+      for (const layer of layers) {
+        const state = map.get(layer.id);
+        if (state && layer.visible) {
+          const posAttr = state.mesh.geometry.getAttribute("position");
+          if (posAttr) totalTriangles += posAttr.count / 3;
+        }
       }
-    }, [model, onTriangleCount]);
+      onTriangleCount(totalTriangles);
 
-    // Recompute rule colors when rules or model changes
+      // Frame camera on model when first layer(s) added
+      if (needsFit && camera && controls) {
+        const bbox = computeUnionBBox(layers);
+        if (bbox) fitCamera(camera, controls, bbox);
+      }
+
+      // Clear selection if selected layer was removed
+      const sel = useSelectionStore.getState().selection;
+      if (sel && !currentIds.has(sel.layerId)) {
+        useSelectionStore.getState().clear();
+      }
+    }, [layers, onTriangleCount]);
+
+    // Recompute rule colors per layer when rules change
     useEffect(() => {
-      const mesh = meshRef.current;
-      const pickingIndex = pickingIndexRef.current;
-      const baseColors = baseColorsRef.current;
-      if (!mesh || !pickingIndex || !baseColors || !model) {
-        ruleColorsRef.current = null;
-        return;
+      const map = layerSceneMapRef.current;
+
+      for (const layer of layers) {
+        const state = map.get(layer.id);
+        if (!state) continue;
+
+        if (layer.rulesEnabled && layer.rules.length > 0) {
+          state.ruleColors = buildRuleColors(
+            layer.model,
+            state.mesh.geometry,
+            state.pickingIndex,
+            layer.rules as Rule[],
+            state.baseColors,
+          );
+        } else {
+          state.ruleColors = null;
+        }
       }
 
-      if (rulesEnabled && rules.length > 0) {
-        ruleColorsRef.current = buildRuleColors(
-          model,
-          mesh.geometry,
-          pickingIndex,
-          rules,
-          baseColors,
-        );
-      } else {
-        ruleColorsRef.current = null;
-      }
-
-      // Re-apply highlight with the new rule colors
-      const { selection: sel, hovered: hov } = useSelectionStore.getState();
-      if (!sel && !hov) {
-        clearHighlight(mesh.geometry, baseColors, ruleColorsRef.current);
-      } else {
-        applyHighlight(mesh.geometry, baseColors, sel, hov, pickingIndex, ruleColorsRef.current);
-      }
-    }, [rules, rulesEnabled, model]);
+      // Re-apply highlight with new rule colors
+      reapplyHighlight(map, layers);
+    }, [layers]);
 
     // Update directional light position when sun position changes
     useEffect(() => {
@@ -293,9 +314,12 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       if (!light || !sunPosition) return;
 
       const [dx, dy, dz] = sunPosition.direction;
-      // Scale light distance to scene extent so shadow frustum always covers the model
-      const mesh = meshRef.current;
-      const dist = mesh ? mesh.geometry.boundingSphere?.radius ?? 500 : 500;
+      const map = layerSceneMapRef.current;
+      let dist = 500;
+      for (const state of map.values()) {
+        const r = state.mesh.geometry.boundingSphere?.radius;
+        if (r && r > dist) dist = r;
+      }
       const lightDist = Math.max(dist * 2, 100);
 
       if (sunPosition.altitudeDeg > 0) {
@@ -305,7 +329,6 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
         light.shadow.camera.near = lightDist * 0.1;
         light.shadow.camera.far = lightDist * 3;
       } else {
-        // Sun below horizon — dim light, no shadows
         light.position.set(0, 10, 0);
         light.intensity = 0.1;
         light.castShadow = false;
@@ -315,23 +338,14 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
 
     // Apply highlight when selection or hover changes
     useEffect(() => {
-      const mesh = meshRef.current;
-      const pickingIndex = pickingIndexRef.current;
-      const baseColors = baseColorsRef.current;
-      if (!mesh || !pickingIndex || !baseColors) return;
+      reapplyHighlight(layerSceneMapRef.current, layers);
+    }, [selection, hovered, layers]);
 
-      if (!selection && !hovered) {
-        clearHighlight(mesh.geometry, baseColors, ruleColorsRef.current);
-      } else {
-        applyHighlight(mesh.geometry, baseColors, selection, hovered, pickingIndex, ruleColorsRef.current);
-      }
-    }, [selection, hovered]);
-
-    // Wire up picking — pass ref objects so the hook reads .current inside useEffect
+    // Wire up multi-layer picking
     usePickingControls({
       cameraRef,
-      meshRef,
-      pickingIndexRef,
+      cityGroupRef,
+      layerSceneMapRef,
       canvasRef,
     });
 
@@ -339,10 +353,11 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
     const fitAll = useCallback(() => {
       const camera = cameraRef.current;
       const controls = controlsRef.current;
-      if (camera && controls && model) {
-        fitCamera(camera, controls, model);
+      if (camera && controls) {
+        const bbox = computeUnionBBox(layers);
+        if (bbox) fitCamera(camera, controls, bbox);
       }
-    }, [model]);
+    }, [layers]);
 
     const getCameraState = useCallback(() => {
       const camera = cameraRef.current;
@@ -369,8 +384,11 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
     useImperativeHandle(ref, () => ({ fitAll, getCameraState, setCameraState }), [fitAll, getCameraState, setCameraState]);
 
     // Tooltip for hovered object
-    const hoveredObject = hovered
-      ? model?.objects[hovered.objectId]
+    const hoveredLayer = hovered
+      ? layers.find((l) => l.id === hovered.layerId)
+      : undefined;
+    const hoveredObject = hoveredLayer
+      ? hoveredLayer.model.objects[hovered!.objectId]
       : undefined;
 
     return (
@@ -393,16 +411,73 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
 // Helpers
 // ---------------------------------------------------------------------------
 
+function reapplyHighlight(
+  map: Map<string, LayerSceneState>,
+  layers: ReadonlyArray<Layer>,
+): void {
+  const { selection: sel, hovered: hov } = useSelectionStore.getState();
+
+  for (const layer of layers) {
+    const state = map.get(layer.id);
+    if (!state) continue;
+
+    const isTarget =
+      (sel && sel.layerId === layer.id) || (hov && hov.layerId === layer.id);
+
+    if (isTarget) {
+      applyHighlight(
+        state.mesh.geometry,
+        state.baseColors,
+        sel?.layerId === layer.id ? sel : null,
+        hov?.layerId === layer.id ? hov : null,
+        state.pickingIndex,
+        state.ruleColors,
+      );
+    } else {
+      clearHighlight(state.mesh.geometry, state.baseColors, state.ruleColors);
+    }
+  }
+}
+
+function configureShadowCamera(light: DirectionalLight, bbox: BBox3): void {
+  const extentX = bbox[3] - bbox[0];
+  const extentY = bbox[4] - bbox[1];
+  const extentZ = bbox[5] - bbox[2];
+  const halfSize = Math.max(extentX, extentY, extentZ) * 0.7;
+  light.shadow.camera.left = -halfSize;
+  light.shadow.camera.right = halfSize;
+  light.shadow.camera.top = halfSize;
+  light.shadow.camera.bottom = -halfSize;
+  light.shadow.camera.updateProjectionMatrix();
+}
+
+function computeUnionBBox(layers: ReadonlyArray<Layer>): BBox3 | null {
+  let result: [number, number, number, number, number, number] | null = null;
+  for (const layer of layers) {
+    if (!layer.visible || !layer.model.bbox) continue;
+    const b = layer.model.bbox;
+    if (!result) {
+      result = [b[0], b[1], b[2], b[3], b[4], b[5]];
+    } else {
+      result[0] = Math.min(result[0], b[0]);
+      result[1] = Math.min(result[1], b[1]);
+      result[2] = Math.min(result[2], b[2]);
+      result[3] = Math.max(result[3], b[3]);
+      result[4] = Math.max(result[4], b[4]);
+      result[5] = Math.max(result[5], b[5]);
+    }
+  }
+  return result;
+}
+
 function fitCamera(
   camera: PerspectiveCamera,
   controls: OrbitControls,
-  model: CityModel,
+  bbox: BBox3,
 ): void {
-  if (!model.bbox) return;
-
-  const extentX = model.bbox[3] - model.bbox[0];
-  const extentY = model.bbox[4] - model.bbox[1];
-  const extentZ = model.bbox[5] - model.bbox[2];
+  const extentX = bbox[3] - bbox[0];
+  const extentY = bbox[4] - bbox[1];
+  const extentZ = bbox[5] - bbox[2];
   const maxExtent = Math.max(extentX, extentY, extentZ);
   const distance = maxExtent * 1.5;
 

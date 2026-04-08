@@ -33,7 +33,7 @@ function makeGeometryWithIndices(
 // ---------------------------------------------------------------------------
 
 describe("resolveSelection", () => {
-  const pickingIndex: PickingIndex = { objectKeys: ["b1", "b2"] };
+  const pickingIndex: PickingIndex = { layerId: "test-layer", objectKeys: ["b1", "b2"] };
 
   it("returns object selection in object mode", () => {
     const geometry = makeGeometryWithIndices(
@@ -43,7 +43,7 @@ describe("resolveSelection", () => {
 
     const result = resolveSelection(3, geometry, pickingIndex, "object");
 
-    expect(result).toEqual({ kind: "object", objectId: "b2" });
+    expect(result).toEqual({ kind: "object", layerId: "test-layer", objectId: "b2" });
   });
 
   it("returns surface selection in surface mode", () => {
@@ -56,6 +56,7 @@ describe("resolveSelection", () => {
 
     expect(result).toEqual({
       kind: "surface",
+      layerId: "test-layer",
       objectId: "b1",
       surfaceIndex: 2,
     });

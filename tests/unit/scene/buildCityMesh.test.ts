@@ -70,7 +70,7 @@ describe("computeOriginOffset", () => {
 describe("buildCityMesh", () => {
   it("returns zero triangles for an empty model", () => {
     const model = makeModel({});
-    const result = buildCityMesh(model);
+    const result = buildCityMesh(model, "test-layer");
 
     expect(result.triangleCount).toBe(0);
     expect(result.geometry.getAttribute("position")).toBeDefined();
@@ -84,7 +84,7 @@ describe("buildCityMesh", () => {
       [0, 1, 0],
     ]);
     const model = makeModel({ b1: makeObject("b1", [surface]) });
-    const result = buildCityMesh(model);
+    const result = buildCityMesh(model, "test-layer");
 
     expect(result.triangleCount).toBe(1);
   });
@@ -98,7 +98,7 @@ describe("buildCityMesh", () => {
       [0, 1, 0],
     ]);
     const model = makeModel({ b1: makeObject("b1", [surface]) });
-    const result = buildCityMesh(model);
+    const result = buildCityMesh(model, "test-layer");
 
     expect(result.triangleCount).toBe(2);
   });
@@ -110,7 +110,7 @@ describe("buildCityMesh", () => {
       [100, 210, 0],
     ]);
     const model = makeModel({ b1: makeObject("b1", [surface]) });
-    const result = buildCityMesh(model, [105, 205, 0]);
+    const result = buildCityMesh(model, "test-layer", [105, 205, 0]);
 
     const posAttr = result.geometry.getAttribute("position");
     // First vertex: (100-105, 200-205, 0-0) = (-5, -5, 0)
@@ -133,7 +133,7 @@ describe("buildCityMesh", () => {
     const model = makeModel({
       b1: makeObject("b1", [roof, wall]),
     });
-    const result = buildCityMesh(model);
+    const result = buildCityMesh(model, "test-layer");
 
     const colorAttr = result.geometry.getAttribute("color");
     // RoofSurface (0xcc4444) and WallSurface (0xcccccc) differ in green channel
@@ -146,7 +146,7 @@ describe("buildCityMesh", () => {
       [1, 0, 0],
     ]);
     const model = makeModel({ b1: makeObject("b1", [degenerate]) });
-    const result = buildCityMesh(model);
+    const result = buildCityMesh(model, "test-layer");
 
     expect(result.triangleCount).toBe(0);
   });
@@ -175,7 +175,7 @@ describe("buildCityMesh", () => {
     const model = makeModel({
       b1: makeObject("b1", [surfaceWithHole]),
     });
-    const result = buildCityMesh(model);
+    const result = buildCityMesh(model, "test-layer");
 
     // Only the exterior quad should be triangulated: 2 triangles
     expect(result.triangleCount).toBe(2);
@@ -193,7 +193,7 @@ describe("picking index", () => {
       b1: makeObject("b1", [roof]),
       b2: makeObject("b2", [roof]),
     });
-    const result = buildCityMesh(model);
+    const result = buildCityMesh(model, "test-layer");
 
     expect(result.pickingIndex.objectKeys).toEqual(["b1", "b2"]);
   });
@@ -205,7 +205,7 @@ describe("picking index", () => {
       [0, 1, 0],
     ]);
     const model = makeModel({ b1: makeObject("b1", [roof]) });
-    const result = buildCityMesh(model);
+    const result = buildCityMesh(model, "test-layer");
 
     const posAttr = result.geometry.getAttribute("position");
     const idxAttr = result.geometry.getAttribute("objectIndex");
@@ -222,7 +222,7 @@ describe("picking index", () => {
       b1: makeObject("b1", [tri]),
       b2: makeObject("b2", [tri]),
     });
-    const result = buildCityMesh(model);
+    const result = buildCityMesh(model, "test-layer");
 
     const idxAttr = result.geometry.getAttribute("objectIndex");
     // b1's triangle: vertices 0,1,2 → objectIndex 0
@@ -249,7 +249,7 @@ describe("picking index", () => {
     const model = makeModel({
       b1: makeObject("b1", [roof, wall]),
     });
-    const result = buildCityMesh(model);
+    const result = buildCityMesh(model, "test-layer");
 
     const surfAttr = result.geometry.getAttribute("surfaceIndex");
     // roof triangle: vertices 0,1,2 → surfaceIndex 0
@@ -265,7 +265,7 @@ describe("picking index", () => {
       [0, 1, 0],
     ]);
     const model = makeModel({ b1: makeObject("b1", [roof]) });
-    const result = buildCityMesh(model);
+    const result = buildCityMesh(model, "test-layer");
 
     expect(result.baseColors).toBeInstanceOf(Float32Array);
     expect(result.baseColors.length).toBeGreaterThan(0);
@@ -277,7 +277,7 @@ describe("picking index", () => {
 
   it("returns empty pickingIndex for empty model", () => {
     const model = makeModel({});
-    const result = buildCityMesh(model);
+    const result = buildCityMesh(model, "test-layer");
 
     expect(result.pickingIndex.objectKeys).toEqual([]);
     expect(result.baseColors.length).toBe(0);

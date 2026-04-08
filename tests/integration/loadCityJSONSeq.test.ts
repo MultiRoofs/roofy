@@ -24,7 +24,7 @@ describe("CityJSONSeq load-to-inspect pipeline", () => {
 
   describe("mesh construction", () => {
     const originOffset = computeOriginOffset(model);
-    const meshResult = buildCityMesh(model, originOffset);
+    const meshResult = buildCityMesh(model, "test-layer", originOffset);
 
     it("produces non-zero triangles", () => {
       expect(meshResult.triangleCount).toBeGreaterThan(0);
