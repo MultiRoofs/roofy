@@ -2,38 +2,49 @@
  * Viewer toolbar with metadata pills and action buttons.
  */
 
-import type { CityModel } from "../../domain/citymodel/types";
-import { useRuleStore } from "../../features/rules/ruleStore";
+import type { Theme } from "../../features/theme/useTheme";
+import { useLayerStore } from "../../features/layers/layerStore";
 import { useSolarStore } from "../../features/solar/solarStore";
 
 interface ViewerToolbarProps {
-  readonly model: CityModel;
   readonly fileName: string | null;
+  readonly layerCount: number;
   readonly onClose: () => void;
   readonly onToggleInspector: () => void;
   readonly onFitAll: () => void;
   readonly onSave?: () => void;
   readonly onShare?: () => void;
   readonly canShare?: boolean;
+  readonly theme: Theme;
+  readonly onToggleTheme: () => void;
 }
 
 export function ViewerToolbar({
-  model,
   fileName,
+  layerCount,
   onClose,
   onToggleInspector,
   onFitAll,
   onSave,
   onShare,
   canShare,
+  theme,
+  onToggleTheme,
 }: ViewerToolbarProps) {
-  const objectCount = Object.keys(model.objects).length;
-  const crs = extractCrsCode(model.metadata.referenceSystem);
-  const lod = findPrimaryLod(model);
+  const layers = useLayerStore((s) => s.layers);
+  const activeLayerId = useLayerStore((s) => s.activeLayerId);
+  const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
 
-  const rulesEnabled = useRuleStore((s) => s.enabled);
-  const ruleCount = useRuleStore((s) => s.rules.filter((r) => r.enabled).length);
-  const toggleRules = useRuleStore((s) => s.toggleEnabled);
+  const totalObjects = layers.reduce(
+    (sum, l) => sum + Object.keys(l.model.objects).length,
+    0,
+  );
+  const crs = activeLayer ? extractCrsCode(activeLayer.model.metadata.referenceSystem) : null;
+  const lod = activeLayer ? findPrimaryLod(activeLayer.model) : null;
+
+  const ruleCount = activeLayer
+    ? activeLayer.rules.filter((r) => r.enabled).length
+    : 0;
 
   const datetime = useSolarStore((s) => s.datetime);
   const sunPosition = useSolarStore((s) => s.sunPosition);
@@ -51,8 +62,13 @@ export function ViewerToolbar({
           </div>
         )}
         <div className="pill">
-          Objects <span className="value">{objectCount}</span>
+          Objects <span className="value">{totalObjects}</span>
         </div>
+        {layerCount > 1 && (
+          <div className="pill">
+            Layers <span className="value">{layerCount}</span>
+          </div>
+        )}
         {lod && (
           <div className="pill">
             LoD <span className="value">{lod}</span>
@@ -72,18 +88,37 @@ export function ViewerToolbar({
       {ruleCount > 0 && (
         <>
           <div className="toolbar-sep" />
-          <div
-            className={`pill rule-pill ${rulesEnabled ? "rule-pill-active" : ""}`}
-            onClick={toggleRules}
-            role="button"
-            tabIndex={0}
-          >
+          <div className="pill rule-pill rule-pill-active">
             Rules <span className="value">{ruleCount} active</span>
           </div>
         </>
       )}
 
       <div className="toolbar-spacer" />
+
+      <button
+        className="theme-toggle-btn"
+        title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+        onClick={onToggleTheme}
+      >
+        {theme === "dark" ? (
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="5" />
+            <line x1="12" y1="1" x2="12" y2="3" />
+            <line x1="12" y1="21" x2="12" y2="23" />
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+            <line x1="1" y1="12" x2="3" y2="12" />
+            <line x1="21" y1="12" x2="23" y2="12" />
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+          </svg>
+        )}
+      </button>
 
       {onSave && (
         <button className="tb-btn" title="Save workspace" onClick={onSave}>
@@ -137,7 +172,7 @@ function formatDatetimePill(dt: Date): string {
   });
 }
 
-function findPrimaryLod(model: CityModel): string | null {
+function findPrimaryLod(model: { objects: Record<string, { lod: string | null }> }): string | null {
   for (const obj of Object.values(model.objects)) {
     if (obj?.lod) return obj.lod;
   }

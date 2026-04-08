@@ -2,34 +2,48 @@
  * Right-side inspector panel.
  *
  * Shows details about the selected CityObject or surface.
- * Tabs: Object (identity + attributes) and Surfaces (type breakdown).
+ * Tabs: Layers, Object, Surfaces, Analysis, Rules, Solar, Stats.
  */
 
 import { useState } from "react";
-import type { CityModel, CityObject, BuildingSurfaceType } from "../../domain/citymodel/types";
+import type { CityObject, BuildingSurfaceType } from "../../domain/citymodel/types";
 import type { Selection } from "../../domain/selection/types";
 import { SURFACE_COLOR_HEX } from "../../shared/surfaceColorMap";
+import { useLayerStore } from "../../features/layers/layerStore";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { AnalysisTab } from "./AnalysisTab";
 import { RuleBuilderTab } from "./RuleBuilderTab";
 import { SolarTab } from "./SolarTab";
 import { StatsTab } from "./StatsTab";
+import { LayerPanel } from "../layers/LayerPanel";
 
-type Tab = "object" | "surfaces" | "analysis" | "rules" | "solar" | "stats";
+type Tab = "layers" | "object" | "surfaces" | "analysis" | "rules" | "solar" | "stats";
 
 interface InspectorPanelProps {
-  readonly model: CityModel;
   readonly selection: Selection | null;
   readonly onClose: () => void;
   readonly duckdbModelLoaded?: boolean;
+  readonly onAddLayerFromFile: (file: File) => void;
+  readonly onAddLayerFromUrl: (url: string) => void;
+  readonly addLayerLoading: boolean;
 }
 
-export function InspectorPanel({ model, selection, onClose, duckdbModelLoaded }: InspectorPanelProps) {
-  const [activeTab, setActiveTab] = useState<Tab>("object");
+export function InspectorPanel({ selection, onClose, duckdbModelLoaded, onAddLayerFromFile, onAddLayerFromUrl, addLayerLoading }: InspectorPanelProps) {
+  const [activeTab, setActiveTab] = useState<Tab>("layers");
 
-  const selectedObject: CityObject | undefined = selection
-    ? model.objects[selection.objectId]
+  const layers = useLayerStore((s) => s.layers);
+  const activeLayerId = useLayerStore((s) => s.activeLayerId);
+
+  // Derive the model to display based on selection or active layer
+  const selectedLayer = selection
+    ? layers.find((l) => l.id === selection.layerId)
     : undefined;
+  const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
+  const displayLayer = selectedLayer ?? activeLayer;
+  const model = displayLayer?.model;
+
+  const selectedObject: CityObject | undefined =
+    selection && model ? model.objects[selection.objectId] : undefined;
 
   return (
     <aside className="inspector">
@@ -43,6 +57,12 @@ export function InspectorPanel({ model, selection, onClose, duckdbModelLoaded }:
       </div>
 
       <div className="inspector-tabs">
+        <button
+          className={`inspector-tab ${activeTab === "layers" ? "active" : ""}`}
+          onClick={() => setActiveTab("layers")}
+        >
+          Layers
+        </button>
         <button
           className={`inspector-tab ${activeTab === "object" ? "active" : ""}`}
           onClick={() => setActiveTab("object")}
@@ -82,12 +102,26 @@ export function InspectorPanel({ model, selection, onClose, duckdbModelLoaded }:
       </div>
       <div className="inspector-body">
         <ErrorBoundary fallback="inline" key={activeTab}>
-          {activeTab === "rules" ? (
-            <RuleBuilderTab model={model} />
+          {activeTab === "layers" ? (
+            <LayerPanel
+              onAddFile={onAddLayerFromFile}
+              onAddUrl={onAddLayerFromUrl}
+              loading={addLayerLoading}
+            />
+          ) : activeTab === "rules" ? (
+            displayLayer ? (
+              <RuleBuilderTab model={displayLayer.model} layerId={displayLayer.id} />
+            ) : (
+              <div className="inspector-placeholder">No layer selected</div>
+            )
           ) : activeTab === "solar" ? (
             <SolarTab />
           ) : activeTab === "stats" ? (
-            <StatsTab model={model} selection={selection} duckdbModelLoaded={duckdbModelLoaded} />
+            model ? (
+              <StatsTab model={model} selection={selection} duckdbModelLoaded={duckdbModelLoaded} />
+            ) : (
+              <div className="inspector-placeholder">No layer selected</div>
+            )
           ) : !selectedObject ? (
             <div className="inspector-placeholder">
               Select an object to inspect
@@ -185,7 +219,6 @@ function SurfacesTab({
   object: CityObject;
   selectedSurfaceIndex: number | null;
 }) {
-  // Count surfaces by type
   const counts = new Map<BuildingSurfaceType, number>();
   const indexByType = new Map<BuildingSurfaceType, number[]>();
 

@@ -1,21 +1,23 @@
 /**
  * Legend overlay displayed on the viewport when rules are active.
  *
- * Shows the active rules with their color swatches and names.
- * Can be toggled on/off by the user.
+ * Shows the active rules across all visible layers with their color
+ * swatches and names.
  */
 
 import { useState } from "react";
-import { useRuleStore } from "../../features/rules/ruleStore";
+import { useLayerStore } from "../../features/layers/layerStore";
 
 export function LegendOverlay() {
-  const rules = useRuleStore((s) => s.rules);
-  const enabled = useRuleStore((s) => s.enabled);
+  const layers = useLayerStore((s) => s.layers);
   const [visible, setVisible] = useState(true);
 
-  const activeRules = rules.filter((r) => r.enabled);
+  // Collect all active rules from visible layers with rules enabled
+  const activeRules = layers
+    .filter((l) => l.visible && l.rulesEnabled)
+    .flatMap((l) => l.rules.filter((r) => r.enabled).map((r) => ({ ...r, layerName: l.name })));
 
-  if (!enabled || activeRules.length === 0) return null;
+  if (activeRules.length === 0) return null;
 
   return (
     <div className="legend-overlay">

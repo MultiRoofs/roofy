@@ -1,18 +1,19 @@
 /**
- * Rule builder tab for creating and managing colorization rules.
+ * Rule builder tab for creating and managing per-layer colorization rules.
  *
- * Rules are stored in the Zustand rule store and applied to the mesh
+ * Rules are stored in the layer store and applied to the mesh
  * via applyRuleColors in CityScene.
  */
 
 import { useCallback, useRef, useState } from "react";
 import type { CityModel } from "../../domain/citymodel/types";
-import { useRuleStore } from "../../features/rules/ruleStore";
+import { useLayerStore } from "../../features/layers/layerStore";
 import type { Condition, ConditionOperator, LogicMode, Rule } from "../../features/rules/types";
 import { RULE_PRESETS } from "../../features/rules/presets";
 
 interface RuleBuilderTabProps {
   readonly model: CityModel;
+  readonly layerId: string;
 }
 
 // Metric fields always available for conditions
@@ -20,13 +21,15 @@ const METRIC_FIELDS = ["areaSqM", "inclinationDeg", "azimuthDeg", "elevationM"] 
 
 const OPERATORS: ConditionOperator[] = [">", "<", "=", ">=", "<="];
 
-export function RuleBuilderTab({ model }: RuleBuilderTabProps) {
-  const rules = useRuleStore((s) => s.rules);
-  const enabled = useRuleStore((s) => s.enabled);
-  const addRule = useRuleStore((s) => s.addRule);
-  const updateRule = useRuleStore((s) => s.updateRule);
-  const deleteRule = useRuleStore((s) => s.deleteRule);
-  const toggleEnabled = useRuleStore((s) => s.toggleEnabled);
+export function RuleBuilderTab({ model, layerId }: RuleBuilderTabProps) {
+  const layer = useLayerStore((s) => s.layers.find((l) => l.id === layerId));
+  const rules = layer?.rules ?? [];
+  const enabled = layer?.rulesEnabled ?? true;
+
+  const addRule = useLayerStore((s) => s.addRule);
+  const updateRule = useLayerStore((s) => s.updateRule);
+  const deleteRule = useLayerStore((s) => s.deleteRule);
+  const toggleRulesEnabled = useLayerStore((s) => s.toggleRulesEnabled);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -57,7 +60,7 @@ export function RuleBuilderTab({ model }: RuleBuilderTabProps) {
           if (!Array.isArray(imported)) return;
           for (const rule of imported) {
             if (rule.name && rule.color && Array.isArray(rule.conditions)) {
-              addRule({ ...rule, id: crypto.randomUUID() });
+              addRule(layerId, { ...rule, id: crypto.randomUUID() });
             }
           }
         } catch {
@@ -67,7 +70,7 @@ export function RuleBuilderTab({ model }: RuleBuilderTabProps) {
       // Reset so the same file can be re-imported
       e.target.value = "";
     },
-    [addRule],
+    [addRule, layerId],
   );
 
   return (
@@ -79,7 +82,7 @@ export function RuleBuilderTab({ model }: RuleBuilderTabProps) {
             <input
               type="checkbox"
               checked={enabled}
-              onChange={toggleEnabled}
+              onChange={() => toggleRulesEnabled(layerId)}
             />
             <span className="rule-toggle-label">{enabled ? "On" : "Off"}</span>
           </label>
@@ -96,7 +99,7 @@ export function RuleBuilderTab({ model }: RuleBuilderTabProps) {
                 initial={rule}
                 fields={allFields}
                 onSave={(updated) => {
-                  updateRule(rule.id, updated);
+                  updateRule(layerId, rule.id, updated);
                   setEditingId(null);
                 }}
                 onCancel={() => setEditingId(null)}
@@ -105,8 +108,8 @@ export function RuleBuilderTab({ model }: RuleBuilderTabProps) {
               <RuleRow
                 rule={rule}
                 onEdit={() => setEditingId(rule.id)}
-                onDelete={() => deleteRule(rule.id)}
-                onToggle={() => updateRule(rule.id, { enabled: !rule.enabled })}
+                onDelete={() => deleteRule(layerId, rule.id)}
+                onToggle={() => updateRule(layerId, rule.id, { enabled: !rule.enabled })}
               />
             )}
           </div>
@@ -116,7 +119,7 @@ export function RuleBuilderTab({ model }: RuleBuilderTabProps) {
           <RuleForm
             fields={allFields}
             onSave={(rule) => {
-              addRule({
+              addRule(layerId, {
                 ...rule,
                 id: crypto.randomUUID(),
               });
@@ -143,7 +146,7 @@ export function RuleBuilderTab({ model }: RuleBuilderTabProps) {
               key={preset.label}
               className="preset-btn"
               title={preset.description}
-              onClick={() => addRule(preset.create())}
+              onClick={() => addRule(layerId, preset.create())}
             >
               {preset.label}
             </button>
@@ -330,7 +333,7 @@ function RuleForm({ initial, fields, onSave, onCancel }: RuleFormProps) {
             value={String(cond.value)}
             onChange={(e) => {
               const raw = e.target.value;
-              if (raw === "") return; // preserve previous value when cleared
+              if (raw === "") return;
               const num = Number(raw);
               updateCondition(idx, {
                 value: raw === "true" ? true : raw === "false" ? false : isNaN(num) ? raw : num,
