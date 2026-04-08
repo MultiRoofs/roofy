@@ -4,17 +4,18 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview",
+    "dev": "vp dev",
+    "build": "tsc -b && vp build",
+    "preview": "vp preview",
     "devcontainer:up": "devcontainer up --workspace-folder . --docker-path podman",
     "devcontainer:exec": "devcontainer exec --workspace-folder . --docker-path podman",
     "devcontainer:shell": "bash .devcontainer/attach-container.sh podman",
-    "lint": "eslint .",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "lint": "vp lint . --fix",
+    "test": "vp test run",
+    "test:watch": "vp test",
+    "format": "vp fmt .",
+    "format:check": "vp fmt --check .",
+    "prepare": "vp config"
   },
   "dependencies": {
     "@cityjson/flatcitybuf": "^0.2.0",
@@ -28,8 +29,6 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
-    "@eslint/js": "latest",
-    "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "latest",
     "@testing-library/react": "latest",
     "@testing-library/user-event": "latest",
@@ -40,15 +39,15 @@
     "@types/suncalc": "^1.9.2",
     "@types/three": "latest",
     "@vitejs/plugin-react": "latest",
-    "eslint": "latest",
-    "eslint-plugin-react-hooks": "latest",
-    "eslint-plugin-react-refresh": "latest",
-    "globals": "latest",
     "jsdom": "latest",
-    "prettier": "latest",
     "typescript": "latest",
-    "typescript-eslint": "latest",
-    "vite": "latest",
-    "vitest": "latest"
+    "vite": "npm:@voidzero-dev/vite-plus-core@latest",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@latest",
+    "vite-plus": "latest"
+  },
+  "packageManager": "npm@11.12.1",
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@latest",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@latest"
   }
 }

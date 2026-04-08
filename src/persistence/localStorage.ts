@@ -5,7 +5,11 @@
  * A separate index key tracks all snapshot IDs for listing.
  */
 
-import type { ProjectSnapshot, ProjectStateStore, SnapshotSummary } from "./types";
+import type {
+  ProjectSnapshot,
+  ProjectStateStore,
+  SnapshotSummary,
+} from "./types";
 
 const STORAGE_PREFIX = "multiroof:snapshot:";
 const INDEX_KEY = "multiroof:snapshot-index";
@@ -39,7 +43,9 @@ export class LocalStorageProjectStateStore implements ProjectStateStore {
     try {
       localStorage.setItem(key, JSON.stringify(snapshot));
     } catch (e) {
-      throw new Error("Could not save workspace: storage quota exceeded.", { cause: e });
+      throw new Error("Could not save workspace: storage quota exceeded.", {
+        cause: e,
+      });
     }
 
     try {
@@ -65,7 +71,11 @@ export class LocalStorageProjectStateStore implements ProjectStateStore {
   }
 
   async list(): Promise<SnapshotSummary[]> {
-    return readIndex().map(({ id, savedAt, label }) => ({ id, savedAt, label }));
+    return readIndex().map(({ id, savedAt, label }) => ({
+      id,
+      savedAt,
+      label,
+    }));
   }
 
   async remove(id: string): Promise<void> {

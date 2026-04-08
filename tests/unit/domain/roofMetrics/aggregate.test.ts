@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import {
   computeAverageAzimuth,
   aggregateRoofMetrics,
@@ -35,8 +35,8 @@ describe("computeAverageAzimuth", () => {
   it("excludes flat surfaces (inclinationDeg < 1) from the azimuth average", () => {
     // Flat roof has azimuthDeg=0 by convention — must not pull average north
     const metrics: RoofMetrics[] = [
-      { areaSqM: 100, inclinationDeg: 0, azimuthDeg: 0 },   // flat — should be excluded
-      { areaSqM: 50, inclinationDeg: 30, azimuthDeg: 180 },  // south-facing
+      { areaSqM: 100, inclinationDeg: 0, azimuthDeg: 0 }, // flat — should be excluded
+      { areaSqM: 50, inclinationDeg: 30, azimuthDeg: 180 }, // south-facing
     ];
     expect(computeAverageAzimuth(metrics)).toBeCloseTo(180, 1);
   });
@@ -57,7 +57,12 @@ describe("computeAverageAzimuth", () => {
 describe("aggregateRoofMetrics", () => {
   it("returns zeros for empty array", () => {
     const agg = aggregateRoofMetrics([]);
-    expect(agg).toEqual({ totalArea: 0, avgInclination: 0, avgAzimuth: 0, count: 0 });
+    expect(agg).toEqual({
+      totalArea: 0,
+      avgInclination: 0,
+      avgAzimuth: 0,
+      count: 0,
+    });
   });
 
   it("computes area-weighted average inclination", () => {

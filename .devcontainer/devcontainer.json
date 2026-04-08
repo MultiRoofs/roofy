@@ -5,9 +5,7 @@
     "ghcr.io/devcontainers/features/node:1": {
       "version": "lts",
       "nodeGypDependencies": true,
-      "npmPackages": [
-        "typescript"
-      ]
+      "npmPackages": ["typescript"]
     }
   },
   "customizations": {
@@ -50,10 +48,7 @@
   "postCreateCommand": "bash .devcontainer/post-create.sh",
   "remoteUser": "vscode",
   "userEnvProbe": "none",
-  "forwardPorts": [
-    5173,
-    4173
-  ],
+  "forwardPorts": [5173, 4173],
   "portsAttributes": {
     "5173": {
       "label": "Vite Dev Server",
@@ -63,8 +58,5 @@
       "label": "Vite Preview"
     }
   },
-  "runArgs": [
-    "--userns=keep-id",
-    "--cap-add=SYS_PTRACE"
-  ]
+  "runArgs": ["--userns=keep-id", "--cap-add=SYS_PTRACE"]
 }

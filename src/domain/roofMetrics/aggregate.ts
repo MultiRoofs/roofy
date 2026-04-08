@@ -9,7 +9,9 @@ const FLAT_THRESHOLD_DEG = 1;
 
 /** Compute the area-weighted circular mean of azimuth angles.
  *  Flat surfaces (inclination < 1°) are excluded since their azimuth is undefined. */
-export function computeAverageAzimuth(metrics: ReadonlyArray<RoofMetrics>): number {
+export function computeAverageAzimuth(
+  metrics: ReadonlyArray<RoofMetrics>,
+): number {
   if (metrics.length === 0) return 0;
 
   let sinSum = 0;
@@ -47,7 +49,8 @@ export function aggregateRoofMetrics(metrics: ReadonlyArray<RoofMetrics>): {
   const totalArea = metrics.reduce((sum, m) => sum + m.areaSqM, 0);
   const avgInclination =
     totalArea > 0
-      ? metrics.reduce((sum, m) => sum + m.inclinationDeg * m.areaSqM, 0) / totalArea
+      ? metrics.reduce((sum, m) => sum + m.inclinationDeg * m.areaSqM, 0) /
+        totalArea
       : 0;
   const avgAzimuth = computeAverageAzimuth(metrics);
 

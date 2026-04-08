@@ -62,10 +62,7 @@ function expandBBox(
   if (v[2] > bbox[5]) bbox[5] = v[2];
 }
 
-export function mergeBBox(
-  a: BBox3 | null,
-  b: BBox3 | null,
-): BBox3 | null {
+export function mergeBBox(a: BBox3 | null, b: BBox3 | null): BBox3 | null {
   if (a === null) return b;
   if (b === null) return a;
   return [
@@ -140,9 +137,7 @@ function extractSurfacesFromMultiSurface(
     const semanticIndex =
       semanticValues !== undefined ? semanticValues[i] : undefined;
     const sem =
-      semanticIndex !== undefined &&
-      semanticIndex !== null &&
-      semanticSurfaces
+      semanticIndex !== undefined && semanticIndex !== null && semanticSurfaces
         ? semanticSurfaces[semanticIndex]
         : undefined;
 
@@ -324,7 +319,12 @@ export function parseCityObject(
 ): CityObject {
   const allSurfaces: Surface[] = [];
   const objectBBox: [number, number, number, number, number, number] = [
-    Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity,
+    Infinity,
+    Infinity,
+    Infinity,
+    -Infinity,
+    -Infinity,
+    -Infinity,
   ];
   let lod: string | null = null;
 
@@ -343,7 +343,14 @@ export function parseCityObject(
     attributes: raw.attributes ?? {},
     surfaces: allSurfaces,
     bbox: hasBBox
-      ? [objectBBox[0], objectBBox[1], objectBBox[2], objectBBox[3], objectBBox[4], objectBBox[5]]
+      ? [
+          objectBBox[0],
+          objectBBox[1],
+          objectBBox[2],
+          objectBBox[3],
+          objectBBox[4],
+          objectBBox[5],
+        ]
       : null,
     children: raw.children ? [...raw.children] : [],
     parents: raw.parents ? [...raw.parents] : [],
@@ -355,9 +362,7 @@ export function parseCityObject(
 // Metadata mapping
 // ---------------------------------------------------------------------------
 
-export function mapMetadata(
-  raw: CityJSONRoot["metadata"],
-): CityModelMetadata {
+export function mapMetadata(raw: CityJSONRoot["metadata"]): CityModelMetadata {
   if (!raw) return {};
   return {
     title: raw.title,

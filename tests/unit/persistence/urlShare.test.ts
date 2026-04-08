@@ -2,14 +2,16 @@
  * Unit tests for URL share state codec.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import {
   encodeShareState,
   decodeShareState,
 } from "../../../src/persistence/urlShare";
 import type { ShareableViewState } from "../../../src/persistence/urlShare";
 
-function makeState(overrides: Partial<ShareableViewState> = {}): ShareableViewState {
+function makeState(
+  overrides: Partial<ShareableViewState> = {},
+): ShareableViewState {
   return {
     modelUrl: "https://example.com/model.city.json",
     cp: [50, 50, 50],

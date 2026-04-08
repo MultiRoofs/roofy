@@ -31,16 +31,18 @@ It is broken into four sub-milestones, each independently committable.
 - On restore: load snapshot → set all store states → if model source is a URL, reload it
 
 **What the snapshot captures**:
+
 - `version`: Schema version string for forward compat
 - `savedAt`: ISO 8601 timestamp
 - `label`: User-provided or auto-generated name
 - `modelRef`: `{ type: "url", url: string } | { type: "file", fileName: string }`
-- `viewState`: `{ cameraPosition, cameraTarget, datetime }` 
+- `viewState`: `{ cameraPosition, cameraTarget, datetime }`
 - `rules`: Full rule array from ruleStore
 - `rulesEnabled`: Global toggle
 - `pickMode`: "object" | "surface"
 
 **What it does NOT capture** (v1):
+
 - The model data itself (too large for localStorage)
 - Selection (transient)
 - DuckDB query state
@@ -66,6 +68,7 @@ It is broken into four sub-milestones, each independently committable.
 - Statistics are computed on demand (not cached in a store) since the model is immutable after loading
 
 **Example stats**:
+
 - Building count / surface count
 - Total roof area (m²)
 - Average building height (m)
@@ -92,6 +95,7 @@ It is broken into four sub-milestones, each independently committable.
 - Vite config: add COOP/COEP headers for SharedArrayBuffer (required by DuckDB-wasm)
 
 **Implementation status**: The `duckdb.ts` module is implemented with:
+
 - Lazy singleton initialization via `initDuckDB()` (race-safe Promise caching)
 - MVP bundle (no SharedArrayBuffer needed — avoids COOP/COEP header requirement)
 - `getDuckDBStatus()` exposes a discriminated union: uninitialized / initializing / ready / failed
@@ -100,6 +104,7 @@ It is broken into four sub-milestones, each independently committable.
 - `loadModelIntoDuckDB(url, encoding)` creates a `city_objects` table from a URL source
 
 **Risk**: The `cityjson` DuckDB extension may not have a WASM build in the community repository. If it fails:
+
 - The module catches the error and sets `extensionLoaded: false`
 - The M4.2 pure-function stats remain fully functional as the primary stats path
 - Fallback for M5: populate DuckDB tables from in-memory CityModel data instead of using the extension readers
@@ -127,6 +132,7 @@ It is broken into four sub-milestones, each independently committable.
 - On app load: check `location.hash` for a share token → decode → load model from URL → apply view state
 
 **Shareability constraints** (from design doc §17):
+
 - If model came from a local file, sharing the URL won't fully work (no model source). Show a warning.
 - Keep the hash payload small — omit large data, use compact keys.
 

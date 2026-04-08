@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import { detectEncoding } from "../../../../src/domain/citymodel/detectEncoding";
 
 describe("detectEncoding", () => {
@@ -31,15 +31,21 @@ describe("detectEncoding", () => {
 
   // URLs with query strings and fragments
   it("handles URLs with query strings", () => {
-    expect(detectEncoding("https://example.com/data.city.jsonl?token=abc")).toBe("cityjsonseq");
+    expect(
+      detectEncoding("https://example.com/data.city.jsonl?token=abc"),
+    ).toBe("cityjsonseq");
   });
 
   it("handles URLs with fragments", () => {
-    expect(detectEncoding("https://example.com/model.fcb#section")).toBe("flatcitybuf");
+    expect(detectEncoding("https://example.com/model.fcb#section")).toBe(
+      "flatcitybuf",
+    );
   });
 
   it("handles full URLs for CityJSON", () => {
-    expect(detectEncoding("https://storage.googleapis.com/cityjson/delft.city.json")).toBe("cityjson");
+    expect(
+      detectEncoding("https://storage.googleapis.com/cityjson/delft.city.json"),
+    ).toBe("cityjson");
   });
 
   // Case insensitivity
@@ -64,6 +70,8 @@ describe("detectEncoding", () => {
   });
 
   it("ignores extensions in query strings — only pathname matters", () => {
-    expect(detectEncoding("https://example.com/data?file=model.city.jsonl")).toBe("cityjson");
+    expect(
+      detectEncoding("https://example.com/data?file=model.city.jsonl"),
+    ).toBe("cityjson");
   });
 });

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import type { CityJSONRoot } from "../../../../../src/domain/citymodel/cityjson/types";
 import { parseCityJSON } from "../../../../../src/domain/citymodel/cityjson/parseCityJSON";
 
@@ -206,7 +206,7 @@ describe("parseCityJSON", () => {
       const noSemantics: CityJSONRoot = {
         ...SINGLE_BUILDING_CITYJSON,
         CityObjects: {
-          "b1": {
+          b1: {
             type: "Building",
             geometry: [
               {

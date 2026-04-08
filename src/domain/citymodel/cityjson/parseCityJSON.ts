@@ -7,7 +7,12 @@
 
 import type { BBox3, CityModel, CityObject } from "../types";
 import type { CityJSONObject, CityJSONRoot } from "./types";
-import { dequantizeAll, mapMetadata, mergeBBox, parseCityObject } from "./parseHelpers";
+import {
+  dequantizeAll,
+  mapMetadata,
+  mergeBBox,
+  parseCityObject,
+} from "./parseHelpers";
 
 export function parseCityJSON(root: CityJSONRoot): CityModel {
   if (!root.version.startsWith("2.")) {
@@ -21,7 +26,10 @@ export function parseCityJSON(root: CityJSONRoot): CityModel {
   const objects: Record<string, CityObject> = {};
   let modelBBox: BBox3 | null = null;
 
-  for (const [id, rawObj] of Object.entries(root.CityObjects) as [string, CityJSONObject][]) {
+  for (const [id, rawObj] of Object.entries(root.CityObjects) as [
+    string,
+    CityJSONObject,
+  ][]) {
     const obj = parseCityObject(id, rawObj, realVertices);
     objects[id] = obj;
     modelBBox = mergeBBox(modelBBox, obj.bbox);

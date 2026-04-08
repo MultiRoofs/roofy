@@ -50,7 +50,13 @@ export function buildRuleColors(
 
     let ruleColor = colorCache.get(cacheKey);
     if (ruleColor === undefined) {
-      ruleColor = resolveRuleColor(objIdx, surfIdx, model, pickingIndex, enabledRules);
+      ruleColor = resolveRuleColor(
+        objIdx,
+        surfIdx,
+        model,
+        pickingIndex,
+        enabledRules,
+      );
       colorCache.set(cacheKey, ruleColor);
     }
 

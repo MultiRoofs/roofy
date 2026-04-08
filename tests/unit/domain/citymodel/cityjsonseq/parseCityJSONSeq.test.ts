@@ -5,7 +5,7 @@
  * dataset used in CityJSON tests to verify format parity.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseCityJSONSeq } from "../../../../../src/domain/citymodel/cityjsonseq/parseCityJSONSeq";
@@ -109,13 +109,17 @@ describe("parseCityJSONSeq", () => {
 
   it("throws on invalid header type", () => {
     expect(() =>
-      parseCityJSONSeq('{"type":"NotCityJSON","version":"2.0","transform":{"scale":[1,1,1],"translate":[0,0,0]},"CityObjects":{},"vertices":[]}'),
+      parseCityJSONSeq(
+        '{"type":"NotCityJSON","version":"2.0","transform":{"scale":[1,1,1],"translate":[0,0,0]},"CityObjects":{},"vertices":[]}',
+      ),
     ).toThrow(/Invalid CityJSONSeq header/);
   });
 
   it("throws on unsupported version", () => {
     expect(() =>
-      parseCityJSONSeq('{"type":"CityJSON","version":"1.0","transform":{"scale":[1,1,1],"translate":[0,0,0]},"CityObjects":{},"vertices":[]}'),
+      parseCityJSONSeq(
+        '{"type":"CityJSON","version":"1.0","transform":{"scale":[1,1,1],"translate":[0,0,0]},"CityObjects":{},"vertices":[]}',
+      ),
     ).toThrow(/Unsupported CityJSON version "1\.0"/);
   });
 

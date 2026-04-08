@@ -27,4 +27,3 @@ export function getPreferredCityModelEncoding(
 
   return null;
 }
-

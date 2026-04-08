@@ -1,6 +1,13 @@
-import { describe, expect, it } from "vitest";
-import { buildCityMesh, computeOriginOffset } from "../../../src/scene/buildCityMesh";
-import type { CityModel, CityObject, Surface } from "../../../src/domain/citymodel/types";
+import { describe, expect, it } from "vite-plus/test";
+import {
+  buildCityMesh,
+  computeOriginOffset,
+} from "../../../src/scene/buildCityMesh";
+import type {
+  CityModel,
+  CityObject,
+  Surface,
+} from "../../../src/domain/citymodel/types";
 
 // ---------------------------------------------------------------------------
 // Helpers

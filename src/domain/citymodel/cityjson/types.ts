@@ -78,7 +78,7 @@ export type CityJSONObjectType =
   | "WaterBody";
 
 export interface CityJSONObject {
-  readonly type: CityJSONObjectType | string;
+  readonly type: CityJSONObjectType | (string & {});
   readonly geometry?: ReadonlyArray<CityJSONGeometry>;
   readonly attributes?: Readonly<Record<string, unknown>>;
   readonly geographicalExtent?: readonly [
@@ -159,7 +159,7 @@ export type CityJSONSemanticSurfaceType =
   | "TransportationHole";
 
 export interface CityJSONSemanticSurface {
-  readonly type: CityJSONSemanticSurfaceType | string;
+  readonly type: CityJSONSemanticSurfaceType | (string & {});
   readonly parent?: number;
   readonly children?: ReadonlyArray<number>;
   readonly [key: string]: unknown;

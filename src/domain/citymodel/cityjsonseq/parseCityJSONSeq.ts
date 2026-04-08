@@ -12,7 +12,12 @@
 import type { BBox3, CityModel, CityObject } from "../types";
 import type { CityJSONObject, CityJSONRoot } from "../cityjson/types";
 import type { CityJSONFeature } from "./types";
-import { dequantizeAll, mapMetadata, mergeBBox, parseCityObject } from "../cityjson/parseHelpers";
+import {
+  dequantizeAll,
+  mapMetadata,
+  mergeBBox,
+  parseCityObject,
+} from "../cityjson/parseHelpers";
 
 export function parseCityJSONSeq(text: string): CityModel {
   const lines = text.split("\n").filter((line) => line.trim().length > 0);
@@ -26,7 +31,7 @@ export function parseCityJSONSeq(text: string): CityModel {
 
   if (header.type !== "CityJSON") {
     throw new Error(
-      `Invalid CityJSONSeq header: expected "type": "CityJSON", got "${header.type}".`,
+      `Invalid CityJSONSeq header: expected "type": "CityJSON", got "${String(header.type)}".`,
     );
   }
   if (!header.version.startsWith("2.")) {
@@ -48,7 +53,10 @@ export function parseCityJSONSeq(text: string): CityModel {
     const realVertices = dequantizeAll(feature.vertices, header.transform);
     totalVertexCount += feature.vertices.length;
 
-    for (const [id, rawObj] of Object.entries(feature.CityObjects) as [string, CityJSONObject][]) {
+    for (const [id, rawObj] of Object.entries(feature.CityObjects) as [
+      string,
+      CityJSONObject,
+    ][]) {
       const obj = parseCityObject(id, rawObj, realVertices);
       objects[id] = obj;
       modelBBox = mergeBBox(modelBBox, obj.bbox);

@@ -42,10 +42,7 @@ export function LegendOverlay() {
           <div className="legend-title">Rules</div>
           {activeRules.map((rule) => (
             <div key={rule.id} className="legend-item">
-              <div
-                className="legend-dot"
-                style={{ background: rule.color }}
-              />
+              <div className="legend-dot" style={{ background: rule.color }} />
               <span>{rule.name}</span>
             </div>
           ))}

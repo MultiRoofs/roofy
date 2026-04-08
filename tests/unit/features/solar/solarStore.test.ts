@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vite-plus/test";
 import {
   parseEpsgCode,
   sunDirectionThreeJs,
@@ -14,7 +14,9 @@ import type { BBox3 } from "../../../../src/domain/citymodel/types";
 
 describe("parseEpsgCode", () => {
   it("extracts code from OGC URI", () => {
-    expect(parseEpsgCode("https://www.opengis.net/def/crs/EPSG/0/7415")).toBe(7415);
+    expect(parseEpsgCode("https://www.opengis.net/def/crs/EPSG/0/7415")).toBe(
+      7415,
+    );
   });
 
   it("extracts code from short URI", () => {
@@ -149,7 +151,9 @@ describe("useSolarStore", () => {
     useSolarStore.getState().setLatLon({ lat: 52.37, lon: 4.9 });
 
     const before = useSolarStore.getState().sunPosition;
-    useSolarStore.getState().setDatetime(new Date(Date.UTC(2025, 11, 21, 12, 0, 0)));
+    useSolarStore
+      .getState()
+      .setDatetime(new Date(Date.UTC(2025, 11, 21, 12, 0, 0)));
     const after = useSolarStore.getState().sunPosition;
 
     expect(before).not.toBeNull();
@@ -159,10 +163,12 @@ describe("useSolarStore", () => {
   });
 
   it("initFromModel extracts lat/lon and computes sun position", () => {
-    useSolarStore.getState().initFromModel(
-      "https://www.opengis.net/def/crs/EPSG/0/7415",
-      [85000, 446000, 0, 87500, 446012, 10],
-    );
+    useSolarStore
+      .getState()
+      .initFromModel(
+        "https://www.opengis.net/def/crs/EPSG/0/7415",
+        [85000, 446000, 0, 87500, 446012, 10],
+      );
 
     const { latLon, sunPosition } = useSolarStore.getState();
     expect(latLon).not.toBeNull();
@@ -170,7 +176,9 @@ describe("useSolarStore", () => {
   });
 
   it("initFromModel does nothing for unknown CRS", () => {
-    useSolarStore.getState().initFromModel("urn:ogc:def:crs:UNKNOWN:0:9999", [0, 0, 0, 1, 1, 1]);
+    useSolarStore
+      .getState()
+      .initFromModel("urn:ogc:def:crs:UNKNOWN:0:9999", [0, 0, 0, 1, 1, 1]);
 
     const { latLon } = useSolarStore.getState();
     expect(latLon).toBeNull();

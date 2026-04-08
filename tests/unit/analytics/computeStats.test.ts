@@ -2,18 +2,23 @@
  * Unit tests for computeModelStats and computeObjectStats.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { CityJSONRoot } from "../../../src/domain/citymodel/cityjson/types";
 import { parseCityJSON } from "../../../src/domain/citymodel/cityjson/parseCityJSON";
-import { computeModelStats, computeObjectStats } from "../../../src/analytics/computeStats";
+import {
+  computeModelStats,
+  computeObjectStats,
+} from "../../../src/analytics/computeStats";
 
 const fixturePath = path.resolve(
   import.meta.dirname!,
   "../../../fixtures/two-buildings.city.json",
 );
-const fixtureJson = JSON.parse(fs.readFileSync(fixturePath, "utf-8")) as CityJSONRoot;
+const fixtureJson = JSON.parse(
+  fs.readFileSync(fixturePath, "utf-8"),
+) as CityJSONRoot;
 const model = parseCityJSON(fixtureJson);
 
 describe("computeModelStats", () => {

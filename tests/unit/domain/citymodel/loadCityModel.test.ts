@@ -6,10 +6,13 @@
  * tested at a higher level.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { parseText, fileNameFromUrl } from "../../../../src/domain/citymodel/loadCityModel";
+import {
+  parseText,
+  fileNameFromUrl,
+} from "../../../../src/domain/citymodel/loadCityModel";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -50,7 +53,10 @@ describe("parseText", () => {
   });
 
   it("works with a full URL as the name", () => {
-    const model = parseText("https://example.com/data.city.jsonl?token=abc", seqFixtureText);
+    const model = parseText(
+      "https://example.com/data.city.jsonl?token=abc",
+      seqFixtureText,
+    );
     expect(model.sourceEncoding).toBe("cityjsonseq");
   });
 
@@ -95,19 +101,27 @@ describe("parseText", () => {
 
 describe("fileNameFromUrl", () => {
   it("extracts filename from a simple URL", () => {
-    expect(fileNameFromUrl("https://example.com/model.city.json")).toBe("model.city.json");
+    expect(fileNameFromUrl("https://example.com/model.city.json")).toBe(
+      "model.city.json",
+    );
   });
 
   it("strips query strings", () => {
-    expect(fileNameFromUrl("https://example.com/data.fcb?token=abc")).toBe("data.fcb");
+    expect(fileNameFromUrl("https://example.com/data.fcb?token=abc")).toBe(
+      "data.fcb",
+    );
   });
 
   it("strips fragments", () => {
-    expect(fileNameFromUrl("https://example.com/data.city.jsonl#section")).toBe("data.city.jsonl");
+    expect(fileNameFromUrl("https://example.com/data.city.jsonl#section")).toBe(
+      "data.city.jsonl",
+    );
   });
 
   it("handles URLs with nested paths", () => {
-    expect(fileNameFromUrl("https://storage.example.com/v2/buildings/delft.fcb")).toBe("delft.fcb");
+    expect(
+      fileNameFromUrl("https://storage.example.com/v2/buildings/delft.fcb"),
+    ).toBe("delft.fcb");
   });
 
   it("falls back to full string for non-URL input", () => {

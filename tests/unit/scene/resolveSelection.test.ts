@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vite-plus/test";
 import { BufferAttribute, BufferGeometry } from "three";
 import { resolveSelection } from "../../../src/scene/usePickingControls";
 import type { PickingIndex } from "../../../src/scene/buildCityMesh";
