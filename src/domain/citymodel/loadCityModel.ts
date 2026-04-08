@@ -32,13 +32,15 @@ export function parseText(nameOrUrl: string, text: string): CityModel {
     );
   }
   if (json.type !== "CityJSON") {
-    throw new Error("Not a CityJSON file \u2014 expected \"type\": \"CityJSON\".");
+    throw new Error('Not a CityJSON file \u2014 expected "type": "CityJSON".');
   }
   if (!json.CityObjects || typeof json.CityObjects !== "object") {
-    throw new Error("Invalid CityJSON \u2014 missing \"CityObjects\" property.");
+    throw new Error('Invalid CityJSON \u2014 missing "CityObjects" property.');
   }
   if (!Array.isArray(json.vertices)) {
-    throw new Error("Invalid CityJSON \u2014 missing or invalid \"vertices\" array.");
+    throw new Error(
+      'Invalid CityJSON \u2014 missing or invalid "vertices" array.',
+    );
   }
   return parseCityJSON(json);
 }
@@ -48,7 +50,12 @@ const defaultHttp: HttpClient = {
   async fetchText(url: string) {
     const response = await fetch(url);
     const text = response.ok ? await response.text() : "";
-    return { ok: response.ok, status: response.status, statusText: response.statusText, text };
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      text,
+    };
   },
 };
 
@@ -60,14 +67,22 @@ const defaultHttp: HttpClient = {
  *
  * Accepts an optional HttpClient for platform abstraction (Tauri, testing).
  */
-export async function loadFromUrl(url: string, http: HttpClient = defaultHttp): Promise<CityModel> {
+export async function loadFromUrl(
+  url: string,
+  http: HttpClient = defaultHttp,
+): Promise<CityModel> {
   const encoding = detectEncoding(url);
 
   if (encoding === "flatcitybuf") {
     return loadFlatCityBuf(url);
   }
 
-  let response: { ok: boolean; status: number; statusText: string; text: string };
+  let response: {
+    ok: boolean;
+    status: number;
+    statusText: string;
+    text: string;
+  };
   try {
     response = await http.fetchText(url);
   } catch (err) {
@@ -75,16 +90,21 @@ export async function loadFromUrl(url: string, http: HttpClient = defaultHttp): 
     if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
       throw new Error(
         `Network error loading "${fileNameFromUrl(url)}". Check that the URL is correct and accessible (CORS may block cross-origin requests).`,
+        { cause: err },
       );
     }
-    throw new Error(`Failed to load: ${msg}`);
+    throw new Error(`Failed to load: ${msg}`, { cause: err });
   }
 
   if (!response.ok) {
     if (response.status === 404) {
-      throw new Error(`File not found (404) at "${fileNameFromUrl(url)}". Check the URL.`);
+      throw new Error(
+        `File not found (404) at "${fileNameFromUrl(url)}". Check the URL.`,
+      );
     }
-    throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
+    throw new Error(
+      `Failed to fetch: ${response.status} ${response.statusText}`,
+    );
   }
   const text = response.text;
 
@@ -101,13 +121,15 @@ export async function loadFromUrl(url: string, http: HttpClient = defaultHttp): 
     );
   }
   if (json.type !== "CityJSON") {
-    throw new Error("Not a CityJSON file \u2014 expected \"type\": \"CityJSON\".");
+    throw new Error('Not a CityJSON file \u2014 expected "type": "CityJSON".');
   }
   if (!json.CityObjects || typeof json.CityObjects !== "object") {
-    throw new Error("Invalid CityJSON \u2014 missing \"CityObjects\" property.");
+    throw new Error('Invalid CityJSON \u2014 missing "CityObjects" property.');
   }
   if (!Array.isArray(json.vertices)) {
-    throw new Error("Invalid CityJSON \u2014 missing or invalid \"vertices\" array.");
+    throw new Error(
+      'Invalid CityJSON \u2014 missing or invalid "vertices" array.',
+    );
   }
   return parseCityJSON(json);
 }

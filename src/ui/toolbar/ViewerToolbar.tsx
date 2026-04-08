@@ -39,7 +39,9 @@ export function ViewerToolbar({
     (sum, l) => sum + Object.keys(l.model.objects).length,
     0,
   );
-  const crs = activeLayer ? extractCrsCode(activeLayer.model.metadata.referenceSystem) : null;
+  const crs = activeLayer
+    ? extractCrsCode(activeLayer.model.metadata.referenceSystem)
+    : null;
   const lod = activeLayer ? findPrimaryLod(activeLayer.model) : null;
 
   const ruleCount = activeLayer
@@ -79,7 +81,9 @@ export function ViewerToolbar({
       {sunPosition && (
         <>
           <div className="toolbar-sep" />
-          <div className={`pill sun-pill ${sunPosition.altitudeDeg > 0 ? "sun-pill-up" : ""}`}>
+          <div
+            className={`pill sun-pill ${sunPosition.altitudeDeg > 0 ? "sun-pill-up" : ""}`}
+          >
             Sun <span className="value">{formatDatetimePill(datetime)}</span>
           </div>
         </>
@@ -102,7 +106,16 @@ export function ViewerToolbar({
         onClick={onToggleTheme}
       >
         {theme === "dark" ? (
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <circle cx="12" cy="12" r="5" />
             <line x1="12" y1="1" x2="12" y2="3" />
             <line x1="12" y1="21" x2="12" y2="23" />
@@ -114,7 +127,16 @@ export function ViewerToolbar({
             <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
           </svg>
         ) : (
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
           </svg>
         )}
@@ -137,7 +159,11 @@ export function ViewerToolbar({
           </svg>
         </button>
       )}
-      <button className="tb-btn" title="Toggle inspector" onClick={onToggleInspector}>
+      <button
+        className="tb-btn"
+        title="Toggle inspector"
+        onClick={onToggleInspector}
+      >
         <svg viewBox="0 0 24 24">
           <rect x="3" y="3" width="18" height="18" rx="2" />
           <path d="M15 3v18" />
@@ -172,7 +198,9 @@ function formatDatetimePill(dt: Date): string {
   });
 }
 
-function findPrimaryLod(model: { objects: Record<string, { lod: string | null }> }): string | null {
+function findPrimaryLod(model: {
+  objects: Record<string, { lod: string | null }>;
+}): string | null {
   for (const obj of Object.values(model.objects)) {
     if (obj?.lod) return obj.lod;
   }

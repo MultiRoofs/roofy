@@ -6,7 +6,10 @@
  */
 
 import { useState } from "react";
-import type { CityObject, BuildingSurfaceType } from "../../domain/citymodel/types";
+import type {
+  CityObject,
+  BuildingSurfaceType,
+} from "../../domain/citymodel/types";
 import type { Selection } from "../../domain/selection/types";
 import { SURFACE_COLOR_HEX } from "../../shared/surfaceColorMap";
 import { useLayerStore } from "../../features/layers/layerStore";
@@ -17,7 +20,14 @@ import { SolarTab } from "./SolarTab";
 import { StatsTab } from "./StatsTab";
 import { LayerPanel } from "../layers/LayerPanel";
 
-type Tab = "layers" | "object" | "surfaces" | "analysis" | "rules" | "solar" | "stats";
+type Tab =
+  | "layers"
+  | "object"
+  | "surfaces"
+  | "analysis"
+  | "rules"
+  | "solar"
+  | "stats";
 
 interface InspectorPanelProps {
   readonly selection: Selection | null;
@@ -28,7 +38,14 @@ interface InspectorPanelProps {
   readonly addLayerLoading: boolean;
 }
 
-export function InspectorPanel({ selection, onClose, duckdbModelLoaded, onAddLayerFromFile, onAddLayerFromUrl, addLayerLoading }: InspectorPanelProps) {
+export function InspectorPanel({
+  selection,
+  onClose,
+  duckdbModelLoaded,
+  onAddLayerFromFile,
+  onAddLayerFromUrl,
+  addLayerLoading,
+}: InspectorPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>("layers");
 
   const layers = useLayerStore((s) => s.layers);
@@ -110,7 +127,10 @@ export function InspectorPanel({ selection, onClose, duckdbModelLoaded, onAddLay
             />
           ) : activeTab === "rules" ? (
             displayLayer ? (
-              <RuleBuilderTab model={displayLayer.model} layerId={displayLayer.id} />
+              <RuleBuilderTab
+                model={displayLayer.model}
+                layerId={displayLayer.id}
+              />
             ) : (
               <div className="inspector-placeholder">No layer selected</div>
             )
@@ -118,7 +138,11 @@ export function InspectorPanel({ selection, onClose, duckdbModelLoaded, onAddLay
             <SolarTab />
           ) : activeTab === "stats" ? (
             model ? (
-              <StatsTab model={model} selection={selection} duckdbModelLoaded={duckdbModelLoaded} />
+              <StatsTab
+                model={model}
+                selection={selection}
+                duckdbModelLoaded={duckdbModelLoaded}
+              />
             ) : (
               <div className="inspector-placeholder">No layer selected</div>
             )
@@ -168,10 +192,7 @@ function ObjectTab({ object }: { object: CityObject }) {
           />
         )}
         {object.parents.length > 0 && (
-          <AttrRow
-            label="Parent"
-            value={object.parents.join(", ")}
-          />
+          <AttrRow label="Parent" value={object.parents.join(", ")} />
         )}
       </div>
 
@@ -273,5 +294,5 @@ function AttrRow({ label, value }: { label: string; value: string }) {
 function formatValue(value: unknown): string {
   if (value === null || value === undefined) return "\u2014";
   if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
+  return typeof value === "string" ? value : JSON.stringify(value);
 }

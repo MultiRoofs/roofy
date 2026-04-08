@@ -24,7 +24,11 @@ const testRule: Rule = {
 };
 
 beforeEach(() => {
-  useSelectionStore.setState({ mode: "object", selection: null, hovered: null });
+  useSelectionStore.setState({
+    mode: "object",
+    selection: null,
+    hovered: null,
+  });
   useSolarStore.setState({
     datetime: new Date(Date.UTC(2025, 5, 21, 12, 0, 0)),
     latLon: null,
@@ -36,13 +40,15 @@ describe("captureSnapshot", () => {
   it("captures provided values into a snapshot", () => {
     const snapshot = captureSnapshot({
       label: "Test",
-      layers: [{
-        name: "delft",
-        modelRef: { type: "url", url: "https://example.com/model.city.json" },
-        rules: [testRule],
-        rulesEnabled: false,
-        visible: true,
-      }],
+      layers: [
+        {
+          name: "delft",
+          modelRef: { type: "url", url: "https://example.com/model.city.json" },
+          rules: [testRule],
+          rulesEnabled: false,
+          visible: true,
+        },
+      ],
       cameraPosition: [10, 20, 30],
       cameraTarget: [0, 5, 0],
       datetime: new Date("2025-12-21T10:00:00Z"),
@@ -119,13 +125,15 @@ describe("restoreSnapshot", () => {
   it("captures layers with rules correctly for round-trip", () => {
     const snapshot = captureSnapshot({
       label: "Rules round-trip",
-      layers: [{
-        name: "test-layer",
-        modelRef: { type: "url", url: "https://example.com/model.city.json" },
-        rules: [testRule],
-        rulesEnabled: false,
-        visible: true,
-      }],
+      layers: [
+        {
+          name: "test-layer",
+          modelRef: { type: "url", url: "https://example.com/model.city.json" },
+          rules: [testRule],
+          rulesEnabled: false,
+          visible: true,
+        },
+      ],
       cameraPosition: [0, 0, 0],
       cameraTarget: [0, 0, 0],
       datetime: new Date(Date.UTC(2025, 5, 21, 12, 0, 0)),
@@ -136,7 +144,9 @@ describe("restoreSnapshot", () => {
     expect(snapshot.layers).toHaveLength(1);
     expect(snapshot.layers![0]!.rules).toHaveLength(1);
     expect(snapshot.layers![0]!.rules[0]!.id).toBe("r1");
-    expect(snapshot.layers![0]!.rules[0]!.conditions[0]!.field).toBe("azimuthDeg");
+    expect(snapshot.layers![0]!.rules[0]!.conditions[0]!.field).toBe(
+      "azimuthDeg",
+    );
     expect(snapshot.layers![0]!.rulesEnabled).toBe(false);
   });
 
@@ -151,7 +161,10 @@ describe("restoreSnapshot", () => {
     });
 
     // Manually corrupt the datetime
-    const corrupted = { ...snapshot, viewState: { ...snapshot.viewState, datetime: "not-a-date" } };
+    const corrupted = {
+      ...snapshot,
+      viewState: { ...snapshot.viewState, datetime: "not-a-date" },
+    };
 
     // Should not throw
     const before = useSolarStore.getState().datetime;

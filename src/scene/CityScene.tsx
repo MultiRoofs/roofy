@@ -6,7 +6,13 @@
  * colorization, and per-layer highlight.
  */
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+} from "react";
 import {
   AmbientLight,
   Color,
@@ -20,7 +26,7 @@ import {
   Group,
 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import type { CityModel, BBox3 } from "../domain/citymodel/types";
+import type { BBox3 } from "../domain/citymodel/types";
 import { buildCityMesh, computeOriginOffset } from "./buildCityMesh";
 import type { PickingIndex } from "./buildCityMesh";
 import { applyHighlight, clearHighlight } from "./highlightMesh";
@@ -93,7 +99,8 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
 
       // Check WebGL availability
       const testCanvas = document.createElement("canvas");
-      const gl = testCanvas.getContext("webgl2") ?? testCanvas.getContext("webgl");
+      const gl =
+        testCanvas.getContext("webgl2") ?? testCanvas.getContext("webgl");
       if (!gl) {
         container.innerHTML =
           '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#6b7280;font-size:0.9rem;text-align:center;padding:2rem;">' +
@@ -176,19 +183,20 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       });
       resizeObserver.observe(container);
 
+      const layerSceneMap = layerSceneMapRef.current;
       return () => {
         themeObserver.disconnect();
         resizeObserver.disconnect();
         cancelAnimationFrame(animationIdRef.current);
         controls.dispose();
         // Dispose all per-layer GPU resources
-        for (const state of layerSceneMapRef.current.values()) {
+        for (const state of layerSceneMap.values()) {
           state.mesh.geometry.dispose();
           if (state.mesh.material instanceof MeshStandardMaterial) {
             state.mesh.material.dispose();
           }
         }
-        layerSceneMapRef.current.clear();
+        layerSceneMap.clear();
         renderer.dispose();
         container.removeChild(renderer.domElement);
       };
@@ -246,7 +254,12 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
           mesh.visible = layer.visible;
           cityGroup.add(mesh);
 
-          map.set(layer.id, { mesh, pickingIndex, baseColors, ruleColors: null });
+          map.set(layer.id, {
+            mesh,
+            pickingIndex,
+            baseColors,
+            ruleColors: null,
+          });
 
           // Configure shadow camera and solar from the first non-empty layer
           if (!hadLayersBefore && !solarInitialized) {
@@ -254,7 +267,9 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
               configureShadowCamera(dirLightRef.current, model.bbox);
               geometry.computeBoundingSphere();
             }
-            useSolarStore.getState().initFromModel(model.metadata.referenceSystem, model.bbox);
+            useSolarStore
+              .getState()
+              .initFromModel(model.metadata.referenceSystem, model.bbox);
             solarInitialized = true;
           }
 
@@ -375,13 +390,24 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       const controls = controlsRef.current;
       if (!camera || !controls) return null;
       return {
-        position: [camera.position.x, camera.position.y, camera.position.z] as const,
-        target: [controls.target.x, controls.target.y, controls.target.z] as const,
+        position: [
+          camera.position.x,
+          camera.position.y,
+          camera.position.z,
+        ] as const,
+        target: [
+          controls.target.x,
+          controls.target.y,
+          controls.target.z,
+        ] as const,
       };
     }, []);
 
     const setCameraState = useCallback(
-      (position: readonly [number, number, number], target: readonly [number, number, number]) => {
+      (
+        position: readonly [number, number, number],
+        target: readonly [number, number, number],
+      ) => {
         const camera = cameraRef.current;
         const controls = controlsRef.current;
         if (!camera || !controls) return;
@@ -392,7 +418,11 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       [],
     );
 
-    useImperativeHandle(ref, () => ({ fitAll, getCameraState, setCameraState }), [fitAll, getCameraState, setCameraState]);
+    useImperativeHandle(
+      ref,
+      () => ({ fitAll, getCameraState, setCameraState }),
+      [fitAll, getCameraState, setCameraState],
+    );
 
     // Tooltip for hovered object
     const hoveredLayer = hovered
@@ -503,6 +533,8 @@ function truncateId(id: string): string {
 }
 
 function readCssColor(varName: string, fallback: string): Color {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  const raw = getComputedStyle(document.documentElement)
+    .getPropertyValue(varName)
+    .trim();
   return new Color(raw || fallback);
 }

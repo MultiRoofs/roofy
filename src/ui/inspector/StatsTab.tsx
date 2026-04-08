@@ -9,7 +9,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CityModel } from "../../domain/citymodel/types";
 import type { Selection } from "../../domain/selection/types";
-import { computeModelStats, computeObjectStats } from "../../analytics/computeStats";
+import {
+  computeModelStats,
+  computeObjectStats,
+} from "../../analytics/computeStats";
 import { queryDuckDB } from "../../analytics/duckdb";
 import type { QueryResult } from "../../analytics/duckdb";
 
@@ -24,12 +27,15 @@ interface DuckDBStats {
   readonly typeBreakdown: ReadonlyArray<{ type: string; count: number }>;
 }
 
-export function StatsTab({ model, selection, duckdbModelLoaded }: StatsTabProps) {
+export function StatsTab({
+  model,
+  selection,
+  duckdbModelLoaded,
+}: StatsTabProps) {
   const modelStats = useMemo(() => computeModelStats(model), [model]);
 
   const objectStats = useMemo(
-    () =>
-      selection ? computeObjectStats(model, selection.objectId) : null,
+    () => (selection ? computeObjectStats(model, selection.objectId) : null),
     [model, selection],
   );
 
@@ -46,7 +52,9 @@ export function StatsTab({ model, selection, duckdbModelLoaded }: StatsTabProps)
     async function fetchStats() {
       const [countResult, typeResult] = await Promise.all([
         queryDuckDB("SELECT COUNT(*) AS cnt FROM city_objects"),
-        queryDuckDB("SELECT type, COUNT(*) AS cnt FROM city_objects GROUP BY type ORDER BY cnt DESC"),
+        queryDuckDB(
+          "SELECT type, COUNT(*) AS cnt FROM city_objects GROUP BY type ORDER BY cnt DESC",
+        ),
       ]);
 
       if (cancelled) return;
@@ -56,8 +64,10 @@ export function StatsTab({ model, selection, duckdbModelLoaded }: StatsTabProps)
       setDuckdbStats({ rowCount, typeBreakdown });
     }
 
-    fetchStats();
-    return () => { cancelled = true; };
+    void fetchStats();
+    return () => {
+      cancelled = true;
+    };
   }, [duckdbModelLoaded]);
 
   return (
@@ -65,18 +75,36 @@ export function StatsTab({ model, selection, duckdbModelLoaded }: StatsTabProps)
       {/* Per-object stats when selected */}
       {objectStats && (
         <div className="attr-section">
-          <div className="attr-section-title" style={{ color: "var(--accent-text)" }}>
+          <div
+            className="attr-section-title"
+            style={{ color: "var(--accent-text)" }}
+          >
             Selected: {objectStats.objectType}
           </div>
           {objectStats.height !== null && (
-            <StatRow label="Height" value={`${objectStats.height.toFixed(1)} m`} />
+            <StatRow
+              label="Height"
+              value={`${objectStats.height.toFixed(1)} m`}
+            />
           )}
           <StatRow label="Surfaces" value={String(objectStats.surfaceCount)} />
-          <StatRow label="Roof surfaces" value={String(objectStats.roofSurfaceCount)} />
-          <StatRow label="Roof area" value={`${objectStats.totalRoofArea.toFixed(1)} m\u00B2`} />
-          <StatRow label="Avg slope" value={`${objectStats.avgRoofSlope.toFixed(1)}\u00B0`} />
+          <StatRow
+            label="Roof surfaces"
+            value={String(objectStats.roofSurfaceCount)}
+          />
+          <StatRow
+            label="Roof area"
+            value={`${objectStats.totalRoofArea.toFixed(1)} m\u00B2`}
+          />
+          <StatRow
+            label="Avg slope"
+            value={`${objectStats.avgRoofSlope.toFixed(1)}\u00B0`}
+          />
           {objectStats.avgRoofAzimuth > 0 && (
-            <StatRow label="Avg azimuth" value={`${cardinalFromDeg(objectStats.avgRoofAzimuth)} (${objectStats.avgRoofAzimuth.toFixed(0)}\u00B0)`} />
+            <StatRow
+              label="Avg azimuth"
+              value={`${cardinalFromDeg(objectStats.avgRoofAzimuth)} (${objectStats.avgRoofAzimuth.toFixed(0)}\u00B0)`}
+            />
           )}
         </div>
       )}
@@ -87,21 +115,42 @@ export function StatsTab({ model, selection, duckdbModelLoaded }: StatsTabProps)
           {objectStats ? "Model Summary" : "Statistics"}
         </div>
         <StatRow label="Buildings" value={String(modelStats.buildingCount)} />
-        <StatRow label="Total surfaces" value={String(modelStats.surfaceCount)} />
-        <StatRow label="Roof surfaces" value={String(modelStats.roofSurfaceCount)} />
-        <StatRow label="Total roof area" value={`${modelStats.totalRoofArea.toFixed(1)} m\u00B2`} />
+        <StatRow
+          label="Total surfaces"
+          value={String(modelStats.surfaceCount)}
+        />
+        <StatRow
+          label="Roof surfaces"
+          value={String(modelStats.roofSurfaceCount)}
+        />
+        <StatRow
+          label="Total roof area"
+          value={`${modelStats.totalRoofArea.toFixed(1)} m\u00B2`}
+        />
       </div>
 
       <div className="attr-section">
         <div className="attr-section-title">Heights</div>
-        <StatRow label="Average" value={`${modelStats.avgBuildingHeight.toFixed(1)} m`} />
-        <StatRow label="Min" value={`${modelStats.minBuildingHeight.toFixed(1)} m`} />
-        <StatRow label="Max" value={`${modelStats.maxBuildingHeight.toFixed(1)} m`} />
+        <StatRow
+          label="Average"
+          value={`${modelStats.avgBuildingHeight.toFixed(1)} m`}
+        />
+        <StatRow
+          label="Min"
+          value={`${modelStats.minBuildingHeight.toFixed(1)} m`}
+        />
+        <StatRow
+          label="Max"
+          value={`${modelStats.maxBuildingHeight.toFixed(1)} m`}
+        />
       </div>
 
       <div className="attr-section">
         <div className="attr-section-title">Roof Slope</div>
-        <StatRow label="Average" value={`${modelStats.avgRoofSlope.toFixed(1)}\u00B0`} />
+        <StatRow
+          label="Average"
+          value={`${modelStats.avgRoofSlope.toFixed(1)}\u00B0`}
+        />
       </div>
 
       <div className="attr-section">
@@ -127,7 +176,13 @@ export function StatsTab({ model, selection, duckdbModelLoaded }: StatsTabProps)
   );
 }
 
-function StatRow({ label, value }: { readonly label: string; readonly value: string }) {
+function StatRow({
+  label,
+  value,
+}: {
+  readonly label: string;
+  readonly value: string;
+}) {
   return (
     <div className="attr-row">
       <span className="attr-key">{label}</span>
@@ -153,10 +208,15 @@ function extractCount(result: QueryResult | null): number {
   return typeof val === "number" ? val : Number(val) || 0;
 }
 
-function extractTypeBreakdown(result: QueryResult | null): Array<{ type: string; count: number }> {
+function extractTypeBreakdown(
+  result: QueryResult | null,
+): Array<{ type: string; count: number }> {
   if (!result) return [];
   return result.rows.map((row) => ({
-    type: String(row.type ?? "unknown"),
+    type:
+      typeof row.type === "string"
+        ? row.type
+        : JSON.stringify(row.type ?? "unknown"),
     count: typeof row.cnt === "number" ? row.cnt : Number(row.cnt) || 0,
   }));
 }

@@ -13,6 +13,7 @@ function makeState(
   overrides: Partial<ShareableViewState> = {},
 ): ShareableViewState {
   return {
+    layers: [],
     modelUrl: "https://example.com/model.city.json",
     cp: [50, 50, 50],
     ct: [0, 0, 0],
@@ -56,7 +57,7 @@ describe("encodeShareState / decodeShareState", () => {
 
     expect(decoded).not.toBeNull();
     expect(decoded!.rules).toHaveLength(1);
-    expect(decoded!.rules[0]!.name).toBe("South");
+    expect(decoded!.rules![0]!.name).toBe("South");
   });
 
   it("round-trips state with null modelUrl", () => {

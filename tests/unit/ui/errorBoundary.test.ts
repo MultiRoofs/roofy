@@ -42,11 +42,10 @@ describe("ErrorBoundary", () => {
 
   it("shows inline fallback when mode is inline", () => {
     const { container } = render(
-      createElement(
-        ErrorBoundary,
-        { fallback: "inline" },
-        createElement(BrokenComponent),
-      ),
+      createElement(ErrorBoundary, {
+        fallback: "inline" as const,
+        children: createElement(BrokenComponent),
+      }),
     );
     expect(container.querySelector(".error-inline")).toBeTruthy();
     expect(container.textContent).toContain("Test crash");

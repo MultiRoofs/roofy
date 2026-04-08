@@ -10,7 +10,9 @@
  * HTTP client for fetching remote resources.
  */
 export interface HttpClient {
-  fetchText(url: string): Promise<{ ok: boolean; status: number; statusText: string; text: string }>;
+  fetchText(
+    url: string,
+  ): Promise<{ ok: boolean; status: number; statusText: string; text: string }>;
 }
 
 /**

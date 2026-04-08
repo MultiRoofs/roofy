@@ -12,28 +12,37 @@ describe("selectionStore", () => {
 
   describe("select", () => {
     it("sets object selection", () => {
-      useSelectionStore.getState().select({ kind: "object", objectId: "b1" });
+      useSelectionStore
+        .getState()
+        .select({ kind: "object", layerId: "layer-1", objectId: "b1" });
 
       expect(useSelectionStore.getState().selection).toEqual({
         kind: "object",
+        layerId: "layer-1",
         objectId: "b1",
       });
     });
 
     it("sets surface selection", () => {
-      useSelectionStore
-        .getState()
-        .select({ kind: "surface", objectId: "b1", surfaceIndex: 2 });
+      useSelectionStore.getState().select({
+        kind: "surface",
+        layerId: "layer-1",
+        objectId: "b1",
+        surfaceIndex: 2,
+      });
 
       expect(useSelectionStore.getState().selection).toEqual({
         kind: "surface",
+        layerId: "layer-1",
         objectId: "b1",
         surfaceIndex: 2,
       });
     });
 
     it("clears selection when passed null", () => {
-      useSelectionStore.getState().select({ kind: "object", objectId: "b1" });
+      useSelectionStore
+        .getState()
+        .select({ kind: "object", layerId: "layer-1", objectId: "b1" });
       useSelectionStore.getState().select(null);
 
       expect(useSelectionStore.getState().selection).toBeNull();
@@ -42,10 +51,13 @@ describe("selectionStore", () => {
 
   describe("hover", () => {
     it("sets hovered state", () => {
-      useSelectionStore.getState().hover({ kind: "object", objectId: "b2" });
+      useSelectionStore
+        .getState()
+        .hover({ kind: "object", layerId: "layer-1", objectId: "b2" });
 
       expect(useSelectionStore.getState().hovered).toEqual({
         kind: "object",
+        layerId: "layer-1",
         objectId: "b2",
       });
     });
@@ -53,8 +65,12 @@ describe("selectionStore", () => {
 
   describe("setMode", () => {
     it("changes mode and clears selection and hover", () => {
-      useSelectionStore.getState().select({ kind: "object", objectId: "b1" });
-      useSelectionStore.getState().hover({ kind: "object", objectId: "b2" });
+      useSelectionStore
+        .getState()
+        .select({ kind: "object", layerId: "layer-1", objectId: "b1" });
+      useSelectionStore
+        .getState()
+        .hover({ kind: "object", layerId: "layer-1", objectId: "b2" });
 
       useSelectionStore.getState().setMode("surface");
 
@@ -67,8 +83,12 @@ describe("selectionStore", () => {
 
   describe("clear", () => {
     it("clears both selection and hover", () => {
-      useSelectionStore.getState().select({ kind: "object", objectId: "b1" });
-      useSelectionStore.getState().hover({ kind: "object", objectId: "b2" });
+      useSelectionStore
+        .getState()
+        .select({ kind: "object", layerId: "layer-1", objectId: "b1" });
+      useSelectionStore
+        .getState()
+        .hover({ kind: "object", layerId: "layer-1", objectId: "b2" });
 
       useSelectionStore.getState().clear();
 
@@ -81,6 +101,7 @@ describe("selectionStore", () => {
       useSelectionStore.getState().setMode("surface");
       useSelectionStore.getState().select({
         kind: "surface",
+        layerId: "layer-1",
         objectId: "b1",
         surfaceIndex: 0,
       });

@@ -28,13 +28,20 @@ export interface LayerStoreState {
 export interface LayerStoreActions {
   addLayer: (layer: Omit<Layer, "id">) => string;
   removeLayer: (id: string) => void;
-  updateLayer: (id: string, patch: Partial<Pick<Layer, "name" | "visible">>) => void;
+  updateLayer: (
+    id: string,
+    patch: Partial<Pick<Layer, "name" | "visible">>,
+  ) => void;
   setActiveLayer: (id: string | null) => void;
   removeAllLayers: () => void;
 
   // Per-layer rule actions
   addRule: (layerId: string, rule: Rule) => void;
-  updateRule: (layerId: string, ruleId: string, patch: Partial<Omit<Rule, "id">>) => void;
+  updateRule: (
+    layerId: string,
+    ruleId: string,
+    patch: Partial<Omit<Rule, "id">>,
+  ) => void;
   deleteRule: (layerId: string, ruleId: string) => void;
   reorderRules: (layerId: string, fromIdx: number, toIdx: number) => void;
   toggleRulesEnabled: (layerId: string) => void;
@@ -61,16 +68,14 @@ export const useLayerStore = create<LayerStore>((set) => ({
       const layers = state.layers.filter((l) => l.id !== id);
       const activeLayerId =
         state.activeLayerId === id
-          ? layers[layers.length - 1]?.id ?? null
+          ? (layers[layers.length - 1]?.id ?? null)
           : state.activeLayerId;
       return { layers, activeLayerId };
     }),
 
   updateLayer: (id, patch) =>
     set((state) => ({
-      layers: state.layers.map((l) =>
-        l.id === id ? { ...l, ...patch } : l,
-      ),
+      layers: state.layers.map((l) => (l.id === id ? { ...l, ...patch } : l)),
     })),
 
   setActiveLayer: (id) => set({ activeLayerId: id }),

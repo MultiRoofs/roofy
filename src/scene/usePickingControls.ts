@@ -16,7 +16,10 @@ import { useSelectionStore } from "../features/selection/selectionStore";
 export interface PickingRefs {
   readonly cameraRef: React.RefObject<PerspectiveCamera | null>;
   readonly cityGroupRef: React.RefObject<Group | null>;
-  readonly layerSceneMapRef: React.RefObject<Map<string, LayerSceneState> | null>;
+  readonly layerSceneMapRef: React.RefObject<Map<
+    string,
+    LayerSceneState
+  > | null>;
   readonly canvasRef: React.RefObject<HTMLCanvasElement | null>;
 }
 
@@ -40,7 +43,12 @@ export function resolveSelection(
 
   if (mode === "surface") {
     const surfaceIndex = surfIdxAttr.getX(faceVertexIndex);
-    return { kind: "surface", layerId: pickingIndex.layerId, objectId, surfaceIndex };
+    return {
+      kind: "surface",
+      layerId: pickingIndex.layerId,
+      objectId,
+      surfaceIndex,
+    };
   }
 
   return { kind: "object", layerId: pickingIndex.layerId, objectId };
@@ -62,10 +70,14 @@ export function usePickingControls(refs: PickingRefs): void {
 
       const rect = canvas!.getBoundingClientRect();
       pointerRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      pointerRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      pointerRef.current.y =
+        -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
       raycasterRef.current.setFromCamera(pointerRef.current, camera);
-      const intersects = raycasterRef.current.intersectObjects(cityGroup.children, false);
+      const intersects = raycasterRef.current.intersectObjects(
+        cityGroup.children,
+        false,
+      );
       const hit = intersects[0];
       if (!hit?.face) return null;
 
@@ -102,5 +114,10 @@ export function usePickingControls(refs: PickingRefs): void {
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerup", onPointerUp);
     };
-  }, [refs.canvasRef, refs.cameraRef, refs.cityGroupRef, refs.layerSceneMapRef]);
+  }, [
+    refs.canvasRef,
+    refs.cameraRef,
+    refs.cityGroupRef,
+    refs.layerSceneMapRef,
+  ]);
 }

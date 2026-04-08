@@ -8,7 +8,12 @@
 import { useCallback, useRef, useState } from "react";
 import type { CityModel } from "../../domain/citymodel/types";
 import { useLayerStore } from "../../features/layers/layerStore";
-import type { Condition, ConditionOperator, LogicMode, Rule } from "../../features/rules/types";
+import type {
+  Condition,
+  ConditionOperator,
+  LogicMode,
+  Rule,
+} from "../../features/rules/types";
 import { RULE_PRESETS } from "../../features/rules/presets";
 
 interface RuleBuilderTabProps {
@@ -17,7 +22,12 @@ interface RuleBuilderTabProps {
 }
 
 // Metric fields always available for conditions
-const METRIC_FIELDS = ["areaSqM", "inclinationDeg", "azimuthDeg", "elevationM"] as const;
+const METRIC_FIELDS = [
+  "areaSqM",
+  "inclinationDeg",
+  "azimuthDeg",
+  "elevationM",
+] as const;
 
 const OPERATORS: ConditionOperator[] = [">", "<", "=", ">=", "<="];
 
@@ -40,7 +50,10 @@ export function RuleBuilderTab({ model, layerId }: RuleBuilderTabProps) {
   const allFields = [...METRIC_FIELDS, ...attributeFields];
 
   const handleExport = useCallback(() => {
-    const json = JSON.stringify(rules, null, 2);
+    const currentRules =
+      useLayerStore.getState().layers.find((l) => l.id === layerId)?.rules ??
+      [];
+    const json = JSON.stringify(currentRules, null, 2);
     const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -48,13 +61,13 @@ export function RuleBuilderTab({ model, layerId }: RuleBuilderTabProps) {
     a.download = "rules.json";
     a.click();
     URL.revokeObjectURL(url);
-  }, [rules]);
+  }, [layerId]);
 
   const handleImport = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      file.text().then((text) => {
+      void file.text().then((text) => {
         try {
           const imported = JSON.parse(text) as Rule[];
           if (!Array.isArray(imported)) return;
@@ -109,7 +122,9 @@ export function RuleBuilderTab({ model, layerId }: RuleBuilderTabProps) {
                 rule={rule}
                 onEdit={() => setEditingId(rule.id)}
                 onDelete={() => deleteRule(layerId, rule.id)}
-                onToggle={() => updateRule(layerId, rule.id, { enabled: !rule.enabled })}
+                onToggle={() =>
+                  updateRule(layerId, rule.id, { enabled: !rule.enabled })
+                }
               />
             )}
           </div>
@@ -128,10 +143,7 @@ export function RuleBuilderTab({ model, layerId }: RuleBuilderTabProps) {
             onCancel={() => setShowForm(false)}
           />
         ) : (
-          <button
-            className="rule-add-btn"
-            onClick={() => setShowForm(true)}
-          >
+          <button className="rule-add-btn" onClick={() => setShowForm(true)}>
             + Add Rule
           </button>
         )}
@@ -243,11 +255,16 @@ function RuleForm({ initial, fields, onSave, onCancel }: RuleFormProps) {
   const [color, setColor] = useState(initial?.color ?? "#4ec84e");
   const [logic, setLogic] = useState<LogicMode>(initial?.logic ?? "AND");
   const [conditions, setConditions] = useState<Condition[]>(
-    initial ? [...initial.conditions] : [{ field: "inclinationDeg", operator: "<", value: 10 }],
+    initial
+      ? [...initial.conditions]
+      : [{ field: "inclinationDeg", operator: "<", value: 10 }],
   );
 
   const addCondition = () => {
-    setConditions([...conditions, { field: "inclinationDeg", operator: "<", value: 0 }]);
+    setConditions([
+      ...conditions,
+      { field: "inclinationDeg", operator: "<", value: 0 },
+    ]);
   };
 
   const removeCondition = (idx: number) => {
@@ -319,7 +336,9 @@ function RuleForm({ initial, fields, onSave, onCancel }: RuleFormProps) {
             className="rule-select rule-select-sm"
             value={cond.operator}
             onChange={(e) =>
-              updateCondition(idx, { operator: e.target.value as ConditionOperator })
+              updateCondition(idx, {
+                operator: e.target.value as ConditionOperator,
+              })
             }
           >
             {OPERATORS.map((op) => (
@@ -336,12 +355,22 @@ function RuleForm({ initial, fields, onSave, onCancel }: RuleFormProps) {
               if (raw === "") return;
               const num = Number(raw);
               updateCondition(idx, {
-                value: raw === "true" ? true : raw === "false" ? false : isNaN(num) ? raw : num,
+                value:
+                  raw === "true"
+                    ? true
+                    : raw === "false"
+                      ? false
+                      : isNaN(num)
+                        ? raw
+                        : num,
               });
             }}
           />
           {conditions.length > 1 && (
-            <button className="rule-action-btn" onClick={() => removeCondition(idx)}>
+            <button
+              className="rule-action-btn"
+              onClick={() => removeCondition(idx)}
+            >
               x
             </button>
           )}

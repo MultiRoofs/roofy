@@ -71,7 +71,7 @@
   --fg-label: #5f6672;
 
   --accent: #d07830;
-  --accent-soft: rgba(208, 120, 48, 0.10);
+  --accent-soft: rgba(208, 120, 48, 0.1);
   --accent-text: #b5601a;
 
   --teal: #178080;
@@ -824,8 +824,13 @@ body {
 }
 
 @keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }
 
 .statusbar .toolbar-spacer {
@@ -1144,7 +1149,10 @@ body {
   color: var(--fg-muted);
   font-size: 0.7rem;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
   text-align: center;
 }
 
@@ -1170,7 +1178,9 @@ body {
   color: var(--fg-muted);
   font-size: 0.68rem;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .rule-io-btn:hover:not(:disabled) {
@@ -1385,7 +1395,11 @@ body {
   justify-content: center;
   min-height: 100vh;
   background:
-    radial-gradient(circle at top left, rgba(197, 48, 48, 0.08), transparent 35%),
+    radial-gradient(
+      circle at top left,
+      rgba(197, 48, 48, 0.08),
+      transparent 35%
+    ),
     linear-gradient(180deg, #f7f5ec 0%, #eef3f6 100%);
   padding: 2rem;
 }
@@ -1469,7 +1483,7 @@ body {
 
 .error-inline-btn {
   padding: 0.25rem 0.75rem;
-  border: 1px solid var(--border-accent, rgba(255, 255, 255, 0.10));
+  border: 1px solid var(--border-accent, rgba(255, 255, 255, 0.1));
   border-radius: var(--radius-sm, 0.375rem);
   background: transparent;
   color: var(--fg-muted, #6b7280);
@@ -1506,7 +1520,9 @@ body {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1521,7 +1537,7 @@ body {
   padding: 0.5rem 1rem;
   background: rgba(12, 14, 20, 0.9);
   backdrop-filter: blur(12px);
-  border: 1px solid var(--border-accent, rgba(255, 255, 255, 0.10));
+  border: 1px solid var(--border-accent, rgba(255, 255, 255, 0.1));
   border-radius: var(--radius, 0.5rem);
   color: var(--fg, #e8eaf0);
   font-size: 0.8rem;
@@ -1530,8 +1546,14 @@ body {
 }
 
 @keyframes toast-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(0.5rem); }
-  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1548,7 +1570,9 @@ body {
   margin-bottom: 0.3rem;
   font-size: 0.75rem;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
 }
 
 .layer-item:hover {
@@ -1642,7 +1666,9 @@ body {
   color: var(--fg-muted);
   font-size: 0.75rem;
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
+  transition:
+    border-color 0.15s,
+    color 0.15s;
   margin-top: 0.35rem;
 }
 
@@ -1672,7 +1698,9 @@ body {
   font-size: 0.7rem;
   color: var(--fg-dim);
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
+  transition:
+    border-color 0.15s,
+    color 0.15s;
 }
 
 .layer-drop-zone:hover {
@@ -1695,7 +1723,9 @@ body {
   background: transparent;
   color: var(--fg-muted);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .theme-toggle-btn:hover {

@@ -151,7 +151,10 @@ export function LayerPanel({ onAddFile, onAddUrl, loading }: LayerPanelProps) {
           <div
             className="layer-drop-zone"
             onDrop={handleDrop}
-            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
             onClick={() => fileInputRef.current?.click()}
           >
             {loading ? "Loading..." : "Drop file or click to browse"}
@@ -190,10 +193,7 @@ export function LayerPanel({ onAddFile, onAddUrl, loading }: LayerPanelProps) {
           </button>
         </div>
       ) : (
-        <button
-          className="layer-add-btn"
-          onClick={() => setShowAddForm(true)}
-        >
+        <button className="layer-add-btn" onClick={() => setShowAddForm(true)}>
           + Add Layer
         </button>
       )}

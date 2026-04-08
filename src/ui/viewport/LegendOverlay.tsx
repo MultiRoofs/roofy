@@ -15,7 +15,11 @@ export function LegendOverlay() {
   // Collect all active rules from visible layers with rules enabled
   const activeRules = layers
     .filter((l) => l.visible && l.rulesEnabled)
-    .flatMap((l) => l.rules.filter((r) => r.enabled).map((r) => ({ ...r, layerName: l.name })));
+    .flatMap((l) =>
+      l.rules
+        .filter((r) => r.enabled)
+        .map((r) => ({ ...r, layerName: l.name })),
+    );
 
   if (activeRules.length === 0) return null;
 

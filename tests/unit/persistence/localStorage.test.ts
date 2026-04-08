@@ -98,8 +98,8 @@ describe("LocalStorageProjectStateStore", () => {
     const loaded = await store.load(id);
 
     expect(loaded!.rules).toHaveLength(1);
-    expect(loaded!.rules[0]!.name).toBe("South-facing");
-    expect(loaded!.rules[0]!.conditions[0]!.field).toBe("azimuthDeg");
+    expect(loaded!.rules![0]!.name).toBe("South-facing");
+    expect(loaded!.rules![0]!.conditions[0]!.field).toBe("azimuthDeg");
   });
 
   it("preserves file model reference", async () => {

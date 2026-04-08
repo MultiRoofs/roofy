@@ -11,7 +11,12 @@ interface StatusBarProps {
   readonly duckdbStatus?: DuckDBStatus;
 }
 
-export function StatusBar({ objectCount, triangleCount, selectedCount, duckdbStatus }: StatusBarProps) {
+export function StatusBar({
+  objectCount,
+  triangleCount,
+  selectedCount,
+  duckdbStatus,
+}: StatusBarProps) {
   return (
     <footer className="statusbar">
       <div className="status-item">
@@ -47,13 +52,15 @@ export function StatusBar({ objectCount, triangleCount, selectedCount, duckdbSta
 }
 
 function duckdbDotClass(status: DuckDBStatus): string {
-  if (status.state === "ready") return status.extensionLoaded ? "dot-ready" : "dot-partial";
+  if (status.state === "ready")
+    return status.extensionLoaded ? "dot-ready" : "dot-partial";
   if (status.state === "initializing") return "dot-loading";
   return "dot-failed";
 }
 
 function duckdbLabel(status: DuckDBStatus): string {
-  if (status.state === "ready") return status.extensionLoaded ? "Ready" : "No ext";
+  if (status.state === "ready")
+    return status.extensionLoaded ? "Ready" : "No ext";
   if (status.state === "initializing") return "Loading";
   return "N/A";
 }

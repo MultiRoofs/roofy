@@ -27,12 +27,14 @@ const FLAT_METRICS: RoofMetrics = {
   areaSqM: 50,
   inclinationDeg: 5,
   azimuthDeg: 180,
+  elevationM: 0,
 };
 
 const STEEP_METRICS: RoofMetrics = {
   areaSqM: 30,
   inclinationDeg: 45,
   azimuthDeg: 90,
+  elevationM: 0,
 };
 
 // ---------------------------------------------------------------------------

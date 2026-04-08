@@ -5,7 +5,18 @@ import type { Rule } from "../../../../src/features/rules/types";
 
 function makeModel(id = "m1"): CityModel {
   return {
-    objects: { [id]: { id, objectType: "Building", surfaces: [], attributes: {}, children: [], parents: [], bbox: null, lod: null } },
+    objects: {
+      [id]: {
+        id,
+        objectType: "Building",
+        surfaces: [],
+        attributes: {},
+        children: [],
+        parents: [],
+        bbox: null,
+        lod: null,
+      },
+    },
     metadata: { referenceSystem: undefined },
     bbox: null,
   } as unknown as CityModel;
@@ -195,7 +206,9 @@ describe("layerStore", () => {
       const rule = makeRule();
       useLayerStore.getState().addRule(layerId, rule);
 
-      const layer = useLayerStore.getState().layers.find((l) => l.id === layerId)!;
+      const layer = useLayerStore
+        .getState()
+        .layers.find((l) => l.id === layerId)!;
       expect(layer.rules).toHaveLength(1);
       expect(layer.rules[0]!.name).toBe("test rule");
     });
@@ -203,9 +216,13 @@ describe("layerStore", () => {
     it("updates a rule on a specific layer", () => {
       const rule = makeRule();
       useLayerStore.getState().addRule(layerId, rule);
-      useLayerStore.getState().updateRule(layerId, rule.id, { name: "updated" });
+      useLayerStore
+        .getState()
+        .updateRule(layerId, rule.id, { name: "updated" });
 
-      const layer = useLayerStore.getState().layers.find((l) => l.id === layerId)!;
+      const layer = useLayerStore
+        .getState()
+        .layers.find((l) => l.id === layerId)!;
       expect(layer.rules[0]!.name).toBe("updated");
     });
 
@@ -214,7 +231,9 @@ describe("layerStore", () => {
       useLayerStore.getState().addRule(layerId, rule);
       useLayerStore.getState().deleteRule(layerId, rule.id);
 
-      const layer = useLayerStore.getState().layers.find((l) => l.id === layerId)!;
+      const layer = useLayerStore
+        .getState()
+        .layers.find((l) => l.id === layerId)!;
       expect(layer.rules).toHaveLength(0);
     });
 
@@ -228,17 +247,23 @@ describe("layerStore", () => {
 
       useLayerStore.getState().reorderRules(layerId, 0, 2);
 
-      const layer = useLayerStore.getState().layers.find((l) => l.id === layerId)!;
+      const layer = useLayerStore
+        .getState()
+        .layers.find((l) => l.id === layerId)!;
       expect(layer.rules.map((r) => r.name)).toEqual(["B", "C", "A"]);
     });
 
     it("toggles rulesEnabled for a specific layer", () => {
       useLayerStore.getState().toggleRulesEnabled(layerId);
-      const layer = useLayerStore.getState().layers.find((l) => l.id === layerId)!;
+      const layer = useLayerStore
+        .getState()
+        .layers.find((l) => l.id === layerId)!;
       expect(layer.rulesEnabled).toBe(false);
 
       useLayerStore.getState().toggleRulesEnabled(layerId);
-      const updated = useLayerStore.getState().layers.find((l) => l.id === layerId)!;
+      const updated = useLayerStore
+        .getState()
+        .layers.find((l) => l.id === layerId)!;
       expect(updated.rulesEnabled).toBe(true);
     });
 
@@ -247,7 +272,9 @@ describe("layerStore", () => {
       useLayerStore.getState().addRule(layerId, makeRule({ name: "second" }));
       useLayerStore.getState().clearRules(layerId);
 
-      const layer = useLayerStore.getState().layers.find((l) => l.id === layerId)!;
+      const layer = useLayerStore
+        .getState()
+        .layers.find((l) => l.id === layerId)!;
       expect(layer.rules).toHaveLength(0);
     });
 
@@ -264,7 +291,9 @@ describe("layerStore", () => {
       const rule = makeRule();
       useLayerStore.getState().addRule(layerId, rule);
 
-      const other = useLayerStore.getState().layers.find((l) => l.id === otherId)!;
+      const other = useLayerStore
+        .getState()
+        .layers.find((l) => l.id === otherId)!;
       expect(other.rules).toHaveLength(0);
     });
   });

@@ -47,7 +47,10 @@ function makeTwoObjectGeometry() {
   geometry.setAttribute("surfaceIndex", new BufferAttribute(surfaceIndices, 1));
 
   const baseColors = Float32Array.from(colors);
-  const pickingIndex: PickingIndex = { layerId: "test-layer", objectKeys: ["b1", "b2"] };
+  const pickingIndex: PickingIndex = {
+    layerId: "test-layer",
+    objectKeys: ["b1", "b2"],
+  };
 
   return { geometry, baseColors, pickingIndex };
 }
@@ -146,12 +149,20 @@ describe("applyHighlight", () => {
     );
 
     const baseColors = Float32Array.from(colors);
-    const pickingIndex: PickingIndex = { layerId: "test-layer", objectKeys: ["b1"] };
+    const pickingIndex: PickingIndex = {
+      layerId: "test-layer",
+      objectKeys: ["b1"],
+    };
 
     applyHighlight(
       geometry,
       baseColors,
-      { kind: "surface", layerId: "test-layer", objectId: "b1", surfaceIndex: 1 },
+      {
+        kind: "surface",
+        layerId: "test-layer",
+        objectId: "b1",
+        surfaceIndex: 1,
+      },
       null,
       pickingIndex,
     );

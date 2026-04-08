@@ -1,14 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./app.css";
 import { detectEncoding } from "../domain/citymodel/detectEncoding";
-import { loadFromUrl, fileNameFromUrl } from "../domain/citymodel/loadCityModel";
+import {
+  loadFromUrl,
+  fileNameFromUrl,
+} from "../domain/citymodel/loadCityModel";
 import type { ProjectStateStore, SnapshotSummary } from "../persistence/types";
 import { LocalStorageProjectStateStore } from "../persistence/localStorage";
 import { captureSnapshot } from "../persistence/captureSnapshot";
 import { restoreSnapshot } from "../persistence/restoreSnapshot";
-import { encodeShareState, decodeShareState, buildShareUrl } from "../persistence/urlShare";
+import { decodeShareState, buildShareUrl } from "../persistence/urlShare";
 import type { ShareableViewState } from "../persistence/urlShare";
-import { initDuckDB, getDuckDBStatus, loadModelIntoDuckDB } from "../analytics/duckdb";
+import {
+  initDuckDB,
+  getDuckDBStatus,
+  loadModelIntoDuckDB,
+} from "../analytics/duckdb";
 import type { DuckDBStatus } from "../analytics/duckdb";
 import { browserPlatform } from "../platform/browser";
 import type { PlatformServices } from "../platform/types";
@@ -32,11 +39,16 @@ interface AppProps {
   readonly platform?: PlatformServices;
 }
 
-export function App({ persistenceStore = defaultStore, platform = browserPlatform }: AppProps) {
+export function App({
+  persistenceStore = defaultStore,
+  platform = browserPlatform,
+}: AppProps) {
   const [triangleCount, setTriangleCount] = useState(0);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [savedSnapshots, setSavedSnapshots] = useState<SnapshotSummary[]>([]);
-  const [duckdbStatus, setDuckdbStatus] = useState<DuckDBStatus>({ state: "uninitialized" });
+  const [duckdbStatus, setDuckdbStatus] = useState<DuckDBStatus>({
+    state: "uninitialized",
+  });
   const [duckdbModelLoaded, setDuckdbModelLoaded] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const sceneRef = useRef<CitySceneHandle>(null);
@@ -50,7 +62,13 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
   const hasLayers = layers.length > 0;
 
   // File loading
-  const { addLayerFromFile, addLayerFromUrl, loading, error: loadError, clearError } = useLayerFileLoader();
+  const {
+    addLayerFromFile,
+    addLayerFromUrl,
+    loading,
+    error: loadError,
+    clearError,
+  } = useLayerFileLoader();
 
   const selection = useSelectionStore((s) => s.selection);
   const mode = useSelectionStore((s) => s.mode);
@@ -63,12 +81,12 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
   }, [persistenceStore]);
 
   useEffect(() => {
-    refreshSnapshots();
+    void refreshSnapshots();
   }, [refreshSnapshots]);
 
   // Initialize DuckDB-wasm on mount
   useEffect(() => {
-    initDuckDB().then(() => {
+    void initDuckDB().then(() => {
       setDuckdbStatus(getDuckDBStatus());
     });
   }, []);
@@ -78,7 +96,8 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
     let cancelled = false;
 
     if (duckdbStatus.state !== "ready") return;
-    if (!("extensionLoaded" in duckdbStatus) || !duckdbStatus.extensionLoaded) return;
+    if (!("extensionLoaded" in duckdbStatus) || !duckdbStatus.extensionLoaded)
+      return;
 
     const activeLayer = layers.find((l) => l.id === activeLayerId);
     if (!activeLayer || activeLayer.modelRef.type !== "url") {
@@ -87,11 +106,13 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
     }
 
     const encoding = detectEncoding(activeLayer.modelRef.url);
-    loadModelIntoDuckDB(activeLayer.modelRef.url, encoding).then((ok) => {
+    void loadModelIntoDuckDB(activeLayer.modelRef.url, encoding).then((ok) => {
       if (!cancelled) setDuckdbModelLoaded(ok);
     });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [duckdbStatus, activeLayerId, layers]);
 
   const handleFile = useCallback(
@@ -118,7 +139,8 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
     const { layers: allLayers } = useLayerStore.getState();
     const { mode: pickMode } = useSelectionStore.getState();
 
-    const activeLayer = allLayers.find((l) => l.id === activeLayerId) ?? allLayers[0];
+    const activeLayer =
+      allLayers.find((l) => l.id === activeLayerId) ?? allLayers[0];
     const label = activeLayer?.name ?? "Untitled";
 
     const snapshot = captureSnapshot({
@@ -145,70 +167,91 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
     }
   }, [activeLayerId, persistenceStore, refreshSnapshots]);
 
-  const handleRestore = useCallback(async (id: string) => {
-    clearError();
-    try {
-      const snapshot = await persistenceStore.load(id);
-      if (!snapshot) {
-        setToast("Snapshot not found.");
-        setTimeout(() => setToast(null), 3000);
-        return;
-      }
-
-      const viewState = restoreSnapshot(snapshot);
-
-      // Remove all existing layers
-      useLayerStore.getState().removeAllLayers();
-
-      // Restore layers from snapshot
-      const snapshotLayers = snapshot.layers ?? [];
-      // Legacy single-model fallback
-      const legacyLayers = snapshotLayers.length === 0 && snapshot.modelRef
-        ? [{ name: snapshot.label, modelRef: snapshot.modelRef, rules: [...(snapshot.rules ?? [])], rulesEnabled: snapshot.rulesEnabled ?? true, visible: true }]
-        : snapshotLayers;
-
-      let hasUrlLayer = false;
-      for (const sl of legacyLayers) {
-        if (sl.modelRef.type === "url") {
-          hasUrlLayer = true;
-          const parsed = await loadFromUrl(sl.modelRef.url);
-          useLayerStore.getState().addLayer({
-            name: sl.name,
-            model: parsed,
-            modelRef: sl.modelRef,
-            visible: sl.visible ?? true,
-            rules: sl.rules ?? [],
-            rulesEnabled: sl.rulesEnabled ?? true,
-          });
+  const handleRestore = useCallback(
+    async (id: string) => {
+      clearError();
+      try {
+        const snapshot = await persistenceStore.load(id);
+        if (!snapshot) {
+          setToast("Snapshot not found.");
+          setTimeout(() => setToast(null), 3000);
+          return;
         }
-      }
 
-      const hasFileLayer = legacyLayers.some((l) => l.modelRef.type === "file");
-      if (!hasUrlLayer) {
-        setToast("Workspace restored. Drop file(s) to view the model.");
-        setTimeout(() => setToast(null), 3000);
-      } else if (hasFileLayer) {
-        setToast("URL layers restored. Drop local file(s) to restore remaining layers.");
-        setTimeout(() => setToast(null), 3000);
-      }
+        const viewState = restoreSnapshot(snapshot);
 
-      if (cameraTimerRef.current) clearTimeout(cameraTimerRef.current);
-      cameraTimerRef.current = setTimeout(() => {
-        sceneRef.current?.setCameraState(
-          viewState.cameraPosition,
-          viewState.cameraTarget,
+        // Remove all existing layers
+        useLayerStore.getState().removeAllLayers();
+
+        // Restore layers from snapshot
+        const snapshotLayers = snapshot.layers ?? [];
+        // Legacy single-model fallback
+        const legacyLayers =
+          snapshotLayers.length === 0 && snapshot.modelRef
+            ? [
+                {
+                  name: snapshot.label,
+                  modelRef: snapshot.modelRef,
+                  rules: [...(snapshot.rules ?? [])],
+                  rulesEnabled: snapshot.rulesEnabled ?? true,
+                  visible: true,
+                },
+              ]
+            : snapshotLayers;
+
+        let hasUrlLayer = false;
+        for (const sl of legacyLayers) {
+          if (sl.modelRef.type === "url") {
+            hasUrlLayer = true;
+            const parsed = await loadFromUrl(sl.modelRef.url);
+            useLayerStore.getState().addLayer({
+              name: sl.name,
+              model: parsed,
+              modelRef: sl.modelRef,
+              visible: sl.visible ?? true,
+              rules: sl.rules ?? [],
+              rulesEnabled: sl.rulesEnabled ?? true,
+            });
+          }
+        }
+
+        const hasFileLayer = legacyLayers.some(
+          (l) => l.modelRef.type === "file",
         );
-      }, 100);
-    } catch (e) {
-      setToast(e instanceof Error ? e.message : "Failed to restore workspace.");
-      setTimeout(() => setToast(null), 3000);
-    }
-  }, [persistenceStore, clearError]);
+        if (!hasUrlLayer) {
+          setToast("Workspace restored. Drop file(s) to view the model.");
+          setTimeout(() => setToast(null), 3000);
+        } else if (hasFileLayer) {
+          setToast(
+            "URL layers restored. Drop local file(s) to restore remaining layers.",
+          );
+          setTimeout(() => setToast(null), 3000);
+        }
 
-  const handleDeleteSnapshot = useCallback(async (id: string) => {
-    await persistenceStore.remove(id);
-    await refreshSnapshots();
-  }, [persistenceStore, refreshSnapshots]);
+        if (cameraTimerRef.current) clearTimeout(cameraTimerRef.current);
+        cameraTimerRef.current = setTimeout(() => {
+          sceneRef.current?.setCameraState(
+            viewState.cameraPosition,
+            viewState.cameraTarget,
+          );
+        }, 100);
+      } catch (e) {
+        setToast(
+          e instanceof Error ? e.message : "Failed to restore workspace.",
+        );
+        setTimeout(() => setToast(null), 3000);
+      }
+    },
+    [persistenceStore, clearError],
+  );
+
+  const handleDeleteSnapshot = useCallback(
+    async (id: string) => {
+      await persistenceStore.remove(id);
+      await refreshSnapshots();
+    },
+    [persistenceStore, refreshSnapshots],
+  );
 
   const handleShare = useCallback(() => {
     const cameraState = sceneRef.current?.getCameraState();
@@ -235,7 +278,7 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
     };
 
     const url = buildShareUrl(state);
-    platform.clipboard.writeText(url).then((ok) => {
+    void platform.clipboard.writeText(url).then((ok) => {
       if (ok) {
         setToast("Share link copied to clipboard");
         setTimeout(() => setToast(null), 2500);
@@ -259,16 +302,26 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
     // Load shared layers
     const sharedLayers = shared.layers ?? [];
     // Legacy single-model fallback
-    const legacyUrl = "modelUrl" in shared ? (shared as { modelUrl?: string }).modelUrl : null;
-    const layersToLoad = sharedLayers.length > 0
-      ? sharedLayers
-      : legacyUrl
-        ? [{ name: fileNameFromUrl(legacyUrl), modelUrl: legacyUrl, rules: (shared as { rules?: unknown[] }).rules ?? [], rulesEnabled: true, visible: true }]
-        : [];
+    const legacyUrl =
+      "modelUrl" in shared ? (shared as { modelUrl?: string }).modelUrl : null;
+    const layersToLoad =
+      sharedLayers.length > 0
+        ? sharedLayers
+        : legacyUrl
+          ? [
+              {
+                name: fileNameFromUrl(legacyUrl),
+                modelUrl: legacyUrl,
+                rules: (shared as { rules?: unknown[] }).rules ?? [],
+                rulesEnabled: true,
+                visible: true,
+              },
+            ]
+          : [];
 
     if (layersToLoad.length === 0) return;
 
-    (async () => {
+    void (async () => {
       for (const sl of layersToLoad) {
         if (!sl.modelUrl) continue;
         try {
@@ -278,7 +331,7 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
             model: parsed,
             modelRef: { type: "url", url: sl.modelUrl },
             visible: sl.visible ?? true,
-            rules: (sl.rules ?? []) as typeof layers[number]["rules"],
+            rules: (sl.rules ?? []) as (typeof layers)[number]["rules"],
             rulesEnabled: sl.rulesEnabled ?? true,
           });
         } catch {
@@ -286,7 +339,11 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
         }
       }
 
-      useSelectionStore.setState({ mode: shared.pm, selection: null, hovered: null });
+      useSelectionStore.setState({
+        mode: shared.pm,
+        selection: null,
+        hovered: null,
+      });
       const dt = new Date(shared.dt);
       if (!isNaN(dt.getTime())) {
         useSolarStore.getState().setDatetime(dt);
@@ -302,7 +359,7 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
     (e: React.DragEvent) => {
       e.preventDefault();
       const file = e.dataTransfer.files[0];
-      if (file) handleFile(file);
+      if (file) void handleFile(file);
     },
     [handleFile],
   );
@@ -310,7 +367,7 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
   const handleInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) handleFile(file);
+      if (file) void handleFile(file);
     },
     [handleFile],
   );
@@ -336,7 +393,9 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
     const hasUrlLayers = layers.some((l) => l.modelRef.type === "url");
 
     return (
-      <div className={`viewer-shell ${!inspectorOpen ? "panel-collapsed" : ""}`}>
+      <div
+        className={`viewer-shell ${!inspectorOpen ? "panel-collapsed" : ""}`}
+      >
         <ViewerToolbar
           fileName={activeLayer?.name ?? null}
           layerCount={layers.length}
@@ -391,9 +450,8 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
         <p className="eyebrow">MultiRoof Viewer</p>
         <h1>Rooftop analysis starts here.</h1>
         <p className="summary">
-          Drop a file or load from a URL.
-          Supports <code>.city.json</code>, <code>.city.jsonl</code>,
-          and <code>.fcb</code>.
+          Drop a file or load from a URL. Supports <code>.city.json</code>,{" "}
+          <code>.city.jsonl</code>, and <code>.fcb</code>.
         </p>
       </div>
 
@@ -459,9 +517,7 @@ function UrlInput({
 
   return (
     <form className="fcb-url-form" onSubmit={handleSubmit}>
-      <label className="fcb-url-label">
-        Or load from URL:
-      </label>
+      <label className="fcb-url-label">Or load from URL:</label>
       <div className="fcb-url-row">
         <input
           type="url"

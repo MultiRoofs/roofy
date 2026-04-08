@@ -6,10 +6,7 @@
  * and assigns vertex colors based on semantic surface type.
  */
 
-import {
-  BufferAttribute,
-  BufferGeometry,
-} from "three";
+import { BufferAttribute, BufferGeometry } from "three";
 import type { CityModel, Vec3 } from "../domain/citymodel/types";
 import { SURFACE_COLORS } from "./surfaceColors";
 
@@ -97,7 +94,7 @@ export function buildCityMesh(
         const v2 = exteriorRing[i + 1]!;
         const base = writeIdx * 3;
 
-        posArray[base]     = v0x;
+        posArray[base] = v0x;
         posArray[base + 1] = v0y;
         posArray[base + 2] = v0z;
         posArray[base + 3] = v1[0] - originOffset[0];
@@ -107,7 +104,7 @@ export function buildCityMesh(
         posArray[base + 7] = v2[1] - originOffset[1];
         posArray[base + 8] = v2[2] - originOffset[2];
 
-        colorArray[base]     = color.r;
+        colorArray[base] = color.r;
         colorArray[base + 1] = color.g;
         colorArray[base + 2] = color.b;
         colorArray[base + 3] = color.r;
@@ -117,10 +114,10 @@ export function buildCityMesh(
         colorArray[base + 7] = color.g;
         colorArray[base + 8] = color.b;
 
-        objIdxArray[writeIdx]     = objectIdx;
+        objIdxArray[writeIdx] = objectIdx;
         objIdxArray[writeIdx + 1] = objectIdx;
         objIdxArray[writeIdx + 2] = objectIdx;
-        surfIdxArray[writeIdx]     = surfaceIdx;
+        surfIdxArray[writeIdx] = surfaceIdx;
         surfIdxArray[writeIdx + 1] = surfaceIdx;
         surfIdxArray[writeIdx + 2] = surfaceIdx;
 
