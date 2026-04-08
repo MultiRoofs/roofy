@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./app.css";
-import type { CityModel } from "../domain/citymodel/types";
 import { detectEncoding } from "../domain/citymodel/detectEncoding";
-import { loadFlatCityBuf } from "../domain/citymodel/flatcitybuf/loadFlatCityBuf";
-import { parseText, loadFromUrl, fileNameFromUrl } from "../domain/citymodel/loadCityModel";
-import type { CityModelReference, ProjectStateStore, SnapshotSummary } from "../persistence/types";
+import { loadFromUrl, fileNameFromUrl } from "../domain/citymodel/loadCityModel";
+import type { ProjectStateStore, SnapshotSummary } from "../persistence/types";
 import { LocalStorageProjectStateStore } from "../persistence/localStorage";
 import { captureSnapshot } from "../persistence/captureSnapshot";
 import { restoreSnapshot } from "../persistence/restoreSnapshot";
@@ -17,7 +15,9 @@ import type { PlatformServices } from "../platform/types";
 import { CityScene } from "../scene/CityScene";
 import type { CitySceneHandle } from "../scene/CityScene";
 import { useSelectionStore } from "../features/selection/selectionStore";
-import { useRuleStore } from "../features/rules/ruleStore";
+import { useLayerStore } from "../features/layers/layerStore";
+import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
+import { useTheme } from "../features/theme/useTheme";
 import { useSolarStore } from "../features/solar/solarStore";
 import { InspectorPanel } from "../ui/inspector/InspectorPanel";
 import { ViewerToolbar } from "../ui/toolbar/ViewerToolbar";
@@ -33,18 +33,24 @@ interface AppProps {
 }
 
 export function App({ persistenceStore = defaultStore, platform = browserPlatform }: AppProps) {
-  const [model, setModel] = useState<CityModel | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [fileName, setFileName] = useState<string | null>(null);
   const [triangleCount, setTriangleCount] = useState(0);
   const [inspectorOpen, setInspectorOpen] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [modelRef, setModelRef] = useState<CityModelReference | null>(null);
   const [savedSnapshots, setSavedSnapshots] = useState<SnapshotSummary[]>([]);
   const [duckdbStatus, setDuckdbStatus] = useState<DuckDBStatus>({ state: "uninitialized" });
   const [duckdbModelLoaded, setDuckdbModelLoaded] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const sceneRef = useRef<CitySceneHandle>(null);
+  const cameraTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const { theme, toggleTheme } = useTheme();
+
+  // Layer store
+  const layers = useLayerStore((s) => s.layers);
+  const activeLayerId = useLayerStore((s) => s.activeLayerId);
+  const hasLayers = layers.length > 0;
+
+  // File loading
+  const { addLayerFromFile, addLayerFromUrl, loading, error: loadError, clearError } = useLayerFileLoader();
 
   const selection = useSelectionStore((s) => s.selection);
   const mode = useSelectionStore((s) => s.mode);
@@ -60,88 +66,73 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
     refreshSnapshots();
   }, [refreshSnapshots]);
 
-  // Initialize DuckDB-wasm on mount (fire-and-forget)
+  // Initialize DuckDB-wasm on mount
   useEffect(() => {
     initDuckDB().then(() => {
       setDuckdbStatus(getDuckDBStatus());
     });
   }, []);
 
-  // Load model into DuckDB when both DuckDB and a URL-based model are ready
+  // Load active layer's model into DuckDB when URL-based
   useEffect(() => {
+    let cancelled = false;
+
     if (duckdbStatus.state !== "ready") return;
     if (!("extensionLoaded" in duckdbStatus) || !duckdbStatus.extensionLoaded) return;
-    if (!modelRef || modelRef.type !== "url") {
+
+    const activeLayer = layers.find((l) => l.id === activeLayerId);
+    if (!activeLayer || activeLayer.modelRef.type !== "url") {
       setDuckdbModelLoaded(false);
       return;
     }
 
-    const encoding = detectEncoding(modelRef.url);
-    loadModelIntoDuckDB(modelRef.url, encoding).then((ok) => {
-      setDuckdbModelLoaded(ok);
+    const encoding = detectEncoding(activeLayer.modelRef.url);
+    loadModelIntoDuckDB(activeLayer.modelRef.url, encoding).then((ok) => {
+      if (!cancelled) setDuckdbModelLoaded(ok);
     });
-  }, [duckdbStatus, modelRef]);
 
-  const handleFile = useCallback(async (file: File) => {
-    setError(null);
-    setLoading(true);
-    try {
-      let parsed: CityModel;
+    return () => { cancelled = true; };
+  }, [duckdbStatus, activeLayerId, layers]);
 
-      if (detectEncoding(file.name) === "flatcitybuf") {
-        const blobUrl = URL.createObjectURL(file);
-        try {
-          parsed = await loadFlatCityBuf(blobUrl);
-        } finally {
-          URL.revokeObjectURL(blobUrl);
-        }
-      } else {
-        const text = await file.text();
-        parsed = parseText(file.name, text);
-      }
+  const handleFile = useCallback(
+    async (file: File) => {
+      clearError();
+      await addLayerFromFile(file);
+    },
+    [addLayerFromFile, clearError],
+  );
 
-      setModel(parsed);
-      setFileName(file.name);
-      setModelRef({ type: "file", fileName: file.name });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to parse file.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const handleUrl = useCallback(async (url: string) => {
-    setError(null);
-    setLoading(true);
-    try {
-      const parsed = await loadFromUrl(url);
-      setModel(parsed);
-      setFileName(fileNameFromUrl(url));
-      setModelRef({ type: "url", url });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load remote file.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const handleUrl = useCallback(
+    async (url: string) => {
+      clearError();
+      await addLayerFromUrl(url);
+    },
+    [addLayerFromUrl, clearError],
+  );
 
   const handleSave = useCallback(async () => {
     const cameraState = sceneRef.current?.getCameraState();
     if (!cameraState) return;
 
     const { datetime } = useSolarStore.getState();
-    const { rules, enabled: rulesEnabled } = useRuleStore.getState();
+    const { layers: allLayers } = useLayerStore.getState();
     const { mode: pickMode } = useSelectionStore.getState();
 
-    const label = fileName ?? "Untitled";
+    const activeLayer = allLayers.find((l) => l.id === activeLayerId) ?? allLayers[0];
+    const label = activeLayer?.name ?? "Untitled";
+
     const snapshot = captureSnapshot({
       label,
-      modelRef,
+      layers: allLayers.map((l) => ({
+        name: l.name,
+        modelRef: l.modelRef,
+        rules: [...l.rules],
+        rulesEnabled: l.rulesEnabled,
+        visible: l.visible,
+      })),
       cameraPosition: cameraState.position,
       cameraTarget: cameraState.target,
       datetime,
-      rules,
-      rulesEnabled,
       pickMode,
     });
 
@@ -149,57 +140,70 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
       await persistenceStore.save(snapshot);
       await refreshSnapshots();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save workspace.");
+      setToast(e instanceof Error ? e.message : "Failed to save workspace.");
+      setTimeout(() => setToast(null), 3000);
     }
-  }, [fileName, modelRef, persistenceStore, refreshSnapshots]);
+  }, [activeLayerId, persistenceStore, refreshSnapshots]);
 
   const handleRestore = useCallback(async (id: string) => {
-    setError(null);
-    setLoading(true);
+    clearError();
     try {
       const snapshot = await persistenceStore.load(id);
       if (!snapshot) {
-        setError("Snapshot not found.");
+        setToast("Snapshot not found.");
+        setTimeout(() => setToast(null), 3000);
         return;
       }
 
       const viewState = restoreSnapshot(snapshot);
 
-      if (snapshot.modelRef?.type === "url") {
-        const parsed = await loadFromUrl(snapshot.modelRef.url);
-        setModel(parsed);
-        setFileName(fileNameFromUrl(snapshot.modelRef.url));
-        setModelRef(snapshot.modelRef);
-        // Apply camera after the scene initializes with the new model
-        setTimeout(() => {
-          sceneRef.current?.setCameraState(
-            viewState.cameraPosition,
-            viewState.cameraTarget,
-          );
-        }, 100);
-      } else if (snapshot.modelRef?.type === "file") {
-        // Cannot auto-load a local file — apply camera if model is already loaded
-        setFileName(snapshot.modelRef.fileName);
-        setModelRef(snapshot.modelRef);
-        if (model) {
-          sceneRef.current?.setCameraState(
-            viewState.cameraPosition,
-            viewState.cameraTarget,
-          );
+      // Remove all existing layers
+      useLayerStore.getState().removeAllLayers();
+
+      // Restore layers from snapshot
+      const snapshotLayers = snapshot.layers ?? [];
+      // Legacy single-model fallback
+      const legacyLayers = snapshotLayers.length === 0 && snapshot.modelRef
+        ? [{ name: snapshot.label, modelRef: snapshot.modelRef, rules: [...(snapshot.rules ?? [])], rulesEnabled: snapshot.rulesEnabled ?? true, visible: true }]
+        : snapshotLayers;
+
+      let hasUrlLayer = false;
+      for (const sl of legacyLayers) {
+        if (sl.modelRef.type === "url") {
+          hasUrlLayer = true;
+          const parsed = await loadFromUrl(sl.modelRef.url);
+          useLayerStore.getState().addLayer({
+            name: sl.name,
+            model: parsed,
+            modelRef: sl.modelRef,
+            visible: sl.visible ?? true,
+            rules: sl.rules ?? [],
+            rulesEnabled: sl.rulesEnabled ?? true,
+          });
         }
-        setError(
-          `Workspace "${snapshot.label}" restored. ` +
-          `Please drop "${snapshot.modelRef.fileName}" to view the model.`,
-        );
-      } else {
-        setError("Workspace restored, but no model source was saved.");
       }
+
+      const hasFileLayer = legacyLayers.some((l) => l.modelRef.type === "file");
+      if (!hasUrlLayer) {
+        setToast("Workspace restored. Drop file(s) to view the model.");
+        setTimeout(() => setToast(null), 3000);
+      } else if (hasFileLayer) {
+        setToast("URL layers restored. Drop local file(s) to restore remaining layers.");
+        setTimeout(() => setToast(null), 3000);
+      }
+
+      if (cameraTimerRef.current) clearTimeout(cameraTimerRef.current);
+      cameraTimerRef.current = setTimeout(() => {
+        sceneRef.current?.setCameraState(
+          viewState.cameraPosition,
+          viewState.cameraTarget,
+        );
+      }, 100);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to restore workspace.");
-    } finally {
-      setLoading(false);
+      setToast(e instanceof Error ? e.message : "Failed to restore workspace.");
+      setTimeout(() => setToast(null), 3000);
     }
-  }, [model, persistenceStore]);
+  }, [persistenceStore, clearError]);
 
   const handleDeleteSnapshot = useCallback(async (id: string) => {
     await persistenceStore.remove(id);
@@ -211,16 +215,22 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
     if (!cameraState) return;
 
     const { datetime } = useSolarStore.getState();
-    const { rules, enabled: rulesEnabled } = useRuleStore.getState();
+    const { layers: allLayers } = useLayerStore.getState();
     const { mode: pickMode } = useSelectionStore.getState();
 
     const state: ShareableViewState = {
-      modelUrl: modelRef?.type === "url" ? modelRef.url : null,
+      layers: allLayers
+        .filter((l) => l.modelRef.type === "url")
+        .map((l) => ({
+          name: l.name,
+          modelUrl: (l.modelRef as { type: "url"; url: string }).url,
+          rules: [...l.rules],
+          rulesEnabled: l.rulesEnabled,
+          visible: l.visible,
+        })),
       cp: cameraState.position,
       ct: cameraState.target,
       dt: datetime.toISOString(),
-      rules: [...rules],
-      re: rulesEnabled,
       pm: pickMode,
     };
 
@@ -234,7 +244,7 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
         setTimeout(() => setToast(null), 3000);
       }
     });
-  }, [modelRef, platform]);
+  }, [platform]);
 
   // On mount: check URL hash for a share token
   useEffect(() => {
@@ -244,23 +254,48 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
     const shared = decodeShareState(hash);
     if (!shared) return;
 
-    // Clear the hash so it doesn't re-trigger on refresh
     history.replaceState(null, "", location.pathname);
 
-    if (shared.modelUrl) {
-      handleUrl(shared.modelUrl).then(() => {
-        // Apply camera and state after model loads
-        useRuleStore.setState({ rules: [...shared.rules], enabled: shared.re });
-        useSelectionStore.setState({ mode: shared.pm, selection: null, hovered: null });
-        const dt = new Date(shared.dt);
-        if (!isNaN(dt.getTime())) {
-          useSolarStore.getState().setDatetime(dt);
+    // Load shared layers
+    const sharedLayers = shared.layers ?? [];
+    // Legacy single-model fallback
+    const legacyUrl = "modelUrl" in shared ? (shared as { modelUrl?: string }).modelUrl : null;
+    const layersToLoad = sharedLayers.length > 0
+      ? sharedLayers
+      : legacyUrl
+        ? [{ name: fileNameFromUrl(legacyUrl), modelUrl: legacyUrl, rules: (shared as { rules?: unknown[] }).rules ?? [], rulesEnabled: true, visible: true }]
+        : [];
+
+    if (layersToLoad.length === 0) return;
+
+    (async () => {
+      for (const sl of layersToLoad) {
+        if (!sl.modelUrl) continue;
+        try {
+          const parsed = await loadFromUrl(sl.modelUrl);
+          useLayerStore.getState().addLayer({
+            name: sl.name ?? fileNameFromUrl(sl.modelUrl),
+            model: parsed,
+            modelRef: { type: "url", url: sl.modelUrl },
+            visible: sl.visible ?? true,
+            rules: (sl.rules ?? []) as typeof layers[number]["rules"],
+            rulesEnabled: sl.rulesEnabled ?? true,
+          });
+        } catch {
+          // Skip failed layers silently
         }
-        setTimeout(() => {
-          sceneRef.current?.setCameraState(shared.cp, shared.ct);
-        }, 100);
-      });
-    }
+      }
+
+      useSelectionStore.setState({ mode: shared.pm, selection: null, hovered: null });
+      const dt = new Date(shared.dt);
+      if (!isNaN(dt.getTime())) {
+        useSolarStore.getState().setDatetime(dt);
+      }
+      if (cameraTimerRef.current) clearTimeout(cameraTimerRef.current);
+      cameraTimerRef.current = setTimeout(() => {
+        sceneRef.current?.setCameraState(shared.cp, shared.ct);
+      }, 100);
+    })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDrop = useCallback(
@@ -281,9 +316,7 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
   );
 
   const handleClose = useCallback(() => {
-    setModel(null);
-    setFileName(null);
-    setModelRef(null);
+    useLayerStore.getState().removeAllLayers();
     setTriangleCount(0);
     setDuckdbModelLoaded(false);
     clearSelection();
@@ -294,20 +327,27 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
   }, []);
 
   // Viewer state
-  if (model) {
-    const objectCount = Object.keys(model.objects).length;
+  if (hasLayers) {
+    const totalObjects = layers.reduce(
+      (sum, l) => sum + Object.keys(l.model.objects).length,
+      0,
+    );
+    const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
+    const hasUrlLayers = layers.some((l) => l.modelRef.type === "url");
 
     return (
       <div className={`viewer-shell ${!inspectorOpen ? "panel-collapsed" : ""}`}>
         <ViewerToolbar
-          model={model}
-          fileName={fileName}
+          fileName={activeLayer?.name ?? null}
+          layerCount={layers.length}
           onClose={handleClose}
           onToggleInspector={() => setInspectorOpen((o) => !o)}
           onFitAll={handleFitAll}
           onSave={handleSave}
           onShare={handleShare}
-          canShare={modelRef?.type === "url"}
+          canShare={hasUrlLayers}
+          theme={theme}
+          onToggleTheme={toggleTheme}
         />
 
         <ToolRail
@@ -317,21 +357,23 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
         />
 
         <div className="viewport">
-          <CityScene ref={sceneRef} model={model} onTriangleCount={setTriangleCount} />
+          <CityScene ref={sceneRef} onTriangleCount={setTriangleCount} />
           <LegendOverlay />
         </div>
 
         {inspectorOpen && (
           <InspectorPanel
-            model={model}
             selection={selection}
             onClose={() => setInspectorOpen(false)}
             duckdbModelLoaded={duckdbModelLoaded}
+            onAddLayerFromFile={handleFile}
+            onAddLayerFromUrl={handleUrl}
+            addLayerLoading={loading}
           />
         )}
 
         <StatusBar
-          objectCount={objectCount}
+          objectCount={totalObjects}
           triangleCount={triangleCount}
           selectedCount={selection ? 1 : 0}
           duckdbStatus={duckdbStatus}
@@ -391,7 +433,7 @@ export function App({ persistenceStore = defaultStore, platform = browserPlatfor
         </div>
       )}
 
-      {error && <p className="error-message">{error}</p>}
+      {loadError && <p className="error-message">{loadError}</p>}
     </main>
   );
 }
