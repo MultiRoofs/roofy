@@ -1,7 +1,8 @@
 /**
- * Viewer toolbar with metadata pills and action buttons.
+ * Viewer toolbar with metadata pills, pick mode, and action buttons.
  */
 
+import type { PickMode } from "../../domain/selection/types";
 import type { Theme } from "../../features/theme/useTheme";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useSolarStore } from "../../features/solar/solarStore";
@@ -9,8 +10,11 @@ import { useSolarStore } from "../../features/solar/solarStore";
 interface ViewerToolbarProps {
   readonly fileName: string | null;
   readonly layerCount: number;
+  readonly pickMode: PickMode;
+  readonly onSetPickMode: (mode: PickMode) => void;
   readonly onClose: () => void;
   readonly onToggleInspector: () => void;
+  readonly onToggleLeftSidebar: () => void;
   readonly onFitAll: () => void;
   readonly onSave?: () => void;
   readonly onShare?: () => void;
@@ -22,8 +26,11 @@ interface ViewerToolbarProps {
 export function ViewerToolbar({
   fileName,
   layerCount,
+  pickMode,
+  onSetPickMode,
   onClose,
   onToggleInspector,
+  onToggleLeftSidebar,
   onFitAll,
   onSave,
   onShare,
@@ -54,8 +61,54 @@ export function ViewerToolbar({
   return (
     <header className="toolbar">
       <span className="toolbar-brand">MultiRoof</span>
-      {fileName && <span className="toolbar-file">{fileName}</span>}
+
+      {/* Left sidebar toggle */}
+      <button
+        className="tb-btn"
+        title="Toggle layers panel"
+        onClick={onToggleLeftSidebar}
+      >
+        <svg viewBox="0 0 24 24">
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <path d="M9 3v18" />
+        </svg>
+      </button>
+
       <div className="toolbar-sep" />
+
+      {/* Pick mode buttons */}
+      <div className="toolbar-btn-group">
+        <button
+          className={`tb-btn ${pickMode === "object" ? "tb-btn-active" : ""}`}
+          title="Select objects (V)"
+          onClick={() => onSetPickMode("object")}
+        >
+          <svg viewBox="0 0 24 24">
+            <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
+          </svg>
+        </button>
+        <button
+          className={`tb-btn ${pickMode === "surface" ? "tb-btn-active" : ""}`}
+          title="Select surfaces (S)"
+          onClick={() => onSetPickMode("surface")}
+        >
+          <svg viewBox="0 0 24 24">
+            <path d="M2 6l10-3 10 3-10 3-10-3z" />
+            <path d="M2 12l10 3 10-3" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Fit all */}
+      <button className="tb-btn" title="Zoom to fit (F)" onClick={onFitAll}>
+        <svg viewBox="0 0 24 24">
+          <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3M3 16v3a2 2 0 002 2h3m8 0h3a2 2 0 002-2v-3" />
+        </svg>
+      </button>
+
+      <div className="toolbar-sep" />
+
+      {fileName && <span className="toolbar-file">{fileName}</span>}
 
       <div className="meta-pills">
         {crs && (
@@ -167,11 +220,6 @@ export function ViewerToolbar({
         <svg viewBox="0 0 24 24">
           <rect x="3" y="3" width="18" height="18" rx="2" />
           <path d="M15 3v18" />
-        </svg>
-      </button>
-      <button className="tb-btn" title="Zoom to fit" onClick={onFitAll}>
-        <svg viewBox="0 0 24 24">
-          <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
         </svg>
       </button>
       <button className="tb-btn" title="Close file" onClick={onClose}>

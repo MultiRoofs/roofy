@@ -2,7 +2,7 @@
  * Right-side inspector panel.
  *
  * Shows details about the selected CityObject or surface.
- * Tabs: Layers, Object, Surfaces, Analysis, Rules, Solar, Stats.
+ * Tabs: Object, Surfaces, Analysis, Rules, Solar, Stats.
  */
 
 import { useState } from "react";
@@ -18,35 +18,21 @@ import { AnalysisTab } from "./AnalysisTab";
 import { RuleBuilderTab } from "./RuleBuilderTab";
 import { SolarTab } from "./SolarTab";
 import { StatsTab } from "./StatsTab";
-import { LayerPanel } from "../layers/LayerPanel";
 
-type Tab =
-  | "layers"
-  | "object"
-  | "surfaces"
-  | "analysis"
-  | "rules"
-  | "solar"
-  | "stats";
+type Tab = "object" | "surfaces" | "analysis" | "rules" | "solar" | "stats";
 
 interface InspectorPanelProps {
   readonly selection: Selection | null;
   readonly onClose: () => void;
   readonly duckdbModelLoaded?: boolean;
-  readonly onAddLayerFromFile: (file: File) => void;
-  readonly onAddLayerFromUrl: (url: string) => void;
-  readonly addLayerLoading: boolean;
 }
 
 export function InspectorPanel({
   selection,
   onClose,
   duckdbModelLoaded,
-  onAddLayerFromFile,
-  onAddLayerFromUrl,
-  addLayerLoading,
 }: InspectorPanelProps) {
-  const [activeTab, setActiveTab] = useState<Tab>("layers");
+  const [activeTab, setActiveTab] = useState<Tab>("object");
 
   const layers = useLayerStore((s) => s.layers);
   const activeLayerId = useLayerStore((s) => s.activeLayerId);
@@ -74,12 +60,6 @@ export function InspectorPanel({
       </div>
 
       <div className="inspector-tabs">
-        <button
-          className={`inspector-tab ${activeTab === "layers" ? "active" : ""}`}
-          onClick={() => setActiveTab("layers")}
-        >
-          Layers
-        </button>
         <button
           className={`inspector-tab ${activeTab === "object" ? "active" : ""}`}
           onClick={() => setActiveTab("object")}
@@ -119,13 +99,7 @@ export function InspectorPanel({
       </div>
       <div className="inspector-body">
         <ErrorBoundary fallback="inline" key={activeTab}>
-          {activeTab === "layers" ? (
-            <LayerPanel
-              onAddFile={onAddLayerFromFile}
-              onAddUrl={onAddLayerFromUrl}
-              loading={addLayerLoading}
-            />
-          ) : activeTab === "rules" ? (
+          {activeTab === "rules" ? (
             displayLayer ? (
               <RuleBuilderTab
                 model={displayLayer.model}

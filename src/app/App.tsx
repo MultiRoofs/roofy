@@ -28,7 +28,7 @@ import { useTheme } from "../features/theme/useTheme";
 import { useSolarStore } from "../features/solar/solarStore";
 import { InspectorPanel } from "../ui/inspector/InspectorPanel";
 import { ViewerToolbar } from "../ui/toolbar/ViewerToolbar";
-import { ToolRail } from "../ui/toolbar/ToolRail";
+import { LeftSidebar } from "../ui/sidebar/LeftSidebar";
 import { StatusBar } from "../ui/StatusBar";
 import { LegendOverlay } from "../ui/viewport/LegendOverlay";
 
@@ -45,6 +45,8 @@ export function App({
 }: AppProps) {
   const [triangleCount, setTriangleCount] = useState(0);
   const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
+  const [leftSidebarWidth, setLeftSidebarWidth] = useState(240);
   const [savedSnapshots, setSavedSnapshots] = useState<SnapshotSummary[]>([]);
   const [duckdbStatus, setDuckdbStatus] = useState<DuckDBStatus>({
     state: "uninitialized",
@@ -392,15 +394,29 @@ export function App({
     const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
     const hasUrlLayers = layers.some((l) => l.modelRef.type === "url");
 
+    const shellClasses = [
+      "viewer-shell",
+      !inspectorOpen && "panel-collapsed",
+      leftSidebarCollapsed && "left-collapsed",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
     return (
       <div
-        className={`viewer-shell ${!inspectorOpen ? "panel-collapsed" : ""}`}
+        className={shellClasses}
+        style={
+          { "--left-panel-w": `${leftSidebarWidth}px` } as React.CSSProperties
+        }
       >
         <ViewerToolbar
           fileName={activeLayer?.name ?? null}
           layerCount={layers.length}
+          pickMode={mode}
+          onSetPickMode={setMode}
           onClose={handleClose}
           onToggleInspector={() => setInspectorOpen((o) => !o)}
+          onToggleLeftSidebar={() => setLeftSidebarCollapsed((o) => !o)}
           onFitAll={handleFitAll}
           onSave={handleSave}
           onShare={handleShare}
@@ -409,10 +425,13 @@ export function App({
           onToggleTheme={toggleTheme}
         />
 
-        <ToolRail
-          pickMode={mode}
-          onSetPickMode={setMode}
-          onFitAll={handleFitAll}
+        <LeftSidebar
+          width={leftSidebarWidth}
+          onWidthChange={setLeftSidebarWidth}
+          collapsed={leftSidebarCollapsed}
+          onAddFile={handleFile}
+          onAddUrl={handleUrl}
+          loading={loading}
         />
 
         <div className="viewport">
@@ -425,9 +444,6 @@ export function App({
             selection={selection}
             onClose={() => setInspectorOpen(false)}
             duckdbModelLoaded={duckdbModelLoaded}
-            onAddLayerFromFile={handleFile}
-            onAddLayerFromUrl={handleUrl}
-            addLayerLoading={loading}
           />
         )}
 
