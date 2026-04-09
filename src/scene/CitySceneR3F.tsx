@@ -1,9 +1,9 @@
 /**
- * React Three Fiber version of CityScene.
+ * React Three Fiber scene with @takram/three-atmosphere and clouds.
  *
  * Renders multi-layer city models using R3F declarative components.
- * Integrates drei Sky for atmosphere and sun visualization.
- * Preserves the CitySceneHandle contract for App.tsx compatibility.
+ * Integrates the @takram ecosystem for physically-based atmosphere,
+ * sun/moon lighting, stars, and volumetric clouds.
  */
 
 import {
@@ -11,12 +11,23 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
-  useMemo,
   useRef,
+  useState,
 } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
-import { OrbitControls, Sky } from "@react-three/drei";
+import { OrbitControls } from "@react-three/drei";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
+import { EffectComposer } from "@react-three/postprocessing";
+import {
+  Atmosphere,
+  Sky,
+  SunLight,
+  Stars,
+  AerialPerspective,
+} from "@takram/three-atmosphere/r3f";
+import { SunDirectionalLight } from "@takram/three-atmosphere";
+import { Clouds, CloudLayer } from "@takram/three-clouds/r3f";
+import { EastNorthUpFrame } from "@takram/three-geospatial/r3f";
 import {
   BufferGeometry,
   DirectionalLight,
@@ -24,7 +35,6 @@ import {
   Mesh,
   MeshStandardMaterial,
   PerspectiveCamera,
-  Vector3,
 } from "three";
 import type { BBox3 } from "../domain/citymodel/types";
 import { buildCityMesh, computeOriginOffset } from "./buildCityMesh";
@@ -68,14 +78,17 @@ interface CitySceneHandle {
 
 interface CitySceneProps {
   readonly onTriangleCount: (count: number) => void;
+  readonly cloudsEnabled?: boolean;
 }
 
+const DEG_TO_RAD = Math.PI / 180;
+
 // ---------------------------------------------------------------------------
-// Outer wrapper — renders Canvas + overlay tooltip
+// Outer wrapper — renders Canvas + overlay tooltip + view buttons
 // ---------------------------------------------------------------------------
 
 export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
-  function CityScene({ onTriangleCount }, ref) {
+  function CityScene({ onTriangleCount, cloudsEnabled = true }, ref) {
     const innerRef = useRef<CitySceneHandle>(null);
     const layers = useLayerStore((s) => s.layers);
     const hovered = useSelectionStore((s) => s.hovered);
@@ -88,7 +101,6 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
         ? hoveredLayer.model.objects[hovered.objectId]
         : undefined;
 
-    // Forward handle from inner to outer
     useImperativeHandle(ref, () => ({
       fitAll: () => innerRef.current?.fitAll(),
       fitLayer: (id: string) => innerRef.current?.fitLayer(id),
@@ -113,7 +125,11 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
             raycaster.params.Line = { threshold: 0.1 };
           }}
         >
-          <CitySceneInner ref={innerRef} onTriangleCount={onTriangleCount} />
+          <CitySceneInner
+            ref={innerRef}
+            onTriangleCount={onTriangleCount}
+            cloudsEnabled={cloudsEnabled}
+          />
         </Canvas>
         <ViewAlignButtons onAlign={handleAlign} />
         {hoveredObject && hovered && (
@@ -133,15 +149,17 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
 
 interface InnerProps {
   readonly onTriangleCount: (count: number) => void;
+  readonly cloudsEnabled: boolean;
 }
 
 const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
-  function CitySceneInner({ onTriangleCount }, ref) {
+  function CitySceneInner({ onTriangleCount, cloudsEnabled }, ref) {
     const { camera, gl } = useThree();
     const controlsRef = useRef<OrbitControlsImpl>(null);
     const cityGroupRef = useRef<Group>(null);
-    const dirLightRef = useRef<DirectionalLight>(null);
+    const sunLightRef = useRef<SunDirectionalLight>(null);
     const layerSceneMapRef = useRef<Map<string, LayerSceneState>>(new Map());
+    const [atmosphereReady, setAtmosphereReady] = useState(false);
 
     // Theme-aware clear color with proper cleanup
     useEffect(() => {
@@ -160,7 +178,10 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
     const layers = useLayerStore((s) => s.layers);
     const selection = useSelectionStore((s) => s.selection);
     const hovered = useSelectionStore((s) => s.hovered);
-    const sunPosition = useSolarStore((s) => s.sunPosition);
+
+    // Solar datetime and geographic position
+    const datetime = useSolarStore((s) => s.datetime);
+    const latLon = useSolarStore((s) => s.latLon);
 
     // Manage per-layer meshes: add/remove/visibility/LoD rebuild
     useEffect(() => {
@@ -235,14 +256,15 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
           });
 
           if (!hadLayersBefore && !solarInitialized) {
-            if (model.bbox && dirLightRef.current) {
-              configureShadowCamera(dirLightRef.current, model.bbox);
+            if (model.bbox && sunLightRef.current) {
+              configureShadowCamera(sunLightRef.current, model.bbox);
               geometry.computeBoundingSphere();
             }
             useSolarStore
               .getState()
               .initFromModel(model.metadata.referenceSystem, model.bbox);
             solarInitialized = true;
+            setAtmosphereReady(true);
           }
 
           needsFit = !lodChanged;
@@ -306,65 +328,19 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
       reapplyHighlight(layerSceneMapRef.current, layers);
     }, [selection, hovered, layers]);
 
-    // Sun position → directional light + sky sun direction
-    const sunDir = useMemo(() => {
-      if (!sunPosition) return new Vector3(0, 1, 0);
-      return new Vector3(...sunPosition.direction);
-    }, [sunPosition]);
-
-    useEffect(() => {
-      const light = dirLightRef.current;
-      if (!light || !sunPosition) return;
-
-      let dist = 500;
-      for (const state of layerSceneMapRef.current.values()) {
-        const r = state.mesh.geometry.boundingSphere?.radius;
-        if (r && r > dist) dist = r;
-      }
-      const lightDist = Math.max(dist * 2, 100);
-
-      if (sunPosition.altitudeDeg > 0) {
-        light.position.copy(sunDir.clone().multiplyScalar(lightDist));
-        light.intensity = 0.8;
-        light.castShadow = true;
-        light.shadow.camera.near = lightDist * 0.1;
-        light.shadow.camera.far = lightDist * 3;
-      } else {
-        light.position.set(0, 10, 0);
-        light.intensity = 0.1;
-        light.castShadow = false;
-      }
-      light.shadow.camera.updateProjectionMatrix();
-    }, [sunPosition, sunDir]);
-
     // Picking via R3F pointer events on the city group
-    const handlePointerMove = useCallback(
-      (e: {
-        stopPropagation: () => void;
-        face: { a: number } | null;
-        object: { userData: { layerId?: string }; geometry: BufferGeometry };
-      }) => {
-        e.stopPropagation();
-        const sel = resolveFromEvent(e, layerSceneMapRef.current);
-        useSelectionStore.getState().hover(sel);
-      },
-      [],
-    );
+    const handlePointerMove = useCallback((e: PickEvent) => {
+      e.stopPropagation();
+      const sel = resolveFromEvent(e, layerSceneMapRef.current);
+      useSelectionStore.getState().hover(sel);
+    }, []);
 
-    const handlePointerUp = useCallback(
-      (e: {
-        stopPropagation: () => void;
-        face: { a: number } | null;
-        object: { userData: { layerId?: string }; geometry: BufferGeometry };
-      }) => {
-        e.stopPropagation();
-        const sel = resolveFromEvent(e, layerSceneMapRef.current);
-        useSelectionStore.getState().select(sel);
-      },
-      [],
-    );
+    const handlePointerUp = useCallback((e: PickEvent) => {
+      e.stopPropagation();
+      const sel = resolveFromEvent(e, layerSceneMapRef.current);
+      useSelectionStore.getState().select(sel);
+    }, []);
 
-    // Clear hover when pointer leaves city group
     const handlePointerLeave = useCallback(() => {
       useSelectionStore.getState().hover(null);
     }, []);
@@ -453,44 +429,75 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
       [fitAll, fitLayer, alignView, getCameraState, setCameraState],
     );
 
-    // Sky sun position (scaled far away for visual effect)
-    const skySunPosition = useMemo(
-      () => sunDir.clone().multiplyScalar(450000),
-      [sunDir],
-    );
+    // Geographic position for ENU frame (radians)
+    const enuLon = latLon ? latLon.lon * DEG_TO_RAD : 0;
+    const enuLat = latLon ? latLon.lat * DEG_TO_RAD : 0;
+
+    // Determine if we have geographic context for atmosphere
+    const hasGeo = atmosphereReady && latLon !== null;
 
     return (
       <>
-        {/* Lighting */}
-        <ambientLight intensity={0.6} />
-        <directionalLight
-          ref={dirLightRef}
-          position={[50, 100, 50]}
-          intensity={0.8}
-          castShadow
-          shadow-mapSize-width={1024}
-          shadow-mapSize-height={1024}
-          shadow-camera-near={0.5}
-          shadow-camera-far={2000}
-        />
+        {/* @takram atmosphere: physically-based sky, sun, stars, clouds */}
+        {hasGeo ? (
+          <Atmosphere date={datetime} ground>
+            <Sky sun moon />
+            <Stars />
+            <SunLight
+              ref={sunLightRef}
+              castShadow
+              shadow-mapSize-width={2048}
+              shadow-mapSize-height={2048}
+            />
 
-        {/* Sky */}
-        <Sky
-          sunPosition={skySunPosition}
-          distance={450000}
-          turbidity={8}
-          rayleigh={2}
-          mieCoefficient={0.005}
-          mieDirectionalG={0.8}
-        />
+            {/* ENU frame at model's geographic position */}
+            <EastNorthUpFrame longitude={enuLon} latitude={enuLat} height={0}>
+              {/* City meshes group — picking events */}
+              <group
+                ref={cityGroupRef}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerLeave={handlePointerLeave}
+              />
+            </EastNorthUpFrame>
 
-        {/* City meshes group — picking events */}
-        <group
-          ref={cityGroupRef}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerLeave={handlePointerLeave}
-        />
+            {/* Post-processing: aerial perspective + optional clouds */}
+            {cloudsEnabled ? (
+              <EffectComposer enableNormalPass>
+                <Clouds>
+                  <CloudLayer altitude={2000} height={800} />
+                  <CloudLayer altitude={5000} height={400} />
+                </Clouds>
+                <AerialPerspective sunLight skyLight />
+              </EffectComposer>
+            ) : (
+              <EffectComposer enableNormalPass>
+                <AerialPerspective sunLight skyLight />
+              </EffectComposer>
+            )}
+          </Atmosphere>
+        ) : (
+          <>
+            {/* Fallback without geographic context: basic lighting */}
+            <ambientLight intensity={0.6} />
+            <directionalLight
+              ref={sunLightRef}
+              position={[50, 100, 50]}
+              intensity={0.8}
+              castShadow
+              shadow-mapSize-width={1024}
+              shadow-mapSize-height={1024}
+              shadow-camera-near={0.5}
+              shadow-camera-far={2000}
+            />
+            <group
+              ref={cityGroupRef}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerLeave={handlePointerLeave}
+            />
+          </>
+        )}
 
         {/* Controls */}
         <OrbitControls
@@ -505,14 +512,21 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
 );
 
 // ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+type PickEvent = {
+  stopPropagation: () => void;
+  face: { a: number } | null;
+  object: { userData: { layerId?: string }; geometry: BufferGeometry };
+};
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function resolveFromEvent(
-  e: {
-    face: { a: number } | null;
-    object: { userData: { layerId?: string }; geometry: BufferGeometry };
-  },
+  e: PickEvent,
   map: Map<string, LayerSceneState>,
 ): Selection | null {
   if (!e.face) return null;
@@ -567,7 +581,10 @@ function reapplyHighlight(
   }
 }
 
-function configureShadowCamera(light: DirectionalLight, bbox: BBox3): void {
+function configureShadowCamera(
+  light: DirectionalLight | SunDirectionalLight,
+  bbox: BBox3,
+): void {
   const extentX = bbox[3] - bbox[0];
   const extentY = bbox[4] - bbox[1];
   const extentZ = bbox[5] - bbox[2];
