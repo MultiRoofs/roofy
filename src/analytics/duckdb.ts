@@ -15,6 +15,7 @@
  */
 
 import * as duckdb from "@duckdb/duckdb-wasm";
+import type { CityModel } from "../domain/citymodel/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -161,6 +162,58 @@ export async function loadModelIntoDuckDB(
     `);
     return true;
   } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// In-memory loading (file-dropped models or extension fallback)
+// ---------------------------------------------------------------------------
+
+const RESERVED_COLS = new Set(["id", "type", "lod", "surface_count"]);
+
+/**
+ * Load a CityModel into DuckDB by converting objects to JSON and using
+ * read_json_auto. Works without the cityjson extension — only needs
+ * DuckDB core ready.
+ */
+export async function loadCityModelFromMemory(
+  model: CityModel,
+): Promise<boolean> {
+  if (!db || !conn || status.state !== "ready") return false;
+
+  try {
+    const objects = Object.values(model.objects).filter(Boolean);
+    if (objects.length === 0) return false;
+
+    // Flatten objects into tabular JSON rows
+    const rows = objects.map((obj) => {
+      const row: Record<string, unknown> = {
+        id: obj.id,
+        type: obj.objectType,
+        lod: obj.lod ?? null,
+        surface_count: obj.surfaces.length,
+      };
+      for (const [key, value] of Object.entries(obj.attributes)) {
+        if (RESERVED_COLS.has(key)) continue;
+        row[key] =
+          typeof value === "object" && value !== null
+            ? JSON.stringify(value)
+            : value;
+      }
+      return row;
+    });
+
+    const jsonStr = JSON.stringify(rows);
+    const buffer = new TextEncoder().encode(jsonStr);
+    await db.registerFileBuffer("city_objects.json", buffer);
+    await conn.query(
+      "CREATE OR REPLACE TABLE city_objects AS SELECT * FROM read_json_auto('city_objects.json')",
+    );
+
+    return true;
+  } catch (err) {
+    console.error("Failed to load CityModel into DuckDB from memory:", err);
     return false;
   }
 }

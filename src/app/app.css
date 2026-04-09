@@ -400,11 +400,12 @@ body {
 
 .viewer-shell {
   display: grid;
-  grid-template-rows: var(--toolbar-h) 1fr var(--statusbar-h);
+  grid-template-rows: var(--toolbar-h) 1fr var(--table-h, 0) var(--statusbar-h);
   grid-template-columns: var(--left-panel-w) 1fr var(--panel-w);
   grid-template-areas:
     "toolbar  toolbar  toolbar"
     "left     viewport panel"
+    "table    table    table"
     "status   status   status";
   height: 100vh;
   background: var(--bg-root);
@@ -2017,4 +2018,178 @@ body {
 [data-theme="light"] .box-select-rect {
   background: rgba(208, 120, 48, 0.08);
   border-color: var(--accent);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TABLE PANEL (bottom database view)
+   ═══════════════════════════════════════════════════════════════ */
+
+.table-panel {
+  grid-area: table;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  overflow: hidden;
+  min-height: 0;
+}
+
+.table-resize-handle {
+  height: 4px;
+  cursor: ns-resize;
+  background: transparent;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.table-resize-handle:hover {
+  background: var(--accent);
+}
+
+.table-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.25rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.table-panel-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--fg);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.table-count {
+  font-weight: 400;
+  color: var(--fg-muted);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.table-sync-label {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.65rem;
+  color: var(--fg-label);
+  cursor: pointer;
+  user-select: none;
+}
+
+.table-sync-label input[type="checkbox"] {
+  width: 0.8rem;
+  height: 0.8rem;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.table-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.65rem;
+  padding: 0.15rem 0.4rem;
+}
+
+.table-panel-body {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+/* Data table */
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.7rem;
+  font-family: "Geist Mono", monospace;
+  table-layout: auto;
+}
+
+.data-th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-toolbar);
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.65rem;
+  color: var(--fg-label);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-bottom: 1px solid var(--border-accent);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: color 0.15s;
+}
+
+.data-th:hover {
+  color: var(--fg);
+}
+
+.data-th.sorted {
+  color: var(--accent);
+}
+
+.sort-indicator {
+  font-size: 0.55rem;
+  margin-left: 0.25rem;
+}
+
+.data-row {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.data-row:hover {
+  background: var(--bg-panel-hover);
+}
+
+.data-row-selected {
+  background: var(--accent-soft) !important;
+}
+
+.data-row-selected .data-td {
+  color: var(--accent-text);
+}
+
+.data-td {
+  padding: 0.2rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.scroll-sentinel {
+  padding: 0.25rem;
+  text-align: center;
+  min-height: 1px;
+}
+
+.table-loading {
+  font-size: 0.65rem;
+  color: var(--fg-dim);
+}
+
+/* Table toggle button in toolbar */
+
+.table-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.65rem;
+  color: var(--fg-muted);
+}
+
+.table-toggle-btn.active {
+  color: var(--accent);
 }

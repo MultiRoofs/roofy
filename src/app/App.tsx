@@ -15,6 +15,7 @@ import {
   initDuckDB,
   getDuckDBStatus,
   loadModelIntoDuckDB,
+  loadCityModelFromMemory,
 } from "../analytics/duckdb";
 import type { DuckDBStatus } from "../analytics/duckdb";
 import { browserPlatform } from "../platform/browser";
@@ -32,6 +33,7 @@ import { LeftSidebar } from "../ui/sidebar/LeftSidebar";
 import { StatusBar } from "../ui/StatusBar";
 import { LegendOverlay } from "../ui/viewport/LegendOverlay";
 import { AttributePanel } from "../ui/viewport/AttributePanel";
+import { TablePanel } from "../ui/table/TablePanel";
 import type { CityObject } from "../domain/citymodel/types";
 
 const defaultStore = new LocalStorageProjectStateStore();
@@ -56,6 +58,8 @@ export function App({
     state: "uninitialized",
   });
   const [duckdbModelLoaded, setDuckdbModelLoaded] = useState(false);
+  const [duckdbTableLoaded, setDuckdbTableLoaded] = useState(false);
+  const [tableOpen, setTableOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [fps, setFps] = useState<number | undefined>(undefined);
   const [cursorPosition, setCursorPosition] = useState<
@@ -103,24 +107,43 @@ export function App({
     });
   }, []);
 
-  // Load active layer's model into DuckDB when URL-based
+  // Load active layer's model into DuckDB (URL via extension, file via in-memory)
   useEffect(() => {
     let cancelled = false;
 
     if (duckdbStatus.state !== "ready") return;
-    if (!("extensionLoaded" in duckdbStatus) || !duckdbStatus.extensionLoaded)
-      return;
+
+    // Reset synchronously so table doesn't show stale data during load
+    setDuckdbModelLoaded(false);
+    setDuckdbTableLoaded(false);
 
     const activeLayer = layers.find((l) => l.id === activeLayerId);
-    if (!activeLayer || activeLayer.modelRef.type !== "url") {
-      setDuckdbModelLoaded(false);
-      return;
-    }
+    if (!activeLayer) return;
 
-    const encoding = detectEncoding(activeLayer.modelRef.url);
-    void loadModelIntoDuckDB(activeLayer.modelRef.url, encoding).then((ok) => {
-      if (!cancelled) setDuckdbModelLoaded(ok);
-    });
+    const extensionLoaded =
+      "extensionLoaded" in duckdbStatus && duckdbStatus.extensionLoaded;
+
+    void (async () => {
+      let loaded = false;
+
+      // Try extension reader for URL models
+      if (activeLayer.modelRef.type === "url" && extensionLoaded) {
+        const encoding = detectEncoding(activeLayer.modelRef.url);
+        loaded = await loadModelIntoDuckDB(activeLayer.modelRef.url, encoding);
+      }
+
+      // Fall back to in-memory loading (works for file and URL models)
+      if (!loaded) {
+        loaded = await loadCityModelFromMemory(activeLayer.model);
+      }
+
+      if (!cancelled) {
+        setDuckdbModelLoaded(
+          activeLayer.modelRef.type === "url" && extensionLoaded && loaded,
+        );
+        setDuckdbTableLoaded(loaded);
+      }
+    })();
 
     return () => {
       cancelled = true;
@@ -388,6 +411,8 @@ export function App({
     useLayerStore.getState().removeAllLayers();
     setTriangleCount(0);
     setDuckdbModelLoaded(false);
+    setDuckdbTableLoaded(false);
+    setTableOpen(false);
     setFps(undefined);
     setCursorPosition(null);
     clearSelection();
@@ -431,13 +456,13 @@ export function App({
       .filter(Boolean)
       .join(" ");
 
+    const gridStyle = {
+      "--left-panel-w": `${leftSidebarWidth}px`,
+      ...(tableOpen ? { "--table-h": "250px" } : {}),
+    } as React.CSSProperties;
+
     return (
-      <div
-        className={shellClasses}
-        style={
-          { "--left-panel-w": `${leftSidebarWidth}px` } as React.CSSProperties
-        }
-      >
+      <div className={shellClasses} style={gridStyle}>
         <ViewerToolbar
           fileName={activeLayer?.name ?? null}
           layerCount={layers.length}
@@ -485,6 +510,20 @@ export function App({
           />
         )}
 
+        {tableOpen && (
+          <TablePanel
+            duckdbTableLoaded={duckdbTableLoaded}
+            onCollapse={() => {
+              setTableOpen(false);
+              // Clear imperative resize style so next open uses default height
+              const shell = document.querySelector(
+                ".viewer-shell",
+              ) as HTMLElement | null;
+              shell?.style.removeProperty("--table-h");
+            }}
+          />
+        )}
+
         <StatusBar
           objectCount={totalObjects}
           triangleCount={triangleCount}
@@ -492,6 +531,8 @@ export function App({
           duckdbStatus={duckdbStatus}
           fps={fps}
           cursorPosition={cursorPosition}
+          tableOpen={tableOpen}
+          onToggleTable={() => setTableOpen((o) => !o)}
         />
 
         {toast && <div className="toast">{toast}</div>}
