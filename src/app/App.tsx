@@ -60,6 +60,7 @@ export function App({
   const [duckdbModelLoaded, setDuckdbModelLoaded] = useState(false);
   const [duckdbTableLoaded, setDuckdbTableLoaded] = useState(false);
   const [tableOpen, setTableOpen] = useState(false);
+  const [tableHeight, setTableHeight] = useState(250);
   const [toast, setToast] = useState<string | null>(null);
   const [fps, setFps] = useState<number | undefined>(undefined);
   const [cursorPosition, setCursorPosition] = useState<
@@ -458,7 +459,7 @@ export function App({
 
     const gridStyle = {
       "--left-panel-w": `${leftSidebarWidth}px`,
-      ...(tableOpen ? { "--table-h": "250px" } : {}),
+      ...(tableOpen ? { "--table-h": `${tableHeight}px` } : {}),
     } as React.CSSProperties;
 
     return (
@@ -513,14 +514,8 @@ export function App({
         {tableOpen && (
           <TablePanel
             duckdbTableLoaded={duckdbTableLoaded}
-            onCollapse={() => {
-              setTableOpen(false);
-              // Clear imperative resize style so next open uses default height
-              const shell = document.querySelector(
-                ".viewer-shell",
-              ) as HTMLElement | null;
-              shell?.style.removeProperty("--table-h");
-            }}
+            onCollapse={() => setTableOpen(false)}
+            onHeightChange={setTableHeight}
           />
         )}
 

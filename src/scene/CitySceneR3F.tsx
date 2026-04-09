@@ -361,7 +361,7 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
             setHasModel(true);
           }
 
-          needsFit = !lodChanged;
+          needsFit = needsFit || !lodChanged;
         }
       }
 

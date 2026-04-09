@@ -85,6 +85,7 @@ export function ViewerToolbar({
         <button
           className={`tb-btn ${pickMode === "object" && toolMode === "select" ? "tb-btn-active" : ""}`}
           title="Select objects (V)"
+          aria-pressed={pickMode === "object" && toolMode === "select"}
           onClick={() => {
             onSetPickMode("object");
             onSetToolMode("select");
@@ -97,6 +98,7 @@ export function ViewerToolbar({
         <button
           className={`tb-btn ${pickMode === "surface" && toolMode === "select" ? "tb-btn-active" : ""}`}
           title="Select surfaces (S)"
+          aria-pressed={pickMode === "surface" && toolMode === "select"}
           onClick={() => {
             onSetPickMode("surface");
             onSetToolMode("select");
@@ -118,6 +120,7 @@ export function ViewerToolbar({
               ? "Box select (object mode only)"
               : "Box select (B)"
           }
+          aria-pressed={toolMode === "box-select"}
           disabled={pickMode === "surface"}
           onClick={() => onSetToolMode("box-select")}
         >
@@ -138,6 +141,7 @@ export function ViewerToolbar({
         <button
           className={`tb-btn ${toolMode === "measure" ? "tb-btn-active" : ""}`}
           title="Measure distance (M)"
+          aria-pressed={toolMode === "measure"}
           onClick={() => onSetToolMode("measure")}
         >
           <svg viewBox="0 0 24 24">

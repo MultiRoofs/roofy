@@ -144,11 +144,7 @@ export function InspectorPanel({
               Select an object to inspect
             </div>
           ) : isMultiSelect ? (
-            <MultiSelectView
-              objects={selectedObjects}
-              activeTab={activeTab}
-              selectedSurfaceIndex={null}
-            />
+            <MultiSelectView objects={selectedObjects} activeTab={activeTab} />
           ) : activeTab === "object" ? (
             <ObjectTab object={selectedObject!} />
           ) : activeTab === "surfaces" ? (
@@ -179,11 +175,9 @@ export function InspectorPanel({
 function MultiSelectView({
   objects,
   activeTab,
-  selectedSurfaceIndex: _selectedSurfaceIndex,
 }: {
   objects: CityObject[];
   activeTab: Tab;
-  selectedSurfaceIndex: number | null;
 }) {
   const [aggMode, setAggMode] = useState<AggMode>("sum");
 
@@ -277,7 +271,7 @@ function formatAgg(values: number[], mode: AggMode, unit = "m\u00B2"): string {
 
 function formatAggNullable(values: (number | null)[], mode: AggMode): string {
   const valid = values.filter((v): v is number => v !== null);
-  if (valid.length === 0) return "NaN";
+  if (valid.length === 0) return "N/A";
   const v = aggregate(valid, mode);
   return `${v.toFixed(1)} m\u00B2`;
 }
@@ -326,11 +320,11 @@ function ObjectTab({ object }: { object: CityObject }) {
           value={
             footprintArea !== null
               ? `${footprintArea.toFixed(1)} m\u00B2`
-              : "NaN"
+              : "N/A"
           }
         />
         <AttrRow label="Roof area" value={`${roofArea.toFixed(1)} m\u00B2`} />
-        <AttrRow label="Volume" value={`${volume.toFixed(1)} m\u00B3`} />
+        <AttrRow label="Volume" value={`\u2248 ${volume.toFixed(1)} m\u00B3`} />
         {object.bbox && (
           <>
             <AttrRow

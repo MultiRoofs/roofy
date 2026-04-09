@@ -18,11 +18,16 @@ const PAGE_SIZE = 100;
 interface TablePanelProps {
   readonly duckdbTableLoaded: boolean;
   readonly onCollapse: () => void;
+  readonly onHeightChange: (height: number) => void;
 }
 
 type SortDir = "asc" | "desc";
 
-export function TablePanel({ duckdbTableLoaded, onCollapse }: TablePanelProps) {
+export function TablePanel({
+  duckdbTableLoaded,
+  onCollapse,
+  onHeightChange,
+}: TablePanelProps) {
   const [columns, setColumns] = useState<string[]>([]);
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -64,7 +69,11 @@ export function TablePanel({ duckdbTableLoaded, onCollapse }: TablePanelProps) {
 
         if (duckdbTableLoaded) {
           // DuckDB path
-          const orderClause = sortCol ? `ORDER BY "${sortCol}" ${sortDir}` : "";
+          const safeCol =
+            sortCol && columns.includes(sortCol)
+              ? sortCol.replace(/"/g, '""')
+              : null;
+          const orderClause = safeCol ? `ORDER BY "${safeCol}" ${sortDir}` : "";
           const result = await queryDuckDB(
             `SELECT * FROM city_objects ${orderClause} LIMIT ${PAGE_SIZE} OFFSET ${offset}`,
           );
@@ -208,7 +217,7 @@ export function TablePanel({ duckdbTableLoaded, onCollapse }: TablePanelProps) {
   return (
     <div className="table-panel">
       {/* Drag handle at top edge */}
-      <TableResizeHandle />
+      <TableResizeHandle onHeightChange={onHeightChange} />
 
       <div className="table-panel-header">
         <span className="table-panel-title">
@@ -265,6 +274,13 @@ export function TablePanel({ duckdbTableLoaded, onCollapse }: TablePanelProps) {
                   key={col}
                   className={`data-th ${sortCol === col ? "sorted" : ""}`}
                   onClick={() => handleSort(col)}
+                  aria-sort={
+                    sortCol === col
+                      ? sortDir === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : "none"
+                  }
                 >
                   <span>{col}</span>
                   {sortCol === col && (
@@ -314,31 +330,37 @@ export function TablePanel({ duckdbTableLoaded, onCollapse }: TablePanelProps) {
 // Resize handle (drag to change table height)
 // ---------------------------------------------------------------------------
 
-function TableResizeHandle() {
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    const startY = e.clientY;
-    const shell = document.querySelector(".viewer-shell") as HTMLElement | null;
-    if (!shell) return;
-    const startHeight = parseInt(
-      getComputedStyle(shell).getPropertyValue("--table-h") || "250",
-      10,
-    );
+function TableResizeHandle({
+  onHeightChange,
+}: {
+  onHeightChange: (height: number) => void;
+}) {
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startY = e.clientY;
+      const panel = (e.target as HTMLElement).closest(
+        ".table-panel",
+      ) as HTMLElement | null;
+      if (!panel) return;
+      const startHeight = panel.getBoundingClientRect().height;
 
-    const onMouseMove = (me: MouseEvent) => {
-      const delta = startY - me.clientY;
-      const newHeight = Math.max(100, Math.min(startHeight + delta, 600));
-      shell.style.setProperty("--table-h", `${newHeight}px`);
-    };
+      const onMouseMove = (me: MouseEvent) => {
+        const delta = startY - me.clientY;
+        const newHeight = Math.max(100, Math.min(startHeight + delta, 600));
+        onHeightChange(newHeight);
+      };
 
-    const onMouseUp = () => {
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
-    };
+      const onMouseUp = () => {
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+      };
 
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
-  }, []);
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    },
+    [onHeightChange],
+  );
 
   return <div className="table-resize-handle" onMouseDown={handleMouseDown} />;
 }

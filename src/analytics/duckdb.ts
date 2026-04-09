@@ -156,9 +156,10 @@ export async function loadModelIntoDuckDB(
         : "read_cityjson";
 
   try {
+    const escapedUrl = sourceUrl.replace(/'/g, "''");
     await conn.query(`
       CREATE OR REPLACE TABLE city_objects AS
-      SELECT * FROM ${readerFn}('${sourceUrl}')
+      SELECT * FROM ${readerFn}('${escapedUrl}')
     `);
     return true;
   } catch {
