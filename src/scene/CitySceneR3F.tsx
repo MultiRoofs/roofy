@@ -2,7 +2,8 @@
  * React Three Fiber scene for multi-layer city model viewing.
  *
  * Features: multi-select, box select, measure tool, FPS counter,
- * cursor position tracking, per-layer mesh management, solar lighting.
+ * cursor position tracking, per-layer mesh management,
+ * @takram/three-atmosphere sky and physically-based sun lighting.
  */
 
 import {
@@ -10,6 +11,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -18,13 +20,17 @@ import { OrbitControls, Line, Html } from "@react-three/drei";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import {
   BufferGeometry,
-  DirectionalLight,
   Group,
+  Matrix4,
   Mesh,
   MeshStandardMaterial,
   PerspectiveCamera,
   Vector3,
 } from "three";
+import { Geodetic, Ellipsoid } from "@takram/three-geospatial";
+import { Atmosphere, Sky, SunLight, Stars } from "@takram/three-atmosphere/r3f";
+import type { AtmosphereApi } from "@takram/three-atmosphere/r3f";
+
 import type { BBox3, Vec3 } from "../domain/citymodel/types";
 import { buildCityMesh, computeOriginOffset } from "./buildCityMesh";
 import type { PickingIndex } from "./buildCityMesh";
@@ -72,6 +78,46 @@ interface CitySceneProps {
   readonly onCursorPosition?: (
     pos: readonly [number, number, number] | null,
   ) => void;
+}
+
+// ---------------------------------------------------------------------------
+// Build a worldToECEF matrix from lat/lon
+// ---------------------------------------------------------------------------
+
+/**
+ * Construct a Matrix4 that maps the local Three.js Y-up scene coordinates
+ * to ECEF. The city model sits at the origin in Three.js space; this matrix
+ * tells the atmosphere shader where on Earth that origin is.
+ *
+ * Three.js local: X=east, Y=up, Z=south (after CityJSON rotation)
+ * ENU at site:    X=east, Y=north, Z=up
+ * We need to map: localX→east, localY→up, localZ→-north → south
+ *
+ * The ENU frame from Ellipsoid gives us [East, North, Up] as basis vectors
+ * in ECEF. We rearrange to match Three.js Y-up conventions.
+ */
+function buildWorldToECEFMatrix(
+  latDeg: number,
+  lonDeg: number,
+  heightM = 0,
+): Matrix4 {
+  const latRad = (latDeg * Math.PI) / 180;
+  const lonRad = (lonDeg * Math.PI) / 180;
+
+  const ecefPos = new Geodetic(lonRad, latRad, heightM).toECEF();
+
+  const east = new Vector3();
+  const north = new Vector3();
+  const up = new Vector3();
+  Ellipsoid.WGS84.getEastNorthUpVectors(ecefPos, east, north, up);
+
+  // Three.js Y-up: localX=east, localY=up, localZ=-north (south)
+  // Matrix columns: [what localX maps to, what localY maps to, what localZ maps to]
+  const mat = new Matrix4();
+  mat.makeBasis(east, up, north.negate());
+  mat.setPosition(ecefPos);
+
+  return mat;
 }
 
 // ---------------------------------------------------------------------------
@@ -139,7 +185,6 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
         setBoxEnd(null);
         return;
       }
-      // Box select is handled inside CitySceneInner via a custom event
       const detail = {
         left: Math.min(boxStart.x, boxEnd.x),
         top: Math.min(boxStart.y, boxEnd.y),
@@ -175,8 +220,7 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
           camera={{ fov: 60, near: 0.1, far: 50000, position: [50, 50, 50] }}
           shadows="soft"
           gl={{ antialias: true }}
-          onCreated={({ gl, raycaster }) => {
-            gl.setClearColor(readCssColor("--bg-viewport", "#0a0c12"));
+          onCreated={({ raycaster }) => {
             raycaster.firstHitOnly = true;
           }}
         >
@@ -229,29 +273,15 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
     { onTriangleCount, onFps, onCursorPosition, containerEl },
     ref,
   ) {
-    const { camera, gl } = useThree();
+    const { camera } = useThree();
     const controlsRef = useRef<OrbitControlsImpl>(null);
     const cityGroupRef = useRef<Group>(null);
-    const dirLightRef = useRef<DirectionalLight>(null);
     const layerSceneMapRef = useRef<Map<string, LayerSceneState>>(new Map());
+    const atmosphereRef = useRef<AtmosphereApi>(null);
     const [hasModel, setHasModel] = useState(false);
 
     // Measure tool state
     const [measurePoints, setMeasurePoints] = useState<Vector3[]>([]);
-
-    // Theme-aware clear color with proper cleanup
-    useEffect(() => {
-      const updateClearColor = () => {
-        gl.setClearColor(readCssColor("--bg-viewport", "#0a0c12"));
-      };
-      updateClearColor();
-      const obs = new MutationObserver(updateClearColor);
-      obs.observe(document.documentElement, {
-        attributes: true,
-        attributeFilter: ["data-theme"],
-      });
-      return () => obs.disconnect();
-    }, [gl]);
 
     const layers = useLayerStore((s) => s.layers);
     const selections = useSelectionStore((s) => s.selections);
@@ -259,7 +289,22 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
     const toolMode = useSelectionStore((s) => s.toolMode);
 
     // Solar state
-    const sunPosition = useSolarStore((s) => s.sunPosition);
+    const datetime = useSolarStore((s) => s.datetime);
+    const latLon = useSolarStore((s) => s.latLon);
+
+    // Build worldToECEF matrix from site lat/lon
+    const worldToECEFMatrix = useMemo(() => {
+      if (!latLon) return null;
+      return buildWorldToECEFMatrix(latLon.lat, latLon.lon, 0);
+    }, [latLon]);
+
+    // Push worldToECEFMatrix into Atmosphere transient states when it changes
+    useEffect(() => {
+      const api = atmosphereRef.current;
+      if (api && worldToECEFMatrix) {
+        api.worldToECEFMatrix.copy(worldToECEFMatrix);
+      }
+    }, [worldToECEFMatrix]);
 
     // FPS counter
     const fpsFrameCount = useRef(0);
@@ -328,7 +373,6 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
             layer.selectedLod,
           );
 
-          // Always compute bounding sphere (needed for raycasting)
           geometry.computeBoundingSphere();
 
           const material = new MeshStandardMaterial({
@@ -363,13 +407,6 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
 
           needsFit = needsFit || !lodChanged;
         }
-      }
-
-      // Configure shadow camera from union bbox
-      const light = dirLightRef.current;
-      if (light) {
-        const bbox = computeUnionBBox(layers);
-        if (bbox) configureShadowCamera(light, bbox);
       }
 
       // Update visibility
@@ -429,33 +466,6 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
       reapplyHighlight(layerSceneMapRef.current, layers);
     }, [selections, hovered, layers]);
 
-    // Sun position -> directional light
-    useEffect(() => {
-      const light = dirLightRef.current;
-      if (!light || !sunPosition) return;
-
-      let dist = 500;
-      for (const state of layerSceneMapRef.current.values()) {
-        const r = state.mesh.geometry.boundingSphere?.radius;
-        if (r && r > dist) dist = r;
-      }
-      const lightDist = Math.max(dist * 2, 100);
-
-      const [dx, dy, dz] = sunPosition.direction;
-      if (sunPosition.altitudeDeg > 0) {
-        light.position.set(dx * lightDist, dy * lightDist, dz * lightDist);
-        light.intensity = 0.8;
-        light.castShadow = true;
-        light.shadow.camera.near = lightDist * 0.1;
-        light.shadow.camera.far = lightDist * 3;
-      } else {
-        light.position.set(0, 10, 0);
-        light.intensity = 0.1;
-        light.castShadow = false;
-      }
-      light.shadow.camera.updateProjectionMatrix();
-    }, [sunPosition]);
-
     // Convert scene point to CRS coordinates
     const sceneToCrs = useCallback(
       (
@@ -465,9 +475,6 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
         const state = layerSceneMapRef.current.get(layerId);
         if (!state) return null;
         const o = state.originOffset;
-        // Undo mesh rotation (rotation.x = -PI/2):
-        // Three.js [x, y, z] -> CityJSON [x, -z, y]
-        // Then add back origin offset
         return [point.x + o[0], -point.z + o[1], point.y + o[2]];
       },
       [],
@@ -542,7 +549,7 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
 
       const handleBoxSelect = (e: Event) => {
         const { left, top, right, bottom } = (e as CustomEvent).detail;
-        if (right - left < 5 || bottom - top < 5) return; // Too small
+        if (right - left < 5 || bottom - top < 5) return;
 
         const rect = container.getBoundingClientRect();
         const cam = camera as PerspectiveCamera;
@@ -555,16 +562,13 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
 
           for (const [objectId, obj] of Object.entries(layer.model.objects)) {
             if (!obj?.bbox) continue;
-            // Compute bbox center in scene space
             const o = state.originOffset;
             const cx = (obj.bbox[0] + obj.bbox[3]) / 2 - o[0];
             const cy = (obj.bbox[1] + obj.bbox[4]) / 2 - o[1];
             const cz = (obj.bbox[2] + obj.bbox[5]) / 2 - o[2];
-            // Apply mesh rotation (CityJSON Z-up -> Three.js Y-up)
             const screenPos = new Vector3(cx, cz, -cy);
             screenPos.project(cam);
 
-            // Convert NDC to pixel coords
             const px = ((screenPos.x + 1) / 2) * rect.width;
             const py = ((-screenPos.y + 1) / 2) * rect.height;
 
@@ -577,7 +581,6 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
         }
 
         if (selected.length > 0) {
-          // Only select within one layer (first layer with hits)
           const firstLayerId = selected[0]!.layerId;
           useSelectionStore
             .getState()
@@ -692,20 +695,37 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
             .multiplyScalar(0.5)
         : null;
 
+    const hasAtmosphere = worldToECEFMatrix !== null;
+
     return (
-      <>
-        {/* Lighting */}
-        <ambientLight intensity={0.6} />
-        <directionalLight
-          ref={dirLightRef}
-          position={[50, 100, 50]}
-          intensity={0.8}
-          castShadow
-          shadow-mapSize-width={1024}
-          shadow-mapSize-height={1024}
-          shadow-camera-near={0.5}
-          shadow-camera-far={2000}
-        />
+      <Atmosphere ref={atmosphereRef} date={datetime} correctAltitude={false}>
+        {/* Physically-based sky — only when valid ECEF matrix is available */}
+        {hasAtmosphere && <Sky />}
+        {hasAtmosphere && <Stars />}
+
+        {/* Sun-driven directional light with physically-correct color */}
+        {hasAtmosphere && (
+          <SunLight
+            castShadow
+            shadow-mapSize-width={1024}
+            shadow-mapSize-height={1024}
+          />
+        )}
+
+        {/* Fallback lighting when atmosphere is not available */}
+        {!hasAtmosphere && (
+          <>
+            <color attach="background" args={["#0a0c12"]} />
+            <directionalLight
+              position={[50, 100, 50]}
+              intensity={0.8}
+              castShadow
+            />
+          </>
+        )}
+
+        {/* Ambient fill */}
+        <ambientLight intensity={hasAtmosphere ? 0.3 : 0.6} />
 
         {/* City meshes group — picking events */}
         <group
@@ -751,7 +771,7 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
           dampingFactor={0.1}
           enabled={toolMode !== "box-select"}
         />
-      </>
+      </Atmosphere>
     );
   },
 );
@@ -832,18 +852,6 @@ function reapplyHighlight(
   }
 }
 
-function configureShadowCamera(light: DirectionalLight, bbox: BBox3): void {
-  const extentX = bbox[3] - bbox[0];
-  const extentY = bbox[4] - bbox[1];
-  const extentZ = bbox[5] - bbox[2];
-  const halfSize = Math.max(extentX, extentY, extentZ) * 0.7;
-  light.shadow.camera.left = -halfSize;
-  light.shadow.camera.right = halfSize;
-  light.shadow.camera.top = halfSize;
-  light.shadow.camera.bottom = -halfSize;
-  light.shadow.camera.updateProjectionMatrix();
-}
-
 function computeUnionBBox(layers: ReadonlyArray<Layer>): BBox3 | null {
   let result: [number, number, number, number, number, number] | null = null;
   for (const layer of layers) {
@@ -881,11 +889,4 @@ function fitCamera(
 function truncateId(id: string): string {
   if (id.length <= 24) return id;
   return id.slice(0, 10) + "..." + id.slice(-10);
-}
-
-function readCssColor(varName: string, fallback: string): string {
-  const raw = getComputedStyle(document.documentElement)
-    .getPropertyValue(varName)
-    .trim();
-  return raw || fallback;
 }
