@@ -1,5 +1,5 @@
 /**
- * Bottom status bar showing model statistics and selection state.
+ * Bottom status bar showing model statistics, FPS, cursor position, and selection state.
  */
 
 import type { DuckDBStatus } from "../analytics/duckdb";
@@ -9,6 +9,8 @@ interface StatusBarProps {
   readonly triangleCount: number;
   readonly selectedCount: number;
   readonly duckdbStatus?: DuckDBStatus;
+  readonly fps?: number;
+  readonly cursorPosition?: readonly [number, number, number] | null;
 }
 
 export function StatusBar({
@@ -16,6 +18,8 @@ export function StatusBar({
   triangleCount,
   selectedCount,
   duckdbStatus,
+  fps,
+  cursorPosition,
 }: StatusBarProps) {
   return (
     <footer className="statusbar">
@@ -23,6 +27,25 @@ export function StatusBar({
         <span className="status-dot" />
         <span className="status-label">Ready</span>
       </div>
+
+      {fps !== undefined && (
+        <div className="status-item">
+          <span className="status-label">FPS</span>
+          <span className={`status-value ${fps < 30 ? "warn" : ""}`}>
+            {fps}
+          </span>
+        </div>
+      )}
+
+      {cursorPosition && (
+        <div className="status-item status-item-cursor">
+          <span className="status-label">XYZ</span>
+          <span className="status-value status-value-mono">
+            {cursorPosition[0].toFixed(1)}, {cursorPosition[1].toFixed(1)},{" "}
+            {cursorPosition[2].toFixed(1)}
+          </span>
+        </div>
+      )}
 
       <div className="toolbar-spacer" />
 

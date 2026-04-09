@@ -1,7 +1,8 @@
 /**
  * Right-side inspector panel.
  *
- * Shows details about the selected CityObject or surface.
+ * Shows details about the selected CityObject(s) or surface.
+ * Supports multi-select with statistical aggregation.
  * Tabs: Object, Surfaces, Analysis, Rules, Solar, Stats.
  */
 
@@ -18,17 +19,23 @@ import { AnalysisTab } from "./AnalysisTab";
 import { RuleBuilderTab } from "./RuleBuilderTab";
 import { SolarTab } from "./SolarTab";
 import { StatsTab } from "./StatsTab";
+import {
+  computeFootprintArea,
+  computeTotalRoofArea,
+  computeVolume,
+} from "../../domain/geometry/derived";
 
 type Tab = "object" | "surfaces" | "analysis" | "rules" | "solar" | "stats";
+type AggMode = "sum" | "avg" | "min" | "max";
 
 interface InspectorPanelProps {
-  readonly selection: Selection | null;
+  readonly selections: ReadonlyArray<Selection>;
   readonly onClose: () => void;
   readonly duckdbModelLoaded?: boolean;
 }
 
 export function InspectorPanel({
-  selection,
+  selections,
   onClose,
   duckdbModelLoaded,
 }: InspectorPanelProps) {
@@ -36,6 +43,9 @@ export function InspectorPanel({
 
   const layers = useLayerStore((s) => s.layers);
   const activeLayerId = useLayerStore((s) => s.activeLayerId);
+
+  const selection = selections.length > 0 ? selections[0]! : null;
+  const isMultiSelect = selections.length > 1;
 
   // Derive the model to display based on selection or active layer
   const selectedLayer = selection
@@ -47,6 +57,15 @@ export function InspectorPanel({
 
   const selectedObject: CityObject | undefined =
     selection && model ? model.objects[selection.objectId] : undefined;
+
+  // Resolve all selected objects for multi-select
+  const selectedObjects: CityObject[] = [];
+  if (model && selections.length > 0) {
+    for (const sel of selections) {
+      const obj = model.objects[sel.objectId];
+      if (obj) selectedObjects.push(obj);
+    }
+  }
 
   return (
     <aside className="inspector">
@@ -120,22 +139,28 @@ export function InspectorPanel({
             ) : (
               <div className="inspector-placeholder">No layer selected</div>
             )
-          ) : !selectedObject ? (
+          ) : selectedObjects.length === 0 ? (
             <div className="inspector-placeholder">
               Select an object to inspect
             </div>
+          ) : isMultiSelect ? (
+            <MultiSelectView
+              objects={selectedObjects}
+              activeTab={activeTab}
+              selectedSurfaceIndex={null}
+            />
           ) : activeTab === "object" ? (
-            <ObjectTab object={selectedObject} />
+            <ObjectTab object={selectedObject!} />
           ) : activeTab === "surfaces" ? (
             <SurfacesTab
-              object={selectedObject}
+              object={selectedObject!}
               selectedSurfaceIndex={
                 selection?.kind === "surface" ? selection.surfaceIndex : null
               }
             />
           ) : (
             <AnalysisTab
-              object={selectedObject}
+              object={selectedObject!}
               selectedSurfaceIndex={
                 selection?.kind === "surface" ? selection.surfaceIndex : null
               }
@@ -148,10 +173,124 @@ export function InspectorPanel({
 }
 
 // ---------------------------------------------------------------------------
+// Multi-select statistics view
+// ---------------------------------------------------------------------------
+
+function MultiSelectView({
+  objects,
+  activeTab,
+  selectedSurfaceIndex: _selectedSurfaceIndex,
+}: {
+  objects: CityObject[];
+  activeTab: Tab;
+  selectedSurfaceIndex: number | null;
+}) {
+  const [aggMode, setAggMode] = useState<AggMode>("sum");
+
+  if (activeTab === "surfaces") {
+    // Show aggregate surface counts
+    const counts = new Map<BuildingSurfaceType, number>();
+    for (const obj of objects) {
+      for (const s of obj.surfaces) {
+        counts.set(s.type, (counts.get(s.type) ?? 0) + 1);
+      }
+    }
+
+    return (
+      <div className="attr-section">
+        <div className="attr-section-title">
+          Surface Breakdown ({objects.length} objects)
+        </div>
+        {[...counts.entries()].map(([type, count]) => (
+          <div key={type} className="surface-item">
+            <div
+              className="surface-dot"
+              style={{ background: SURFACE_COLOR_HEX[type] }}
+            />
+            <span>{type}</span>
+            <span className="count">{count}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Object tab with aggregated geometry metrics
+  const footprintAreas = objects.map(computeFootprintArea);
+  const roofAreas = objects.map(computeTotalRoofArea);
+  const volumes = objects.map(computeVolume);
+
+  return (
+    <>
+      <div className="attr-section">
+        <div className="attr-section-title">
+          Selection ({objects.length} objects)
+        </div>
+        <div className="agg-mode-select">
+          <label>Aggregation:</label>
+          <select
+            value={aggMode}
+            onChange={(e) => setAggMode(e.target.value as AggMode)}
+          >
+            <option value="sum">Sum</option>
+            <option value="avg">Average</option>
+            <option value="min">Min</option>
+            <option value="max">Max</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="attr-section">
+        <div className="attr-section-title">Geometry</div>
+        <AttrRow
+          label="Footprint area"
+          value={formatAggNullable(footprintAreas, aggMode)}
+        />
+        <AttrRow label="Roof area" value={formatAgg(roofAreas, aggMode)} />
+        <AttrRow
+          label="Volume"
+          value={formatAgg(volumes, aggMode, "m\u00B3")}
+        />
+      </div>
+    </>
+  );
+}
+
+function aggregate(values: number[], mode: AggMode): number {
+  if (values.length === 0) return 0;
+  switch (mode) {
+    case "sum":
+      return values.reduce((a, b) => a + b, 0);
+    case "avg":
+      return values.reduce((a, b) => a + b, 0) / values.length;
+    case "min":
+      return Math.min(...values);
+    case "max":
+      return Math.max(...values);
+  }
+}
+
+function formatAgg(values: number[], mode: AggMode, unit = "m\u00B2"): string {
+  const v = aggregate(values, mode);
+  return `${v.toFixed(1)} ${unit}`;
+}
+
+function formatAggNullable(values: (number | null)[], mode: AggMode): string {
+  const valid = values.filter((v): v is number => v !== null);
+  if (valid.length === 0) return "NaN";
+  const v = aggregate(valid, mode);
+  return `${v.toFixed(1)} m\u00B2`;
+}
+
+// ---------------------------------------------------------------------------
 // Object Tab
 // ---------------------------------------------------------------------------
 
 function ObjectTab({ object }: { object: CityObject }) {
+  const footprintArea = computeFootprintArea(object);
+  const roofArea = computeTotalRoofArea(object);
+  const volume = computeVolume(object);
+
   return (
     <>
       <div className="attr-section">
@@ -182,6 +321,16 @@ function ObjectTab({ object }: { object: CityObject }) {
       <div className="attr-section">
         <div className="attr-section-title">Geometry</div>
         <AttrRow label="Surfaces" value={String(object.surfaces.length)} />
+        <AttrRow
+          label="Footprint area"
+          value={
+            footprintArea !== null
+              ? `${footprintArea.toFixed(1)} m\u00B2`
+              : "NaN"
+          }
+        />
+        <AttrRow label="Roof area" value={`${roofArea.toFixed(1)} m\u00B2`} />
+        <AttrRow label="Volume" value={`${volume.toFixed(1)} m\u00B3`} />
         {object.bbox && (
           <>
             <AttrRow

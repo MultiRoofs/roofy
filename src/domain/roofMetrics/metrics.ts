@@ -47,6 +47,17 @@ function magnitude(v: Vec3): number {
 // ---------------------------------------------------------------------------
 
 /**
+ * Compute the unit surface normal of a 3D polygon in CityJSON Z-up space.
+ */
+export function computeSurfaceNormal(ring: ReadonlyArray<Vec3>): Vec3 {
+  if (ring.length < 3) return [0, 0, 1];
+  const n = newellNormal(ring);
+  const mag = magnitude(n);
+  if (mag === 0) return [0, 0, 1];
+  return [n[0] / mag, n[1] / mag, n[2] / mag];
+}
+
+/**
  * Compute the area of a 3D polygon.
  * Uses Newell's method — half the magnitude of the summed cross products.
  */

@@ -2,11 +2,11 @@
  * Selection domain types.
  *
  * These describe what can be selected in the viewer and which
- * picking mode is active. The discriminated union on `kind`
- * makes it easy to extend for multi-select in M2.
+ * picking mode is active. ToolMode controls the active interaction tool.
  */
 
 export type PickMode = "object" | "surface";
+export type ToolMode = "select" | "box-select" | "measure";
 
 export interface ObjectSelection {
   readonly kind: "object";

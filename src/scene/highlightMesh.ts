@@ -4,6 +4,8 @@
  * Instead of creating overlay meshes, we mutate the color buffer attribute
  * in-place and restore from a snapshot (baseColors). This avoids extra
  * draw calls and geometry copies.
+ *
+ * Supports multi-select (Selection[]).
  */
 
 import { Color } from "three";
@@ -15,24 +17,23 @@ const HIGHLIGHT_COLOR = new Color(0xe8973f);
 const HOVER_COLOR = new Color(0xfbbf24);
 
 function resolveObjectIdx(
-  selection: Selection | null,
+  selection: Selection,
   pickingIndex: PickingIndex,
 ): number {
-  if (!selection) return -1;
   return pickingIndex.objectKeys.indexOf(selection.objectId);
 }
 
 /**
  * Apply highlight colors to the geometry's color buffer.
  * Restores from ruleColors (if present) or baseColors, then overwrites
- * vertices belonging to the hovered and/or selected object/surface.
+ * vertices belonging to the hovered and/or selected objects/surfaces.
  *
- * Color layer stack: baseColors → ruleColors → highlight
+ * Color layer stack: baseColors -> ruleColors -> highlight
  */
 export function applyHighlight(
   geometry: BufferGeometry,
   baseColors: Float32Array,
-  selection: Selection | null,
+  selections: ReadonlyArray<Selection>,
   hovered: Selection | null,
   pickingIndex: PickingIndex,
   ruleColors?: Float32Array | null,
@@ -48,8 +49,14 @@ export function applyHighlight(
   const colorArray = colorAttr.array as Float32Array;
   colorArray.set(ruleColors ?? baseColors);
 
-  const selectedObjIdx = resolveObjectIdx(selection, pickingIndex);
-  const hoveredObjIdx = resolveObjectIdx(hovered, pickingIndex);
+  // Build lookup for selected objects
+  const selectedSet = new Map<number, Selection>();
+  for (const sel of selections) {
+    const idx = resolveObjectIdx(sel, pickingIndex);
+    if (idx >= 0) selectedSet.set(idx, sel);
+  }
+
+  const hoveredObjIdx = hovered ? resolveObjectIdx(hovered, pickingIndex) : -1;
 
   const vertexCount = colorAttr.count;
 
@@ -69,11 +76,8 @@ export function applyHighlight(
       colorArray[base + 2] = HOVER_COLOR.b;
     }
 
-    if (
-      selectedObjIdx >= 0 &&
-      oIdx === selectedObjIdx &&
-      matchesSurface(selection, sIdx)
-    ) {
+    const sel = selectedSet.get(oIdx);
+    if (sel && matchesSurface(sel, sIdx)) {
       colorArray[base] = HIGHLIGHT_COLOR.r;
       colorArray[base + 1] = HIGHLIGHT_COLOR.g;
       colorArray[base + 2] = HIGHLIGHT_COLOR.b;

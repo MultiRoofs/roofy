@@ -1,13 +1,8 @@
 /**
- * React Three Fiber scene with @takram/three-atmosphere and clouds.
+ * React Three Fiber scene for multi-layer city model viewing.
  *
- * Renders multi-layer city models using R3F declarative components.
- * Integrates the @takram ecosystem for physically-based atmosphere,
- * sun/moon lighting, stars, and volumetric clouds.
- *
- * City meshes remain at the scene origin in local CRS coordinates.
- * The Atmosphere component provides sky rendering based on datetime,
- * and SunLight provides physically-correct directional lighting.
+ * Features: multi-select, box select, measure tool, FPS counter,
+ * cursor position tracking, per-layer mesh management, solar lighting.
  */
 
 import {
@@ -18,8 +13,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { Canvas, useThree } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { OrbitControls, Line, Html } from "@react-three/drei";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import {
   BufferGeometry,
@@ -28,8 +23,9 @@ import {
   Mesh,
   MeshStandardMaterial,
   PerspectiveCamera,
+  Vector3,
 } from "three";
-import type { BBox3 } from "../domain/citymodel/types";
+import type { BBox3, Vec3 } from "../domain/citymodel/types";
 import { buildCityMesh, computeOriginOffset } from "./buildCityMesh";
 import type { PickingIndex } from "./buildCityMesh";
 import { applyHighlight, clearHighlight } from "./highlightMesh";
@@ -53,6 +49,7 @@ export interface LayerSceneState {
   baseColors: Float32Array;
   selectedLod: string | null;
   ruleColors: Float32Array | null;
+  originOffset: Vec3;
 }
 
 interface CitySceneHandle {
@@ -71,17 +68,22 @@ interface CitySceneHandle {
 
 interface CitySceneProps {
   readonly onTriangleCount: (count: number) => void;
+  readonly onFps?: (fps: number) => void;
+  readonly onCursorPosition?: (
+    pos: readonly [number, number, number] | null,
+  ) => void;
 }
 
 // ---------------------------------------------------------------------------
-// Outer wrapper — renders Canvas + overlay tooltip + view buttons
+// Outer wrapper — renders Canvas + overlays
 // ---------------------------------------------------------------------------
 
 export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
-  function CityScene({ onTriangleCount }, ref) {
+  function CityScene({ onTriangleCount, onFps, onCursorPosition }, ref) {
     const innerRef = useRef<CitySceneHandle>(null);
     const layers = useLayerStore((s) => s.layers);
     const hovered = useSelectionStore((s) => s.hovered);
+    const toolMode = useSelectionStore((s) => s.toolMode);
 
     const hoveredLayer = hovered
       ? layers.find((l) => l.id === hovered.layerId)
@@ -103,8 +105,72 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       innerRef.current?.alignView(dir);
     }, []);
 
+    // Box select drag state
+    const [boxStart, setBoxStart] = useState<{ x: number; y: number } | null>(
+      null,
+    );
+    const [boxEnd, setBoxEnd] = useState<{ x: number; y: number } | null>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    const handleBoxMouseDown = useCallback(
+      (e: React.MouseEvent) => {
+        if (toolMode !== "box-select") return;
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        setBoxStart({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+        setBoxEnd({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      },
+      [toolMode],
+    );
+
+    const handleBoxMouseMove = useCallback(
+      (e: React.MouseEvent) => {
+        if (!boxStart || toolMode !== "box-select") return;
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (!rect) return;
+        setBoxEnd({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      },
+      [boxStart, toolMode],
+    );
+
+    const handleBoxMouseUp = useCallback(() => {
+      if (!boxStart || !boxEnd || toolMode !== "box-select") {
+        setBoxStart(null);
+        setBoxEnd(null);
+        return;
+      }
+      // Box select is handled inside CitySceneInner via a custom event
+      const detail = {
+        left: Math.min(boxStart.x, boxEnd.x),
+        top: Math.min(boxStart.y, boxEnd.y),
+        right: Math.max(boxStart.x, boxEnd.x),
+        bottom: Math.max(boxStart.y, boxEnd.y),
+      };
+      containerRef.current?.dispatchEvent(
+        new CustomEvent("boxselect", { detail }),
+      );
+      setBoxStart(null);
+      setBoxEnd(null);
+    }, [boxStart, boxEnd, toolMode]);
+
+    const boxRect =
+      boxStart && boxEnd
+        ? {
+            left: Math.min(boxStart.x, boxEnd.x),
+            top: Math.min(boxStart.y, boxEnd.y),
+            width: Math.abs(boxEnd.x - boxStart.x),
+            height: Math.abs(boxEnd.y - boxStart.y),
+          }
+        : null;
+
     return (
-      <div style={{ width: "100%", height: "100%", position: "relative" }}>
+      <div
+        ref={containerRef}
+        style={{ width: "100%", height: "100%", position: "relative" }}
+        onMouseDown={handleBoxMouseDown}
+        onMouseMove={handleBoxMouseMove}
+        onMouseUp={handleBoxMouseUp}
+      >
         <Canvas
           camera={{ fov: 60, near: 0.1, far: 50000, position: [50, 50, 50] }}
           shadows="soft"
@@ -114,7 +180,13 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
             raycaster.firstHitOnly = true;
           }}
         >
-          <CitySceneInner ref={innerRef} onTriangleCount={onTriangleCount} />
+          <CitySceneInner
+            ref={innerRef}
+            onTriangleCount={onTriangleCount}
+            onFps={onFps}
+            onCursorPosition={onCursorPosition}
+            containerEl={containerRef}
+          />
         </Canvas>
         <ViewAlignButtons onAlign={handleAlign} />
         {hoveredObject && hovered && (
@@ -122,6 +194,17 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
             <span className="obj-type">{hoveredObject.objectType}</span>
             <span className="obj-id">{truncateId(hovered.objectId)}</span>
           </div>
+        )}
+        {boxRect && (
+          <div
+            className="box-select-rect"
+            style={{
+              left: boxRect.left,
+              top: boxRect.top,
+              width: boxRect.width,
+              height: boxRect.height,
+            }}
+          />
         )}
       </div>
     );
@@ -134,16 +217,27 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
 
 interface InnerProps {
   readonly onTriangleCount: (count: number) => void;
+  readonly onFps?: (fps: number) => void;
+  readonly onCursorPosition?: (
+    pos: readonly [number, number, number] | null,
+  ) => void;
+  readonly containerEl: React.RefObject<HTMLDivElement | null>;
 }
 
 const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
-  function CitySceneInner({ onTriangleCount }, ref) {
+  function CitySceneInner(
+    { onTriangleCount, onFps, onCursorPosition, containerEl },
+    ref,
+  ) {
     const { camera, gl } = useThree();
     const controlsRef = useRef<OrbitControlsImpl>(null);
     const cityGroupRef = useRef<Group>(null);
     const dirLightRef = useRef<DirectionalLight>(null);
     const layerSceneMapRef = useRef<Map<string, LayerSceneState>>(new Map());
     const [hasModel, setHasModel] = useState(false);
+
+    // Measure tool state
+    const [measurePoints, setMeasurePoints] = useState<Vector3[]>([]);
 
     // Theme-aware clear color with proper cleanup
     useEffect(() => {
@@ -160,11 +254,29 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
     }, [gl]);
 
     const layers = useLayerStore((s) => s.layers);
-    const selection = useSelectionStore((s) => s.selection);
+    const selections = useSelectionStore((s) => s.selections);
     const hovered = useSelectionStore((s) => s.hovered);
+    const toolMode = useSelectionStore((s) => s.toolMode);
 
     // Solar state
     const sunPosition = useSolarStore((s) => s.sunPosition);
+
+    // FPS counter
+    const fpsFrameCount = useRef(0);
+    const fpsLastTime = useRef(performance.now());
+    useFrame(() => {
+      fpsFrameCount.current++;
+      const now = performance.now();
+      if (now - fpsLastTime.current >= 1000) {
+        onFps?.(
+          Math.round(
+            (fpsFrameCount.current * 1000) / (now - fpsLastTime.current),
+          ),
+        );
+        fpsFrameCount.current = 0;
+        fpsLastTime.current = now;
+      }
+    });
 
     // Manage per-layer meshes: add/remove/visibility/LoD rebuild
     useEffect(() => {
@@ -238,6 +350,7 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
             baseColors,
             ruleColors: null,
             selectedLod: layer.selectedLod,
+            originOffset,
           });
 
           if (needsSolarInit) {
@@ -284,8 +397,8 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
       }
 
       // Clear selection if layer was removed
-      const sel = useSelectionStore.getState().selection;
-      if (sel && !currentIds.has(sel.layerId)) {
+      const sels = useSelectionStore.getState().selections;
+      if (sels.some((s) => !currentIds.has(s.layerId))) {
         useSelectionStore.getState().clear();
       }
     }, [layers, onTriangleCount, camera, hasModel]);
@@ -314,9 +427,9 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
     // Highlight on selection/hover change
     useEffect(() => {
       reapplyHighlight(layerSceneMapRef.current, layers);
-    }, [selection, hovered, layers]);
+    }, [selections, hovered, layers]);
 
-    // Sun position → directional light
+    // Sun position -> directional light
     useEffect(() => {
       const light = dirLightRef.current;
       if (!light || !sunPosition) return;
@@ -343,22 +456,145 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
       light.shadow.camera.updateProjectionMatrix();
     }, [sunPosition]);
 
-    // Picking via R3F pointer events on the city group
-    const handlePointerMove = useCallback((e: PickEvent) => {
-      e.stopPropagation();
-      const sel = resolveFromEvent(e, layerSceneMapRef.current);
-      useSelectionStore.getState().hover(sel);
-    }, []);
+    // Convert scene point to CRS coordinates
+    const sceneToCrs = useCallback(
+      (
+        point: { x: number; y: number; z: number },
+        layerId: string,
+      ): readonly [number, number, number] | null => {
+        const state = layerSceneMapRef.current.get(layerId);
+        if (!state) return null;
+        const o = state.originOffset;
+        // Undo mesh rotation (rotation.x = -PI/2):
+        // Three.js [x, y, z] -> CityJSON [x, -z, y]
+        // Then add back origin offset
+        return [point.x + o[0], -point.z + o[1], point.y + o[2]];
+      },
+      [],
+    );
+
+    // Cursor position tracking (throttled)
+    const cursorThrottleRef = useRef(0);
+    const handlePointerMove = useCallback(
+      (e: PickEvent) => {
+        e.stopPropagation();
+
+        const mode = useSelectionStore.getState().toolMode;
+
+        if (mode === "select" || mode === "box-select") {
+          const sel = resolveFromEvent(e, layerSceneMapRef.current);
+          useSelectionStore.getState().hover(sel);
+        }
+
+        // Throttled cursor position update (~15fps)
+        if (onCursorPosition && e.point) {
+          const now = performance.now();
+          if (now - cursorThrottleRef.current > 66) {
+            cursorThrottleRef.current = now;
+            const layerId = e.object.userData.layerId;
+            if (layerId) {
+              const crs = sceneToCrs(e.point, layerId);
+              onCursorPosition(crs);
+            }
+          }
+        }
+      },
+      [onCursorPosition, sceneToCrs],
+    );
 
     const handlePointerUp = useCallback((e: PickEvent) => {
       e.stopPropagation();
+      const store = useSelectionStore.getState();
+      const currentToolMode = store.toolMode;
+
+      if (currentToolMode === "measure") {
+        if (e.point) {
+          const pt = new Vector3(e.point.x, e.point.y, e.point.z);
+          setMeasurePoints((prev) => {
+            if (prev.length >= 2) return [pt]; // Reset after 2
+            return [...prev, pt];
+          });
+        }
+        return;
+      }
+
+      if (currentToolMode === "box-select") return; // Handled by overlay
+
       const sel = resolveFromEvent(e, layerSceneMapRef.current);
-      useSelectionStore.getState().select(sel);
+      const shiftKey = !!(e as PickEventWithMeta).nativeEvent?.shiftKey;
+
+      if (shiftKey && sel) {
+        store.toggleSelect(sel);
+      } else {
+        store.select(sel);
+      }
     }, []);
 
     const handlePointerLeave = useCallback(() => {
       useSelectionStore.getState().hover(null);
-    }, []);
+      onCursorPosition?.(null);
+    }, [onCursorPosition]);
+
+    // Box select event from overlay
+    useEffect(() => {
+      const container = containerEl.current;
+      if (!container) return;
+
+      const handleBoxSelect = (e: Event) => {
+        const { left, top, right, bottom } = (e as CustomEvent).detail;
+        if (right - left < 5 || bottom - top < 5) return; // Too small
+
+        const rect = container.getBoundingClientRect();
+        const cam = camera as PerspectiveCamera;
+        const mode = useSelectionStore.getState().mode;
+        const selected: Selection[] = [];
+
+        for (const layer of layers) {
+          const state = layerSceneMapRef.current.get(layer.id);
+          if (!state || !layer.visible) continue;
+
+          for (const [objectId, obj] of Object.entries(layer.model.objects)) {
+            if (!obj?.bbox) continue;
+            // Compute bbox center in scene space
+            const o = state.originOffset;
+            const cx = (obj.bbox[0] + obj.bbox[3]) / 2 - o[0];
+            const cy = (obj.bbox[1] + obj.bbox[4]) / 2 - o[1];
+            const cz = (obj.bbox[2] + obj.bbox[5]) / 2 - o[2];
+            // Apply mesh rotation (CityJSON Z-up -> Three.js Y-up)
+            const screenPos = new Vector3(cx, cz, -cy);
+            screenPos.project(cam);
+
+            // Convert NDC to pixel coords
+            const px = ((screenPos.x + 1) / 2) * rect.width;
+            const py = ((-screenPos.y + 1) / 2) * rect.height;
+
+            if (px >= left && px <= right && py >= top && py <= bottom) {
+              if (mode === "object") {
+                selected.push({ kind: "object", layerId: layer.id, objectId });
+              }
+            }
+          }
+        }
+
+        if (selected.length > 0) {
+          // Only select within one layer (first layer with hits)
+          const firstLayerId = selected[0]!.layerId;
+          useSelectionStore
+            .getState()
+            .selectMany(selected.filter((s) => s.layerId === firstLayerId));
+        } else {
+          useSelectionStore.getState().select(null);
+        }
+      };
+
+      container.addEventListener("boxselect", handleBoxSelect);
+      return () => container.removeEventListener("boxselect", handleBoxSelect);
+    }, [camera, layers, containerEl]);
+
+    // Clear measure when tool mode changes
+    useEffect(() => {
+      if (toolMode !== "measure") setMeasurePoints([]);
+    }, [toolMode]);
 
     // Imperative handle
     const fitAll = useCallback(() => {
@@ -444,6 +680,18 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
       [fitAll, fitLayer, alignView, getCameraState, setCameraState],
     );
 
+    // Compute measure distance
+    const measureDistance =
+      measurePoints.length === 2
+        ? measurePoints[0]!.distanceTo(measurePoints[1]!)
+        : null;
+    const measureMidpoint =
+      measurePoints.length === 2
+        ? new Vector3()
+            .addVectors(measurePoints[0]!, measurePoints[1]!)
+            .multiplyScalar(0.5)
+        : null;
+
     return (
       <>
         {/* Lighting */}
@@ -467,12 +715,41 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
           onPointerLeave={handlePointerLeave}
         />
 
-        {/* Controls */}
+        {/* Measure tool visualization */}
+        {measurePoints.length >= 1 && (
+          <mesh position={measurePoints[0]!}>
+            <sphereGeometry args={[0.3, 16, 16]} />
+            <meshBasicMaterial color={0x00aaff} />
+          </mesh>
+        )}
+        {measurePoints.length === 2 && (
+          <>
+            <mesh position={measurePoints[1]!}>
+              <sphereGeometry args={[0.3, 16, 16]} />
+              <meshBasicMaterial color={0x00aaff} />
+            </mesh>
+            <Line
+              points={[measurePoints[0]!, measurePoints[1]!]}
+              color={0x00aaff}
+              lineWidth={2}
+            />
+            {measureMidpoint && measureDistance !== null && (
+              <Html position={measureMidpoint} center>
+                <div className="measure-label">
+                  {measureDistance.toFixed(2)} m
+                </div>
+              </Html>
+            )}
+          </>
+        )}
+
+        {/* Controls — disabled during box select */}
         <OrbitControls
           ref={controlsRef}
           makeDefault
           enableDamping
           dampingFactor={0.1}
+          enabled={toolMode !== "box-select"}
         />
       </>
     );
@@ -486,7 +763,12 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
 type PickEvent = {
   stopPropagation: () => void;
   face: { a: number } | null;
+  point: { x: number; y: number; z: number };
   object: { userData: { layerId?: string }; geometry: BufferGeometry };
+};
+
+type PickEventWithMeta = PickEvent & {
+  nativeEvent?: { shiftKey?: boolean };
 };
 
 // ---------------------------------------------------------------------------
@@ -525,20 +807,21 @@ function reapplyHighlight(
   map: Map<string, LayerSceneState>,
   layers: ReadonlyArray<Layer>,
 ): void {
-  const { selection: sel, hovered: hov } = useSelectionStore.getState();
+  const { selections, hovered: hov } = useSelectionStore.getState();
 
   for (const layer of layers) {
     const state = map.get(layer.id);
     if (!state) continue;
 
+    const layerSelections = selections.filter((s) => s.layerId === layer.id);
     const isTarget =
-      (sel && sel.layerId === layer.id) || (hov && hov.layerId === layer.id);
+      layerSelections.length > 0 || (hov && hov.layerId === layer.id);
 
     if (isTarget) {
       applyHighlight(
         state.mesh.geometry,
         state.baseColors,
-        sel?.layerId === layer.id ? sel : null,
+        layerSelections,
         hov?.layerId === layer.id ? hov : null,
         state.pickingIndex,
         state.ruleColors,
@@ -585,7 +868,6 @@ function fitCamera(
   controls: OrbitControlsImpl,
   bbox: BBox3,
 ): void {
-  // Mesh vertices are origin-offset (centered near zero), so use extents only
   const extentX = bbox[3] - bbox[0];
   const extentY = bbox[4] - bbox[1];
   const extentZ = bbox[5] - bbox[2];

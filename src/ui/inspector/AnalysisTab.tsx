@@ -1,5 +1,5 @@
 /**
- * Analysis tab showing computed roof metrics.
+ * Analysis tab showing computed roof metrics, solar score, and surface normals.
  *
  * Users can toggle between surface-level view (individual surface metrics)
  * and building-aggregate view (averages across all roof surfaces).
@@ -7,8 +7,13 @@
 
 import { useState } from "react";
 import type { CityObject, Surface } from "../../domain/citymodel/types";
-import { computeRoofMetrics } from "../../domain/roofMetrics/metrics";
+import {
+  computeRoofMetrics,
+  computeSurfaceNormal,
+} from "../../domain/roofMetrics/metrics";
 import { aggregateRoofMetrics } from "../../domain/roofMetrics/aggregate";
+import { computeSolarScore } from "../../domain/geometry/derived";
+import { useSolarStore } from "../../features/solar/solarStore";
 
 interface AnalysisTabProps {
   readonly object: CityObject;
@@ -73,6 +78,24 @@ export function AnalysisTab({
 function BuildingMetrics({ roofSurfaces }: { roofSurfaces: Surface[] }) {
   const metrics = roofSurfaces.map(computeRoofMetrics);
   const agg = aggregateRoofMetrics(metrics);
+  const sunPosition = useSolarStore((s) => s.sunPosition);
+
+  // Compute average solar score across roof surfaces
+  let avgSolarScore: number | null = null;
+  if (sunPosition && sunPosition.altitudeDeg > 0) {
+    let scoreSum = 0;
+    let areaSum = 0;
+    for (let i = 0; i < roofSurfaces.length; i++) {
+      const ring = roofSurfaces[i]!.rings[0];
+      if (!ring || ring.length < 3) continue;
+      const normal = computeSurfaceNormal(ring);
+      const score = computeSolarScore(normal, sunPosition.direction);
+      const area = metrics[i]!.areaSqM;
+      scoreSum += score * area;
+      areaSum += area;
+    }
+    avgSolarScore = areaSum > 0 ? scoreSum / areaSum : 0;
+  }
 
   return (
     <div className="attr-section">
@@ -93,6 +116,13 @@ function BuildingMetrics({ roofSurfaces }: { roofSurfaces: Surface[] }) {
         value={`${agg.avgInclination.toFixed(1)}\u00B0`}
       />
       <AttrRow label="Avg azimuth" value={formatAzimuth(agg.avgAzimuth)} />
+      {avgSolarScore !== null && (
+        <AttrRow
+          label="Avg solar score"
+          value={`${(avgSolarScore * 100).toFixed(0)}%`}
+          highlight
+        />
+      )}
     </div>
   );
 }
@@ -108,11 +138,23 @@ function SurfaceMetricsList({
   roofSurfaces: { surface: Surface; index: number }[];
   selectedSurfaceIndex: number | null;
 }) {
+  const sunPosition = useSolarStore((s) => s.sunPosition);
+
   return (
     <>
       {roofSurfaces.map(({ surface, index }) => {
         const metrics = computeRoofMetrics(surface);
         const isSelected = selectedSurfaceIndex === index;
+
+        const ring = surface.rings[0];
+        const normal =
+          ring && ring.length >= 3 ? computeSurfaceNormal(ring) : null;
+
+        let solarScore: number | null = null;
+        if (normal && sunPosition && sunPosition.altitudeDeg > 0) {
+          solarScore = computeSolarScore(normal, sunPosition.direction);
+        }
+
         return (
           <div
             key={index}
@@ -137,6 +179,19 @@ function SurfaceMetricsList({
               label="Azimuth"
               value={formatAzimuth(metrics.azimuthDeg)}
             />
+            {normal && (
+              <AttrRow
+                label="Normal"
+                value={`(${normal[0].toFixed(3)}, ${normal[1].toFixed(3)}, ${normal[2].toFixed(3)})`}
+              />
+            )}
+            {solarScore !== null && (
+              <AttrRow
+                label="Solar score"
+                value={`${(solarScore * 100).toFixed(0)}%`}
+                highlight
+              />
+            )}
           </div>
         );
       })}

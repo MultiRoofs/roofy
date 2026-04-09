@@ -1,8 +1,8 @@
 /**
- * Viewer toolbar with metadata pills, pick mode, and action buttons.
+ * Viewer toolbar with metadata pills, pick mode, tool mode, and action buttons.
  */
 
-import type { PickMode } from "../../domain/selection/types";
+import type { PickMode, ToolMode } from "../../domain/selection/types";
 import type { Theme } from "../../features/theme/useTheme";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useSolarStore } from "../../features/solar/solarStore";
@@ -11,7 +11,9 @@ interface ViewerToolbarProps {
   readonly fileName: string | null;
   readonly layerCount: number;
   readonly pickMode: PickMode;
+  readonly toolMode: ToolMode;
   readonly onSetPickMode: (mode: PickMode) => void;
+  readonly onSetToolMode: (mode: ToolMode) => void;
   readonly onClose: () => void;
   readonly onToggleInspector: () => void;
   readonly onToggleLeftSidebar: () => void;
@@ -27,7 +29,9 @@ export function ViewerToolbar({
   fileName,
   layerCount,
   pickMode,
+  toolMode,
   onSetPickMode,
+  onSetToolMode,
   onClose,
   onToggleInspector,
   onToggleLeftSidebar,
@@ -79,22 +83,68 @@ export function ViewerToolbar({
       {/* Pick mode buttons */}
       <div className="toolbar-btn-group">
         <button
-          className={`tb-btn ${pickMode === "object" ? "tb-btn-active" : ""}`}
+          className={`tb-btn ${pickMode === "object" && toolMode === "select" ? "tb-btn-active" : ""}`}
           title="Select objects (V)"
-          onClick={() => onSetPickMode("object")}
+          onClick={() => {
+            onSetPickMode("object");
+            onSetToolMode("select");
+          }}
         >
           <svg viewBox="0 0 24 24">
             <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
           </svg>
         </button>
         <button
-          className={`tb-btn ${pickMode === "surface" ? "tb-btn-active" : ""}`}
+          className={`tb-btn ${pickMode === "surface" && toolMode === "select" ? "tb-btn-active" : ""}`}
           title="Select surfaces (S)"
-          onClick={() => onSetPickMode("surface")}
+          onClick={() => {
+            onSetPickMode("surface");
+            onSetToolMode("select");
+          }}
         >
           <svg viewBox="0 0 24 24">
             <path d="M2 6l10-3 10 3-10 3-10-3z" />
             <path d="M2 12l10 3 10-3" />
+          </svg>
+        </button>
+
+        <div className="toolbar-sep-inline" />
+
+        {/* Box select — only works in object mode */}
+        <button
+          className={`tb-btn ${toolMode === "box-select" ? "tb-btn-active" : ""}`}
+          title={
+            pickMode === "surface"
+              ? "Box select (object mode only)"
+              : "Box select (B)"
+          }
+          disabled={pickMode === "surface"}
+          onClick={() => onSetToolMode("box-select")}
+        >
+          <svg viewBox="0 0 24 24">
+            <rect
+              x="3"
+              y="3"
+              width="18"
+              height="18"
+              rx="1"
+              fill="none"
+              strokeDasharray="4 2"
+            />
+          </svg>
+        </button>
+
+        {/* Measure */}
+        <button
+          className={`tb-btn ${toolMode === "measure" ? "tb-btn-active" : ""}`}
+          title="Measure distance (M)"
+          onClick={() => onSetToolMode("measure")}
+        >
+          <svg viewBox="0 0 24 24">
+            <path d="M2 12h4M18 12h4" />
+            <path d="M6 8v8M18 8v8" />
+            <path d="M6 12h12" />
+            <path d="M12 10v4" />
           </svg>
         </button>
       </div>

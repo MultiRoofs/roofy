@@ -31,8 +31,12 @@ import { ViewerToolbar } from "../ui/toolbar/ViewerToolbar";
 import { LeftSidebar } from "../ui/sidebar/LeftSidebar";
 import { StatusBar } from "../ui/StatusBar";
 import { LegendOverlay } from "../ui/viewport/LegendOverlay";
+import { AttributePanel } from "../ui/viewport/AttributePanel";
+import type { CityObject } from "../domain/citymodel/types";
 
 const defaultStore = new LocalStorageProjectStateStore();
+const SAMPLE_DATA_URL =
+  "https://storage.googleapis.com/cityjson/delft.city.jsonl";
 
 interface AppProps {
   readonly persistenceStore?: ProjectStateStore;
@@ -53,6 +57,10 @@ export function App({
   });
   const [duckdbModelLoaded, setDuckdbModelLoaded] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [fps, setFps] = useState<number | undefined>(undefined);
+  const [cursorPosition, setCursorPosition] = useState<
+    readonly [number, number, number] | null
+  >(null);
   const sceneRef = useRef<CitySceneHandle>(null);
   const cameraTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -72,9 +80,11 @@ export function App({
     clearError,
   } = useLayerFileLoader();
 
-  const selection = useSelectionStore((s) => s.selection);
+  const selections = useSelectionStore((s) => s.selections);
   const mode = useSelectionStore((s) => s.mode);
+  const toolMode = useSelectionStore((s) => s.toolMode);
   const setMode = useSelectionStore((s) => s.setMode);
+  const setToolMode = useSelectionStore((s) => s.setToolMode);
   const clearSelection = useSelectionStore((s) => s.clear);
 
   const refreshSnapshots = useCallback(async () => {
@@ -343,7 +353,7 @@ export function App({
 
       useSelectionStore.setState({
         mode: shared.pm,
-        selection: null,
+        selections: [],
         hovered: null,
       });
       const dt = new Date(shared.dt);
@@ -378,12 +388,31 @@ export function App({
     useLayerStore.getState().removeAllLayers();
     setTriangleCount(0);
     setDuckdbModelLoaded(false);
+    setFps(undefined);
+    setCursorPosition(null);
     clearSelection();
   }, [clearSelection]);
 
   const handleFitAll = useCallback(() => {
     sceneRef.current?.fitAll();
   }, []);
+
+  const handleLoadSample = useCallback(() => {
+    void handleUrl(SAMPLE_DATA_URL);
+  }, [handleUrl]);
+
+  // Resolve selected objects for attribute panel
+  const selectedObjects: CityObject[] = [];
+  if (selections.length > 0) {
+    const sel0 = selections[0]!;
+    const layer = layers.find((l) => l.id === sel0.layerId);
+    if (layer) {
+      for (const sel of selections) {
+        const obj = layer.model.objects[sel.objectId];
+        if (obj) selectedObjects.push(obj);
+      }
+    }
+  }
 
   // Viewer state
   if (hasLayers) {
@@ -413,7 +442,9 @@ export function App({
           fileName={activeLayer?.name ?? null}
           layerCount={layers.length}
           pickMode={mode}
+          toolMode={toolMode}
           onSetPickMode={setMode}
+          onSetToolMode={setToolMode}
           onClose={handleClose}
           onToggleInspector={() => setInspectorOpen((o) => !o)}
           onToggleLeftSidebar={() => setLeftSidebarCollapsed((o) => !o)}
@@ -436,13 +467,19 @@ export function App({
         />
 
         <div className="viewport">
-          <CityScene ref={sceneRef} onTriangleCount={setTriangleCount} />
+          <CityScene
+            ref={sceneRef}
+            onTriangleCount={setTriangleCount}
+            onFps={setFps}
+            onCursorPosition={setCursorPosition}
+          />
           <LegendOverlay />
+          <AttributePanel objects={selectedObjects} />
         </div>
 
         {inspectorOpen && (
           <InspectorPanel
-            selection={selection}
+            selections={selections}
             onClose={() => setInspectorOpen(false)}
             duckdbModelLoaded={duckdbModelLoaded}
           />
@@ -451,8 +488,10 @@ export function App({
         <StatusBar
           objectCount={totalObjects}
           triangleCount={triangleCount}
-          selectedCount={selection ? 1 : 0}
+          selectedCount={selections.length}
           duckdbStatus={duckdbStatus}
+          fps={fps}
+          cursorPosition={cursorPosition}
         />
 
         {toast && <div className="toast">{toast}</div>}
@@ -491,6 +530,28 @@ export function App({
       </div>
 
       <UrlInput onLoad={handleUrl} loading={loading} />
+
+      <div className="sample-data-section">
+        <button
+          className="sample-data-btn"
+          onClick={handleLoadSample}
+          disabled={loading}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          {loading ? "Loading\u2026" : "Load Delft sample"}
+        </button>
+      </div>
 
       {savedSnapshots.length > 0 && (
         <SnapshotList
