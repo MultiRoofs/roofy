@@ -13,9 +13,15 @@ interface LayerPanelProps {
   readonly onAddFile: (file: File) => void;
   readonly onAddUrl: (url: string) => void;
   readonly loading: boolean;
+  readonly onFlyToLayer?: (layerId: string) => void;
 }
 
-export function LayerPanel({ onAddFile, onAddUrl, loading }: LayerPanelProps) {
+export function LayerPanel({
+  onAddFile,
+  onAddUrl,
+  loading,
+  onFlyToLayer,
+}: LayerPanelProps) {
   const layers = useLayerStore((s) => s.layers);
   const activeLayerId = useLayerStore((s) => s.activeLayerId);
   const setActiveLayer = useLayerStore((s) => s.setActiveLayer);
@@ -138,6 +144,33 @@ export function LayerPanel({ onAddFile, onAddUrl, loading }: LayerPanelProps) {
             />
 
             <div className="layer-actions">
+              {onFlyToLayer && (
+                <button
+                  className="rule-action-btn"
+                  title="Fly to layer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onFlyToLayer(layer.id);
+                  }}
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="12"
+                    height="12"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="22" y1="12" x2="18" y2="12" />
+                    <line x1="6" y1="12" x2="2" y2="12" />
+                    <line x1="12" y1="6" x2="12" y2="2" />
+                    <line x1="12" y1="22" x2="12" y2="18" />
+                  </svg>
+                </button>
+              )}
               <button
                 className="rule-action-btn"
                 title="Remove layer"

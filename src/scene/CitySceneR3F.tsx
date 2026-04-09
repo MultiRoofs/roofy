@@ -37,7 +37,8 @@ import type { Layer } from "../features/layers/layerStore";
 import { useSolarStore } from "../features/solar/solarStore";
 import type { Selection } from "../domain/selection/types";
 import type { Rule } from "../features/rules/types";
-import { OrbitTargetGizmo } from "./OrbitTargetGizmo";
+import { ViewAlignButtons } from "./ViewAlignButtons";
+import type { ViewDirection } from "./ViewAlignButtons";
 
 // Re-export for consumers
 export type { CitySceneHandle, CitySceneProps };
@@ -53,6 +54,8 @@ export interface LayerSceneState {
 
 interface CitySceneHandle {
   fitAll: () => void;
+  fitLayer: (layerId: string) => void;
+  alignView: (direction: ViewDirection) => void;
   getCameraState: () => {
     position: readonly [number, number, number];
     target: readonly [number, number, number];
@@ -65,7 +68,6 @@ interface CitySceneHandle {
 
 interface CitySceneProps {
   readonly onTriangleCount: (count: number) => void;
-  readonly showOrbitGizmo?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -73,7 +75,8 @@ interface CitySceneProps {
 // ---------------------------------------------------------------------------
 
 export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
-  function CityScene({ onTriangleCount, showOrbitGizmo }, ref) {
+  function CityScene({ onTriangleCount }, ref) {
+    const innerRef = useRef<CitySceneHandle>(null);
     const layers = useLayerStore((s) => s.layers);
     const hovered = useSelectionStore((s) => s.hovered);
 
@@ -84,6 +87,19 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
       hoveredLayer && hovered
         ? hoveredLayer.model.objects[hovered.objectId]
         : undefined;
+
+    // Forward handle from inner to outer
+    useImperativeHandle(ref, () => ({
+      fitAll: () => innerRef.current?.fitAll(),
+      fitLayer: (id: string) => innerRef.current?.fitLayer(id),
+      alignView: (dir: ViewDirection) => innerRef.current?.alignView(dir),
+      getCameraState: () => innerRef.current?.getCameraState() ?? null,
+      setCameraState: (pos, tgt) => innerRef.current?.setCameraState(pos, tgt),
+    }));
+
+    const handleAlign = useCallback((dir: ViewDirection) => {
+      innerRef.current?.alignView(dir);
+    }, []);
 
     return (
       <div style={{ width: "100%", height: "100%", position: "relative" }}>
@@ -97,12 +113,9 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
             raycaster.params.Line = { threshold: 0.1 };
           }}
         >
-          <CitySceneInner
-            ref={ref}
-            onTriangleCount={onTriangleCount}
-            showOrbitGizmo={showOrbitGizmo}
-          />
+          <CitySceneInner ref={innerRef} onTriangleCount={onTriangleCount} />
         </Canvas>
+        <ViewAlignButtons onAlign={handleAlign} />
         {hoveredObject && hovered && (
           <div className="pick-tooltip">
             <span className="obj-type">{hoveredObject.objectType}</span>
@@ -120,11 +133,10 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
 
 interface InnerProps {
   readonly onTriangleCount: (count: number) => void;
-  readonly showOrbitGizmo?: boolean;
 }
 
 const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
-  function CitySceneInner({ onTriangleCount, showOrbitGizmo }, ref) {
+  function CitySceneInner({ onTriangleCount }, ref) {
     const { camera, gl } = useThree();
     const controlsRef = useRef<OrbitControlsImpl>(null);
     const cityGroupRef = useRef<Group>(null);
@@ -366,6 +378,46 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
       }
     }, [layers, camera]);
 
+    const fitLayer = useCallback(
+      (layerId: string) => {
+        const layer = layers.find((l) => l.id === layerId);
+        if (!layer || !layer.model.bbox || !controlsRef.current) return;
+        fitCamera(
+          camera as PerspectiveCamera,
+          controlsRef.current,
+          layer.model.bbox,
+        );
+      },
+      [layers, camera],
+    );
+
+    const alignView = useCallback(
+      (direction: ViewDirection) => {
+        if (!controlsRef.current) return;
+        const target = controlsRef.current.target.clone();
+        const bbox = computeUnionBBox(layers);
+        const dist = bbox
+          ? Math.max(bbox[3] - bbox[0], bbox[4] - bbox[1], bbox[5] - bbox[2]) *
+            1.5
+          : 100;
+
+        const offsets: Record<ViewDirection, [number, number, number]> = {
+          top: [0, dist, 0],
+          bottom: [0, -dist, 0],
+          front: [0, 0, dist],
+          back: [0, 0, -dist],
+          right: [dist, 0, 0],
+          left: [-dist, 0, 0],
+        };
+
+        const [ox, oy, oz] = offsets[direction];
+        camera.position.set(target.x + ox, target.y + oy, target.z + oz);
+        camera.lookAt(target);
+        controlsRef.current.update();
+      },
+      [layers, camera],
+    );
+
     const getCameraState = useCallback(() => {
       if (!controlsRef.current) return null;
       return {
@@ -397,8 +449,8 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
 
     useImperativeHandle(
       ref,
-      () => ({ fitAll, getCameraState, setCameraState }),
-      [fitAll, getCameraState, setCameraState],
+      () => ({ fitAll, fitLayer, alignView, getCameraState, setCameraState }),
+      [fitAll, fitLayer, alignView, getCameraState, setCameraState],
     );
 
     // Sky sun position (scaled far away for visual effect)
@@ -447,9 +499,6 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
           enableDamping
           dampingFactor={0.1}
         />
-
-        {/* Orbit target gizmo */}
-        {showOrbitGizmo && <OrbitTargetGizmo controlsRef={controlsRef} />}
       </>
     );
   },

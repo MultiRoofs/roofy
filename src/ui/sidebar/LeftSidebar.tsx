@@ -18,6 +18,7 @@ interface LeftSidebarProps {
   readonly onAddFile: (file: File) => void;
   readonly onAddUrl: (url: string) => void;
   readonly loading: boolean;
+  readonly onFlyToLayer?: (layerId: string) => void;
 }
 
 export function LeftSidebar({
@@ -27,6 +28,7 @@ export function LeftSidebar({
   onAddFile,
   onAddUrl,
   loading,
+  onFlyToLayer,
 }: LeftSidebarProps) {
   const draggingRef = useRef(false);
   const startXRef = useRef(0);
@@ -86,6 +88,7 @@ export function LeftSidebar({
           onAddFile={onAddFile}
           onAddUrl={onAddUrl}
           loading={loading}
+          onFlyToLayer={onFlyToLayer}
         />
       </div>
       <div className="left-sidebar-handle" onPointerDown={handlePointerDown} />

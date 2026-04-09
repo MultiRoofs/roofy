@@ -16,8 +16,6 @@ interface ViewerToolbarProps {
   readonly onToggleInspector: () => void;
   readonly onToggleLeftSidebar: () => void;
   readonly onFitAll: () => void;
-  readonly onToggleGizmo?: () => void;
-  readonly gizmoActive?: boolean;
   readonly onSave?: () => void;
   readonly onShare?: () => void;
   readonly canShare?: boolean;
@@ -34,8 +32,6 @@ export function ViewerToolbar({
   onToggleInspector,
   onToggleLeftSidebar,
   onFitAll,
-  onToggleGizmo,
-  gizmoActive,
   onSave,
   onShare,
   canShare,
@@ -109,23 +105,6 @@ export function ViewerToolbar({
           <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3M3 16v3a2 2 0 002 2h3m8 0h3a2 2 0 002-2v-3" />
         </svg>
       </button>
-
-      {/* Orbit target gizmo toggle */}
-      {onToggleGizmo && (
-        <button
-          className={`tb-btn ${gizmoActive ? "tb-btn-active" : ""}`}
-          title="Move orbit target"
-          onClick={onToggleGizmo}
-        >
-          <svg viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="3" />
-            <line x1="12" y1="2" x2="12" y2="6" />
-            <line x1="12" y1="18" x2="12" y2="22" />
-            <line x1="2" y1="12" x2="6" y2="12" />
-            <line x1="18" y1="12" x2="22" y2="12" />
-          </svg>
-        </button>
-      )}
 
       <div className="toolbar-sep" />
 

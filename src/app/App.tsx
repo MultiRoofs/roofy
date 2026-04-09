@@ -52,7 +52,6 @@ export function App({
     state: "uninitialized",
   });
   const [duckdbModelLoaded, setDuckdbModelLoaded] = useState(false);
-  const [showOrbitGizmo, setShowOrbitGizmo] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const sceneRef = useRef<CitySceneHandle>(null);
   const cameraTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -419,8 +418,6 @@ export function App({
           onToggleInspector={() => setInspectorOpen((o) => !o)}
           onToggleLeftSidebar={() => setLeftSidebarCollapsed((o) => !o)}
           onFitAll={handleFitAll}
-          onToggleGizmo={() => setShowOrbitGizmo((o) => !o)}
-          gizmoActive={showOrbitGizmo}
           onSave={handleSave}
           onShare={handleShare}
           canShare={hasUrlLayers}
@@ -435,14 +432,11 @@ export function App({
           onAddFile={handleFile}
           onAddUrl={handleUrl}
           loading={loading}
+          onFlyToLayer={(id) => sceneRef.current?.fitLayer(id)}
         />
 
         <div className="viewport">
-          <CityScene
-            ref={sceneRef}
-            onTriangleCount={setTriangleCount}
-            showOrbitGizmo={showOrbitGizmo}
-          />
+          <CityScene ref={sceneRef} onTriangleCount={setTriangleCount} />
           <LegendOverlay />
         </div>
 

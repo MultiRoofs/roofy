@@ -611,6 +611,49 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   VIEW ALIGN BUTTONS
+   ═══════════════════════════════════════════════════════════════ */
+
+.view-align-buttons {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  z-index: 10;
+}
+
+.view-align-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  background: rgba(12, 14, 20, 0.7);
+  backdrop-filter: blur(8px);
+  color: var(--fg-muted);
+  font-size: 0.6rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.view-align-btn:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+[data-theme="light"] .view-align-btn {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+/* ═══════════════════════════════════════════════════════════════
    INSPECTOR PANEL
    ═══════════════════════════════════════════════════════════════ */
 
