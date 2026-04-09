@@ -19,8 +19,8 @@ import {
 import type { DuckDBStatus } from "../analytics/duckdb";
 import { browserPlatform } from "../platform/browser";
 import type { PlatformServices } from "../platform/types";
-import { CityScene } from "../scene/CityScene";
-import type { CitySceneHandle } from "../scene/CityScene";
+import { CityScene } from "../scene/CitySceneR3F";
+import type { CitySceneHandle } from "../scene/CitySceneR3F";
 import { useSelectionStore } from "../features/selection/selectionStore";
 import { useLayerStore } from "../features/layers/layerStore";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
@@ -52,6 +52,7 @@ export function App({
     state: "uninitialized",
   });
   const [duckdbModelLoaded, setDuckdbModelLoaded] = useState(false);
+  const [showOrbitGizmo, setShowOrbitGizmo] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const sceneRef = useRef<CitySceneHandle>(null);
   const cameraTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -418,6 +419,8 @@ export function App({
           onToggleInspector={() => setInspectorOpen((o) => !o)}
           onToggleLeftSidebar={() => setLeftSidebarCollapsed((o) => !o)}
           onFitAll={handleFitAll}
+          onToggleGizmo={() => setShowOrbitGizmo((o) => !o)}
+          gizmoActive={showOrbitGizmo}
           onSave={handleSave}
           onShare={handleShare}
           canShare={hasUrlLayers}
@@ -435,7 +438,11 @@ export function App({
         />
 
         <div className="viewport">
-          <CityScene ref={sceneRef} onTriangleCount={setTriangleCount} />
+          <CityScene
+            ref={sceneRef}
+            onTriangleCount={setTriangleCount}
+            showOrbitGizmo={showOrbitGizmo}
+          />
           <LegendOverlay />
         </div>
 

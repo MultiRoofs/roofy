@@ -20,6 +20,8 @@
   "dependencies": {
     "@cityjson/flatcitybuf": "^0.2.0",
     "@duckdb/duckdb-wasm": "latest",
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.5.0",
     "@takram/three-geospatial": "latest",
     "proj4": "^2.20.8",
     "react": "latest",
@@ -42,8 +44,8 @@
     "jsdom": "latest",
     "typescript": "latest",
     "vite": "npm:@voidzero-dev/vite-plus-core@latest",
-    "vitest": "npm:@voidzero-dev/vite-plus-test@latest",
-    "vite-plus": "latest"
+    "vite-plus": "latest",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@latest"
   },
   "packageManager": "npm@11.12.1",
   "overrides": {
