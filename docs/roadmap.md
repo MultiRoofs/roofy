@@ -154,6 +154,75 @@ Exit criteria:
 
 Status: In progress. Completed: error boundaries and validation (M5.1), mesh building performance optimization (M5.2), platform adapter interfaces for Tauri (M5.3), pilot workflow documentation (M5.4). Remaining: further performance profiling with large real-world datasets.
 
+## Milestone 5b: Multi-Layer and Per-Layer Rules
+
+Goal: support multiple data sources as named layers with per-layer rule-based colorization and theme toggle.
+
+Deliverables:
+
+- Layer store with per-layer CityModel, visibility, and rule management
+- Layer management UI (add, remove, rename, visibility toggle)
+- Per-layer rule scoping (replaces global ruleStore)
+- Multi-layer rendering with per-layer picking and highlighting
+- Multi-layer persistence (snapshots and URL sharing with backward compat)
+- Dark/light theme toggle with CSS variables and renderer sync
+
+Status: Complete. Committed in 6 incremental commits.
+
+## Milestone 6: Scene Quality and UI Refinements
+
+Goal: improve scene rendering quality, add geospatial accuracy, LoD control, and refine the UI layout.
+
+### M6.4: Left Layer Panel and Pick Mode to Toolbar
+
+Goal: move layer management to a collapsible, resizable left sidebar and pick mode buttons to the toolbar.
+
+Deliverables:
+
+- Collapsible, resizable left sidebar (default 240px, range 180-480px)
+- Layer panel moved from inspector tab to left sidebar
+- Pick mode (object/surface) and fit-all buttons moved to toolbar
+- Remove ToolRail component
+
+### M6.3: LoD Selection Per Layer
+
+Goal: let users choose which LoD to render per layer, defaulting to the highest available.
+
+Deliverables:
+
+- Tag each Surface with its source LoD in the parser
+- Per-layer LoD selection in layerStore (selectedLod, availableLods)
+- LoD filtering in buildCityMesh
+- LoD selector UI in the layer panel (shown even with one LoD)
+- Mesh rebuild on LoD change
+
+### M6.1: React Three Fiber Migration with three-geospatial
+
+Goal: migrate from vanilla Three.js to R3F, integrate three-geospatial for geospatially accurate rendering with sky and atmosphere.
+
+Deliverables:
+
+- Migrate CityScene to R3F declarative components
+- Integrate three-geospatial EastNorthUpFrame for geographic positioning
+- Add visible sky/atmosphere using three-geospatial Sky component
+- Visible sun in the scene synced with solar store
+- Preserve all existing functionality (picking, highlighting, rule colors, persistence)
+
+### M6.2: Camera Orbit Target Gizmo
+
+Goal: add a draggable gizmo to move the camera orbit center point.
+
+Deliverables:
+
+- TransformControls gizmo from drei to move orbit target
+- Visible target indicator sphere
+- Toggle button in toolbar to show/hide gizmo
+
+Exit criteria:
+
+- A user can manage layers in a left sidebar, select LoD per layer, see a geospatially accurate sky, and reposition the camera orbit target via gizmo
+- Scene rendering is visually improved with atmosphere and sun
+
 ## Cross-Cutting Workstreams
 
 - Data quality and semantic assumptions
