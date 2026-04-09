@@ -5,7 +5,7 @@
  * for resizing between 180px and 480px.
  */
 
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { LayerPanel } from "../layers/LayerPanel";
 
 const MIN_WIDTH = 180;
@@ -31,6 +31,14 @@ export function LeftSidebar({
   const draggingRef = useRef(false);
   const startXRef = useRef(0);
   const startWidthRef = useRef(0);
+  const cleanupRef = useRef<(() => void) | null>(null);
+
+  // Clean up orphaned window listeners on unmount
+  useEffect(() => {
+    return () => {
+      if (cleanupRef.current) cleanupRef.current();
+    };
+  }, []);
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -53,10 +61,18 @@ export function LeftSidebar({
         draggingRef.current = false;
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
+        cleanupRef.current = null;
       };
 
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
+
+      // Store cleanup in case component unmounts during drag
+      cleanupRef.current = () => {
+        draggingRef.current = false;
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+      };
     },
     [width, onWidthChange],
   );

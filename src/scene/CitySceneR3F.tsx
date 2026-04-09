@@ -95,14 +95,6 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
             gl.setClearColor(readCssColor("--bg-viewport", "#0a0c12"));
             raycaster.firstHitOnly = true;
             raycaster.params.Line = { threshold: 0.1 };
-            // Observe theme changes
-            const obs = new MutationObserver(() => {
-              gl.setClearColor(readCssColor("--bg-viewport", "#0a0c12"));
-            });
-            obs.observe(document.documentElement, {
-              attributes: true,
-              attributeFilter: ["data-theme"],
-            });
           }}
         >
           <CitySceneInner
@@ -133,11 +125,25 @@ interface InnerProps {
 
 const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
   function CitySceneInner({ onTriangleCount, showOrbitGizmo }, ref) {
-    const { camera } = useThree();
+    const { camera, gl } = useThree();
     const controlsRef = useRef<OrbitControlsImpl>(null);
     const cityGroupRef = useRef<Group>(null);
     const dirLightRef = useRef<DirectionalLight>(null);
     const layerSceneMapRef = useRef<Map<string, LayerSceneState>>(new Map());
+
+    // Theme-aware clear color with proper cleanup
+    useEffect(() => {
+      const updateClearColor = () => {
+        gl.setClearColor(readCssColor("--bg-viewport", "#0a0c12"));
+      };
+      updateClearColor();
+      const obs = new MutationObserver(updateClearColor);
+      obs.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["data-theme"],
+      });
+      return () => obs.disconnect();
+    }, [gl]);
 
     const layers = useLayerStore((s) => s.layers);
     const selection = useSelectionStore((s) => s.selection);

@@ -6,37 +6,39 @@
  * position. OrbitControls are disabled during drag to prevent conflict.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TransformControls } from "@react-three/drei";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
-import { Object3D } from "three";
+import type { Mesh } from "three";
 
 interface OrbitTargetGizmoProps {
   readonly controlsRef: React.RefObject<OrbitControlsImpl | null>;
 }
 
 export function OrbitTargetGizmo({ controlsRef }: OrbitTargetGizmoProps) {
-  const dummyRef = useRef<Object3D>(null);
+  const meshRef = useRef<Mesh>(null);
+  const [ready, setReady] = useState(false);
 
-  // Initialize dummy position at current orbit target
+  // Initialize position at current orbit target once the mesh is mounted
   useEffect(() => {
-    if (dummyRef.current && controlsRef.current) {
-      dummyRef.current.position.copy(controlsRef.current.target);
+    if (meshRef.current && controlsRef.current) {
+      meshRef.current.position.copy(controlsRef.current.target);
+      setReady(true);
     }
   }, [controlsRef]);
 
   return (
     <>
       {/* Visible target indicator */}
-      <mesh ref={dummyRef}>
+      <mesh ref={meshRef}>
         <sphereGeometry args={[0.3, 8, 8]} />
         <meshBasicMaterial color="#e8973f" transparent opacity={0.6} />
       </mesh>
 
-      {/* Transform gizmo */}
-      {dummyRef.current && (
+      {/* Transform gizmo — only mount after mesh is committed */}
+      {ready && meshRef.current && (
         <TransformControls
-          object={dummyRef.current}
+          object={meshRef.current}
           mode="translate"
           onMouseDown={() => {
             if (controlsRef.current) controlsRef.current.enabled = false;
@@ -45,8 +47,8 @@ export function OrbitTargetGizmo({ controlsRef }: OrbitTargetGizmoProps) {
             if (controlsRef.current) controlsRef.current.enabled = true;
           }}
           onChange={() => {
-            if (dummyRef.current && controlsRef.current) {
-              controlsRef.current.target.copy(dummyRef.current.position);
+            if (meshRef.current && controlsRef.current) {
+              controlsRef.current.target.copy(meshRef.current.position);
               controlsRef.current.update();
             }
           }}
