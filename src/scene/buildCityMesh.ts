@@ -45,6 +45,7 @@ export function buildCityMesh(
   model: CityModel,
   layerId: string,
   originOffset: Vec3 = [0, 0, 0],
+  selectedLod: string | null = null,
 ): CityMeshResult {
   const objectKeys: string[] = [];
 
@@ -54,6 +55,7 @@ export function buildCityMesh(
     if (!obj) continue;
     objectKeys.push(id);
     for (const surface of obj.surfaces) {
+      if (selectedLod !== null && surface.lod !== selectedLod) continue;
       const ring = surface.rings[0];
       if (ring && ring.length >= 3) {
         totalTriangles += ring.length - 2;
@@ -77,6 +79,7 @@ export function buildCityMesh(
 
     for (let surfaceIdx = 0; surfaceIdx < obj.surfaces.length; surfaceIdx++) {
       const surface = obj.surfaces[surfaceIdx]!;
+      if (selectedLod !== null && surface.lod !== selectedLod) continue;
       const color = SURFACE_COLORS[surface.type];
       // Only triangulate the exterior ring (index 0).
       // Interior rings are holes — proper hole handling requires

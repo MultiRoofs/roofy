@@ -43,6 +43,7 @@ export interface LayerSceneState {
   mesh: Mesh;
   pickingIndex: PickingIndex;
   baseColors: Float32Array;
+  selectedLod: string | null;
   ruleColors: Float32Array | null;
 }
 
@@ -225,11 +226,25 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
         }
       }
 
-      // Add meshes for new layers (check map directly, after removals)
+      // Add or rebuild meshes for new layers or LoD changes
       let needsFit = false;
       const hadLayersBefore = map.size > 0;
       let solarInitialized = false;
       for (const layer of layers) {
+        const existing = map.get(layer.id);
+        const lodChanged =
+          existing !== undefined && existing.selectedLod !== layer.selectedLod;
+
+        // Dispose old mesh if LoD changed
+        if (lodChanged && existing) {
+          cityGroup.remove(existing.mesh);
+          existing.mesh.geometry.dispose();
+          if (existing.mesh.material instanceof MeshStandardMaterial) {
+            existing.mesh.material.dispose();
+          }
+          map.delete(layer.id);
+        }
+
         if (!map.has(layer.id)) {
           const model = layer.model;
           if (Object.keys(model.objects).length === 0) continue;
@@ -239,6 +254,7 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
             model,
             layer.id,
             originOffset,
+            layer.selectedLod,
           );
 
           const material = new MeshStandardMaterial({
@@ -259,6 +275,7 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
             pickingIndex,
             baseColors,
             ruleColors: null,
+            selectedLod: layer.selectedLod,
           });
 
           // Configure shadow camera and solar from the first non-empty layer
@@ -273,7 +290,7 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
             solarInitialized = true;
           }
 
-          needsFit = true;
+          needsFit = !lodChanged; // Only fit camera on new layers, not LoD changes
         }
       }
 

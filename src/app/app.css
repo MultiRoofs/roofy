@@ -1650,6 +1650,22 @@ body {
   flex-shrink: 0;
 }
 
+.lod-select {
+  padding: 0.1rem 0.25rem;
+  font-size: 0.65rem;
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.lod-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .layer-actions {
   display: flex;
   gap: 0.15rem;

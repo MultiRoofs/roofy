@@ -2,7 +2,7 @@
  * Zustand store for the layer system.
  *
  * Each layer holds a CityModel, its source reference, visibility,
- * and per-layer colorization rules. Replaces the global useRuleStore.
+ * per-layer colorization rules, and LoD selection.
  */
 
 import { create } from "zustand";
@@ -18,6 +18,8 @@ export interface Layer {
   readonly visible: boolean;
   readonly rules: ReadonlyArray<Rule>;
   readonly rulesEnabled: boolean;
+  readonly selectedLod: string | null;
+  readonly availableLods: ReadonlyArray<string>;
 }
 
 export interface LayerStoreState {
@@ -26,7 +28,9 @@ export interface LayerStoreState {
 }
 
 export interface LayerStoreActions {
-  addLayer: (layer: Omit<Layer, "id">) => string;
+  addLayer: (
+    layer: Omit<Layer, "id" | "selectedLod" | "availableLods">,
+  ) => string;
   removeLayer: (id: string) => void;
   updateLayer: (
     id: string,
@@ -34,6 +38,7 @@ export interface LayerStoreActions {
   ) => void;
   setActiveLayer: (id: string | null) => void;
   removeAllLayers: () => void;
+  setLayerLod: (layerId: string, lod: string | null) => void;
 
   // Per-layer rule actions
   addRule: (layerId: string, rule: Rule) => void;
@@ -50,14 +55,30 @@ export interface LayerStoreActions {
 
 export type LayerStore = LayerStoreState & LayerStoreActions;
 
+/**
+ * Collect unique LoD values from all surfaces in a model,
+ * sorted numerically descending (highest first).
+ */
+export function computeAvailableLods(model: CityModel): string[] {
+  const set = new Set<string>();
+  for (const obj of Object.values(model.objects)) {
+    for (const surface of obj?.surfaces ?? []) {
+      if (surface.lod) set.add(surface.lod);
+    }
+  }
+  return [...set].sort((a, b) => parseFloat(b) - parseFloat(a));
+}
+
 export const useLayerStore = create<LayerStore>((set) => ({
   layers: [],
   activeLayerId: null,
 
   addLayer: (input) => {
     const id = crypto.randomUUID();
+    const availableLods = computeAvailableLods(input.model);
+    const selectedLod = availableLods[0] ?? null;
     set((state) => ({
-      layers: [...state.layers, { ...input, id }],
+      layers: [...state.layers, { ...input, id, selectedLod, availableLods }],
       activeLayerId: state.activeLayerId ?? id,
     }));
     return id;
@@ -81,6 +102,13 @@ export const useLayerStore = create<LayerStore>((set) => ({
   setActiveLayer: (id) => set({ activeLayerId: id }),
 
   removeAllLayers: () => set({ layers: [], activeLayerId: null }),
+
+  setLayerLod: (layerId, lod) =>
+    set((state) => ({
+      layers: state.layers.map((l) =>
+        l.id === layerId ? { ...l, selectedLod: lod } : l,
+      ),
+    })),
 
   // --- Per-layer rule actions ---
 

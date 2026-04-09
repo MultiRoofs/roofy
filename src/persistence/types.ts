@@ -35,6 +35,7 @@ export interface LayerSnapshot {
   readonly rules: ReadonlyArray<Rule>;
   readonly rulesEnabled: boolean;
   readonly visible: boolean;
+  readonly selectedLod?: string | null;
 }
 
 // ---------------------------------------------------------------------------

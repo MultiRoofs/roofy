@@ -7,6 +7,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useLayerStore } from "../../features/layers/layerStore";
+import { LodSelector } from "../sidebar/LodSelector";
 
 interface LayerPanelProps {
   readonly onAddFile: (file: File) => void;
@@ -129,6 +130,12 @@ export function LayerPanel({ onAddFile, onAddUrl, loading }: LayerPanelProps) {
             )}
 
             <span className="layer-meta">{objectCount}</span>
+
+            <LodSelector
+              layerId={layer.id}
+              availableLods={layer.availableLods}
+              selectedLod={layer.selectedLod}
+            />
 
             <div className="layer-actions">
               <button

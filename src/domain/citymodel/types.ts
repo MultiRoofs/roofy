@@ -45,6 +45,8 @@ export interface Surface {
   readonly rings: ReadonlyArray<ReadonlyArray<Vec3>>;
   /** Extra semantic attributes (e.g. slope, solar-potential). */
   readonly attributes: Readonly<Record<string, unknown>>;
+  /** LoD of the source geometry that produced this surface (e.g. "2", "2.2"). */
+  readonly lod: string | null;
 }
 
 // ---------------------------------------------------------------------------

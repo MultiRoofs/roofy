@@ -121,6 +121,7 @@ function extractSurfacesFromMultiSurface(
   geom: CityJSONSurfaceGeometry,
   realVertices: Vec3[],
   objectBBox: [number, number, number, number, number, number],
+  lod: string | null,
 ): Surface[] {
   const boundaries = geom.boundaries as ReadonlyArray<
     ReadonlyArray<ReadonlyArray<number>>
@@ -158,6 +159,7 @@ function extractSurfacesFromMultiSurface(
       type: resolveSemanticType(sem),
       rings,
       attributes: extractSemanticAttributes(sem),
+      lod,
     });
   }
 
@@ -172,6 +174,7 @@ function extractSurfacesFromSolid(
   geom: CityJSONSurfaceGeometry,
   realVertices: Vec3[],
   objectBBox: [number, number, number, number, number, number],
+  lod: string | null,
 ): Surface[] {
   const shells = geom.boundaries as ReadonlyArray<
     ReadonlyArray<ReadonlyArray<ReadonlyArray<number>>>
@@ -215,6 +218,7 @@ function extractSurfacesFromSolid(
         type: resolveSemanticType(sem),
         rings,
         attributes: extractSemanticAttributes(sem),
+        lod,
       });
     }
   }
@@ -230,6 +234,7 @@ function extractSurfacesFromCompositeSolid(
   geom: CityJSONSurfaceGeometry,
   realVertices: Vec3[],
   objectBBox: [number, number, number, number, number, number],
+  lod: string | null,
 ): Surface[] {
   const solids = geom.boundaries as ReadonlyArray<
     ReadonlyArray<ReadonlyArray<ReadonlyArray<ReadonlyArray<number>>>>
@@ -277,6 +282,7 @@ function extractSurfacesFromCompositeSolid(
           type: resolveSemanticType(sem),
           rings,
           attributes: extractSemanticAttributes(sem),
+          lod,
         });
       }
     }
@@ -293,16 +299,27 @@ function extractSurfaces(
   geom: CityJSONSurfaceGeometry,
   realVertices: Vec3[],
   objectBBox: [number, number, number, number, number, number],
+  lod: string | null,
 ): Surface[] {
   switch (geom.type) {
     case "MultiSurface":
     case "CompositeSurface":
-      return extractSurfacesFromMultiSurface(geom, realVertices, objectBBox);
+      return extractSurfacesFromMultiSurface(
+        geom,
+        realVertices,
+        objectBBox,
+        lod,
+      );
     case "Solid":
-      return extractSurfacesFromSolid(geom, realVertices, objectBBox);
+      return extractSurfacesFromSolid(geom, realVertices, objectBBox, lod);
     case "MultiSolid":
     case "CompositeSolid":
-      return extractSurfacesFromCompositeSolid(geom, realVertices, objectBBox);
+      return extractSurfacesFromCompositeSolid(
+        geom,
+        realVertices,
+        objectBBox,
+        lod,
+      );
     default:
       return [];
   }
@@ -330,8 +347,15 @@ export function parseCityObject(
 
   for (const geom of raw.geometry ?? []) {
     if (geom.type === "GeometryInstance") continue;
-    if (!lod) lod = geom.lod;
-    const surfaces = extractSurfaces(geom, realVertices, objectBBox);
+    const geomLod = geom.lod ?? null;
+    // Track highest LoD for display purposes
+    if (
+      geomLod !== null &&
+      (lod === null || parseFloat(geomLod) > parseFloat(lod))
+    ) {
+      lod = geomLod;
+    }
+    const surfaces = extractSurfaces(geom, realVertices, objectBBox, geomLod);
     allSurfaces.push(...surfaces);
   }
 
