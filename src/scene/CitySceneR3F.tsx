@@ -4,6 +4,10 @@
  * Renders multi-layer city models using R3F declarative components.
  * Integrates the @takram ecosystem for physically-based atmosphere,
  * sun/moon lighting, stars, and volumetric clouds.
+ *
+ * City meshes remain at the scene origin in local CRS coordinates.
+ * The Atmosphere component provides sky rendering based on datetime,
+ * and SunLight provides physically-correct directional lighting.
  */
 
 import {
@@ -17,17 +21,6 @@ import {
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
-import { EffectComposer } from "@react-three/postprocessing";
-import {
-  Atmosphere,
-  Sky,
-  SunLight,
-  Stars,
-  AerialPerspective,
-} from "@takram/three-atmosphere/r3f";
-import { SunDirectionalLight } from "@takram/three-atmosphere";
-import { Clouds, CloudLayer } from "@takram/three-clouds/r3f";
-import { EastNorthUpFrame } from "@takram/three-geospatial/r3f";
 import {
   BufferGeometry,
   DirectionalLight,
@@ -78,17 +71,14 @@ interface CitySceneHandle {
 
 interface CitySceneProps {
   readonly onTriangleCount: (count: number) => void;
-  readonly cloudsEnabled?: boolean;
 }
-
-const DEG_TO_RAD = Math.PI / 180;
 
 // ---------------------------------------------------------------------------
 // Outer wrapper — renders Canvas + overlay tooltip + view buttons
 // ---------------------------------------------------------------------------
 
 export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
-  function CityScene({ onTriangleCount, cloudsEnabled = true }, ref) {
+  function CityScene({ onTriangleCount }, ref) {
     const innerRef = useRef<CitySceneHandle>(null);
     const layers = useLayerStore((s) => s.layers);
     const hovered = useSelectionStore((s) => s.hovered);
@@ -116,20 +106,15 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
     return (
       <div style={{ width: "100%", height: "100%", position: "relative" }}>
         <Canvas
-          camera={{ fov: 60, near: 0.1, far: 10000, position: [50, 50, 50] }}
+          camera={{ fov: 60, near: 0.1, far: 50000, position: [50, 50, 50] }}
           shadows="soft"
           gl={{ antialias: true }}
           onCreated={({ gl, raycaster }) => {
             gl.setClearColor(readCssColor("--bg-viewport", "#0a0c12"));
             raycaster.firstHitOnly = true;
-            raycaster.params.Line = { threshold: 0.1 };
           }}
         >
-          <CitySceneInner
-            ref={innerRef}
-            onTriangleCount={onTriangleCount}
-            cloudsEnabled={cloudsEnabled}
-          />
+          <CitySceneInner ref={innerRef} onTriangleCount={onTriangleCount} />
         </Canvas>
         <ViewAlignButtons onAlign={handleAlign} />
         {hoveredObject && hovered && (
@@ -149,17 +134,16 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
 
 interface InnerProps {
   readonly onTriangleCount: (count: number) => void;
-  readonly cloudsEnabled: boolean;
 }
 
 const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
-  function CitySceneInner({ onTriangleCount, cloudsEnabled }, ref) {
+  function CitySceneInner({ onTriangleCount }, ref) {
     const { camera, gl } = useThree();
     const controlsRef = useRef<OrbitControlsImpl>(null);
     const cityGroupRef = useRef<Group>(null);
-    const sunLightRef = useRef<SunDirectionalLight>(null);
+    const dirLightRef = useRef<DirectionalLight>(null);
     const layerSceneMapRef = useRef<Map<string, LayerSceneState>>(new Map());
-    const [atmosphereReady, setAtmosphereReady] = useState(false);
+    const [hasModel, setHasModel] = useState(false);
 
     // Theme-aware clear color with proper cleanup
     useEffect(() => {
@@ -179,9 +163,8 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
     const selection = useSelectionStore((s) => s.selection);
     const hovered = useSelectionStore((s) => s.hovered);
 
-    // Solar datetime and geographic position
-    const datetime = useSolarStore((s) => s.datetime);
-    const latLon = useSolarStore((s) => s.latLon);
+    // Solar state
+    const sunPosition = useSolarStore((s) => s.sunPosition);
 
     // Manage per-layer meshes: add/remove/visibility/LoD rebuild
     useEffect(() => {
@@ -206,8 +189,7 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
 
       // Add or rebuild meshes for new layers or LoD changes
       let needsFit = false;
-      const hadLayersBefore = map.size > 0;
-      let solarInitialized = false;
+      let needsSolarInit = !hasModel && map.size === 0;
       for (const layer of layers) {
         const existing = map.get(layer.id);
         const lodChanged =
@@ -234,6 +216,9 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
             layer.selectedLod,
           );
 
+          // Always compute bounding sphere (needed for raycasting)
+          geometry.computeBoundingSphere();
+
           const material = new MeshStandardMaterial({
             vertexColors: true,
             flatShading: true,
@@ -255,20 +240,23 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
             selectedLod: layer.selectedLod,
           });
 
-          if (!hadLayersBefore && !solarInitialized) {
-            if (model.bbox && sunLightRef.current) {
-              configureShadowCamera(sunLightRef.current, model.bbox);
-              geometry.computeBoundingSphere();
-            }
+          if (needsSolarInit) {
             useSolarStore
               .getState()
               .initFromModel(model.metadata.referenceSystem, model.bbox);
-            solarInitialized = true;
-            setAtmosphereReady(true);
+            needsSolarInit = false;
+            setHasModel(true);
           }
 
           needsFit = !lodChanged;
         }
+      }
+
+      // Configure shadow camera from union bbox
+      const light = dirLightRef.current;
+      if (light) {
+        const bbox = computeUnionBBox(layers);
+        if (bbox) configureShadowCamera(light, bbox);
       }
 
       // Update visibility
@@ -300,7 +288,7 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
       if (sel && !currentIds.has(sel.layerId)) {
         useSelectionStore.getState().clear();
       }
-    }, [layers, onTriangleCount, camera]);
+    }, [layers, onTriangleCount, camera, hasModel]);
 
     // Rule colors
     useEffect(() => {
@@ -327,6 +315,33 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
     useEffect(() => {
       reapplyHighlight(layerSceneMapRef.current, layers);
     }, [selection, hovered, layers]);
+
+    // Sun position → directional light
+    useEffect(() => {
+      const light = dirLightRef.current;
+      if (!light || !sunPosition) return;
+
+      let dist = 500;
+      for (const state of layerSceneMapRef.current.values()) {
+        const r = state.mesh.geometry.boundingSphere?.radius;
+        if (r && r > dist) dist = r;
+      }
+      const lightDist = Math.max(dist * 2, 100);
+
+      const [dx, dy, dz] = sunPosition.direction;
+      if (sunPosition.altitudeDeg > 0) {
+        light.position.set(dx * lightDist, dy * lightDist, dz * lightDist);
+        light.intensity = 0.8;
+        light.castShadow = true;
+        light.shadow.camera.near = lightDist * 0.1;
+        light.shadow.camera.far = lightDist * 3;
+      } else {
+        light.position.set(0, 10, 0);
+        light.intensity = 0.1;
+        light.castShadow = false;
+      }
+      light.shadow.camera.updateProjectionMatrix();
+    }, [sunPosition]);
 
     // Picking via R3F pointer events on the city group
     const handlePointerMove = useCallback((e: PickEvent) => {
@@ -429,75 +444,28 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
       [fitAll, fitLayer, alignView, getCameraState, setCameraState],
     );
 
-    // Geographic position for ENU frame (radians)
-    const enuLon = latLon ? latLon.lon * DEG_TO_RAD : 0;
-    const enuLat = latLon ? latLon.lat * DEG_TO_RAD : 0;
-
-    // Determine if we have geographic context for atmosphere
-    const hasGeo = atmosphereReady && latLon !== null;
-
     return (
       <>
-        {/* @takram atmosphere: physically-based sky, sun, stars, clouds */}
-        {hasGeo ? (
-          <Atmosphere date={datetime} ground>
-            <Sky sun moon />
-            <Stars />
-            <SunLight
-              ref={sunLightRef}
-              castShadow
-              shadow-mapSize-width={2048}
-              shadow-mapSize-height={2048}
-            />
+        {/* Lighting */}
+        <ambientLight intensity={0.6} />
+        <directionalLight
+          ref={dirLightRef}
+          position={[50, 100, 50]}
+          intensity={0.8}
+          castShadow
+          shadow-mapSize-width={1024}
+          shadow-mapSize-height={1024}
+          shadow-camera-near={0.5}
+          shadow-camera-far={2000}
+        />
 
-            {/* ENU frame at model's geographic position */}
-            <EastNorthUpFrame longitude={enuLon} latitude={enuLat} height={0}>
-              {/* City meshes group — picking events */}
-              <group
-                ref={cityGroupRef}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-                onPointerLeave={handlePointerLeave}
-              />
-            </EastNorthUpFrame>
-
-            {/* Post-processing: aerial perspective + optional clouds */}
-            {cloudsEnabled ? (
-              <EffectComposer enableNormalPass>
-                <Clouds>
-                  <CloudLayer altitude={2000} height={800} />
-                  <CloudLayer altitude={5000} height={400} />
-                </Clouds>
-                <AerialPerspective sunLight skyLight />
-              </EffectComposer>
-            ) : (
-              <EffectComposer enableNormalPass>
-                <AerialPerspective sunLight skyLight />
-              </EffectComposer>
-            )}
-          </Atmosphere>
-        ) : (
-          <>
-            {/* Fallback without geographic context: basic lighting */}
-            <ambientLight intensity={0.6} />
-            <directionalLight
-              ref={sunLightRef}
-              position={[50, 100, 50]}
-              intensity={0.8}
-              castShadow
-              shadow-mapSize-width={1024}
-              shadow-mapSize-height={1024}
-              shadow-camera-near={0.5}
-              shadow-camera-far={2000}
-            />
-            <group
-              ref={cityGroupRef}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-              onPointerLeave={handlePointerLeave}
-            />
-          </>
-        )}
+        {/* City meshes group — picking events */}
+        <group
+          ref={cityGroupRef}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={handlePointerLeave}
+        />
 
         {/* Controls */}
         <OrbitControls
@@ -581,10 +549,7 @@ function reapplyHighlight(
   }
 }
 
-function configureShadowCamera(
-  light: DirectionalLight | SunDirectionalLight,
-  bbox: BBox3,
-): void {
+function configureShadowCamera(light: DirectionalLight, bbox: BBox3): void {
   const extentX = bbox[3] - bbox[0];
   const extentY = bbox[4] - bbox[1];
   const extentZ = bbox[5] - bbox[2];
@@ -620,6 +585,7 @@ function fitCamera(
   controls: OrbitControlsImpl,
   bbox: BBox3,
 ): void {
+  // Mesh vertices are origin-offset (centered near zero), so use extents only
   const extentX = bbox[3] - bbox[0];
   const extentY = bbox[4] - bbox[1];
   const extentZ = bbox[5] - bbox[2];
