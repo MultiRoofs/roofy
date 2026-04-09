@@ -82,13 +82,16 @@ When completing a major feature or milestone, use the `feature-dev:code-reviewer
 ## Known Issues
 
 - 21 test files fail due to vite-plus vitest runner bug (imports from `"vite-plus/test"` break `describe`). Tests importing from `"vitest"` work fine.
-- `three: "latest"` and `@takram/three-geospatial: "latest"` in package.json are unpinned.
-- @takram/three-atmosphere and @takram/three-clouds are installed but not yet wired into the scene (EastNorthUpFrame ECEF positioning conflicts with local-origin mesh approach). The scene currently uses simple directional lighting.
+- `three: "latest"` and `@takram/three-geospatial: "latest"` in package.json are unpinned — should pin to compatible versions.
+- @takram/three-atmosphere and @takram/three-clouds are installed but not wired into the scene. EastNorthUpFrame places meshes at ECEF coordinates (millions of meters from origin) which breaks the local-origin camera/controls model used for city-scale viewing. Future integration should either use a globe-scale view mode or pass sun direction to atmosphere shaders without ENU framing.
 
 ## Milestones
 
 See `docs/roadmap.md` for full milestone tracking. Current state:
 
 - M1-M5: Complete
-- M5b (multi-layer): Complete
-- M6 (scene quality + UI): In progress — layout, LoD, R3F migration done; atmosphere integration needs different approach
+- M5b (multi-layer + per-layer rules): Complete
+- M6.4 (left sidebar + toolbar pick mode): Complete
+- M6.3 (per-layer LoD selection): Complete
+- M6.1 (R3F migration): Complete. Atmosphere/clouds deferred.
+- M6.2 (view alignment + fly-to): Complete

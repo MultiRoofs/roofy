@@ -184,6 +184,8 @@ Deliverables:
 - Pick mode (object/surface) and fit-all buttons moved to toolbar
 - Remove ToolRail component
 
+Status: Complete.
+
 ### M6.3: LoD Selection Per Layer
 
 Goal: let users choose which LoD to render per layer, defaulting to the highest available.
@@ -196,32 +198,45 @@ Deliverables:
 - LoD selector UI in the layer panel (shown even with one LoD)
 - Mesh rebuild on LoD change
 
+Status: Complete.
+
 ### M6.1: React Three Fiber Migration with three-geospatial
 
 Goal: migrate from vanilla Three.js to R3F, integrate three-geospatial for geospatially accurate rendering with sky and atmosphere.
 
 Deliverables:
 
-- Migrate CityScene to R3F declarative components
-- Integrate three-geospatial EastNorthUpFrame for geographic positioning
-- Add visible sky/atmosphere using three-geospatial Sky component
-- Visible sun in the scene synced with solar store
-- Preserve all existing functionality (picking, highlighting, rule colors, persistence)
+- Migrate CityScene to R3F declarative components ✓
+- R3F pointer events for multi-layer picking ✓
+- drei OrbitControls with damping ✓
+- drei Sky for atmosphere (replaced by directional lighting after ENU issues) ✓
+- Preserve all existing functionality (picking, highlighting, rule colors, persistence) ✓
 
-### M6.2: Camera Orbit Target Gizmo
+Deferred:
 
-Goal: add a draggable gizmo to move the camera orbit center point.
+- @takram/three-atmosphere and @takram/three-clouds integration. Packages are installed but EastNorthUpFrame places meshes at ECEF coordinates (millions of meters from origin) which breaks the local-origin camera/controls model. A future approach should either: (a) implement a globe-scale view mode where OrbitControls target is in ECEF space, or (b) use the atmosphere shaders without ENU framing by passing sun direction directly.
+
+Status: Complete (R3F migration). Atmosphere/clouds deferred.
+
+### M6.2: View Alignment Buttons and Per-Layer Fly-To
+
+Goal: provide camera view alignment and per-layer navigation.
+
+Original goal was a TransformControls gizmo for the orbit target. Redesigned to view alignment buttons after user feedback.
 
 Deliverables:
 
-- TransformControls gizmo from drei to move orbit target
-- Visible target indicator sphere
-- Toggle button in toolbar to show/hide gizmo
+- View alignment buttons (Top, Front, Right, Bottom, Back, Left) as viewport overlay
+- Per-layer fly-to button in LayerPanel that centers camera on that layer's bbox
+- fitLayer and alignView methods on CitySceneHandle
+
+Status: Complete.
 
 Exit criteria:
 
-- A user can manage layers in a left sidebar, select LoD per layer, see a geospatially accurate sky, and reposition the camera orbit target via gizmo
-- Scene rendering is visually improved with atmosphere and sun
+- A user can manage layers in a left sidebar, select LoD per layer, and navigate views via alignment buttons ✓
+- A user can fly to any layer by clicking the crosshair icon ✓
+- Scene rendering uses R3F with proper lighting and shadows ✓
 
 ## Cross-Cutting Workstreams
 
