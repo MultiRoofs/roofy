@@ -29,6 +29,8 @@ export function LodSelector({
       value={selectedLod ?? ""}
       onChange={(e) => setLayerLod(layerId, e.target.value || null)}
       onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
       title="Level of Detail"
     >
       {availableLods.map((lod) => (
