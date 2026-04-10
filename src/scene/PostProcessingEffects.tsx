@@ -105,17 +105,16 @@ export function PostProcessingEffects({
       uLensPos.value.y = projectedPosRef.current.y;
     }
 
-    // Occlusion check
+    // Occlusion check — only against shadow-casting meshes (skip Sky, Stars, atmosphere)
     raycasterPosRef.current.set(
       projectedPosRef.current.x,
       projectedPosRef.current.y,
     );
     raycaster.setFromCamera(raycasterPosRef.current, camera);
     const intersects = raycaster.intersectObjects(scene.children, true);
-    const occluded =
-      intersects.length > 0 &&
-      intersects[0]!.object instanceof Object &&
-      intersects[0]!.object.userData?.lensflare !== "no-occlusion";
+    const occluded = intersects.some(
+      (hit) => hit.object.castShadow || hit.object.receiveShadow,
+    );
 
     const uOpacity = effect.uniforms.get("opacity");
     if (uOpacity) {
