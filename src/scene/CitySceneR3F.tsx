@@ -703,7 +703,7 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
     const hasAtmosphere = worldToECEFMatrix !== null;
 
     return (
-      <Atmosphere ref={atmosphereRef} date={datetime} correctAltitude={false}>
+      <Atmosphere ref={atmosphereRef} date={datetime} correctAltitude>
         {/* Physically-based sky — only when valid ECEF matrix is available */}
         {hasAtmosphere && <Sky />}
         {hasAtmosphere && <Stars />}
