@@ -79,11 +79,15 @@ When completing a major feature or milestone, use the `feature-dev:code-reviewer
 - Run `npx tsc --noEmit` before committing to catch type errors
 - The pre-commit hook runs `vp check --fix` (lint + format)
 
+## Project Philosophy
+
+- **Breaking changes are acceptable.** This is an experimental project — prioritize well-organized code and good UI/UX over backward compatibility. No migration shims or backward-compat hacks needed.
+
 ## Known Issues
 
 - 21 test files fail due to vite-plus vitest runner bug (imports from `"vite-plus/test"` break `describe`). Tests importing from `"vitest"` work fine.
 - `three: "latest"` and `@takram/three-geospatial: "latest"` in package.json are unpinned — should pin to compatible versions.
-- @takram/three-atmosphere is integrated using a synthetic `worldToECEFMatrix` (built from site lat/lon) that maps local-origin camera coordinates to ECEF for the atmosphere shader, without moving meshes. Sky, Stars, and SunLight only render when a valid CRS/lat-lon is available. @takram/three-clouds and AerialPerspective require EffectComposer and are deferred.
+- @takram/three-atmosphere is integrated using a synthetic `worldToECEFMatrix` (built from site lat/lon) that maps local-origin camera coordinates to ECEF for the atmosphere shader, without moving meshes. Sky, Stars, SunLight, Clouds, and AerialPerspective only render when a valid CRS/lat-lon is available. Post-processing uses EffectComposer with SMAA (Canvas antialias is disabled). Future: may consider mixed lighting via LightingMask (option C) for more physically correct results.
 
 ## Milestones
 
@@ -93,5 +97,5 @@ See `docs/roadmap.md` for full milestone tracking. Current state:
 - M5b (multi-layer + per-layer rules): Complete
 - M6.4 (left sidebar + toolbar pick mode): Complete
 - M6.3 (per-layer LoD selection): Complete
-- M6.1 (R3F migration): Complete. Atmosphere sky/sun integrated. Clouds/aerial perspective deferred (need EffectComposer).
+- M6.1 (R3F migration): Complete. Atmosphere sky/sun/clouds/aerial-perspective integrated with EffectComposer + SMAA.
 - M6.2 (view alignment + fly-to): Complete

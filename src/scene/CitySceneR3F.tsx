@@ -30,6 +30,8 @@ import {
 import { Geodetic, Ellipsoid } from "@takram/three-geospatial";
 import { Atmosphere, Sky, SunLight, Stars } from "@takram/three-atmosphere/r3f";
 import type { AtmosphereApi } from "@takram/three-atmosphere/r3f";
+import { useAtmosphereStore } from "../features/atmosphere/atmosphereStore";
+import { PostProcessingEffects } from "./PostProcessingEffects";
 
 import type { BBox3, Vec3 } from "../domain/citymodel/types";
 import { buildCityMesh, computeOriginOffset } from "./buildCityMesh";
@@ -219,7 +221,7 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
         <Canvas
           camera={{ fov: 60, near: 0.1, far: 50000, position: [50, 50, 50] }}
           shadows="soft"
-          gl={{ antialias: true }}
+          gl={{ antialias: false }}
           onCreated={({ raycaster }) => {
             raycaster.firstHitOnly = true;
           }}
@@ -291,6 +293,9 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
     // Solar state
     const datetime = useSolarStore((s) => s.datetime);
     const latLon = useSolarStore((s) => s.latLon);
+
+    // Atmosphere settings
+    const cloudCoverage = useAtmosphereStore((s) => s.cloudCoverage);
 
     // Build worldToECEF matrix from site lat/lon
     const worldToECEFMatrix = useMemo(() => {
@@ -770,6 +775,12 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
           enableDamping
           dampingFactor={0.1}
           enabled={toolMode !== "box-select"}
+        />
+
+        {/* Post-processing: clouds, aerial perspective, SMAA */}
+        <PostProcessingEffects
+          hasAtmosphere={hasAtmosphere}
+          cloudCoverage={cloudCoverage}
         />
       </Atmosphere>
     );

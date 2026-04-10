@@ -7,6 +7,7 @@
 
 import type { ChangeEvent } from "react";
 import { useSolarStore } from "../../features/solar/solarStore";
+import { useAtmosphereStore } from "../../features/atmosphere/atmosphereStore";
 
 // Preset dates: summer/winter solstice, spring equinox.
 // Month values are 0-indexed (JS Date convention): 5=June, 2=March, 11=December.
@@ -28,6 +29,9 @@ export function SolarTab() {
   const sunPosition = useSolarStore((s) => s.sunPosition);
   const latLon = useSolarStore((s) => s.latLon);
   const setDatetime = useSolarStore((s) => s.setDatetime);
+
+  const cloudCoverage = useAtmosphereStore((s) => s.cloudCoverage);
+  const setCoverage = useAtmosphereStore((s) => s.setCoverage);
 
   const dateStr = toLocalDateStr(datetime);
   const minuteOfDay = datetime.getHours() * 60 + datetime.getMinutes();
@@ -147,6 +151,28 @@ export function SolarTab() {
           </div>
         </div>
       )}
+
+      {/* Cloud coverage control */}
+      <div className="attr-section">
+        <div className="attr-section-title">Clouds</div>
+        <div className="attr-row">
+          <span className="attr-key">Coverage</span>
+          <span className="attr-value">
+            {(cloudCoverage * 100).toFixed(0)}%
+          </span>
+        </div>
+        <div className="solar-control-row">
+          <input
+            type="range"
+            className="solar-slider"
+            min={0}
+            max={1}
+            step={0.01}
+            value={cloudCoverage}
+            onChange={(e) => setCoverage(Number(e.target.value))}
+          />
+        </div>
+      </div>
     </>
   );
 }
