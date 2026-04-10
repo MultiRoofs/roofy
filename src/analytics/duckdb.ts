@@ -126,7 +126,9 @@ export async function queryDuckDB(sql: string): Promise<QueryResult | null> {
     for (let i = 0; i < result.numRows; i++) {
       const row: Record<string, unknown> = {};
       for (const col of columns) {
-        row[col] = result.getChild(col)?.get(i);
+        const val = result.getChild(col)?.get(i);
+        // Convert BigInt to Number for JSON compatibility
+        row[col] = typeof val === "bigint" ? Number(val) : val;
       }
       rows.push(row);
     }

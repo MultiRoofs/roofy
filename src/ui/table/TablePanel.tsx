@@ -68,15 +68,22 @@ export function TablePanel({
         const offset = page * PAGE_SIZE;
 
         if (duckdbTableLoaded) {
-          // DuckDB path
+          // DuckDB path — fetch data and count in parallel to avoid
+          // generation counter race (count was discarded if a re-render
+          // triggered another loadPage before the count query finished)
           const safeCol =
             sortCol && columns.includes(sortCol)
               ? sortCol.replace(/"/g, '""')
               : null;
           const orderClause = safeCol ? `ORDER BY "${safeCol}" ${sortDir}` : "";
-          const result = await queryDuckDB(
-            `SELECT * FROM city_objects ${orderClause} LIMIT ${PAGE_SIZE} OFFSET ${offset}`,
-          );
+          const [result, countResult] = await Promise.all([
+            queryDuckDB(
+              `SELECT * FROM city_objects ${orderClause} LIMIT ${PAGE_SIZE} OFFSET ${offset}`,
+            ),
+            page === 0
+              ? queryDuckDB("SELECT COUNT(*) AS cnt FROM city_objects")
+              : null,
+          ]);
           if (gen !== loadGenRef.current) return; // stale
           if (result) {
             if (reset || page === 0) {
@@ -89,14 +96,8 @@ export function TablePanel({
           } else {
             setHasMore(false);
           }
-          // Get total count
-          if (page === 0) {
-            const countResult = await queryDuckDB(
-              "SELECT COUNT(*) AS cnt FROM city_objects",
-            );
-            if (gen === loadGenRef.current && countResult?.rows[0]) {
-              setTotalCount(Number(countResult.rows[0].cnt) || 0);
-            }
+          if (countResult?.rows[0]) {
+            setTotalCount(Number(countResult.rows[0].cnt) || 0);
           }
         } else if (activeLayer) {
           // In-memory fallback
