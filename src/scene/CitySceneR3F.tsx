@@ -28,7 +28,13 @@ import {
   Vector3,
 } from "three";
 import { Geodetic, Ellipsoid } from "@takram/three-geospatial";
-import { Atmosphere, Sky, SunLight, Stars } from "@takram/three-atmosphere/r3f";
+import {
+  Atmosphere,
+  Sky,
+  SunLight,
+  SkyLight,
+  Stars,
+} from "@takram/three-atmosphere/r3f";
 import type { AtmosphereApi } from "@takram/three-atmosphere/r3f";
 import { useAtmosphereStore } from "../features/atmosphere/atmosphereStore";
 import { useTilesStore } from "../features/tiles/tilesStore";
@@ -298,6 +304,7 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
 
     // Atmosphere settings
     const cloudCoverage = useAtmosphereStore((s) => s.cloudCoverage);
+    const lensFlareEnabled = useAtmosphereStore((s) => s.lensFlareEnabled);
 
     // 3D Tiles
     const tilesEnabled = useTilesStore((s) => s.enabled);
@@ -338,6 +345,29 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
         );
         fpsFrameCount.current = 0;
         fpsLastTime.current = now;
+      }
+    });
+
+    // Sun/time animation — advance datetime per frame when playing
+    const timeAnimating = useSolarStore((s) => s.timeAnimating);
+    const timeSpeed = useSolarStore((s) => s.timeSpeed);
+    const datetimeRef = useRef(datetime);
+    datetimeRef.current = datetime;
+    const lastSyncRef = useRef(0);
+    useFrame((_, delta) => {
+      if (!timeAnimating) return;
+      const clampedDelta = Math.min(delta, 0.1); // Cap at 100ms to avoid tab-refocus jumps
+      const next = new Date(
+        datetimeRef.current.getTime() + clampedDelta * 1000 * timeSpeed,
+      );
+      datetimeRef.current = next;
+      // Update atmosphere imperatively (no React re-render)
+      atmosphereRef.current?.updateByDate(next);
+      // Throttle store sync to ~10fps for UI readout
+      const now = performance.now();
+      if (now - lastSyncRef.current > 100) {
+        useSolarStore.getState().setDatetime(next);
+        lastSyncRef.current = now;
       }
     });
 
@@ -716,7 +746,11 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
     const hasAtmosphere = worldToECEFMatrix !== null;
 
     return (
-      <Atmosphere ref={atmosphereRef} date={datetime} correctAltitude>
+      <Atmosphere
+        ref={atmosphereRef}
+        date={timeAnimating ? undefined : datetime}
+        correctAltitude
+      >
         {/* Physically-based sky — only when valid ECEF matrix is available */}
         {hasAtmosphere && <Sky />}
         {hasAtmosphere && <Stars />}
@@ -725,10 +759,13 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
         {hasAtmosphere && (
           <SunLight
             castShadow
-            shadow-mapSize-width={1024}
-            shadow-mapSize-height={1024}
+            shadow-mapSize-width={2048}
+            shadow-mapSize-height={2048}
           />
         )}
+
+        {/* Sky irradiance-based ambient light (adapts to time of day) */}
+        {hasAtmosphere && <SkyLight />}
 
         {/* Fallback lighting when atmosphere is not available */}
         {!hasAtmosphere && (
@@ -742,8 +779,8 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
           </>
         )}
 
-        {/* Ambient fill */}
-        <ambientLight intensity={hasAtmosphere ? 0.3 : 0.6} />
+        {/* Minimal ambient fill (SkyLight handles main ambient when atmosphere active) */}
+        <ambientLight intensity={hasAtmosphere ? 0.05 : 0.6} />
 
         {/* Google Photorealistic 3D Tiles background */}
         {hasAtmosphere && tilesEnabled && (
@@ -795,10 +832,12 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
           enabled={toolMode !== "box-select"}
         />
 
-        {/* Post-processing: clouds, aerial perspective, SMAA */}
+        {/* Post-processing: clouds, aerial perspective, lens flare, tone mapping, SMAA */}
         <PostProcessingEffects
           hasAtmosphere={hasAtmosphere}
           cloudCoverage={cloudCoverage}
+          lensFlareEnabled={lensFlareEnabled}
+          atmosphereRef={atmosphereRef}
         />
       </Atmosphere>
     );

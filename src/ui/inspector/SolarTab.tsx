@@ -1,27 +1,32 @@
 /**
  * Solar tab in the inspector panel.
  *
- * Provides datetime controls (date picker, time slider), preset buttons
- * (seasonal × time-of-day), and read-only sun position display.
+ * Provides datetime controls (date picker, time slider), time animation
+ * (play/pause with speed selector), preset buttons (seasonal × time-of-day),
+ * and read-only sun position display.
  */
 
 import type { ChangeEvent } from "react";
 import { useSolarStore } from "../../features/solar/solarStore";
-import { useAtmosphereStore } from "../../features/atmosphere/atmosphereStore";
 
 // Preset dates: summer/winter solstice, spring equinox.
-// Month values are 0-indexed (JS Date convention): 5=June, 2=March, 11=December.
 const PRESET_DATES = [
-  { label: "Summer", month: 5, day: 21 }, // June 21
-  { label: "Equinox", month: 2, day: 20 }, // March 20
-  { label: "Winter", month: 11, day: 21 }, // December 21
+  { label: "Summer", month: 5, day: 21 },
+  { label: "Equinox", month: 2, day: 20 },
+  { label: "Winter", month: 11, day: 21 },
 ] as const;
 
-// Preset times of day (hours)
 const PRESET_TIMES = [
   { label: "Morning", hour: 9 },
   { label: "Noon", hour: 12 },
   { label: "Evening", hour: 17 },
+] as const;
+
+const SPEED_OPTIONS = [
+  { label: "1x", value: 1 },
+  { label: "60x", value: 60 },
+  { label: "6min/s", value: 360 },
+  { label: "1hr/s", value: 3600 },
 ] as const;
 
 export function SolarTab() {
@@ -29,9 +34,10 @@ export function SolarTab() {
   const sunPosition = useSolarStore((s) => s.sunPosition);
   const latLon = useSolarStore((s) => s.latLon);
   const setDatetime = useSolarStore((s) => s.setDatetime);
-
-  const cloudCoverage = useAtmosphereStore((s) => s.cloudCoverage);
-  const setCoverage = useAtmosphereStore((s) => s.setCoverage);
+  const timeAnimating = useSolarStore((s) => s.timeAnimating);
+  const timeSpeed = useSolarStore((s) => s.timeSpeed);
+  const setTimeAnimating = useSolarStore((s) => s.setTimeAnimating);
+  const setTimeSpeed = useSolarStore((s) => s.setTimeSpeed);
 
   const dateStr = toLocalDateStr(datetime);
   const minuteOfDay = datetime.getHours() * 60 + datetime.getMinutes();
@@ -93,6 +99,33 @@ export function SolarTab() {
         </div>
       </div>
 
+      {/* Time animation */}
+      <div className="attr-section">
+        <div className="attr-section-title">Animation</div>
+        <div className="solar-control-row">
+          <button
+            className={`solar-preset-btn ${timeAnimating ? "tb-btn-active" : ""}`}
+            onClick={() => setTimeAnimating(!timeAnimating)}
+            title={timeAnimating ? "Pause" : "Play"}
+            style={{ minWidth: "3.5rem" }}
+          >
+            {timeAnimating ? "Pause" : "Play"}
+          </button>
+          <select
+            className="solar-input"
+            value={timeSpeed}
+            onChange={(e) => setTimeSpeed(Number(e.target.value))}
+            style={{ marginLeft: "0.5rem", flex: 1 }}
+          >
+            {SPEED_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
       {/* Presets */}
       <div className="attr-section">
         <div className="attr-section-title">Presets</div>
@@ -151,28 +184,6 @@ export function SolarTab() {
           </div>
         </div>
       )}
-
-      {/* Cloud coverage control */}
-      <div className="attr-section">
-        <div className="attr-section-title">Clouds</div>
-        <div className="attr-row">
-          <span className="attr-key">Coverage</span>
-          <span className="attr-value">
-            {(cloudCoverage * 100).toFixed(0)}%
-          </span>
-        </div>
-        <div className="solar-control-row">
-          <input
-            type="range"
-            className="solar-slider"
-            min={0}
-            max={1}
-            step={0.01}
-            value={cloudCoverage}
-            onChange={(e) => setCoverage(Number(e.target.value))}
-          />
-        </div>
-      </div>
     </>
   );
 }

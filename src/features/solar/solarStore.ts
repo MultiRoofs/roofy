@@ -35,11 +35,15 @@ export interface SolarState {
   readonly datetime: Date;
   readonly latLon: LatLon | null;
   readonly sunPosition: SunPosition | null;
+  readonly timeAnimating: boolean;
+  readonly timeSpeed: number; // multiplier: 1, 60, 360, 3600
 }
 
 export interface SolarActions {
   setDatetime: (dt: Date) => void;
   setLatLon: (latLon: LatLon | null) => void;
+  setTimeAnimating: (v: boolean) => void;
+  setTimeSpeed: (v: number) => void;
   /** Extract lat/lon from model CRS and bbox, then compute sun position. */
   initFromModel: (
     referenceSystem: string | undefined,
@@ -175,6 +179,8 @@ export const useSolarStore = create<SolarStore>((set, get) => ({
   datetime: new Date(),
   latLon: null,
   sunPosition: null,
+  timeAnimating: false,
+  timeSpeed: 60,
 
   setDatetime: (dt) => {
     const { latLon } = get();
@@ -187,6 +193,9 @@ export const useSolarStore = create<SolarStore>((set, get) => ({
     const sunPosition = latLon ? computeSunPosition(datetime, latLon) : null;
     set({ latLon, sunPosition });
   },
+
+  setTimeAnimating: (v) => set({ timeAnimating: v }),
+  setTimeSpeed: (v) => set({ timeSpeed: v }),
 
   initFromModel: (referenceSystem, bbox) => {
     if (!bbox) {

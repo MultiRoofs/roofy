@@ -33,6 +33,7 @@ import { LeftSidebar } from "../ui/sidebar/LeftSidebar";
 import { StatusBar } from "../ui/StatusBar";
 import { LegendOverlay } from "../ui/viewport/LegendOverlay";
 import { AttributePanel } from "../ui/viewport/AttributePanel";
+import { AdvancedSettingsPanel } from "../ui/viewport/AdvancedSettingsPanel";
 import { TablePanel } from "../ui/table/TablePanel";
 import type { CityObject } from "../domain/citymodel/types";
 
@@ -62,6 +63,7 @@ export function App({
   const [tableOpen, setTableOpen] = useState(false);
   const [tableHeight, setTableHeight] = useState(250);
   const [toast, setToast] = useState<string | null>(null);
+  const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
   const [fps, setFps] = useState<number | undefined>(undefined);
   const [cursorPosition, setCursorPosition] = useState<
     readonly [number, number, number] | null
@@ -480,6 +482,8 @@ export function App({
           canShare={hasUrlLayers}
           theme={theme}
           onToggleTheme={toggleTheme}
+          advancedSettingsOpen={advancedSettingsOpen}
+          onToggleAdvancedSettings={() => setAdvancedSettingsOpen((o) => !o)}
         />
 
         <LeftSidebar
@@ -501,6 +505,11 @@ export function App({
           />
           <LegendOverlay />
           <AttributePanel objects={selectedObjects} />
+          {advancedSettingsOpen && (
+            <AdvancedSettingsPanel
+              onClose={() => setAdvancedSettingsOpen(false)}
+            />
+          )}
         </div>
 
         {inspectorOpen && (
