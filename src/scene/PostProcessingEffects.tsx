@@ -7,22 +7,31 @@
  *
  * Must be placed inside <Atmosphere> for context propagation.
  *
- * Lighting mode: light-source (SunLight + MeshStandardMaterial).
- * AerialPerspective runs without sunLight/skyLight props to avoid
- * double-lighting. May add LightingMask for mixed lighting later.
+ * Lighting mode: mixed. Google tiles stay effectively unlit/baked while
+ * AerialPerspective applies Takram's post-process sun/sky lighting model
+ * to match the reference scenes more closely.
  */
 
 import { useEffect, useRef, useState } from "react";
 import { Matrix3, Vector2, Vector3 } from "three";
 import { useFrame, useThree } from "@react-three/fiber";
-import { EffectComposer, SMAA, ToneMapping } from "@react-three/postprocessing";
-import { ToneMappingMode } from "postprocessing";
+import { SMAA, ToneMapping } from "@react-three/postprocessing";
+import {
+  ToneMappingMode,
+  type EffectComposer as EffectComposerImpl,
+} from "postprocessing";
 import { Clouds } from "@takram/three-clouds/r3f";
 import { AerialPerspective } from "@takram/three-atmosphere/r3f";
 import type { AtmosphereApi } from "@takram/three-atmosphere/r3f";
 import { LensFlareEffect } from "@react-three/postprocessing";
 import { BlendFunction } from "postprocessing";
 import { Color } from "three";
+import {
+  SceneEffectComposer,
+  syncEffectComposerCameraSettings,
+} from "./SceneEffectComposer";
+
+const TILE_ALBEDO_SCALE = 2 / Math.PI;
 
 // Fixed cloud animation velocities (no UI control)
 const WEATHER_VELOCITY = new Vector2(0.0002, 0.0001);
@@ -74,6 +83,7 @@ export function PostProcessingEffects({
     () => new LensFlareEffect(LENS_FLARE_OPTS),
   );
   const lensFlareRef = useRef(lensFlareEffect);
+  const composerRef = useRef<EffectComposerImpl | null>(null);
 
   // Scratch objects for ECEF→world transform
   const ecefToWorldRotRef = useRef(new Matrix3());
@@ -82,6 +92,8 @@ export function PostProcessingEffects({
 
   // Update lens flare position and occlusion each frame
   useFrame((_, delta) => {
+    syncEffectComposerCameraSettings(composerRef.current, camera);
+
     const api = atmosphereRef.current;
     const effect = lensFlareRef.current;
     if (!api || !effect || !lensFlareEnabled) return;
@@ -146,17 +158,27 @@ export function PostProcessingEffects({
   if (!hasAtmosphere) return null;
 
   return (
-    <EffectComposer multisampling={0} enableNormalPass>
+    <SceneEffectComposer
+      ref={composerRef}
+      multisampling={0}
+      enableNormalPass
+    >
       <Clouds
         qualityPreset="medium"
         coverage={cloudCoverage}
         localWeatherVelocity={WEATHER_VELOCITY}
         shapeVelocity={SHAPE_VELOCITY}
       />
-      <AerialPerspective sky />
+      <AerialPerspective
+        sky
+        sunLight
+        skyLight
+        correctGeometricError
+        albedoScale={TILE_ALBEDO_SCALE}
+      />
       <primitive object={lensFlareEffect} />
       <ToneMapping mode={ToneMappingMode.AGX} exposure={10} />
       <SMAA />
-    </EffectComposer>
+    </SceneEffectComposer>
   );
 }

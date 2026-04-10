@@ -21,11 +21,14 @@ import {
   TileCompressionPlugin,
   UpdateOnChangePlugin,
   GLTFExtensionsPlugin,
+  TilesFadePlugin,
 } from "3d-tiles-renderer/plugins";
+import { TileCreasedNormalsPlugin } from "./TileCreasedNormalsPlugin";
 
 // Read at module init — Vite replaces at build time
 const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
 let warnedOnce = false;
+export const TILE_CREASE_ANGLE = Math.PI / 6;
 
 // Scratch objects for matrix decomposition (avoid allocation per render)
 const _pos = new Vector3();
@@ -34,6 +37,28 @@ const _scale = new Vector3();
 
 interface GoogleTilesLayerProps {
   readonly worldToECEFMatrix: Matrix4;
+}
+
+interface TilesPluginSpec {
+  readonly plugin: unknown;
+  readonly args?: object;
+}
+
+export function getGoogleTilesPluginSpecs(apiKey: string): TilesPluginSpec[] {
+  return [
+    {
+      plugin: GoogleCloudAuthPlugin,
+      args: { apiToken: apiKey },
+    },
+    { plugin: GLTFExtensionsPlugin },
+    { plugin: TileCompressionPlugin },
+    { plugin: UpdateOnChangePlugin },
+    { plugin: TilesFadePlugin },
+    {
+      plugin: TileCreasedNormalsPlugin,
+      args: { creaseAngle: TILE_CREASE_ANGLE },
+    },
+  ];
 }
 
 export function GoogleTilesLayer({ worldToECEFMatrix }: GoogleTilesLayerProps) {
@@ -98,19 +123,21 @@ export function GoogleTilesLayer({ worldToECEFMatrix }: GoogleTilesLayerProps) {
     return null;
   }
 
+  const pluginSpecs = getGoogleTilesPluginSpecs(API_KEY);
+
   return (
     <TilesRenderer
       onLoadModel={handleLoadModel}
       onDisposeModel={handleDisposeModel}
       group={groupProps as never}
     >
-      <TilesPlugin
-        plugin={GoogleCloudAuthPlugin}
-        args={{ apiToken: API_KEY } as never}
-      />
-      <TilesPlugin plugin={GLTFExtensionsPlugin} />
-      <TilesPlugin plugin={TileCompressionPlugin} />
-      <TilesPlugin plugin={UpdateOnChangePlugin} />
+      {pluginSpecs.map((spec) => (
+        <TilesPlugin
+          key={String((spec.plugin as { name?: string }).name ?? "plugin")}
+          plugin={spec.plugin as never}
+          args={spec.args as never}
+        />
+      ))}
       <TilesAttributionOverlay />
     </TilesRenderer>
   );
