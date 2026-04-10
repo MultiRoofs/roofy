@@ -153,9 +153,9 @@ export function PostProcessingEffects({
         localWeatherVelocity={WEATHER_VELOCITY}
         shapeVelocity={SHAPE_VELOCITY}
       />
-      <AerialPerspective />
+      <AerialPerspective sky />
       <primitive object={lensFlareEffect} />
-      <ToneMapping mode={ToneMappingMode.AGX} />
+      <ToneMapping mode={ToneMappingMode.AGX} exposure={10} />
       <SMAA />
     </EffectComposer>
   );

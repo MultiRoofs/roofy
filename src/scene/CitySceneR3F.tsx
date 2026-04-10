@@ -229,8 +229,9 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
         <Canvas
           camera={{ fov: 60, near: 0.1, far: 50000, position: [50, 50, 50] }}
           shadows="soft"
-          gl={{ antialias: false, toneMapping: 0 }}
-          onCreated={({ raycaster }) => {
+          gl={{ antialias: false }}
+          onCreated={({ gl, raycaster }) => {
+            gl.toneMapping = 0; // NoToneMapping — post-process AGX handles it
             raycaster.firstHitOnly = true;
           }}
         >
@@ -797,9 +798,9 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
 
         {/* Ground plane — receives shadows for buildings */}
         {hasAtmosphere && (
-          <mesh rotation-x={-Math.PI / 2} receiveShadow>
+          <mesh rotation-x={-Math.PI / 2} position-y={-0.01} receiveShadow>
             <planeGeometry args={[10000, 10000]} />
-            <meshStandardMaterial color="#4a5548" />
+            <meshStandardMaterial color="#5a6b58" />
           </mesh>
         )}
 
