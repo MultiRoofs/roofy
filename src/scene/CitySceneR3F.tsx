@@ -746,6 +746,14 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
 
     const hasAtmosphere = worldToECEFMatrix !== null;
 
+    // Ground Y position: bottom of buildings after origin-offset + Z-up→Y-up rotation
+    const groundY = useMemo(() => {
+      const bbox = computeUnionBBox(layers);
+      if (!bbox) return 0;
+      const extentZ = bbox[5] - bbox[2];
+      return -extentZ / 2 - 0.01; // slight offset to prevent z-fighting
+    }, [layers]);
+
     return (
       <Atmosphere
         ref={atmosphereRef}
@@ -796,9 +804,9 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
           onPointerLeave={handlePointerLeave}
         />
 
-        {/* Ground plane — receives shadows for buildings */}
+        {/* Ground plane — receives shadows, positioned at building base */}
         {hasAtmosphere && (
-          <mesh rotation-x={-Math.PI / 2} position-y={-0.01} receiveShadow>
+          <mesh rotation-x={-Math.PI / 2} position-y={groundY} receiveShadow>
             <planeGeometry args={[10000, 10000]} />
             <meshStandardMaterial color="#5a6b58" />
           </mesh>
