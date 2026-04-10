@@ -31,7 +31,9 @@ import { Geodetic, Ellipsoid } from "@takram/three-geospatial";
 import { Atmosphere, Sky, SunLight, Stars } from "@takram/three-atmosphere/r3f";
 import type { AtmosphereApi } from "@takram/three-atmosphere/r3f";
 import { useAtmosphereStore } from "../features/atmosphere/atmosphereStore";
+import { useTilesStore } from "../features/tiles/tilesStore";
 import { PostProcessingEffects } from "./PostProcessingEffects";
+import { GoogleTilesLayer } from "./GoogleTilesLayer";
 
 import type { BBox3, Vec3 } from "../domain/citymodel/types";
 import { buildCityMesh, computeOriginOffset } from "./buildCityMesh";
@@ -296,6 +298,17 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
 
     // Atmosphere settings
     const cloudCoverage = useAtmosphereStore((s) => s.cloudCoverage);
+
+    // 3D Tiles
+    const tilesEnabled = useTilesStore((s) => s.enabled);
+
+    // Adjust camera near/far when 3D tiles are active to avoid z-fighting
+    useEffect(() => {
+      const cam = camera as PerspectiveCamera;
+      cam.near = tilesEnabled ? 1 : 0.1;
+      cam.far = tilesEnabled ? 200000 : 50000;
+      cam.updateProjectionMatrix();
+    }, [tilesEnabled, camera]);
 
     // Build worldToECEF matrix from site lat/lon
     const worldToECEFMatrix = useMemo(() => {
@@ -731,6 +744,11 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
 
         {/* Ambient fill */}
         <ambientLight intensity={hasAtmosphere ? 0.3 : 0.6} />
+
+        {/* Google Photorealistic 3D Tiles background */}
+        {hasAtmosphere && tilesEnabled && (
+          <GoogleTilesLayer worldToECEFMatrix={worldToECEFMatrix!} />
+        )}
 
         {/* City meshes group — picking events */}
         <group

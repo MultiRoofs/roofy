@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import { LayerPanel } from "../layers/LayerPanel";
+import { GoogleTilesPanel } from "../layers/GoogleTilesPanel";
 
 const MIN_WIDTH = 180;
 const MAX_WIDTH = 480;
@@ -84,6 +85,7 @@ export function LeftSidebar({
   return (
     <aside className="left-sidebar" style={{ width }}>
       <div className="left-sidebar-content">
+        <GoogleTilesPanel />
         <LayerPanel
           onAddFile={onAddFile}
           onAddUrl={onAddUrl}
