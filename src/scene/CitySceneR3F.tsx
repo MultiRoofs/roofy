@@ -38,7 +38,10 @@ import {
 import type { AtmosphereApi } from "@takram/three-atmosphere/r3f";
 import { useAtmosphereStore } from "../features/atmosphere/atmosphereStore";
 import { useTilesStore } from "../features/tiles/tilesStore";
-import { PostProcessingEffects } from "./PostProcessingEffects";
+import {
+  PostProcessingEffects,
+  LIGHTING_MASK_LAYER,
+} from "./PostProcessingEffects";
 import { GoogleTilesLayer } from "./GoogleTilesLayer";
 
 import type { BBox3, Vec3 } from "../domain/citymodel/types";
@@ -227,7 +230,7 @@ export const CityScene = forwardRef<CitySceneHandle, CitySceneProps>(
         onMouseUp={handleBoxMouseUp}
       >
         <Canvas
-          camera={{ fov: 60, near: 0.1, far: 50000, position: [50, 50, 50] }}
+          camera={{ fov: 60, near: 1, far: 50000, position: [50, 50, 50] }}
           shadows="soft"
           gl={{ antialias: false }}
           onCreated={({ gl, raycaster }) => {
@@ -310,10 +313,11 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
     // 3D Tiles
     const tilesEnabled = useTilesStore((s) => s.enabled);
 
-    // Adjust camera near/far when 3D tiles are active to avoid z-fighting
+    // Adjust camera near/far — near=1 improves depth precision for
+    // LightingMask and prevents z-fighting artifacts
     useEffect(() => {
       const cam = camera as PerspectiveCamera;
-      cam.near = tilesEnabled ? 1 : 0.1;
+      cam.near = 1;
       cam.far = tilesEnabled ? 200000 : 50000;
       cam.updateProjectionMatrix();
     }, [tilesEnabled, camera]);
@@ -434,6 +438,7 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
           mesh.rotation.x = -Math.PI / 2;
           mesh.castShadow = true;
           mesh.receiveShadow = true;
+          mesh.layers.enable(LIGHTING_MASK_LAYER);
           mesh.visible = layer.visible;
           cityGroup.add(mesh);
 
@@ -806,7 +811,14 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
 
         {/* Ground plane — receives shadows, positioned at building base */}
         {hasAtmosphere && (
-          <mesh rotation-x={-Math.PI / 2} position-y={groundY} receiveShadow>
+          <mesh
+            rotation-x={-Math.PI / 2}
+            position-y={groundY}
+            receiveShadow
+            ref={(m: Mesh | null) => {
+              if (m) m.layers.enable(LIGHTING_MASK_LAYER);
+            }}
+          >
             <planeGeometry args={[10000, 10000]} />
             <meshStandardMaterial color="#5a6b58" />
           </mesh>
