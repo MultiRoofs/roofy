@@ -31,7 +31,7 @@ export const DEFAULT_RENDER_DEBUG_STATE: RenderDebugState = {
   postProcessingEnabled: true,
   cloudsEnabled: true,
   aerialPerspectiveEnabled: true,
-  normalPassEnabled: true,
+  normalPassEnabled: false,
   sunShadowsEnabled: true,
   cityShadowsEnabled: true,
   cityDoubleSided: false,

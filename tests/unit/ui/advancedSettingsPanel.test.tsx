@@ -43,7 +43,7 @@ describe("AdvancedSettingsPanel", () => {
       postProcessingEnabled: false,
       cloudsEnabled: false,
       aerialPerspectiveEnabled: false,
-      normalPassEnabled: false,
+      normalPassEnabled: true,
       sunShadowsEnabled: false,
       cityShadowsEnabled: false,
       cityDoubleSided: true,
