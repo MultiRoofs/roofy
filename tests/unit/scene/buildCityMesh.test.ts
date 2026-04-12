@@ -17,16 +17,20 @@ function makeSurface(
   type: Surface["type"],
   ring: Surface["rings"][0],
 ): Surface {
-  return { type, rings: [ring], attributes: {} };
+  return { type, rings: [ring], attributes: {}, lod: "2" };
 }
 
-function makeObject(id: string, surfaces: Surface[]): CityObject {
+function makeObject(
+  id: string,
+  surfaces: Surface[],
+  bbox: CityObject["bbox"] = null,
+): CityObject {
   return {
     id,
     objectType: "Building",
     attributes: {},
     surfaces,
-    bbox: null,
+    bbox,
     children: [],
     parents: [],
     lod: "2",
@@ -120,10 +124,19 @@ describe("buildCityMesh", () => {
     const result = buildCityMesh(model, "test-layer", [105, 205, 0]);
 
     const posAttr = result.geometry.getAttribute("position");
-    // First vertex: (100-105, 200-205, 0-0) = (-5, -5, 0)
-    expect(posAttr.getX(0)).toBeCloseTo(-5);
-    expect(posAttr.getY(0)).toBeCloseTo(-5);
-    expect(posAttr.getZ(0)).toBeCloseTo(0);
+    const vertices = Array.from(
+      { length: posAttr.count },
+      (_, i) => [posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)] as const,
+    );
+
+    expect(
+      vertices.some(
+        ([x, y, z]) =>
+          Math.abs(x + 5) < 1e-6 &&
+          Math.abs(y + 5) < 1e-6 &&
+          Math.abs(z) < 1e-6,
+      ),
+    ).toBe(true);
   });
 
   it("assigns different colors for different surface types", () => {
@@ -158,7 +171,7 @@ describe("buildCityMesh", () => {
     expect(result.triangleCount).toBe(0);
   });
 
-  it("only triangulates exterior ring, ignoring holes", () => {
+  it("triangulates holes instead of filling them in", () => {
     // Surface with exterior quad + interior triangle (hole)
     const surfaceWithHole: Surface = {
       type: "RoofSurface",
@@ -178,14 +191,51 @@ describe("buildCityMesh", () => {
         ],
       ],
       attributes: {},
+      lod: "2",
     };
     const model = makeModel({
       b1: makeObject("b1", [surfaceWithHole]),
     });
     const result = buildCityMesh(model, "test-layer");
 
-    // Only the exterior quad should be triangulated: 2 triangles
-    expect(result.triangleCount).toBe(2);
+    // 4 contour vertices + 3 hole vertices + 2 * 1 hole - 2 = 7 triangles
+    expect(result.triangleCount).toBe(7);
+  });
+
+  it("reverses inward-wound rings when object bbox is available", () => {
+    const reversedTopFace = makeSurface("RoofSurface", [
+      [0, 0, 10],
+      [0, 10, 10],
+      [10, 10, 10],
+      [10, 0, 10],
+    ]);
+    const model = makeModel({
+      b1: makeObject("b1", [reversedTopFace], [0, 0, 0, 10, 10, 10]),
+    });
+    const result = buildCityMesh(model, "test-layer");
+    const posAttr = result.geometry.getAttribute("position");
+
+    const ax = posAttr.getX(0);
+    const ay = posAttr.getY(0);
+    const az = posAttr.getZ(0);
+    const bx = posAttr.getX(1);
+    const by = posAttr.getY(1);
+    const bz = posAttr.getZ(1);
+    const cx = posAttr.getX(2);
+    const cy = posAttr.getY(2);
+    const cz = posAttr.getZ(2);
+
+    const abx = bx - ax;
+    const aby = by - ay;
+    const abz = bz - az;
+    const acx = cx - ax;
+    const acy = cy - ay;
+    const acz = cz - az;
+    const normalZ = abx * acy - aby * acx;
+
+    expect(abz).toBeCloseTo(0);
+    expect(acz).toBeCloseTo(0);
+    expect(normalZ).toBeGreaterThan(0);
   });
 });
 

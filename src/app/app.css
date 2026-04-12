@@ -654,6 +654,26 @@ body {
   color: var(--fg);
 }
 
+.advanced-select-row {
+  gap: 0.75rem;
+}
+
+.advanced-select {
+  min-width: 6.5rem;
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--fg);
+  font-size: 0.74rem;
+}
+
+.advanced-settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.35rem 0.75rem 0.15rem;
+}
+
 /* ═══════════════════════════════════════════════════════════════
    VIEW ALIGN BUTTONS
    ═══════════════════════════════════════════════════════════════ */

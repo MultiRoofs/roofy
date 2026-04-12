@@ -20,11 +20,16 @@ import { OrbitControls, Line, Html } from "@react-three/drei";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import {
   BufferGeometry,
+  DoubleSide,
+  FrontSide,
   Group,
+  Material,
   Matrix4,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   PerspectiveCamera,
+  type Side,
   Vector3,
 } from "three";
 import { Geodetic, Ellipsoid } from "@takram/three-geospatial";
@@ -53,6 +58,10 @@ import { useSelectionStore } from "../features/selection/selectionStore";
 import { useLayerStore } from "../features/layers/layerStore";
 import type { Layer } from "../features/layers/layerStore";
 import { useSolarStore } from "../features/solar/solarStore";
+import {
+  useRenderDebugStore,
+  type CityMaterialMode,
+} from "../features/debug/renderDebugStore";
 import type { Selection } from "../domain/selection/types";
 import type { Rule } from "../features/rules/types";
 import { ViewAlignButtons } from "./ViewAlignButtons";
@@ -287,6 +296,8 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
     { onTriangleCount, onFps, onCursorPosition, containerEl },
     ref,
   ) {
+    const SUN_SHADOW_BIAS = -0.0005;
+    const SUN_SHADOW_NORMAL_BIAS = 0.05;
     const { camera } = useThree();
     const controlsRef = useRef<OrbitControlsImpl>(null);
     const cityGroupRef = useRef<Group>(null);
@@ -312,6 +323,10 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
 
     // 3D Tiles
     const tilesEnabled = useTilesStore((s) => s.enabled);
+    const sunShadowsEnabled = useRenderDebugStore((s) => s.sunShadowsEnabled);
+    const cityShadowsEnabled = useRenderDebugStore((s) => s.cityShadowsEnabled);
+    const cityDoubleSided = useRenderDebugStore((s) => s.cityDoubleSided);
+    const cityMaterialMode = useRenderDebugStore((s) => s.cityMaterialMode);
 
     // Adjust camera near/far — near=1 improves depth precision for
     // LightingMask and prevents z-fighting artifacts
@@ -390,9 +405,7 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
           const state = map.get(id)!;
           cityGroup.remove(state.mesh);
           state.mesh.geometry.dispose();
-          if (state.mesh.material instanceof MeshStandardMaterial) {
-            state.mesh.material.dispose();
-          }
+          disposeMaterial(state.mesh.material);
           map.delete(id);
         }
       }
@@ -408,9 +421,7 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
         if (lodChanged && existing) {
           cityGroup.remove(existing.mesh);
           existing.mesh.geometry.dispose();
-          if (existing.mesh.material instanceof MeshStandardMaterial) {
-            existing.mesh.material.dispose();
-          }
+          disposeMaterial(existing.mesh.material);
           map.delete(layer.id);
         }
 
@@ -428,16 +439,14 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
 
           geometry.computeBoundingSphere();
 
-          const material = new MeshStandardMaterial({
-            vertexColors: true,
-            flatShading: true,
-          });
-
-          const mesh = new Mesh(geometry, material);
+          const mesh = new Mesh(
+            geometry,
+            createCityMaterial(cityMaterialMode, cityDoubleSided),
+          );
           mesh.userData.layerId = layer.id;
           mesh.rotation.x = -Math.PI / 2;
-          mesh.castShadow = true;
-          mesh.receiveShadow = true;
+          mesh.castShadow = cityShadowsEnabled;
+          mesh.receiveShadow = cityShadowsEnabled;
           mesh.layers.enable(LIGHTING_MASK_LAYER);
           mesh.visible = layer.visible;
           cityGroup.add(mesh);
@@ -492,7 +501,47 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
       if (sels.some((s) => !currentIds.has(s.layerId))) {
         useSelectionStore.getState().clear();
       }
-    }, [layers, onTriangleCount, camera, hasModel]);
+    }, [
+      layers,
+      onTriangleCount,
+      camera,
+      hasModel,
+      cityMaterialMode,
+      cityDoubleSided,
+      cityShadowsEnabled,
+    ]);
+
+    useEffect(() => {
+      for (const state of layerSceneMapRef.current.values()) {
+        state.mesh.castShadow = cityShadowsEnabled;
+        state.mesh.receiveShadow = cityShadowsEnabled;
+
+        const material = state.mesh.material;
+        const expectedSide = cityDoubleSided ? DoubleSide : FrontSide;
+        const needsModeSwap =
+          (cityMaterialMode === "basic" &&
+            !(material instanceof MeshBasicMaterial)) ||
+          (cityMaterialMode === "standard" &&
+            !(material instanceof MeshStandardMaterial));
+
+        if (needsModeSwap) {
+          disposeMaterial(material);
+          state.mesh.material = createCityMaterial(
+            cityMaterialMode,
+            cityDoubleSided,
+          );
+          continue;
+        }
+
+        if (material instanceof MeshBasicMaterial) {
+          material.side = expectedSide;
+          material.needsUpdate = true;
+        } else if (material instanceof MeshStandardMaterial) {
+          material.side = expectedSide;
+          material.needsUpdate = true;
+        }
+      }
+    }, [cityMaterialMode, cityDoubleSided, cityShadowsEnabled]);
 
     // Rule colors
     useEffect(() => {
@@ -772,7 +821,9 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
         {/* Sun-driven directional light with physically-correct color */}
         {hasAtmosphere && (
           <SunLight
-            castShadow
+            castShadow={sunShadowsEnabled}
+            shadow-bias={SUN_SHADOW_BIAS}
+            shadow-normalBias={SUN_SHADOW_NORMAL_BIAS}
             shadow-mapSize-width={2048}
             shadow-mapSize-height={2048}
           />
@@ -788,7 +839,9 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
             <directionalLight
               position={[50, 100, 50]}
               intensity={0.8}
-              castShadow
+              castShadow={sunShadowsEnabled}
+              shadow-bias={SUN_SHADOW_BIAS}
+              shadow-normalBias={SUN_SHADOW_NORMAL_BIAS}
             />
           </>
         )}
@@ -891,6 +944,37 @@ type PickEventWithMeta = PickEvent & {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function createCityMaterial(
+  mode: CityMaterialMode,
+  doubleSided: boolean,
+): MeshStandardMaterial | MeshBasicMaterial {
+  const side: Side = doubleSided ? DoubleSide : FrontSide;
+
+  if (mode === "basic") {
+    return new MeshBasicMaterial({
+      vertexColors: true,
+      side,
+    });
+  }
+
+  return new MeshStandardMaterial({
+    vertexColors: true,
+    flatShading: true,
+    side,
+  });
+}
+
+function disposeMaterial(material: Material | Material[]): void {
+  if (Array.isArray(material)) {
+    for (const entry of material) {
+      entry.dispose();
+    }
+    return;
+  }
+
+  material.dispose();
+}
 
 function resolveFromEvent(
   e: PickEvent,

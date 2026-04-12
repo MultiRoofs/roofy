@@ -6,6 +6,11 @@
  */
 
 import { useAtmosphereStore } from "../../features/atmosphere/atmosphereStore";
+import { useTilesStore } from "../../features/tiles/tilesStore";
+import {
+  useRenderDebugStore,
+  type CityMaterialMode,
+} from "../../features/debug/renderDebugStore";
 
 interface AdvancedSettingsPanelProps {
   readonly onClose: () => void;
@@ -16,6 +21,21 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
   const setCoverage = useAtmosphereStore((s) => s.setCoverage);
   const lensFlareEnabled = useAtmosphereStore((s) => s.lensFlareEnabled);
   const setLensFlareEnabled = useAtmosphereStore((s) => s.setLensFlareEnabled);
+  const tilesEnabled = useTilesStore((s) => s.enabled);
+  const setTilesEnabled = useTilesStore((s) => s.setEnabled);
+  const sunShadowsEnabled = useRenderDebugStore((s) => s.sunShadowsEnabled);
+  const setSunShadowsEnabled = useRenderDebugStore(
+    (s) => s.setSunShadowsEnabled,
+  );
+  const cityShadowsEnabled = useRenderDebugStore((s) => s.cityShadowsEnabled);
+  const setCityShadowsEnabled = useRenderDebugStore(
+    (s) => s.setCityShadowsEnabled,
+  );
+  const cityDoubleSided = useRenderDebugStore((s) => s.cityDoubleSided);
+  const setCityDoubleSided = useRenderDebugStore((s) => s.setCityDoubleSided);
+  const cityMaterialMode = useRenderDebugStore((s) => s.cityMaterialMode);
+  const setCityMaterialMode = useRenderDebugStore((s) => s.setCityMaterialMode);
+  const resetDebugSettings = useRenderDebugStore((s) => s.reset);
 
   return (
     <div className="advanced-settings-panel">
@@ -35,9 +55,69 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
             <span>Lens Flare</span>
             <input
               type="checkbox"
+              aria-label="Lens Flare"
               checked={lensFlareEnabled}
               onChange={(e) => setLensFlareEnabled(e.target.checked)}
             />
+          </div>
+          <div className="advanced-toggle-row">
+            <span>Google 3D Tiles</span>
+            <input
+              type="checkbox"
+              aria-label="Google 3D Tiles"
+              checked={tilesEnabled}
+              onChange={(e) => setTilesEnabled(e.target.checked)}
+            />
+          </div>
+        </div>
+
+        <div className="attr-section">
+          <div className="attr-section-title">Scene Debug</div>
+          <div className="advanced-toggle-row">
+            <span>Sun Shadows</span>
+            <input
+              type="checkbox"
+              aria-label="Sun Shadows"
+              checked={sunShadowsEnabled}
+              onChange={(e) => setSunShadowsEnabled(e.target.checked)}
+            />
+          </div>
+          <div className="advanced-toggle-row">
+            <span>City Shadows</span>
+            <input
+              type="checkbox"
+              aria-label="City Shadows"
+              checked={cityShadowsEnabled}
+              onChange={(e) => setCityShadowsEnabled(e.target.checked)}
+            />
+          </div>
+          <div className="advanced-toggle-row">
+            <span>Double Sided</span>
+            <input
+              type="checkbox"
+              aria-label="Double Sided"
+              checked={cityDoubleSided}
+              onChange={(e) => setCityDoubleSided(e.target.checked)}
+            />
+          </div>
+          <div className="advanced-toggle-row advanced-select-row">
+            <label htmlFor="city-material-mode">City Material</label>
+            <select
+              id="city-material-mode"
+              className="advanced-select"
+              value={cityMaterialMode}
+              onChange={(e) =>
+                setCityMaterialMode(e.target.value as CityMaterialMode)
+              }
+            >
+              <option value="standard">Standard</option>
+              <option value="basic">Basic</option>
+            </select>
+          </div>
+          <div className="advanced-settings-actions">
+            <button className="rule-cancel-btn" onClick={resetDebugSettings}>
+              Reset Debug
+            </button>
           </div>
         </div>
 

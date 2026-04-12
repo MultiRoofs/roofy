@@ -2,12 +2,12 @@
  * Converts normalized CityModel surfaces into Three.js BufferGeometry.
  *
  * This is the bridge between the domain model and the GPU.
- * It triangulates polygon surfaces using a simple fan triangulation
- * and assigns vertex colors based on semantic surface type.
+ * It triangulates polygon surfaces and assigns vertex colors
+ * based on semantic surface type.
  */
 
-import { BufferAttribute, BufferGeometry } from "three";
-import type { CityModel, Vec3 } from "../domain/citymodel/types";
+import { BufferAttribute, BufferGeometry, ShapeUtils, Vector2 } from "three";
+import type { BBox3, CityModel, Vec3 } from "../domain/citymodel/types";
 import { SURFACE_COLORS } from "./surfaceColors";
 
 // ---------------------------------------------------------------------------
@@ -29,6 +29,11 @@ export interface CityMeshResult {
   readonly baseColors: Float32Array;
 }
 
+interface SurfaceTriangulation {
+  readonly vertices: ReadonlyArray<Vec3>;
+  readonly triangles: ReadonlyArray<readonly [number, number, number]>;
+}
+
 /**
  * Build a single merged BufferGeometry from all surfaces in a CityModel.
  * Vertex colors encode the semantic surface type.
@@ -48,19 +53,24 @@ export function buildCityMesh(
   selectedLod: string | null = null,
 ): CityMeshResult {
   const objectKeys: string[] = [];
+  const triangulationCache = new Map<
+    string,
+    Array<SurfaceTriangulation | null>
+  >();
 
   // Pass 1: count total triangles and build object key list
   let totalTriangles = 0;
   for (const [id, obj] of Object.entries(model.objects)) {
     if (!obj) continue;
     objectKeys.push(id);
+    const surfaceTriangulations: Array<SurfaceTriangulation | null> = [];
     for (const surface of obj.surfaces) {
       if (selectedLod !== null && surface.lod !== selectedLod) continue;
-      const ring = surface.rings[0];
-      if (ring && ring.length >= 3) {
-        totalTriangles += ring.length - 2;
-      }
+      const triangulation = triangulateSurface(surface.rings, obj.bbox);
+      surfaceTriangulations.push(triangulation);
+      totalTriangles += triangulation?.triangles.length ?? 0;
     }
+    triangulationCache.set(id, surfaceTriangulations);
   }
 
   const vertexCount = totalTriangles * 3;
@@ -74,32 +84,27 @@ export function buildCityMesh(
   // Pass 2: write directly into typed arrays
   let writeIdx = 0;
   let objectIdx = 0;
-  for (const obj of Object.values(model.objects)) {
+  for (const [id, obj] of Object.entries(model.objects)) {
     if (!obj) continue;
+    const surfaceTriangulations = triangulationCache.get(id) ?? [];
+    let cachedSurfaceIdx = 0;
 
     for (let surfaceIdx = 0; surfaceIdx < obj.surfaces.length; surfaceIdx++) {
       const surface = obj.surfaces[surfaceIdx]!;
       if (selectedLod !== null && surface.lod !== selectedLod) continue;
       const color = SURFACE_COLORS[surface.type];
-      // Only triangulate the exterior ring (index 0).
-      // Interior rings are holes — proper hole handling requires
-      // constrained triangulation (e.g. earcut).
-      const exteriorRing = surface.rings[0];
-      if (!exteriorRing || exteriorRing.length < 3) continue;
+      const triangulation = surfaceTriangulations[cachedSurfaceIdx++] ?? null;
+      if (!triangulation) continue;
 
-      const v0 = exteriorRing[0]!;
-      const v0x = v0[0] - originOffset[0];
-      const v0y = v0[1] - originOffset[1];
-      const v0z = v0[2] - originOffset[2];
-
-      for (let i = 1; i < exteriorRing.length - 1; i++) {
-        const v1 = exteriorRing[i]!;
-        const v2 = exteriorRing[i + 1]!;
+      for (const triangle of triangulation.triangles) {
+        const v0 = triangulation.vertices[triangle[0]]!;
+        const v1 = triangulation.vertices[triangle[1]]!;
+        const v2 = triangulation.vertices[triangle[2]]!;
         const base = writeIdx * 3;
 
-        posArray[base] = v0x;
-        posArray[base + 1] = v0y;
-        posArray[base + 2] = v0z;
+        posArray[base] = v0[0] - originOffset[0];
+        posArray[base + 1] = v0[1] - originOffset[1];
+        posArray[base + 2] = v0[2] - originOffset[2];
         posArray[base + 3] = v1[0] - originOffset[0];
         posArray[base + 4] = v1[1] - originOffset[1];
         posArray[base + 5] = v1[2] - originOffset[2];
@@ -144,6 +149,201 @@ export function buildCityMesh(
     pickingIndex: { layerId, objectKeys },
     baseColors: Float32Array.from(colorArray),
   };
+}
+
+function triangulateSurface(
+  rings: ReadonlyArray<ReadonlyArray<Vec3>>,
+  objectBBox: BBox3 | null,
+): SurfaceTriangulation | null {
+  if (rings.length === 0) return null;
+
+  const exteriorRing = orientExteriorRing(rings[0], objectBBox);
+  if (!exteriorRing || exteriorRing.length < 3) return null;
+
+  const normal = computeNewellNormal(exteriorRing);
+  const normalLength = Math.hypot(normal[0], normal[1], normal[2]);
+  if (normalLength === 0) return null;
+
+  const basis = buildProjectionBasis(exteriorRing, [
+    normal[0] / normalLength,
+    normal[1] / normalLength,
+    normal[2] / normalLength,
+  ]);
+  if (!basis) return null;
+
+  const projectedContour = projectRingTo2D(exteriorRing, basis);
+  const contourClockwise = ShapeUtils.isClockWise([...projectedContour]);
+
+  const holeRings = rings
+    .slice(1)
+    .filter((ring) => ring.length >= 3)
+    .map((ring) => [...ring]);
+  const projectedHoles = holeRings.map((ring) => {
+    const projectedHole = projectRingTo2D(ring, basis);
+    const holeClockwise = ShapeUtils.isClockWise([...projectedHole]);
+    return holeClockwise === contourClockwise
+      ? [...projectedHole].reverse()
+      : projectedHole;
+  });
+
+  const vertices = [exteriorRing, ...holeRings].flat();
+  const triangles = ShapeUtils.triangulateShape(
+    [...projectedContour],
+    projectedHoles.map((hole) => [...hole]),
+  ).map(
+    (triangle) =>
+      [triangle[0]!, triangle[1]!, triangle[2]!] as const satisfies readonly [
+        number,
+        number,
+        number,
+      ],
+  );
+
+  return { vertices, triangles };
+}
+
+function orientExteriorRing(
+  ring: ReadonlyArray<Vec3> | undefined,
+  objectBBox: BBox3 | null,
+): ReadonlyArray<Vec3> | undefined {
+  if (!ring || ring.length < 3 || !objectBBox) return ring;
+
+  const normal = computeNewellNormal(ring);
+  const normalLengthSq =
+    normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2];
+  if (normalLengthSq === 0) return ring;
+
+  const faceCenter = computeRingCenter(ring);
+  const objectCenter = [
+    (objectBBox[0] + objectBBox[3]) / 2,
+    (objectBBox[1] + objectBBox[4]) / 2,
+    (objectBBox[2] + objectBBox[5]) / 2,
+  ] as const;
+  const toFace = [
+    faceCenter[0] - objectCenter[0],
+    faceCenter[1] - objectCenter[1],
+    faceCenter[2] - objectCenter[2],
+  ] as const;
+  const dot =
+    normal[0] * toFace[0] + normal[1] * toFace[1] + normal[2] * toFace[2];
+
+  return dot < 0 ? [...ring].reverse() : ring;
+}
+
+function computeRingCenter(ring: ReadonlyArray<Vec3>): Vec3 {
+  let sx = 0;
+  let sy = 0;
+  let sz = 0;
+
+  for (const v of ring) {
+    sx += v[0];
+    sy += v[1];
+    sz += v[2];
+  }
+
+  return [sx / ring.length, sy / ring.length, sz / ring.length];
+}
+
+// Newell's method is stable for arbitrary planar polygon winding.
+function computeNewellNormal(ring: ReadonlyArray<Vec3>): Vec3 {
+  let nx = 0;
+  let ny = 0;
+  let nz = 0;
+
+  for (let i = 0; i < ring.length; i++) {
+    const current = ring[i]!;
+    const next = ring[(i + 1) % ring.length]!;
+    nx += (current[1] - next[1]) * (current[2] + next[2]);
+    ny += (current[2] - next[2]) * (current[0] + next[0]);
+    nz += (current[0] - next[0]) * (current[1] + next[1]);
+  }
+
+  return [nx, ny, nz];
+}
+
+interface ProjectionBasis {
+  readonly origin: Vec3;
+  readonly tangent: Vec3;
+  readonly bitangent: Vec3;
+}
+
+function buildProjectionBasis(
+  ring: ReadonlyArray<Vec3>,
+  normal: Vec3,
+): ProjectionBasis | null {
+  const origin = ring[0]!;
+  let tangent: Vec3 | null = null;
+
+  for (let i = 1; i < ring.length; i++) {
+    const edge = subtractVec3(ring[i]!, origin);
+    const length = Math.hypot(edge[0], edge[1], edge[2]);
+    if (length > 0) {
+      tangent = [edge[0] / length, edge[1] / length, edge[2] / length];
+      break;
+    }
+  }
+
+  if (!tangent) return null;
+
+  const bitangentRaw = crossVec3(normal, tangent);
+  const bitangentLength = Math.hypot(
+    bitangentRaw[0],
+    bitangentRaw[1],
+    bitangentRaw[2],
+  );
+  if (bitangentLength === 0) return null;
+
+  const bitangent: Vec3 = [
+    bitangentRaw[0] / bitangentLength,
+    bitangentRaw[1] / bitangentLength,
+    bitangentRaw[2] / bitangentLength,
+  ];
+  const tangentOrthoRaw = crossVec3(bitangent, normal);
+  const tangentOrthoLength = Math.hypot(
+    tangentOrthoRaw[0],
+    tangentOrthoRaw[1],
+    tangentOrthoRaw[2],
+  );
+  if (tangentOrthoLength === 0) return null;
+
+  return {
+    origin,
+    tangent: [
+      tangentOrthoRaw[0] / tangentOrthoLength,
+      tangentOrthoRaw[1] / tangentOrthoLength,
+      tangentOrthoRaw[2] / tangentOrthoLength,
+    ],
+    bitangent,
+  };
+}
+
+function projectRingTo2D(
+  ring: ReadonlyArray<Vec3>,
+  basis: ProjectionBasis,
+): Vector2[] {
+  return ring.map((vertex) => {
+    const offset = subtractVec3(vertex, basis.origin);
+    return new Vector2(
+      dotVec3(offset, basis.tangent),
+      dotVec3(offset, basis.bitangent),
+    );
+  });
+}
+
+function subtractVec3(a: Vec3, b: Vec3): Vec3 {
+  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+}
+
+function dotVec3(a: Vec3, b: Vec3): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+function crossVec3(a: Vec3, b: Vec3): Vec3 {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
 }
 
 /**
