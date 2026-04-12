@@ -84,7 +84,7 @@ export function PostProcessingEffects({
   const camera = useThree((s) => s.camera);
   const scene = useThree((s) => s.scene);
   const raycaster = useThree((s) => s.raycaster);
-  const viewport = useThree((s) => s.viewport);
+  const size = useThree((s) => s.size);
 
   // Manual LensFlareEffect to avoid wrapEffect's JSON.stringify crash
   // (the LensFlare R3F wrapper serializes Three.js objects causing circular ref error)
@@ -145,16 +145,16 @@ export function PostProcessingEffects({
     }
   });
 
-  // Update screen resolution when viewport changes
+  // LensFlareEffect expects actual canvas pixel dimensions, not world-space viewport units.
   useEffect(() => {
     const effect = lensFlareRef.current;
     if (!effect) return;
     const screenRes = effect.uniforms.get("screenRes");
     if (screenRes) {
-      screenRes.value.x = viewport.width;
-      screenRes.value.y = viewport.height;
+      screenRes.value.x = size.width;
+      screenRes.value.y = size.height;
     }
-  }, [viewport.width, viewport.height]);
+  }, [size.width, size.height]);
 
   // Toggle enabled state on the effect
   useEffect(() => {

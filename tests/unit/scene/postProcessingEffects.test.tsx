@@ -3,6 +3,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { PostProcessingEffects } from "../../../src/scene/PostProcessingEffects";
 
+const lensFlareInstances: Array<{
+  uniforms: Map<
+    string,
+    { value: { x?: number; y?: number } | boolean | number }
+  >;
+}> = [];
+
 vi.mock("@react-three/fiber", () => ({
   useFrame: vi.fn(),
   useThree: (selector: (state: unknown) => unknown) =>
@@ -13,6 +20,7 @@ vi.mock("@react-three/fiber", () => ({
         setFromCamera: vi.fn(),
         intersectObjects: vi.fn(() => []),
       },
+      size: { width: 1920, height: 1080 },
       viewport: { width: 1280, height: 720 },
     }),
 }));
@@ -33,6 +41,10 @@ vi.mock("@react-three/postprocessing", async () => {
       ["enabled", { value: true }],
       ["opacity", { value: 1 }],
     ]);
+
+    constructor() {
+      lensFlareInstances.push(this);
+    }
   }
 
   return {
@@ -141,6 +153,7 @@ vi.mock("@takram/three-atmosphere/r3f", async () => {
 
 afterEach(() => {
   cleanup();
+  lensFlareInstances.length = 0;
 });
 
 describe("PostProcessingEffects", () => {
@@ -170,5 +183,26 @@ describe("PostProcessingEffects", () => {
     // LightingMask should be present with the correct selection layer
     const lightingMask = screen.getByTestId("lighting-mask");
     expect(lightingMask).toHaveAttribute("data-selection-layer", "10");
+  });
+
+  it("passes pixel canvas size to the lens flare screen resolution uniform", () => {
+    render(
+      createElement(PostProcessingEffects, {
+        hasAtmosphere: true,
+        cloudCoverage: 0.3,
+        lensFlareEnabled: true,
+        atmosphereRef: { current: null },
+      }),
+    );
+
+    expect(lensFlareInstances).toHaveLength(1);
+    const instance = lensFlareInstances.at(0);
+    expect(instance).toBeDefined();
+    if (!instance) {
+      throw new Error("Expected lens flare instance to be created");
+    }
+    const screenRes = instance.uniforms.get("screenRes");
+    expect(screenRes).toBeDefined();
+    expect(screenRes?.value).toMatchObject({ x: 1920, y: 1080 });
   });
 });
