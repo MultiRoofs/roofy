@@ -72,6 +72,10 @@ interface PostProcessingEffectsProps {
   readonly hasAtmosphere: boolean;
   readonly cloudCoverage: number;
   readonly lensFlareEnabled: boolean;
+  readonly postProcessingEnabled?: boolean;
+  readonly cloudsEnabled?: boolean;
+  readonly aerialPerspectiveEnabled?: boolean;
+  readonly normalPassEnabled?: boolean;
   readonly atmosphereRef: React.RefObject<AtmosphereApi | null>;
 }
 
@@ -79,6 +83,10 @@ export function PostProcessingEffects({
   hasAtmosphere,
   cloudCoverage,
   lensFlareEnabled,
+  postProcessingEnabled = true,
+  cloudsEnabled = true,
+  aerialPerspectiveEnabled = true,
+  normalPassEnabled = true,
   atmosphereRef,
 }: PostProcessingEffectsProps) {
   const camera = useThree((s) => s.camera);
@@ -164,24 +172,38 @@ export function PostProcessingEffects({
     if (uEnabled) uEnabled.value = lensFlareEnabled;
   }, [lensFlareEnabled]);
 
-  if (!hasAtmosphere) return null;
+  if (!hasAtmosphere || !postProcessingEnabled) return null;
 
   return (
-    <SceneEffectComposer ref={composerRef} multisampling={0} enableNormalPass>
-      <Clouds
-        qualityPreset="medium"
-        coverage={cloudCoverage}
-        localWeatherVelocity={WEATHER_VELOCITY}
-        shapeVelocity={SHAPE_VELOCITY}
-      />
-      <LightingMask selectionLayer={LIGHTING_MASK_LAYER} />
-      <AerialPerspective
-        sky
-        sunLight
-        skyLight
-        correctGeometricError
-        albedoScale={TILE_ALBEDO_SCALE}
-      />
+    <SceneEffectComposer
+      ref={composerRef}
+      multisampling={0}
+      enableNormalPass={normalPassEnabled}
+    >
+      {cloudsEnabled ? (
+        <Clouds
+          qualityPreset="medium"
+          coverage={cloudCoverage}
+          localWeatherVelocity={WEATHER_VELOCITY}
+          shapeVelocity={SHAPE_VELOCITY}
+        />
+      ) : (
+        <></>
+      )}
+      {aerialPerspectiveEnabled ? (
+        <>
+          <LightingMask selectionLayer={LIGHTING_MASK_LAYER} />
+          <AerialPerspective
+            sky
+            sunLight
+            skyLight
+            correctGeometricError
+            albedoScale={TILE_ALBEDO_SCALE}
+          />
+        </>
+      ) : (
+        <></>
+      )}
       <primitive object={lensFlareEffect} />
       <ToneMapping mode={ToneMappingMode.AGX} exposure={4} />
       <Vignette

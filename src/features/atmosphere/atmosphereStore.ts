@@ -5,7 +5,8 @@
  * Separate from solarStore (which handles datetime/latLon/sun position)
  * because atmosphere visual settings evolve independently.
  *
- * Future: may add lightingMode ("sun-only" | "mixed") for LightingMask support.
+ * LightingMask is now active: city meshes use light-source lighting (SunLight/SkyLight)
+ * while Google tiles get post-process lighting from AerialPerspective.
  */
 
 import { create } from "zustand";
