@@ -15,13 +15,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Matrix3, Vector2, Vector3 } from "three";
 import { useFrame, useThree } from "@react-three/fiber";
-import { SMAA, ToneMapping } from "@react-three/postprocessing";
+import { SMAA, ToneMapping, Vignette } from "@react-three/postprocessing";
 import {
   ToneMappingMode,
+  VignetteTechnique,
   type EffectComposer as EffectComposerImpl,
 } from "postprocessing";
 import { Clouds } from "@takram/three-clouds/r3f";
-import { AerialPerspective } from "@takram/three-atmosphere/r3f";
+import { AerialPerspective, LightingMask } from "@takram/three-atmosphere/r3f";
 import type { AtmosphereApi } from "@takram/three-atmosphere/r3f";
 import { LensFlareEffect } from "@react-three/postprocessing";
 import { BlendFunction } from "postprocessing";
@@ -33,14 +34,22 @@ import {
 
 const TILE_ALBEDO_SCALE = 2 / Math.PI;
 
+/**
+ * Three.js layer used by LightingMask to distinguish light-source lit objects
+ * (citymodel meshes, ground plane) from post-process lit objects (Google tiles).
+ * Objects on this layer keep their MeshStandardMaterial lighting from SunLight/SkyLight;
+ * objects NOT on this layer get post-process lighting from AerialPerspective.
+ */
+export const LIGHTING_MASK_LAYER = 10;
+
 // Fixed cloud animation velocities (no UI control)
 const WEATHER_VELOCITY = new Vector2(0.0002, 0.0001);
 const SHAPE_VELOCITY = new Vector3(0.00005, 0, 0.00003);
 
 const LENS_FLARE_OPTS: ConstructorParameters<typeof LensFlareEffect>[0] = {
-  blendFunction: BlendFunction.NORMAL,
+  blendFunction: BlendFunction.SCREEN,
   enabled: true,
-  glareSize: 0.2,
+  glareSize: 0.15,
   lensPosition: new Vector3(-25, 6, -60),
   screenRes: new Vector2(0, 0),
   starPoints: 6,
@@ -49,13 +58,13 @@ const LENS_FLARE_OPTS: ConstructorParameters<typeof LensFlareEffect>[0] = {
   flareShape: 0.01,
   animated: true,
   anamorphic: false,
-  colorGain: new Color(20, 20, 20),
+  colorGain: new Color(2, 2, 2),
   lensDirtTexture: null,
-  haloScale: 0.5,
+  haloScale: 0.3,
   secondaryGhosts: true,
   aditionalStreaks: true,
-  ghostScale: 0.0,
-  opacity: 1.0,
+  ghostScale: 0.1,
+  opacity: 0.8,
   starBurst: false,
 };
 
@@ -158,17 +167,14 @@ export function PostProcessingEffects({
   if (!hasAtmosphere) return null;
 
   return (
-    <SceneEffectComposer
-      ref={composerRef}
-      multisampling={0}
-      enableNormalPass
-    >
+    <SceneEffectComposer ref={composerRef} multisampling={0} enableNormalPass>
       <Clouds
         qualityPreset="medium"
         coverage={cloudCoverage}
         localWeatherVelocity={WEATHER_VELOCITY}
         shapeVelocity={SHAPE_VELOCITY}
       />
+      <LightingMask selectionLayer={LIGHTING_MASK_LAYER} />
       <AerialPerspective
         sky
         sunLight
@@ -177,7 +183,12 @@ export function PostProcessingEffects({
         albedoScale={TILE_ALBEDO_SCALE}
       />
       <primitive object={lensFlareEffect} />
-      <ToneMapping mode={ToneMappingMode.AGX} exposure={10} />
+      <ToneMapping mode={ToneMappingMode.AGX} exposure={4} />
+      <Vignette
+        technique={VignetteTechnique.DEFAULT}
+        darkness={0.3}
+        offset={0.5}
+      />
       <SMAA />
     </SceneEffectComposer>
   );

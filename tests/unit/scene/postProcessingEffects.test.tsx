@@ -18,8 +18,9 @@ vi.mock("@react-three/fiber", () => ({
 }));
 
 vi.mock("postprocessing", () => ({
-  BlendFunction: { NORMAL: "NORMAL" },
+  BlendFunction: { NORMAL: "NORMAL", SCREEN: "SCREEN" },
   ToneMappingMode: { AGX: "AGX" },
+  VignetteTechnique: { DEFAULT: "DEFAULT" },
 }));
 
 vi.mock("@react-three/postprocessing", async () => {
@@ -51,6 +52,7 @@ vi.mock("@react-three/postprocessing", async () => {
         children,
       ),
     SMAA: () => React.createElement("div", { "data-testid": "smaa" }),
+    Vignette: () => React.createElement("div", { "data-testid": "vignette" }),
     ToneMapping: ({
       exposure,
       mode,
@@ -64,6 +66,33 @@ vi.mock("@react-three/postprocessing", async () => {
         "data-mode": String(mode ?? ""),
       }),
     LensFlareEffect: MockLensFlareEffect,
+  };
+});
+
+vi.mock("../../../src/scene/SceneEffectComposer", async () => {
+  const React = await import("react");
+  return {
+    SceneEffectComposer: React.forwardRef(
+      (
+        {
+          children,
+          enableNormalPass,
+        }: {
+          readonly children: React.ReactNode;
+          readonly enableNormalPass?: boolean;
+        },
+        _ref: React.Ref<unknown>,
+      ) =>
+        React.createElement(
+          "div",
+          {
+            "data-testid": "effect-composer",
+            "data-enable-normal-pass": String(enableNormalPass ?? false),
+          },
+          children,
+        ),
+    ),
+    syncEffectComposerCameraSettings: vi.fn(),
   };
 });
 
@@ -81,6 +110,11 @@ vi.mock("@takram/three-clouds/r3f", async () => {
 vi.mock("@takram/three-atmosphere/r3f", async () => {
   const React = await import("react");
   return {
+    LightingMask: ({ selectionLayer }: { readonly selectionLayer?: number }) =>
+      React.createElement("div", {
+        "data-testid": "lighting-mask",
+        "data-selection-layer": String(selectionLayer ?? ""),
+      }),
     AerialPerspective: ({
       albedoScale,
       correctGeometricError,
@@ -97,9 +131,7 @@ vi.mock("@takram/three-atmosphere/r3f", async () => {
       React.createElement("div", {
         "data-testid": "aerial-perspective",
         "data-albedo-scale": String(albedoScale ?? ""),
-        "data-correct-geometric-error": String(
-          correctGeometricError ?? false,
-        ),
+        "data-correct-geometric-error": String(correctGeometricError ?? false),
         "data-sky": String(sky ?? false),
         "data-sky-light": String(skyLight ?? false),
         "data-sun-light": String(sunLight ?? false),
@@ -134,5 +166,9 @@ describe("PostProcessingEffects", () => {
       "data-albedo-scale",
       String(2 / Math.PI),
     );
+
+    // LightingMask should be present with the correct selection layer
+    const lightingMask = screen.getByTestId("lighting-mask");
+    expect(lightingMask).toHaveAttribute("data-selection-layer", "10");
   });
 });
