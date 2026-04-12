@@ -27,10 +27,8 @@ import type { AtmosphereApi } from "@takram/three-atmosphere/r3f";
 import { LensFlareEffect } from "@react-three/postprocessing";
 import { BlendFunction } from "postprocessing";
 import { Color } from "three";
-import {
-  SceneEffectComposer,
-  syncEffectComposerCameraSettings,
-} from "./SceneEffectComposer";
+import { SceneEffectComposer } from "./SceneEffectComposer";
+import { syncEffectComposerCameraSettings } from "./syncEffectComposerCameraSettings";
 
 const TILE_ALBEDO_SCALE = 2 / Math.PI;
 

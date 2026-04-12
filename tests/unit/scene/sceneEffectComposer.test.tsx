@@ -1,11 +1,8 @@
-import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/react";
-import { HalfFloatType } from "three";
-import {
-  SceneEffectComposer,
-  syncEffectComposerCameraSettings,
-} from "../../../src/scene/SceneEffectComposer";
+import { type Camera } from "three";
+import { SceneEffectComposer } from "../../../src/scene/SceneEffectComposer";
+import { syncEffectComposerCameraSettings } from "../../../src/scene/syncEffectComposerCameraSettings";
 
 const composerMock = { passes: [] as unknown[] };
 
@@ -60,14 +57,17 @@ afterEach(() => {
 });
 
 describe("SceneEffectComposer", () => {
-  it("upgrades the normal pass render target to half-float precision", async () => {
-    const { NormalPass } = await import("postprocessing");
-    const normalPass = new NormalPass();
-    composerMock.passes = [normalPass];
+  it("forwards the normal-pass flag to the wrapped composer", () => {
+    const { container } = render(
+      <SceneEffectComposer enableNormalPass={false}>
+        <div />
+      </SceneEffectComposer>,
+    );
 
-    render(createElement(SceneEffectComposer, null, createElement("div")));
-
-    expect(normalPass.renderTarget.texture.type).toBe(HalfFloatType);
+    expect(container.firstChild).toHaveAttribute(
+      "data-enable-normal-pass",
+      "false",
+    );
   });
 });
 
@@ -75,7 +75,7 @@ describe("syncEffectComposerCameraSettings", () => {
   it("adopts camera settings for fullscreen effect materials", async () => {
     const { EffectMaterial } = await import("postprocessing");
     const material = new EffectMaterial();
-    const camera = { near: 1, far: 200000 };
+    const camera = { near: 1, far: 200000 } as unknown as Camera;
 
     syncEffectComposerCameraSettings(
       {
@@ -88,7 +88,19 @@ describe("syncEffectComposerCameraSettings", () => {
       camera,
     );
 
-    expect(material.adoptCameraSettings).toHaveBeenCalledOnce();
-    expect(material.adoptCameraSettings).toHaveBeenCalledWith(camera);
+    expect(
+      (
+        material.adoptCameraSettings as unknown as {
+          mock: { calls: unknown[][] };
+        }
+      ).mock.calls,
+    ).toHaveLength(1);
+    expect(
+      (
+        material.adoptCameraSettings as unknown as {
+          mock: { calls: unknown[][] };
+        }
+      ).mock.calls[0],
+    ).toEqual([camera]);
   });
 });
