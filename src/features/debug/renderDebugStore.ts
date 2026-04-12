@@ -6,7 +6,6 @@ export interface RenderDebugState {
   readonly postProcessingEnabled: boolean;
   readonly cloudsEnabled: boolean;
   readonly aerialPerspectiveEnabled: boolean;
-  readonly normalPassEnabled: boolean;
   readonly sunShadowsEnabled: boolean;
   readonly cityShadowsEnabled: boolean;
   readonly cityDoubleSided: boolean;
@@ -17,7 +16,6 @@ export interface RenderDebugActions {
   setPostProcessingEnabled: (value: boolean) => void;
   setCloudsEnabled: (value: boolean) => void;
   setAerialPerspectiveEnabled: (value: boolean) => void;
-  setNormalPassEnabled: (value: boolean) => void;
   setSunShadowsEnabled: (value: boolean) => void;
   setCityShadowsEnabled: (value: boolean) => void;
   setCityDoubleSided: (value: boolean) => void;
@@ -31,7 +29,6 @@ export const DEFAULT_RENDER_DEBUG_STATE: RenderDebugState = {
   postProcessingEnabled: true,
   cloudsEnabled: true,
   aerialPerspectiveEnabled: true,
-  normalPassEnabled: false,
   sunShadowsEnabled: true,
   cityShadowsEnabled: true,
   cityDoubleSided: false,
@@ -46,7 +43,6 @@ export const useRenderDebugStore = create<RenderDebugStore>((set) => ({
   setCloudsEnabled: (cloudsEnabled) => set({ cloudsEnabled }),
   setAerialPerspectiveEnabled: (aerialPerspectiveEnabled) =>
     set({ aerialPerspectiveEnabled }),
-  setNormalPassEnabled: (normalPassEnabled) => set({ normalPassEnabled }),
   setSunShadowsEnabled: (sunShadowsEnabled) => set({ sunShadowsEnabled }),
   setCityShadowsEnabled: (cityShadowsEnabled) => set({ cityShadowsEnabled }),
   setCityDoubleSided: (cityDoubleSided) => set({ cityDoubleSided }),

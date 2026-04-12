@@ -37,10 +37,6 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
   const setAerialPerspectiveEnabled = useRenderDebugStore(
     (s) => s.setAerialPerspectiveEnabled,
   );
-  const normalPassEnabled = useRenderDebugStore((s) => s.normalPassEnabled);
-  const setNormalPassEnabled = useRenderDebugStore(
-    (s) => s.setNormalPassEnabled,
-  );
   const sunShadowsEnabled = useRenderDebugStore((s) => s.sunShadowsEnabled);
   const setSunShadowsEnabled = useRenderDebugStore(
     (s) => s.setSunShadowsEnabled,
@@ -96,16 +92,6 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
               checked={aerialPerspectiveEnabled}
               disabled={!postProcessingEnabled}
               onChange={(e) => setAerialPerspectiveEnabled(e.target.checked)}
-            />
-          </div>
-          <div className="advanced-toggle-row">
-            <span>Normal Pass</span>
-            <input
-              type="checkbox"
-              aria-label="Normal Pass"
-              checked={normalPassEnabled}
-              disabled={!postProcessingEnabled}
-              onChange={(e) => setNormalPassEnabled(e.target.checked)}
             />
           </div>
           <div className="advanced-toggle-row">

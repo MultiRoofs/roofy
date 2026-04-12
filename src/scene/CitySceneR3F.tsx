@@ -330,7 +330,6 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
     const aerialPerspectiveEnabled = useRenderDebugStore(
       (s) => s.aerialPerspectiveEnabled,
     );
-    const normalPassEnabled = useRenderDebugStore((s) => s.normalPassEnabled);
     const sunShadowsEnabled = useRenderDebugStore((s) => s.sunShadowsEnabled);
     const cityShadowsEnabled = useRenderDebugStore((s) => s.cityShadowsEnabled);
     const cityDoubleSided = useRenderDebugStore((s) => s.cityDoubleSided);
@@ -930,7 +929,6 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
           postProcessingEnabled={postProcessingEnabled}
           cloudsEnabled={cloudsEnabled}
           aerialPerspectiveEnabled={aerialPerspectiveEnabled}
-          normalPassEnabled={normalPassEnabled}
           atmosphereRef={atmosphereRef}
         />
       </Atmosphere>

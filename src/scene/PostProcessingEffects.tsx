@@ -73,7 +73,6 @@ interface PostProcessingEffectsProps {
   readonly postProcessingEnabled?: boolean;
   readonly cloudsEnabled?: boolean;
   readonly aerialPerspectiveEnabled?: boolean;
-  readonly normalPassEnabled?: boolean;
   readonly atmosphereRef: React.RefObject<AtmosphereApi | null>;
 }
 
@@ -84,7 +83,6 @@ export function PostProcessingEffects({
   postProcessingEnabled = true,
   cloudsEnabled = true,
   aerialPerspectiveEnabled = true,
-  normalPassEnabled = true,
   atmosphereRef,
 }: PostProcessingEffectsProps) {
   const camera = useThree((s) => s.camera);
@@ -176,7 +174,7 @@ export function PostProcessingEffects({
     <SceneEffectComposer
       ref={composerRef}
       multisampling={0}
-      enableNormalPass={normalPassEnabled}
+      enableNormalPass={false}
     >
       {cloudsEnabled ? (
         <Clouds
@@ -196,6 +194,7 @@ export function PostProcessingEffects({
             sunLight
             skyLight
             correctGeometricError
+            reconstructNormal
             albedoScale={TILE_ALBEDO_SCALE}
           />
         </>
