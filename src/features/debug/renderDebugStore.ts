@@ -31,7 +31,7 @@ export const DEFAULT_RENDER_DEBUG_STATE: RenderDebugState = {
   aerialPerspectiveEnabled: true,
   sunShadowsEnabled: true,
   cityShadowsEnabled: true,
-  cityDoubleSided: false,
+  cityDoubleSided: true,
   cityMaterialMode: "standard",
 };
 

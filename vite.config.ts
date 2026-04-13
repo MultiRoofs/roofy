@@ -130,7 +130,27 @@ export default defineConfig({
     sortPackageJson: false,
     ignorePatterns: ["dist", "coverage", "node_modules"],
   },
-  plugins: [react()],
+  plugins: [
+    react(),
+    // Suppress missing source map warnings from node_modules (e.g. @duckdb/duckdb-wasm
+    // ships a worker.js referencing a .map file that doesn't exist in the package)
+    {
+      name: "suppress-node-modules-sourcemap-warnings",
+      configResolved(config) {
+        const origWarn = config.logger.warn.bind(config.logger);
+        config.logger.warn = (msg, options) => {
+          if (
+            typeof msg === "string" &&
+            msg.includes("Failed to load source map") &&
+            msg.includes("node_modules")
+          ) {
+            return;
+          }
+          origWarn(msg, options);
+        };
+      },
+    },
+  ],
   optimizeDeps: {
     exclude: ["@cityjson/flatcitybuf", "@duckdb/duckdb-wasm"],
   },
