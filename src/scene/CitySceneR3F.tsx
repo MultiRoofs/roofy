@@ -303,6 +303,9 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
     const cityGroupRef = useRef<Group>(null);
     const layerSceneMapRef = useRef<Map<string, LayerSceneState>>(new Map());
     const atmosphereRef = useRef<AtmosphereApi>(null);
+    // Shared origin offset: the first loaded layer's bbox center.
+    // All layers use this same offset so adjacent tiles stay aligned.
+    const sceneOriginRef = useRef<Vec3 | null>(null);
     const [hasModel, setHasModel] = useState(false);
 
     // Measure tool state
@@ -417,6 +420,11 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
         }
       }
 
+      // Reset shared origin when all layers are removed
+      if (map.size === 0) {
+        sceneOriginRef.current = null;
+      }
+
       // Add or rebuild meshes for new layers or LoD changes
       let needsFit = false;
       let needsSolarInit = !hasModel && map.size === 0;
@@ -436,7 +444,12 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
           const model = layer.model;
           if (Object.keys(model.objects).length === 0) continue;
 
-          const originOffset = computeOriginOffset(model);
+          // Use shared scene origin (first layer sets it); all layers
+          // share the same offset so adjacent tiles remain aligned.
+          if (!sceneOriginRef.current) {
+            sceneOriginRef.current = computeOriginOffset(model);
+          }
+          const originOffset = sceneOriginRef.current;
           const { geometry, pickingIndex, baseColors } = buildCityMesh(
             model,
             layer.id,
@@ -500,7 +513,12 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
       if (needsFit && controlsRef.current) {
         const bbox = computeUnionBBox(layers);
         if (bbox)
-          fitCamera(camera as PerspectiveCamera, controlsRef.current, bbox);
+          fitCamera(
+            camera as PerspectiveCamera,
+            controlsRef.current,
+            bbox,
+            sceneOriginRef.current,
+          );
       }
 
       // Clear selection if layer was removed
@@ -714,7 +732,12 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
       if (controlsRef.current) {
         const bbox = computeUnionBBox(layers);
         if (bbox)
-          fitCamera(camera as PerspectiveCamera, controlsRef.current, bbox);
+          fitCamera(
+            camera as PerspectiveCamera,
+            controlsRef.current,
+            bbox,
+            sceneOriginRef.current,
+          );
       }
     }, [layers, camera]);
 
@@ -726,6 +749,7 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
           camera as PerspectiveCamera,
           controlsRef.current,
           layer.model.bbox,
+          sceneOriginRef.current,
         );
       },
       [layers, camera],
@@ -1066,14 +1090,31 @@ function fitCamera(
   camera: PerspectiveCamera,
   controls: OrbitControlsImpl,
   bbox: BBox3,
+  sceneOrigin: Vec3 | null,
 ): void {
+  const o = sceneOrigin ?? [0, 0, 0];
+  // bbox center in scene space (Z-up world → Y-up Three.js via mesh rotation)
+  const cx = (bbox[0] + bbox[3]) / 2 - o[0];
+  const cy = (bbox[1] + bbox[4]) / 2 - o[1];
+  const cz = (bbox[2] + bbox[5]) / 2 - o[2];
+
   const extentX = bbox[3] - bbox[0];
   const extentY = bbox[4] - bbox[1];
   const extentZ = bbox[5] - bbox[2];
   const maxExtent = Math.max(extentX, extentY, extentZ);
   const distance = maxExtent * 1.5;
-  camera.position.set(distance * 0.7, distance * 0.7, distance * 0.7);
-  controls.target.set(0, extentZ / 2, 0);
+
+  // Scene coordinates: X=east, Y=up(Z), Z=-north(-Y) due to mesh rotation
+  const targetX = cx;
+  const targetY = cz;
+  const targetZ = -cy;
+
+  camera.position.set(
+    targetX + distance * 0.7,
+    targetY + distance * 0.7,
+    targetZ + distance * 0.7,
+  );
+  controls.target.set(targetX, targetY, targetZ);
   controls.update();
 }
 
