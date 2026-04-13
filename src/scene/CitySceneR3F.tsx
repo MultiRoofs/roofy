@@ -323,6 +323,13 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
 
     // 3D Tiles
     const tilesEnabled = useTilesStore((s) => s.enabled);
+    const postProcessingEnabled = useRenderDebugStore(
+      (s) => s.postProcessingEnabled,
+    );
+    const cloudsEnabled = useRenderDebugStore((s) => s.cloudsEnabled);
+    const aerialPerspectiveEnabled = useRenderDebugStore(
+      (s) => s.aerialPerspectiveEnabled,
+    );
     const sunShadowsEnabled = useRenderDebugStore((s) => s.sunShadowsEnabled);
     const cityShadowsEnabled = useRenderDebugStore((s) => s.cityShadowsEnabled);
     const cityDoubleSided = useRenderDebugStore((s) => s.cityDoubleSided);
@@ -919,6 +926,9 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
           hasAtmosphere={hasAtmosphere}
           cloudCoverage={cloudCoverage}
           lensFlareEnabled={lensFlareEnabled}
+          postProcessingEnabled={postProcessingEnabled}
+          cloudsEnabled={cloudsEnabled}
+          aerialPerspectiveEnabled={aerialPerspectiveEnabled}
           atmosphereRef={atmosphereRef}
         />
       </Atmosphere>

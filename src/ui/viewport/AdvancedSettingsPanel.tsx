@@ -23,6 +23,20 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
   const setLensFlareEnabled = useAtmosphereStore((s) => s.setLensFlareEnabled);
   const tilesEnabled = useTilesStore((s) => s.enabled);
   const setTilesEnabled = useTilesStore((s) => s.setEnabled);
+  const postProcessingEnabled = useRenderDebugStore(
+    (s) => s.postProcessingEnabled,
+  );
+  const setPostProcessingEnabled = useRenderDebugStore(
+    (s) => s.setPostProcessingEnabled,
+  );
+  const cloudsEnabled = useRenderDebugStore((s) => s.cloudsEnabled);
+  const setCloudsEnabled = useRenderDebugStore((s) => s.setCloudsEnabled);
+  const aerialPerspectiveEnabled = useRenderDebugStore(
+    (s) => s.aerialPerspectiveEnabled,
+  );
+  const setAerialPerspectiveEnabled = useRenderDebugStore(
+    (s) => s.setAerialPerspectiveEnabled,
+  );
   const sunShadowsEnabled = useRenderDebugStore((s) => s.sunShadowsEnabled);
   const setSunShadowsEnabled = useRenderDebugStore(
     (s) => s.setSunShadowsEnabled,
@@ -52,11 +66,41 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
         <div className="attr-section">
           <div className="attr-section-title">Rendering</div>
           <div className="advanced-toggle-row">
+            <span>Post Processing</span>
+            <input
+              type="checkbox"
+              aria-label="Post Processing"
+              checked={postProcessingEnabled}
+              onChange={(e) => setPostProcessingEnabled(e.target.checked)}
+            />
+          </div>
+          <div className="advanced-toggle-row">
+            <span>Clouds</span>
+            <input
+              type="checkbox"
+              aria-label="Clouds"
+              checked={cloudsEnabled}
+              disabled={!postProcessingEnabled}
+              onChange={(e) => setCloudsEnabled(e.target.checked)}
+            />
+          </div>
+          <div className="advanced-toggle-row">
+            <span>Aerial Perspective</span>
+            <input
+              type="checkbox"
+              aria-label="Aerial Perspective"
+              checked={aerialPerspectiveEnabled}
+              disabled={!postProcessingEnabled}
+              onChange={(e) => setAerialPerspectiveEnabled(e.target.checked)}
+            />
+          </div>
+          <div className="advanced-toggle-row">
             <span>Lens Flare</span>
             <input
               type="checkbox"
               aria-label="Lens Flare"
               checked={lensFlareEnabled}
+              disabled={!postProcessingEnabled}
               onChange={(e) => setLensFlareEnabled(e.target.checked)}
             />
           </div>

@@ -27,10 +27,8 @@ import type { AtmosphereApi } from "@takram/three-atmosphere/r3f";
 import { LensFlareEffect } from "@react-three/postprocessing";
 import { BlendFunction } from "postprocessing";
 import { Color } from "three";
-import {
-  SceneEffectComposer,
-  syncEffectComposerCameraSettings,
-} from "./SceneEffectComposer";
+import { SceneEffectComposer } from "./SceneEffectComposer";
+import { syncEffectComposerCameraSettings } from "./syncEffectComposerCameraSettings";
 
 const TILE_ALBEDO_SCALE = 2 / Math.PI;
 
@@ -72,6 +70,9 @@ interface PostProcessingEffectsProps {
   readonly hasAtmosphere: boolean;
   readonly cloudCoverage: number;
   readonly lensFlareEnabled: boolean;
+  readonly postProcessingEnabled?: boolean;
+  readonly cloudsEnabled?: boolean;
+  readonly aerialPerspectiveEnabled?: boolean;
   readonly atmosphereRef: React.RefObject<AtmosphereApi | null>;
 }
 
@@ -79,6 +80,9 @@ export function PostProcessingEffects({
   hasAtmosphere,
   cloudCoverage,
   lensFlareEnabled,
+  postProcessingEnabled = true,
+  cloudsEnabled = true,
+  aerialPerspectiveEnabled = true,
   atmosphereRef,
 }: PostProcessingEffectsProps) {
   const camera = useThree((s) => s.camera);
@@ -164,24 +168,39 @@ export function PostProcessingEffects({
     if (uEnabled) uEnabled.value = lensFlareEnabled;
   }, [lensFlareEnabled]);
 
-  if (!hasAtmosphere) return null;
+  if (!hasAtmosphere || !postProcessingEnabled) return null;
 
   return (
-    <SceneEffectComposer ref={composerRef} multisampling={0} enableNormalPass>
-      <Clouds
-        qualityPreset="medium"
-        coverage={cloudCoverage}
-        localWeatherVelocity={WEATHER_VELOCITY}
-        shapeVelocity={SHAPE_VELOCITY}
-      />
-      <LightingMask selectionLayer={LIGHTING_MASK_LAYER} />
-      <AerialPerspective
-        sky
-        sunLight
-        skyLight
-        correctGeometricError
-        albedoScale={TILE_ALBEDO_SCALE}
-      />
+    <SceneEffectComposer
+      ref={composerRef}
+      multisampling={0}
+      enableNormalPass={false}
+    >
+      {cloudsEnabled ? (
+        <Clouds
+          qualityPreset="medium"
+          coverage={cloudCoverage}
+          localWeatherVelocity={WEATHER_VELOCITY}
+          shapeVelocity={SHAPE_VELOCITY}
+        />
+      ) : (
+        <></>
+      )}
+      {aerialPerspectiveEnabled ? (
+        <>
+          <LightingMask selectionLayer={LIGHTING_MASK_LAYER} />
+          <AerialPerspective
+            sky
+            sunLight
+            skyLight
+            correctGeometricError
+            reconstructNormal
+            albedoScale={TILE_ALBEDO_SCALE}
+          />
+        </>
+      ) : (
+        <></>
+      )}
       <primitive object={lensFlareEffect} />
       <ToneMapping mode={ToneMappingMode.AGX} exposure={4} />
       <Vignette
