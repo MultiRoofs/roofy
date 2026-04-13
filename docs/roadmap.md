@@ -238,6 +238,50 @@ Exit criteria:
 - A user can fly to any layer by clicking the crosshair icon ✓
 - Scene rendering uses R3F with proper lighting and shadows ✓
 
+## Milestone 7: CityGML 2.0/3.0 Support
+
+Goal: extend format support beyond CityJSON to include CityGML, the OGC standard XML encoding for 3D city models.
+
+### M7.1: CityGML Parser — Buildings
+
+Deliverables:
+
+- CityGML 2.0 and 3.0 XML parsing via fast-xml-parser (DOM-based)
+- Automatic version detection from namespace URIs
+- Semantic surface extraction (RoofSurface, WallSurface, GroundSurface, etc.)
+- Fallback geometry extraction from lod*Solid/lod*MultiSurface for objects without semantic surfaces
+- LoD detection from element names (lod1Solid → "1", lod2MultiSurface → "2")
+- CRS extraction and normalization to OGC URI format
+- Lenient parsing: skips malformed elements, logs warnings
+- File detection for .gml and .citygml extensions
+- Local file upload and remote URL loading
+
+Status: Complete.
+
+Current limitations (documented for future work):
+
+- **Building types only**: Only Building and BuildingPart are parsed. Other CityGML types (Transportation, Vegetation, WaterBody, LandUse, Relief, CityFurniture) will be added in M7.2.
+- **DOM-based parser**: Uses fast-xml-parser which loads the entire XML document into memory. For files >100MB, a SAX streaming parser (e.g. sax-wasm) should be implemented.
+- **XLink resolution**: Solid geometry that uses xlink:href references to polygons defined elsewhere is skipped. Only inline polygons in semantic surfaces are extracted.
+- **No DuckDB integration**: CityGML data is not imported into the DuckDB analytics engine (CityJSON only for now).
+- **Axis order**: Coordinates are passed through as-is, relying on CRS metadata. No axis-order normalization for CRS with lat/lon order.
+
+### M7.2: Non-Building CityGML Types (Planned)
+
+Deliverables:
+
+- Transportation, Vegetation, WaterBody, LandUse, Relief, CityFurniture parsing
+- Extended semantic surface type mapping
+- Object type filtering in the layer panel
+
+### M7.3: Streaming Parser for Large Files (Planned)
+
+Deliverables:
+
+- SAX-based streaming parser (sax-wasm) for CityGML files >100MB
+- Progress reporting during parse
+- Memory-efficient incremental object emission
+
 ## Cross-Cutting Workstreams
 
 - Data quality and semantic assumptions

@@ -26,5 +26,6 @@ export function detectEncoding(nameOrUrl: string): CityModelEncoding {
   const p = cleanPath(nameOrUrl);
   if (p.endsWith(".city.jsonl") || p.endsWith(".jsonl")) return "cityjsonseq";
   if (p.endsWith(".fcb")) return "flatcitybuf";
+  if (p.endsWith(".gml") || p.endsWith(".citygml")) return "citygml";
   return "cityjson";
 }

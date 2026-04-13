@@ -27,6 +27,7 @@
     "@takram/three-clouds": "^0.7.4",
     "@takram/three-geospatial": "latest",
     "3d-tiles-renderer": "^0.4.24",
+    "fast-xml-parser": "^5.5.12",
     "postprocessing": "^6.39.0",
     "proj4": "^2.20.8",
     "react": "latest",

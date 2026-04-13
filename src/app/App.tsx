@@ -129,10 +129,15 @@ export function App({
     void (async () => {
       let loaded = false;
 
-      // Try extension reader for URL models
+      // Try extension reader for URL models (CityGML not supported by DuckDB extension)
       if (activeLayer.modelRef.type === "url" && extensionLoaded) {
         const encoding = detectEncoding(activeLayer.modelRef.url);
-        loaded = await loadModelIntoDuckDB(activeLayer.modelRef.url, encoding);
+        if (encoding !== "citygml") {
+          loaded = await loadModelIntoDuckDB(
+            activeLayer.modelRef.url,
+            encoding,
+          );
+        }
       }
 
       // Fall back to in-memory loading (works for file and URL models)
@@ -552,7 +557,8 @@ export function App({
         <h1>Rooftop analysis starts here.</h1>
         <p className="summary">
           Drop a file or load from a URL. Supports <code>.city.json</code>,{" "}
-          <code>.city.jsonl</code>, and <code>.fcb</code>.
+          <code>.city.jsonl</code>, <code>.fcb</code>, and <code>.gml</code>{" "}
+          (CityGML).
         </p>
       </div>
 
@@ -561,13 +567,13 @@ export function App({
         onDrop={handleDrop}
         onDragOver={(e) => e.preventDefault()}
       >
-        <p>Drop a CityJSON, CityJSONSeq, or FlatCityBuf file here</p>
+        <p>Drop a CityJSON, CityJSONSeq, FlatCityBuf, or CityGML file here</p>
         <p className="drop-or">or</p>
         <label className="file-label">
           Browse files
           <input
             type="file"
-            accept=".json,.city.json,.jsonl,.city.jsonl,.fcb"
+            accept=".json,.city.json,.jsonl,.city.jsonl,.fcb,.gml,.citygml"
             onChange={handleInputChange}
             hidden
           />

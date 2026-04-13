@@ -2,6 +2,7 @@ export const CITYMODEL_ENCODING_PRIORITY = [
   "cityjson",
   "cityjsonseq",
   "flatcitybuf",
+  "citygml",
 ] as const;
 
 export type CityModelEncoding = (typeof CITYMODEL_ENCODING_PRIORITY)[number];

@@ -202,7 +202,7 @@ export function LayerPanel({
           <input
             ref={fileInputRef}
             type="file"
-            accept=".json,.city.json,.jsonl,.city.jsonl,.fcb"
+            accept=".json,.city.json,.jsonl,.city.jsonl,.fcb,.gml,.citygml"
             onChange={handleFileInput}
             hidden
           />

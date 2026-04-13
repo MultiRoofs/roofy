@@ -11,6 +11,7 @@ import type { HttpClient } from "../../platform/types";
 import { parseCityJSON } from "./cityjson/parseCityJSON";
 import { parseCityJSONSeq } from "./cityjsonseq/parseCityJSONSeq";
 import { loadFlatCityBuf } from "./flatcitybuf/loadFlatCityBuf";
+import { parseCityGML } from "./citygml/parseCityGML";
 import { detectEncoding } from "./detectEncoding";
 
 /**
@@ -21,6 +22,10 @@ export function parseText(nameOrUrl: string, text: string): CityModel {
 
   if (encoding === "cityjsonseq") {
     return parseCityJSONSeq(text);
+  }
+
+  if (encoding === "citygml") {
+    return parseCityGML(text);
   }
 
   let json: CityJSONRoot;
@@ -110,6 +115,10 @@ export async function loadFromUrl(
 
   if (encoding === "cityjsonseq") {
     return parseCityJSONSeq(text);
+  }
+
+  if (encoding === "citygml") {
+    return parseCityGML(text);
   }
 
   let json: CityJSONRoot;

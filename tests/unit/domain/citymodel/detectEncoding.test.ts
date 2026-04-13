@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { describe, it, expect } from "vitest";
 import { detectEncoding } from "../../../../src/domain/citymodel/detectEncoding";
 
 describe("detectEncoding", () => {
@@ -48,11 +48,27 @@ describe("detectEncoding", () => {
     ).toBe("cityjson");
   });
 
+  // CityGML
+  it("detects .gml as citygml", () => {
+    expect(detectEncoding("buildings.gml")).toBe("citygml");
+  });
+
+  it("detects .citygml as citygml", () => {
+    expect(detectEncoding("buildings.citygml")).toBe("citygml");
+  });
+
+  it("handles CityGML URLs", () => {
+    expect(
+      detectEncoding("https://example.com/data/buildings.gml?token=abc"),
+    ).toBe("citygml");
+  });
+
   // Case insensitivity
   it("is case-insensitive", () => {
     expect(detectEncoding("Model.CITY.JSON")).toBe("cityjson");
     expect(detectEncoding("Data.JSONL")).toBe("cityjsonseq");
     expect(detectEncoding("Buildings.FCB")).toBe("flatcitybuf");
+    expect(detectEncoding("Buildings.GML")).toBe("citygml");
   });
 
   // Edge cases
