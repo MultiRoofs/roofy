@@ -22,5 +22,5 @@
       "node"
     ]
   },
-  "include": ["src", "tests", "vitest.setup.ts"]
+  "include": ["src"]
 }

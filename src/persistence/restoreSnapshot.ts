@@ -14,7 +14,7 @@ export function restoreSnapshot(snapshot: ProjectSnapshot): ViewState {
   // Restore pick mode (clear selection — it's transient)
   useSelectionStore.setState({
     mode: snapshot.pickMode,
-    selection: null,
+    selections: [],
     hovered: null,
   });
 
