@@ -942,6 +942,10 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
           makeDefault
           enableDamping
           dampingFactor={0.1}
+          zoomSpeed={1.2}
+          panSpeed={1.5}
+          minDistance={2}
+          zoomToCursor
           enabled={toolMode !== "box-select"}
         />
 
