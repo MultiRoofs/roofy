@@ -2,6 +2,7 @@ import { defineConfig } from "vite-plus";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
+  base: process.env.BASE_PATH || "/",
   staged: {
     "*": "vp check --fix",
   },
