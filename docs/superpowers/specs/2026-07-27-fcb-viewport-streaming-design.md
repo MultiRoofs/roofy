@@ -222,15 +222,46 @@ thread.
 ```
 
 **What crosses the boundary.** Geometry goes as transferable `Float32Array`s
-(zero-copy). Per object we send a compact record — `id`, `type`, `attributes`,
-`bbox`, `lod`, and precomputed roof metrics — never raw surface rings.
+(zero-copy). Per object we send a compact record — never raw surface rings by
+default:
 
-This is affordable precisely because colorization moved into the worker. With
-`buildRuleColors` and `computeRoofMetrics` running worker-side, **nothing on the
-main thread needs per-surface geometry**: highlighting uses the picking index and
-the existing buffer, the inspector uses attributes, stats use attributes plus
-metrics. That invariant must be verified during planning — if a consumer does
-need rings, it either moves into the worker or the payload grows.
+```ts
+interface ObjectRecord {
+  id: string
+  objectType: string
+  attributes: Record<string, unknown>
+  bbox: BBox3
+  lod: string | null
+  surfaceCount: number             // duckdb.ts:198, TablePanel.tsx:390
+  roofMetrics: RoofMetrics[]       // one per RoofSurface — computeStats needs
+                                   // only type + metrics, never the rings
+}
+// per tile, alongside the records:
+surfaceAttrKeys: string[]          // RuleBuilderTab.tsx:407 needs keys, not values
+```
+
+An audit of every consumer (not an assumption — `grep -rn '\.surfaces'`) shows
+two that genuinely need raw ring geometry:
+
+| Consumer                                  | Needs                                | Resolution        |
+| ----------------------------------------- | ------------------------------------ | ----------------- |
+| `AnalysisTab.tsx:31,89,149`               | `surface.rings[0]` for solar scoring | on-demand         |
+| `InspectorPanel.tsx:188,363`              | Surfaces tab iterates rings          | on-demand         |
+| `computeStats.ts:74,123`                  | surface `type` + `RoofMetrics`       | `roofMetrics[]`   |
+| `duckdb.ts:198`, `TablePanel.tsx:390,420` | `surfaces.length`                    | `surfaceCount`    |
+| `RuleBuilderTab.tsx:407`                  | surface attribute _keys_             | `surfaceAttrKeys` |
+| `layerStore.ts:65` `computeAvailableLods` | LoD strings                          | `lodsSeen`        |
+| `derived.ts:14,26,37`                     | rings, via the two tabs above        | on-demand         |
+
+Both ring consumers operate on **one selected object**, so rings are fetched
+on demand rather than shipped for every feature:
+
+```ts
+{ type:'objectSurfaces', id, objectId }  →  { type:'surfaces', id, surfaces }
+```
+
+That keeps the bulk payload compact while leaving the inspector fully functional.
+The worker retains the parsed `CityModel` per resident tile to serve these.
 
 Rule edits do not refetch. The client posts `recolor` with the resident keys; the
 worker recomputes and returns colour arrays.
@@ -290,11 +321,31 @@ mode toggle; in `auto` the dropdown becomes a read-out ("near 2.2 / far 1.2").
 The origin is pinned once from the **header extent centre** — never from loaded
 features, which change constantly.
 
-Streaming tiles use **tile-local vertices** with `mesh.position = tileCentre −
-sceneOrigin`. A rebase is then an O(tiles) position update rather than O(vertices)
-re-triangulation. Float32 carries ~7 significant digits, so beyond roughly
-50–100 km from the origin the ULP grows into visible jitter and z-fighting; a
-rebase triggers only on crossing that threshold.
+Streaming tiles use **tile-local vertices** plus a per-mesh position offset, so a
+rebase is an O(tiles) position update rather than O(vertices) re-triangulation.
+
+**The offset must be rotated.** Three.js composes `matrixWorld = T(P)·R`, and the
+city mesh already carries `rotation.x = -π/2` (`CitySceneR3F.tsx:467`). So the
+position is applied in _world_ space, after the rotation — a raw source-CRS
+difference would place every tile wrong:
+
+```
+world = P + R·v ,  where  R·v = (v.x, v.z, −v.y)
+
+want:  world = (srcX−ox, srcZ−oz, −(srcY−oy))
+with:  v     = (srcX−tcx, srcY−tcy, srcZ−tcz)
+
+⇒  P = R·(tileCentre − sceneOrigin)
+     = (dx, dz, −dy)   for d = tileCentre − sceneOrigin in source CRS
+```
+
+So `mesh.position = (d.x, d.z, −d.y)`, **not** `d` componentwise. `tileGrid`
+exposes this as `meshOffset(tileCentre, sceneOrigin)` so the sign convention lives
+in one tested place rather than at each call site.
+
+Float32 carries ~7 significant digits, so beyond roughly 50–100 km from the origin
+the ULP grows into visible jitter and z-fighting; a rebase triggers only on
+crossing that threshold.
 
 `buildCityMeshArrays` serves both paths unchanged — static layers pass the scene
 origin and leave `mesh.position` at zero, tiles pass the tile centre. No
@@ -353,7 +404,10 @@ lives:
 
 - `tileGrid` — key/bbox round-trip, `keysCovering` at level boundaries,
   `children`/`parent` inverses, ownership by bbox centre including the straddling
-  case.
+  case, and `meshOffset` sign convention (§10): a tile built with tile-local
+  vertices plus its offset must land on exactly the same world coordinates as the
+  same features built through the static whole-model path. This is the regression
+  test for the rotation bug and is worth writing first.
 - `viewportFootprint` — top-down camera gives the expected rectangle; tilted
   camera clamps at `T_MAX`; camera aimed at or above the horizon does not produce
   an infinite or NaN footprint; camera below `groundY`.
