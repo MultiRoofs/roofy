@@ -1,13 +1,17 @@
 /**
  * Builds a rule-colorized Float32Array from model + rules.
  *
- * Iterates all vertices in the geometry. For RoofSurface vertices,
- * evaluates rules and writes the matched color. For non-roof vertices,
- * copies from baseColors. Returns a new Float32Array that serves as
- * the restore baseline for the highlight layer.
+ * Iterates all vertices. For RoofSurface vertices, evaluates rules and
+ * writes the matched color. For non-roof vertices, copies from baseColors.
+ * Returns a new Float32Array that serves as the restore baseline for the
+ * highlight layer.
+ *
+ * The array-based core (`buildRuleColorsFromArrays`) contains no Three.js
+ * DOM/GPU types, so it can run inside a Web Worker. `buildRuleColors` is a
+ * thin wrapper that reads the two index attributes off a `BufferGeometry`
+ * and delegates, preserving the static (main-thread) path's signature.
  */
 
-import { Color } from "three";
 import type { BufferGeometry } from "three";
 import type { CityModel } from "../domain/citymodel/types";
 import { computeRoofMetrics } from "../domain/roofMetrics/metrics";
@@ -15,37 +19,64 @@ import { matchRule } from "../features/rules/evaluate";
 import type { Rule } from "../features/rules/types";
 import type { PickingIndex } from "./buildCityMesh";
 
+type RGB = readonly [number, number, number];
+
+function srgbChannelToLinear(c: number): number {
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+/**
+ * Matches three.Color's sRGB → Linear-sRGB conversion (ColorManagement on).
+ * NOT hex/255 — see the parity test in ruleColorsWorkerSafe.test.ts.
+ */
+export function srgbHexToLinear(hex: string): RGB {
+  const h = hex.startsWith("#") ? hex.slice(1) : hex;
+  const n = parseInt(h, 16);
+  return [
+    srgbChannelToLinear(((n >> 16) & 255) / 255),
+    srgbChannelToLinear(((n >> 8) & 255) / 255),
+    srgbChannelToLinear((n & 255) / 255),
+  ];
+}
+
+const linearCache = new Map<string, RGB>();
+function cachedLinear(hex: string): RGB {
+  let c = linearCache.get(hex);
+  if (!c) {
+    c = srgbHexToLinear(hex);
+    linearCache.set(hex, c);
+  }
+  return c;
+}
+
 /**
  * Build a ruleColors array from the current rules and model.
  *
  * Returns null if no rules produced any color changes (all non-roof
  * or no matches), allowing the caller to fall back to baseColors.
+ *
+ * Worker-safe: consumes plain typed arrays, no BufferGeometry/Color.
  */
-export function buildRuleColors(
+export function buildRuleColorsFromArrays(
   model: CityModel,
-  geometry: BufferGeometry,
-  pickingIndex: PickingIndex,
+  objectIndices: Uint32Array,
+  surfaceIndices: Uint32Array,
+  objectKeys: ReadonlyArray<string>,
   rules: ReadonlyArray<Rule>,
   baseColors: Float32Array,
 ): Float32Array | null {
   const enabledRules = rules.filter((r) => r.enabled);
   if (enabledRules.length === 0) return null;
 
-  const objIdxAttr = geometry.getAttribute("objectIndex");
-  const surfIdxAttr = geometry.getAttribute("surfaceIndex");
-  if (!objIdxAttr || !surfIdxAttr) return null;
-
   const result = Float32Array.from(baseColors);
   let anyChange = false;
 
-  // Cache: object index → object data, surface metrics
-  const colorCache = new Map<string, Color | null>();
+  // Cache: "objIdx:surfIdx" → resolved linear-sRGB color, or null (no match)
+  const colorCache = new Map<string, RGB | null>();
 
-  const vertexCount = objIdxAttr.count;
-
-  for (let v = 0; v < vertexCount; v++) {
-    const objIdx = objIdxAttr.getX(v);
-    const surfIdx = surfIdxAttr.getX(v);
+  for (let v = 0; v < objectIndices.length; v++) {
+    const objIdx = objectIndices[v]!;
+    const surfIdx = surfaceIndices[v]!;
     const cacheKey = `${objIdx}:${surfIdx}`;
 
     let ruleColor = colorCache.get(cacheKey);
@@ -54,7 +85,7 @@ export function buildRuleColors(
         objIdx,
         surfIdx,
         model,
-        pickingIndex,
+        { layerId: "", objectKeys },
         enabledRules,
       );
       colorCache.set(cacheKey, ruleColor);
@@ -62,9 +93,9 @@ export function buildRuleColors(
 
     if (ruleColor) {
       const base = v * 3;
-      result[base] = ruleColor.r;
-      result[base + 1] = ruleColor.g;
-      result[base + 2] = ruleColor.b;
+      result[base] = ruleColor[0];
+      result[base + 1] = ruleColor[1];
+      result[base + 2] = ruleColor[2];
       anyChange = true;
     }
   }
@@ -73,17 +104,40 @@ export function buildRuleColors(
 }
 
 /**
- * Pre-parsed rule colors to avoid allocating new Color objects in tight loops.
+ * Build a ruleColors array from the current rules and model.
+ *
+ * Thin wrapper around `buildRuleColorsFromArrays` — reads the object/surface
+ * index attributes off the geometry and delegates. Kept for the static
+ * (main-thread) rendering path; see `buildRuleColorsFromArrays` for the
+ * worker-safe core.
  */
-const ruleColorCache = new Map<string, Color>();
+export function buildRuleColors(
+  model: CityModel,
+  geometry: BufferGeometry,
+  pickingIndex: PickingIndex,
+  rules: ReadonlyArray<Rule>,
+  baseColors: Float32Array,
+): Float32Array | null {
+  const objIdxAttr = geometry.getAttribute("objectIndex");
+  const surfIdxAttr = geometry.getAttribute("surfaceIndex");
+  if (!objIdxAttr || !surfIdxAttr) return null;
 
-function getCachedColor(hex: string): Color {
-  let c = ruleColorCache.get(hex);
-  if (!c) {
-    c = new Color(hex);
-    ruleColorCache.set(hex, c);
+  const vertexCount = objIdxAttr.count;
+  const objectIndices = new Uint32Array(vertexCount);
+  const surfaceIndices = new Uint32Array(vertexCount);
+  for (let v = 0; v < vertexCount; v++) {
+    objectIndices[v] = objIdxAttr.getX(v);
+    surfaceIndices[v] = surfIdxAttr.getX(v);
   }
-  return c;
+
+  return buildRuleColorsFromArrays(
+    model,
+    objectIndices,
+    surfaceIndices,
+    pickingIndex.objectKeys,
+    rules,
+    baseColors,
+  );
 }
 
 function resolveRuleColor(
@@ -92,7 +146,7 @@ function resolveRuleColor(
   model: CityModel,
   pickingIndex: PickingIndex,
   rules: ReadonlyArray<Rule>,
-): Color | null {
+): RGB | null {
   const objectId = pickingIndex.objectKeys[objIdx];
   if (!objectId) return null;
 
@@ -109,5 +163,5 @@ function resolveRuleColor(
   const colorHex = matchRule(attributes, metrics, rules);
   if (!colorHex) return null;
 
-  return getCachedColor(colorHex);
+  return cachedLinear(colorHex);
 }
