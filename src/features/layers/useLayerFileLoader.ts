@@ -8,7 +8,6 @@
 import { useCallback, useState } from "react";
 import type { CityModel } from "../../domain/citymodel/types";
 import { detectEncoding } from "../../domain/citymodel/detectEncoding";
-import { loadFlatCityBuf } from "../../domain/citymodel/flatcitybuf/loadFlatCityBuf";
 import {
   parseText,
   loadFromUrl,
@@ -36,12 +35,13 @@ export function useLayerFileLoader(): LayerFileLoader {
         let parsed: CityModel;
 
         if (detectEncoding(file.name) === "flatcitybuf") {
-          const blobUrl = URL.createObjectURL(file);
-          try {
-            parsed = await loadFlatCityBuf(blobUrl);
-          } finally {
-            URL.revokeObjectURL(blobUrl);
-          }
+          // FlatCityBuf files are loaded by viewport streaming, not as a
+          // single whole-file read, and that path is not wired up to this
+          // hook yet. The whole-file WASM reader this branch used to call
+          // has been removed.
+          throw new Error(
+            `FlatCityBuf (.fcb) files are loaded by viewport streaming, not as a single whole-file read, and that path is not wired up yet. Could not load "${file.name}".`,
+          );
         } else {
           const text = await file.text();
           parsed = parseText(file.name, text);

@@ -2757,6 +2757,24 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ### Task 17: Delete the whole-file path and fix its fallout
 
+> **PLAN CORRECTION (made during execution).** Task 8's `^0.3.0` dependency bump broke
+> `loadFlatCityBuf.ts` and `flatcitybufConversion.test.ts`, which depend on the removed
+> 0.2.0 WASM API — leaving `tsc -b` with 5 errors and one failing test file for the nine
+> tasks between 8 and 17. That would have made every intermediate "tsc clean / suite green"
+> gate meaningless.
+>
+> So part of this task was **pulled forward into Task 8**: deleting
+> `src/domain/citymodel/flatcitybuf/loadFlatCityBuf.ts`, deleting
+> `tests/unit/domain/citymodel/flatcitybuf/flatcitybufConversion.test.ts`, and making
+> `loadCityModel.ts` throw a clear error for `.fcb` instead of importing the deleted loader.
+>
+> **Still owned by this task:** `App.tsx` snapshot restore (`:245`) and share restore
+> (`:367`), `useLayerFileLoader.ts` routing to the streaming path, and the versioned
+> persistence schema. Do not re-attempt the deletions above — verify they are already gone.
+>
+> Lesson for future plans: a dependency bump and the removal of that dependency's consumers
+> must land in the same task, or the build is broken in between.
+
 **Files:**
 
 - Delete: `src/domain/citymodel/flatcitybuf/loadFlatCityBuf.ts`
