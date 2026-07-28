@@ -33,6 +33,9 @@ describe("AdvancedSettingsPanel", () => {
     fireEvent.click(screen.getByLabelText("Sun Shadows"));
     fireEvent.click(screen.getByLabelText("City Shadows"));
     fireEvent.click(screen.getByLabelText("Double Sided"));
+    fireEvent.change(screen.getByLabelText("City Material"), {
+      target: { value: "basic" },
+    });
     fireEvent.click(screen.getByLabelText("Google 3D Tiles"));
 
     expect(useRenderDebugStore.getState()).toMatchObject({
@@ -43,6 +46,7 @@ describe("AdvancedSettingsPanel", () => {
       cityShadowsEnabled: false,
       // cityDoubleSided defaults to true; clicking the checkbox toggles it off.
       cityDoubleSided: false,
+      cityMaterialMode: "basic",
     });
     expect(useTilesStore.getState().enabled).toBe(true);
   });
