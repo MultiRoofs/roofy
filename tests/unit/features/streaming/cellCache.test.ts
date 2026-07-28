@@ -77,13 +77,13 @@ describe("CellCache", () => {
 
   it("stops when pinned cells alone exceed budget; unpinned cells also present (T5-F3)", () => {
     const c = new CellCache<string>({ maxTriangles: 100, maxBytes: Infinity });
-    c.set("a", "A", S(80)); // pinned will exceed budget alone
+    c.set("a", "A", S(150)); // pinned alone exceeds budget
     c.pin("a");
-    c.set("b", "B", S(50)); // now 130 > 100
+    c.set("b", "B", S(50)); // now 200 > 100
     const evicted = c.evictToBudget();
     expect(evicted).toEqual(["b"]); // unpinned b is evicted
-    expect(c.has("a")).toBe(true); // pinned a stays, even though alone it's 80 < 100 but with b it was 130
-    expect(c.has("b")).toBe(false);
+    expect(c.has("a")).toBe(true); // pinned a stays even though it alone exceeds budget
+    expect(c.totals().triangles).toBe(150); // STILL over the 100 budget
   });
 
   it("get() returns undefined for missing keys (T5-F4)", () => {
@@ -96,12 +96,14 @@ describe("CellCache", () => {
     expect(c.get("nonexistent")).toBeUndefined();
   });
 
-  it("unpin() allows eviction of previously pinned cells (T5-F4)", () => {
+  it("replacement updates stats; unpin() allows eviction (T5-F4)", () => {
     const c = new CellCache<string>({ maxTriangles: 100, maxBytes: Infinity });
     c.set("a", "A", S(100));
+    c.set("a", "A2", S(50)); // replace with different stats
+    expect(c.totals().triangles).toBe(50); // not 150, proof of replacement
     c.pin("a");
-    c.unpin("a");
-    c.set("b", "B", S(100)); // now 200 > 100
+    c.unpin("a"); // unpin for eviction test
+    c.set("b", "B", S(100)); // now 150 > 100 (with a=50)
     const evicted = c.evictToBudget();
     expect(evicted).toEqual(["a"]); // a is now unpinned and oldest
     expect(c.has("a")).toBe(false);
