@@ -7,7 +7,7 @@
  * exit criterion: "A user can change datetime and clearly see the scene respond."
  */
 
-import { describe, it, expect, beforeEach } from "vite-plus/test";
+import { describe, it, expect, beforeEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { CityJSONRoot } from "../../src/domain/citymodel/cityjson/types";

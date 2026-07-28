@@ -6,7 +6,7 @@
  * which need to be converted to plain objects for parseCityJSON.
  */
 
-import { describe, it, expect, beforeAll } from "vite-plus/test";
+import { describe, it, expect, beforeAll } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { initSync, cjseqToCj } from "@cityjson/flatcitybuf";

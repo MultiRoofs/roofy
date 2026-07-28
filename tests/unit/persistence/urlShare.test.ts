@@ -2,7 +2,7 @@
  * Unit tests for URL share state codec.
  */
 
-import { describe, it, expect } from "vite-plus/test";
+import { describe, it, expect } from "vitest";
 import {
   encodeShareState,
   decodeShareState,

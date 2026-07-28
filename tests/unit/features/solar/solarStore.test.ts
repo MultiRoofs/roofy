@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vite-plus/test";
+import { describe, it, expect, beforeEach } from "vitest";
 import {
   parseEpsgCode,
   sunDirectionThreeJs,

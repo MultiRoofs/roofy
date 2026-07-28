@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import {
   CITYMODEL_ENCODING_PRIORITY,
   getPreferredCityModelEncoding,
@@ -11,6 +11,7 @@ describe("CITYMODEL_ENCODING_PRIORITY", () => {
       "cityjson",
       "cityjsonseq",
       "flatcitybuf",
+      "citygml",
     ]);
   });
 });

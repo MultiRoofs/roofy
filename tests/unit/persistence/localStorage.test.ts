@@ -5,7 +5,7 @@
  * via beforeEach clear.
  */
 
-import { describe, it, expect, beforeEach } from "vite-plus/test";
+import { describe, it, expect, beforeEach } from "vitest";
 import { LocalStorageProjectStateStore } from "../../../src/persistence/localStorage";
 import type { ProjectSnapshot } from "../../../src/persistence/types";
 

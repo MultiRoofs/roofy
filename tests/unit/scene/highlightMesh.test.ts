@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { describe, it, expect } from "vitest";
 import { BufferAttribute, BufferGeometry, Color } from "three";
 import {
   applyHighlight,
@@ -69,7 +69,7 @@ describe("applyHighlight", () => {
     applyHighlight(
       geometry,
       baseColors,
-      { kind: "object", layerId: "test-layer", objectId: "b1" },
+      [{ kind: "object", layerId: "test-layer", objectId: "b1" }],
       null,
       pickingIndex,
     );
@@ -90,7 +90,7 @@ describe("applyHighlight", () => {
     applyHighlight(
       geometry,
       baseColors,
-      null,
+      [],
       { kind: "object", layerId: "test-layer", objectId: "b2" },
       pickingIndex,
     );
@@ -109,7 +109,7 @@ describe("applyHighlight", () => {
     applyHighlight(
       geometry,
       baseColors,
-      { kind: "object", layerId: "test-layer", objectId: "b1" },
+      [{ kind: "object", layerId: "test-layer", objectId: "b1" }],
       { kind: "object", layerId: "test-layer", objectId: "b1" },
       pickingIndex,
     );
@@ -122,7 +122,7 @@ describe("applyHighlight", () => {
   it("does nothing when both selection and hovered are null", () => {
     const { geometry, baseColors, pickingIndex } = makeTwoObjectGeometry();
 
-    applyHighlight(geometry, baseColors, null, null, pickingIndex);
+    applyHighlight(geometry, baseColors, [], null, pickingIndex);
 
     const colorAttr = geometry.getAttribute("color");
     // Should match base colors exactly
@@ -157,12 +157,14 @@ describe("applyHighlight", () => {
     applyHighlight(
       geometry,
       baseColors,
-      {
-        kind: "surface",
-        layerId: "test-layer",
-        objectId: "b1",
-        surfaceIndex: 1,
-      },
+      [
+        {
+          kind: "surface",
+          layerId: "test-layer",
+          objectId: "b1",
+          surfaceIndex: 1,
+        },
+      ],
       null,
       pickingIndex,
     );
@@ -183,7 +185,7 @@ describe("clearHighlight", () => {
     applyHighlight(
       geometry,
       baseColors,
-      { kind: "object", layerId: "test-layer", objectId: "b1" },
+      [{ kind: "object", layerId: "test-layer", objectId: "b1" }],
       null,
       pickingIndex,
     );
