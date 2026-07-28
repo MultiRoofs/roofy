@@ -17,6 +17,10 @@ export function chooseLevel(
   grid: Grid,
   footprintBBox: [number, number, number, number],
 ): number | null {
+  const [minX, minY, maxX, maxY] = footprintBBox;
+  // Reject degenerate footprints with zero or negative extent (T4-F2)
+  if (maxX <= minX || maxY <= minY) return null;
+
   for (let level = 0; level <= grid.maxLevel; level++) {
     const n = keysCovering(grid, footprintBBox, level).length;
     if (n >= MIN_COVER_CELLS) return n <= MAX_COVER_CELLS ? level : null;
@@ -28,7 +32,18 @@ export function chooseLevel(
 export function buildLadder(observed: ReadonlyArray<string | null>): string[] {
   const set = new Set<string>();
   for (const l of observed) if (l !== null) set.add(l);
-  return [...set].sort((a, b) => Number(a) - Number(b));
+  return [...set].sort((a, b) => {
+    // Numeric labels first, sorted numerically; then non-numeric, sorted lexicographically (T4-F1)
+    const numA = Number(a);
+    const numB = Number(b);
+    const aIsNum = !isNaN(numA);
+    const bIsNum = !isNaN(numB);
+
+    if (aIsNum && bIsNum) return numA - numB;
+    if (aIsNum) return -1; // numeric before non-numeric
+    if (bIsNum) return 1;
+    return a.localeCompare(b); // both non-numeric: lexicographic
+  });
 }
 
 export function lodForCellSize(
