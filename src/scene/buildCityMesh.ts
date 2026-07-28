@@ -175,7 +175,29 @@ export function buildCityMeshArrays(
         // non-indexed (no vertex sharing across triangles), so this exactly
         // reproduces what BufferGeometry.computeVertexNormals() computes:
         // normal = normalize(cross(v2 - v1, v0 - v1)).
-        const [nx, ny, nz] = computeFaceNormal(v0, v1, v2);
+        //
+        // Critically, this must be derived from the values just written
+        // into posArray (already rounded to Float32), NOT from the
+        // double-precision v0/v1/v2. computeVertexNormals() reads from the
+        // Float32Array position attribute, so for a triangle whose
+        // double-precision area is tiny relative to its coordinate
+        // magnitude, Float32 rounding can collapse two vertices onto the
+        // same representable value and zero out the cross product — a
+        // real behavioral case that reading from v0/v1/v2 directly would
+        // miss (it would "see" the double-precision area and produce a
+        // non-zero normal where the old computeVertexNormals()-based
+        // implementation produced zero).
+        const [nx, ny, nz] = computeFaceNormal(
+          posArray[base]!,
+          posArray[base + 1]!,
+          posArray[base + 2]!,
+          posArray[base + 3]!,
+          posArray[base + 4]!,
+          posArray[base + 5]!,
+          posArray[base + 6]!,
+          posArray[base + 7]!,
+          posArray[base + 8]!,
+        );
         normalArray[base] = nx;
         normalArray[base + 1] = ny;
         normalArray[base + 2] = nz;
@@ -223,19 +245,43 @@ export function buildCityMeshArrays(
 
 /**
  * Flat face normal for a triangle, normalized to unit length (or the zero
- * vector for a degenerate/zero-area triangle). Uses the same vertex pairing
- * and cross-product order as `BufferGeometry.computeVertexNormals()`
- * (`cross(pC - pB, pA - pB)`) so results match bit-for-bit (within float
- * rounding) with what the old `computeVertexNormals()`-based implementation
- * produced for non-indexed geometry.
+ * vector for a degenerate/zero-area triangle — matching
+ * `Vector3.normalize()`'s `divideScalar(length() || 1)`, which leaves a
+ * zero-length vector as `(0,0,0)` rather than producing `NaN`).
+ *
+ * Takes the three vertices as plain numbers already read back from the
+ * Float32Array position buffer (see call site) — NOT double-precision
+ * coordinates — because `BufferGeometry.computeVertexNormals()` operates on
+ * the Float32-rounded position attribute. Uses the same vertex pairing and
+ * cross-product order as that function (`cross(pC - pB, pA - pB)`) so
+ * results match bit-for-bit (within float rounding) with what the old
+ * `computeVertexNormals()`-based implementation produced for non-indexed
+ * geometry, including the case where Float32 rounding collapses a
+ * double-precision-nondegenerate triangle to zero area.
  */
-function computeFaceNormal(v0: Vec3, v1: Vec3, v2: Vec3): Vec3 {
-  const cb = subtractVec3(v2, v1);
-  const ab = subtractVec3(v0, v1);
-  const n = crossVec3(cb, ab);
-  const length = Math.hypot(n[0], n[1], n[2]);
+function computeFaceNormal(
+  p0x: number,
+  p0y: number,
+  p0z: number,
+  p1x: number,
+  p1y: number,
+  p1z: number,
+  p2x: number,
+  p2y: number,
+  p2z: number,
+): Vec3 {
+  const cbx = p2x - p1x;
+  const cby = p2y - p1y;
+  const cbz = p2z - p1z;
+  const abx = p0x - p1x;
+  const aby = p0y - p1y;
+  const abz = p0z - p1z;
+  const nx = cby * abz - cbz * aby;
+  const ny = cbz * abx - cbx * abz;
+  const nz = cbx * aby - cby * abx;
+  const length = Math.hypot(nx, ny, nz);
   if (length === 0) return [0, 0, 0];
-  return [n[0] / length, n[1] / length, n[2] / length];
+  return [nx / length, ny / length, nz / length];
 }
 
 function triangulateSurface(
