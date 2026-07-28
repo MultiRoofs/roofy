@@ -7,7 +7,7 @@
  * "A user can load and inspect a sample city-model fixture end to end."
  */
 
-import { describe, it, expect } from "vite-plus/test";
+import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { CityJSONRoot } from "../../src/domain/citymodel/cityjson/types";
@@ -16,7 +16,7 @@ import {
   buildCityMesh,
   computeOriginOffset,
 } from "../../src/scene/buildCityMesh";
-import { resolveSelection } from "../../src/scene/usePickingControls";
+import { resolveSelection } from "../../src/scene/resolvePicking";
 import { applyHighlight, clearHighlight } from "../../src/scene/highlightMesh";
 
 // ---------------------------------------------------------------------------
@@ -139,8 +139,14 @@ describe("load-to-inspect pipeline", () => {
   });
 
   // Stage 3: Picking resolution
+  //
+  // resolveSelection is pick-mode-agnostic: it always resolves the concrete
+  // object + surface for the hit vertex. The active PickMode ("object" vs
+  // "surface") is applied by the caller (resolveFromEvent in
+  // CitySceneR3F.tsx) to decide whether to build an object-level or
+  // surface-level Selection from the PickResult.
   describe("picking resolution", () => {
-    it("resolves a vertex from the first object in object mode", () => {
+    it("resolves a vertex from the first object", () => {
       // Find the first vertex belonging to object index 0
       const objIdxAttr = meshResult.geometry.getAttribute("objectIndex");
       let vertexIdx = -1;
@@ -152,19 +158,17 @@ describe("load-to-inspect pipeline", () => {
       }
       expect(vertexIdx).toBeGreaterThanOrEqual(0);
 
-      const selection = resolveSelection(
-        vertexIdx,
+      const result = resolveSelection(
         meshResult.geometry,
         meshResult.pickingIndex,
-        "object",
+        vertexIdx,
       );
 
-      expect(selection).not.toBeNull();
-      expect(selection!.kind).toBe("object");
-      expect(selection!.objectId).toBe(meshResult.pickingIndex.objectKeys[0]);
+      expect(result).not.toBeNull();
+      expect(result!.objectId).toBe(meshResult.pickingIndex.objectKeys[0]);
     });
 
-    it("resolves a vertex from the last object in object mode", () => {
+    it("resolves a vertex from the last object", () => {
       const lastIdx = meshResult.pickingIndex.objectKeys.length - 1;
       const objIdxAttr = meshResult.geometry.getAttribute("objectIndex");
       let vertexIdx = -1;
@@ -176,20 +180,19 @@ describe("load-to-inspect pipeline", () => {
       }
       expect(vertexIdx).toBeGreaterThanOrEqual(0);
 
-      const selection = resolveSelection(
-        vertexIdx,
+      const result = resolveSelection(
         meshResult.geometry,
         meshResult.pickingIndex,
-        "object",
+        vertexIdx,
       );
 
-      expect(selection).not.toBeNull();
-      expect(selection!.objectId).toBe(
+      expect(result).not.toBeNull();
+      expect(result!.objectId).toBe(
         meshResult.pickingIndex.objectKeys[lastIdx],
       );
     });
 
-    it("resolves surface index in surface mode", () => {
+    it("resolves the surface index of the hit triangle", () => {
       // Find a vertex for object 0 with surfaceIndex > 0
       const objIdxAttr = meshResult.geometry.getAttribute("objectIndex");
       const surfIdxAttr = meshResult.geometry.getAttribute("surfaceIndex");
@@ -202,19 +205,15 @@ describe("load-to-inspect pipeline", () => {
       }
       expect(vertexIdx).toBeGreaterThanOrEqual(0);
 
-      const selection = resolveSelection(
-        vertexIdx,
+      const result = resolveSelection(
         meshResult.geometry,
         meshResult.pickingIndex,
-        "surface",
+        vertexIdx,
       );
 
-      expect(selection).not.toBeNull();
-      expect(selection!.kind).toBe("surface");
-      if (selection!.kind === "surface") {
-        expect(selection!.surfaceIndex).toBeGreaterThan(0);
-        expect(selection!.objectId).toBe(meshResult.pickingIndex.objectKeys[0]);
-      }
+      expect(result).not.toBeNull();
+      expect(result!.surfaceIndex).toBeGreaterThan(0);
+      expect(result!.objectId).toBe(meshResult.pickingIndex.objectKeys[0]);
     });
   });
 
@@ -227,7 +226,7 @@ describe("load-to-inspect pipeline", () => {
       applyHighlight(
         meshResult.geometry,
         meshResult.baseColors,
-        { kind: "object", layerId: "test-layer", objectId: firstObjectId },
+        [{ kind: "object", layerId: "test-layer", objectId: firstObjectId }],
         null,
         meshResult.pickingIndex,
       );

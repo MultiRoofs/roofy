@@ -6,7 +6,7 @@
  * and pickable mesh. This ensures format-agnostic downstream behavior.
  */
 
-import { describe, it, expect } from "vite-plus/test";
+import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseCityJSONSeq } from "../../src/domain/citymodel/cityjsonseq/parseCityJSONSeq";
@@ -14,7 +14,7 @@ import {
   buildCityMesh,
   computeOriginOffset,
 } from "../../src/scene/buildCityMesh";
-import { resolveSelection } from "../../src/scene/usePickingControls";
+import { resolveSelection } from "../../src/scene/resolvePicking";
 
 const fixturePath = path.resolve(
   import.meta.dirname!,
@@ -69,15 +69,14 @@ describe("CityJSONSeq load-to-inspect pipeline", () => {
       }
       expect(vertexIdx).toBeGreaterThanOrEqual(0);
 
-      const selection = resolveSelection(
-        vertexIdx,
+      const result = resolveSelection(
         meshResult.geometry,
         meshResult.pickingIndex,
-        "object",
+        vertexIdx,
       );
 
-      expect(selection).not.toBeNull();
-      expect(selection!.objectId).toBe("NL.IMBAG.Pand.0002");
+      expect(result).not.toBeNull();
+      expect(result!.objectId).toBe("NL.IMBAG.Pand.0002");
     });
   });
 
