@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { Group, PerspectiveCamera, Vector3 } from "three";
-import { viewportFootprint } from "../../../../src/features/streaming/viewportFootprint";
+import {
+  EPS,
+  viewportFootprint,
+} from "../../../../src/features/streaming/viewportFootprint";
 import { sceneToSource } from "../../../../src/features/streaming/sceneTransform";
 import {
   MAX_FOOTPRINT_SPAN_M,
@@ -167,6 +170,74 @@ describe("viewportFootprint", () => {
     // bbox on the near (ny=-1) side. referenceFootprint uses the documented
     // EPS=1e-6 independently, so this comparison catches that regression.
     expectBBoxCloseTo(f!.bbox, referenceFootprint(camera, 0, ORIGIN).bbox);
+  });
+
+  it("falls back to T_MAX_M — discarding a real, reachable intersection — when |dir.y| is smaller than EPS", () => {
+    // Round 1's "shallow EPS boundary" fixture used dir.y ≈ -1.4e-4, which is
+    // ~140x ABOVE EPS=1e-6 — it exercised the real-hit branch, not the
+    // EPS-excluded one this test targets. This fixture is built analytically
+    // (not by search) to land dir.y strictly inside (-EPS, 0): start from the
+    // exact pitch where the bottom-left corner's ray is horizontal (read off
+    // an identity camera's own unprojected direction, so no magic angle is
+    // hardcoded), then rotate a further 1e-7rad past it.
+    const identity = new PerspectiveCamera(50, 16 / 9, 1, 50000);
+    identity.updateMatrixWorld(true);
+    identity.updateProjectionMatrix();
+    const localDir = new Vector3(-1, -1, 0.5)
+      .unproject(identity)
+      .sub(identity.position)
+      .normalize();
+    // A pure rotation about the camera's local X axis leaves local X fixed
+    // and mixes local Y/Z; this corner's ray is exactly horizontal (dir.y=0)
+    // at pitch = atan2(localDir.y, localDir.z) from the identity pose.
+    const horizonPitch = Math.atan2(localDir.y, localDir.z);
+
+    // eye.y is deliberately sub-millimetre: with dir.y ~ -8e-8, that keeps
+    // the *true* algebraic intersection (~2502m, see below) well inside
+    // T_MAX_M=5000. That matters — if the true hit were larger than
+    // T_MAX_M, discarding it via the EPS guard and discarding it via the
+    // `tHit <= T_MAX_M` cap would be indistinguishable by output (both land
+    // on the same t=T_MAX_M). Keeping the true hit reachable is what makes
+    // this test actually prove the EPS branch fired, not just "something"
+    // capped it.
+    const camera = new PerspectiveCamera(50, 16 / 9, 1, 50000);
+    camera.position.set(0, 0.0002, 0);
+    camera.rotateX(horizonPitch + 1e-7);
+    camera.updateMatrixWorld(true);
+    camera.updateProjectionMatrix();
+    const eye = camera.getWorldPosition(new Vector3());
+    const dir = new Vector3(-1, -1, 0.5).unproject(camera).sub(eye).normalize();
+
+    // The fixture must actually land inside the EPS-excluded band — this is
+    // exactly the assertion whose absence let round 1's fixture silently
+    // drift out of the branch it claimed to cover.
+    expect(dir.y).toBeLessThan(0);
+    expect(dir.y).toBeGreaterThan(-EPS);
+
+    // The true algebraic intersection is finite AND well within T_MAX_M —
+    // it is a real, reachable ground hit that EPS discards anyway, purely
+    // because the denominator is too close to zero to trust.
+    const trueTHit = (0 - eye.y) / dir.y;
+    expect(Number.isFinite(trueTHit)).toBe(true);
+    expect(trueTHit).toBeGreaterThan(0);
+    expect(trueTHit).toBeLessThan(T_MAX_M);
+
+    const f = viewportFootprint(camera, 0, ORIGIN);
+    expect(f).not.toBeNull();
+    expectBBoxCloseTo(f!.bbox, referenceFootprint(camera, 0, ORIGIN).bbox);
+
+    // Directly confirm this corner's contribution used T_MAX_M, not
+    // trueTHit: bbox[0] (its governing extreme) must match a T_MAX_M-based
+    // world point, independent of the shared reference helper above. If the
+    // EPS guard were dropped, this corner would instead use trueTHit
+    // (~2502m) and bbox[0] would come out roughly half this magnitude.
+    const worldAtTMax: [number, number, number] = [
+      eye.x + dir.x * T_MAX_M,
+      eye.y + dir.y * T_MAX_M,
+      eye.z + dir.z * T_MAX_M,
+    ];
+    const expectedX0 = sceneToSource(worldAtTMax, ORIGIN, [0, 0, 0])[0];
+    expect(f!.bbox[0]).toBeCloseTo(expectedX0, 3);
   });
 
   it("refuses the footprint when it exceeds MAX_FOOTPRINT_SPAN_M instead of returning an oversized rectangle", () => {
