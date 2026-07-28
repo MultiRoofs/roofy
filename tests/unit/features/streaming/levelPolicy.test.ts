@@ -18,7 +18,7 @@ const grid = makeGrid([0, 0, 0, 10000, 10000, 30]); // rootCell 12800
 describe("chooseLevel", () => {
   it("picks the coarsest level giving at least MIN_COVER_CELLS (T4-F3)", () => {
     const level = chooseLevel(grid, [0, 0, 3200, 3200]);
-    expect(level).not.toBeNull();
+    expect(level).toBe(3); // Explicit assertion for the fixture
 
     // Verify the cover is within bounds
     const cover = keysCovering(grid, [0, 0, 3200, 3200], level!).length;
@@ -51,9 +51,10 @@ describe("chooseLevel", () => {
 
 describe("buildLadder", () => {
   it("sorts numeric labels numerically and non-numeric lexicographically (T4-F1, T4-F4)", () => {
-    // ["10", "2", "1.2", "abc"] should sort numerically as [1.2, 2, 10]
-    // then non-numeric "abc" after, not lexicographically as [1.2, 10, 2]
-    expect(buildLadder(["10", "2", "1.2", "abc"])).toEqual([
+    // Non-numeric label FIRST so implementations must disagree:
+    // Correct: ["1.2", "2", "10", "abc"]
+    // Broken (NaN sort): "abc" stays first, then numeric labels misorder
+    expect(buildLadder(["abc", "10", "2", "1.2"])).toEqual([
       "1.2",
       "2",
       "10",
