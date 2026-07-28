@@ -12,6 +12,7 @@ import { create } from "zustand";
 import SunCalc from "suncalc";
 import proj4 from "proj4";
 import type { BBox3 } from "../../domain/citymodel/types";
+import { ensureProjDef } from "../../domain/citymodel/crsProjDefs";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -125,37 +126,13 @@ export function computeSunPosition(dt: Date, latLon: LatLon): SunPosition {
 }
 
 /**
- * Known proj4 definition strings for common CRS used in CityJSON datasets.
- * proj4 includes WGS84 and a few others built-in, but national CRS
- * like RD New need explicit registration.
- */
-const RD_NEW_DEF =
-  "+proj=sterea +lat_0=52.15616055555555 +lon_0=5.38763888888889 +k=0.9999079 +x_0=155000 +y_0=463000 +ellps=bessel +towgs84=565.2369,50.0087,465.658,-0.40685733032239757,-0.3507326765425626,1.8703473836067956,4.0812 +units=m +no_defs";
-
-const KNOWN_PROJ4_DEFS: Record<number, string> = {
-  28992: RD_NEW_DEF, // EPSG:28992 — RD New (Netherlands) horizontal
-  7415: RD_NEW_DEF, // EPSG:7415 — compound CRS, horizontal component is RD New
-};
-
-function ensureProj4Def(epsgCode: number): boolean {
-  const key = `EPSG:${epsgCode}`;
-  if (proj4.defs(key)) return true; // already registered
-
-  const def = KNOWN_PROJ4_DEFS[epsgCode];
-  if (!def) return false;
-
-  proj4.defs(key, def);
-  return true;
-}
-
-/**
  * Reproject bbox center from source CRS to WGS84.
  */
 export function reprojectToLatLon(
   bbox: BBox3,
   epsgCode: number,
 ): LatLon | null {
-  if (!ensureProj4Def(epsgCode)) return null;
+  if (!ensureProjDef(epsgCode)) return null;
 
   const cx = (bbox[0] + bbox[3]) / 2;
   const cy = (bbox[1] + bbox[4]) / 2;
