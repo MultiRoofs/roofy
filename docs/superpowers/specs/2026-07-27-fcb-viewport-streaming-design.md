@@ -217,13 +217,13 @@ want.
 On the **first** `change`, abort any in-flight probe, fetch, and worker decode
 immediately — stale work must not compete with the interaction. Then:
 
-| Gate             | Constant                       | Behaviour                             |
-| ---------------- | ------------------------------ | ------------------------------------- |
-| Settle           | `SETTLE_MS = 350`              | fire 350 ms after the last `change`   |
-| Span cap         | `MAX_FOOTPRINT_SPAN_M = 20000` | short-circuit before probing          |
-| Move hysteresis  | `MOVE_FRAC = 0.2`              | skip unless centre moved >20% of span |
-| Scale hysteresis | `SCALE_FACTOR = 1.3`           | skip unless span changed ≥1.3×        |
-| Horizon clamp    | `T_MAX_M = 5000`               | §5                                    |
+| Gate             | Constant                      | Behaviour                             |
+| ---------------- | ----------------------------- | ------------------------------------- |
+| Settle           | `SETTLE_MS = 350`             | fire 350 ms after the last `change`   |
+| Span cap         | `MAX_FOOTPRINT_SPAN_M = 8000` | short-circuit before probing          |
+| Move hysteresis  | `MOVE_FRAC = 0.2`             | skip unless centre moved >20% of span |
+| Scale hysteresis | `SCALE_FACTOR = 1.3`          | skip unless span changed ≥1.3×        |
+| Horizon clamp    | `T_MAX_M = 5000`              | §5                                    |
 
 Both hysteresis gates are relative to the current span, so they track zoom
 automatically. **Both are bypassed** when the desired cover has holes or the
@@ -593,7 +593,7 @@ Per CLAUDE.md, all test imports come from `"vitest"`, never `"vite-plus/test"`.
 | `MOVE_FRAC`                | 0.2                     |
 | `SCALE_FACTOR`             | 1.3                     |
 | `T_MAX_M`                  | 5000                    |
-| `MAX_FOOTPRINT_SPAN_M`     | 20000                   |
+| `MAX_FOOTPRINT_SPAN_M`     | 8000                    |
 | `VIEWPORT_FEATURE_BUDGET`  | 20000 features          |
 | `RESIDENT_TRIANGLE_BUDGET` | 4,000,000               |
 | `RESIDENT_BYTE_BUDGET`     | 512 MiB (main + worker) |
@@ -604,6 +604,18 @@ Per CLAUDE.md, all test imports come from `"vitest"`, never `"vite-plus/test"`.
 
 All are provisional and must be tuned against `delft.fcb` and one large real
 dataset before they are treated as settled.
+
+**Constraint discovered during implementation:** `MAX_FOOTPRINT_SPAN_M` must stay
+**below `2 × T_MAX_M`**, or it can never fire. Every corner ray is clamped to
+`T_MAX_M`, so no two footprint points can be more than `2 × T_MAX_M` apart — a
+50,000-pose randomized probe measured a maximum span of 9999.869 m against
+`T_MAX_M = 5000`. The original 20000 was therefore dead code, and the "zoom in"
+refusal it was supposed to provide never existed. Retuning `T_MAX_M` requires
+revisiting this pairing.
+
+Note also that the span cap is only a cheap pre-filter. The honest "too far"
+decision is the feature-count probe in §4 — a 10 km² viewport over a dense city
+can hold millions of features while passing any span check.
 
 ## 18. Review history
 
