@@ -29,6 +29,21 @@ export interface CityMeshResult {
   readonly baseColors: Float32Array;
 }
 
+/**
+ * Plain-array output of the CityModel → mesh conversion, with no Three.js
+ * DOM/GPU types. Safe to construct inside a Web Worker; the caller is
+ * responsible for wrapping these into a BufferGeometry (see `buildCityMesh`).
+ */
+export interface CityMeshArrays {
+  readonly positions: Float32Array;
+  readonly normals: Float32Array;
+  readonly colors: Float32Array;
+  readonly objectIndices: Uint32Array;
+  readonly surfaceIndices: Uint32Array;
+  readonly objectKeys: string[];
+  readonly triangleCount: number;
+}
+
 interface SurfaceTriangulation {
   readonly vertices: ReadonlyArray<Vec3>;
   readonly triangles: ReadonlyArray<readonly [number, number, number]>;
@@ -38,9 +53,9 @@ interface SurfaceTriangulation {
  * Build a single merged BufferGeometry from all surfaces in a CityModel.
  * Vertex colors encode the semantic surface type.
  *
- * Uses a two-pass approach for large-model performance:
- * Pass 1: count total triangles to pre-allocate typed arrays.
- * Pass 2: write directly into typed arrays (no intermediate number[]).
+ * Thin wrapper around `buildCityMeshArrays` — see that function for the
+ * actual triangulation/coloring/normal logic (worker-safe, no Three.js
+ * DOM/GPU types).
  *
  * The geometry uses an origin offset to maintain float precision
  * for large coordinates. The returned offset should be applied
@@ -52,6 +67,49 @@ export function buildCityMesh(
   originOffset: Vec3 = [0, 0, 0],
   selectedLod: string | null = null,
 ): CityMeshResult {
+  const a = buildCityMeshArrays(model, layerId, originOffset, selectedLod);
+  const geometry = new BufferGeometry();
+  geometry.setAttribute("position", new BufferAttribute(a.positions, 3));
+  geometry.setAttribute("color", new BufferAttribute(a.colors, 3));
+  geometry.setAttribute("normal", new BufferAttribute(a.normals, 3));
+  geometry.setAttribute("objectIndex", new BufferAttribute(a.objectIndices, 1));
+  geometry.setAttribute(
+    "surfaceIndex",
+    new BufferAttribute(a.surfaceIndices, 1),
+  );
+
+  return {
+    geometry,
+    triangleCount: a.triangleCount,
+    pickingIndex: { layerId, objectKeys: a.objectKeys },
+    baseColors: Float32Array.from(a.colors),
+  };
+}
+
+/**
+ * Convert normalized CityModel surfaces into plain typed arrays: positions,
+ * per-triangle face normals, vertex colors, and picking indices.
+ *
+ * Uses a two-pass approach for large-model performance:
+ * Pass 1: count total triangles to pre-allocate typed arrays.
+ * Pass 2: write directly into typed arrays (no intermediate number[]).
+ *
+ * Normals are computed per-triangle (flat face normal) and written
+ * identically to all three of that triangle's vertices. Because the
+ * geometry is non-indexed (no vertex sharing across triangles), this is
+ * exactly what `BufferGeometry.computeVertexNormals()` produces: each
+ * vertex belongs to only one triangle, so the "accumulated" normal is
+ * just that triangle's own face normal, normalized.
+ *
+ * Contains no Three.js DOM/GPU types (no BufferGeometry/BufferAttribute),
+ * so it can run inside a Web Worker.
+ */
+export function buildCityMeshArrays(
+  model: CityModel,
+  layerId: string,
+  originOffset: Vec3 = [0, 0, 0],
+  selectedLod: string | null = null,
+): CityMeshArrays {
   const objectKeys: string[] = [];
   const triangulationCache = new Map<
     string,
@@ -77,9 +135,10 @@ export function buildCityMesh(
 
   // Pre-allocate typed arrays (avoids dynamic array growth and copy)
   const posArray = new Float32Array(vertexCount * 3);
+  const normalArray = new Float32Array(vertexCount * 3);
   const colorArray = new Float32Array(vertexCount * 3);
-  const objIdxArray = new Int32Array(vertexCount);
-  const surfIdxArray = new Int32Array(vertexCount);
+  const objIdxArray = new Uint32Array(vertexCount);
+  const surfIdxArray = new Uint32Array(vertexCount);
 
   // Pass 2: write directly into typed arrays
   let writeIdx = 0;
@@ -112,6 +171,21 @@ export function buildCityMesh(
         posArray[base + 7] = v2[1] - originOffset[1];
         posArray[base + 8] = v2[2] - originOffset[2];
 
+        // Flat face normal, written to all three vertices. The geometry is
+        // non-indexed (no vertex sharing across triangles), so this exactly
+        // reproduces what BufferGeometry.computeVertexNormals() computes:
+        // normal = normalize(cross(v2 - v1, v0 - v1)).
+        const [nx, ny, nz] = computeFaceNormal(v0, v1, v2);
+        normalArray[base] = nx;
+        normalArray[base + 1] = ny;
+        normalArray[base + 2] = nz;
+        normalArray[base + 3] = nx;
+        normalArray[base + 4] = ny;
+        normalArray[base + 5] = nz;
+        normalArray[base + 6] = nx;
+        normalArray[base + 7] = ny;
+        normalArray[base + 8] = nz;
+
         colorArray[base] = color.r;
         colorArray[base + 1] = color.g;
         colorArray[base + 2] = color.b;
@@ -136,19 +210,32 @@ export function buildCityMesh(
     objectIdx++;
   }
 
-  const geometry = new BufferGeometry();
-  geometry.setAttribute("position", new BufferAttribute(posArray, 3));
-  geometry.setAttribute("color", new BufferAttribute(colorArray, 3));
-  geometry.setAttribute("objectIndex", new BufferAttribute(objIdxArray, 1));
-  geometry.setAttribute("surfaceIndex", new BufferAttribute(surfIdxArray, 1));
-  geometry.computeVertexNormals();
-
   return {
-    geometry,
+    positions: posArray,
+    normals: normalArray,
+    colors: colorArray,
+    objectIndices: objIdxArray,
+    surfaceIndices: surfIdxArray,
+    objectKeys,
     triangleCount: totalTriangles,
-    pickingIndex: { layerId, objectKeys },
-    baseColors: Float32Array.from(colorArray),
   };
+}
+
+/**
+ * Flat face normal for a triangle, normalized to unit length (or the zero
+ * vector for a degenerate/zero-area triangle). Uses the same vertex pairing
+ * and cross-product order as `BufferGeometry.computeVertexNormals()`
+ * (`cross(pC - pB, pA - pB)`) so results match bit-for-bit (within float
+ * rounding) with what the old `computeVertexNormals()`-based implementation
+ * produced for non-indexed geometry.
+ */
+function computeFaceNormal(v0: Vec3, v1: Vec3, v2: Vec3): Vec3 {
+  const cb = subtractVec3(v2, v1);
+  const ab = subtractVec3(v0, v1);
+  const n = crossVec3(cb, ab);
+  const length = Math.hypot(n[0], n[1], n[2]);
+  if (length === 0) return [0, 0, 0];
+  return [n[0] / length, n[1] / length, n[2] / length];
 }
 
 function triangulateSurface(
