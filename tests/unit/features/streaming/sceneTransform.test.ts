@@ -15,7 +15,7 @@ describe("sceneTransform", () => {
   });
 
   it("round-trips with a non-zero offset on all three axes", () => {
-    const cellCentre = [110, 220, 10] as const;
+    const cellCentre = [110, 220, 15] as const;
     const off = meshOffset(cellCentre, ORIGIN);
     const src = [113, 217, 14] as const;
     const world = sourceToScene(src, ORIGIN, off);
