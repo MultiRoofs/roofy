@@ -29,7 +29,10 @@ export function viewportFootprint(
   groundY: number,
   origin: Vec3,
 ): Footprint | null {
-  const eye = camera.position;
+  // unproject() returns world-space coordinates, so the ray origin must be
+  // the camera's world position too — camera.position is local and disagrees
+  // with it as soon as the camera is parented under a transformed group.
+  const eye = camera.getWorldPosition(new Vector3());
   const pts: Array<[number, number]> = [];
 
   for (const [nx, ny] of NDC_CORNERS) {
@@ -64,6 +67,12 @@ export function viewportFootprint(
   return {
     bbox,
     span,
-    centre: [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2],
+    // Overflow-safe midpoint: (a + b) / 2 can overflow to Infinity when a and
+    // b are large same-sign finite values, even though the true midpoint is
+    // representable.
+    centre: [
+      bbox[0] + (bbox[2] - bbox[0]) / 2,
+      bbox[1] + (bbox[3] - bbox[1]) / 2,
+    ],
   };
 }
