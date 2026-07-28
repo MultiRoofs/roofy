@@ -59,11 +59,22 @@ export interface AdmissionError {
  *     `"urn:ogc:def:crs:EPSG:<version>:<code>"`.
  * A form not on this list — however plausible-looking — returns `null`
  * rather than being guessed at with a looser pattern.
+ *
+ * The `<version>` slot is constrained to `\d+`/`\d*` (URN allows the empty
+ * version FlatCityBuf's own writer emits, e.g. "EPSG::28992"), NOT to
+ * "anything but the delimiter". A negated class like `[^/]+` or `[^:]*`
+ * matches a `?query`, a `#fragment`, a bare space, or an embedded `\n` just
+ * as happily as a real version number — which would let
+ * ".../EPSG/0?dataset=x/28992" or "urn:...:EPSG:0\nspoof:28992" smuggle a
+ * registered code past the anchors. `header.fbs` stores the version as an
+ * actual integer field (not free text), so `\d+`/`\d*` is not just safer,
+ * it's the correct type for what this slot represents. A `\n` needs no
+ * separate guard beyond that: `\d` never matches it, under any flag.
  */
 const EPSG_PATTERNS: readonly RegExp[] = [
   /^EPSG:(\d+)$/i,
-  /^urn:ogc:def:crs:EPSG:[^:]*:(\d+)$/i,
-  /^https?:\/\/www\.opengis\.net\/def\/crs\/EPSG\/[^/]+\/(\d+)$/i,
+  /^urn:ogc:def:crs:EPSG:\d*:(\d+)$/i,
+  /^https?:\/\/www\.opengis\.net\/def\/crs\/EPSG\/\d+\/(\d+)$/i,
 ];
 
 export function parseEpsg(rs: string | undefined): number | null {

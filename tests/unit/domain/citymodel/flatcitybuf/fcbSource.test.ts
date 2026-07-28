@@ -266,6 +266,66 @@ describe("parseEpsg", () => {
   it("refuses free text that merely mentions EPSG near an unrelated number", () => {
     expect(parseEpsg("garbage EPSG nonsense 32631")).toBeNull();
   });
+
+  // Version-slot smuggling (fix round 3): round 2's anchors used [^/]+ /
+  // [^:]* for the <version> placeholder, which matches ANYTHING but the
+  // delimiter — a query string, a fragment, a bare space, or an embedded
+  // newline — not just a real version number. The version is an integer
+  // field in the format (header.fbs), so the slot must be constrained to
+  // \d+ / \d* rather than "not the delimiter character".
+  it("refuses a URI with a query string smuggled into the version slot", () => {
+    expect(
+      parseEpsg("https://www.opengis.net/def/crs/EPSG/0?dataset=x/28992"),
+    ).toBeNull();
+  });
+
+  it("refuses a URI with a fragment smuggled into the version slot", () => {
+    expect(
+      parseEpsg("https://www.opengis.net/def/crs/EPSG/0#dataset/28992"),
+    ).toBeNull();
+  });
+
+  it("refuses a URI with an embedded newline smuggled into the version slot", () => {
+    expect(
+      parseEpsg("https://www.opengis.net/def/crs/EPSG/0\nspoof/28992"),
+    ).toBeNull();
+  });
+
+  it("refuses a URI with a bare space as the version slot", () => {
+    expect(
+      parseEpsg("https://www.opengis.net/def/crs/EPSG/ /28992"),
+    ).toBeNull();
+  });
+
+  it("refuses a URN with a query string smuggled into the version slot", () => {
+    expect(parseEpsg("urn:ogc:def:crs:EPSG:?dataset:28992")).toBeNull();
+  });
+
+  it("refuses a URN with a fragment smuggled into the version slot", () => {
+    expect(parseEpsg("urn:ogc:def:crs:EPSG:#dataset:28992")).toBeNull();
+  });
+
+  it("refuses a URN with an embedded newline smuggled into the version slot", () => {
+    expect(parseEpsg("urn:ogc:def:crs:EPSG:0\nspoof:28992")).toBeNull();
+  });
+
+  it("refuses a URN with a bare space as the version slot", () => {
+    expect(parseEpsg("urn:ogc:def:crs:EPSG: :28992")).toBeNull();
+  });
+
+  // Already correctly refused before this round (regression guards, not new
+  // behaviour): a prefix before "urn:", and trailing content after the code.
+  it("still refuses a spoofed prefix before a valid URN form", () => {
+    expect(parseEpsg("xurn:ogc:def:crs:EPSG::28992")).toBeNull();
+  });
+
+  it("still refuses a valid URN form followed by a trailing query string", () => {
+    expect(parseEpsg("urn:ogc:def:crs:EPSG::28992?x=1")).toBeNull();
+  });
+
+  it("still refuses a valid URN form followed by a trailing fragment", () => {
+    expect(parseEpsg("urn:ogc:def:crs:EPSG::28992#foo")).toBeNull();
+  });
 });
 
 describe("openFcb", () => {
