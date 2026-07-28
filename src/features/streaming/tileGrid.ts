@@ -88,9 +88,12 @@ export function ownerKey(
   featureBBox: BBox3,
   level: number,
 ): CellKey | null {
+  // Reject if any bbox component is non-finite
+  for (let i = 0; i < 6; i++) {
+    if (!Number.isFinite(featureBBox[i])) return null;
+  }
   const cx = (featureBBox[0] + featureBBox[3]) / 2;
   const cy = (featureBBox[1] + featureBBox[4]) / 2;
-  if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
   const col = indexOf(grid, cx, grid.originX, level);
   const row = indexOf(grid, cy, grid.originY, level);
   return `${level}/${col}/${row}`;
