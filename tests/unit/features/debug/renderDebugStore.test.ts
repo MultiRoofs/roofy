@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_RENDER_DEBUG_STATE,
   useRenderDebugStore,
@@ -21,7 +21,6 @@ describe("renderDebugStore", () => {
     useRenderDebugStore.getState().setPostProcessingEnabled(false);
     useRenderDebugStore.getState().setCloudsEnabled(false);
     useRenderDebugStore.getState().setAerialPerspectiveEnabled(false);
-    useRenderDebugStore.getState().setNormalPassEnabled(false);
     useRenderDebugStore.getState().setSunShadowsEnabled(false);
     useRenderDebugStore.getState().setCityShadowsEnabled(false);
     useRenderDebugStore.getState().setCityDoubleSided(true);
@@ -31,7 +30,6 @@ describe("renderDebugStore", () => {
       postProcessingEnabled: false,
       cloudsEnabled: false,
       aerialPerspectiveEnabled: false,
-      normalPassEnabled: false,
       sunShadowsEnabled: false,
       cityShadowsEnabled: false,
       cityDoubleSided: true,

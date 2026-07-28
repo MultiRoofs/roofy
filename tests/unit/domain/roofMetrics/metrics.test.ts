@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vite-plus/test";
+import { describe, it, expect } from "vitest";
 import {
   computeArea,
   computeInclination,
@@ -156,6 +156,7 @@ describe("computeRoofMetrics", () => {
       type: "RoofSurface",
       rings: [FLAT_SQUARE],
       attributes: {},
+      lod: null,
     };
     const metrics = computeRoofMetrics(surface);
 
@@ -176,6 +177,7 @@ describe("computeRoofMetrics", () => {
       type: "RoofSurface",
       rings: [elevated],
       attributes: {},
+      lod: null,
     };
     const metrics = computeRoofMetrics(surface);
     expect(metrics.elevationM).toBe(10);
@@ -186,6 +188,7 @@ describe("computeRoofMetrics", () => {
       type: "RoofSurface",
       rings: [],
       attributes: {},
+      lod: null,
     };
     const metrics = computeRoofMetrics(surface);
 

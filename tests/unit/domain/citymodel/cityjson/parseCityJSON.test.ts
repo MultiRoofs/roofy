@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import type { CityJSONRoot } from "../../../../../src/domain/citymodel/cityjson/types";
 import { parseCityJSON } from "../../../../../src/domain/citymodel/cityjson/parseCityJSON";
 
