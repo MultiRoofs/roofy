@@ -12,6 +12,7 @@ import * as path from "node:path";
 import {
   parseText,
   fileNameFromUrl,
+  loadFromUrl,
 } from "../../../../src/domain/citymodel/loadCityModel";
 
 // ---------------------------------------------------------------------------
@@ -91,6 +92,20 @@ describe("parseText", () => {
     });
     expect(() => parseText("model.city.json", noVertices)).toThrow(
       /missing or invalid "vertices"/,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loadFromUrl
+// ---------------------------------------------------------------------------
+
+describe("loadFromUrl", () => {
+  it("throws a clear, honest error for .fcb instead of attempting a whole-file read", async () => {
+    // Checked before any fetch, so no HttpClient/network mocking is needed
+    // here — the rejection happens purely from encoding detection.
+    await expect(loadFromUrl("https://example.com/delft.fcb")).rejects.toThrow(
+      /viewport streaming/,
     );
   });
 });

@@ -10,7 +10,6 @@ import type { CityJSONRoot } from "./cityjson/types";
 import type { HttpClient } from "../../platform/types";
 import { parseCityJSON } from "./cityjson/parseCityJSON";
 import { parseCityJSONSeq } from "./cityjsonseq/parseCityJSONSeq";
-import { loadFlatCityBuf } from "./flatcitybuf/loadFlatCityBuf";
 import { parseCityGML } from "./citygml/parseCityGML";
 import { detectEncoding } from "./detectEncoding";
 
@@ -66,7 +65,11 @@ const defaultHttp: HttpClient = {
 
 /**
  * Load a city model from a remote URL.
- *  - .fcb → FlatCityBuf (WASM HTTP range-request reader)
+ *  - .fcb → NOT loaded here. FlatCityBuf files are streamed by viewport
+ *    rather than loaded whole; this function throws a clear error instead
+ *    of attempting a whole-file read. (The whole-file WASM reader this
+ *    branch used to call has been removed; viewport streaming is not yet
+ *    wired up to this entry point.)
  *  - .city.jsonl / .jsonl → CityJSONSeq (fetch + parse)
  *  - everything else → CityJSON (fetch + parse)
  *
@@ -79,7 +82,9 @@ export async function loadFromUrl(
   const encoding = detectEncoding(url);
 
   if (encoding === "flatcitybuf") {
-    return loadFlatCityBuf(url);
+    throw new Error(
+      `FlatCityBuf (.fcb) files are loaded by viewport streaming, not as a single whole-file read, and that path is not wired up yet. Could not load "${fileNameFromUrl(url)}".`,
+    );
   }
 
   let response: {
