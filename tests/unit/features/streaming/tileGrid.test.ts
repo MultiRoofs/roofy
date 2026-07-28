@@ -36,7 +36,7 @@ describe("tileGrid", () => {
   it("assigns the declared extent maximum to its legitimate cell", () => {
     // The declared extent max (1000, 1000) at level 2 belongs to cell 2/2/2,
     // not the padded grid's final index (2/3/3).
-    const k = ownerKey(grid, [900, 900, 0, 1000, 1000, 1], 2); // centre (950, 950)
+    const k = ownerKey(grid, [1000, 1000, 0, 1000, 1000, 0], 2); // centre exactly (1000, 1000)
     expect(k).toBe("2/2/2");
   });
 
@@ -47,21 +47,22 @@ describe("tileGrid", () => {
   });
 
   it("ensures boundary point consistency: keysCovering and ownerKey must agree", () => {
-    // For a boundary point, keysCovering must include the cell returned by ownerKey
-    const boundingBox: [number, number, number, number] = [390, 90, 410, 110];
-    const key = ownerKey(grid, [390, 90, 0, 410, 110, 5], 2);
-    const covered = keysCovering(grid, boundingBox, 2);
-    expect(key).not.toBeNull();
-    expect(covered).toContain(key);
+    // For a boundary point, keysCovering must include the cell returned by ownerKey.
+    // Use the SAME point for both functions so the invariant is pinned.
+    const p = [400, 400, 0, 400, 400, 0] as const; // centre exactly (400, 400)
+    const covering = keysCovering(grid, [400, 400, 400, 400], 2);
+    const owner = ownerKey(grid, p, 2);
+    expect(owner).toBe("2/1/1"); // half-open: upper cell wins
+    expect(covering).toContain(owner); // must never disagree
   });
 
   it("handles negative coordinates correctly", () => {
-    // Create a grid with negative origin to test negative coordinates
+    // Create a grid with negative origin to test negative coordinates at an exact boundary.
     const negGrid = makeGrid([-1000, -1000, 0, 0, 0, 30]);
-    // At level 2, cellSize = 1600 / 4 = 400
-    // Point at (-800, -800) should be in cell 2/0/0
-    const k = ownerKey(negGrid, [-900, -900, 0, -700, -700, 5], 2);
-    expect(k).toBe("2/0/0");
+    // At level 2, cellSize = 1600 / 4 = 400. Boundaries are -1000, -600, -200, +200.
+    // Point at (-600, -600) is on a boundary; should be in cell 2/1/1.
+    const k = ownerKey(negGrid, [-600, -600, 0, -600, -600, 0], 2);
+    expect(k).toBe("2/1/1"); // floor((-600 - (-1000))/400) = floor(400/400) = 1
   });
 
   it("handles zero-span/degenerate extent without infinite looping", () => {
@@ -82,6 +83,10 @@ describe("tileGrid", () => {
     expect(ownerKey(grid, [Infinity, 0, 0, 1, 1, 1], 2)).toBeNull();
     // Infinity in Y
     expect(ownerKey(grid, [0, Infinity, 0, 1, 1, 1], 2)).toBeNull();
+    // Infinity in Z (positive)
+    expect(ownerKey(grid, [0, 0, Infinity, 1, 1, 1], 2)).toBeNull();
+    // Infinity in Z (negative)
+    expect(ownerKey(grid, [0, 0, 0, 1, 1, -Infinity], 2)).toBeNull();
   });
 
   it("computes cell centre correctly", () => {
@@ -90,11 +95,10 @@ describe("tileGrid", () => {
   });
 
   it("computes maxLevel based on minimum cell size", () => {
-    // At grid's maxLevel, cellSize should be >= MIN_CELL_M (50)
-    // At maxLevel + 1, cellSize would be < MIN_CELL_M
-    const size = cellSize(grid, grid.maxLevel);
-    const nextSize = grid.rootCell / 2 ** (grid.maxLevel + 1);
-    expect(size).toBeGreaterThanOrEqual(50);
-    expect(nextSize).toBeLessThan(50);
+    // For rootCell 1600 and MIN_CELL_M 50: level 5 = 1600/32 = 50 (ok),
+    // level 6 = 1600/64 = 25 (too small), so maxLevel = 5
+    expect(grid.maxLevel).toBe(5);
+    expect(cellSize(grid, 5)).toBe(50);
+    expect(cellSize(grid, 6)).toBe(25);
   });
 });
