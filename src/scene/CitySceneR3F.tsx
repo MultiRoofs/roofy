@@ -52,6 +52,7 @@ import { GoogleTilesLayer } from "./GoogleTilesLayer";
 import type { BBox3, Vec3 } from "../domain/citymodel/types";
 import { buildCityMesh, computeOriginOffset } from "./buildCityMesh";
 import type { PickingIndex } from "./buildCityMesh";
+import { resolveSelection } from "./resolvePicking";
 import { applyHighlight, clearHighlight } from "./highlightMesh";
 import { buildRuleColors } from "./applyRuleColors";
 import { useSelectionStore } from "../features/selection/selectionStore";
@@ -1024,22 +1025,23 @@ function resolveFromEvent(
   const state = map.get(layerId);
   if (!state) return null;
 
+  const result = resolveSelection(
+    e.object.geometry,
+    state.pickingIndex,
+    e.face.a,
+  );
+  if (!result) return null;
+
   const mode = useSelectionStore.getState().mode;
-  const faceVertexIndex = e.face.a;
-
-  const objIdxAttr = e.object.geometry.getAttribute("objectIndex");
-  const surfIdxAttr = e.object.geometry.getAttribute("surfaceIndex");
-  if (!objIdxAttr || !surfIdxAttr) return null;
-
-  const objectIdx = objIdxAttr.getX(faceVertexIndex);
-  const objectId = state.pickingIndex.objectKeys[objectIdx];
-  if (objectId === undefined) return null;
-
   if (mode === "surface") {
-    const surfaceIndex = surfIdxAttr.getX(faceVertexIndex);
-    return { kind: "surface", layerId, objectId, surfaceIndex };
+    return {
+      kind: "surface",
+      layerId: result.layerId,
+      objectId: result.objectId,
+      surfaceIndex: result.surfaceIndex,
+    };
   }
-  return { kind: "object", layerId, objectId };
+  return { kind: "object", layerId: result.layerId, objectId: result.objectId };
 }
 
 function reapplyHighlight(

@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vite-plus/test";
+import { describe, it, expect } from "vitest";
 import { BufferAttribute, BufferGeometry } from "three";
-import { resolveSelection } from "../../../src/scene/usePickingControls";
+import { resolveSelection } from "../../../src/scene/resolvePicking";
 import type { PickingIndex } from "../../../src/scene/buildCityMesh";
 
 // ---------------------------------------------------------------------------
@@ -32,37 +32,40 @@ function makeGeometryWithIndices(
 // Tests
 // ---------------------------------------------------------------------------
 
+// resolveSelection is mode-agnostic: it always resolves the concrete object
+// + surface that was hit. Callers decide (based on the active PickMode)
+// whether to build an object-level or surface-level Selection from the
+// result — see resolveFromEvent in CitySceneR3F.tsx.
 describe("resolveSelection", () => {
   const pickingIndex: PickingIndex = {
     layerId: "test-layer",
     objectKeys: ["b1", "b2"],
   };
 
-  it("returns object selection in object mode", () => {
+  it("resolves the object and surface index for the hit vertex", () => {
     const geometry = makeGeometryWithIndices(
       [0, 0, 0, 1, 1, 1],
       [0, 0, 0, 0, 0, 0],
     );
 
-    const result = resolveSelection(3, geometry, pickingIndex, "object");
+    const result = resolveSelection(geometry, pickingIndex, 3);
 
     expect(result).toEqual({
-      kind: "object",
       layerId: "test-layer",
       objectId: "b2",
+      surfaceIndex: 0,
     });
   });
 
-  it("returns surface selection in surface mode", () => {
+  it("reports the surface index of the hit triangle", () => {
     const geometry = makeGeometryWithIndices(
       [0, 0, 0, 0, 0, 0],
       [0, 0, 0, 2, 2, 2],
     );
 
-    const result = resolveSelection(3, geometry, pickingIndex, "surface");
+    const result = resolveSelection(geometry, pickingIndex, 3);
 
     expect(result).toEqual({
-      kind: "surface",
       layerId: "test-layer",
       objectId: "b1",
       surfaceIndex: 2,
@@ -72,7 +75,7 @@ describe("resolveSelection", () => {
   it("returns null when object index is out of range", () => {
     const geometry = makeGeometryWithIndices([99, 99, 99], [0, 0, 0]);
 
-    const result = resolveSelection(0, geometry, pickingIndex, "object");
+    const result = resolveSelection(geometry, pickingIndex, 0);
 
     expect(result).toBeNull();
   });
@@ -84,7 +87,7 @@ describe("resolveSelection", () => {
       new BufferAttribute(new Float32Array(9), 3),
     );
 
-    const result = resolveSelection(0, geometry, pickingIndex, "object");
+    const result = resolveSelection(geometry, pickingIndex, 0);
 
     expect(result).toBeNull();
   });
