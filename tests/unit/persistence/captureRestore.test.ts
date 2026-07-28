@@ -26,7 +26,7 @@ const testRule: Rule = {
 beforeEach(() => {
   useSelectionStore.setState({
     mode: "object",
-    selection: null,
+    selections: [],
     hovered: null,
   });
   useSolarStore.setState({
@@ -96,12 +96,15 @@ describe("restoreSnapshot", () => {
     });
 
     // Mutate stores
-    useSelectionStore.setState({ mode: "surface" });
+    useSelectionStore.setState({
+      mode: "surface",
+      selections: [{ kind: "object", layerId: "layer-1", objectId: "b1" }],
+    });
 
     const viewState = restoreSnapshot(snapshot);
 
     expect(useSelectionStore.getState().mode).toBe("object");
-    expect(useSelectionStore.getState().selection).toBeNull();
+    expect(useSelectionStore.getState().selections).toEqual([]);
     expect(viewState.cameraPosition).toEqual([100, 200, 300]);
     expect(viewState.cameraTarget).toEqual([10, 10, 10]);
   });

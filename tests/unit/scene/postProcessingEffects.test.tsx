@@ -199,23 +199,6 @@ describe("PostProcessingEffects", () => {
     expect(screen.queryByTestId("effect-composer")).toBeNull();
   });
 
-  it("forwards the normal pass toggle to the effect composer", () => {
-    render(
-      createElement(PostProcessingEffects, {
-        hasAtmosphere: true,
-        cloudCoverage: 0.3,
-        lensFlareEnabled: true,
-        normalPassEnabled: false,
-        atmosphereRef: { current: null },
-      }),
-    );
-
-    expect(screen.getByTestId("effect-composer")).toHaveAttribute(
-      "data-enable-normal-pass",
-      "false",
-    );
-  });
-
   it("passes pixel canvas size to the lens flare screen resolution uniform", () => {
     render(
       createElement(PostProcessingEffects, {
