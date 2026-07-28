@@ -18,7 +18,7 @@
     "prepare": "vp config"
   },
   "dependencies": {
-    "@cityjson/flatcitybuf": "^0.2.0",
+    "@cityjson/flatcitybuf": "^0.3.0",
     "@duckdb/duckdb-wasm": "latest",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
