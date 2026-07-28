@@ -15,7 +15,7 @@
 - Branch is `develop`. Never commit to `main`.
 - **All test imports come from `"vitest"`, never `"vite-plus/test"`.** The vite-plus runner bug breaks `describe`; 21 existing files are affected and must not be copied as a template. Verified working template: `tests/unit/scene/googleTilesLayer.test.ts`.
 - `@cityjson/flatcitybuf` must be `^0.3.0`. Version `0.2.0` is the WASM reader and has no `AbortSignal`.
-- Run `npx tsc --noEmit` before every commit.
+- Run `npx tsc -b --noEmit` before every commit.
 - Pre-commit hook runs `vp check --fix` automatically.
 - Commit prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`. Include `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`.
 - Streaming requires a **projected, metre-based CRS**. Every distance constant is metres.
@@ -179,7 +179,7 @@ Expected: PASS (3 tests)
 - [ ] **Step 5: Typecheck and commit**
 
 ```bash
-npx tsc --noEmit
+npx tsc -b --noEmit
 git add src/features/streaming/sceneTransform.ts src/features/streaming/tileGrid.ts tests/unit/features/streaming/sceneTransform.test.ts
 git commit -m "feat: add scene transform with rotated cell mesh offset
 
@@ -386,7 +386,7 @@ Expected: PASS (6 tests)
 - [ ] **Step 5: Typecheck and commit**
 
 ```bash
-npx tsc --noEmit
+npx tsc -b --noEmit
 git add src/features/streaming/ tests/unit/features/streaming/tileGrid.test.ts
 git commit -m "feat: add streaming cell grid with half-open bounds and ownership
 
@@ -553,7 +553,7 @@ Expected: PASS (4 tests)
 - [ ] **Step 5: Typecheck and commit**
 
 ```bash
-npx tsc --noEmit
+npx tsc -b --noEmit
 git add src/features/streaming/viewportFootprint.ts tests/unit/features/streaming/viewportFootprint.test.ts
 git commit -m "feat: add perspective viewport footprint with horizon clamp
 
@@ -716,7 +716,7 @@ Expected: PASS (9 tests)
 - [ ] **Step 5: Typecheck and commit**
 
 ```bash
-npx tsc --noEmit
+npx tsc -b --noEmit
 git add src/features/streaming/levelPolicy.ts tests/unit/features/streaming/levelPolicy.test.ts
 git commit -m "feat: add uniform level selection and LoD ladder
 
@@ -953,7 +953,7 @@ Expected: PASS (6 tests)
 - [ ] **Step 5: Typecheck and commit**
 
 ```bash
-npx tsc --noEmit
+npx tsc -b --noEmit
 git add src/features/streaming/cellCache.ts tests/unit/features/streaming/cellCache.test.ts
 git commit -m "feat: add cell cache with LRU eviction, pinning and byte budgets
 
@@ -1109,7 +1109,7 @@ Expected: PASS. The parity test plus every existing scene/integration test must 
 - [ ] **Step 5: Typecheck and commit**
 
 ```bash
-npx tsc --noEmit
+npx tsc -b --noEmit
 git add src/scene/buildCityMesh.ts tests/unit/scene/buildCityMeshArrays.test.ts
 git commit -m "refactor: extract worker-safe buildCityMeshArrays from buildCityMesh
 
@@ -1276,7 +1276,7 @@ Expected: PASS — parity test plus every existing rule-colour test.
 - [ ] **Step 5: Typecheck and commit**
 
 ```bash
-npx tsc --noEmit
+npx tsc -b --noEmit
 git add src/scene/applyRuleColors.ts tests/unit/scene/ruleColorsWorkerSafe.test.ts
 git commit -m "refactor: make rule colorization worker-safe with sRGB parity
 
@@ -1527,7 +1527,7 @@ export function openFcb(
 
 ```bash
 npx vitest run tests/unit/domain/citymodel/flatcitybuf/fcbSource.test.ts
-npx tsc --noEmit
+npx tsc -b --noEmit
 git add package.json package-lock.json src/domain/citymodel/flatcitybuf/fcbSource.ts tests/unit/domain/citymodel/flatcitybuf/
 git commit -m "feat: add fcbSource with admission checks and Blob-based open
 
@@ -1802,7 +1802,7 @@ The constructor's `onmessage` must consult **both** maps, and `streaming` must b
 
 ```bash
 npx vitest run tests/unit/features/streaming/workerClient.test.ts
-npx tsc --noEmit
+npx tsc -b --noEmit
 git add src/features/streaming/workerProtocol.ts src/features/streaming/workerClient.ts tests/unit/features/streaming/workerClient.test.ts
 git commit -m "feat: add streaming worker protocol with geometry invariants
 
@@ -2139,7 +2139,7 @@ ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
 
 ```bash
 npx vitest run tests/unit/features/streaming/
-npx tsc --noEmit
+npx tsc -b --noEmit
 git add src/features/streaming/ tests/unit/features/streaming/bucketFeatures.test.ts
 git commit -m "feat: add streaming worker with single-traversal cell fetch
 
@@ -2246,7 +2246,7 @@ In `fcb.worker.ts`, add `const cells = new Map<CellKey, { model: CityModel; obje
 
 ```bash
 npx vitest run tests/unit/features/streaming/
-npx tsc --noEmit
+npx tsc -b --noEmit
 git add src/features/streaming/ tests/unit/features/streaming/objectRecords.test.ts
 git commit -m "feat: add worker cell cache with recolor, on-demand surfaces and evict
 
@@ -2355,7 +2355,7 @@ Add `lodMode: "auto"` and `isStreaming: false` defaults in `addLayer` (`src/feat
 
 ```bash
 npx vitest run tests/unit/features tests/unit/persistence
-npx tsc --noEmit
+npx tsc -b --noEmit
 git add src/features/streaming/streamStore.ts src/features/layers/layerStore.ts tests/unit/features/streaming/streamStore.test.ts
 git commit -m "feat: add stream store keyed by layer id, with lodMode on Layer
 
@@ -2445,7 +2445,7 @@ Export `resolveMeshOwner(obj: Object3D)`. Then rewrite each of these call sites 
 
 ```bash
 npx vitest run tests/unit/scene tests/integration
-npx tsc --noEmit
+npx tsc -b --noEmit
 git add src/scene/CitySceneR3F.tsx tests/unit/scene/layerSceneMap.test.ts
 git commit -m "refactor: two-level layer/cell scene map for streaming meshes
 
@@ -2568,7 +2568,7 @@ Then write `useTileStreaming` wiring: subscribe to `controls.addEventListener("c
 
 ```bash
 npx vitest run tests/unit/features/streaming/
-npx tsc --noEmit
+npx tsc -b --noEmit
 git add src/features/streaming/throttleGates.ts src/features/streaming/useTileStreaming.ts tests/unit/features/streaming/throttleGates.test.ts
 git commit -m "feat: add controls-driven streaming trigger with bypassable hysteresis
 
@@ -2681,7 +2681,7 @@ Implement with a single-entry memo per layer (`Map<layerId, {version, model}>`).
 
 ```bash
 npx vitest run
-npx tsc --noEmit
+npx tsc -b --noEmit
 git add src/features/streaming/residentModel.ts src/analytics src/ui tests/unit/features/streaming/residentModel.test.ts
 git commit -m "feat: add memoised resident model and migrate consumers
 
@@ -2746,7 +2746,7 @@ Export `shouldUseSourceUrlPath(ref, isStreaming)` from `duckdb.ts` and use it at
 
 ```bash
 npx vitest run
-npx tsc --noEmit
+npx tsc -b --noEmit
 git add src/app/App.tsx src/analytics/duckdb.ts src/ui tests/unit/analytics/streamingDuckdb.test.ts
 git commit -m "feat: constrain DuckDB for streaming layers and add streaming UI
 
@@ -2842,7 +2842,7 @@ Expected: `CLEAN`.
 
 ```bash
 npx vitest run
-npx tsc --noEmit
+npx tsc -b --noEmit
 git add -A src tests
 git commit -m "feat: remove whole-file .fcb path and version the snapshot schema
 
@@ -2997,7 +2997,7 @@ describe("fcb streaming pipeline", () => {
 
 ```bash
 npx vitest run tests/integration/fcbStreaming.test.ts
-npx tsc --noEmit
+npx tsc -b --noEmit
 git add fixtures/delft.fcb tests/integration/fcbStreaming.test.ts
 git commit -m "test: add end-to-end fcb streaming integration with request accounting
 
@@ -3008,7 +3008,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ```bash
 npx vitest run
-npx tsc --noEmit
+npx tsc -b --noEmit
 npm run build
 ```
 
