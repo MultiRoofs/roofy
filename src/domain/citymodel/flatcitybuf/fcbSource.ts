@@ -39,25 +39,41 @@ export interface AdmissionError {
 }
 
 /**
- * Extracts an EPSG numeric code, but ONLY when the string actually names the
- * EPSG authority — a bare trailing number proves nothing about authority, so
- * "OGC:CRS84" (a real, degree-based CRS some writers emit) must parse to
- * `null`, not to a fabricated EPSG code. Handles the two shapes the format
- * and its neighbours actually use: colon form ("EPSG:28992") and the OGC
- * URI/URN forms ("https://www.opengis.net/def/crs/EPSG/0/7415",
- * "urn:ogc:def:crs:EPSG::28992") — in the URI forms the LAST digit run after
- * the "EPSG" token is the code, the ones before it (a version placeholder)
- * are not.
+ * Anchored forms this parser accepts, matched against the WHOLE trimmed
+ * string — not searched for within it. Searching (a prior version of this
+ * function did: find "EPSG" anywhere, then take the last digit run after it)
+ * admits the mirror-image bug to the one it was fixing: a string that merely
+ * CONTAINS "EPSG" and a registered code — a trailing query string
+ * ("EPSG:999999?dataset=28992"), a spoofed prefix ("NOT-EPSG:32631"), or
+ * free text near an unrelated number ("garbage EPSG nonsense 32631") — would
+ * all admit. Both directions fail closed identically here: wrong authority
+ * and right-authority-wrong-shape both return `null`.
+ *
+ * These are the exact forms actually produced:
+ *   - FlatCityBuf's own `header.info.referenceSystem`, built by
+ *     `buildReferenceSystem` in the reader's `file-info.ts` as
+ *     `"${authority}:${code}"` — colon form, nothing else.
+ *   - CityJSON's `metadata.referenceSystem` convention, an OGC URI:
+ *     `"https://www.opengis.net/def/crs/EPSG/<version>/<code>"`.
+ *   - The OGC URN equivalent of the same:
+ *     `"urn:ogc:def:crs:EPSG:<version>:<code>"`.
+ * A form not on this list — however plausible-looking — returns `null`
+ * rather than being guessed at with a looser pattern.
  */
+const EPSG_PATTERNS: readonly RegExp[] = [
+  /^EPSG:(\d+)$/i,
+  /^urn:ogc:def:crs:EPSG:[^:]*:(\d+)$/i,
+  /^https?:\/\/www\.opengis\.net\/def\/crs\/EPSG\/[^/]+\/(\d+)$/i,
+];
+
 export function parseEpsg(rs: string | undefined): number | null {
   if (!rs) return null;
   const s = rs.trim();
-  const epsgAt = s.search(/\bEPSG\b/i);
-  if (epsgAt === -1) return null;
-  const tail = s.slice(epsgAt);
-  const digitRuns = tail.match(/\d+/g);
-  if (!digitRuns) return null;
-  return Number(digitRuns[digitRuns.length - 1]);
+  for (const pattern of EPSG_PATTERNS) {
+    const m = pattern.exec(s);
+    if (m) return Number(m[1]);
+  }
+  return null;
 }
 
 /**

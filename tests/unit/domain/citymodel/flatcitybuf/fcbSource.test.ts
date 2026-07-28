@@ -119,6 +119,17 @@ describe("checkAdmission", () => {
     expect(checkAdmission(h)?.code).toBe("non-metric-crs");
   });
 
+  it("rejects a reference system that merely CONTAINS a registered metric code after a query string (the mirror of authority-spoofing: unlike CRS84's misparse landing on an unregistered code, this misparse would land on 28992 — a REAL registered metric CRS — so a reverted parser would wrongly admit this end to end)", () => {
+    const h = {
+      info: {
+        ...okInfo,
+        referenceSystem: "EPSG:999999?dataset=28992",
+      },
+      layout: { rtreeSize: 4096 },
+    } as never;
+    expect(checkAdmission(h)?.code).toBe("non-metric-crs");
+  });
+
   it("rejects a non-EPSG authority (OGC:CRS84) rather than misparsing a trailing digit as an EPSG code", () => {
     const h = {
       info: {
@@ -204,27 +215,31 @@ describe("headerModel", () => {
 });
 
 describe("parseEpsg", () => {
-  it("extracts the trailing numeric code from an EPSG string", () => {
+  it("extracts the code from the colon form (FlatCityBuf's own header.referenceSystem shape)", () => {
     expect(parseEpsg("EPSG:28992")).toBe(28992);
+  });
+
+  it("extracts the code from the colon form for a second code, to prove this isn't special-cased to 28992", () => {
+    expect(parseEpsg("EPSG:32631")).toBe(32631);
   });
 
   it("is case-insensitive on the authority token", () => {
     expect(parseEpsg("epsg:28992")).toBe(28992);
   });
 
-  it("extracts the trailing code from a URN-style reference system", () => {
+  it("extracts the code from the OGC URI form (CityJSON's metadata.referenceSystem convention)", () => {
     expect(parseEpsg("https://www.opengis.net/def/crs/EPSG/0/7415")).toBe(7415);
   });
 
-  it("extracts the trailing code from a slash-separated short URI, ignoring the version segment before it", () => {
-    expect(parseEpsg("EPSG/0/28992")).toBe(28992);
+  it("extracts the code from the OGC URN form", () => {
+    expect(parseEpsg("urn:ogc:def:crs:EPSG::28992")).toBe(28992);
   });
 
   it("returns null for an undefined reference system", () => {
     expect(parseEpsg(undefined)).toBeNull();
   });
 
-  it("returns null when there is no trailing numeric code", () => {
+  it("returns null when there is no numeric code (colon form)", () => {
     expect(parseEpsg("EPSG:")).toBeNull();
   });
 
@@ -234,6 +249,22 @@ describe("parseEpsg", () => {
 
   it("does not match 'EPSG' embedded inside a larger word (authority token must stand alone)", () => {
     expect(parseEpsg("NOTEPSG:1234")).toBeNull();
+  });
+
+  // Adversarial sweep (fix round 2): the whole string must match one of the
+  // anchored forms exactly. Merely CONTAINING "EPSG" plus a registered code
+  // is the mirror-image bug to authority-spoofing, and must fail closed the
+  // same way.
+  it("refuses a trailing query string after an otherwise-valid colon form", () => {
+    expect(parseEpsg("EPSG:999999?dataset=28992")).toBeNull();
+  });
+
+  it("refuses a spoofed authority prefix ('NOT-EPSG:') that merely contains 'EPSG'", () => {
+    expect(parseEpsg("NOT-EPSG:32631")).toBeNull();
+  });
+
+  it("refuses free text that merely mentions EPSG near an unrelated number", () => {
+    expect(parseEpsg("garbage EPSG nonsense 32631")).toBeNull();
   });
 });
 
