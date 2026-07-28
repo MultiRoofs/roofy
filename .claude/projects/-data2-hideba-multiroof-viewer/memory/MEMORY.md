@@ -1,0 +1,1 @@
+- [Project philosophy](feedback_breaking_changes.md) — breaking changes OK, prioritize clean code and UX over backward compat
