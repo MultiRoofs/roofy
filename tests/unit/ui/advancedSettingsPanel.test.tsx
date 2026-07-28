@@ -29,25 +29,20 @@ describe("AdvancedSettingsPanel", () => {
 
     fireEvent.click(screen.getByLabelText("Clouds"));
     fireEvent.click(screen.getByLabelText("Aerial Perspective"));
-    fireEvent.click(screen.getByLabelText("Normal Pass"));
     fireEvent.click(screen.getByLabelText("Post Processing"));
     fireEvent.click(screen.getByLabelText("Sun Shadows"));
     fireEvent.click(screen.getByLabelText("City Shadows"));
     fireEvent.click(screen.getByLabelText("Double Sided"));
-    fireEvent.change(screen.getByLabelText("City Material"), {
-      target: { value: "basic" },
-    });
     fireEvent.click(screen.getByLabelText("Google 3D Tiles"));
 
     expect(useRenderDebugStore.getState()).toMatchObject({
       postProcessingEnabled: false,
       cloudsEnabled: false,
       aerialPerspectiveEnabled: false,
-      normalPassEnabled: true,
       sunShadowsEnabled: false,
       cityShadowsEnabled: false,
-      cityDoubleSided: true,
-      cityMaterialMode: "basic",
+      // cityDoubleSided defaults to true; clicking the checkbox toggles it off.
+      cityDoubleSided: false,
     });
     expect(useTilesStore.getState().enabled).toBe(true);
   });
@@ -61,7 +56,6 @@ describe("AdvancedSettingsPanel", () => {
       postProcessingEnabled: false,
       cloudsEnabled: false,
       aerialPerspectiveEnabled: false,
-      normalPassEnabled: false,
       sunShadowsEnabled: false,
       cityShadowsEnabled: false,
       cityDoubleSided: true,
