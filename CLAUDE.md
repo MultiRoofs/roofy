@@ -63,7 +63,7 @@ docs/           # Design doc, roadmap, plans
 npm run dev          # Start dev server
 npm run build        # TypeScript check + Vite build
 npm run test         # Run vitest
-npx tsc --noEmit     # Type check only
+npx tsc -b --noEmit  # Type check only (plain `tsc --noEmit` is a no-op: root tsconfig has no files, only project references)
 npx vitest run       # Run tests once
 ```
 
@@ -87,7 +87,7 @@ When completing a major feature or milestone, use the `feature-dev:code-reviewer
 - Use small, incremental commits (one feature/fix per commit)
 - Prefix: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`
 - Include `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>`
-- Run `npx tsc --noEmit` before committing to catch type errors
+- Run `npx tsc -b --noEmit` before committing to catch type errors (plain `tsc --noEmit` is a no-op here)
 - The pre-commit hook runs `vp check --fix` (lint + format)
 
 ## Project Philosophy
@@ -96,8 +96,8 @@ When completing a major feature or milestone, use the `feature-dev:code-reviewer
 
 ## Known Issues
 
-- 21 test files fail due to vite-plus vitest runner bug (imports from `"vite-plus/test"` break `describe`). Tests importing from `"vitest"` work fine.
 - `three: "latest"` and `@takram/three-geospatial: "latest"` in package.json are unpinned — should pin to compatible versions.
+- The vite-plus test runner has a bug that breaks `describe` for files importing from `"vite-plus/test"`; all test files were migrated to import from `"vitest"` instead (2026-07-28) and `npx vitest run` is green (0 failed files). Do not reintroduce `"vite-plus/test"` imports in new test files.
 - @takram/three-atmosphere is integrated using a synthetic `worldToECEFMatrix` (built from site lat/lon) that maps local-origin camera coordinates to ECEF for the atmosphere shader, without moving meshes. Sky, Stars, SunLight, Clouds, and AerialPerspective only render when a valid CRS/lat-lon is available. Post-processing uses EffectComposer with SMAA (Canvas antialias is disabled). Future: may consider mixed lighting via LightingMask (option C) for more physically correct results.
 
 ## Milestones
