@@ -10,7 +10,9 @@ import type { Vec3 } from "../../domain/citymodel/types";
 import { sceneToSource } from "./sceneTransform";
 import { MAX_FOOTPRINT_SPAN_M, T_MAX_M } from "./constants";
 
-const EPS = 1e-6;
+// Exported so tests can assert a fixture's dir.y actually falls inside the
+// EPS-excluded band, rather than hardcoding a copy that could drift from it.
+export const EPS = 1e-6;
 const NDC_CORNERS: ReadonlyArray<readonly [number, number]> = [
   [-1, -1],
   [1, -1],
