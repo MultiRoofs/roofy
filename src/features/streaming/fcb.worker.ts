@@ -28,17 +28,45 @@ import {
 import { buildCityMeshArrays } from "../../scene/buildCityMesh";
 import { buildRuleColorsFromArrays } from "../../scene/applyRuleColors";
 import { bucketFeatures } from "./bucketFeatures";
-import { makeGrid, cellCentre, type Grid } from "./tileGrid";
+import { toObjectRecords } from "./objectRecords";
+import { makeGrid, cellCentre, type CellKey, type Grid } from "./tileGrid";
 import type {
   CellGeometry,
   WorkerRequest,
   WorkerResponse,
 } from "./workerProtocol";
 
+/**
+ * A resident cell as retained by the worker, independent of what has already
+ * been transferred to the main thread. `postMessage` DETACHES every
+ * transferred `ArrayBuffer` — so once a cell's positions/normals/colors/
+ * indices are handed off in `fetch`, the worker no longer owns those
+ * specific typed arrays. `recolor` and `surfaces` need to keep working on
+ * that cell afterwards (without re-running select()+decode), so the worker
+ * keeps its own copies: the full parsed `CityModel` (never transferred — it
+ * holds no ArrayBuffers of its own) plus copies of the per-vertex index
+ * arrays and base colors that were about to be transferred away.
+ */
+interface CachedCell {
+  readonly model: CityModel;
+  readonly objectIndices: Uint32Array;
+  readonly surfaceIndices: Uint32Array;
+  readonly objectKeys: string[];
+  /** Copy of the cell's base (non-rule) vertex colors, so `recolor` can fall
+   *  back to them when `buildRuleColorsFromArrays` returns null (no rule
+   *  matched) without needing to re-triangulate the cell to get them. */
+  readonly colors: Float32Array;
+}
+
 const ctx = self as unknown as Worker;
 let reader: FcbReader | undefined;
 let grid: Grid | undefined;
 let controller: AbortController | null = null;
+/** The worker's own cell cache. Counts against the same memory budget as
+ *  the main thread's cache; the main thread's `evict` message is what
+ *  releases entries here (see the `evict`/`close` handlers below). Without
+ *  it, this map would grow without bound as the viewport pans. */
+const cells = new Map<CellKey, CachedCell>();
 
 function post(msg: WorkerResponse, transfer: Transferable[] = []): void {
   ctx.postMessage(msg, transfer);
@@ -172,17 +200,29 @@ ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
           objectKeys: a.objectKeys,
           triangleCount: a.triangleCount,
         };
-        // Task 11 populates `objects`/`surfaceAttrKeys` from toObjectRecords
-        // and records this cell in the worker cache BEFORE transferring —
-        // the buffers below are detached by postMessage.
+        const { records, surfaceAttrKeys } = toObjectRecords(cellModel);
+
+        // Record this cell in the worker cache BEFORE transferring: the
+        // arrays below are detached the instant `post()`'s postMessage call
+        // returns, so `.slice()` copies must be taken first. `cellModel`
+        // itself is never transferred (it holds no ArrayBuffers), so it can
+        // be cached by reference.
+        cells.set(key, {
+          model: cellModel,
+          objectIndices: a.objectIndices.slice(),
+          surfaceIndices: a.surfaceIndices.slice(),
+          objectKeys: a.objectKeys,
+          colors: a.colors.slice(),
+        });
+
         post(
           {
             type: "cell",
             id: msg.id,
             key,
             geometry,
-            objects: [],
-            surfaceAttrKeys: [],
+            objects: records,
+            surfaceAttrKeys,
             lodsSeen: [],
           },
           [
@@ -198,6 +238,66 @@ ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       return;
     }
 
+    if (msg.type === "recolor") {
+      for (const key of msg.cells) {
+        const cached = cells.get(key);
+        // A recolor request can race a viewport move: the main thread may
+        // ask to recolor a key this worker has since evicted. Skip rather
+        // than error — the main thread has already dropped that cell too.
+        if (!cached) continue;
+        // buildRuleColorsFromArrays returns null when no rule matched
+        // anything (or rulesEnabled is false); ruleColors on the wire is
+        // non-nullable, so fall back to a fresh copy of the cached base
+        // colors — same "ruleColors ?? baseColors" convention the
+        // non-streaming path uses (see highlightMesh.ts). Always a *copy*:
+        // transferring the cache's own buffer would detach it out from
+        // under this cache entry.
+        const ruleColors = msg.rulesEnabled
+          ? (buildRuleColorsFromArrays(
+              cached.model,
+              cached.objectIndices,
+              cached.surfaceIndices,
+              cached.objectKeys,
+              msg.rules,
+              cached.colors,
+            ) ?? cached.colors.slice())
+          : cached.colors.slice();
+        post({ type: "recolored", id: msg.id, key, ruleColors }, [
+          ruleColors.buffer,
+        ]);
+      }
+      post({ type: "done", id: msg.id });
+      return;
+    }
+
+    if (msg.type === "surfaces") {
+      for (const cached of cells.values()) {
+        const obj = cached.model.objects[msg.objectId];
+        if (obj) {
+          post({
+            type: "surfaceData",
+            id: msg.id,
+            objectId: msg.objectId,
+            surfaces: obj.surfaces as unknown[],
+          });
+          return;
+        }
+      }
+      post({
+        type: "error",
+        id: msg.id,
+        message: `object not resident in any cached cell: ${msg.objectId}`,
+        code: "not-found",
+        aborted: false,
+      });
+      return;
+    }
+
+    if (msg.type === "evict") {
+      for (const key of msg.cells) cells.delete(key);
+      return;
+    }
+
     if (msg.type === "cancel") {
       controller?.abort();
       return;
@@ -206,6 +306,7 @@ ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       controller?.abort();
       reader = undefined;
       grid = undefined;
+      cells.clear();
       return;
     }
   } catch (e) {
