@@ -39,52 +39,32 @@ export interface AdmissionError {
 }
 
 /**
- * Anchored forms this parser accepts, matched against the WHOLE trimmed
- * string — not searched for within it. Searching (a prior version of this
- * function did: find "EPSG" anywhere, then take the last digit run after it)
- * admits the mirror-image bug to the one it was fixing: a string that merely
- * CONTAINS "EPSG" and a registered code — a trailing query string
- * ("EPSG:999999?dataset=28992"), a spoofed prefix ("NOT-EPSG:32631"), or
- * free text near an unrelated number ("garbage EPSG nonsense 32631") — would
- * all admit. Both directions fail closed identically here: wrong authority
- * and right-authority-wrong-shape both return `null`.
+ * The EPSG code, read from the header's STRUCTURED reference-system fields
+ * (`header.raw.referenceSystem()` → `authority()`/`code()`), never by
+ * recomposing them into a display string and parsing that string back
+ * apart. Three rounds of hardening `parseEpsg` — an authority check, an
+ * anchor, a version-slot character class — each closed one hole and opened
+ * another (policy → parser form → field content → input normalisation)
+ * because string-round-tripping an already-structured integer is the wrong
+ * shape for this decision, not because any one regex was insufficiently
+ * clever. `code()` is an integer FlatBuffers field: no digit shape to
+ * validate, no range to worry about, no whitespace to trim.
  *
- * These are the exact forms actually produced:
- *   - FlatCityBuf's own `header.info.referenceSystem`, built by
- *     `buildReferenceSystem` in the reader's `file-info.ts` as
- *     `"${authority}:${code}"` — colon form, nothing else.
- *   - CityJSON's `metadata.referenceSystem` convention, an OGC URI:
- *     `"https://www.opengis.net/def/crs/EPSG/<version>/<code>"`.
- *   - The OGC URN equivalent of the same:
- *     `"urn:ogc:def:crs:EPSG:<version>:<code>"`.
- * A form not on this list — however plausible-looking — returns `null`
- * rather than being guessed at with a looser pattern.
- *
- * The `<version>` slot is constrained to `\d+`/`\d*` (URN allows the empty
- * version FlatCityBuf's own writer emits, e.g. "EPSG::28992"), NOT to
- * "anything but the delimiter". A negated class like `[^/]+` or `[^:]*`
- * matches a `?query`, a `#fragment`, a bare space, or an embedded `\n` just
- * as happily as a real version number — which would let
- * ".../EPSG/0?dataset=x/28992" or "urn:...:EPSG:0\nspoof:28992" smuggle a
- * registered code past the anchors. `header.fbs` stores the version as an
- * actual integer field (not free text), so `\d+`/`\d*` is not just safer,
- * it's the correct type for what this slot represents. A `\n` needs no
- * separate guard beyond that: `\d` never matches it, under any flag.
+ * `authority()` must equal "EPSG" (case-insensitive, since writers vary
+ * capitalisation) — a missing or non-EPSG authority returns `null` rather
+ * than being assumed. `code() === 0` means "not set" (mirrors
+ * `buildReferenceSystem` in the reader's own `file-info.ts`, which falls
+ * back to `codeString()` only to build a display string — not something
+ * this function reparses, for the same reason it doesn't reparse anything
+ * else).
  */
-const EPSG_PATTERNS: readonly RegExp[] = [
-  /^EPSG:(\d+)$/i,
-  /^urn:ogc:def:crs:EPSG:\d*:(\d+)$/i,
-  /^https?:\/\/www\.opengis\.net\/def\/crs\/EPSG\/\d+\/(\d+)$/i,
-];
-
-export function parseEpsg(rs: string | undefined): number | null {
-  if (!rs) return null;
-  const s = rs.trim();
-  for (const pattern of EPSG_PATTERNS) {
-    const m = pattern.exec(s);
-    if (m) return Number(m[1]);
-  }
-  return null;
+function structuredEpsg(header: HeaderView): number | null {
+  const rs = header.raw.referenceSystem();
+  if (rs === null) return null;
+  const authority = rs.authority();
+  if (authority === null || authority.toUpperCase() !== "EPSG") return null;
+  const code = rs.code();
+  return code === 0 ? null : code;
 }
 
 /**
@@ -146,7 +126,11 @@ export function checkAdmission(header: HeaderView): AdmissionError | null {
       message: "This file's geographical extent has zero width or height.",
     };
   }
-  const epsg = parseEpsg(info.referenceSystem);
+  // Admission is decided from the STRUCTURED fields (authority()/code()),
+  // never from `info.referenceSystem` — that composed string is used below
+  // only to name the CRS in the refusal message, which is metadata, not
+  // the decision.
+  const epsg = structuredEpsg(header);
   if (epsg === null || !isEstablishedMetricCrs(epsg)) {
     const named = info.referenceSystem
       ? `Reference system "${info.referenceSystem}"`
@@ -166,7 +150,7 @@ export function headerModel(header: HeaderView): FcbHeaderModel {
     featuresCount: info.featuresCount === 0 ? undefined : info.featuresCount,
     extent: info.geographicalExtent,
     referenceSystem: info.referenceSystem,
-    epsg: parseEpsg(info.referenceSystem),
+    epsg: structuredEpsg(header),
   };
 }
 
