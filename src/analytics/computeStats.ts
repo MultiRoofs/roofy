@@ -8,6 +8,7 @@
 import type { CityModel, CityObject } from "../domain/citymodel/types";
 import { computeRoofMetrics } from "../domain/roofMetrics/metrics";
 import type { RoofMetrics } from "../domain/roofMetrics/types";
+import type { ResidentObjectRecord } from "../features/streaming/workerProtocol";
 import type { ModelStats, ObjectStats, OrientationCount } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -53,9 +54,24 @@ function countByOrientation(metrics: RoofMetrics[]): OrientationCount[] {
 // Model-level stats
 // ---------------------------------------------------------------------------
 
-export function computeModelStats(model: CityModel): ModelStats {
-  const objects = Object.values(model.objects);
+/** Normalized per-object input shared by both the `CityObject` (rings,
+ *  recomputed roof metrics) and `ResidentObjectRecord` (rings absent,
+ *  roof metrics already precomputed by the worker) paths, so the
+ *  accumulation math below is written and tested exactly once. */
+interface StatsInput {
+  readonly surfaceCount: number;
+  readonly roofMetrics: ReadonlyArray<RoofMetrics>;
+  readonly height: number | null;
+}
 
+function heightFromAttributes(
+  attributes: Readonly<Record<string, unknown>>,
+): number | null {
+  const h = attributes.measuredHeight;
+  return typeof h === "number" ? h : null;
+}
+
+function accumulateModelStats(inputs: ReadonlyArray<StatsInput>): ModelStats {
   let surfaceCount = 0;
   let roofSurfaceCount = 0;
   let totalRoofArea = 0;
@@ -65,27 +81,21 @@ export function computeModelStats(model: CityModel): ModelStats {
   const heights: number[] = [];
   const roofMetricsList: RoofMetrics[] = [];
 
-  for (const obj of objects) {
-    if (!obj) continue;
+  for (const input of inputs) {
+    if (input.height !== null) heights.push(input.height);
+    surfaceCount += input.surfaceCount;
 
-    const h = obj.attributes.measuredHeight;
-    if (typeof h === "number") heights.push(h);
-
-    for (const surface of obj.surfaces) {
-      surfaceCount++;
-      if (surface.type === "RoofSurface") {
-        roofSurfaceCount++;
-        const m = computeRoofMetrics(surface);
-        roofMetricsList.push(m);
-        totalRoofArea += m.areaSqM;
-        avgRoofSlope += m.inclinationDeg * m.areaSqM;
-        roofSlopeWeightSum += m.areaSqM;
-      }
+    for (const m of input.roofMetrics) {
+      roofSurfaceCount++;
+      roofMetricsList.push(m);
+      totalRoofArea += m.areaSqM;
+      avgRoofSlope += m.inclinationDeg * m.areaSqM;
+      roofSlopeWeightSum += m.areaSqM;
     }
   }
 
   return {
-    buildingCount: objects.length,
+    buildingCount: inputs.length,
     surfaceCount,
     roofSurfaceCount,
     totalRoofArea,
@@ -101,17 +111,54 @@ export function computeModelStats(model: CityModel): ModelStats {
   };
 }
 
+export function computeModelStats(model: CityModel): ModelStats {
+  const inputs: StatsInput[] = [];
+  for (const obj of Object.values(model.objects)) {
+    if (!obj) continue;
+    const roofMetrics = obj.surfaces
+      .filter((s) => s.type === "RoofSurface")
+      .map(computeRoofMetrics);
+    inputs.push({
+      surfaceCount: obj.surfaces.length,
+      roofMetrics,
+      height: heightFromAttributes(obj.attributes),
+    });
+  }
+  return accumulateModelStats(inputs);
+}
+
+/**
+ * Streaming counterpart of `computeModelStats`: a `ResidentObjectRecord`
+ * carries no ring geometry (see `ResidentObjectRecord` in
+ * workerProtocol.ts), so roof metrics are read from `r.roofMetrics`
+ * (already computed by the worker when the cell was decoded) instead of
+ * being recomputed from surfaces, and `r.surfaceCount` stands in for
+ * `obj.surfaces.length`.
+ */
+export function computeModelStatsFromRecords(
+  records: ReadonlyArray<ResidentObjectRecord>,
+): ModelStats {
+  const inputs: StatsInput[] = records.map((r) => ({
+    surfaceCount: r.surfaceCount,
+    roofMetrics: r.roofMetrics,
+    height: heightFromAttributes(r.attributes),
+  }));
+  return accumulateModelStats(inputs);
+}
+
 // ---------------------------------------------------------------------------
 // Per-object stats
 // ---------------------------------------------------------------------------
 
-export function computeObjectStats(
-  model: CityModel,
-  objectId: string,
-): ObjectStats | null {
-  const obj: CityObject | undefined = model.objects[objectId];
-  if (!obj) return null;
+interface ObjectStatsInput {
+  readonly objectId: string;
+  readonly objectType: string;
+  readonly surfaceCount: number;
+  readonly roofMetrics: ReadonlyArray<RoofMetrics>;
+  readonly height: number | null;
+}
 
+function accumulateObjectStats(input: ObjectStatsInput): ObjectStats {
   let roofSurfaceCount = 0;
   let totalRoofArea = 0;
   let slopeSum = 0;
@@ -120,20 +167,17 @@ export function computeObjectStats(
   let azimuthCosSum = 0;
   let azimuthWeight = 0;
 
-  for (const surface of obj.surfaces) {
-    if (surface.type === "RoofSurface") {
-      roofSurfaceCount++;
-      const m = computeRoofMetrics(surface);
-      totalRoofArea += m.areaSqM;
-      slopeSum += m.inclinationDeg * m.areaSqM;
-      slopeWeight += m.areaSqM;
+  for (const m of input.roofMetrics) {
+    roofSurfaceCount++;
+    totalRoofArea += m.areaSqM;
+    slopeSum += m.inclinationDeg * m.areaSqM;
+    slopeWeight += m.areaSqM;
 
-      if (m.inclinationDeg >= 1) {
-        const rad = (m.azimuthDeg * Math.PI) / 180;
-        azimuthSinSum += m.areaSqM * Math.sin(rad);
-        azimuthCosSum += m.areaSqM * Math.cos(rad);
-        azimuthWeight += m.areaSqM;
-      }
+    if (m.inclinationDeg >= 1) {
+      const rad = (m.azimuthDeg * Math.PI) / 180;
+      azimuthSinSum += m.areaSqM * Math.sin(rad);
+      azimuthCosSum += m.areaSqM * Math.cos(rad);
+      azimuthWeight += m.areaSqM;
     }
   }
 
@@ -143,16 +187,49 @@ export function computeObjectStats(
     if (avgAzimuth < 0) avgAzimuth += 360;
   }
 
-  const h = obj.attributes.measuredHeight;
-
   return {
-    objectId,
-    objectType: obj.objectType,
-    surfaceCount: obj.surfaces.length,
+    objectId: input.objectId,
+    objectType: input.objectType,
+    surfaceCount: input.surfaceCount,
     roofSurfaceCount,
     totalRoofArea,
-    height: typeof h === "number" ? h : null,
+    height: input.height,
     avgRoofSlope: slopeWeight > 0 ? slopeSum / slopeWeight : 0,
     avgRoofAzimuth: avgAzimuth,
   };
+}
+
+export function computeObjectStats(
+  model: CityModel,
+  objectId: string,
+): ObjectStats | null {
+  const obj: CityObject | undefined = model.objects[objectId];
+  if (!obj) return null;
+
+  const roofMetrics = obj.surfaces
+    .filter((s) => s.type === "RoofSurface")
+    .map(computeRoofMetrics);
+
+  return accumulateObjectStats({
+    objectId,
+    objectType: obj.objectType,
+    surfaceCount: obj.surfaces.length,
+    roofMetrics,
+    height: heightFromAttributes(obj.attributes),
+  });
+}
+
+/** Streaming counterpart of `computeObjectStats` — takes an already-resolved
+ *  `ResidentObjectRecord` directly rather than a model + id, since callers
+ *  get records from `getResidentModel(...).objects`, not from a `CityModel`. */
+export function computeObjectStatsFromRecord(
+  record: ResidentObjectRecord,
+): ObjectStats {
+  return accumulateObjectStats({
+    objectId: record.id,
+    objectType: record.objectType,
+    surfaceCount: record.surfaceCount,
+    roofMetrics: record.roofMetrics,
+    height: heightFromAttributes(record.attributes),
+  });
 }

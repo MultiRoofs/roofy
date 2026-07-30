@@ -11,6 +11,9 @@ import type { CityModel, CityObject } from "../../domain/citymodel/types";
 import { queryDuckDB } from "../../analytics/duckdb";
 import { useSelectionStore } from "../../features/selection/selectionStore";
 import { useLayerStore } from "../../features/layers/layerStore";
+import { useStreamStore } from "../../features/streaming/streamStore";
+import { getResidentModel } from "../../features/streaming/residentModel";
+import type { ResidentObjectRecord } from "../../features/streaming/workerProtocol";
 import type { Selection } from "../../domain/selection/types";
 
 const PAGE_SIZE = 100;
@@ -45,6 +48,13 @@ export function TablePanel({
   const layers = useLayerStore((s) => s.layers);
   const activeLayerId = useLayerStore((s) => s.activeLayerId);
   const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
+
+  // Only meaningful (and only subscribed) for a streaming active layer —
+  // bumps on every cell commit, which is what drives loadPage to re-read
+  // the merged resident model below.
+  const streamVersion = useStreamStore((s) =>
+    activeLayer ? s.streams[activeLayer.id]?.version : undefined,
+  );
 
   // Determine the active selected IDs based on sync mode
   const selectedIds = syncSelection
@@ -99,6 +109,34 @@ export function TablePanel({
           if (countResult?.rows[0]) {
             setTotalCount(Number(countResult.rows[0].cnt) || 0);
           }
+        } else if (activeLayer?.isStreaming) {
+          // Streaming layer, no DuckDB table: read whatever cells are
+          // currently resident via the memoised merge instead of a
+          // `CityModel` — a streaming layer never has one populated with
+          // real objects (see residentModel.ts's doc comment on why this
+          // isn't a Zustand selector).
+          const residentModel = getResidentModel(
+            activeLayer.id,
+            streamVersion ?? 0,
+          );
+          const allRecords = Object.values(residentModel.objects);
+          if (gen !== loadGenRef.current) return; // stale
+          if (page === 0) {
+            setColumns(getColumnsFromRecords(allRecords));
+            setTotalCount(allRecords.length);
+          }
+
+          const sorted = sortRecordsInMemory(allRecords, sortCol, sortDir);
+          const pageRows = sorted
+            .slice(offset, offset + PAGE_SIZE)
+            .map(recordToRow);
+
+          if (reset || page === 0) {
+            setRows(pageRows);
+          } else {
+            setRows((prev) => [...prev, ...pageRows]);
+          }
+          setHasMore(offset + PAGE_SIZE < sorted.length);
         } else if (activeLayer) {
           // In-memory fallback
           const allObjects = Object.values(activeLayer.model.objects).filter(
@@ -128,7 +166,7 @@ export function TablePanel({
         if (gen === loadGenRef.current) setLoading(false);
       }
     },
-    [duckdbTableLoaded, sortCol, sortDir, activeLayer],
+    [duckdbTableLoaded, sortCol, sortDir, activeLayer, streamVersion],
   );
 
   // Reload on sort change or data source change
@@ -419,6 +457,65 @@ function getObjectValue(obj: CityObject, col: string): unknown {
   if (col === "lod") return obj.lod;
   if (col === "surface_count") return obj.surfaces.length;
   return obj.attributes[col];
+}
+
+// ---------------------------------------------------------------------------
+// Streaming (ResidentObjectRecord) helpers — mirror the in-memory helpers
+// above field-for-field, but read `surface_count` from `r.surfaceCount`
+// instead of `surfaces.length`, since a ResidentObjectRecord never carries
+// a `surfaces` array (see workerProtocol.ts's doc comment on why).
+// ---------------------------------------------------------------------------
+
+function getColumnsFromRecords(
+  records: ReadonlyArray<ResidentObjectRecord>,
+): string[] {
+  const cols = ["id", "type", "lod", "surface_count"];
+  const attrKeys = new Set<string>();
+  for (const r of records) {
+    for (const key of Object.keys(r.attributes)) {
+      attrKeys.add(key);
+    }
+  }
+  return [...cols, ...Array.from(attrKeys).sort()];
+}
+
+function recordToRow(r: ResidentObjectRecord): Record<string, unknown> {
+  const row: Record<string, unknown> = {
+    id: r.id,
+    type: r.objectType,
+    lod: r.lod,
+    surface_count: r.surfaceCount,
+  };
+  for (const [key, value] of Object.entries(r.attributes)) {
+    row[key] =
+      typeof value === "object" && value !== null
+        ? JSON.stringify(value)
+        : value;
+  }
+  return row;
+}
+
+function sortRecordsInMemory(
+  records: ReadonlyArray<ResidentObjectRecord>,
+  sortCol: string | null,
+  sortDir: SortDir,
+): ResidentObjectRecord[] {
+  if (!sortCol) return [...records];
+
+  return [...records].sort((a, b) => {
+    const av = getRecordValue(a, sortCol);
+    const bv = getRecordValue(b, sortCol);
+    const cmp = compareValues(av, bv);
+    return sortDir === "asc" ? cmp : -cmp;
+  });
+}
+
+function getRecordValue(r: ResidentObjectRecord, col: string): unknown {
+  if (col === "id") return r.id;
+  if (col === "type") return r.objectType;
+  if (col === "lod") return r.lod;
+  if (col === "surface_count") return r.surfaceCount;
+  return r.attributes[col];
 }
 
 function compareValues(a: unknown, b: unknown): number {
