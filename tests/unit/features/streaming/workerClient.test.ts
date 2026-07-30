@@ -272,24 +272,33 @@ describe("WorkerClient", () => {
     expect(client.isCurrent(e2)).toBe(true);
   });
 
-  it("terminate() tears down the underlying worker and drops pending callbacks", async () => {
+  it("terminate() tears down the underlying worker and REJECTS pending calls, rather than leaking them", async () => {
     const client = new WorkerClient();
     const worker = currentWorker();
     const promise = client.send({ type: "probe", bbox: [0, 0, 1, 1] });
     const id = sentId(worker);
     client.terminate();
     expect(worker.terminate).toHaveBeenCalledTimes(1);
+    await expect(promise).rejects.toThrow(/terminated/i);
     // The pending callback was dropped by terminate(), so firing the
-    // now-orphaned id must not throw and must not resolve the promise.
+    // now-orphaned id afterward must not throw and must not resolve/re-settle
+    // the (already-rejected) promise.
     expect(() =>
       worker.onmessage?.({
         data: { type: "probed", id, count: 1 },
       } as unknown as MessageEvent<WorkerResponse>),
     ).not.toThrow();
-    const race = await Promise.race([
-      promise.then(() => "resolved"),
-      new Promise((resolve) => setTimeout(() => resolve("timeout"), 20)),
-    ]);
-    expect(race).toBe("timeout");
+  });
+
+  it("terminate() rejects an in-flight sendStreaming() promise too", async () => {
+    const client = new WorkerClient();
+    const received: WorkerResponse[] = [];
+    const done = client.sendStreaming({ type: "evict", cells: [] }, (r) =>
+      received.push(r),
+    );
+    client.terminate();
+    await expect(done).rejects.toThrow(/terminated/i);
+    // No 'cell'/'done' ever arrived, so onMessage must never have fired.
+    expect(received).toEqual([]);
   });
 });

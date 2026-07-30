@@ -42,7 +42,12 @@ export interface LayerStoreActions {
     layer: Omit<
       Layer,
       "id" | "selectedLod" | "availableLods" | "lodMode" | "isStreaming"
-    >,
+    > & {
+      /** Defaults to false. Set true for a layer opened via viewport
+       *  streaming (Task 17's `openStreamingLayer`) — its `model` is a stub
+       *  (bbox only, empty objects) rather than a fully-parsed model. */
+      readonly isStreaming?: boolean;
+    },
   ) => string;
   removeLayer: (id: string) => void;
   updateLayer: (
@@ -100,7 +105,7 @@ export const useLayerStore = create<LayerStore>((set) => ({
           selectedLod,
           availableLods,
           lodMode: "auto",
-          isStreaming: false,
+          isStreaming: input.isStreaming ?? false,
         },
       ],
       activeLayerId: state.activeLayerId ?? id,

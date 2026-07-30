@@ -14,9 +14,46 @@ import {
   fileNameFromUrl,
 } from "../../domain/citymodel/loadCityModel";
 import { useLayerStore } from "./layerStore";
+import { openStreamingLayer } from "../streaming/openStreamingLayer";
+import type { Rule } from "../rules/types";
+
+/** Optional per-layer settings to apply instead of the usual fresh-layer
+ *  defaults (rules: [], rulesEnabled: true, visible: true, lodMode: "auto")
+ *  — used when re-linking a file to a layer restored from a snapshot, so
+ *  the saved rules/visibility/LoD survive the re-selection (see App.tsx's
+ *  "unavailable layers" resolve flow). */
+export interface LayerOverrides {
+  readonly rules?: ReadonlyArray<Rule>;
+  readonly rulesEnabled?: boolean;
+  readonly visible?: boolean;
+  readonly lodMode?: "auto" | "manual";
+  readonly selectedLod?: string | null;
+}
+
+function applyPostCreateOverrides(
+  layerId: string,
+  overrides: LayerOverrides | undefined,
+): void {
+  if (!overrides) return;
+  if (overrides.lodMode === "manual") {
+    useLayerStore.getState().setLodMode(layerId, "manual");
+  }
+  if (overrides.selectedLod !== undefined && overrides.selectedLod !== null) {
+    const layer = useLayerStore.getState().layers.find((l) => l.id === layerId);
+    // Only apply a saved LoD that actually exists on the (possibly
+    // different) file being re-linked — an invalid value would silently
+    // pin a LoD the new content never renders.
+    if (layer?.availableLods.includes(overrides.selectedLod)) {
+      useLayerStore.getState().setLayerLod(layerId, overrides.selectedLod);
+    }
+  }
+}
 
 export interface LayerFileLoader {
-  addLayerFromFile: (file: File) => Promise<string | null>;
+  addLayerFromFile: (
+    file: File,
+    overrides?: LayerOverrides,
+  ) => Promise<string | null>;
   addLayerFromUrl: (url: string) => Promise<string | null>;
   loading: boolean;
   error: string | null;
@@ -28,34 +65,37 @@ export function useLayerFileLoader(): LayerFileLoader {
   const [error, setError] = useState<string | null>(null);
 
   const addLayerFromFile = useCallback(
-    async (file: File): Promise<string | null> => {
+    async (file: File, overrides?: LayerOverrides): Promise<string | null> => {
       setError(null);
       setLoading(true);
       try {
-        let parsed: CityModel;
-
+        let layerId: string;
         if (detectEncoding(file.name) === "flatcitybuf") {
-          // FlatCityBuf files are loaded by viewport streaming, not as a
-          // single whole-file read, and that path is not wired up to this
-          // hook yet. The whole-file WASM reader this branch used to call
-          // has been removed.
-          throw new Error(
-            `FlatCityBuf (.fcb) files are loaded by viewport streaming, not as a single whole-file read, and that path is not wired up yet. Could not load "${file.name}".`,
-          );
+          // A `File` IS a `Blob` — passed straight through, never read into
+          // an ArrayBuffer first (see openStreamingLayer.ts's doc comment
+          // on why fromBytes' copy would OOM a multi-GB local file).
+          layerId = await openStreamingLayer({
+            source: { blob: file },
+            name: file.name,
+            modelRef: { type: "file", fileName: file.name },
+            rules: overrides?.rules,
+            rulesEnabled: overrides?.rulesEnabled,
+            visible: overrides?.visible,
+          });
         } else {
           const text = await file.text();
-          parsed = parseText(file.name, text);
+          const parsed: CityModel = parseText(file.name, text);
+          layerId = useLayerStore.getState().addLayer({
+            name: file.name,
+            model: parsed,
+            modelRef: { type: "file", fileName: file.name },
+            visible: overrides?.visible ?? true,
+            rules: overrides?.rules ?? [],
+            rulesEnabled: overrides?.rulesEnabled ?? true,
+          });
         }
-
-        const id = useLayerStore.getState().addLayer({
-          name: file.name,
-          model: parsed,
-          modelRef: { type: "file", fileName: file.name },
-          visible: true,
-          rules: [],
-          rulesEnabled: true,
-        });
-        return id;
+        applyPostCreateOverrides(layerId, overrides);
+        return layerId;
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to parse file.");
         return null;
@@ -71,8 +111,16 @@ export function useLayerFileLoader(): LayerFileLoader {
       setError(null);
       setLoading(true);
       try {
+        if (detectEncoding(url) === "flatcitybuf") {
+          return await openStreamingLayer({
+            source: { url },
+            name: fileNameFromUrl(url),
+            modelRef: { type: "url", url },
+          });
+        }
+
         const parsed = await loadFromUrl(url);
-        const id = useLayerStore.getState().addLayer({
+        return useLayerStore.getState().addLayer({
           name: fileNameFromUrl(url),
           model: parsed,
           modelRef: { type: "url", url },
@@ -80,7 +128,6 @@ export function useLayerFileLoader(): LayerFileLoader {
           rules: [],
           rulesEnabled: true,
         });
-        return id;
       } catch (e) {
         setError(
           e instanceof Error ? e.message : "Failed to load remote file.",

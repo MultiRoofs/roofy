@@ -10,20 +10,18 @@
  * while damping decays, which is exactly the "interaction has stopped"
  * signal this module needs, and nothing else in the app produces.
  *
- * `useTileStreaming()` is not mounted anywhere yet. No code path sets
- * `Layer.isStreaming = true` (that lands in Task 17), and Task 13's report
- * on the two-level scene map says explicitly that it doesn't call this
- * hook either. It is written to be mounted with a single
- * `useTileStreaming();` call inside `CitySceneInner` — it takes no props,
- * reading camera/controls via `useThree()` (works from any component under
- * `<Canvas>`, per `OrbitControls`' `makeDefault` prop) and layers/streams
- * via the Zustand stores directly. A later task both flips `isStreaming` and
- * consumes `CellEntry` into `LayerSceneState.cells`; until then this hook
- * has no live layer to act on, which is why its coverage below is a mix of
- * directly-tested pure functions plus one real-timers integration test, not
- * a live-camera end-to-end test — see the task report for the split.
+ * Mounted from `CitySceneInner` (`src/scene/CitySceneR3F.tsx`) as
+ * `useTileStreaming(sceneOriginRef, groundY)` — see that call site for why
+ * it needs those two params instead of being a true zero-arg hook: streaming
+ * cells and static-layer meshes must share ONE scene origin/ground plane or
+ * they render misaligned (CitySceneR3F already maintains both as the
+ * multi-layer shared anchor, established from the first-loaded layer).
+ * `camera`/`controls` still come from `useThree()` (works from any component
+ * under `<Canvas>`, per `OrbitControls`' `makeDefault` prop); layers/streams
+ * come from the Zustand stores directly.
  */
 import { useEffect, useRef } from "react";
+import type { RefObject } from "react";
 import { useThree } from "@react-three/fiber";
 import type { PerspectiveCamera } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
@@ -45,8 +43,7 @@ import {
   LEVEL_SWAP_TIMEOUT_MS,
 } from "./constants";
 import type { CellGeometry, WorkerResponse } from "./workerProtocol";
-import { computeOriginOffset } from "../../scene/buildCityMesh";
-import type { BBox3 } from "../../domain/citymodel/types";
+import type { BBox3, Vec3 } from "../../domain/citymodel/types";
 
 // ---------------------------------------------------------------------
 // Pure helpers — each independently unit- and mutation-tested.
@@ -108,16 +105,15 @@ export function cellStatsFromGeometry(g: CellGeometry): CellStats {
 }
 
 /**
- * `layer.model.bbox` is expected to be a stub-model's own extent for a
- * streaming layer (set from the header extent at open time, Task 17), not
- * necessarily the multi-layer shared scene anchor `CitySceneR3F.tsx`
- * establishes from the FIRST loaded layer (design doc §10). A second
- * streaming layer sharing a scene with an already-anchored first layer would
- * need the SHARED anchor, not its own centre, for its footprint math to
- * agree with where its meshes actually get placed. That reconciliation is
- * out of scope while no code path ever sets `isStreaming = true`, and
- * `CitySceneR3F.tsx`'s shared origin ref is module-private — flagged here
- * rather than silently assumed correct for the multi-layer case.
+ * Same formula `CitySceneR3F.tsx` uses for its ground plane's Y position,
+ * exported so both sides compute the identical value from the identical
+ * (shared, multi-layer UNION) bbox — `CitySceneInner` calls this on
+ * `computeUnionBBox(layers)` and passes the result into `useTileStreaming`
+ * as `groundY`, rather than each streaming layer computing its own ground
+ * from just its own bbox. That per-layer-vs-shared mismatch was flagged as
+ * an open gap in an earlier draft of this module; resolved by having the
+ * caller own the shared computation and pass it in (see `useTileStreaming`'s
+ * `groundY` parameter) instead of this module recomputing it per layer.
  */
 export function groundYFromBBox(bbox: BBox3 | null): number {
   if (!bbox) return 0;
@@ -316,6 +312,8 @@ export function createSettleController(opts: {
 export async function commitStreamingLayer(
   layerId: string,
   camera: PerspectiveCamera,
+  origin: Vec3,
+  groundY: number,
 ): Promise<void> {
   const layer = useLayerStore.getState().layers.find((l) => l.id === layerId);
   const stream = useStreamStore.getState().get(layerId);
@@ -323,134 +321,162 @@ export async function commitStreamingLayer(
 
   const epoch = stream.client.newEpoch();
 
-  const origin = computeOriginOffset(layer.model);
-  const groundY = groundYFromBBox(layer.model.bbox);
-  const footprint = viewportFootprint(camera, groundY, origin);
+  // Everything below awaits the WorkerClient at least once, and terminate()
+  // (the layer-removal teardown path, CitySceneR3F.tsx) now REJECTS every
+  // promise it still has in flight rather than leaving it hanging — a real
+  // race if the user pans right as a layer is removed. Caught here so that
+  // race surfaces as, at worst, a status update (and only if the stream is
+  // still registered for someone to show it to) rather than an unhandled
+  // promise rejection.
+  try {
+    const footprint = viewportFootprint(camera, groundY, origin);
 
-  let probeCount: number | null = null;
-  if (footprint !== null) {
-    useStreamStore.getState().setStatus(layerId, "probing");
-    const probeResp = await stream.client.send({
-      type: "probe",
-      bbox: footprint.bbox,
+    let probeCount: number | null = null;
+    if (footprint !== null) {
+      useStreamStore.getState().setStatus(layerId, "probing");
+      const probeResp = await stream.client.send({
+        type: "probe",
+        bbox: footprint.bbox,
+      });
+      if (!stream.client.isCurrent(epoch)) return;
+      if (probeResp.type !== "probed") {
+        const message =
+          probeResp.type === "error"
+            ? probeResp.message
+            : `unexpected probe response: ${probeResp.type}`;
+        useStreamStore.getState().setStatus(layerId, "error", message);
+        return;
+      }
+      probeCount = probeResp.count;
+    }
+
+    const plan = planCommit({
+      footprint,
+      probeCount,
+      grid: stream.grid,
+      cache: stream.cache,
+      prevLevel: stream.level,
+      prevCommit: stream.lastCommit,
+      prevLod: lastLod.get(layerId) ?? null,
+      ladder: stream.ladder,
+      lodMode: layer.lodMode,
+      selectedLod: layer.selectedLod,
     });
-    if (!stream.client.isCurrent(epoch)) return;
-    if (probeResp.type !== "probed") {
-      const message =
-        probeResp.type === "error"
-          ? probeResp.message
-          : `unexpected probe response: ${probeResp.type}`;
-      useStreamStore.getState().setStatus(layerId, "error", message);
+
+    if (plan.kind === "too-far") {
+      useStreamStore
+        .getState()
+        .setStatus(layerId, "too-far", `Zoom in (${plan.reason})`);
       return;
     }
-    probeCount = probeResp.count;
-  }
+    if (plan.kind === "skip") {
+      useStreamStore.getState().setStatus(layerId, "idle");
+      return;
+    }
+    if (footprint === null) return; // unreachable: plan.kind is "commit" only when footprint is non-null.
 
-  const plan = planCommit({
-    footprint,
-    probeCount,
-    grid: stream.grid,
-    cache: stream.cache,
-    prevLevel: stream.level,
-    prevCommit: stream.lastCommit,
-    prevLod: lastLod.get(layerId) ?? null,
-    ladder: stream.ladder,
-    lodMode: layer.lodMode,
-    selectedLod: layer.selectedLod,
-  });
+    useStreamStore.getState().setStatus(layerId, "fetching");
+    const fetched = new Map<CellKey, FetchedCell>();
+    let fetchError: string | null = null;
 
-  if (plan.kind === "too-far") {
-    useStreamStore
-      .getState()
-      .setStatus(layerId, "too-far", `Zoom in (${plan.reason})`);
-    return;
-  }
-  if (plan.kind === "skip") {
-    useStreamStore.getState().setStatus(layerId, "idle");
-    return;
-  }
-  if (footprint === null) return; // unreachable: plan.kind is "commit" only when footprint is non-null.
+    const fetchPromise = stream.client
+      .sendStreaming(
+        {
+          type: "fetch",
+          bbox: footprint.bbox,
+          level: plan.level,
+          cells: [...plan.toFetch],
+          lod: lodToWireLabel(plan.lod),
+          rules: layer.rules,
+          rulesEnabled: layer.rulesEnabled,
+        },
+        (msg: WorkerResponse) => {
+          if (msg.type === "cell") {
+            fetched.set(msg.key, {
+              entry: {
+                geometry: msg.geometry,
+                objects: msg.objects,
+                surfaceAttrKeys: msg.surfaceAttrKeys,
+                lodsSeen: msg.lodsSeen,
+              },
+              stats: cellStatsFromGeometry(msg.geometry),
+            });
+          } else if (msg.type === "error") {
+            fetchError = msg.message;
+          }
+        },
+      )
+      .then(() => "done" as const);
 
-  useStreamStore.getState().setStatus(layerId, "fetching");
-  const fetched = new Map<CellKey, FetchedCell>();
-  let fetchError: string | null = null;
+    const outcome = plan.isSwap
+      ? await Promise.race([
+          fetchPromise,
+          new Promise<"timeout">((resolve) =>
+            setTimeout(() => resolve("timeout"), LEVEL_SWAP_TIMEOUT_MS),
+          ),
+        ])
+      : await fetchPromise;
 
-  const fetchPromise = stream.client
-    .sendStreaming(
-      {
-        type: "fetch",
-        bbox: footprint.bbox,
-        level: plan.level,
-        cells: [...plan.toFetch],
-        lod: lodToWireLabel(plan.lod),
-        rules: layer.rules,
-        rulesEnabled: layer.rulesEnabled,
-      },
-      (msg: WorkerResponse) => {
-        if (msg.type === "cell") {
-          fetched.set(msg.key, {
-            entry: {
-              geometry: msg.geometry,
-              objects: msg.objects,
-              surfaceAttrKeys: msg.surfaceAttrKeys,
-              lodsSeen: msg.lodsSeen,
-            },
-            stats: cellStatsFromGeometry(msg.geometry),
-          });
-        } else if (msg.type === "error") {
-          fetchError = msg.message;
-        }
-      },
-    )
-    .then(() => "done" as const);
+    if (!stream.client.isCurrent(epoch)) return;
 
-  const outcome = plan.isSwap
-    ? await Promise.race([
-        fetchPromise,
-        new Promise<"timeout">((resolve) =>
-          setTimeout(() => resolve("timeout"), LEVEL_SWAP_TIMEOUT_MS),
-        ),
-      ])
-    : await fetchPromise;
+    if (outcome === "timeout") {
+      // Best-effort abort — fire-and-forget, deliberately not awaited (this
+      // status update must not wait on it). If the worker was terminated in
+      // the meantime (layer removal racing the timeout), this send() rejects
+      // per workerClient.ts's terminate() contract; a rejected, un-awaited
+      // promise is NOT caught by this function's own try/catch (that only
+      // catches thrown/awaited errors), so it needs its own no-op catch or
+      // it surfaces as an unhandled rejection instead of being swallowed.
+      void stream.client.send({ type: "cancel" }).catch(() => {});
+      useStreamStore
+        .getState()
+        .setStatus(
+          layerId,
+          "error",
+          "Level swap timed out; kept the previous level",
+        );
+      return;
+    }
+    if (fetchError !== null) {
+      useStreamStore.getState().setStatus(layerId, "error", fetchError);
+      return;
+    }
 
-  if (!stream.client.isCurrent(epoch)) return;
+    const evicted = plan.isSwap
+      ? commitSwap(stream.cache, plan.desired, fetched)
+      : commitNormal(stream.cache, plan.desired, fetched);
 
-  if (outcome === "timeout") {
-    void stream.client.send({ type: "cancel" });
-    useStreamStore
-      .getState()
-      .setStatus(
-        layerId,
-        "error",
-        "Level swap timed out; kept the previous level",
-      );
-    return;
-  }
-  if (fetchError !== null) {
-    useStreamStore.getState().setStatus(layerId, "error", fetchError);
-    return;
-  }
+    if (evicted.length > 0) {
+      // Same fire-and-forget rationale as the cancel above: not awaited, so
+      // needs its own catch rather than relying on the surrounding try.
+      void stream.client
+        .send({ type: "evict", cells: evicted })
+        .catch(() => {});
+    }
 
-  const evicted = plan.isSwap
-    ? commitSwap(stream.cache, plan.desired, fetched)
-    : commitNormal(stream.cache, plan.desired, fetched);
-
-  if (evicted.length > 0) {
-    void stream.client.send({ type: "evict", cells: evicted });
-  }
-
-  lastLod.set(layerId, plan.lod);
-  const latest = useStreamStore.getState().get(layerId);
-  if (!latest) return; // layer was removed while the fetch was in flight.
-  useStreamStore.getState().register(layerId, {
-    ...latest,
-    level: plan.level,
-    lastCommit: plan.commitView,
-    status: "idle",
-    message: null,
-  });
-  if (fetched.size > 0 || evicted.length > 0) {
-    useStreamStore.getState().bumpVersion(layerId);
+    lastLod.set(layerId, plan.lod);
+    const latest = useStreamStore.getState().get(layerId);
+    if (!latest) return; // layer was removed while the fetch was in flight.
+    useStreamStore.getState().register(layerId, {
+      ...latest,
+      level: plan.level,
+      lastCommit: plan.commitView,
+      status: "idle",
+      message: null,
+    });
+    if (fetched.size > 0 || evicted.length > 0) {
+      useStreamStore.getState().bumpVersion(layerId);
+    }
+  } catch (err) {
+    if (useStreamStore.getState().get(layerId)) {
+      useStreamStore
+        .getState()
+        .setStatus(
+          layerId,
+          "error",
+          err instanceof Error ? err.message : String(err),
+        );
+    }
   }
 }
 
@@ -462,11 +488,31 @@ export async function commitStreamingLayer(
  */
 const lastLod = new Map<string, LodSelection>();
 
-export function useTileStreaming(): void {
+/**
+ * @param sceneOriginRef The scene's shared multi-layer origin offset
+ *   (`CitySceneR3F.tsx`'s `sceneOriginRef`), passed in rather than recomputed
+ *   here so a streaming layer's footprint math agrees with where its cell
+ *   meshes actually get placed by the scene (both derive from the SAME
+ *   value — see `CitySceneR3F.tsx`'s mesh-management effect, which sets this
+ *   ref from the first-loaded layer, streaming or not). Read fresh via
+ *   `.current` inside the change handler (never stale, no extra dependency).
+ * @param groundY The scene's shared ground-plane Y (`CitySceneInner`'s own
+ *   `groundY` memo, `computeUnionBBox(layers)` run through `groundYFromBBox`)
+ *   — likewise passed in so streaming and static layers agree on where "the
+ *   ground" is. Captured in a ref (not a dependency) so this effect doesn't
+ *   re-subscribe every time it changes, matching the existing "layers isn't
+ *   a dependency either" design below.
+ */
+export function useTileStreaming(
+  sceneOriginRef: RefObject<Vec3 | null>,
+  groundY: number,
+): void {
   const camera = useThree((s) => s.camera) as PerspectiveCamera;
   const controls = useThree((s) => s.controls) as OrbitControlsImpl | null;
 
   const controllers = useRef<Map<string, SettleController>>(new Map());
+  const groundYRef = useRef(groundY);
+  groundYRef.current = groundY;
 
   useEffect(() => {
     if (!controls) return;
@@ -499,10 +545,20 @@ export function useTileStreaming(): void {
               const stream = useStreamStore.getState().get(layer.id);
               if (!stream) return;
               stream.client.newEpoch();
-              void stream.client.send({ type: "cancel" });
+              // Fire-and-forget: see the identical rationale in
+              // commitStreamingLayer's cancel/evict sends above — not
+              // awaited, so a terminate()-triggered rejection needs its own
+              // catch rather than relying on a surrounding try/catch.
+              void stream.client.send({ type: "cancel" }).catch(() => {});
             },
             onSettle: () => {
-              void commitStreamingLayer(layer.id, camera);
+              const origin: Vec3 = sceneOriginRef.current ?? [0, 0, 0];
+              void commitStreamingLayer(
+                layer.id,
+                camera,
+                origin,
+                groundYRef.current,
+              );
             },
           });
           map.set(layer.id, controller);
