@@ -930,6 +930,10 @@ body {
   background: #6b7280;
 }
 
+.status-dot.dot-error {
+  background: #f87171;
+}
+
 @keyframes pulse-dot {
   0%,
   100% {
@@ -1755,6 +1759,66 @@ body {
   font-size: 0.6rem;
   color: var(--fg-dim);
   flex-shrink: 0;
+}
+
+.layer-meta-streaming {
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-badge-streaming {
+  flex-shrink: 0;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.55rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+
+.lod-selector-streaming {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.lod-readout {
+  font-size: 0.6rem;
+  color: var(--fg-dim);
+  cursor: default;
+}
+
+.lod-readout-value {
+  color: var(--fg-muted);
+}
+
+.lod-readout-cellsize {
+  color: var(--fg-dim);
+}
+
+.lod-readout-cellsize::before {
+  content: "\00b7";
+  margin-right: 0.25rem;
+}
+
+.lod-mode-btn {
+  padding: 0.1rem 0.3rem;
+  font-size: 0.6rem;
+  background: transparent;
+  color: var(--fg-dim);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.lod-mode-btn:hover {
+  color: var(--fg);
+  border-color: var(--accent);
 }
 
 .lod-select {

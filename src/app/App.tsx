@@ -16,6 +16,8 @@ import {
   getDuckDBStatus,
   loadModelIntoDuckDB,
   loadCityModelFromMemory,
+  loadResidentObjectsIntoDuckDB,
+  shouldUseSourceUrlPath,
 } from "../analytics/duckdb";
 import type { DuckDBStatus } from "../analytics/duckdb";
 import { browserPlatform } from "../platform/browser";
@@ -25,6 +27,8 @@ import type { CitySceneHandle } from "../scene/CitySceneR3F";
 import { useSelectionStore } from "../features/selection/selectionStore";
 import { useLayerStore } from "../features/layers/layerStore";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
+import { useStreamStore } from "../features/streaming/streamStore";
+import { getResidentModel } from "../features/streaming/residentModel";
 import { useTheme } from "../features/theme/useTheme";
 import { useSolarStore } from "../features/solar/solarStore";
 import { InspectorPanel } from "../ui/inspector/InspectorPanel";
@@ -78,6 +82,22 @@ export function App({
   const activeLayerId = useLayerStore((s) => s.activeLayerId);
   const hasLayers = layers.length > 0;
 
+  // Active layer's streaming state, if any. Selected as individual
+  // primitive fields (not the whole `StreamState` object) so this component
+  // only re-renders on the fields it actually reads — see streamStore.ts's
+  // doc comment on why a commit only ever touches `streams`, never
+  // `layers`, and why consumers that DO need to react to one select
+  // narrowly rather than subscribing to the whole entry.
+  const activeStreamVersion = useStreamStore((s) =>
+    activeLayerId ? s.streams[activeLayerId]?.version : undefined,
+  );
+  const activeStreamStatus = useStreamStore((s) =>
+    activeLayerId ? s.streams[activeLayerId]?.status : undefined,
+  );
+  const activeStreamMessage = useStreamStore((s) =>
+    activeLayerId ? s.streams[activeLayerId]?.message : undefined,
+  );
+
   // File loading
   const {
     addLayerFromFile,
@@ -110,7 +130,8 @@ export function App({
     });
   }, []);
 
-  // Load active layer's model into DuckDB (URL via extension, file via in-memory)
+  // Load active layer's model into DuckDB (URL via extension, file via
+  // in-memory, streaming via resident cells — see shouldUseSourceUrlPath).
   useEffect(() => {
     let cancelled = false;
 
@@ -129,25 +150,49 @@ export function App({
     void (async () => {
       let loaded = false;
 
-      // Try extension reader for URL models (CityGML not supported by DuckDB extension)
-      if (activeLayer.modelRef.type === "url" && extensionLoaded) {
-        const encoding = detectEncoding(activeLayer.modelRef.url);
-        if (encoding !== "citygml") {
-          loaded = await loadModelIntoDuckDB(
-            activeLayer.modelRef.url,
-            encoding,
-          );
+      if (activeLayer.isStreaming) {
+        // shouldUseSourceUrlPath refuses the extension path here — it would
+        // open a second, complete read of the remote file just to populate
+        // `city_objects`, exactly what viewport streaming exists to avoid.
+        // Feed the table from whatever cells are actually resident instead,
+        // so Stats/Table only ever report what the UI itself claims to show.
+        const resident = getResidentModel(
+          activeLayer.id,
+          activeStreamVersion ?? 0,
+        );
+        loaded = await loadResidentObjectsIntoDuckDB(
+          Object.values(resident.objects),
+        );
+      } else {
+        // Try extension reader for URL models (CityGML not supported by DuckDB extension)
+        if (
+          shouldUseSourceUrlPath(
+            activeLayer.modelRef,
+            activeLayer.isStreaming,
+          ) &&
+          extensionLoaded
+        ) {
+          const encoding = detectEncoding(activeLayer.modelRef.url);
+          if (encoding !== "citygml") {
+            loaded = await loadModelIntoDuckDB(
+              activeLayer.modelRef.url,
+              encoding,
+            );
+          }
         }
-      }
 
-      // Fall back to in-memory loading (works for file and URL models)
-      if (!loaded) {
-        loaded = await loadCityModelFromMemory(activeLayer.model);
+        // Fall back to in-memory loading (works for file and URL models)
+        if (!loaded) {
+          loaded = await loadCityModelFromMemory(activeLayer.model);
+        }
       }
 
       if (!cancelled) {
         setDuckdbModelLoaded(
-          activeLayer.modelRef.type === "url" && extensionLoaded && loaded,
+          !activeLayer.isStreaming &&
+            activeLayer.modelRef.type === "url" &&
+            extensionLoaded &&
+            loaded,
         );
         setDuckdbTableLoaded(loaded);
       }
@@ -156,7 +201,7 @@ export function App({
     return () => {
       cancelled = true;
     };
-  }, [duckdbStatus, activeLayerId, layers]);
+  }, [duckdbStatus, activeLayerId, layers, activeStreamVersion]);
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -542,6 +587,12 @@ export function App({
           cursorPosition={cursorPosition}
           tableOpen={tableOpen}
           onToggleTable={() => setTableOpen((o) => !o)}
+          streamStatus={
+            activeLayer?.isStreaming ? (activeStreamStatus ?? "idle") : null
+          }
+          streamMessage={
+            activeLayer?.isStreaming ? (activeStreamMessage ?? null) : null
+          }
         />
 
         {toast && <div className="toast">{toast}</div>}

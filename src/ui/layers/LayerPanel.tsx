@@ -7,6 +7,9 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useLayerStore } from "../../features/layers/layerStore";
+import type { Layer } from "../../features/layers/layerStore";
+import { useStreamStore } from "../../features/streaming/streamStore";
+import { getResidentModel } from "../../features/streaming/residentModel";
 import { LodSelector } from "../sidebar/LodSelector";
 
 interface LayerPanelProps {
@@ -80,7 +83,6 @@ export function LayerPanel({
 
       {layers.map((layer) => {
         const isActive = layer.id === activeLayerId;
-        const objectCount = Object.keys(layer.model.objects).length;
 
         return (
           <div
@@ -135,12 +137,23 @@ export function LayerPanel({
               </span>
             )}
 
-            <span className="layer-meta">{objectCount}</span>
+            {layer.isStreaming && (
+              <span
+                className="layer-badge-streaming"
+                title="Viewport streaming — only cells near the camera are fetched"
+              >
+                STREAM
+              </span>
+            )}
+
+            <LayerObjectCount layer={layer} />
 
             <LodSelector
               layerId={layer.id}
               availableLods={layer.availableLods}
               selectedLod={layer.selectedLod}
+              isStreaming={layer.isStreaming}
+              lodMode={layer.lodMode}
             />
 
             <div className="layer-actions">
@@ -238,5 +251,49 @@ export function LayerPanel({
         </button>
       )}
     </div>
+  );
+}
+
+/**
+ * The per-layer object-count badge, split out into its own component so its
+ * `useStreamStore` subscription (needed only for a streaming layer) doesn't
+ * violate Rules of Hooks inside `LayerPanel`'s `.map()` — the number of rows
+ * changes whenever a layer is added or removed, so a hook call directly
+ * inside that callback would call a different number of hooks across
+ * renders. A dedicated component per row sidesteps that: each mounted
+ * instance has its own stable hook order.
+ *
+ * A streaming layer's `model.objects` is never populated — see
+ * residentModel.ts's doc comment — so this reads the resident count from
+ * `getResidentModel` instead of `Object.keys(layer.model.objects).length`.
+ * Labelled "features" (never "buildings": one FlatCityBuf feature can carry
+ * a Building plus several BuildingParts, so a building count wouldn't add
+ * up against anything) and explicitly qualified as the RESIDENT CACHE, not
+ * "visible area" — the cover includes a one-cell margin and the LRU keeps
+ * cells after they leave view, so this number can outlive what's on screen.
+ * There is no "n of total" here: the header's total feature count and this
+ * resident count aren't the same unit (see duckdb.ts/App.tsx's DuckDB
+ * gating for the fuller version of this reasoning) so a denominator would
+ * invite exactly the false precision this task exists to remove.
+ */
+function LayerObjectCount({ layer }: { readonly layer: Layer }) {
+  const streamVersion = useStreamStore((s) => s.streams[layer.id]?.version);
+
+  if (!layer.isStreaming) {
+    const objectCount = Object.keys(layer.model.objects).length;
+    return <span className="layer-meta">{objectCount}</span>;
+  }
+
+  const resident = getResidentModel(layer.id, streamVersion ?? 0);
+  const featureWord = resident.featureCount === 1 ? "feature" : "features";
+  const cellWord = resident.cellCount === 1 ? "cell" : "cells";
+
+  return (
+    <span
+      className="layer-meta layer-meta-streaming"
+      title={`Resident cache: ${resident.featureCount} ${featureWord} loaded across ${resident.cellCount} resident ${cellWord}. Reflects what's currently held in memory — including a margin around the viewport and cells not yet evicted — not exactly what's on screen right now.`}
+    >
+      {resident.featureCount} {featureWord} loaded (resident cache)
+    </span>
   );
 }
