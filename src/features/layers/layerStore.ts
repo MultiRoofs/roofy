@@ -20,6 +20,16 @@ export interface Layer {
   readonly rulesEnabled: boolean;
   readonly selectedLod: string | null;
   readonly availableLods: ReadonlyArray<string>;
+  /** "auto": the viewport-streaming driver (Task 14) picks the LoD ladder
+   *  rung from zoom level. "manual": the user's `selectedLod` choice pins
+   *  it, same as a non-streaming layer. Defaults to "auto" so a freshly
+   *  loaded streaming layer follows zoom without extra user action. */
+  readonly lodMode: "auto" | "manual";
+  /** True once a layer's stream has been opened and admitted (Task 8's
+   *  `checkAdmission`) for viewport streaming, i.e. it has per-cell state
+   *  in `useStreamStore` rather than one resident `model`. Defaults to
+   *  false: every layer starts as a plain, fully-resident layer. */
+  readonly isStreaming: boolean;
 }
 
 export interface LayerStoreState {
@@ -29,7 +39,10 @@ export interface LayerStoreState {
 
 export interface LayerStoreActions {
   addLayer: (
-    layer: Omit<Layer, "id" | "selectedLod" | "availableLods">,
+    layer: Omit<
+      Layer,
+      "id" | "selectedLod" | "availableLods" | "lodMode" | "isStreaming"
+    >,
   ) => string;
   removeLayer: (id: string) => void;
   updateLayer: (
@@ -39,6 +52,7 @@ export interface LayerStoreActions {
   setActiveLayer: (id: string | null) => void;
   removeAllLayers: () => void;
   setLayerLod: (layerId: string, lod: string | null) => void;
+  setLodMode: (layerId: string, mode: "auto" | "manual") => void;
 
   // Per-layer rule actions
   addRule: (layerId: string, rule: Rule) => void;
@@ -78,7 +92,17 @@ export const useLayerStore = create<LayerStore>((set) => ({
     const availableLods = computeAvailableLods(input.model);
     const selectedLod = availableLods[0] ?? null;
     set((state) => ({
-      layers: [...state.layers, { ...input, id, selectedLod, availableLods }],
+      layers: [
+        ...state.layers,
+        {
+          ...input,
+          id,
+          selectedLod,
+          availableLods,
+          lodMode: "auto",
+          isStreaming: false,
+        },
+      ],
       activeLayerId: state.activeLayerId ?? id,
     }));
     return id;
@@ -107,6 +131,13 @@ export const useLayerStore = create<LayerStore>((set) => ({
     set((state) => ({
       layers: state.layers.map((l) =>
         l.id === layerId ? { ...l, selectedLod: lod } : l,
+      ),
+    })),
+
+  setLodMode: (layerId, mode) =>
+    set((state) => ({
+      layers: state.layers.map((l) =>
+        l.id === layerId ? { ...l, lodMode: mode } : l,
       ),
     })),
 
