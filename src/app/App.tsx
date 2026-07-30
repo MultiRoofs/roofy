@@ -5,7 +5,14 @@ import {
   loadFromUrl,
   fileNameFromUrl,
 } from "../domain/citymodel/loadCityModel";
-import type { ProjectStateStore, SnapshotSummary } from "../persistence/types";
+import type {
+  CityModelReference,
+  ProjectStateStore,
+  RawLayerSnapshot,
+  SnapshotSummary,
+  StreamSourceSnapshot,
+} from "../persistence/types";
+import { migrateSnapshot } from "../persistence/types";
 import { LocalStorageProjectStateStore } from "../persistence/localStorage";
 import { captureSnapshot } from "../persistence/captureSnapshot";
 import { restoreSnapshot } from "../persistence/restoreSnapshot";
@@ -29,6 +36,7 @@ import { useLayerStore } from "../features/layers/layerStore";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
 import { useStreamStore } from "../features/streaming/streamStore";
 import { getResidentModel } from "../features/streaming/residentModel";
+import { openStreamingLayer } from "../features/streaming/openStreamingLayer";
 import { useTheme } from "../features/theme/useTheme";
 import { useSolarStore } from "../features/solar/solarStore";
 import { InspectorPanel } from "../ui/inspector/InspectorPanel";
@@ -40,10 +48,41 @@ import { AttributePanel } from "../ui/viewport/AttributePanel";
 import { AdvancedSettingsPanel } from "../ui/viewport/AdvancedSettingsPanel";
 import { TablePanel } from "../ui/table/TablePanel";
 import type { CityObject } from "../domain/citymodel/types";
+import type { Rule } from "../features/rules/types";
 
 const defaultStore = new LocalStorageProjectStateStore();
 const SAMPLE_DATA_URL =
   "https://storage.googleapis.com/cityjson/delft.city.jsonl";
+
+/** How a streaming layer's `.fcb` source was opened, for the save/restore
+ *  round-trip (`LayerSnapshot.stream`, `migrateSnapshot`'s `unavailable`
+ *  flag). Only meaningful for `l.isStreaming` layers — see handleSave. */
+function streamSourceSnapshot(
+  modelRef: CityModelReference,
+): StreamSourceSnapshot {
+  return modelRef.type === "url"
+    ? { kind: "url", url: modelRef.url }
+    : { kind: "file", fileName: modelRef.fileName };
+}
+
+/** An unavailable-locally-sourced layer restored from a snapshot: a
+ *  file-backed layer (streaming or not) whose bytes cannot survive a
+ *  reload — no Blob/File is ever persisted. Rendered as a persistent
+ *  (not auto-dismissing) prompt, distinct from the transient `toast`, so
+ *  the user can re-select the file rather than the layer silently vanishing. */
+interface UnavailableLayer {
+  readonly id: string;
+  readonly name: string;
+  readonly fileName: string;
+  /** The saved layer's settings, carried through so re-selecting a file
+   *  restores them instead of silently reverting to defaults — see
+   *  handleResolveUnavailableLayer. */
+  readonly rules: ReadonlyArray<Rule>;
+  readonly rulesEnabled: boolean;
+  readonly visible: boolean;
+  readonly lodMode: "auto" | "manual";
+  readonly selectedLod: string | null;
+}
 
 interface AppProps {
   readonly persistenceStore?: ProjectStateStore;
@@ -59,6 +98,9 @@ export function App({
   const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(240);
   const [savedSnapshots, setSavedSnapshots] = useState<SnapshotSummary[]>([]);
+  const [unavailableLayers, setUnavailableLayers] = useState<
+    ReadonlyArray<UnavailableLayer>
+  >([]);
   const [duckdbStatus, setDuckdbStatus] = useState<DuckDBStatus>({
     state: "uninitialized",
   });
@@ -239,6 +281,9 @@ export function App({
         rules: [...l.rules],
         rulesEnabled: l.rulesEnabled,
         visible: l.visible,
+        selectedLod: l.selectedLod,
+        lodMode: l.lodMode,
+        ...(l.isStreaming ? { stream: streamSourceSnapshot(l.modelRef) } : {}),
       })),
       cameraPosition: cameraState.position,
       cameraTarget: cameraState.target,
@@ -270,6 +315,7 @@ export function App({
 
         // Remove all existing layers
         useLayerStore.getState().removeAllLayers();
+        setUnavailableLayers([]);
 
         // Restore layers from snapshot
         const snapshotLayers = snapshot.layers ?? [];
@@ -287,32 +333,104 @@ export function App({
               ]
             : snapshotLayers;
 
+        // Upgrades an older save (missing lodMode/stream) to the current
+        // per-layer schema and flags a file-backed streaming layer as
+        // needing re-selection — see migrateSnapshot's own doc comment.
+        // Cast at the boundary: `legacyLayers` is genuinely well-typed
+        // (`LayerSnapshot[]`), but `migrateSnapshot` accepts a deliberately
+        // LOOSE shape so it can also upgrade an older save that predates
+        // some of these fields — the same reason its own test file casts
+        // its fixtures `as never`.
+        const migrated = migrateSnapshot({
+          layers: legacyLayers as unknown as RawLayerSnapshot[],
+        });
+
+        // Each layer gets its OWN try/catch: one .fcb layer failing
+        // admission (checkAdmission — no-extent, non-metric-crs, ...) must
+        // not abort every layer listed after it in the same workspace. The
+        // share-restore effect below already does this per-item; this loop
+        // previously did not, and streaming's admission checks make a
+        // single-layer failure meaningfully more likely than before.
         let hasUrlLayer = false;
-        for (const sl of legacyLayers) {
-          if (sl.modelRef.type === "url") {
+        let failedCount = 0;
+        const newUnavailable: UnavailableLayer[] = [];
+        for (const sl of migrated.layers) {
+          try {
+            const name = (sl.name as string | undefined) ?? "Untitled layer";
+            const modelRef = sl.modelRef as CityModelReference | undefined;
+            if (!modelRef) continue; // malformed saved entry — nothing to restore
+
+            const rules = (sl.rules as Rule[] | undefined) ?? [];
+            const rulesEnabled =
+              (sl.rulesEnabled as boolean | undefined) ?? true;
+            const visible = (sl.visible as boolean | undefined) ?? true;
+            const lodMode =
+              (sl.lodMode as "auto" | "manual" | undefined) ?? "auto";
+            const selectedLod = (sl.selectedLod as string | null) ?? null;
+
+            if (modelRef.type === "file" || sl.unavailable) {
+              const fileName =
+                modelRef.type === "file" ? modelRef.fileName : name;
+              newUnavailable.push({
+                id: crypto.randomUUID(),
+                name,
+                fileName,
+                rules,
+                rulesEnabled,
+                visible,
+                lodMode,
+                selectedLod,
+              });
+              continue;
+            }
+
             hasUrlLayer = true;
-            const parsed = await loadFromUrl(sl.modelRef.url);
-            useLayerStore.getState().addLayer({
-              name: sl.name,
-              model: parsed,
-              modelRef: sl.modelRef,
-              visible: sl.visible ?? true,
-              rules: sl.rules ?? [],
-              rulesEnabled: sl.rulesEnabled ?? true,
-            });
+
+            let layerId: string;
+            if (detectEncoding(modelRef.url) === "flatcitybuf") {
+              layerId = await openStreamingLayer({
+                source: { url: modelRef.url },
+                name,
+                modelRef,
+                rules,
+                rulesEnabled,
+                visible,
+              });
+            } else {
+              const parsed = await loadFromUrl(modelRef.url);
+              layerId = useLayerStore.getState().addLayer({
+                name,
+                model: parsed,
+                modelRef,
+                visible,
+                rules,
+                rulesEnabled,
+              });
+            }
+            if (lodMode === "manual") {
+              useLayerStore.getState().setLodMode(layerId, "manual");
+            }
+          } catch {
+            // Skip this one layer; keep restoring the rest of the workspace.
+            failedCount++;
           }
         }
+        setUnavailableLayers(newUnavailable);
 
-        const hasFileLayer = legacyLayers.some(
-          (l) => l.modelRef.type === "file",
-        );
-        if (!hasUrlLayer) {
+        if (!hasUrlLayer && newUnavailable.length === 0 && failedCount === 0) {
           setToast("Workspace restored. Drop file(s) to view the model.");
           setTimeout(() => setToast(null), 3000);
-        } else if (hasFileLayer) {
-          setToast(
-            "URL layers restored. Drop local file(s) to restore remaining layers.",
-          );
+        } else if (newUnavailable.length > 0 || failedCount > 0) {
+          const parts = [
+            hasUrlLayer ? "Workspace restored." : null,
+            newUnavailable.length > 0
+              ? "Some layers need a local file re-selected below."
+              : null,
+            failedCount > 0
+              ? `${failedCount} layer${failedCount === 1 ? "" : "s"} failed to restore.`
+              : null,
+          ].filter(Boolean);
+          setToast(parts.join(" "));
           setTimeout(() => setToast(null), 3000);
         }
 
@@ -413,15 +531,31 @@ export function App({
       for (const sl of layersToLoad) {
         if (!sl.modelUrl) continue;
         try {
-          const parsed = await loadFromUrl(sl.modelUrl);
-          useLayerStore.getState().addLayer({
-            name: sl.name ?? fileNameFromUrl(sl.modelUrl),
-            model: parsed,
-            modelRef: { type: "url", url: sl.modelUrl },
-            visible: sl.visible ?? true,
-            rules: (sl.rules ?? []) as (typeof layers)[number]["rules"],
-            rulesEnabled: sl.rulesEnabled ?? true,
-          });
+          const name = sl.name ?? fileNameFromUrl(sl.modelUrl);
+          const rules = (sl.rules ?? []) as (typeof layers)[number]["rules"];
+          const rulesEnabled = sl.rulesEnabled ?? true;
+          const visible = sl.visible ?? true;
+
+          if (detectEncoding(sl.modelUrl) === "flatcitybuf") {
+            await openStreamingLayer({
+              source: { url: sl.modelUrl },
+              name,
+              modelRef: { type: "url", url: sl.modelUrl },
+              rules,
+              rulesEnabled,
+              visible,
+            });
+          } else {
+            const parsed = await loadFromUrl(sl.modelUrl);
+            useLayerStore.getState().addLayer({
+              name,
+              model: parsed,
+              modelRef: { type: "url", url: sl.modelUrl },
+              visible,
+              rules,
+              rulesEnabled,
+            });
+          }
         } catch {
           // Skip failed layers silently
         }
@@ -468,8 +602,41 @@ export function App({
     setTableOpen(false);
     setFps(undefined);
     setCursorPosition(null);
+    setUnavailableLayers([]);
     clearSelection();
   }, [clearSelection]);
+
+  // Re-selecting a file for an "unavailable" (restored-but-file-backed)
+  // layer entry: routes through the same handleFile path any drop/browse
+  // use — it already dispatches .fcb to streaming vs. plain parsing by
+  // extension — then drops the entry once handled, whether it succeeded or
+  // not (a failure surfaces through the normal `loadError` state; leaving a
+  // permanently-stuck placeholder row would be worse than letting the user
+  // retry via the ordinary add-layer controls).
+  const handleResolveUnavailableLayer = useCallback(
+    (entryId: string, file: File) => {
+      const entry = unavailableLayers.find((u) => u.id === entryId);
+      setUnavailableLayers((prev) => prev.filter((u) => u.id !== entryId));
+      clearError();
+      void addLayerFromFile(
+        file,
+        entry
+          ? {
+              rules: entry.rules,
+              rulesEnabled: entry.rulesEnabled,
+              visible: entry.visible,
+              lodMode: entry.lodMode,
+              selectedLod: entry.selectedLod,
+            }
+          : undefined,
+      );
+    },
+    [unavailableLayers, addLayerFromFile, clearError],
+  );
+
+  const handleDismissUnavailableLayer = useCallback((entryId: string) => {
+    setUnavailableLayers((prev) => prev.filter((u) => u.id !== entryId));
+  }, []);
 
   const handleFitAll = useCallback(() => {
     sceneRef.current?.fitAll();
@@ -595,6 +762,14 @@ export function App({
           }
         />
 
+        {unavailableLayers.length > 0 && (
+          <UnavailableLayersBanner
+            layers={unavailableLayers}
+            onResolve={handleResolveUnavailableLayer}
+            onDismiss={handleDismissUnavailableLayer}
+          />
+        )}
+
         {toast && <div className="toast">{toast}</div>}
       </div>
     );
@@ -612,6 +787,14 @@ export function App({
           (CityGML).
         </p>
       </div>
+
+      {unavailableLayers.length > 0 && (
+        <UnavailableLayersBanner
+          layers={unavailableLayers}
+          onResolve={handleResolveUnavailableLayer}
+          onDismiss={handleDismissUnavailableLayer}
+        />
+      )}
 
       <div
         className="drop-zone"
@@ -716,6 +899,63 @@ function UrlInput({
         </button>
       </div>
     </form>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Unavailable (file-backed, restored-from-a-snapshot) layers — a persistent
+// prompt, not a toast, per the explicit persistence requirement: "such a
+// layer must restore as an explicit unavailable local source state
+// prompting re-selection — not vanish with a toast."
+// ---------------------------------------------------------------------------
+
+function UnavailableLayersBanner({
+  layers,
+  onResolve,
+  onDismiss,
+}: {
+  readonly layers: ReadonlyArray<{
+    readonly id: string;
+    readonly name: string;
+    readonly fileName: string;
+  }>;
+  readonly onResolve: (entryId: string, file: File) => void;
+  readonly onDismiss: (entryId: string) => void;
+}) {
+  return (
+    <div className="unavailable-layers">
+      <div className="unavailable-layers-title">
+        {layers.length} layer{layers.length === 1 ? "" : "s"} need
+        {layers.length === 1 ? "s" : ""} a local file re-selected
+      </div>
+      {layers.map((entry) => (
+        <div key={entry.id} className="unavailable-layer-row">
+          <span className="unavailable-layer-name" title={entry.fileName}>
+            {entry.name}
+          </span>
+          <label className="unavailable-layer-choose">
+            Choose file
+            <input
+              type="file"
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) onResolve(entry.id, file);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          <button
+            type="button"
+            className="unavailable-layer-dismiss"
+            title="Dismiss"
+            onClick={() => onDismiss(entry.id)}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }
 

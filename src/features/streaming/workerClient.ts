@@ -23,14 +23,24 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
   ? Omit<T, K>
   : never;
 
+interface PendingEntry {
+  readonly resolve: (r: WorkerResponse) => void;
+  readonly reject: (e: Error) => void;
+}
+
+interface StreamingEntry {
+  readonly onMessage: (r: WorkerResponse) => void;
+  readonly reject: (e: Error) => void;
+}
+
 export class WorkerClient {
   private readonly worker: Worker;
-  private readonly pending = new Map<number, (r: WorkerResponse) => void>();
+  private readonly pending = new Map<number, PendingEntry>();
   /** Streaming responses live in a separate map from `pending` because a
    *  streaming request receives many messages ('cell' * N, then 'done'), and
    *  `pending`'s dispatch deletes the handler after the first message —
    *  which would silently drop every cell after the first. */
-  private readonly streaming = new Map<number, (r: WorkerResponse) => void>();
+  private readonly streaming = new Map<number, StreamingEntry>();
   private nextId = 0;
   private epoch = 0;
 
@@ -41,13 +51,13 @@ export class WorkerClient {
     this.worker.onmessage = (ev: MessageEvent<WorkerResponse>) => {
       const stream = this.streaming.get(ev.data.id);
       if (stream) {
-        stream(ev.data);
+        stream.onMessage(ev.data);
         return;
       }
       const cb = this.pending.get(ev.data.id);
       if (cb) {
         this.pending.delete(ev.data.id);
-        cb(ev.data);
+        cb.resolve(ev.data);
       }
     };
   }
@@ -67,8 +77,8 @@ export class WorkerClient {
   ): Promise<WorkerResponse> {
     const id = ++this.nextId;
     const full = { ...msg, id } as WorkerRequest;
-    return new Promise((resolve) => {
-      this.pending.set(id, resolve);
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
       this.worker.postMessage(full, transfer);
     });
   }
@@ -82,20 +92,36 @@ export class WorkerClient {
     onMessage: (r: WorkerResponse) => void,
   ): Promise<void> {
     const id = ++this.nextId;
-    return new Promise((resolve) => {
-      this.streaming.set(id, (r) => {
-        if (r.type === "cell") assertCellGeometry(r.geometry);
-        onMessage(r);
-        if (r.type === "done" || r.type === "error") {
-          this.streaming.delete(id);
-          resolve();
-        }
+    return new Promise((resolve, reject) => {
+      this.streaming.set(id, {
+        onMessage: (r) => {
+          if (r.type === "cell") assertCellGeometry(r.geometry);
+          onMessage(r);
+          if (r.type === "done" || r.type === "error") {
+            this.streaming.delete(id);
+            resolve();
+          }
+        },
+        reject,
       });
       this.worker.postMessage({ ...msg, id } as WorkerRequest);
     });
   }
 
+  /**
+   * Tears down the underlying worker thread (which also releases anything
+   * it holds — an open FcbReader, a cloned Blob, the per-cell cache — as a
+   * side effect of thread teardown, so nothing here needs to explicitly
+   * "close" the reader first) and REJECTS every promise still awaiting a
+   * response, rather than leaving it hanging forever. A caller mid-`await`
+   * on `send`/`sendStreaming` (e.g. `commitStreamingLayer` racing a layer
+   * removal) gets a real rejection it can catch, instead of a permanently
+   * unsettled promise — the leak this method exists to prevent.
+   */
   terminate(): void {
+    const err = new Error("WorkerClient terminated");
+    for (const { reject } of this.pending.values()) reject(err);
+    for (const { reject } of this.streaming.values()) reject(err);
     this.pending.clear();
     this.streaming.clear();
     this.worker.terminate();

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { StrictMode } from "react";
 import { renderHook, cleanup } from "@testing-library/react";
 import { PerspectiveCamera } from "three";
+import type { Vec3 } from "../../../../src/domain/citymodel/types";
 import type { WorkerClient } from "../../../../src/features/streaming/workerClient";
 import type {
   CellGeometry,
@@ -618,14 +620,16 @@ describe("useTileStreaming", () => {
   });
 
   it("subscribes to controls' change event on mount and unsubscribes on unmount", () => {
-    const { unmount } = renderHook(() => useTileStreaming());
+    const { unmount } = renderHook(() =>
+      useTileStreaming({ current: [0, 0, 0] }, 0),
+    );
     expect(fakeControls.listenerCount("change")).toBe(1);
     unmount();
     expect(fakeControls.listenerCount("change")).toBe(0);
   });
 
   it("does nothing when no layer is streaming (documented baseline: nothing sets isStreaming=true yet)", async () => {
-    renderHook(() => useTileStreaming());
+    renderHook(() => useTileStreaming({ current: [0, 0, 0] }, 0));
     fakeControls.fire("change");
     await new Promise((r) => setTimeout(r, SETTLE_MS + 100));
     // no assertion target exists (no streaming layer) — the point is that
@@ -674,7 +678,7 @@ describe("useTileStreaming", () => {
       version: 0,
     });
 
-    renderHook(() => useTileStreaming());
+    renderHook(() => useTileStreaming({ current: [0, 0, 0] }, 0));
 
     fakeControls.fire("change");
     fakeControls.fire("change"); // simulate damping-decay repeats
@@ -699,6 +703,269 @@ describe("useTileStreaming", () => {
     expect(stream.lastCommit).not.toBeNull();
     expect(stream.version).toBeGreaterThan(0);
     expect(stream.cache.keys().length).toBe(desired.length);
+  }, 10000);
+
+  // -------------------------------------------------------------------
+  // Origin/groundY sharing (Task 17, item B): useTileStreaming must use the
+  // CALLER-supplied sceneOriginRef/groundY, not recompute its own per-layer
+  // values — otherwise a streaming layer's footprint math disagrees with
+  // where CitySceneR3F actually places its cell meshes (the shared-origin
+  // scene design's whole point).
+  // -------------------------------------------------------------------
+
+  function registerStreamingLayerForOriginTest() {
+    const layerId = useLayerStore.getState().addLayer({
+      name: "s.fcb",
+      model: {
+        sourceEncoding: "flatcitybuf",
+        metadata: {},
+        bbox: null,
+        objects: {},
+        vertexCount: 0,
+      },
+      modelRef: { type: "url", url: "https://x/s.fcb" },
+      visible: true,
+      rules: [],
+      rulesEnabled: true,
+    });
+    useLayerStore.setState((s) => ({
+      layers: s.layers.map((l) =>
+        l.id === layerId ? { ...l, isStreaming: true } : l,
+      ),
+    }));
+    const fake = makeFakeClient();
+    useStreamStore.getState().register(layerId, {
+      client: fake.client,
+      grid: INTEGRATION_GRID,
+      header: HEADER,
+      cache: new CellCache<CellEntry>({
+        maxTriangles: Infinity,
+        maxBytes: Infinity,
+      }),
+      level: null,
+      ladder: [],
+      ladderVersion: 0,
+      status: "idle",
+      message: null,
+      lastCommit: null,
+      version: 0,
+    });
+    return { layerId, ...fake };
+  }
+
+  it("uses the caller's sceneOriginRef, not a hardcoded [0,0,0], when computing the footprint", async () => {
+    const { layerId } = registerStreamingLayerForOriginTest();
+    const originRef: { current: Vec3 | null } = { current: [1000, 2000, 0] };
+
+    renderHook(() => useTileStreaming(originRef, 0));
+    fakeControls.fire("change");
+    await new Promise((r) => setTimeout(r, SETTLE_MS + 200));
+
+    const stream = useStreamStore.getState().get(layerId)!;
+    expect(stream.lastCommit).not.toBeNull();
+    // Camera looks straight down at scene-space (0,0,0); sceneToSource adds
+    // the origin back, so the source-CRS footprint centre should land near
+    // the origin itself, not near [0, 0].
+    expect(stream.lastCommit!.centre[0]).toBeCloseTo(1000, 0);
+    expect(stream.lastCommit!.centre[1]).toBeCloseTo(2000, 0);
+  }, 10000);
+
+  it("falls back to [0,0,0] when sceneOriginRef.current is null (no layer has established the shared origin yet)", async () => {
+    const { layerId } = registerStreamingLayerForOriginTest();
+    const originRef: { current: Vec3 | null } = { current: null };
+
+    renderHook(() => useTileStreaming(originRef, 0));
+    fakeControls.fire("change");
+    await new Promise((r) => setTimeout(r, SETTLE_MS + 200));
+
+    const stream = useStreamStore.getState().get(layerId)!;
+    expect(stream.lastCommit).not.toBeNull();
+    expect(stream.lastCommit!.centre[0]).toBeCloseTo(0, 0);
+    expect(stream.lastCommit!.centre[1]).toBeCloseTo(0, 0);
+  }, 10000);
+
+  it("uses the caller's groundY, not a hardcoded 0 — a higher groundY shrinks the footprint span (ray travels less far)", async () => {
+    const atGroundZero = registerStreamingLayerForOriginTest();
+    renderHook(() => useTileStreaming({ current: [0, 0, 0] }, 0));
+    fakeControls.fire("change");
+    await new Promise((r) => setTimeout(r, SETTLE_MS + 200));
+    const spanAtZero = useStreamStore.getState().get(atGroundZero.layerId)!
+      .lastCommit!.span;
+
+    cleanup();
+    fakeControls = new FakeControls();
+    const atGroundHigh = registerStreamingLayerForOriginTest();
+    renderHook(() => useTileStreaming({ current: [0, 0, 0] }, 250));
+    fakeControls.fire("change");
+    await new Promise((r) => setTimeout(r, SETTLE_MS + 200));
+    const spanAtHigh = useStreamStore.getState().get(atGroundHigh.layerId)!
+      .lastCommit!.span;
+
+    // eye.y=500: distance-to-ground halves from 500 to 250, so the footprint
+    // (proportional to distance for a straight-down camera) should shrink
+    // by roughly the same factor.
+    expect(spanAtHigh).toBeLessThan(spanAtZero * 0.6);
+  }, 15000);
+
+  // -------------------------------------------------------------------
+  // Teardown safety (Task 17): terminate() now REJECTS in-flight
+  // send()/sendStreaming() calls (workerClient.ts) instead of hanging them
+  // forever. commitStreamingLayer must not turn that into an unhandled
+  // promise rejection, and must not resurrect a status entry for a layer
+  // whose stream was already unregistered by the same teardown.
+  // -------------------------------------------------------------------
+
+  it("a worker rejection mid-commit (e.g. terminate() racing a layer removal) sets status:error rather than throwing unhandled, IF the stream is still registered", async () => {
+    const layerId = useLayerStore.getState().addLayer({
+      name: "s.fcb",
+      model: {
+        sourceEncoding: "flatcitybuf",
+        metadata: {},
+        bbox: null,
+        objects: {},
+        vertexCount: 0,
+      },
+      modelRef: { type: "url", url: "https://x/s.fcb" },
+      visible: true,
+      rules: [],
+      rulesEnabled: true,
+    });
+    useLayerStore.setState((s) => ({
+      layers: s.layers.map((l) =>
+        l.id === layerId ? { ...l, isStreaming: true } : l,
+      ),
+    }));
+
+    let epoch = 0;
+    const client = {
+      newEpoch: vi.fn(() => ++epoch),
+      isCurrent: vi.fn((e: number) => e === epoch),
+      send: vi.fn(() => Promise.reject(new Error("WorkerClient terminated"))),
+      sendStreaming: vi.fn(async () => {}),
+      terminate: vi.fn(),
+    };
+    useStreamStore.getState().register(layerId, {
+      client: client as unknown as WorkerClient,
+      grid: INTEGRATION_GRID,
+      header: HEADER,
+      cache: new CellCache<CellEntry>({
+        maxTriangles: Infinity,
+        maxBytes: Infinity,
+      }),
+      level: null,
+      ladder: [],
+      ladderVersion: 0,
+      status: "idle",
+      message: null,
+      lastCommit: null,
+      version: 0,
+    });
+
+    renderHook(() => useTileStreaming({ current: [0, 0, 0] }, 0));
+    fakeControls.fire("change");
+    // If this rejection weren't caught, it would surface as an unhandled
+    // promise rejection — vitest fails the run on those, so simply reaching
+    // this point without the test process erroring is part of the proof.
+    await new Promise((r) => setTimeout(r, SETTLE_MS + 100));
+
+    const stream = useStreamStore.getState().get(layerId)!;
+    expect(stream.status).toBe("error");
+    expect(stream.message).toMatch(/terminated/i);
+  }, 10000);
+
+  it("does NOT resurrect a status entry when the stream was unregistered before the rejection arrives", async () => {
+    const layerId = useLayerStore.getState().addLayer({
+      name: "s.fcb",
+      model: {
+        sourceEncoding: "flatcitybuf",
+        metadata: {},
+        bbox: null,
+        objects: {},
+        vertexCount: 0,
+      },
+      modelRef: { type: "url", url: "https://x/s.fcb" },
+      visible: true,
+      rules: [],
+      rulesEnabled: true,
+    });
+    useLayerStore.setState((s) => ({
+      layers: s.layers.map((l) =>
+        l.id === layerId ? { ...l, isStreaming: true } : l,
+      ),
+    }));
+
+    let epoch = 0;
+    let rejectProbe: ((e: Error) => void) | null = null;
+    const client = {
+      newEpoch: vi.fn(() => ++epoch),
+      isCurrent: vi.fn((e: number) => e === epoch),
+      send: vi.fn(
+        () =>
+          new Promise<never>((_, reject) => {
+            rejectProbe = reject;
+          }),
+      ),
+      sendStreaming: vi.fn(async () => {}),
+      terminate: vi.fn(),
+    };
+    useStreamStore.getState().register(layerId, {
+      client: client as unknown as WorkerClient,
+      grid: INTEGRATION_GRID,
+      header: HEADER,
+      cache: new CellCache<CellEntry>({
+        maxTriangles: Infinity,
+        maxBytes: Infinity,
+      }),
+      level: null,
+      ladder: [],
+      ladderVersion: 0,
+      status: "idle",
+      message: null,
+      lastCommit: null,
+      version: 0,
+    });
+
+    renderHook(() => useTileStreaming({ current: [0, 0, 0] }, 0));
+    fakeControls.fire("change");
+    await new Promise((r) => setTimeout(r, SETTLE_MS + 100));
+    expect(rejectProbe).not.toBeNull();
+
+    // Simulate the SAME teardown commitStreamingLayer's caller performs on
+    // layer removal: unregister the stream before the pending promise ever
+    // settles.
+    useStreamStore.getState().unregister(layerId);
+    rejectProbe!(new Error("WorkerClient terminated"));
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(useStreamStore.getState().get(layerId)).toBeUndefined();
+  }, 10000);
+
+  // -------------------------------------------------------------------
+  // React StrictMode double-invoke safety (Task 17): effects mount →
+  // cleanup → mount once in dev/StrictMode. The subscribe/unsubscribe
+  // effect must leave exactly one listener attached and must not run the
+  // settle pipeline twice for one settled interaction.
+  // -------------------------------------------------------------------
+
+  it("is safe under React StrictMode's mount→cleanup→mount: exactly one listener survives, one commit runs per settle", async () => {
+    const { layerId, sendStreamingCalls } =
+      registerStreamingLayerForOriginTest();
+
+    const { unmount } = renderHook(
+      () => useTileStreaming({ current: [0, 0, 0] }, 0),
+      { wrapper: StrictMode },
+    );
+    expect(fakeControls.listenerCount("change")).toBe(1);
+
+    fakeControls.fire("change");
+    await new Promise((r) => setTimeout(r, SETTLE_MS + 200));
+
+    expect(sendStreamingCalls.length).toBe(1);
+    const stream = useStreamStore.getState().get(layerId)!;
+    expect(stream.version).toBe(1);
+
+    unmount();
+    expect(fakeControls.listenerCount("change")).toBe(0);
   }, 10000);
 
   it("discards a stale commit's result when a new interaction starts before the probe response arrives (epoch guard)", async () => {
@@ -762,7 +1029,7 @@ describe("useTileStreaming", () => {
       version: 0,
     });
 
-    renderHook(() => useTileStreaming());
+    renderHook(() => useTileStreaming({ current: [0, 0, 0] }, 0));
 
     fakeControls.fire("change");
     await new Promise((r) => setTimeout(r, SETTLE_MS + 100));
@@ -850,7 +1117,7 @@ describe("useTileStreaming", () => {
       version: 0,
     });
 
-    renderHook(() => useTileStreaming());
+    renderHook(() => useTileStreaming({ current: [0, 0, 0] }, 0));
     fakeControls.fire("change");
 
     await new Promise((r) =>

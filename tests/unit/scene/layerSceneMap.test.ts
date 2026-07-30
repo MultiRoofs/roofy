@@ -11,7 +11,7 @@
  * production functions (extracted from the component for testability) run
  * unmodified.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BufferAttribute,
   BufferGeometry,
@@ -23,6 +23,7 @@ import {
 } from "three";
 import {
   applyVisibility,
+  buildCellMesh,
   computeBoxSelection,
   computeTriangleCount,
   disposeLayerState,
@@ -30,6 +31,8 @@ import {
   resolveFromEvent,
   resolveMeshOwner,
   sceneToCrsImpl,
+  syncStreamingCells,
+  teardownRemovedLayer,
   updateRuleColors,
   type CellSceneState,
   type LayerSceneState,
@@ -49,8 +52,18 @@ import {
   cellCentre,
   makeGrid,
   meshOffset,
+  type Grid,
 } from "../../../src/features/streaming/tileGrid";
 import { sourceToScene } from "../../../src/features/streaming/sceneTransform";
+import { useStreamStore } from "../../../src/features/streaming/streamStore";
+import type { CellEntry } from "../../../src/features/streaming/streamStore";
+import { CellCache } from "../../../src/features/streaming/cellCache";
+import { __resetMemo } from "../../../src/features/streaming/residentModel";
+import type {
+  CellGeometry,
+  ResidentObjectRecord,
+} from "../../../src/features/streaming/workerProtocol";
+import type { WorkerClient } from "../../../src/features/streaming/workerClient";
 
 // ---------------------------------------------------------------------------
 // Fixture builders
@@ -153,6 +166,52 @@ function makeStreamingLayerState(
     cells: new Map(),
   };
 }
+
+/** A minimal, internally-consistent CellGeometry (1 triangle, 3 vertices),
+ *  with a distinct fill per array so a copy-paste field-swap bug would be
+ *  visible in an assertion, following the established fixture convention in
+ *  workerClient.test.ts/useTileStreaming.test.ts. */
+function makeCellGeometry(overrides: Partial<CellGeometry> = {}): CellGeometry {
+  return {
+    positions: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 9]),
+    normals: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]),
+    baseColors: new Float32Array([0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.1, 0.2, 0.3]),
+    ruleColors: null,
+    objectIndices: new Uint32Array([0, 0, 0]),
+    surfaceIndices: new Uint32Array([0, 0, 0]),
+    objectKeys: ["obj-a"],
+    triangleCount: 1,
+    ...overrides,
+  };
+}
+
+function makeCellEntry(overrides: Partial<CellEntry> = {}): CellEntry {
+  return {
+    geometry: makeCellGeometry(),
+    objects: [],
+    surfaceAttrKeys: [],
+    lodsSeen: [],
+    ...overrides,
+  };
+}
+
+function makeResidentRecord(id: string, bbox: BBox3): ResidentObjectRecord {
+  return {
+    id,
+    objectType: "Building",
+    attributes: {},
+    bbox,
+    lod: "2",
+    surfaceCount: 1,
+    roofMetrics: [],
+    footprintAreaSqM: 0,
+    volumeCuM: null,
+    parents: [],
+    children: [],
+  };
+}
+
+const fakeClient = {} as unknown as WorkerClient;
 
 function makeSurface(
   type: Surface["type"],
@@ -303,6 +362,70 @@ describe("disposeLayerState", () => {
 });
 
 // ---------------------------------------------------------------------------
+// teardownRemovedLayer — the worker/StreamState teardown on layer removal
+// (Task 17). Nothing else in the app calls this on `removeLayer`; without
+// it a removed streaming layer's worker thread and cache leak for the
+// lifetime of the tab.
+// ---------------------------------------------------------------------------
+
+describe("teardownRemovedLayer", () => {
+  afterEach(() => {
+    useStreamStore.setState({ streams: {} });
+  });
+
+  it("disposes the GPU state (delegates to disposeLayerState)", () => {
+    const group = new Group();
+    const state = makeLayerState("L", ["a"], [0, 0, 0], [0, 0, 0]);
+    group.add(state.mesh!);
+
+    teardownRemovedLayer(group, state, "L");
+
+    expect(group.children).toHaveLength(0);
+  });
+
+  it("terminates the worker and unregisters the stream for a streaming layer", () => {
+    const group = new Group();
+    const state = makeStreamingLayerState();
+    const terminate = vi.fn();
+    useStreamStore.getState().register("L", {
+      client: { terminate } as unknown as WorkerClient,
+      grid: { originX: 0, originY: 0, rootCell: 100, maxLevel: 1 },
+      header: {
+        version: "1.0",
+        featuresCount: 1,
+        extent: [0, 0, 0, 100, 100, 10],
+        referenceSystem: undefined,
+        epsg: null,
+      },
+      cache: new CellCache<CellEntry>({
+        maxTriangles: Infinity,
+        maxBytes: Infinity,
+      }),
+      level: null,
+      ladder: [],
+      ladderVersion: 0,
+      status: "idle",
+      message: null,
+      lastCommit: null,
+      version: 0,
+    });
+
+    teardownRemovedLayer(group, state, "L");
+
+    expect(terminate).toHaveBeenCalledTimes(1);
+    expect(useStreamStore.getState().get("L")).toBeUndefined();
+  });
+
+  it("is a no-op for the streaming teardown when the layer never had a registered stream (static layer)", () => {
+    const group = new Group();
+    const state = makeLayerState("L", ["a"], [0, 0, 0], [0, 0, 0]);
+
+    expect(() => teardownRemovedLayer(group, state, "L")).not.toThrow();
+    expect(useStreamStore.getState().get("L")).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // :495 visibility — applyVisibility
 // ---------------------------------------------------------------------------
 
@@ -434,6 +557,34 @@ describe("updateRuleColors", () => {
 
     expect(state.ruleColors).toBeNull();
     expect(cell.ruleColors).toBeNull();
+  });
+
+  it("does NOT touch a streaming layer's cell ruleColors — buildRuleColors against an empty model.objects would wrongly wipe the worker-computed value", () => {
+    // A streaming layer's model is a stub (objects: {}) by design; if this
+    // function ran buildRuleColors(layer.model, ...) for the cell branch
+    // anyway, EVERY vertex lookup fails and the result is null — silently
+    // discarding whatever the worker computed at fetch time on every
+    // unrelated `layers`-array change. The sentinel value below must
+    // survive completely untouched.
+    const model = makeModel({}); // empty, as a real streaming layer's stub model always is
+    const layer = makeLayer({
+      id: "L",
+      model,
+      isStreaming: true,
+      rulesEnabled: true,
+      rules: [makeRule({ conditions: [] })],
+    });
+
+    const state = makeStreamingLayerState();
+    const cell = makeCellState("L", "0/0/0", ["b1"], [0, 0, 0], [0, 0, 0]);
+    const sentinel = new Float32Array([9, 9, 9]);
+    cell.ruleColors = sentinel;
+    state.cells.set("0/0/0", cell);
+    const map = new Map([["L", state]]);
+
+    updateRuleColors(map, [layer]);
+
+    expect(cell.ruleColors).toBe(sentinel); // exact same reference — untouched
   });
 });
 
@@ -758,6 +909,395 @@ describe("computeBoxSelection", () => {
     expect(selected).toEqual([
       { kind: "object", layerId: "L", objectId: "b1" },
     ]);
+  });
+
+  describe("streaming layer — box-select decision (Task 17)", () => {
+    beforeEach(() => {
+      useStreamStore.setState({ streams: {} });
+      __resetMemo();
+    });
+    afterEach(() => {
+      useStreamStore.setState({ streams: {} });
+      __resetMemo();
+    });
+
+    it("selects a resident object from getResidentModel — layer.model.objects stays empty, so this is the ONLY source of candidates for a streaming layer", () => {
+      const layer = makeLayer({
+        id: "L",
+        model: makeModel({}), // empty stub, as real streaming layers always are
+        isStreaming: true,
+        visible: true,
+      });
+      const state = makeLayerState("L", [], [], []);
+      const map = new Map([["L", state]]);
+
+      const grid: Grid = {
+        originX: 0,
+        originY: 0,
+        rootCell: 1000,
+        maxLevel: 2,
+      };
+      const cache = new CellCache<CellEntry>({
+        maxTriangles: Infinity,
+        maxBytes: Infinity,
+      });
+      cache.set(
+        "0/0/0",
+        makeCellEntry({
+          objects: [makeResidentRecord("b1", [-1, -1, -1, 1, 1, 1])], // center at scene origin
+        }),
+        { triangles: 1, bytes: 1 },
+      );
+      useStreamStore.getState().register("L", {
+        client: fakeClient,
+        grid,
+        header: {
+          version: "1.0",
+          featuresCount: 1,
+          extent: [0, 0, 0, 1000, 1000, 10],
+          referenceSystem: undefined,
+          epsg: null,
+        },
+        cache,
+        level: 0,
+        ladder: [],
+        ladderVersion: 0,
+        status: "idle",
+        message: null,
+        lastCommit: null,
+        version: 1,
+      });
+
+      const selected = computeBoxSelection(
+        [layer],
+        map,
+        makeCamera(),
+        800,
+        600,
+        centerBox,
+        "object",
+      );
+
+      expect(selected).toEqual([
+        { kind: "object", layerId: "L", objectId: "b1" },
+      ]);
+    });
+
+    it("selects nothing for a streaming layer with no registered stream, rather than throwing", () => {
+      const layer = makeLayer({
+        id: "L",
+        model: makeModel({}),
+        isStreaming: true,
+        visible: true,
+      });
+      const state = makeLayerState("L", [], [], []);
+      const map = new Map([["L", state]]);
+
+      expect(() =>
+        computeBoxSelection(
+          [layer],
+          map,
+          makeCamera(),
+          800,
+          600,
+          centerBox,
+          "object",
+        ),
+      ).not.toThrow();
+      expect(
+        computeBoxSelection(
+          [layer],
+          map,
+          makeCamera(),
+          800,
+          600,
+          centerBox,
+          "object",
+        ),
+      ).toEqual([]);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildCellMesh / syncStreamingCells — the streaming cell-mesh producer
+// (Task 17): turns useStreamStore's per-layer CellEntry cache into GPU
+// meshes attached to LayerSceneState.cells. Without this, useStreamStore
+// fills up as the driver commits, but nothing ever renders or is pickable.
+// ---------------------------------------------------------------------------
+
+describe("buildCellMesh", () => {
+  const grid: Grid = { originX: 0, originY: 0, rootCell: 1000, maxLevel: 2 };
+
+  it("wraps the entry's typed arrays into geometry attributes matching its objectKeys", () => {
+    const entry = makeCellEntry();
+    const cellState = buildCellMesh(
+      "L",
+      "0/0/0",
+      entry,
+      grid,
+      [0, 0, 0],
+      "standard",
+      false,
+    );
+
+    expect(cellState.pickingIndex).toEqual({
+      layerId: "L",
+      objectKeys: ["obj-a"],
+    });
+    const posAttr = cellState.mesh.geometry.getAttribute("position");
+    expect(Array.from(posAttr.array as Float32Array)).toEqual(
+      Array.from(entry.geometry.positions),
+    );
+    const objIdxAttr = cellState.mesh.geometry.getAttribute("objectIndex");
+    expect(Array.from(objIdxAttr.array as Uint32Array)).toEqual(
+      Array.from(entry.geometry.objectIndices),
+    );
+  });
+
+  it("tags the mesh's userData with layerId and cellKey, for resolveMeshOwner", () => {
+    const cellState = buildCellMesh(
+      "L",
+      "2/3/4",
+      makeCellEntry(),
+      grid,
+      [0, 0, 0],
+      "standard",
+      false,
+    );
+    expect(resolveMeshOwner(cellState.mesh)).toEqual({
+      layerId: "L",
+      cellKey: "2/3/4",
+    });
+  });
+
+  it("positions the mesh at meshOffset(cellCentre(grid, key, 0), sceneOrigin) — the exact contract sceneToCrsImpl/computeBoxSelection depend on", () => {
+    const sceneOrigin: Vec3 = [100, 200, 10];
+    const key = "1/1/0";
+    const expected = meshOffset(cellCentre(grid, key, 0), sceneOrigin);
+
+    const cellState = buildCellMesh(
+      "L",
+      key,
+      makeCellEntry(),
+      grid,
+      sceneOrigin,
+      "standard",
+      false,
+    );
+
+    expect(cellState.mesh.position.x).toBeCloseTo(expected[0], 9);
+    expect(cellState.mesh.position.y).toBeCloseTo(expected[1], 9);
+    expect(cellState.mesh.position.z).toBeCloseTo(expected[2], 9);
+  });
+
+  it("returns a baseColors COPY, not the live GPU buffer — mutating the GPU buffer must not affect it", () => {
+    const entry = makeCellEntry();
+    const cellState = buildCellMesh(
+      "L",
+      "0/0/0",
+      entry,
+      grid,
+      [0, 0, 0],
+      "standard",
+      false,
+    );
+
+    expect(cellState.baseColors).not.toBe(entry.geometry.baseColors);
+    expect(Array.from(cellState.baseColors)).toEqual(
+      Array.from(entry.geometry.baseColors),
+    );
+
+    const colorAttr = cellState.mesh.geometry.getAttribute("color");
+    (colorAttr.array as Float32Array).fill(999);
+    // The snapshot must be unaffected by mutating the live GPU buffer.
+    expect(cellState.baseColors[0]).not.toBe(999);
+  });
+
+  it("carries the entry's ruleColors through as the cell's initial ruleColors (already computed by the worker at fetch time)", () => {
+    const ruleColors = new Float32Array([1, 0, 0, 1, 0, 0, 1, 0, 0]);
+    const entry = makeCellEntry({
+      geometry: makeCellGeometry({ ruleColors }),
+    });
+    const cellState = buildCellMesh(
+      "L",
+      "0/0/0",
+      entry,
+      grid,
+      [0, 0, 0],
+      "standard",
+      false,
+    );
+    expect(cellState.ruleColors).toBe(ruleColors);
+  });
+});
+
+describe("syncStreamingCells", () => {
+  const grid: Grid = { originX: 0, originY: 0, rootCell: 1000, maxLevel: 2 };
+
+  beforeEach(() => {
+    useStreamStore.setState({ streams: {} });
+  });
+  afterEach(() => {
+    useStreamStore.setState({ streams: {} });
+  });
+
+  function registerStream(layerId: string, cache: CellCache<CellEntry>) {
+    useStreamStore.getState().register(layerId, {
+      client: fakeClient,
+      grid,
+      header: {
+        version: "1.0",
+        featuresCount: 1,
+        extent: [0, 0, 0, 1000, 1000, 10],
+        referenceSystem: undefined,
+        epsg: null,
+      },
+      cache,
+      level: 0,
+      ladder: [],
+      ladderVersion: 0,
+      status: "idle",
+      message: null,
+      lastCommit: null,
+      version: 1,
+    });
+  }
+
+  it("builds and attaches a mesh for a newly-resident cell, adding it to the cityGroup", () => {
+    const group = new Group();
+    const layer = makeLayer({
+      id: "L",
+      model: makeModel({}),
+      isStreaming: true,
+    });
+    const state = makeStreamingLayerState();
+    const map = new Map([["L", state]]);
+
+    const cache = new CellCache<CellEntry>({
+      maxTriangles: Infinity,
+      maxBytes: Infinity,
+    });
+    cache.set("0/0/0", makeCellEntry(), { triangles: 1, bytes: 1 });
+    registerStream("L", cache);
+
+    syncStreamingCells(group, map, [layer], {
+      materialMode: "standard",
+      doubleSided: false,
+      shadows: false,
+    });
+
+    expect(state.cells.size).toBe(1);
+    expect(state.cells.has("0/0/0")).toBe(true);
+    expect(group.children).toContain(state.cells.get("0/0/0")!.mesh);
+  });
+
+  it("removes and disposes a cell mesh no longer in the cache (evicted)", () => {
+    const group = new Group();
+    const layer = makeLayer({
+      id: "L",
+      model: makeModel({}),
+      isStreaming: true,
+    });
+    const state = makeStreamingLayerState();
+    const stale = makeCellState("L", "9/9/9", ["x"], [0], [0]);
+    state.cells.set("9/9/9", stale);
+    group.add(stale.mesh);
+    const map = new Map([["L", state]]);
+
+    const cache = new CellCache<CellEntry>({
+      maxTriangles: Infinity,
+      maxBytes: Infinity,
+    });
+    registerStream("L", cache); // empty cache — "9/9/9" is no longer resident
+
+    const disposeSpy = vi.spyOn(stale.mesh.geometry, "dispose");
+
+    syncStreamingCells(group, map, [layer], {
+      materialMode: "standard",
+      doubleSided: false,
+      shadows: false,
+    });
+
+    expect(state.cells.has("9/9/9")).toBe(false);
+    expect(group.children).not.toContain(stale.mesh);
+    expect(disposeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips a non-streaming layer entirely", () => {
+    const group = new Group();
+    const layer = makeLayer({
+      id: "L",
+      model: makeModel({}),
+      isStreaming: false,
+    });
+    const state = makeStreamingLayerState();
+    const map = new Map([["L", state]]);
+
+    const cache = new CellCache<CellEntry>({
+      maxTriangles: Infinity,
+      maxBytes: Infinity,
+    });
+    cache.set("0/0/0", makeCellEntry(), { triangles: 1, bytes: 1 });
+    registerStream("L", cache);
+
+    syncStreamingCells(group, map, [layer], {
+      materialMode: "standard",
+      doubleSided: false,
+      shadows: false,
+    });
+
+    expect(state.cells.size).toBe(0);
+  });
+
+  it("skips a streaming layer with no registered stream, rather than throwing", () => {
+    const group = new Group();
+    const layer = makeLayer({
+      id: "L",
+      model: makeModel({}),
+      isStreaming: true,
+    });
+    const state = makeStreamingLayerState();
+    const map = new Map([["L", state]]);
+
+    expect(() =>
+      syncStreamingCells(group, map, [layer], {
+        materialMode: "standard",
+        doubleSided: false,
+        shadows: false,
+      }),
+    ).not.toThrow();
+    expect(state.cells.size).toBe(0);
+  });
+
+  it("applies the layer's current visible/shadow settings to a newly-built cell mesh", () => {
+    const group = new Group();
+    const layer = makeLayer({
+      id: "L",
+      model: makeModel({}),
+      isStreaming: true,
+      visible: false,
+    });
+    const state = makeStreamingLayerState();
+    const map = new Map([["L", state]]);
+
+    const cache = new CellCache<CellEntry>({
+      maxTriangles: Infinity,
+      maxBytes: Infinity,
+    });
+    cache.set("0/0/0", makeCellEntry(), { triangles: 1, bytes: 1 });
+    registerStream("L", cache);
+
+    syncStreamingCells(group, map, [layer], {
+      materialMode: "standard",
+      doubleSided: false,
+      shadows: true,
+    });
+
+    const cellMesh = state.cells.get("0/0/0")!.mesh;
+    expect(cellMesh.visible).toBe(false);
+    expect(cellMesh.castShadow).toBe(true);
+    expect(cellMesh.receiveShadow).toBe(true);
   });
 });
 

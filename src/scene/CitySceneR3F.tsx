@@ -19,6 +19,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Line, Html } from "@react-three/drei";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import {
+  BufferAttribute,
   BufferGeometry,
   DoubleSide,
   FrontSide,
@@ -60,11 +61,19 @@ import {
   sourceToScene,
   sceneToSource,
 } from "../features/streaming/sceneTransform";
-import type { CellKey } from "../features/streaming/tileGrid";
+import { cellCentre, meshOffset } from "../features/streaming/tileGrid";
+import type { CellKey, Grid } from "../features/streaming/tileGrid";
 import { useSelectionStore } from "../features/selection/selectionStore";
 import { useLayerStore } from "../features/layers/layerStore";
 import type { Layer } from "../features/layers/layerStore";
 import { useSolarStore } from "../features/solar/solarStore";
+import { useStreamStore } from "../features/streaming/streamStore";
+import type { CellEntry } from "../features/streaming/streamStore";
+import { getResidentModel } from "../features/streaming/residentModel";
+import {
+  useTileStreaming,
+  groundYFromBBox,
+} from "../features/streaming/useTileStreaming";
 import {
   useRenderDebugStore,
   type CityMaterialMode,
@@ -464,12 +473,11 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
       const map = layerSceneMapRef.current;
       const currentIds = new Set(layers.map((l) => l.id));
 
-      // Remove meshes for deleted layers — dispose the layer mesh (if any)
-      // AND every cell mesh before dropping the map entry.
+      // Remove meshes for deleted layers, AND tear down a streaming layer's
+      // worker/StreamState — see teardownRemovedLayer's own doc comment.
       for (const id of map.keys()) {
         if (!currentIds.has(id)) {
-          const state = map.get(id)!;
-          disposeLayerState(cityGroup, state);
+          teardownRemovedLayer(cityGroup, map.get(id)!, id);
           map.delete(id);
         }
       }
@@ -494,6 +502,41 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
 
         if (!map.has(layer.id)) {
           const model = layer.model;
+
+          if (layer.isStreaming) {
+            // A streaming layer's `model` is a stub — bbox from the file
+            // header, `objects` always empty by design (see
+            // streamStore.ts's doc comment) — so there is no mesh to build
+            // yet. The shell entry (mesh: null, cells: empty) still needs
+            // to exist so: (a) the streaming-cell sync effect below has
+            // somewhere to attach cell meshes as they arrive, and (b) this
+            // layer participates in shared-origin / fit / solar-init
+            // exactly like a static layer, using the SAME `bbox` field.
+            if (!sceneOriginRef.current) {
+              sceneOriginRef.current = computeOriginOffset(model);
+            }
+            map.set(layer.id, {
+              mesh: null,
+              pickingIndex: null,
+              baseColors: null,
+              ruleColors: null,
+              selectedLod: layer.selectedLod,
+              originOffset: sceneOriginRef.current,
+              cells: new Map(),
+            });
+
+            if (needsSolarInit && model.bbox) {
+              useSolarStore
+                .getState()
+                .initFromModel(model.metadata.referenceSystem, model.bbox);
+              needsSolarInit = false;
+              setHasModel(true);
+            }
+
+            needsFit = true;
+            continue;
+          }
+
           if (Object.keys(model.objects).length === 0) continue;
 
           // Use shared scene origin (first layer sets it); all layers
@@ -574,6 +617,51 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
       onTriangleCount,
       camera,
       hasModel,
+      cityMaterialMode,
+      cityDoubleSided,
+      cityShadowsEnabled,
+    ]);
+
+    // Sync streaming cells: builds/evicts cell meshes from useStreamStore's
+    // per-layer cache as commits land (useTileStreaming, mounted below,
+    // drives those commits). This is the producer Task 13's two-level scene
+    // map was built to hold but never had — without it, streaming data
+    // reaches `useStreamStore` but nothing ever appears on screen. A
+    // narrowly-scoped selector (one string, one number per streaming layer's
+    // `version`) keeps this effect from re-running on unrelated store
+    // notifications, matching this file's other narrow-selector effects.
+    const streamVersionKey = useStreamStore((s) => {
+      let key = "";
+      for (const layer of layers) {
+        if (!layer.isStreaming) continue;
+        key += `${layer.id}:${s.streams[layer.id]?.version ?? 0};`;
+      }
+      return key;
+    });
+
+    useEffect(() => {
+      const cityGroup = cityGroupRef.current;
+      if (!cityGroup) return;
+      const map = layerSceneMapRef.current;
+
+      syncStreamingCells(cityGroup, map, layers, {
+        materialMode: cityMaterialMode,
+        doubleSided: cityDoubleSided,
+        shadows: cityShadowsEnabled,
+      });
+
+      // New cell meshes start painted with base colors only (see
+      // buildCellMesh) — reapplyHighlight is what layers in ruleColors (the
+      // worker already computed them at fetch time) and any active
+      // selection/hover, exactly mirroring how a freshly-built static layer
+      // mesh gets its first real paint from the separate rule-colors/
+      // highlight effects below rather than from mesh construction itself.
+      reapplyHighlight(map, layers);
+      onTriangleCount(computeTriangleCount(map, layers));
+    }, [
+      layers,
+      streamVersionKey,
+      onTriangleCount,
       cityMaterialMode,
       cityDoubleSided,
       cityShadowsEnabled,
@@ -851,13 +939,27 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
 
     const hasAtmosphere = worldToECEFMatrix !== null;
 
-    // Ground Y position: bottom of buildings after origin-offset + Z-up→Y-up rotation
-    const groundY = useMemo(() => {
-      const bbox = computeUnionBBox(layers);
-      if (!bbox) return 0;
-      const extentZ = bbox[5] - bbox[2];
-      return -extentZ / 2 - 0.01; // slight offset to prevent z-fighting
-    }, [layers]);
+    // Ground Y position: bottom of buildings after origin-offset + Z-up→Y-up
+    // rotation. `groundYFromBBox` (useTileStreaming.ts) is the SAME formula,
+    // exported specifically so the streaming driver's footprint math agrees
+    // with where this scene actually renders "the ground" — see the mount
+    // below.
+    const groundY = useMemo(
+      () => groundYFromBBox(computeUnionBBox(layers)),
+      [layers],
+    );
+
+    // Mount the viewport-streaming driver: turns OrbitControls' `change`
+    // event into footprint → probe → level → fetch/evict commits for every
+    // streaming layer (useTileStreaming.ts). Passed the SAME shared
+    // `sceneOriginRef`/`groundY` this component uses for its own meshes and
+    // ground plane, so a streaming layer's footprint (computed in source
+    // CRS) and its cell meshes (positioned via `meshOffset` in
+    // `syncStreamingCells`/`buildCellMesh` above) agree on where things are.
+    // Without this mount, nothing ever drives a streaming layer's fetches —
+    // the hook is otherwise fully inert (see useTileStreaming.ts's own doc
+    // comment before this task).
+    useTileStreaming(sceneOriginRef, groundY);
 
     return (
       <Atmosphere
@@ -1059,6 +1161,172 @@ export function disposeLayerState(
   state.cells.clear();
 }
 
+/**
+ * Full teardown for a layer that just disappeared from `layers` (removed by
+ * the user, or replaced by a workspace restore that calls
+ * `removeAllLayers()`): disposes its GPU state (`disposeLayerState`) AND, if
+ * it was streaming, tears down what `useStreamStore` doesn't clean up on its
+ * own — nothing else in the app does this on layer removal (`removeLayer` in
+ * `layerStore.ts` only ever touches the `layers` array).
+ *
+ * `client.terminate()` (workerClient.ts) rejects any promise still in
+ * flight rather than leaving it hanging (a `commitStreamingLayer` racing
+ * this removal gets a real rejection, caught there), and releases the
+ * worker thread — with it, whatever the thread holds: an open `FcbReader`,
+ * a cloned `Blob`, its own per-cell cache. `unregister()` then drops the
+ * main-thread `StreamState` so nothing can resurrect a status entry for a
+ * layer that no longer exists (see `commitStreamingLayer`'s catch guard).
+ * A no-op for a non-streaming layer (no stream was ever registered).
+ */
+export function teardownRemovedLayer(
+  cityGroup: Group,
+  state: LayerSceneState,
+  layerId: string,
+): void {
+  disposeLayerState(cityGroup, state);
+  const stream = useStreamStore.getState().get(layerId);
+  if (stream) {
+    stream.client.terminate();
+    useStreamStore.getState().unregister(layerId);
+  }
+}
+
+/**
+ * Builds a `CellSceneState` (mesh + picking index + color snapshot) from a
+ * `CellEntry` (the worker's already-decoded, already-triangulated payload —
+ * see `streamStore.ts`/`workerProtocol.ts`), mirroring `buildCityMesh`'s
+ * wrapper but for one streaming cell instead of a whole layer's merged mesh:
+ *
+ * - `geometry`'s "color" attribute starts from `baseColors` — the same
+ *   choice `buildCityMesh` makes for a fresh static layer mesh; ruleColors
+ *   (if any) get layered in by `reapplyHighlight`, called once by the
+ *   streaming-cell sync effect right after this returns, not baked in here.
+ * - `baseColors` on the returned `CellSceneState` is a COPY
+ *   (`Float32Array.from`), never the live GPU buffer — `applyHighlight`/
+ *   `clearHighlight` mutate the GPU buffer in place and need this as the
+ *   untouched restore baseline, same contract as the static layer path.
+ * - The mesh's position is `meshOffset(cellCentre(grid, key, 0), sceneOrigin)`
+ *   — exactly the contract `sceneToCrsImpl`/`computeBoxSelection` already
+ *   document and depend on for a cell mesh's offset, and exactly what the
+ *   worker used as ITS OWN per-cell origin when writing `entry.geometry`'s
+ *   vertex positions (`fcb.worker.ts`'s `cellCentre(grid, key, 0)` call) —
+ *   so the mesh position here must use the SAME z=0 convention, not the
+ *   cell's actual elevation, to line up with those already-baked vertices.
+ */
+export function buildCellMesh(
+  layerId: string,
+  key: CellKey,
+  entry: CellEntry,
+  grid: Grid,
+  sceneOrigin: Vec3,
+  materialMode: CityMaterialMode,
+  doubleSided: boolean,
+): CellSceneState {
+  const geometry = new BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new BufferAttribute(entry.geometry.positions, 3),
+  );
+  geometry.setAttribute(
+    "normal",
+    new BufferAttribute(entry.geometry.normals, 3),
+  );
+  geometry.setAttribute(
+    "color",
+    new BufferAttribute(entry.geometry.baseColors, 3),
+  );
+  geometry.setAttribute(
+    "objectIndex",
+    new BufferAttribute(entry.geometry.objectIndices, 1),
+  );
+  geometry.setAttribute(
+    "surfaceIndex",
+    new BufferAttribute(entry.geometry.surfaceIndices, 1),
+  );
+  geometry.computeBoundingSphere();
+
+  const mesh = new Mesh(
+    geometry,
+    createCityMaterial(materialMode, doubleSided),
+  );
+  mesh.userData.layerId = layerId;
+  mesh.userData.cellKey = key;
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.layers.enable(LIGHTING_MASK_LAYER);
+  const [ox, oy, oz] = meshOffset(cellCentre(grid, key, 0), sceneOrigin);
+  mesh.position.set(ox, oy, oz);
+
+  return {
+    mesh,
+    pickingIndex: { layerId, objectKeys: entry.geometry.objectKeys },
+    baseColors: Float32Array.from(entry.geometry.baseColors),
+    ruleColors: entry.geometry.ruleColors,
+  };
+}
+
+/**
+ * Mirrors every streaming layer's `useStreamStore` cache into GPU cell
+ * meshes: builds a mesh for every newly-resident cell (`buildCellMesh`) and
+ * disposes+removes the mesh for every cell the cache no longer holds (a
+ * `commitStreamingLayer` eviction, `commitNormal`/`commitSwap` in
+ * `useTileStreaming.ts`). Skips non-streaming layers entirely and any
+ * streaming layer without a scene-map shell yet (the mesh-management effect
+ * above creates that shell synchronously when the layer is added — this
+ * only reads it, never creates it, keeping "who owns LayerSceneState
+ * creation" a single-effect responsibility).
+ */
+export function syncStreamingCells(
+  cityGroup: Group,
+  map: Map<string, LayerSceneState>,
+  layers: ReadonlyArray<Layer>,
+  options: {
+    readonly materialMode: CityMaterialMode;
+    readonly doubleSided: boolean;
+    readonly shadows: boolean;
+  },
+): void {
+  for (const layer of layers) {
+    if (!layer.isStreaming) continue;
+    const state = map.get(layer.id);
+    if (!state) continue;
+    const stream = useStreamStore.getState().get(layer.id);
+    if (!stream) continue;
+
+    const cacheKeys = new Set(stream.cache.keys());
+
+    // Deleting the CURRENT key from a Map mid-iteration is well-defined
+    // (the key was already visited, so it isn't revisited or skipped) — no
+    // defensive array copy needed before iterating.
+    for (const [key, cell] of state.cells) {
+      if (cacheKeys.has(key)) continue;
+      cityGroup.remove(cell.mesh);
+      cell.mesh.geometry.dispose();
+      disposeMaterial(cell.mesh.material);
+      state.cells.delete(key);
+    }
+
+    for (const key of cacheKeys) {
+      if (state.cells.has(key)) continue;
+      const entry = stream.cache.get(key);
+      if (!entry) continue; // evicted between keys() and get() — next sync picks it up if re-fetched
+      const cellState = buildCellMesh(
+        layer.id,
+        key,
+        entry,
+        stream.grid,
+        state.originOffset,
+        options.materialMode,
+        options.doubleSided,
+      );
+      cellState.mesh.visible = layer.visible;
+      cellState.mesh.castShadow = options.shadows;
+      cellState.mesh.receiveShadow = options.shadows;
+      cityGroup.add(cellState.mesh);
+      state.cells.set(key, cellState);
+    }
+  }
+}
+
 /** Sets `mesh.visible` on the layer mesh (if any) and every cell mesh to
  *  match each layer's `visible` flag. */
 export function applyVisibility(
@@ -1098,8 +1366,22 @@ export function computeTriangleCount(
 /**
  * Rebuilds `ruleColors` for the layer mesh (if any) and every cell mesh,
  * from each layer's active rules. A streaming layer has no layer mesh, so
- * only its cells are (re)colorized; a static layer has no cells, so only
- * the layer mesh is.
+ * only its cells would be (re)colorized here; a static layer has no cells,
+ * so only the layer mesh is.
+ *
+ * A streaming layer's cells are skipped entirely here — NOT a "nothing to
+ * do" no-op, but a deliberate guard against a real bug: `buildRuleColors`
+ * looks objects up by id in `layer.model.objects`, which is intentionally
+ * always `{}` for a streaming layer (`streamStore.ts`'s doc comment). Every
+ * lookup would silently return "no match", so `hasRules ? buildRuleColors(
+ * ...) : null` would evaluate to `null` for EVERY resident cell on every
+ * unrelated `layers` change (e.g. toggling a different layer's visibility)
+ * — overwriting the correct `ruleColors` the WORKER already computed at
+ * fetch time (`fcb.worker.ts`'s `fetch` handler bakes `msg.rules`/
+ * `msg.rulesEnabled` into each cell as it's built) with a wrong, empty
+ * result. Recoloring an already-resident streaming cell after a rule EDIT
+ * would need a `{type:"recolor"}` round trip through the worker instead —
+ * not wired by this task; see the task report.
  */
 export function updateRuleColors(
   map: Map<string, LayerSceneState>,
@@ -1121,6 +1403,8 @@ export function updateRuleColors(
           )
         : null;
     }
+
+    if (layer.isStreaming) continue;
 
     for (const cell of state.cells.values()) {
       cell.ruleColors = hasRules
@@ -1200,16 +1484,64 @@ export function sceneToCrsImpl(
 }
 
 /**
+ * Box-select candidate for one object: its id and bbox, normalized from
+ * either a static `CityObject` or a streaming layer's `ResidentObjectRecord`
+ * (see `boxSelectCandidates` below).
+ */
+interface BoxSelectCandidate {
+  readonly id: string;
+  readonly bbox: BBox3 | null;
+}
+
+/**
+ * Box-select DECISION (Task 17): for a streaming layer, `layer.model.objects`
+ * is intentionally always empty (streamStore.ts's doc comment), so walking
+ * it — the ONLY thing this function did before — silently selects nothing
+ * for every streaming layer, with no visible sign anything is wrong. Task
+ * 13 built the per-object cell-offset lookup below for exactly this case but
+ * left it with nothing to iterate, calling it out explicitly as a real,
+ * unresolved plan gap (`layer.model.objects` empty by design, `CellSceneState`
+ * carries no per-object bboxes) rather than a silent limitation.
+ *
+ * Resolution chosen here: wire it through, not just surface the limitation
+ * in the UI. `ResidentObjectRecord` (`workerProtocol.ts`) already carries a
+ * `bbox` per object, and `getResidentModel` (Task 15, `residentModel.ts`)
+ * already merges every resident cell's objects into one flat, MEMOIZED view
+ * — recomputed only when the stream's `version` changes, so calling it here
+ * (from a box-select drag, not a render) is cheap. This makes box-select
+ * work over whatever is CURRENTLY RESIDENT for a streaming layer — matching
+ * what static box-select has always meant (only what's loaded is
+ * selectable) rather than requiring a synchronous full-file fetch just to
+ * support a drag-select. A UI-only "unsupported" message was the fallback
+ * considered and rejected: the offset-lookup plumbing already existed
+ * specifically to make this work once records were available, and
+ * `ResidentObjectRecord.bbox` is exactly that missing data — leaving it
+ * unwired would mean two pieces built for each other, neither used.
+ */
+function boxSelectCandidates(layer: Layer): BoxSelectCandidate[] {
+  if (layer.isStreaming) {
+    const version = useStreamStore.getState().streams[layer.id]?.version ?? 0;
+    const resident = getResidentModel(layer.id, version);
+    return Object.entries(resident.objects).map(([id, record]) => ({
+      id,
+      bbox: record.bbox,
+    }));
+  }
+  return Object.entries(layer.model.objects).map(([id, obj]) => ({
+    id,
+    bbox: obj?.bbox ?? null,
+  }));
+}
+
+/**
  * Projects each layer's object bboxes to screen space and returns the
  * `Selection`s whose center falls inside the drag rectangle.
  *
  * Walks each layer's cells first to build an objectId -> cell-mesh-offset
  * lookup (from each cell's `pickingIndex.objectKeys`), so an object that
- * lives in a streaming cell projects from where it actually renders
- * (the cell mesh's position) rather than the shared origin. An object with
- * no cell entry uses [0, 0, 0] — the static layer mesh's offset — which is
- * the ONLY case reachable today, since no cell mesh is populated yet; the
- * lookup exists so this keeps working once one is.
+ * lives in a streaming cell projects from where it actually renders (the
+ * cell mesh's position) rather than the shared origin. An object with no
+ * cell entry uses [0, 0, 0] — the static layer mesh's offset.
  */
 export function computeBoxSelection(
   layers: ReadonlyArray<Layer>,
@@ -1238,12 +1570,12 @@ export function computeBoxSelection(
       }
     }
 
-    for (const [objectId, obj] of Object.entries(layer.model.objects)) {
-      if (!obj?.bbox) continue;
+    for (const { id: objectId, bbox } of boxSelectCandidates(layer)) {
+      if (!bbox) continue;
       const center: Vec3 = [
-        (obj.bbox[0] + obj.bbox[3]) / 2,
-        (obj.bbox[1] + obj.bbox[4]) / 2,
-        (obj.bbox[2] + obj.bbox[5]) / 2,
+        (bbox[0] + bbox[3]) / 2,
+        (bbox[1] + bbox[4]) / 2,
+        (bbox[2] + bbox[5]) / 2,
       ];
       const offset = cellOffsetByObject.get(objectId) ?? [0, 0, 0];
       const scenePos = sourceToScene(center, state.originOffset, offset);
