@@ -28,6 +28,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  Object3D,
   PerspectiveCamera,
   type Side,
   Vector3,
@@ -55,6 +56,11 @@ import type { PickingIndex } from "./buildCityMesh";
 import { resolveSelection } from "./resolvePicking";
 import { applyHighlight, clearHighlight } from "./highlightMesh";
 import { buildRuleColors } from "./applyRuleColors";
+import {
+  sourceToScene,
+  sceneToSource,
+} from "../features/streaming/sceneTransform";
+import type { CellKey } from "../features/streaming/tileGrid";
 import { useSelectionStore } from "../features/selection/selectionStore";
 import { useLayerStore } from "../features/layers/layerStore";
 import type { Layer } from "../features/layers/layerStore";
@@ -71,14 +77,62 @@ import type { ViewDirection } from "./ViewAlignButtons";
 // Re-export for consumers
 export type { CitySceneHandle, CitySceneProps };
 
-/** Per-layer GPU state tracked in a ref map. */
-export interface LayerSceneState {
+/**
+ * Per-cell GPU state for a streaming layer's resident tiles, tracked in
+ * `LayerSceneState.cells`. Each cell is its own mesh with its own picking
+ * index and color buffers — a streaming layer never has one merged mesh.
+ */
+export interface CellSceneState {
   mesh: Mesh;
   pickingIndex: PickingIndex;
   baseColors: Float32Array;
-  selectedLod: string | null;
   ruleColors: Float32Array | null;
+}
+
+/**
+ * Per-layer GPU state tracked in a ref map.
+ *
+ * `mesh`/`pickingIndex`/`baseColors` are non-null for a plain (fully
+ * resident) layer and null for a streaming layer, which instead populates
+ * `cells` — one entry per resident tile, keyed by `CellKey` ("level/col/row").
+ *
+ * This is intentionally a TWO-LEVEL map (`layerId -> LayerSceneState ->
+ * cells: Map<CellKey, CellSceneState>`), not a flat `${layerId}:${cellKey}`
+ * compound key: every existing call site keys off `layerId` alone (the
+ * cleanup loop, visibility, triangle count, rule colors, cursor conversion,
+ * box select, picking), and a compound key would make every one of those
+ * `Map.get(layer.id)` calls miss.
+ */
+export interface LayerSceneState {
+  mesh: Mesh | null;
+  pickingIndex: PickingIndex | null;
+  baseColors: Float32Array | null;
+  ruleColors: Float32Array | null;
+  selectedLod: string | null;
   originOffset: Vec3;
+  cells: Map<CellKey, CellSceneState>;
+}
+
+/** Which layer (and, for a streaming cell mesh, which cell) a picked
+ *  Object3D belongs to — resolved from `userData`, set when the mesh is
+ *  created (see the layer/cell mesh-build sites below). */
+export interface MeshOwner {
+  readonly layerId: string;
+  readonly cellKey: string | undefined;
+}
+
+/**
+ * Resolves the owning layer (and cell, if any) of a picked/hovered mesh
+ * from its `userData`. Every layer mesh AND every cell mesh carries
+ * `userData.layerId`; only cell meshes additionally carry `userData.cellKey`.
+ * Returns null for a mesh with no `layerId` (e.g. the ground plane or a
+ * measure-tool marker, which are never pickable owners).
+ */
+export function resolveMeshOwner(obj: Object3D): MeshOwner | null {
+  const layerId: string | undefined = obj.userData.layerId;
+  if (!layerId) return null;
+  const cellKey: string | undefined = obj.userData.cellKey;
+  return { layerId, cellKey };
 }
 
 interface CitySceneHandle {
@@ -410,13 +464,12 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
       const map = layerSceneMapRef.current;
       const currentIds = new Set(layers.map((l) => l.id));
 
-      // Remove meshes for deleted layers
+      // Remove meshes for deleted layers — dispose the layer mesh (if any)
+      // AND every cell mesh before dropping the map entry.
       for (const id of map.keys()) {
         if (!currentIds.has(id)) {
           const state = map.get(id)!;
-          cityGroup.remove(state.mesh);
-          state.mesh.geometry.dispose();
-          disposeMaterial(state.mesh.material);
+          disposeLayerState(cityGroup, state);
           map.delete(id);
         }
       }
@@ -435,9 +488,7 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
           existing !== undefined && existing.selectedLod !== layer.selectedLod;
 
         if (lodChanged && existing) {
-          cityGroup.remove(existing.mesh);
-          existing.mesh.geometry.dispose();
-          disposeMaterial(existing.mesh.material);
+          disposeLayerState(cityGroup, existing);
           map.delete(layer.id);
         }
 
@@ -479,6 +530,7 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
             ruleColors: null,
             selectedLod: layer.selectedLod,
             originOffset,
+            cells: new Map(),
           });
 
           if (needsSolarInit) {
@@ -493,22 +545,12 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
         }
       }
 
-      // Update visibility
-      for (const layer of layers) {
-        const state = map.get(layer.id);
-        if (state) state.mesh.visible = layer.visible;
-      }
+      // Update visibility — the layer mesh AND every cell mesh follow the
+      // layer's visibility flag.
+      applyVisibility(map, layers);
 
-      // Update triangle count
-      let totalTriangles = 0;
-      for (const layer of layers) {
-        const state = map.get(layer.id);
-        if (state && layer.visible) {
-          const posAttr = state.mesh.geometry.getAttribute("position");
-          if (posAttr) totalTriangles += posAttr.count / 3;
-        }
-      }
-      onTriangleCount(totalTriangles);
+      // Update triangle count — layer mesh triangles plus every cell's.
+      onTriangleCount(computeTriangleCount(map, layers));
 
       // Fit camera on first load
       if (needsFit && controlsRef.current) {
@@ -539,55 +581,47 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
 
     useEffect(() => {
       for (const state of layerSceneMapRef.current.values()) {
-        state.mesh.castShadow = cityShadowsEnabled;
-        state.mesh.receiveShadow = cityShadowsEnabled;
+        const cellMeshes = Array.from(state.cells.values(), (c) => c.mesh);
+        const meshes = state.mesh ? [state.mesh, ...cellMeshes] : cellMeshes;
 
-        const material = state.mesh.material;
-        const expectedSide = cityDoubleSided ? DoubleSide : FrontSide;
-        const needsModeSwap =
-          (cityMaterialMode === "basic" &&
-            !(material instanceof MeshBasicMaterial)) ||
-          (cityMaterialMode === "standard" &&
-            !(material instanceof MeshStandardMaterial));
+        for (const mesh of meshes) {
+          mesh.castShadow = cityShadowsEnabled;
+          mesh.receiveShadow = cityShadowsEnabled;
 
-        if (needsModeSwap) {
-          disposeMaterial(material);
-          state.mesh.material = createCityMaterial(
-            cityMaterialMode,
-            cityDoubleSided,
-          );
-          continue;
-        }
+          const material = mesh.material;
+          const expectedSide = cityDoubleSided ? DoubleSide : FrontSide;
+          const needsModeSwap =
+            (cityMaterialMode === "basic" &&
+              !(material instanceof MeshBasicMaterial)) ||
+            (cityMaterialMode === "standard" &&
+              !(material instanceof MeshStandardMaterial));
 
-        if (material instanceof MeshBasicMaterial) {
-          material.side = expectedSide;
-          material.needsUpdate = true;
-        } else if (material instanceof MeshStandardMaterial) {
-          material.side = expectedSide;
-          material.needsUpdate = true;
+          if (needsModeSwap) {
+            disposeMaterial(material);
+            mesh.material = createCityMaterial(
+              cityMaterialMode,
+              cityDoubleSided,
+            );
+            continue;
+          }
+
+          if (material instanceof MeshBasicMaterial) {
+            material.side = expectedSide;
+            material.needsUpdate = true;
+          } else if (material instanceof MeshStandardMaterial) {
+            material.side = expectedSide;
+            material.needsUpdate = true;
+          }
         }
       }
     }, [cityMaterialMode, cityDoubleSided, cityShadowsEnabled]);
 
-    // Rule colors
+    // Rule colors — applied to the layer mesh (static layers) and to every
+    // resident cell mesh (streaming layers), each with its own geometry/
+    // pickingIndex/baseColors.
     useEffect(() => {
-      const map = layerSceneMapRef.current;
-      for (const layer of layers) {
-        const state = map.get(layer.id);
-        if (!state) continue;
-        if (layer.rulesEnabled && layer.rules.length > 0) {
-          state.ruleColors = buildRuleColors(
-            layer.model,
-            state.mesh.geometry,
-            state.pickingIndex,
-            layer.rules as Rule[],
-            state.baseColors,
-          );
-        } else {
-          state.ruleColors = null;
-        }
-      }
-      reapplyHighlight(map, layers);
+      updateRuleColors(layerSceneMapRef.current, layers);
+      reapplyHighlight(layerSceneMapRef.current, layers);
     }, [layers]);
 
     // Highlight on selection/hover change
@@ -595,17 +629,18 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
       reapplyHighlight(layerSceneMapRef.current, layers);
     }, [selections, hovered, layers]);
 
-    // Convert scene point to CRS coordinates
+    // Convert a scene-space point (e.g. a raycast hit) back to source-CRS
+    // coordinates, via the shared sceneTransform module. `cellKey` selects
+    // the owning cell's mesh-position offset for a streaming layer;
+    // undefined means the static layer mesh, whose offset is always
+    // [0, 0, 0] (it is never translated, only rotated).
     const sceneToCrs = useCallback(
       (
         point: { x: number; y: number; z: number },
         layerId: string,
-      ): readonly [number, number, number] | null => {
-        const state = layerSceneMapRef.current.get(layerId);
-        if (!state) return null;
-        const o = state.originOffset;
-        return [point.x + o[0], -point.z + o[1], point.y + o[2]];
-      },
+        cellKey: string | undefined,
+      ): Vec3 | null =>
+        sceneToCrsImpl(layerSceneMapRef.current, layerId, cellKey, point),
       [],
     );
 
@@ -627,9 +662,9 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
           const now = performance.now();
           if (now - cursorThrottleRef.current > 66) {
             cursorThrottleRef.current = now;
-            const layerId = e.object.userData.layerId;
-            if (layerId) {
-              const crs = sceneToCrs(e.point, layerId);
+            const owner = resolveMeshOwner(e.object as unknown as Object3D);
+            if (owner) {
+              const crs = sceneToCrs(e.point, owner.layerId, owner.cellKey);
               onCursorPosition(crs);
             }
           }
@@ -683,31 +718,15 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
         const rect = container.getBoundingClientRect();
         const cam = camera as PerspectiveCamera;
         const mode = useSelectionStore.getState().mode;
-        const selected: Selection[] = [];
-
-        for (const layer of layers) {
-          const state = layerSceneMapRef.current.get(layer.id);
-          if (!state || !layer.visible) continue;
-
-          for (const [objectId, obj] of Object.entries(layer.model.objects)) {
-            if (!obj?.bbox) continue;
-            const o = state.originOffset;
-            const cx = (obj.bbox[0] + obj.bbox[3]) / 2 - o[0];
-            const cy = (obj.bbox[1] + obj.bbox[4]) / 2 - o[1];
-            const cz = (obj.bbox[2] + obj.bbox[5]) / 2 - o[2];
-            const screenPos = new Vector3(cx, cz, -cy);
-            screenPos.project(cam);
-
-            const px = ((screenPos.x + 1) / 2) * rect.width;
-            const py = ((-screenPos.y + 1) / 2) * rect.height;
-
-            if (px >= left && px <= right && py >= top && py <= bottom) {
-              if (mode === "object") {
-                selected.push({ kind: "object", layerId: layer.id, objectId });
-              }
-            }
-          }
-        }
+        const selected = computeBoxSelection(
+          layers,
+          layerSceneMapRef.current,
+          cam,
+          rect.width,
+          rect.height,
+          { left, top, right, bottom },
+          mode,
+        );
 
         if (selected.length > 0) {
           const firstLayerId = selected[0]!.layerId;
@@ -973,7 +992,10 @@ type PickEvent = {
   stopPropagation: () => void;
   face: { a: number } | null;
   point: { x: number; y: number; z: number };
-  object: { userData: { layerId?: string }; geometry: BufferGeometry };
+  object: {
+    userData: { layerId?: string; cellKey?: string };
+    geometry: BufferGeometry;
+  };
 };
 
 type PickEventWithMeta = PickEvent & {
@@ -1015,21 +1037,127 @@ function disposeMaterial(material: Material | Material[]): void {
   material.dispose();
 }
 
-function resolveFromEvent(
+/**
+ * Disposes a layer's GPU state: the layer mesh (if any) and every cell
+ * mesh, removing each from `cityGroup` first. `state.cells` is cleared
+ * afterwards so a stale entry can't be read post-dispose.
+ */
+export function disposeLayerState(
+  cityGroup: Group,
+  state: LayerSceneState,
+): void {
+  if (state.mesh) {
+    cityGroup.remove(state.mesh);
+    state.mesh.geometry.dispose();
+    disposeMaterial(state.mesh.material);
+  }
+  for (const cell of state.cells.values()) {
+    cityGroup.remove(cell.mesh);
+    cell.mesh.geometry.dispose();
+    disposeMaterial(cell.mesh.material);
+  }
+  state.cells.clear();
+}
+
+/** Sets `mesh.visible` on the layer mesh (if any) and every cell mesh to
+ *  match each layer's `visible` flag. */
+export function applyVisibility(
+  map: Map<string, LayerSceneState>,
+  layers: ReadonlyArray<Layer>,
+): void {
+  for (const layer of layers) {
+    const state = map.get(layer.id);
+    if (!state) continue;
+    if (state.mesh) state.mesh.visible = layer.visible;
+    for (const cell of state.cells.values()) cell.mesh.visible = layer.visible;
+  }
+}
+
+/** Sums triangle counts across every VISIBLE layer's mesh plus all of its
+ *  cell meshes (an invisible layer contributes nothing, same as before). */
+export function computeTriangleCount(
+  map: Map<string, LayerSceneState>,
+  layers: ReadonlyArray<Layer>,
+): number {
+  let total = 0;
+  for (const layer of layers) {
+    const state = map.get(layer.id);
+    if (!state || !layer.visible) continue;
+    if (state.mesh) {
+      const posAttr = state.mesh.geometry.getAttribute("position");
+      if (posAttr) total += posAttr.count / 3;
+    }
+    for (const cell of state.cells.values()) {
+      const posAttr = cell.mesh.geometry.getAttribute("position");
+      if (posAttr) total += posAttr.count / 3;
+    }
+  }
+  return total;
+}
+
+/**
+ * Rebuilds `ruleColors` for the layer mesh (if any) and every cell mesh,
+ * from each layer's active rules. A streaming layer has no layer mesh, so
+ * only its cells are (re)colorized; a static layer has no cells, so only
+ * the layer mesh is.
+ */
+export function updateRuleColors(
+  map: Map<string, LayerSceneState>,
+  layers: ReadonlyArray<Layer>,
+): void {
+  for (const layer of layers) {
+    const state = map.get(layer.id);
+    if (!state) continue;
+    const hasRules = layer.rulesEnabled && layer.rules.length > 0;
+
+    if (state.mesh && state.pickingIndex && state.baseColors) {
+      state.ruleColors = hasRules
+        ? buildRuleColors(
+            layer.model,
+            state.mesh.geometry,
+            state.pickingIndex,
+            layer.rules as Rule[],
+            state.baseColors,
+          )
+        : null;
+    }
+
+    for (const cell of state.cells.values()) {
+      cell.ruleColors = hasRules
+        ? buildRuleColors(
+            layer.model,
+            cell.mesh.geometry,
+            cell.pickingIndex,
+            layer.rules as Rule[],
+            cell.baseColors,
+          )
+        : null;
+    }
+  }
+}
+
+/**
+ * Resolves a picked/hovered mesh to a `Selection`, consulting the owning
+ * cell's `pickingIndex` for a streaming layer (via `resolveMeshOwner`) or
+ * the layer mesh's `pickingIndex` for a static layer.
+ */
+export function resolveFromEvent(
   e: PickEvent,
   map: Map<string, LayerSceneState>,
 ): Selection | null {
   if (!e.face) return null;
-  const layerId = e.object.userData.layerId;
-  if (!layerId) return null;
-  const state = map.get(layerId);
+  const owner = resolveMeshOwner(e.object as unknown as Object3D);
+  if (!owner) return null;
+  const state = map.get(owner.layerId);
   if (!state) return null;
 
-  const result = resolveSelection(
-    e.object.geometry,
-    state.pickingIndex,
-    e.face.a,
-  );
+  const pickingIndex =
+    owner.cellKey !== undefined
+      ? state.cells.get(owner.cellKey)?.pickingIndex
+      : state.pickingIndex;
+  if (!pickingIndex) return null;
+
+  const result = resolveSelection(e.object.geometry, pickingIndex, e.face.a);
   if (!result) return null;
 
   const mode = useSelectionStore.getState().mode;
@@ -1044,7 +1172,103 @@ function resolveFromEvent(
   return { kind: "object", layerId: result.layerId, objectId: result.objectId };
 }
 
-function reapplyHighlight(
+/**
+ * Converts a scene-space point back to source-CRS coordinates via
+ * `sceneToSource`. `cellKey` (when set) selects the owning cell, whose
+ * mesh position IS the offset `sceneToSource` needs — a cell mesh is
+ * positioned at `meshOffset(cellCentre(...), sceneOrigin)` (rotated delta),
+ * exactly the `offset` parameter `sceneToSource` expects. A static layer's
+ * mesh is never translated, so its offset is always [0, 0, 0].
+ */
+export function sceneToCrsImpl(
+  map: Map<string, LayerSceneState>,
+  layerId: string,
+  cellKey: string | undefined,
+  point: { x: number; y: number; z: number },
+): Vec3 | null {
+  const state = map.get(layerId);
+  if (!state) return null;
+
+  let offset: Vec3 = [0, 0, 0];
+  if (cellKey !== undefined) {
+    const cell = state.cells.get(cellKey);
+    if (!cell) return null;
+    offset = [cell.mesh.position.x, cell.mesh.position.y, cell.mesh.position.z];
+  }
+
+  return sceneToSource([point.x, point.y, point.z], state.originOffset, offset);
+}
+
+/**
+ * Projects each layer's object bboxes to screen space and returns the
+ * `Selection`s whose center falls inside the drag rectangle.
+ *
+ * Walks each layer's cells first to build an objectId -> cell-mesh-offset
+ * lookup (from each cell's `pickingIndex.objectKeys`), so an object that
+ * lives in a streaming cell projects from where it actually renders
+ * (the cell mesh's position) rather than the shared origin. An object with
+ * no cell entry uses [0, 0, 0] — the static layer mesh's offset — which is
+ * the ONLY case reachable today, since no cell mesh is populated yet; the
+ * lookup exists so this keeps working once one is.
+ */
+export function computeBoxSelection(
+  layers: ReadonlyArray<Layer>,
+  map: Map<string, LayerSceneState>,
+  camera: PerspectiveCamera,
+  rectWidth: number,
+  rectHeight: number,
+  box: { left: number; top: number; right: number; bottom: number },
+  mode: "object" | "surface",
+): Selection[] {
+  const selected: Selection[] = [];
+
+  for (const layer of layers) {
+    const state = map.get(layer.id);
+    if (!state || !layer.visible) continue;
+
+    const cellOffsetByObject = new Map<string, Vec3>();
+    for (const cell of state.cells.values()) {
+      const offset: Vec3 = [
+        cell.mesh.position.x,
+        cell.mesh.position.y,
+        cell.mesh.position.z,
+      ];
+      for (const id of cell.pickingIndex.objectKeys) {
+        cellOffsetByObject.set(id, offset);
+      }
+    }
+
+    for (const [objectId, obj] of Object.entries(layer.model.objects)) {
+      if (!obj?.bbox) continue;
+      const center: Vec3 = [
+        (obj.bbox[0] + obj.bbox[3]) / 2,
+        (obj.bbox[1] + obj.bbox[4]) / 2,
+        (obj.bbox[2] + obj.bbox[5]) / 2,
+      ];
+      const offset = cellOffsetByObject.get(objectId) ?? [0, 0, 0];
+      const scenePos = sourceToScene(center, state.originOffset, offset);
+      const screenPos = new Vector3(scenePos[0], scenePos[1], scenePos[2]);
+      screenPos.project(camera);
+
+      const px = ((screenPos.x + 1) / 2) * rectWidth;
+      const py = ((-screenPos.y + 1) / 2) * rectHeight;
+
+      if (
+        px >= box.left &&
+        px <= box.right &&
+        py >= box.top &&
+        py <= box.bottom &&
+        mode === "object"
+      ) {
+        selected.push({ kind: "object", layerId: layer.id, objectId });
+      }
+    }
+  }
+
+  return selected;
+}
+
+export function reapplyHighlight(
   map: Map<string, LayerSceneState>,
   layers: ReadonlyArray<Layer>,
 ): void {
@@ -1058,17 +1282,34 @@ function reapplyHighlight(
     const isTarget =
       layerSelections.length > 0 || (hov && hov.layerId === layer.id);
 
-    if (isTarget) {
-      applyHighlight(
-        state.mesh.geometry,
-        state.baseColors,
-        layerSelections,
-        hov?.layerId === layer.id ? hov : null,
-        state.pickingIndex,
-        state.ruleColors,
-      );
-    } else {
-      clearHighlight(state.mesh.geometry, state.baseColors, state.ruleColors);
+    if (state.mesh && state.pickingIndex && state.baseColors) {
+      if (isTarget) {
+        applyHighlight(
+          state.mesh.geometry,
+          state.baseColors,
+          layerSelections,
+          hov?.layerId === layer.id ? hov : null,
+          state.pickingIndex,
+          state.ruleColors,
+        );
+      } else {
+        clearHighlight(state.mesh.geometry, state.baseColors, state.ruleColors);
+      }
+    }
+
+    for (const cell of state.cells.values()) {
+      if (isTarget) {
+        applyHighlight(
+          cell.mesh.geometry,
+          cell.baseColors,
+          layerSelections,
+          hov?.layerId === layer.id ? hov : null,
+          cell.pickingIndex,
+          cell.ruleColors,
+        );
+      } else {
+        clearHighlight(cell.mesh.geometry, cell.baseColors, cell.ruleColors);
+      }
     }
   }
 }
