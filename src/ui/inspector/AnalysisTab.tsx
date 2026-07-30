@@ -6,7 +6,7 @@
  */
 
 import { useState } from "react";
-import type { CityObject, Surface } from "../../domain/citymodel/types";
+import type { Surface } from "../../domain/citymodel/types";
 import {
   computeRoofMetrics,
   computeSurfaceNormal,
@@ -15,20 +15,29 @@ import { aggregateRoofMetrics } from "../../domain/roofMetrics/aggregate";
 import { computeSolarScore } from "../../domain/geometry/derived";
 import { useSolarStore } from "../../features/solar/solarStore";
 
+/**
+ * Takes `surfaces` directly rather than a `CityObject` (or
+ * `ResidentObjectRecord`) so the same component serves both the static path
+ * (`selectedObject.surfaces`, synchronous) and the streaming path (rings
+ * fetched on demand via `useObjectSurfaces` — see InspectorPanel.tsx, which
+ * gates rendering this component on that fetch's "ready" state). Solar
+ * scoring needs `computeSurfaceNormal(ring)`, which only a full `Surface`
+ * (not the ring-less `ResidentObjectRecord`) can provide.
+ */
 interface AnalysisTabProps {
-  readonly object: CityObject;
+  readonly surfaces: ReadonlyArray<Surface>;
   readonly selectedSurfaceIndex: number | null;
 }
 
 type Scope = "building" | "surface";
 
 export function AnalysisTab({
-  object,
+  surfaces,
   selectedSurfaceIndex,
 }: AnalysisTabProps) {
   const [scope, setScope] = useState<Scope>("building");
 
-  const roofSurfaces = object.surfaces
+  const roofSurfaces = surfaces
     .map((s, i) => ({ surface: s, index: i }))
     .filter((s) => s.surface.type === "RoofSurface");
 
