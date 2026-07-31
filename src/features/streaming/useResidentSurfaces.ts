@@ -46,25 +46,39 @@ export function useObjectSurfaces(
     let cancelled = false;
     setState({ status: "loading" });
 
-    void client.send({ type: "surfaces", objectId }).then((r) => {
-      if (cancelled) return; // objectId/client changed or unmounted — stale
-      if (r.type === "surfaceData") {
-        // The wire type is `unknown[]` (workerProtocol.ts) because
-        // postMessage can't carry a static type across the worker boundary.
-        // fcb.worker.ts's `surfaces` handler builds this from
-        // `obj.surfaces as unknown[]`, so it IS a `Surface[]` structurally —
-        // this cast documents that contract rather than asserting something
-        // unverified.
-        setState({ status: "ready", surfaces: r.surfaces as Surface[] });
-      } else if (r.type === "error") {
-        setState({ status: "error", message: r.message });
-      } else {
+    client
+      .send({ type: "surfaces", objectId })
+      .then((r) => {
+        if (cancelled) return; // objectId/client changed or unmounted — stale
+        if (r.type === "surfaceData") {
+          // The wire type is `unknown[]` (workerProtocol.ts) because
+          // postMessage can't carry a static type across the worker boundary.
+          // fcb.worker.ts's `surfaces` handler builds this from
+          // `obj.surfaces as unknown[]`, so it IS a `Surface[]` structurally —
+          // this cast documents that contract rather than asserting something
+          // unverified.
+          setState({ status: "ready", surfaces: r.surfaces as Surface[] });
+        } else if (r.type === "error") {
+          setState({ status: "error", message: r.message });
+        } else {
+          setState({
+            status: "error",
+            message: `unexpected worker response for 'surfaces': ${r.type}`,
+          });
+        }
+      })
+      .catch((err: unknown) => {
+        // A layer removed mid-request terminates its WorkerClient, which
+        // REJECTS every in-flight send() (workerClient.ts's terminate()
+        // contract) instead of leaving it hanging — without this `.catch`,
+        // that rejection had no handler at all and surfaced as an unhandled
+        // promise rejection (non-blocking finding, 2026-07-28 final review).
+        if (cancelled) return;
         setState({
           status: "error",
-          message: `unexpected worker response for 'surfaces': ${r.type}`,
+          message: err instanceof Error ? err.message : String(err),
         });
-      }
-    });
+      });
 
     return () => {
       cancelled = true;

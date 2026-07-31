@@ -57,9 +57,13 @@ interface SurfaceTriangulation {
  * actual triangulation/coloring/normal logic (worker-safe, no Three.js
  * DOM/GPU types).
  *
- * The geometry uses an origin offset to maintain float precision
- * for large coordinates. The returned offset should be applied
- * as a translation on the mesh or parent group.
+ * `originOffset` is an INPUT, not something this function computes or
+ * returns: every vertex position is written as `coordinate - originOffset`
+ * (see `buildCityMeshArrays` below), so the offset is already baked into the
+ * geometry's own positions. Callers get the offset to pass in from
+ * `computeOriginOffset` (below) and are responsible for keeping the mesh/
+ * group's OWN transform in whatever frame they chose — this function neither
+ * applies nor reports a translation itself.
  */
 export function buildCityMesh(
   model: CityModel,

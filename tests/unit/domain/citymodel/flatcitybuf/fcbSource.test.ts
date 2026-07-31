@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import proj4 from "proj4";
 import { FcbReader } from "@cityjson/flatcitybuf";
 import {
   checkAdmission,
@@ -175,6 +176,111 @@ describe("checkAdmission", () => {
       rs: { authority: "EPSG", code: 28992 },
     });
     expect(checkAdmission(h)?.code).toBe("non-finite");
+  });
+});
+
+/**
+ * Permanent record of the reviewer's temporary 14-case CRS probe
+ * (2026-07-28 final review, non-blocking item #4). The existing EPSG:2263
+ * test above ("rejects a real, projected-but-non-metric CRS") does NOT
+ * actually exercise `isEstablishedMetricCrs`'s `def?.units === "m"`
+ * comparison — proj4 has no built-in EPSG:2263 definition and it isn't in
+ * `crsProjDefs.ts`'s `KNOWN_PROJ4_DEFS` either, so that test only proves the
+ * "unregistered code" branch (the SAME branch an absent/malformed authority
+ * or a made-up code number falls through to), not "a REGISTERED but
+ * non-metric definition is refused." This block closes that gap with a
+ * fake code registered directly via `proj4.defs()`, plus authority-shape and
+ * code-value edge cases `structuredEpsg`/`isEstablishedMetricCrs` must
+ * fail closed on.
+ */
+describe("checkAdmission — CRS matrix", () => {
+  it("accepts a lowercase 'epsg' authority — case-insensitive, since writers vary capitalisation", () => {
+    const h = fakeHeader({ rs: { authority: "epsg", code: 28992 } });
+    expect(checkAdmission(h)).toBeNull();
+  });
+
+  it("accepts a mixed-case 'Epsg' authority", () => {
+    const h = fakeHeader({
+      info: { referenceSystem: "Epsg:32631" },
+      rs: { authority: "Epsg", code: 32631 },
+    });
+    expect(checkAdmission(h)).toBeNull();
+  });
+
+  it("fails closed on an empty-string authority", () => {
+    const h = fakeHeader({ rs: { authority: "", code: 28992 } });
+    expect(checkAdmission(h)?.code).toBe("non-metric-crs");
+  });
+
+  it("fails closed on a malformed authority that merely contains 'EPSG' as a substring ('EPSGX')", () => {
+    const h = fakeHeader({ rs: { authority: "EPSGX", code: 28992 } });
+    expect(checkAdmission(h)?.code).toBe("non-metric-crs");
+  });
+
+  it("fails closed on a transposed-letter authority typo ('ESPG')", () => {
+    const h = fakeHeader({ rs: { authority: "ESPG", code: 28992 } });
+    expect(checkAdmission(h)?.code).toBe("non-metric-crs");
+  });
+
+  it("fails closed on a Unicode homoglyph authority (Cyrillic Е U+0415, not Latin E) that visually resembles 'EPSG'", () => {
+    const h = fakeHeader({
+      rs: { authority: "ЕPSG", code: 28992 },
+    });
+    expect(checkAdmission(h)?.code).toBe("non-metric-crs");
+  });
+
+  it("fails closed on an authority with trailing whitespace ('EPSG ') — not trimmed before comparison", () => {
+    const h = fakeHeader({ rs: { authority: "EPSG ", code: 28992 } });
+    expect(checkAdmission(h)?.code).toBe("non-metric-crs");
+  });
+
+  it("fails closed on a negative code — no crash, treated as simply unregistered", () => {
+    const h = fakeHeader({ rs: { authority: "EPSG", code: -1 } });
+    expect(checkAdmission(h)?.code).toBe("non-metric-crs");
+  });
+
+  it("fails closed on an implausibly huge code — no overflow/coercion surprise admits it", () => {
+    const h = fakeHeader({
+      rs: { authority: "EPSG", code: Number.MAX_SAFE_INTEGER },
+    });
+    expect(checkAdmission(h)?.code).toBe("non-metric-crs");
+  });
+
+  it("refuses a REGISTERED non-metre definition — the gap the old EPSG:2263 test didn't actually close", () => {
+    // A fake EPSG code, registered directly with proj4 (bypassing
+    // crsProjDefs.ts's fixed metric-only list) using US survey feet, not
+    // metres — proves `isEstablishedMetricCrs`'s `def.units === "m"` check
+    // itself discriminates, not just "is this code known at all."
+    proj4.defs(
+      "EPSG:900001",
+      "+proj=longlat +datum=WGS84 +units=us-ft +no_defs",
+    );
+    const h = fakeHeader({
+      info: { referenceSystem: "EPSG:900001" },
+      rs: { authority: "EPSG", code: 900001 },
+    });
+    expect(checkAdmission(h)?.code).toBe("non-metric-crs");
+  });
+
+  it("refuses a REGISTERED definition with no +units at all (undefined, not 'm')", () => {
+    proj4.defs("EPSG:900002", "+proj=longlat +datum=WGS84 +no_defs");
+    const h = fakeHeader({
+      info: { referenceSystem: "EPSG:900002" },
+      rs: { authority: "EPSG", code: 900002 },
+    });
+    expect(checkAdmission(h)?.code).toBe("non-metric-crs");
+  });
+
+  it("accepts a REGISTERED metre-based definition under a fake code — proves the SAME branch admits when units really is 'm'", () => {
+    proj4.defs(
+      "EPSG:900003",
+      "+proj=sterea +lat_0=52 +lon_0=5 +k=1 +x_0=0 +y_0=0 +ellps=bessel +units=m +no_defs",
+    );
+    const h = fakeHeader({
+      info: { referenceSystem: "EPSG:900003" },
+      rs: { authority: "EPSG", code: 900003 },
+    });
+    expect(checkAdmission(h)).toBeNull();
   });
 });
 

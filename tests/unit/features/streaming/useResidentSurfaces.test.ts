@@ -98,6 +98,53 @@ describe("useObjectSurfaces", () => {
     expect(result.current.status).toBe("error");
   });
 
+  it("goes 'loading' then 'error' when send() REJECTS (e.g. terminate() racing a layer removal), rather than an unhandled rejection", async () => {
+    let reject!: (e: Error) => void;
+    const send = vi.fn(
+      () => new Promise<WorkerResponse>((_, r) => (reject = r)),
+    );
+    const client = fakeClient(send);
+
+    const { result } = renderHook(() => useObjectSurfaces(client, "obj-1"));
+    expect(result.current).toEqual({ status: "loading" });
+
+    // If this rejection had no `.catch`, it would surface as an unhandled
+    // promise rejection — vitest fails the run on those, so simply reaching
+    // the assertion below is part of the proof (mirrors
+    // useTileStreaming.test.ts's identical rationale for commitStreamingLayer).
+    await act(async () => {
+      reject(new Error("WorkerClient terminated"));
+      await Promise.resolve();
+    });
+
+    expect(result.current).toEqual({
+      status: "error",
+      message: "WorkerClient terminated",
+    });
+  });
+
+  it("does not resurrect a resolved/rejected result after unmount (cancelled guard covers the rejection path too)", async () => {
+    let reject!: (e: Error) => void;
+    const send = vi.fn(
+      () => new Promise<WorkerResponse>((_, r) => (reject = r)),
+    );
+    const client = fakeClient(send);
+
+    const { result, unmount } = renderHook(() =>
+      useObjectSurfaces(client, "obj-1"),
+    );
+    unmount();
+
+    await act(async () => {
+      reject(new Error("WorkerClient terminated"));
+      await Promise.resolve();
+    });
+
+    // Nothing to assert on `result.current` post-unmount beyond "did not
+    // throw" — the real proof is the absence of an unhandled rejection.
+    expect(result.current).toEqual({ status: "loading" });
+  });
+
   it("re-fetches (a new send call) when objectId changes", async () => {
     const send = vi
       .fn()
