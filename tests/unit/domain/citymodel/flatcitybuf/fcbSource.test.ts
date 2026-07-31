@@ -109,7 +109,20 @@ describe("checkAdmission", () => {
     expect(checkAdmission(h)?.code).toBe("non-metric-crs");
   });
 
-  it("rejects a real, projected-but-non-metric CRS: EPSG:2263 (US survey feet) — not established, so refused rather than assumed", () => {
+  it("rejects a real, projected-but-non-metric CRS: EPSG:2263 (NAD83 / New York Long Island, US survey feet) — registered here with its genuine definition, so refusal is actually due to its units, not because the code is unknown to this proj4 bundle", () => {
+    // proj4's built-in set (WGS84, NAD83, Web Mercator, the UTM zones, the
+    // two UPS projections — see proj4's lib/global.js) does not include
+    // EPSG:2263, and it isn't in crsProjDefs.ts's fixed list either. Without
+    // registering its REAL definition here, `isEstablishedMetricCrs` would
+    // find no `proj4.defs()` entry at all and refuse it via the
+    // "unregistered code" path — the SAME path EPSG:999999 below takes —
+    // rather than the `units !== "m"` comparison this test's name claims to
+    // exercise (2026-07-28 final review, "the CRS matrix does not test what
+    // it claims"). Definition verbatim from epsg.io/2263.proj4.
+    proj4.defs(
+      "EPSG:2263",
+      "+proj=lcc +lat_0=40.1666666666667 +lon_0=-74 +lat_1=41.0333333333333 +lat_2=40.6666666666667 +x_0=300000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=us-ft +no_defs +type=crs",
+    );
     const h = fakeHeader({
       info: { referenceSystem: "EPSG:2263" },
       rs: { authority: "EPSG", code: 2263 },
@@ -181,17 +194,21 @@ describe("checkAdmission", () => {
 
 /**
  * Permanent record of the reviewer's temporary 14-case CRS probe
- * (2026-07-28 final review, non-blocking item #4). The existing EPSG:2263
- * test above ("rejects a real, projected-but-non-metric CRS") does NOT
- * actually exercise `isEstablishedMetricCrs`'s `def?.units === "m"`
- * comparison — proj4 has no built-in EPSG:2263 definition and it isn't in
- * `crsProjDefs.ts`'s `KNOWN_PROJ4_DEFS` either, so that test only proves the
- * "unregistered code" branch (the SAME branch an absent/malformed authority
- * or a made-up code number falls through to), not "a REGISTERED but
- * non-metric definition is refused." This block closes that gap with a
- * fake code registered directly via `proj4.defs()`, plus authority-shape and
- * code-value edge cases `structuredEpsg`/`isEstablishedMetricCrs` must
- * fail closed on.
+ * (2026-07-28 final review, non-blocking item #4), covering authority-shape
+ * and code-value edge cases `structuredEpsg`/`isEstablishedMetricCrs` must
+ * fail closed on, plus generic (code-independent) proof that the
+ * `def.units === "m"` comparison itself — not merely "is this code known at
+ * all" — is what decides admission.
+ *
+ * The EPSG:2263 test above registers that CRS's own genuine (non-metric)
+ * definition, so it no longer needs a stand-in here — see its comment for
+ * why that mattered (2026-07-28 final review, "the CRS matrix does not test
+ * what it claims": EPSG:2263 used to be refused only for being unregistered
+ * to this proj4 bundle, the SAME reason EPSG:999999 below is refused, not
+ * for being non-metric). The fake EPSG:900001-903 codes below stay: they
+ * additionally prove the units check is code-agnostic (a REAL definition
+ * with the same shape would be refused identically), independent of any
+ * one specific EPSG entry.
  */
 describe("checkAdmission — CRS matrix", () => {
   it("accepts a lowercase 'epsg' authority — case-insensitive, since writers vary capitalisation", () => {
@@ -246,7 +263,7 @@ describe("checkAdmission — CRS matrix", () => {
     expect(checkAdmission(h)?.code).toBe("non-metric-crs");
   });
 
-  it("refuses a REGISTERED non-metre definition — the gap the old EPSG:2263 test didn't actually close", () => {
+  it("refuses a REGISTERED non-metre definition under an arbitrary code — proves the units check is code-agnostic, not special-cased for any one real CRS", () => {
     // A fake EPSG code, registered directly with proj4 (bypassing
     // crsProjDefs.ts's fixed metric-only list) using US survey feet, not
     // metres — proves `isEstablishedMetricCrs`'s `def.units === "m"` check
