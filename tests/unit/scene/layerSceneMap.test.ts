@@ -197,6 +197,8 @@ function makeCellEntry(overrides: Partial<CellEntry> = {}): CellEntry {
     objects: [],
     surfaceAttrKeys: [],
     lodsSeen: [],
+    builtWithRulesEnabled: false,
+    builtWithRules: [],
     ...overrides,
   };
 }
@@ -1622,6 +1624,222 @@ describe("syncStreamingCells", () => {
 
     expect(state.cells.get("0/0/0")!.mesh).toBe(mesh); // same mesh, not rebuilt
     expect(disposeSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// syncStreamingCells + recolorStreamingCells — a rule change racing an
+// in-flight fetch (B2, 2026-07-28 final review). The rule-colors effect
+// (CitySceneR3F.tsx's `updateRuleColors`/`recolorStreamingCells` pair) only
+// ever recolors cells that are ALREADY resident when the user edits a rule.
+// A fetch dispatched BEFORE the edit, landing AFTER it, installs a cell via
+// `syncStreamingCells` carrying colors baked from the OLD rules — and
+// nothing revisits it, because that effect's dependency is `layers`, not
+// the cache commit. `syncStreamingCells` must flag such a cell so its
+// caller can recolor it immediately with the CURRENT rules.
+// ---------------------------------------------------------------------------
+
+describe("syncStreamingCells + recolorStreamingCells — rule change races a fetch (B2, 2026-07-28 final review)", () => {
+  const grid: Grid = { originX: 0, originY: 0, rootCell: 1000, maxLevel: 2 };
+
+  afterEach(() => {
+    useStreamStore.setState({ streams: {} });
+  });
+
+  function registerStream(
+    layerId: string,
+    cache: CellCache<CellEntry>,
+    sendStreaming: WorkerClient["sendStreaming"],
+  ) {
+    useStreamStore.getState().register(layerId, {
+      client: { sendStreaming } as unknown as WorkerClient,
+      grid,
+      header: {
+        version: "1.0",
+        featuresCount: 1,
+        extent: [0, 0, 0, 1000, 1000, 10],
+        referenceSystem: undefined,
+        epsg: null,
+      },
+      cache,
+      level: 0,
+      ladder: [],
+      ladderVersion: 0,
+      status: "idle",
+      message: null,
+      lastCommit: null,
+      version: 1,
+    });
+  }
+
+  it("flags a newly-installed cell whose fetch carried OLD rules, and recoloring it with the CURRENT rules replaces its colours", async () => {
+    const group = new Group();
+    const oldRule = makeRule({ id: "old", color: "#0000ff", conditions: [] });
+    const newRule = makeRule({ id: "new", color: "#ff0000", conditions: [] });
+
+    // The layer's rules as they stand NOW — the user already edited them.
+    const layer = makeLayer({
+      id: "L",
+      model: makeModel({}),
+      isStreaming: true,
+      rulesEnabled: true,
+      rules: [newRule],
+    });
+    const state = makeStreamingLayerState();
+    const map = new Map([["L", state]]);
+
+    // A fetch dispatched BEFORE the edit (baked with the OLD rule) that is
+    // only landing in the cache NOW, after the edit.
+    const staleColors = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]); // old-rule blue
+    const staleEntry = makeCellEntry({
+      geometry: makeCellGeometry({ ruleColors: staleColors }),
+      builtWithRulesEnabled: true,
+      builtWithRules: [oldRule],
+    });
+    const cache = new CellCache<CellEntry>({
+      maxTriangles: Infinity,
+      maxBytes: Infinity,
+    });
+    cache.set("0/0/0", staleEntry, { triangles: 1, bytes: 1 });
+
+    const newColors = new Float32Array([1, 0, 0, 1, 0, 0, 1, 0, 0]); // new-rule red
+    const sendStreaming = vi.fn(
+      async (
+        msg: Record<string, unknown>,
+        onMessage: (r: WorkerResponse) => void,
+      ) => {
+        for (const key of msg.cells as string[]) {
+          onMessage({ type: "recolored", id: 0, key, ruleColors: newColors });
+        }
+        onMessage({ type: "done", id: 0 });
+      },
+    );
+    registerStream("L", cache, sendStreaming);
+
+    const staleKeys = syncStreamingCells(group, map, [layer], {
+      materialMode: "standard",
+      doubleSided: false,
+      shadows: false,
+    });
+
+    // The cell was installed carrying the fetch's OLD-rule colors first...
+    expect(state.cells.get("0/0/0")!.ruleColors).toBe(staleColors);
+    // ...and syncStreamingCells must have flagged it as stale so the caller
+    // knows to recolor it.
+    expect(staleKeys.get("L")).toEqual(["0/0/0"]);
+
+    await recolorStreamingCells(map, [layer], staleKeys);
+
+    expect(sendStreaming).toHaveBeenCalledTimes(1);
+    const sentMsg = sendStreaming.mock.calls[0]![0] as Record<string, unknown>;
+    expect(sentMsg.cells).toEqual(["0/0/0"]);
+    expect(sentMsg.rules).toBe(layer.rules); // the CURRENT (new) rules, not the stale entry's
+
+    // The installed cell now carries the CURRENT rules' colours.
+    expect(state.cells.get("0/0/0")!.ruleColors).toEqual(newColors);
+  });
+
+  it("does NOT flag a newly-installed cell whose fetch already matches the layer's current rules", () => {
+    const group = new Group();
+    const rule = makeRule({ id: "r1", color: "#ff0000", conditions: [] });
+    const layer = makeLayer({
+      id: "L",
+      model: makeModel({}),
+      isStreaming: true,
+      rulesEnabled: true,
+      rules: [rule],
+    });
+    const state = makeStreamingLayerState();
+    const map = new Map([["L", state]]);
+
+    const entry = makeCellEntry({
+      builtWithRulesEnabled: true,
+      builtWithRules: [rule],
+    });
+    const cache = new CellCache<CellEntry>({
+      maxTriangles: Infinity,
+      maxBytes: Infinity,
+    });
+    cache.set("0/0/0", entry, { triangles: 1, bytes: 1 });
+    registerStream(
+      "L",
+      cache,
+      vi.fn() as unknown as WorkerClient["sendStreaming"],
+    );
+
+    const staleKeys = syncStreamingCells(group, map, [layer], {
+      materialMode: "standard",
+      doubleSided: false,
+      shadows: false,
+    });
+
+    expect(staleKeys.size).toBe(0);
+  });
+
+  it("recolorStreamingCells with onlyKeys targets ONLY the flagged cell, leaving an already-correct sibling cell untouched", async () => {
+    const group = new Group();
+    const rule = makeRule({ id: "r1", color: "#ff0000", conditions: [] });
+    const layer = makeLayer({
+      id: "L",
+      model: makeModel({}),
+      isStreaming: true,
+      rulesEnabled: true,
+      rules: [rule],
+    });
+    const state = makeStreamingLayerState();
+    const map = new Map([["L", state]]);
+
+    const freshColors = new Float32Array([9, 9, 9, 9, 9, 9, 9, 9, 9]);
+    const freshEntry = makeCellEntry({
+      geometry: makeCellGeometry({ ruleColors: freshColors }),
+      builtWithRulesEnabled: true,
+      builtWithRules: [rule], // already matches — NOT stale
+    });
+    const staleEntry = makeCellEntry({
+      geometry: makeCellGeometry({ ruleColors: new Float32Array(9) }),
+      builtWithRulesEnabled: false,
+      builtWithRules: [], // built before rules were enabled — IS stale
+    });
+    const cache = new CellCache<CellEntry>({
+      maxTriangles: Infinity,
+      maxBytes: Infinity,
+    });
+    cache.set("0/0/0", freshEntry, { triangles: 1, bytes: 1 });
+    cache.set("0/1/0", staleEntry, { triangles: 1, bytes: 1 });
+
+    const sendStreaming = vi.fn(
+      async (
+        msg: Record<string, unknown>,
+        onMessage: (r: WorkerResponse) => void,
+      ) => {
+        for (const key of msg.cells as string[]) {
+          onMessage({
+            type: "recolored",
+            id: 0,
+            key,
+            ruleColors: new Float32Array([2, 2, 2, 2, 2, 2, 2, 2, 2]),
+          });
+        }
+        onMessage({ type: "done", id: 0 });
+      },
+    );
+    registerStream("L", cache, sendStreaming);
+
+    const staleKeys = syncStreamingCells(group, map, [layer], {
+      materialMode: "standard",
+      doubleSided: false,
+      shadows: false,
+    });
+    expect(staleKeys.get("L")).toEqual(["0/1/0"]);
+
+    await recolorStreamingCells(map, [layer], staleKeys);
+
+    expect(sendStreaming).toHaveBeenCalledTimes(1);
+    const sentMsg = sendStreaming.mock.calls[0]![0] as Record<string, unknown>;
+    expect(sentMsg.cells).toEqual(["0/1/0"]); // NOT "0/0/0"
+
+    // The already-correct cell was never touched.
+    expect(state.cells.get("0/0/0")!.ruleColors).toBe(freshColors);
   });
 });
 

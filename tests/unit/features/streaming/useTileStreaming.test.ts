@@ -14,6 +14,7 @@ import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import type { Grid } from "../../../../src/features/streaming/tileGrid";
 import type { FcbHeaderModel } from "../../../../src/domain/citymodel/flatcitybuf/fcbSource";
+import type { Rule } from "../../../../src/features/rules/types";
 import {
   SETTLE_MS,
   LEVEL_SWAP_TIMEOUT_MS,
@@ -88,6 +89,8 @@ function fakeEntry(tag: string): CellEntry {
     objects: [],
     surfaceAttrKeys: [tag],
     lodsSeen: [],
+    builtWithRulesEnabled: false,
+    builtWithRules: [],
   };
 }
 
@@ -1381,6 +1384,106 @@ describe("useTileStreaming", () => {
     expect(fake.sendStreamingCalls).toHaveLength(1); // still just the one
     stream = useStreamStore.getState().get(layerId)!;
     expect(stream.status).toBe("idle");
+  }, 10000);
+
+  it("stamps every newly-cached CellEntry (both a real 'cell' response AND a sparse/backfilled one) with the rules ACTIVE AT DISPATCH TIME — what CitySceneR3F.tsx's syncStreamingCells later compares against the layer's CURRENT rules to detect a stale cell (B2, 2026-07-28 final review)", async () => {
+    const rule: Rule = {
+      id: "r1",
+      name: "roof",
+      color: "#ff0000",
+      conditions: [],
+      logic: "AND",
+      enabled: true,
+    };
+    const layerId = useLayerStore.getState().addLayer({
+      name: "s.fcb",
+      model: {
+        sourceEncoding: "flatcitybuf",
+        metadata: {},
+        bbox: null,
+        objects: {},
+        vertexCount: 0,
+      },
+      modelRef: { type: "url", url: "https://x/s.fcb" },
+      visible: true,
+      rules: [rule],
+      rulesEnabled: true,
+    });
+    useLayerStore.setState((s) => ({
+      layers: s.layers.map((l) =>
+        l.id === layerId ? { ...l, isStreaming: true } : l,
+      ),
+    }));
+    // The exact array reference `commitStreamingLayer` reads `layer.rules`
+    // from at dispatch time — asserted against below by identity, not just
+    // by value, since that's what `rulesStale()` (CitySceneR3F.tsx) actually
+    // compares.
+    const dispatchRules = useLayerStore
+      .getState()
+      .layers.find((l) => l.id === layerId)!.rules;
+
+    // Phase 1 (as in the B5 sparse-cell test above): learn the real desired
+    // keys for this fixed camera/grid using the default "every cell gets
+    // data" fake.
+    const probe = makeFakeClient();
+    useStreamStore.getState().register(layerId, {
+      client: probe.client,
+      grid: INTEGRATION_GRID,
+      header: HEADER,
+      cache: new CellCache<CellEntry>({
+        maxTriangles: Infinity,
+        maxBytes: Infinity,
+      }),
+      level: null,
+      ladder: [],
+      ladderVersion: 0,
+      status: "idle",
+      message: null,
+      lastCommit: null,
+      version: 0,
+    });
+    await commitStreamingLayer(layerId, fakeCamera, [0, 0, 0], 0);
+    const desired = probe.sendStreamingCalls[0]!.cells as string[];
+    expect(desired.length).toBeGreaterThan(0);
+    const sparseKey = desired[0]!;
+
+    // Phase 2: fresh stream state, identical viewport, but `sparseKey` now
+    // goes through the emptyCellEntry() backfill path (no 'cell' message at
+    // all) instead of a real fetched geometry — the OTHER CellEntry
+    // construction site in commitStreamingLayer.
+    const fake = makeFakeClient(new Set([sparseKey]));
+    useStreamStore.getState().register(layerId, {
+      client: fake.client,
+      grid: INTEGRATION_GRID,
+      header: HEADER,
+      cache: new CellCache<CellEntry>({
+        maxTriangles: Infinity,
+        maxBytes: Infinity,
+      }),
+      level: null,
+      ladder: [],
+      ladderVersion: 0,
+      status: "idle",
+      message: null,
+      lastCommit: null,
+      version: 0,
+    });
+
+    await commitStreamingLayer(layerId, fakeCamera, [0, 0, 0], 0);
+
+    const stream = useStreamStore.getState().get(layerId)!;
+    const cachedKeys = [...stream.cache.keys()];
+    expect(cachedKeys.length).toBeGreaterThan(1); // at least the sparse one plus a real one
+    expect(cachedKeys).toContain(sparseKey);
+
+    for (const key of cachedKeys) {
+      const entry = stream.cache.get(key)!;
+      expect(entry.builtWithRulesEnabled).toBe(true);
+      // Same reference as the layer's rules array at dispatch time — proves
+      // this is the ACTUAL dispatch-time snapshot, not a coincidentally
+      // equal freshly-read `layer.rules` at some other moment.
+      expect(entry.builtWithRules).toBe(dispatchRules);
+    }
   }, 10000);
 
   it("folds each commit's observed LoD labels into the persisted ladder — the worker previously always reported lodsSeen:[], so auto mode never had anything to choose from (B1, 2026-07-28 final review)", async () => {

@@ -26,6 +26,7 @@ import {
   type ResidentObjectRecord,
 } from "./workerProtocol";
 import type { FcbHeaderModel } from "../../domain/citymodel/flatcitybuf/fcbSource";
+import type { Rule } from "../rules/types";
 
 export type StreamStatus =
   | "idle"
@@ -47,6 +48,20 @@ export interface CellEntry {
   readonly objects: ReadonlyArray<ResidentObjectRecord>;
   readonly surfaceAttrKeys: ReadonlyArray<string>;
   readonly lodsSeen: ReadonlyArray<string>;
+  /** The layer's `rulesEnabled`/`rules` at the moment THIS cell's fetch was
+   *  dispatched (`commitStreamingLayer`, useTileStreaming.ts) — exactly what
+   *  `geometry.ruleColors` was computed from. A fetch can still be in flight
+   *  when the user edits a rule; if it lands afterwards, the layer's CURRENT
+   *  rules (by the time `syncStreamingCells` installs this entry) may
+   *  already differ from these. Comparing the two is how `syncStreamingCells`
+   *  detects a newly-installed cell carrying stale colors and asks for an
+   *  immediate recolor — otherwise nothing would ever revisit it: the
+   *  "rules changed" effect (`recolorStreamingCells` in CitySceneR3F.tsx)
+   *  only recolors cells that were ALREADY resident at the moment it ran,
+   *  and a cell arriving later never triggers it again on its own (B2,
+   *  2026-07-28 final review). */
+  readonly builtWithRulesEnabled: boolean;
+  readonly builtWithRules: ReadonlyArray<Rule>;
 }
 
 export interface StreamState {
@@ -157,12 +172,18 @@ export const useStreamStore = create<StreamStore>((set, getState) => ({
 /** A `CellEntry` for a cell the worker genuinely queried and found nothing
  *  in — see `emptyCellGeometry`'s doc comment (workerProtocol.ts) for why
  *  this needs to exist as a real, cacheable value rather than the absence
- *  of one. */
-export function emptyCellEntry(): CellEntry {
+ *  of one. Takes the same rules snapshot as its sibling cells from the same
+ *  commit, so it never looks "stale" on its own next to them. */
+export function emptyCellEntry(
+  rulesEnabled: boolean,
+  rules: ReadonlyArray<Rule>,
+): CellEntry {
   return {
     geometry: emptyCellGeometry(),
     objects: [],
     surfaceAttrKeys: [],
     lodsSeen: [],
+    builtWithRulesEnabled: rulesEnabled,
+    builtWithRules: rules,
   };
 }

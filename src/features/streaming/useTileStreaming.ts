@@ -422,6 +422,13 @@ export async function commitStreamingLayer(
                 objects: msg.objects,
                 surfaceAttrKeys: msg.surfaceAttrKeys,
                 lodsSeen: msg.lodsSeen,
+                // Snapshot of what THIS fetch asked the worker to bake into
+                // `geometry.ruleColors` — `layer` is this call's own local,
+                // never reassigned, so every cell from this commit is
+                // stamped identically even if the user edits a rule while
+                // it's still in flight (see CellEntry's doc comment).
+                builtWithRulesEnabled: layer.rulesEnabled,
+                builtWithRules: layer.rules,
               },
               stats: cellStatsFromGeometry(msg.geometry),
             });
@@ -487,7 +494,7 @@ export async function commitStreamingLayer(
     for (const key of plan.toFetch) {
       if (!fetched.has(key)) {
         fetched.set(key, {
-          entry: emptyCellEntry(),
+          entry: emptyCellEntry(layer.rulesEnabled, layer.rules),
           stats: { triangles: 0, bytes: 0 },
         });
       }
