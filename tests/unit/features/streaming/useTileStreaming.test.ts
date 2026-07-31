@@ -53,12 +53,14 @@ const {
   lodToWireLabel,
   resolveLod,
   lodSelectionEquals,
+  ladderEquals,
   cellStatsFromGeometry,
   groundYFromBBox,
   planCommit,
   commitNormal,
   commitSwap,
   createSettleController,
+  commitStreamingLayer,
   useTileStreaming,
 } = await import("../../../../src/features/streaming/useTileStreaming");
 
@@ -145,6 +147,24 @@ describe("lodSelectionEquals", () => {
     expect(
       lodSelectionEquals({ kind: "all" }, { kind: "exact", lod: "1" }),
     ).toBe(false);
+  });
+});
+
+describe("ladderEquals", () => {
+  it("true for two empty ladders", () => {
+    expect(ladderEquals([], [])).toBe(true);
+  });
+  it("true for identical content even across two DIFFERENT array instances", () => {
+    expect(ladderEquals(["0", "1.2"], ["0", "1.2"])).toBe(true);
+  });
+  it("false when lengths differ", () => {
+    expect(ladderEquals(["0"], ["0", "1.2"])).toBe(false);
+  });
+  it("false when content differs at the same length", () => {
+    expect(ladderEquals(["0", "1.2"], ["0", "2.2"])).toBe(false);
+  });
+  it("false when order differs — position matters (levelPolicy.ts indexes into the ladder by position)", () => {
+    expect(ladderEquals(["0", "1.2"], ["1.2", "0"])).toBe(false);
   });
 });
 
@@ -447,6 +467,26 @@ describe("commitSwap", () => {
     expect(cache.has("old/B")).toBe(false);
     expect(cache.has("new/A")).toBe(true);
   });
+
+  it("also enforces the resident budget on the NEW cover — a swap (including the very first commit, since prevLevel=null makes it one) must not bypass evictToBudget (B4, 2026-07-28 final review)", () => {
+    const cache = new CellCache<CellEntry>({
+      maxTriangles: 100,
+      maxBytes: Infinity,
+    });
+    // The new cover alone (60+60=120 triangles) already exceeds the budget
+    // (100) — no OLD cells are involved at all, so `retain()` alone (which
+    // only drops cells outside `newCover`) would have nothing to drop and
+    // silently accept a viewport 20% over budget.
+    const fetched = new Map([
+      ["new/A", { entry: fakeEntry("A"), stats: { triangles: 60, bytes: 0 } }],
+      ["new/B", { entry: fakeEntry("B"), stats: { triangles: 60, bytes: 0 } }],
+    ]);
+    const evicted = commitSwap(cache, ["new/A", "new/B"], fetched);
+    expect(cache.totals().triangles).toBeLessThanOrEqual(100);
+    expect(evicted.length).toBeGreaterThan(0);
+    // Exactly one of the two must have survived (60 fits, 120 doesn't).
+    expect(cache.has("new/A") !== cache.has("new/B")).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------
@@ -536,10 +576,23 @@ describe("createSettleController", () => {
 // has no existing pattern for.
 // ---------------------------------------------------------------------
 
-function makeFakeClient() {
+/**
+ * @param emptyKeys Requested cell keys the fake should NOT return a 'cell'
+ *   message for — accurately modelling the real worker's `fetch` handler
+ *   (fcb.worker.ts), which only ever emits 'cell' for a POPULATED bucket. A
+ *   prior version of this fake unconditionally sent one 'cell' message per
+ *   requested key regardless of `emptyKeys`, which is what let commits
+ *   built on it "agree with the bug" this fixture exists to catch (B5,
+ *   2026-07-28 final review): a fake that never produces a genuinely-empty
+ *   requested cell can never exercise the "sparse viewport" code path at
+ *   all. Defaults to empty so every EXISTING test's "every requested cell
+ *   gets data" assumption is unchanged.
+ */
+function makeFakeClient(emptyKeys: ReadonlySet<string> = new Set()) {
   let epoch = 0;
   const sendCalls: Array<Record<string, unknown>> = [];
   const sendStreamingCalls: Array<Record<string, unknown>> = [];
+  const notifyCalls: Array<Record<string, unknown>> = [];
   const client = {
     newEpoch: vi.fn(() => ++epoch),
     isCurrent: vi.fn((e: number) => e === epoch),
@@ -550,15 +603,20 @@ function makeFakeClient() {
       }
       return { type: "done", id: 0 } satisfies WorkerResponse;
     }),
+    notify: vi.fn((msg: Record<string, unknown>) => {
+      notifyCalls.push(msg);
+    }),
     sendStreaming: vi.fn(
       async (
         msg: Record<string, unknown>,
         onMessage: (r: WorkerResponse) => void,
       ) => {
         sendStreamingCalls.push(msg);
-        // Returns exactly the requested cells, mirroring the worker's real
-        // "cell per requested key, then done" streaming contract.
+        // One 'cell' message per requested key EXCEPT those in `emptyKeys` —
+        // mirroring the worker's real "only populated buckets get a
+        // message" contract, not "every requested cell gets a response."
         for (const key of msg.cells as string[]) {
+          if (emptyKeys.has(key)) continue;
           onMessage({
             type: "cell",
             id: 0,
@@ -578,6 +636,7 @@ function makeFakeClient() {
     client: client as unknown as WorkerClient,
     sendCalls,
     sendStreamingCalls,
+    notifyCalls,
     getEpoch: () => epoch,
   };
 }
@@ -658,7 +717,7 @@ describe("useTileStreaming", () => {
       ),
     }));
 
-    const { client, sendCalls, sendStreamingCalls, getEpoch } =
+    const { client, sendCalls, sendStreamingCalls, notifyCalls, getEpoch } =
       makeFakeClient();
 
     useStreamStore.getState().register(layerId, {
@@ -683,8 +742,9 @@ describe("useTileStreaming", () => {
     fakeControls.fire("change");
     fakeControls.fire("change"); // simulate damping-decay repeats
 
-    // First-change abort must be synchronous, not waiting for settle.
-    expect(sendCalls.some((m) => m.type === "cancel")).toBe(true);
+    // First-change abort must be synchronous, not waiting for settle. cancel
+    // is a fire-and-forget notify(), not a send() — see workerClient.ts.
+    expect(notifyCalls.some((m) => m.type === "cancel")).toBe(true);
     const epochAfterFirstChange = getEpoch();
     expect(epochAfterFirstChange).toBeGreaterThan(0);
 
@@ -842,6 +902,7 @@ describe("useTileStreaming", () => {
       isCurrent: vi.fn((e: number) => e === epoch),
       send: vi.fn(() => Promise.reject(new Error("WorkerClient terminated"))),
       sendStreaming: vi.fn(async () => {}),
+      notify: vi.fn(),
       terminate: vi.fn(),
     };
     useStreamStore.getState().register(layerId, {
@@ -906,6 +967,7 @@ describe("useTileStreaming", () => {
           }),
       ),
       sendStreaming: vi.fn(async () => {}),
+      notify: vi.fn(),
       terminate: vi.fn(),
     };
     useStreamStore.getState().register(layerId, {
@@ -1009,6 +1071,7 @@ describe("useTileStreaming", () => {
         } satisfies WorkerResponse);
       }),
       sendStreaming: vi.fn(async () => {}),
+      notify: vi.fn(),
       terminate: vi.fn(),
     };
 
@@ -1100,6 +1163,7 @@ describe("useTileStreaming", () => {
       // Never resolves and never calls onMessage — simulates a fetch that
       // is still in flight when LEVEL_SWAP_TIMEOUT_MS elapses.
       sendStreaming: vi.fn(() => new Promise<void>(() => {})),
+      notify: vi.fn(),
       terminate: vi.fn(),
     };
 
@@ -1130,5 +1194,325 @@ describe("useTileStreaming", () => {
     expect(stream.level).toBe(999);
     expect(stream.cache.has("999/0/0")).toBe(true);
     expect(stream.status).toBe("error");
+  }, 10000);
+
+  it("on a level-swap timeout, evicts from the WORKER any cells that arrived before the deadline — this commit never adopts them either (B3, 2026-07-28 final review)", async () => {
+    const layerId = useLayerStore.getState().addLayer({
+      name: "s.fcb",
+      model: {
+        sourceEncoding: "flatcitybuf",
+        metadata: {},
+        bbox: null,
+        objects: {},
+        vertexCount: 0,
+      },
+      modelRef: { type: "url", url: "https://x/s.fcb" },
+      visible: true,
+      rules: [],
+      rulesEnabled: true,
+    });
+    useLayerStore.setState((s) => ({
+      layers: s.layers.map((l) =>
+        l.id === layerId ? { ...l, isStreaming: true } : l,
+      ),
+    }));
+
+    const cache = new CellCache<CellEntry>({
+      maxTriangles: Infinity,
+      maxBytes: Infinity,
+    });
+    cache.set("999/0/0", fakeEntry("old-level-cell"), {
+      triangles: 1,
+      bytes: 1,
+    });
+
+    let epoch = 0;
+    const notifyCalls: Array<Record<string, unknown>> = [];
+    const client = {
+      newEpoch: vi.fn(() => ++epoch),
+      isCurrent: vi.fn((e: number) => e === epoch),
+      send: vi.fn(async (msg: Record<string, unknown>) => {
+        if (msg.type === "probe") {
+          return { type: "probed", id: 0, count: 5 } satisfies WorkerResponse;
+        }
+        return { type: "done", id: 0 } satisfies WorkerResponse;
+      }),
+      notify: vi.fn((msg: Record<string, unknown>) => {
+        notifyCalls.push(msg);
+      }),
+      // Delivers ONE cell (arrives before the deadline), then hangs forever
+      // — never posts 'done'. `fetched` on the main thread ends up with
+      // exactly this one key when LEVEL_SWAP_TIMEOUT_MS fires.
+      sendStreaming: vi.fn(
+        (
+          msg: Record<string, unknown>,
+          onMessage: (r: WorkerResponse) => void,
+        ) => {
+          const key = (msg.cells as string[])[0]!;
+          onMessage({
+            type: "cell",
+            id: 0,
+            key,
+            geometry: geom(1),
+            objects: [],
+            surfaceAttrKeys: [],
+            lodsSeen: [],
+          });
+          return new Promise<void>(() => {});
+        },
+      ),
+      terminate: vi.fn(),
+    };
+
+    useStreamStore.getState().register(layerId, {
+      client: client as unknown as WorkerClient,
+      grid: INTEGRATION_GRID,
+      header: HEADER,
+      cache,
+      level: 999,
+      ladder: [],
+      ladderVersion: 0,
+      status: "idle",
+      message: null,
+      lastCommit: null,
+      version: 0,
+    });
+
+    renderHook(() => useTileStreaming({ current: [0, 0, 0] }, 0));
+    fakeControls.fire("change");
+
+    await new Promise((r) =>
+      setTimeout(r, SETTLE_MS + LEVEL_SWAP_TIMEOUT_MS + 300),
+    );
+
+    // The one cell that DID arrive must be evicted from the worker's own
+    // cache too — this commit discarded it (never called commitSwap), so
+    // leaving it worker-only would make it unreachable by any future
+    // main-thread evict.
+    expect(
+      notifyCalls.some(
+        (m) =>
+          m.type === "evict" &&
+          Array.isArray(m.cells) &&
+          (m.cells as string[]).length === 1,
+      ),
+    ).toBe(true);
+  }, 10000);
+
+  it("a sparse cell the worker genuinely finds nothing in becomes RESIDENT and stops bypassing hysteresis on the next settle (B5, 2026-07-28 final review)", async () => {
+    const layerId = useLayerStore.getState().addLayer({
+      name: "s.fcb",
+      model: {
+        sourceEncoding: "flatcitybuf",
+        metadata: {},
+        bbox: null,
+        objects: {},
+        vertexCount: 0,
+      },
+      modelRef: { type: "url", url: "https://x/s.fcb" },
+      visible: true,
+      rules: [],
+      rulesEnabled: true,
+    });
+    useLayerStore.setState((s) => ({
+      layers: s.layers.map((l) =>
+        l.id === layerId ? { ...l, isStreaming: true } : l,
+      ),
+    }));
+
+    // Phase 1: learn the real desired cell keys for this fixed camera/grid,
+    // using the default (every requested cell gets data) fake.
+    const probe = makeFakeClient();
+    useStreamStore.getState().register(layerId, {
+      client: probe.client,
+      grid: INTEGRATION_GRID,
+      header: HEADER,
+      cache: new CellCache<CellEntry>({
+        maxTriangles: Infinity,
+        maxBytes: Infinity,
+      }),
+      level: null,
+      ladder: [],
+      ladderVersion: 0,
+      status: "idle",
+      message: null,
+      lastCommit: null,
+      version: 0,
+    });
+    await commitStreamingLayer(layerId, fakeCamera, [0, 0, 0], 0);
+    const desired = probe.sendStreamingCalls[0]!.cells as string[];
+    expect(desired.length).toBeGreaterThan(0);
+    const sparseKey = desired[0]!;
+
+    // Phase 2: fresh stream state, IDENTICAL camera/viewport — but this time
+    // the fake genuinely finds nothing for `sparseKey`, mirroring the real
+    // worker's "only populated buckets get a 'cell' message" contract
+    // (fcb.worker.ts). Before this fix, `sparseKey` stayed "missing"
+    // forever: `planCommit`'s hysteresis gate is bypassed unconditionally
+    // whenever `hasHoles` is true, so every settle re-ran full
+    // selection/decode for the whole viewport.
+    const fake = makeFakeClient(new Set([sparseKey]));
+    useStreamStore.getState().register(layerId, {
+      client: fake.client,
+      grid: INTEGRATION_GRID,
+      header: HEADER,
+      cache: new CellCache<CellEntry>({
+        maxTriangles: Infinity,
+        maxBytes: Infinity,
+      }),
+      level: null,
+      ladder: [],
+      ladderVersion: 0,
+      status: "idle",
+      message: null,
+      lastCommit: null,
+      version: 0,
+    });
+
+    await commitStreamingLayer(layerId, fakeCamera, [0, 0, 0], 0);
+    let stream = useStreamStore.getState().get(layerId)!;
+    // Resident even though the worker never sent a 'cell' message for it.
+    expect(stream.cache.has(sparseKey)).toBe(true);
+    expect(fake.sendStreamingCalls).toHaveLength(1);
+
+    // Settle again with the UNCHANGED viewport: a fully-covered, unmoved
+    // view must be skipped by hysteresis, not re-fetched.
+    await commitStreamingLayer(layerId, fakeCamera, [0, 0, 0], 0);
+    expect(fake.sendStreamingCalls).toHaveLength(1); // still just the one
+    stream = useStreamStore.getState().get(layerId)!;
+    expect(stream.status).toBe("idle");
+  }, 10000);
+
+  it("folds each commit's observed LoD labels into the persisted ladder — the worker previously always reported lodsSeen:[], so auto mode never had anything to choose from (B1, 2026-07-28 final review)", async () => {
+    const layerId = useLayerStore.getState().addLayer({
+      name: "s.fcb",
+      model: {
+        sourceEncoding: "flatcitybuf",
+        metadata: {},
+        bbox: null,
+        objects: {},
+        vertexCount: 0,
+      },
+      modelRef: { type: "url", url: "https://x/s.fcb" },
+      visible: true,
+      rules: [],
+      rulesEnabled: true,
+    });
+    useLayerStore.setState((s) => ({
+      layers: s.layers.map((l) =>
+        l.id === layerId ? { ...l, isStreaming: true } : l,
+      ),
+    }));
+
+    let epoch = 0;
+    const client = {
+      newEpoch: vi.fn(() => ++epoch),
+      isCurrent: vi.fn((e: number) => e === epoch),
+      send: vi.fn(async (msg: Record<string, unknown>) => {
+        if (msg.type === "probe") {
+          return { type: "probed", id: 0, count: 5 } satisfies WorkerResponse;
+        }
+        return { type: "done", id: 0 } satisfies WorkerResponse;
+      }),
+      notify: vi.fn(),
+      sendStreaming: vi.fn(
+        async (
+          msg: Record<string, unknown>,
+          onMessage: (r: WorkerResponse) => void,
+        ) => {
+          const cells = msg.cells as string[];
+          const lodsPerCell = [["1.3", "2.2"], ["1.3"]];
+          cells.forEach((key, i) => {
+            onMessage({
+              type: "cell",
+              id: 0,
+              key,
+              geometry: geom(1),
+              objects: [],
+              surfaceAttrKeys: [],
+              lodsSeen: lodsPerCell[i % lodsPerCell.length]!,
+            });
+          });
+          onMessage({ type: "done", id: 0 });
+        },
+      ),
+      terminate: vi.fn(),
+    };
+
+    useStreamStore.getState().register(layerId, {
+      client: client as unknown as WorkerClient,
+      grid: INTEGRATION_GRID,
+      header: HEADER,
+      cache: new CellCache<CellEntry>({
+        maxTriangles: Infinity,
+        maxBytes: Infinity,
+      }),
+      level: null,
+      ladder: [],
+      ladderVersion: 0,
+      status: "idle",
+      message: null,
+      lastCommit: null,
+      version: 0,
+    });
+
+    await commitStreamingLayer(layerId, fakeCamera, [0, 0, 0], 0);
+
+    const stream = useStreamStore.getState().get(layerId)!;
+    expect([...stream.ladder].sort()).toEqual(["1.3", "2.2"]);
+    expect(stream.ladderVersion).toBe(1);
+  }, 10000);
+
+  it("a manual LoD selection change triggers a commit on its own, with no camera movement at all (B1, 2026-07-28 final review)", async () => {
+    const { layerId, sendStreamingCalls } =
+      registerStreamingLayerForOriginTest();
+    useLayerStore.getState().setLodMode(layerId, "manual");
+
+    renderHook(() => useTileStreaming({ current: [0, 0, 0] }, 0));
+    fakeControls.fire("change");
+    await new Promise((r) => setTimeout(r, SETTLE_MS + 200));
+    expect(sendStreamingCalls).toHaveLength(1);
+    expect(sendStreamingCalls[0]!.lod).toBeNull(); // manual, selectedLod=null -> "all"
+
+    // No camera movement from here on — only picking an explicit LoD label
+    // via what LodSelector.tsx calls on selection (setLayerLod).
+    useLayerStore.getState().setLayerLod(layerId, "2");
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(sendStreamingCalls).toHaveLength(2);
+    expect(sendStreamingCalls[1]!.lod).toBe("2");
+  }, 10000);
+
+  it("does NOT force a redundant commit for a layer whose OWN lodMode/selectedLod didn't change, even though a DIFFERENT streaming layer appearing changes the shared (concatenated) signature string", async () => {
+    const { sendCalls: sendCallsA, sendStreamingCalls: sendStreamingCallsA } =
+      registerStreamingLayerForOriginTest();
+
+    renderHook(() => useTileStreaming({ current: [0, 0, 0] }, 0));
+    fakeControls.fire("change");
+    await new Promise((r) => setTimeout(r, SETTLE_MS + 200));
+    expect(sendStreamingCallsA).toHaveLength(1);
+    // Counting `probe` sends (not just `sendStreamingCalls`) rather than
+    // relying only on the fetch count: a wasted `commitStreamingLayer`
+    // invocation always reaches `probe` before `planCommit` gets a chance
+    // to skip it via hysteresis, so a redundant call is observable here
+    // even on the rare occasion its OWN fetch would've been discarded by
+    // the epoch guard anyway.
+    const probeCountAfterSettle = sendCallsA.filter(
+      (m) => m.type === "probe",
+    ).length;
+
+    // A SECOND streaming layer appears — changes the shared, concatenated
+    // `lodSignature` string (built across EVERY streaming layer), even
+    // though layer A's OWN `mode:selectedLod` portion is unchanged. Without
+    // the per-layer `prev === key` check, this would force a redundant
+    // commit for A too, just because ANOTHER layer's signature slot
+    // appeared next to it in the string.
+    registerStreamingLayerForOriginTest();
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(sendStreamingCallsA).toHaveLength(1); // still just the one
+    expect(sendCallsA.filter((m) => m.type === "probe")).toHaveLength(
+      probeCountAfterSettle,
+    ); // no extra probe for A either
   }, 10000);
 });

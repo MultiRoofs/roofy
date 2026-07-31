@@ -28,6 +28,7 @@ import {
   computeTriangleCount,
   disposeLayerState,
   reapplyHighlight,
+  recolorStreamingCells,
   resolveFromEvent,
   resolveMeshOwner,
   sceneToCrsImpl,
@@ -56,12 +57,16 @@ import {
 } from "../../../src/features/streaming/tileGrid";
 import { sourceToScene } from "../../../src/features/streaming/sceneTransform";
 import { useStreamStore } from "../../../src/features/streaming/streamStore";
-import type { CellEntry } from "../../../src/features/streaming/streamStore";
+import type {
+  CellEntry,
+  StreamState,
+} from "../../../src/features/streaming/streamStore";
 import { CellCache } from "../../../src/features/streaming/cellCache";
 import { __resetMemo } from "../../../src/features/streaming/residentModel";
 import type {
   CellGeometry,
   ResidentObjectRecord,
+  WorkerResponse,
 } from "../../../src/features/streaming/workerProtocol";
 import type { WorkerClient } from "../../../src/features/streaming/workerClient";
 
@@ -118,6 +123,7 @@ function makeCellState(
   objectKeys: string[],
   objectIndices: number[],
   surfaceIndices: number[],
+  sourceEntry: CellEntry = makeCellEntry(),
 ): CellSceneState {
   const { mesh, pickingIndex, baseColors } = makeMesh(
     layerId,
@@ -126,7 +132,7 @@ function makeCellState(
     surfaceIndices,
     cellKey,
   );
-  return { mesh, pickingIndex, baseColors, ruleColors: null };
+  return { mesh, pickingIndex, baseColors, ruleColors: null, sourceEntry };
 }
 
 function makeLayerState(
@@ -585,6 +591,226 @@ describe("updateRuleColors", () => {
     updateRuleColors(map, [layer]);
 
     expect(cell.ruleColors).toBe(sentinel); // exact same reference — untouched
+  });
+});
+
+// ---------------------------------------------------------------------------
+// recolorStreamingCells — the streaming counterpart `updateRuleColors`
+// deliberately can't be (see its own doc comment): a real worker `recolor`
+// round trip, wired for the first time by this fix (B2, 2026-07-28 final
+// review). Task 11 implemented and mutation-tested the worker side of this
+// months ago; nothing ever sent the request until now.
+// ---------------------------------------------------------------------------
+
+function fakeStreamState(
+  sendStreaming: WorkerClient["sendStreaming"],
+): StreamState {
+  return {
+    client: { sendStreaming } as unknown as WorkerClient,
+    grid: { originX: 0, originY: 0, rootCell: 100, maxLevel: 1 },
+    header: {
+      version: "1.0",
+      featuresCount: 1,
+      extent: [0, 0, 0, 100, 100, 10],
+      referenceSystem: undefined,
+      epsg: null,
+    },
+    cache: new CellCache<CellEntry>({
+      maxTriangles: Infinity,
+      maxBytes: Infinity,
+    }),
+    level: null,
+    ladder: [],
+    ladderVersion: 0,
+    status: "idle",
+    message: null,
+    lastCommit: null,
+    version: 0,
+  };
+}
+
+describe("recolorStreamingCells", () => {
+  afterEach(() => {
+    useStreamStore.setState({ streams: {} });
+  });
+
+  it("sends a recolor request for every resident cell of a streaming layer, carrying its CURRENT rules, and applies the returned colors onto CellSceneState", async () => {
+    const layer = makeLayer({
+      id: "L",
+      model: makeModel({}),
+      isStreaming: true,
+      rulesEnabled: true,
+      rules: [makeRule({ conditions: [] })],
+    });
+    const state = makeStreamingLayerState();
+    const cellA = makeCellState("L", "0/0/0", ["a"], [0], [0]);
+    const cellB = makeCellState("L", "0/1/0", ["b"], [0], [0]);
+    state.cells.set("0/0/0", cellA);
+    state.cells.set("0/1/0", cellB);
+    const map = new Map([["L", state]]);
+
+    const sendStreaming = vi.fn(
+      async (
+        msg: Record<string, unknown>,
+        onMessage: (r: WorkerResponse) => void,
+      ) => {
+        for (const key of msg.cells as string[]) {
+          onMessage({
+            type: "recolored",
+            id: 0,
+            key,
+            ruleColors: new Float32Array([1, 2, 3]),
+          });
+        }
+        onMessage({ type: "done", id: 0 });
+      },
+    );
+    useStreamStore.getState().register("L", fakeStreamState(sendStreaming));
+
+    await recolorStreamingCells(map, [layer]);
+
+    expect(sendStreaming).toHaveBeenCalledTimes(1);
+    const sentMsg = sendStreaming.mock.calls[0]![0] as Record<string, unknown>;
+    expect(sentMsg.type).toBe("recolor");
+    expect([...(sentMsg.cells as string[])].sort()).toEqual(["0/0/0", "0/1/0"]);
+    expect(sentMsg.rules).toBe(layer.rules);
+    expect(sentMsg.rulesEnabled).toBe(true);
+
+    expect(cellA.ruleColors).toEqual(new Float32Array([1, 2, 3]));
+    expect(cellB.ruleColors).toEqual(new Float32Array([1, 2, 3]));
+  });
+
+  it("skips a streaming layer with no resident cells — no worker round trip at all", async () => {
+    const layer = makeLayer({
+      id: "L",
+      model: makeModel({}),
+      isStreaming: true,
+    });
+    const state = makeStreamingLayerState();
+    const map = new Map([["L", state]]);
+    const sendStreaming = vi.fn();
+    useStreamStore.getState().register("L", fakeStreamState(sendStreaming));
+
+    await recolorStreamingCells(map, [layer]);
+    expect(sendStreaming).not.toHaveBeenCalled();
+  });
+
+  it("skips a non-streaming layer entirely — never even reads its stream state", async () => {
+    const layer = makeLayer({
+      id: "L",
+      model: makeModel({}),
+      isStreaming: false,
+    });
+    const state = makeLayerState("L", ["a"], [0, 0, 0], [0, 0, 0]);
+    const map = new Map([["L", state]]);
+    // No stream registered for "L" at all — if the `isStreaming` filter were
+    // ever removed, this would still resolve (no cells to recolor via the
+    // static layer's `state.cells`, which is always empty), so the dedicated
+    // proof is the `sendStreaming` spy in the OTHER tests never firing for a
+    // non-streaming layer even when one WAS registered — covered together
+    // with the "no resident cells" case above by construction (there is no
+    // `state.cells` entry for a static layer's LayerSceneState either).
+    await expect(recolorStreamingCells(map, [layer])).resolves.toBeUndefined();
+  });
+
+  it("skips a streaming layer with no registered stream, rather than throwing", async () => {
+    const layer = makeLayer({
+      id: "L",
+      model: makeModel({}),
+      isStreaming: true,
+    });
+    const state = makeStreamingLayerState();
+    const cell = makeCellState("L", "0/0/0", ["a"], [0], [0]);
+    state.cells.set("0/0/0", cell);
+    const map = new Map([["L", state]]);
+    // Deliberately NOT registered in useStreamStore.
+    await expect(recolorStreamingCells(map, [layer])).resolves.toBeUndefined();
+    expect(cell.ruleColors).toBeNull();
+  });
+
+  it("does not throw when the worker rejects mid-request (e.g. terminate() racing a layer removal)", async () => {
+    const layer = makeLayer({
+      id: "L",
+      model: makeModel({}),
+      isStreaming: true,
+      rulesEnabled: true,
+      rules: [makeRule({ conditions: [] })],
+    });
+    const state = makeStreamingLayerState();
+    const cell = makeCellState("L", "0/0/0", ["a"], [0], [0]);
+    state.cells.set("0/0/0", cell);
+    const map = new Map([["L", state]]);
+
+    const sendStreaming = vi.fn(() =>
+      Promise.reject(new Error("WorkerClient terminated")),
+    );
+    useStreamStore.getState().register("L", fakeStreamState(sendStreaming));
+
+    await expect(recolorStreamingCells(map, [layer])).resolves.toBeUndefined();
+    expect(cell.ruleColors).toBeNull(); // untouched — the request never completed
+  });
+
+  it("discards a 'recolored' response for a cell that was REBUILT (same key, new CellSceneState) since the request was sent, instead of misapplying a wrong-length array onto it (code-review finding)", async () => {
+    const layer = makeLayer({
+      id: "L",
+      model: makeModel({}),
+      isStreaming: true,
+      rulesEnabled: true,
+      rules: [makeRule({ conditions: [] })],
+    });
+    const state = makeStreamingLayerState();
+    const oldCell = makeCellState("L", "0/0/0", ["a"], [0], [0]);
+    const oldSentinel = new Float32Array([9, 9, 9]);
+    oldCell.ruleColors = oldSentinel;
+    state.cells.set("0/0/0", oldCell);
+    const map = new Map([["L", state]]);
+
+    let deliver!: (r: WorkerResponse) => void;
+    let resolveSend!: () => void;
+    const sendStreaming = vi.fn(
+      (
+        _msg: Record<string, unknown>,
+        onMessage: (r: WorkerResponse) => void,
+      ) => {
+        // Mirrors WorkerClient.sendStreaming's own contract: resolve only
+        // once a 'done'/'error' message has been delivered — lets the test
+        // control exactly when the response "arrives", well after a swap
+        // has already rebuilt the cell below.
+        deliver = (r) => {
+          onMessage(r);
+          if (r.type === "done" || r.type === "error") resolveSend();
+        };
+        return new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        });
+      },
+    );
+    useStreamStore.getState().register("L", fakeStreamState(sendStreaming));
+
+    const pending = recolorStreamingCells(map, [layer]);
+    // A level/LoD swap rebuilds the SAME key with a brand-new
+    // CellSceneState — new mesh, new object identity — exactly what
+    // `syncStreamingCells` does on a same-key cache-entry change, entirely
+    // independent of this in-flight recolor request.
+    const newCell = makeCellState("L", "0/0/0", ["a", "b"], [0, 0], [0, 0]);
+    state.cells.set("0/0/0", newCell);
+
+    // Now the STALE response for the OLD cell's geometry finally arrives.
+    deliver({
+      type: "recolored",
+      id: 0,
+      key: "0/0/0",
+      ruleColors: new Float32Array([1, 2, 3, 4, 5, 6]), // sized for the OLD cell
+    });
+    deliver({ type: "done", id: 0 });
+    await pending;
+
+    // The NEW cell must be untouched by the stale response...
+    expect(newCell.ruleColors).toBeNull();
+    // ...and the OLD (now-detached) cell must be untouched too — proving
+    // this was actually discarded via identity, not accidentally applied to
+    // whichever object happens to still be reachable.
+    expect(oldCell.ruleColors).toBe(oldSentinel);
   });
 });
 
@@ -1298,6 +1524,104 @@ describe("syncStreamingCells", () => {
     expect(cellMesh.visible).toBe(false);
     expect(cellMesh.castShadow).toBe(true);
     expect(cellMesh.receiveShadow).toBe(true);
+  });
+
+  it("rebuilds a cell mesh whose CACHE ENTRY changed under an UNCHANGED key — e.g. a level/LoD swap re-fetching a key that was already resident (B1, 2026-07-28 final review; permanent regression test for the reviewer's temporary same-key-replacement probe, which failed against the old shape)", () => {
+    const group = new Group();
+    const layer = makeLayer({
+      id: "L",
+      model: makeModel({}),
+      isStreaming: true,
+    });
+    const state = makeStreamingLayerState();
+    const map = new Map([["L", state]]);
+
+    const cache = new CellCache<CellEntry>({
+      maxTriangles: Infinity,
+      maxBytes: Infinity,
+    });
+    const firstEntry = makeCellEntry({
+      geometry: makeCellGeometry({ objectKeys: ["obj-a"] }),
+    });
+    cache.set("0/0/0", firstEntry, { triangles: 1, bytes: 1 });
+    registerStream("L", cache);
+
+    syncStreamingCells(group, map, [layer], {
+      materialMode: "standard",
+      doubleSided: false,
+      shadows: false,
+    });
+    const firstMesh = state.cells.get("0/0/0")!.mesh;
+    const firstDisposeSpy = vi.spyOn(firstMesh.geometry, "dispose");
+    expect(group.children).toContain(firstMesh);
+    expect(state.cells.get("0/0/0")!.pickingIndex.objectKeys).toEqual([
+      "obj-a",
+    ]);
+
+    // The SAME key gets a DIFFERENT cache entry (a re-fetch, not an evict +
+    // re-add) — commitNormal/commitSwap (useTileStreaming.ts) both do
+    // exactly this via `cache.set()`, which always installs a fresh object.
+    const secondEntry = makeCellEntry({
+      geometry: makeCellGeometry({ objectKeys: ["obj-b"] }),
+    });
+    cache.set("0/0/0", secondEntry, { triangles: 1, bytes: 1 });
+
+    syncStreamingCells(group, map, [layer], {
+      materialMode: "standard",
+      doubleSided: false,
+      shadows: false,
+    });
+
+    const secondMesh = state.cells.get("0/0/0")!.mesh;
+    // The OLD mesh must be gone — not left behind under the same key, which
+    // is exactly what the reviewer's temporary test caught: "the old mesh
+    // and picking index remained."
+    expect(secondMesh).not.toBe(firstMesh);
+    expect(group.children).not.toContain(firstMesh);
+    expect(group.children).toContain(secondMesh);
+    expect(firstDisposeSpy).toHaveBeenCalledTimes(1);
+    expect(state.cells.size).toBe(1);
+    expect(state.cells.get("0/0/0")!.pickingIndex.objectKeys).toEqual([
+      "obj-b",
+    ]);
+    expect(state.cells.get("0/0/0")!.sourceEntry).toBe(secondEntry);
+  });
+
+  it("does NOT rebuild a cell whose cache entry is unchanged (same object reference) — no dispose, no new mesh, across repeated syncs", () => {
+    const group = new Group();
+    const layer = makeLayer({
+      id: "L",
+      model: makeModel({}),
+      isStreaming: true,
+    });
+    const state = makeStreamingLayerState();
+    const map = new Map([["L", state]]);
+
+    const cache = new CellCache<CellEntry>({
+      maxTriangles: Infinity,
+      maxBytes: Infinity,
+    });
+    const entry = makeCellEntry();
+    cache.set("0/0/0", entry, { triangles: 1, bytes: 1 });
+    registerStream("L", cache);
+
+    syncStreamingCells(group, map, [layer], {
+      materialMode: "standard",
+      doubleSided: false,
+      shadows: false,
+    });
+    const mesh = state.cells.get("0/0/0")!.mesh;
+    const disposeSpy = vi.spyOn(mesh.geometry, "dispose");
+
+    // Re-sync with NOTHING changed in the cache (same entry, same key).
+    syncStreamingCells(group, map, [layer], {
+      materialMode: "standard",
+      doubleSided: false,
+      shadows: false,
+    });
+
+    expect(state.cells.get("0/0/0")!.mesh).toBe(mesh); // same mesh, not rebuilt
+    expect(disposeSpy).not.toHaveBeenCalled();
   });
 });
 

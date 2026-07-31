@@ -96,6 +96,17 @@ export interface CellSceneState {
   pickingIndex: PickingIndex;
   baseColors: Float32Array;
   ruleColors: Float32Array | null;
+  /** Reference identity of the `CellEntry` this mesh was built from — how
+   *  `syncStreamingCells` tells "this key is still resident, nothing to do"
+   *  apart from "this key is resident but its CONTENTS changed" (a level/LoD
+   *  swap or a settle-driven refetch landing new data under the SAME key).
+   *  `CellCache.set()` always installs a freshly-built `CellEntry` object
+   *  (never mutates one in place), so a `!==` comparison against the cache's
+   *  current value for this key is a cheap, exact "did this change" check —
+   *  see the doc comment on `syncStreamingCells` for why a plain
+   *  `state.cells.has(key)` check used to miss this entirely (B1, 2026-07-28
+   *  final review). */
+  sourceEntry: CellEntry;
 }
 
 /**
@@ -704,12 +715,20 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
       }
     }, [cityMaterialMode, cityDoubleSided, cityShadowsEnabled]);
 
-    // Rule colors — applied to the layer mesh (static layers) and to every
-    // resident cell mesh (streaming layers), each with its own geometry/
-    // pickingIndex/baseColors.
+    // Rule colors — applied to the layer mesh (static layers) synchronously
+    // via `updateRuleColors`, and to every resident streaming cell mesh via
+    // an async worker `recolor` round trip (`recolorStreamingCells` — see
+    // its doc comment for why streaming needs a separate path).
+    // `reapplyHighlight` runs once immediately (paints the static-layer
+    // result right away) and again once the recolor round trip resolves (so
+    // the streaming result reaches the GPU "color" attribute too, once it's
+    // actually available).
     useEffect(() => {
       updateRuleColors(layerSceneMapRef.current, layers);
       reapplyHighlight(layerSceneMapRef.current, layers);
+      void recolorStreamingCells(layerSceneMapRef.current, layers).then(() => {
+        reapplyHighlight(layerSceneMapRef.current, layers);
+      });
     }, [layers]);
 
     // Highlight on selection/hover change
@@ -1261,6 +1280,7 @@ export function buildCellMesh(
     pickingIndex: { layerId, objectKeys: entry.geometry.objectKeys },
     baseColors: Float32Array.from(entry.geometry.baseColors),
     ruleColors: entry.geometry.ruleColors,
+    sourceEntry: entry,
   };
 }
 
@@ -1274,6 +1294,20 @@ export function buildCellMesh(
  * above creates that shell synchronously when the layer is added — this
  * only reads it, never creates it, keeping "who owns LayerSceneState
  * creation" a single-effect responsibility).
+ *
+ * Also rebuilds a cell whose cache ENTRY changed under an UNCHANGED key —
+ * e.g. a level/LoD swap (`commitSwap`) or an ordinary settle
+ * (`commitNormal`) re-fetching a key that was already resident, landing new
+ * geometry/objects for it without the key itself ever leaving `cacheKeys`.
+ * A plain `state.cells.has(key)` skip (this function's original shape) can
+ * never see that: the OLD mesh, OLD pickingIndex, and OLD baseColors would
+ * silently persist forever under a key the cache had already moved on from
+ * — the reviewer's temporary regression test for this failed against that
+ * shape (B1, 2026-07-28 final review). `CellSceneState.sourceEntry` (the
+ * reference identity of the `CellEntry` a mesh was last built from) is what
+ * makes "did this key's contents change" a cheap `!==`, since
+ * `CellCache.set()` always installs a fresh object rather than mutating one
+ * in place.
  */
 export function syncStreamingCells(
   cityGroup: Group,
@@ -1306,9 +1340,15 @@ export function syncStreamingCells(
     }
 
     for (const key of cacheKeys) {
-      if (state.cells.has(key)) continue;
       const entry = stream.cache.get(key);
       if (!entry) continue; // evicted between keys() and get() — next sync picks it up if re-fetched
+      const existing = state.cells.get(key);
+      if (existing && existing.sourceEntry === entry) continue; // unchanged
+      if (existing) {
+        cityGroup.remove(existing.mesh);
+        existing.mesh.geometry.dispose();
+        disposeMaterial(existing.mesh.material);
+      }
       const cellState = buildCellMesh(
         layer.id,
         key,
@@ -1380,8 +1420,9 @@ export function computeTriangleCount(
  * fetch time (`fcb.worker.ts`'s `fetch` handler bakes `msg.rules`/
  * `msg.rulesEnabled` into each cell as it's built) with a wrong, empty
  * result. Recoloring an already-resident streaming cell after a rule EDIT
- * would need a `{type:"recolor"}` round trip through the worker instead —
- * not wired by this task; see the task report.
+ * goes through `recolorStreamingCells` below instead — a `{type:"recolor"}`
+ * round trip through the worker, which has the real (non-stub) model to
+ * look objects up against.
  */
 export function updateRuleColors(
   map: Map<string, LayerSceneState>,
@@ -1418,6 +1459,91 @@ export function updateRuleColors(
         : null;
     }
   }
+}
+
+/**
+ * The streaming counterpart to `updateRuleColors` above: sends the worker a
+ * `{type:"recolor"}` request for every currently-resident cell of every
+ * streaming layer, carrying the layer's CURRENT `rules`/`rulesEnabled`, and
+ * writes each returned `ruleColors` onto that cell's `CellSceneState`.
+ *
+ * This is Task 11's `recolor` request — implemented and mutation-tested in
+ * `fcb.worker.ts` from the start, but never sent by anything until now: with
+ * `updateRuleColors` deliberately skipping streaming cells (see its own doc
+ * comment) and nothing else calling `recolor` either, editing, disabling, or
+ * enabling a rule left every resident streaming cell showing whatever
+ * colors it happened to be fetched with, indefinitely (B2, 2026-07-28 final
+ * review).
+ *
+ * Async (a real worker round trip, unlike `updateRuleColors`'s synchronous
+ * local computation) — the caller is expected to re-run `reapplyHighlight`
+ * once this resolves, the same way the streaming-cell sync effect already
+ * does after `syncStreamingCells`, so the new colors actually reach the
+ * mesh's GPU "color" attribute (this function only updates
+ * `CellSceneState.ruleColors`, never touches geometry directly).
+ */
+export async function recolorStreamingCells(
+  map: Map<string, LayerSceneState>,
+  layers: ReadonlyArray<Layer>,
+): Promise<void> {
+  await Promise.all(
+    layers
+      .filter((layer) => layer.isStreaming)
+      .map(async (layer) => {
+        const state = map.get(layer.id);
+        const stream = useStreamStore.getState().get(layer.id);
+        if (!state || !stream) return;
+        // Snapshot the CellSceneState OBJECTS this request is for, not just
+        // their keys. A level/LoD swap (`commitSwap`, useTileStreaming.ts)
+        // can replace the entry at the SAME key with a differently-sized
+        // mesh — driven purely by camera movement, entirely independent of
+        // this recolor round trip — while this request is still in flight.
+        // Applying a response computed for the OLD geometry onto the NEW
+        // one would misapply colors at best; at worst, highlightMesh.ts's
+        // `colorArray.set(ruleColors ?? baseColors)` THROWS a RangeError
+        // when the response is longer than the new mesh's own color
+        // buffer, which (called synchronously from the rule-colors and
+        // highlight effects below) would crash the whole app, not just the
+        // viewport. The snapshot lets the response handler detect "this key
+        // was rebuilt since I asked" via object identity and discard rather
+        // than misapply — the same technique `syncStreamingCells` uses
+        // (`CellSceneState.sourceEntry`) for the equivalent problem on the
+        // sync path.
+        const targets = new Map(state.cells);
+        if (targets.size === 0) return;
+        try {
+          await stream.client.sendStreaming(
+            {
+              type: "recolor",
+              cells: [...targets.keys()],
+              rules: layer.rules,
+              rulesEnabled: layer.rulesEnabled,
+            },
+            (msg) => {
+              if (msg.type !== "recolored") return;
+              const target = targets.get(msg.key);
+              const current = state.cells.get(msg.key);
+              // `target` missing means it was already gone from `targets`
+              // (can't happen — targets is exactly this cell's key set —
+              // kept as a defensive pair with the identity check below,
+              // which is the one that actually matters: `current` missing
+              // means the cell was evicted since the snapshot (the same
+              // race fcb.worker.ts's own recolor handler documents and
+              // skips rather than errors on); `current !== target` means it
+              // was REBUILT under the same key (a swap) — either way, this
+              // response is for geometry that no longer exists.
+              if (target && current === target) {
+                current.ruleColors = msg.ruleColors;
+              }
+            },
+          );
+        } catch {
+          // Layer removed / worker terminated mid-request
+          // (`WorkerClient.terminate()` rejects every in-flight
+          // send/sendStreaming call) — nothing left to recolor.
+        }
+      }),
+  );
 }
 
 /**

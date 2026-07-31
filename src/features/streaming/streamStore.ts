@@ -20,7 +20,11 @@ import { create } from "zustand";
 import type { CellCache } from "./cellCache";
 import type { WorkerClient } from "./workerClient";
 import type { Grid } from "./tileGrid";
-import type { CellGeometry, ResidentObjectRecord } from "./workerProtocol";
+import {
+  emptyCellGeometry,
+  type CellGeometry,
+  type ResidentObjectRecord,
+} from "./workerProtocol";
 import type { FcbHeaderModel } from "../../domain/citymodel/flatcitybuf/fcbSource";
 
 export type StreamStatus =
@@ -80,6 +84,11 @@ export interface StreamStoreActions {
     status: StreamStatus,
     message?: string | null,
   ) => void;
+  /** Persists the LoD ladder `useTileStreaming.ts` derives from what the
+   *  worker has actually observed across every commit so far (see
+   *  `buildLadder` in levelPolicy.ts). A no-op for an unregistered layer id,
+   *  same race-tolerance convention as `bumpVersion`/`setStatus`. */
+  setLadder: (layerId: string, ladder: ReadonlyArray<string>) => void;
 }
 
 export type StreamStore = StreamStoreState & StreamStoreActions;
@@ -127,4 +136,33 @@ export const useStreamStore = create<StreamStore>((set, getState) => ({
         },
       };
     }),
+
+  setLadder: (layerId, ladder) =>
+    set((s) => {
+      const entry = s.streams[layerId];
+      if (!entry) return s;
+      return {
+        streams: {
+          ...s.streams,
+          [layerId]: {
+            ...entry,
+            ladder,
+            ladderVersion: entry.ladderVersion + 1,
+          },
+        },
+      };
+    }),
 }));
+
+/** A `CellEntry` for a cell the worker genuinely queried and found nothing
+ *  in — see `emptyCellGeometry`'s doc comment (workerProtocol.ts) for why
+ *  this needs to exist as a real, cacheable value rather than the absence
+ *  of one. */
+export function emptyCellEntry(): CellEntry {
+  return {
+    geometry: emptyCellGeometry(),
+    objects: [],
+    surfaceAttrKeys: [],
+    lodsSeen: [],
+  };
+}

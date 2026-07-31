@@ -67,6 +67,43 @@ function roofFeature(id: string, cx: number, cy: number): FakeCityJSONFeature {
   };
 }
 
+/** Same shape as `roofFeature`, but with a caller-chosen LoD label instead
+ *  of a hardcoded "2" — for the `lodsSeen` tests below, which need more than
+ *  one distinct label landing in the same cell. */
+function roofFeatureWithLod(
+  id: string,
+  cx: number,
+  cy: number,
+  lod: string,
+): FakeCityJSONFeature {
+  const vertices: [number, number, number][] = [
+    [cx - 5, cy - 5, 0],
+    [cx + 5, cy - 5, 0],
+    [cx + 5, cy + 5, 10],
+    [cx - 5, cy + 5, 10],
+  ];
+  return {
+    toCityJSON: () => ({
+      type: "CityJSONFeature",
+      id,
+      vertices,
+      CityObjects: {
+        [id]: {
+          type: "Building",
+          geometry: [
+            {
+              type: "MultiSurface",
+              lod,
+              boundaries: [[[0, 1, 2, 3]]],
+              semantics: { surfaces: [{ type: "RoofSurface" }], values: [0] },
+            },
+          ],
+        },
+      },
+    }),
+  };
+}
+
 type FakeSelectOpts = { limit?: number };
 
 /** Builds a fresh, isolated worker module instance (own cache, own reader)
@@ -186,6 +223,94 @@ describe("fcb.worker cache — fetch populates records", () => {
     // No ring geometry on the wire in the bulk 'cell' message — only via
     // the on-demand 'surfaces' request (see the describe block below).
     expect(Object.keys(cellMsg.objects[0]!)).not.toContain("rings");
+
+    teardown();
+  });
+});
+
+describe("fcb.worker cache — lodsSeen (B1, 2026-07-28 final review)", () => {
+  it("reports the cell's real LoD label instead of the [] placeholder", async () => {
+    const { handler, posted } = await setupWorker([
+      roofFeatureWithLod("a", 100, 100, "2"),
+    ]);
+    await handler({ data: { type: "open", id: 0, url: "fake://irrelevant" } });
+    await handler({
+      data: {
+        type: "fetch",
+        id: 1,
+        bbox: [0, 0, 1000, 200],
+        level: 2,
+        cells: ["2/0/0"],
+        lod: null,
+        rules: [],
+        rulesEnabled: false,
+      },
+    });
+
+    const cellMsg = posted.find(
+      (m): m is Extract<WorkerResponse, { type: "cell" }> => m.type === "cell",
+    );
+    if (!cellMsg) throw new Error("no cell message posted");
+    expect(cellMsg.lodsSeen).toEqual(["2"]);
+
+    teardown();
+  });
+
+  it("collects every DISTINCT label across objects merged into the same cell, without duplicates", async () => {
+    const { handler, posted } = await setupWorker([
+      roofFeatureWithLod("a", 100, 100, "1.3"),
+      roofFeatureWithLod("b", 150, 150, "2.2"), // -> same cell 2/0/0 as 'a'
+      roofFeatureWithLod("c", 120, 120, "1.3"), // duplicate label, same cell
+    ]);
+    await handler({ data: { type: "open", id: 0, url: "fake://irrelevant" } });
+    await handler({
+      data: {
+        type: "fetch",
+        id: 1,
+        bbox: [0, 0, 1000, 200],
+        level: 2,
+        cells: ["2/0/0"],
+        lod: null,
+        rules: [],
+        rulesEnabled: false,
+      },
+    });
+
+    const cellMsg = posted.find(
+      (m): m is Extract<WorkerResponse, { type: "cell" }> => m.type === "cell",
+    );
+    if (!cellMsg) throw new Error("no cell message posted");
+    expect([...cellMsg.lodsSeen].sort()).toEqual(["1.3", "2.2"]);
+
+    teardown();
+  });
+
+  it("reports lodsSeen independent of msg.lod's rendering filter — a label the request didn't ask to RENDER is still OBSERVED", async () => {
+    const { handler, posted } = await setupWorker([
+      roofFeatureWithLod("a", 100, 100, "1.3"),
+      roofFeatureWithLod("b", 150, 150, "2.2"),
+    ]);
+    await handler({ data: { type: "open", id: 0, url: "fake://irrelevant" } });
+    await handler({
+      data: {
+        type: "fetch",
+        id: 1,
+        bbox: [0, 0, 1000, 200],
+        level: 2,
+        cells: ["2/0/0"],
+        lod: "1.3", // only render 1.3's geometry...
+        rules: [],
+        rulesEnabled: false,
+      },
+    });
+
+    const cellMsg = posted.find(
+      (m): m is Extract<WorkerResponse, { type: "cell" }> => m.type === "cell",
+    );
+    if (!cellMsg) throw new Error("no cell message posted");
+    // ...but BOTH labels were present in the raw model and must both be
+    // reported, so the auto-LoD ladder can still learn about "2.2" existing.
+    expect([...cellMsg.lodsSeen].sort()).toEqual(["1.3", "2.2"]);
 
     teardown();
   });
@@ -471,5 +596,76 @@ describe("fcb.worker cache — evict / close genuinely release memory", () => {
     expect(errMsg.code).toBe("not-found");
 
     teardown();
+  });
+});
+
+describe("fcb.worker cache — partial fetch failure discards its own cells (B3, 2026-07-28 final review)", () => {
+  it("rolls back a cell already added by THIS fetch when a later cell in the SAME request throws", async () => {
+    // Two features landing in two different cells; the second cell's
+    // buildCityMeshArrays call is made to throw, simulating any mid-loop
+    // failure. Before this fix, cell 'a' — already `cells.set()`'d and
+    // posted before the throw — stayed cached in the worker forever: the
+    // main thread never adopts a fetch that errors (commitStreamingLayer
+    // returns without calling commitNormal/commitSwap), so its own `evict`
+    // can never reach a cell it never knew about.
+    let callCount = 0;
+    const real = await vi.importActual<
+      typeof import("../../../../src/scene/buildCityMesh")
+    >("../../../../src/scene/buildCityMesh");
+    vi.doMock("../../../../src/scene/buildCityMesh", () => ({
+      ...real,
+      buildCityMeshArrays: (
+        ...args: Parameters<typeof real.buildCityMeshArrays>
+      ) => {
+        callCount++;
+        if (callCount === 2) throw new Error("boom");
+        return real.buildCityMeshArrays(...args);
+      },
+    }));
+
+    const { handler, posted } = await setupWorker([
+      roofFeature("a", 100, 100), // -> cell 2/0/0, processed FIRST (succeeds)
+      roofFeature("b", 500, 100), // -> cell 2/1/0, processed SECOND (throws)
+    ]);
+    await handler({ data: { type: "open", id: 0, url: "fake://irrelevant" } });
+    await handler({
+      data: {
+        type: "fetch",
+        id: 1,
+        bbox: [0, 0, 1000, 200],
+        level: 2,
+        cells: ["2/0/0", "2/1/0"],
+        lod: null,
+        rules: [],
+        rulesEnabled: false,
+      },
+    });
+
+    // Cell 'a' really was posted before the failure...
+    const cellMsgs = posted.filter(
+      (m): m is Extract<WorkerResponse, { type: "cell" }> => m.type === "cell",
+    );
+    expect(cellMsgs.map((m) => m.key)).toEqual(["2/0/0"]);
+    // ...and the whole request ends in an error, under the SAME id.
+    const errMsg = posted.find(
+      (m): m is Extract<WorkerResponse, { type: "error" }> =>
+        m.type === "error" && m.id === 1,
+    );
+    if (!errMsg) throw new Error("expected an error response for id 1");
+    expect(errMsg.message).toBe("boom");
+
+    // But cell 'a' must NOT remain cached in the worker: this failed fetch
+    // was never adopted by the main thread, so it must not leave
+    // worker-only residue either.
+    await handler({ data: { type: "surfaces", id: 2, objectId: "a" } });
+    const notFound = posted.find(
+      (m): m is Extract<WorkerResponse, { type: "error" }> =>
+        m.type === "error" && m.id === 2,
+    );
+    if (!notFound) throw new Error("expected object 'a' to be not-found");
+    expect(notFound.code).toBe("not-found");
+
+    teardown();
+    vi.doUnmock("../../../../src/scene/buildCityMesh");
   });
 });
