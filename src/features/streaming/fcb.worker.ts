@@ -129,14 +129,31 @@ ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       const my = new AbortController();
       controller = my;
 
-      // Every key this call adds to the worker's OWN cache, so it can be
-      // rolled back if the request doesn't finish cleanly (aborted mid-loop,
-      // or an exception partway through). Without this, a cell already
+      // Every key this call touches in the worker's OWN cache, paired with
+      // whatever was cached at that key BEFORE this call touched it (or
+      // `undefined` for a genuinely new key) — so it can be rolled back if
+      // the request doesn't finish cleanly (aborted mid-loop, or an
+      // exception partway through). Without this, a cell already
       // `cells.set()`'d and posted before the failure stays cached in the
       // worker forever — the main thread never adopts it (a failed/aborted
       // fetch never reaches `commitNormal`/`commitSwap`), so it can never be
       // reached by a main-thread `evict` either (B3, 2026-07-28 final review).
-      const addedKeys: CellKey[] = [];
+      //
+      // Recording the PRIOR value (not just the key) matters when this call
+      // is a same-key REFETCH of a cell that was already resident from an
+      // earlier, successfully-adopted fetch: a plain `cells.delete(key)`
+      // rollback would destroy that still-good prior value along with the
+      // failed attempt, leaving the worker's cache diverged from what the
+      // main thread still believes is resident (a second, later regression
+      // on top of the original B3 fix, 2026-07-28 final review).
+      const touchedKeys: { key: CellKey; previous: CachedCell | undefined }[] =
+        [];
+      const rollbackTouchedKeys = (): void => {
+        for (const { key, previous } of touchedKeys) {
+          if (previous) cells.set(key, previous);
+          else cells.delete(key);
+        }
+      };
 
       try {
         const cursor = await reader.select({
@@ -205,14 +222,14 @@ ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
         for (const [key, cellModel] of buckets) {
           if (my.signal.aborted) {
             // A newer fetch/probe/cancel superseded this one mid-loop: any
-            // cells already added THIS call are for an incomplete result
+            // cells already touched THIS call are for an incomplete result
             // the main thread will never commit, so they must not linger
             // here either. Also posts a terminal response — this loop used
             // to `return` silently on abort, which left the `sendStreaming`
             // call awaiting THIS request's id pending forever on the main
             // thread (workerClient.ts's `streaming` map never got a 'done'
             // or 'error' to resolve on).
-            for (const k of addedKeys) cells.delete(k);
+            rollbackTouchedKeys();
             post({
               type: "error",
               id: msg.id,
@@ -252,7 +269,10 @@ ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
           // arrays below are detached the instant `post()`'s postMessage call
           // returns, so `.slice()` copies must be taken first. `cellModel`
           // itself is never transferred (it holds no ArrayBuffers), so it can
-          // be cached by reference.
+          // be cached by reference. Capture whatever was at this key BEFORE
+          // overwriting it — a same-key refetch of an already-resident cell
+          // must roll back to THIS, not to nothing, if the call fails later.
+          const previous = cells.get(key);
           cells.set(key, {
             model: cellModel,
             objectIndices: a.objectIndices.slice(),
@@ -260,7 +280,7 @@ ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
             objectKeys: a.objectKeys,
             colors: a.colors.slice(),
           });
-          addedKeys.push(key);
+          touchedKeys.push({ key, previous });
 
           post(
             {
@@ -290,7 +310,7 @@ ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
         }
         post({ type: "done", id: msg.id });
       } catch (e) {
-        for (const k of addedKeys) cells.delete(k);
+        rollbackTouchedKeys();
         throw e; // the outer catch below posts the 'error' response.
       }
       return;
