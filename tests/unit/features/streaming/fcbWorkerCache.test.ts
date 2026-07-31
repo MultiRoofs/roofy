@@ -109,27 +109,40 @@ type FakeSelectOpts = { limit?: number };
 /** Builds a fresh, isolated worker module instance (own cache, own reader)
  *  for one test. Mirrors fcbWorkerTraversal.test.ts's setup, plus the
  *  real-transfer `postMessage` described in the file header. `features` is
- *  keyed by cell so tests can control exactly which objects land where. */
-async function setupWorker(features: FakeCityJSONFeature[]): Promise<{
+ *  keyed by cell so tests can control exactly which objects land where.
+ *
+ *  `opts.perCall`, when given, overrides `features` PER `select()` CALL (one
+ *  `fetch`/`probe` message = one call) by index — falling back to `features`
+ *  for any call past the end of the list. Used by the same-key-overwrite
+ *  rollback test below, which needs a SECOND fetch to decode different
+ *  content than the first so a restored-prior-value can be told apart from
+ *  a re-applied-new-value by its content, not just its presence. */
+async function setupWorker(
+  features: FakeCityJSONFeature[],
+  opts?: { perCall?: FakeCityJSONFeature[][] },
+): Promise<{
   handler: (ev: { data: unknown }) => void | Promise<void>;
   posted: WorkerResponse[];
 }> {
   vi.resetModules();
 
+  let selectCallCount = 0;
   const fakeReader = {
     header: {},
-    select: vi.fn(async (opts: FakeSelectOpts) => {
-      if (opts.limit === 0) {
+    select: vi.fn(async (opts2: FakeSelectOpts) => {
+      const active = opts?.perCall?.[selectCallCount] ?? features;
+      selectCallCount++;
+      if (opts2.limit === 0) {
         return {
-          featuresCount: features.length,
+          featuresCount: active.length,
           [Symbol.asyncIterator]: () => (async function* () {})(),
         };
       }
       return {
-        featuresCount: features.length,
+        featuresCount: active.length,
         [Symbol.asyncIterator]: () =>
           (async function* () {
-            for (const f of features) yield f;
+            for (const f of active) yield f;
           })(),
       };
     }),
@@ -664,6 +677,119 @@ describe("fcb.worker cache — partial fetch failure discards its own cells (B3,
     );
     if (!notFound) throw new Error("expected object 'a' to be not-found");
     expect(notFound.code).toBe("not-found");
+
+    teardown();
+    vi.doUnmock("../../../../src/scene/buildCityMesh");
+  });
+
+  it("rolls back a same-key REFETCH to the PRIOR value instead of deleting it — the failed attempt must not destroy a still-good, previously-adopted cell (regression: rollback used to `cells.delete()` unconditionally)", async () => {
+    // Call 1: two cells fetched and successfully cached — as far as the
+    // worker AND the (simulated) main thread are concerned, both 'a' and
+    // 'b' are now genuinely resident.
+    //
+    // Call 2: a refetch of the SAME two keys (e.g. a settle re-running
+    // selection over an unmoved viewport) decodes DIFFERENT features this
+    // time ('a2'/'b2' — content must differ from call 1's so a restored
+    // PRIOR value can be told apart from a leaked FAILED-overwrite value by
+    // its actual content, not merely its presence). The second bucket
+    // processed in call 2 ('b2', cell "2/1/0") is made to throw, but only
+    // AFTER the first bucket ('a2', cell "2/0/0") has already overwritten
+    // the worker's cache entry for "2/0/0" via `cells.set()`.
+    //
+    // The reviewer's probe: cell "2/0/0" is the "formerly resident first
+    // cell" — a plain `cells.delete()` rollback (the pre-fix shape) removes
+    // it entirely, even though call 1's value for it was never invalidated
+    // by anything the main thread knows about. The fix must restore call
+    // 1's value, not erase it.
+    let callCount = 0;
+    const real = await vi.importActual<
+      typeof import("../../../../src/scene/buildCityMesh")
+    >("../../../../src/scene/buildCityMesh");
+    vi.doMock("../../../../src/scene/buildCityMesh", () => ({
+      ...real,
+      buildCityMeshArrays: (
+        ...args: Parameters<typeof real.buildCityMeshArrays>
+      ) => {
+        callCount++;
+        if (callCount === 4) throw new Error("boom");
+        return real.buildCityMeshArrays(...args);
+      },
+    }));
+
+    const { handler, posted } = await setupWorker([], {
+      perCall: [
+        [
+          roofFeature("a", 100, 100), // -> cell 2/0/0, call 1 bucket 1
+          roofFeature("b", 500, 100), // -> cell 2/1/0, call 1 bucket 2
+        ],
+        [
+          roofFeature("a2", 100, 100), // -> cell 2/0/0, call 2 bucket 1 (succeeds, overwrites)
+          roofFeature("b2", 500, 100), // -> cell 2/1/0, call 2 bucket 2 (throws, call #4)
+        ],
+      ],
+    });
+    await handler({ data: { type: "open", id: 0, url: "fake://irrelevant" } });
+
+    const fetchMsg = {
+      type: "fetch" as const,
+      bbox: [0, 0, 1000, 200] as [number, number, number, number],
+      level: 2,
+      cells: ["2/0/0", "2/1/0"],
+      lod: null,
+      rules: [],
+      rulesEnabled: false,
+    };
+    await handler({ data: { ...fetchMsg, id: 1 } }); // call 1 — succeeds
+    await handler({ data: { ...fetchMsg, id: 2 } }); // call 2 — fails on bucket 2
+
+    const call2Err = posted.find(
+      (m): m is Extract<WorkerResponse, { type: "error" }> =>
+        m.type === "error" && m.id === 2,
+    );
+    if (!call2Err) throw new Error("expected an error response for id 2");
+    expect(call2Err.message).toBe("boom");
+
+    // Call 2's overwrite of "2/0/0" really was posted before the failure —
+    // confirms this test actually exercises the same-key-overwrite path,
+    // not merely a fresh-insert rollback.
+    const cellMsgsForKeyA = posted.filter(
+      (m): m is Extract<WorkerResponse, { type: "cell" }> =>
+        m.type === "cell" && m.key === "2/0/0",
+    );
+    expect(cellMsgsForKeyA).toHaveLength(2); // call 1's "a", call 2's "a2"
+
+    // Cell "2/0/0" must still be resident, carrying call 1's ORIGINAL "a" —
+    // not deleted, and not left on call 2's failed "a2" attempt either.
+    await handler({ data: { type: "surfaces", id: 3, objectId: "a" } });
+    const foundA = posted.find(
+      (m): m is Extract<WorkerResponse, { type: "surfaceData" }> =>
+        m.type === "surfaceData" && m.id === 3,
+    );
+    if (!foundA)
+      throw new Error(
+        "expected 'a' to still be resident (prior value restored)",
+      );
+    expect(foundA.objectId).toBe("a");
+
+    await handler({ data: { type: "surfaces", id: 4, objectId: "a2" } });
+    const notFoundA2 = posted.find(
+      (m): m is Extract<WorkerResponse, { type: "error" }> =>
+        m.type === "error" && m.id === 4,
+    );
+    if (!notFoundA2)
+      throw new Error(
+        "expected 'a2' to be gone — call 2's overwrite was never adopted",
+      );
+    expect(notFoundA2.code).toBe("not-found");
+
+    // Cell "2/1/0" ('b') was never touched by call 2 (it threw before
+    // reaching this bucket) — sanity check that it is unaffected either way.
+    await handler({ data: { type: "surfaces", id: 5, objectId: "b" } });
+    const foundB = posted.find(
+      (m): m is Extract<WorkerResponse, { type: "surfaceData" }> =>
+        m.type === "surfaceData" && m.id === 5,
+    );
+    if (!foundB) throw new Error("expected 'b' to still be resident");
 
     teardown();
     vi.doUnmock("../../../../src/scene/buildCityMesh");
