@@ -655,7 +655,7 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
       if (!cityGroup) return;
       const map = layerSceneMapRef.current;
 
-      syncStreamingCells(cityGroup, map, layers, {
+      const staleKeys = syncStreamingCells(cityGroup, map, layers, {
         materialMode: cityMaterialMode,
         doubleSided: cityDoubleSided,
         shadows: cityShadowsEnabled,
@@ -669,6 +669,18 @@ const CitySceneInner = forwardRef<CitySceneHandle, InnerProps>(
       // highlight effects below rather than from mesh construction itself.
       reapplyHighlight(map, layers);
       onTriangleCount(computeTriangleCount(map, layers));
+
+      // A cell just installed above may carry colors baked from rules the
+      // user has since changed (an in-flight fetch dispatched before the
+      // edit, landing after it) — this effect's OTHER dependency, `layers`,
+      // does not re-run on its own just because a fetch landed, so nothing
+      // else will ever revisit it. Recolor exactly those flagged cells now,
+      // with the layer's CURRENT rules (B2, 2026-07-28 final review).
+      if (staleKeys.size > 0) {
+        void recolorStreamingCells(map, layers, staleKeys).then(() => {
+          reapplyHighlight(map, layers);
+        });
+      }
     }, [
       layers,
       streamVersionKey,
@@ -1308,6 +1320,16 @@ export function buildCellMesh(
  * makes "did this key's contents change" a cheap `!==`, since
  * `CellCache.set()` always installs a fresh object rather than mutating one
  * in place.
+ *
+ * Returns, per layer id, the keys of every cell just (re)built here whose
+ * `sourceEntry.builtWithRules*` no longer matches the layer's CURRENT rules
+ * — i.e. a fetch that was in flight when the user edited a rule and landed
+ * carrying colors baked from the OLD ones. `recolorStreamingCells`'s own
+ * "rules changed" effect only ever recolors cells that were ALREADY
+ * resident when it ran; a cell installed here, later, would otherwise never
+ * be revisited and would show stale colors indefinitely (B2, 2026-07-28
+ * final review). The caller is expected to fire a targeted recolor for
+ * exactly these keys.
  */
 export function syncStreamingCells(
   cityGroup: Group,
@@ -1318,7 +1340,9 @@ export function syncStreamingCells(
     readonly doubleSided: boolean;
     readonly shadows: boolean;
   },
-): void {
+): Map<string, CellKey[]> {
+  const staleKeysByLayer = new Map<string, CellKey[]>();
+
   for (const layer of layers) {
     if (!layer.isStreaming) continue;
     const state = map.get(layer.id);
@@ -1363,8 +1387,30 @@ export function syncStreamingCells(
       cellState.mesh.receiveShadow = options.shadows;
       cityGroup.add(cellState.mesh);
       state.cells.set(key, cellState);
+
+      if (rulesStale(entry, layer)) {
+        const stale = staleKeysByLayer.get(layer.id) ?? [];
+        stale.push(key);
+        staleKeysByLayer.set(layer.id, stale);
+      }
     }
   }
+
+  return staleKeysByLayer;
+}
+
+/** Whether `entry.geometry.ruleColors` was baked from rules other than the
+ *  layer's CURRENT ones. Disabled-vs-disabled never differs regardless of
+ *  rule content (colors don't depend on it), so rule-array comparison only
+ *  runs when both are enabled. Rule arrays are small (typically a handful
+ *  of entries) and edited far less often than cells are installed, so a
+ *  `JSON.stringify` comparison is cheap here and — unlike a reference-
+ *  identity check — doesn't depend on every rule-editing call site
+ *  replacing the array wholesale. */
+function rulesStale(entry: CellEntry, layer: Layer): boolean {
+  if (entry.builtWithRulesEnabled !== layer.rulesEnabled) return true;
+  if (!layer.rulesEnabled) return false;
+  return JSON.stringify(entry.builtWithRules) !== JSON.stringify(layer.rules);
 }
 
 /** Sets `mesh.visible` on the layer mesh (if any) and every cell mesh to
@@ -1481,10 +1527,19 @@ export function updateRuleColors(
  * does after `syncStreamingCells`, so the new colors actually reach the
  * mesh's GPU "color" attribute (this function only updates
  * `CellSceneState.ruleColors`, never touches geometry directly).
+ *
+ * `onlyKeys`, when given, restricts each layer's request to that layer's
+ * entry in the map instead of every currently-resident cell — used by the
+ * streaming-cell sync effect to recolor JUST the cells `syncStreamingCells`
+ * flagged as built from stale rules, without re-requesting every other
+ * already-correct cell on every cache commit (B2, 2026-07-28 final review).
+ * Omitted (the "rules changed" effect's own call), every resident cell of
+ * every streaming layer is targeted, as before.
  */
 export async function recolorStreamingCells(
   map: Map<string, LayerSceneState>,
   layers: ReadonlyArray<Layer>,
+  onlyKeys?: ReadonlyMap<string, ReadonlyArray<CellKey>>,
 ): Promise<void> {
   await Promise.all(
     layers
@@ -1493,6 +1548,8 @@ export async function recolorStreamingCells(
         const state = map.get(layer.id);
         const stream = useStreamStore.getState().get(layer.id);
         if (!state || !stream) return;
+        const keyFilter = onlyKeys?.get(layer.id);
+        if (onlyKeys && (!keyFilter || keyFilter.length === 0)) return; // nothing flagged stale for this layer
         // Snapshot the CellSceneState OBJECTS this request is for, not just
         // their keys. A level/LoD swap (`commitSwap`, useTileStreaming.ts)
         // can replace the entry at the SAME key with a differently-sized
@@ -1509,7 +1566,14 @@ export async function recolorStreamingCells(
         // than misapply — the same technique `syncStreamingCells` uses
         // (`CellSceneState.sourceEntry`) for the equivalent problem on the
         // sync path.
-        const targets = new Map(state.cells);
+        const targets = new Map(
+          keyFilter
+            ? keyFilter.flatMap((key) => {
+                const cell = state.cells.get(key);
+                return cell ? [[key, cell] as const] : [];
+              })
+            : state.cells,
+        );
         if (targets.size === 0) return;
         try {
           await stream.client.sendStreaming(
