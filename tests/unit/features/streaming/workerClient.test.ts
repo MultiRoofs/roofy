@@ -290,6 +290,36 @@ describe("WorkerClient", () => {
     ).not.toThrow();
   });
 
+  it("notify() posts the message but returns void — nothing for a caller to await, unlike send()", () => {
+    const client = new WorkerClient();
+    const worker = currentWorker();
+    const result = client.notify({ type: "cancel" });
+    expect(result).toBeUndefined();
+    expect(worker.postMessage).toHaveBeenCalledTimes(1);
+    expect(sentId(worker)).toBeTypeOf("number");
+  });
+
+  it("notify() registers no pending entry — terminate() afterwards has nothing to reject", async () => {
+    const client = new WorkerClient();
+    client.notify({ type: "cancel" });
+    client.notify({ type: "evict", cells: ["0/0/0"] });
+    client.notify({ type: "close" });
+    // If notify() were implemented as a thin, un-awaited wrapper around
+    // send() (e.g. `notify(msg) { void this.send(msg); }`) instead of
+    // genuinely registering nothing, each call above would still create a
+    // Promise via send()'s `pending.set(id, {resolve, reject})`. Nobody
+    // holds a reference to that promise to .catch() it, so terminate()'s
+    // own `reject(err)` loop over `this.pending` would reject it anyway —
+    // and an unhandled rejection on an uncaught promise is exactly what
+    // vitest fails the test run on. Reaching the assertion below, with the
+    // event loop given a turn to surface any such rejection, is itself part
+    // of the proof (this is the regression test for B3, 2026-07-28 final
+    // review: "every interaction burst adds a permanent pending entry").
+    client.terminate();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(true).toBe(true);
+  });
+
   it("terminate() rejects an in-flight sendStreaming() promise too", async () => {
     const client = new WorkerClient();
     const received: WorkerResponse[] = [];

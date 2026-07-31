@@ -83,6 +83,23 @@ export class WorkerClient {
     });
   }
 
+  /**
+   * Genuinely fire-and-forget: registers NO pending entry, so there is
+   * nothing for it to leak. Only for a request the worker never
+   * acknowledges — `evict`/`cancel`/`close` (see fcb.worker.ts's handlers
+   * for those three, none of which ever `post()`s a response) — and that no
+   * caller reads a return value from. Using `send()` for these instead (as
+   * this module originally did) permanently retains a `pending` entry per
+   * call, since `send()`'s promise only ever settles on a matching response
+   * arriving, which these three requests never produce; every interaction
+   * burst (a `cancel` on first-change, an `evict` after budget eviction)
+   * then leaked one more entry forever.
+   */
+  notify(msg: DistributiveOmit<WorkerRequest, "id">): void {
+    const id = ++this.nextId;
+    this.worker.postMessage({ ...msg, id } as WorkerRequest);
+  }
+
   /** Streaming responses: one 'cell' per cell, then 'done'. Every 'cell'
    *  message is validated against the protocol's length invariants on
    *  receipt — a malformed payload fails loudly here rather than producing

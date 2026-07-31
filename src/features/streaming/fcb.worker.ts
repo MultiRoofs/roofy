@@ -72,6 +72,25 @@ function post(msg: WorkerResponse, transfer: Transferable[] = []): void {
   ctx.postMessage(msg, transfer);
 }
 
+/** Distinct, non-null `Surface.lod` labels present in `model` — computed
+ *  from the pre-triangulation `CityModel`, NOT from `buildCityMeshArrays`'s
+ *  output, whose surfaces have already been filtered down to one requested
+ *  `msg.lod` (or all, if `null`) and so can never reveal a label this cell
+ *  ALSO has but the current commit didn't ask for. Mirrors
+ *  `layerStore.ts`'s `computeAvailableLods`, but that function additionally
+ *  sorts descending for a UI dropdown — order doesn't matter here, since
+ *  `useTileStreaming.ts` only ever feeds this into `buildLadder`, which does
+ *  its own dedup+sort. */
+function distinctLods(model: CityModel): string[] {
+  const set = new Set<string>();
+  for (const obj of Object.values(model.objects)) {
+    for (const surface of obj?.surfaces ?? []) {
+      if (surface.lod) set.add(surface.lod);
+    }
+  }
+  return [...set];
+}
+
 ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
   const msg = ev.data;
   try {
@@ -110,131 +129,170 @@ ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       const my = new AbortController();
       controller = my;
 
-      const cursor = await reader.select({
-        spatial: { kind: "bbox", value: msg.bbox },
-        signal: my.signal,
-      });
-      // The metadata line's transform is shared by every feature in the
-      // file (CityJSONSeq semantics — same pattern as parseCityJSONSeq.ts:
-      // one shared header, each feature carrying its own local vertices).
-      // `toCityJSONMetadata`/`Feature.toCityJSON` return plain, JSON-shaped
-      // data (no methods), so casting them into our own domain CityJSON
-      // types is the same move parseCityJSONSeq makes on `JSON.parse`
-      // output — not a type-unsafe escape hatch like `as never` (which
-      // type-checks for ANY value, since `never` is a subtype of
-      // everything; verified empirically, see task-10-report.md).
-      const cjHeader = toCityJSONMetadata(
-        reader.header,
-      ) as unknown as CityJSONRoot;
-      const metadata = mapMetadata(cjHeader.metadata);
+      // Every key this call adds to the worker's OWN cache, so it can be
+      // rolled back if the request doesn't finish cleanly (aborted mid-loop,
+      // or an exception partway through). Without this, a cell already
+      // `cells.set()`'d and posted before the failure stays cached in the
+      // worker forever — the main thread never adopts it (a failed/aborted
+      // fetch never reaches `commitNormal`/`commitSwap`), so it can never be
+      // reached by a main-thread `evict` either (B3, 2026-07-28 final review).
+      const addedKeys: CellKey[] = [];
 
-      // Decode in chunks, yielding so a superseded fetch can be cancelled.
-      const models: CityModel[] = [];
-      let sinceYield = 0;
-      for await (const f of cursor) {
-        if (my.signal.aborted) {
-          post({
-            type: "error",
-            id: msg.id,
-            message: "aborted",
-            aborted: true,
-          });
-          return;
-        }
-        const cjFeature = f.toCityJSON(
+      try {
+        const cursor = await reader.select({
+          spatial: { kind: "bbox", value: msg.bbox },
+          signal: my.signal,
+        });
+        // The metadata line's transform is shared by every feature in the
+        // file (CityJSONSeq semantics — same pattern as parseCityJSONSeq.ts:
+        // one shared header, each feature carrying its own local vertices).
+        // `toCityJSONMetadata`/`Feature.toCityJSON` return plain, JSON-shaped
+        // data (no methods), so casting them into our own domain CityJSON
+        // types is the same move parseCityJSONSeq makes on `JSON.parse`
+        // output — not a type-unsafe escape hatch like `as never` (which
+        // type-checks for ANY value, since `never` is a subtype of
+        // everything; verified empirically, see task-10-report.md).
+        const cjHeader = toCityJSONMetadata(
           reader.header,
-        ) as unknown as CityJSONFeature;
-        const realVertices = dequantizeAll(
-          cjFeature.vertices,
-          cjHeader.transform,
-        );
-        const objects: Record<string, CityObject> = {};
-        let modelBBox: BBox3 | null = null;
-        for (const [id, rawObj] of Object.entries(cjFeature.CityObjects) as [
-          string,
-          CityJSONObject,
-        ][]) {
-          const obj = parseCityObject(id, rawObj, realVertices);
-          objects[id] = obj;
-          modelBBox = mergeBBox(modelBBox, obj.bbox);
+        ) as unknown as CityJSONRoot;
+        const metadata = mapMetadata(cjHeader.metadata);
+
+        // Decode in chunks, yielding so a superseded fetch can be cancelled.
+        const models: CityModel[] = [];
+        let sinceYield = 0;
+        for await (const f of cursor) {
+          if (my.signal.aborted) {
+            post({
+              type: "error",
+              id: msg.id,
+              message: "aborted",
+              aborted: true,
+            });
+            return;
+          }
+          const cjFeature = f.toCityJSON(
+            reader.header,
+          ) as unknown as CityJSONFeature;
+          const realVertices = dequantizeAll(
+            cjFeature.vertices,
+            cjHeader.transform,
+          );
+          const objects: Record<string, CityObject> = {};
+          let modelBBox: BBox3 | null = null;
+          for (const [id, rawObj] of Object.entries(cjFeature.CityObjects) as [
+            string,
+            CityJSONObject,
+          ][]) {
+            const obj = parseCityObject(id, rawObj, realVertices);
+            objects[id] = obj;
+            modelBBox = mergeBBox(modelBBox, obj.bbox);
+          }
+          models.push({
+            sourceEncoding: "flatcitybuf",
+            metadata,
+            bbox: modelBBox,
+            objects,
+            vertexCount: cjFeature.vertices.length,
+          });
+          if (++sinceYield >= 64) {
+            sinceYield = 0;
+            await new Promise((r) => setTimeout(r, 0));
+          }
         }
-        models.push({
-          sourceEncoding: "flatcitybuf",
-          metadata,
-          bbox: modelBBox,
-          objects,
-          vertexCount: cjFeature.vertices.length,
-        });
-        if (++sinceYield >= 64) {
-          sinceYield = 0;
-          await new Promise((r) => setTimeout(r, 0));
+
+        const resident = new Set(msg.cells);
+        const buckets = bucketFeatures(models, grid, msg.level, new Set());
+        for (const [key, cellModel] of buckets) {
+          if (my.signal.aborted) {
+            // A newer fetch/probe/cancel superseded this one mid-loop: any
+            // cells already added THIS call are for an incomplete result
+            // the main thread will never commit, so they must not linger
+            // here either. Also posts a terminal response — this loop used
+            // to `return` silently on abort, which left the `sendStreaming`
+            // call awaiting THIS request's id pending forever on the main
+            // thread (workerClient.ts's `streaming` map never got a 'done'
+            // or 'error' to resolve on).
+            for (const k of addedKeys) cells.delete(k);
+            post({
+              type: "error",
+              id: msg.id,
+              message: "aborted",
+              aborted: true,
+            });
+            return;
+          }
+          if (!resident.has(key)) continue; // outside the requested cover
+          const origin = cellCentre(grid, key, 0);
+          const a = buildCityMeshArrays(cellModel, key, origin, msg.lod);
+          const ruleColors = msg.rulesEnabled
+            ? buildRuleColorsFromArrays(
+                cellModel,
+                a.objectIndices,
+                a.surfaceIndices,
+                a.objectKeys,
+                msg.rules,
+                a.colors,
+              )
+            : null;
+          // Build the payload explicitly. Do NOT spread `a`: CityMeshArrays has
+          // `colors`, CellGeometry has `baseColors`, and a spread would emit both.
+          const geometry: CellGeometry = {
+            positions: a.positions,
+            normals: a.normals,
+            baseColors: a.colors,
+            ruleColors,
+            objectIndices: a.objectIndices,
+            surfaceIndices: a.surfaceIndices,
+            objectKeys: a.objectKeys,
+            triangleCount: a.triangleCount,
+          };
+          const { records, surfaceAttrKeys } = toObjectRecords(cellModel);
+
+          // Record this cell in the worker cache BEFORE transferring: the
+          // arrays below are detached the instant `post()`'s postMessage call
+          // returns, so `.slice()` copies must be taken first. `cellModel`
+          // itself is never transferred (it holds no ArrayBuffers), so it can
+          // be cached by reference.
+          cells.set(key, {
+            model: cellModel,
+            objectIndices: a.objectIndices.slice(),
+            surfaceIndices: a.surfaceIndices.slice(),
+            objectKeys: a.objectKeys,
+            colors: a.colors.slice(),
+          });
+          addedKeys.push(key);
+
+          post(
+            {
+              type: "cell",
+              id: msg.id,
+              key,
+              geometry,
+              objects: records,
+              surfaceAttrKeys,
+              // Every distinct LoD label observed in this cell's RAW model,
+              // independent of `msg.lod`'s filter — what
+              // `useTileStreaming.ts` folds into the layer's auto-LoD ladder
+              // (`levelPolicy.ts`'s `buildLadder`). Previously always `[]`,
+              // which left the ladder permanently empty and auto mode
+              // permanently selecting "all LoDs" (B1, 2026-07-28 final
+              // review).
+              lodsSeen: distinctLods(cellModel),
+            },
+            [
+              a.positions.buffer,
+              a.normals.buffer,
+              a.colors.buffer,
+              a.objectIndices.buffer,
+              a.surfaceIndices.buffer,
+            ],
+          );
         }
+        post({ type: "done", id: msg.id });
+      } catch (e) {
+        for (const k of addedKeys) cells.delete(k);
+        throw e; // the outer catch below posts the 'error' response.
       }
-
-      const resident = new Set(msg.cells);
-      const buckets = bucketFeatures(models, grid, msg.level, new Set());
-      for (const [key, cellModel] of buckets) {
-        if (my.signal.aborted) return;
-        if (!resident.has(key)) continue; // outside the requested cover
-        const origin = cellCentre(grid, key, 0);
-        const a = buildCityMeshArrays(cellModel, key, origin, msg.lod);
-        const ruleColors = msg.rulesEnabled
-          ? buildRuleColorsFromArrays(
-              cellModel,
-              a.objectIndices,
-              a.surfaceIndices,
-              a.objectKeys,
-              msg.rules,
-              a.colors,
-            )
-          : null;
-        // Build the payload explicitly. Do NOT spread `a`: CityMeshArrays has
-        // `colors`, CellGeometry has `baseColors`, and a spread would emit both.
-        const geometry: CellGeometry = {
-          positions: a.positions,
-          normals: a.normals,
-          baseColors: a.colors,
-          ruleColors,
-          objectIndices: a.objectIndices,
-          surfaceIndices: a.surfaceIndices,
-          objectKeys: a.objectKeys,
-          triangleCount: a.triangleCount,
-        };
-        const { records, surfaceAttrKeys } = toObjectRecords(cellModel);
-
-        // Record this cell in the worker cache BEFORE transferring: the
-        // arrays below are detached the instant `post()`'s postMessage call
-        // returns, so `.slice()` copies must be taken first. `cellModel`
-        // itself is never transferred (it holds no ArrayBuffers), so it can
-        // be cached by reference.
-        cells.set(key, {
-          model: cellModel,
-          objectIndices: a.objectIndices.slice(),
-          surfaceIndices: a.surfaceIndices.slice(),
-          objectKeys: a.objectKeys,
-          colors: a.colors.slice(),
-        });
-
-        post(
-          {
-            type: "cell",
-            id: msg.id,
-            key,
-            geometry,
-            objects: records,
-            surfaceAttrKeys,
-            lodsSeen: [],
-          },
-          [
-            a.positions.buffer,
-            a.normals.buffer,
-            a.colors.buffer,
-            a.objectIndices.buffer,
-            a.surfaceIndices.buffer,
-          ],
-        );
-      }
-      post({ type: "done", id: msg.id });
       return;
     }
 

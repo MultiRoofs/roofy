@@ -79,6 +79,30 @@ export type WorkerResponse =
       aborted: boolean;
     };
 
+/**
+ * A zero-triangle `CellGeometry`. Used by `useTileStreaming.ts` to mark a
+ * requested cell that the worker's `fetch` genuinely queried and found
+ * nothing in (as opposed to one that was never requested at all) — the
+ * worker only ever emits a `'cell'` message for a POPULATED bucket
+ * (`fcb.worker.ts`'s `fetch` handler), so a sparse cell's absence from the
+ * response stream is otherwise indistinguishable from "not yet fetched,"
+ * which is exactly what let a sparse viewport bypass hysteresis forever
+ * (B5 in the 2026-07-28 final review). Trivially satisfies
+ * `assertCellGeometry`'s invariants (every length is `0 === triangleCount*3*n`).
+ */
+export function emptyCellGeometry(): CellGeometry {
+  return {
+    positions: new Float32Array(0),
+    normals: new Float32Array(0),
+    baseColors: new Float32Array(0),
+    ruleColors: null,
+    objectIndices: new Uint32Array(0),
+    surfaceIndices: new Uint32Array(0),
+    objectKeys: [],
+    triangleCount: 0,
+  };
+}
+
 /** Throws if a received cell violates the length invariants. */
 export function assertCellGeometry(g: CellGeometry): void {
   const v = g.triangleCount * 3;

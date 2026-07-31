@@ -26,11 +26,12 @@ import { useThree } from "@react-three/fiber";
 import type { PerspectiveCamera } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { useLayerStore, type Layer } from "../layers/layerStore";
-import { useStreamStore, type CellEntry } from "./streamStore";
+import { useStreamStore, emptyCellEntry, type CellEntry } from "./streamStore";
 import { viewportFootprint, type Footprint } from "./viewportFootprint";
 import {
   chooseLevel,
   lodForCellSize,
+  buildLadder,
   cellSize,
   type LodSelection,
 } from "./levelPolicy";
@@ -85,6 +86,18 @@ export function resolveLod(
 export function lodSelectionEquals(a: LodSelection, b: LodSelection): boolean {
   if (a.kind !== b.kind) return false;
   return a.kind === "exact" && b.kind === "exact" ? a.lod === b.lod : true;
+}
+
+/** Order-and-content equality for two ladders. `buildLadder` always returns
+ *  a freshly-allocated array (even when nothing new was observed), so a
+ *  reference check can't tell "unchanged" from "same content, new array" —
+ *  used to avoid an unnecessary `setLadder` store write (and the re-render
+ *  it triggers) on every commit that observes no NEW LoD label. */
+export function ladderEquals(
+  a: ReadonlyArray<string>,
+  b: ReadonlyArray<string>,
+): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
 /** Bytes actually held post-decode, mirroring `CellCache`'s "measured after
@@ -235,6 +248,15 @@ export function commitNormal(
  * after the WHOLE new cover has fetched successfully; on a
  * `LEVEL_SWAP_TIMEOUT_MS` timeout the caller must discard the partial fetch
  * and never call this, leaving the old level/cache untouched.
+ *
+ * Also enforces the resident budget on the NEW cover via `evictToBudget()`,
+ * same as `commitNormal` — a swap is a legitimate commit path too (in
+ * particular, the very FIRST commit for a freshly-opened layer: `prevLevel`
+ * is null, so `planCommit`'s `levelChanged` is true and every initial load
+ * is a swap), so skipping the budget check here let a complex enough
+ * viewport blow past both declared budgets on first paint, undetected,
+ * because `retain()` alone only drops cells OUTSIDE the new cover — it has
+ * no opinion on whether the cover itself fits (B4, 2026-07-28 final review).
  */
 export function commitSwap(
   cache: CellCache<CellEntry>,
@@ -242,7 +264,9 @@ export function commitSwap(
   fetched: ReadonlyMap<CellKey, FetchedCell>,
 ): CellKey[] {
   for (const [key, { entry, stats }] of fetched) cache.set(key, entry, stats);
-  return cache.retain(newCover);
+  const droppedOldCover = cache.retain(newCover);
+  const droppedOverBudget = cache.evictToBudget();
+  return [...droppedOldCover, ...droppedOverBudget];
 }
 
 // ---------------------------------------------------------------------
@@ -420,14 +444,22 @@ export async function commitStreamingLayer(
     if (!stream.client.isCurrent(epoch)) return;
 
     if (outcome === "timeout") {
-      // Best-effort abort — fire-and-forget, deliberately not awaited (this
-      // status update must not wait on it). If the worker was terminated in
-      // the meantime (layer removal racing the timeout), this send() rejects
-      // per workerClient.ts's terminate() contract; a rejected, un-awaited
-      // promise is NOT caught by this function's own try/catch (that only
-      // catches thrown/awaited errors), so it needs its own no-op catch or
-      // it surfaces as an unhandled rejection instead of being swallowed.
-      void stream.client.send({ type: "cancel" }).catch(() => {});
+      // notify() is genuinely fire-and-forget (workerClient.ts): unlike the
+      // old send()-based cancel, it registers no pending entry, so there is
+      // nothing here for a terminate()-triggered rejection to leak — no
+      // `.catch()` needed, and none of the "not awaited, needs its own
+      // catch" reasoning that applied to send() applies to it.
+      stream.client.notify({ type: "cancel" });
+      if (fetched.size > 0) {
+        // The worker may have gone on to fully decode and cache some (or
+        // all) of these cells anyway, right as the deadline passed — cancel
+        // above only helps if it's still mid-flight. Either way, THIS
+        // commit never adopts them (the timeout branch returns without
+        // calling commitNormal/commitSwap), so the worker must not keep
+        // them either, or they become worker-only cache entries the main
+        // thread's evict can never reach (B3, 2026-07-28 final review).
+        stream.client.notify({ type: "evict", cells: [...fetched.keys()] });
+      }
       useStreamStore
         .getState()
         .setStatus(
@@ -442,16 +474,51 @@ export async function commitStreamingLayer(
       return;
     }
 
+    // Every key this commit actually asked for (`plan.toFetch`) that did NOT
+    // come back as a 'cell' message was genuinely queried and found empty —
+    // the worker only emits 'cell' for a populated bucket (fcb.worker.ts).
+    // Backfilling a zero-triangle entry for it here is what makes it count
+    // as RESIDENT (`cache.has(key)` true) from now on; without this, an
+    // empty cell was indistinguishable from "never fetched," so
+    // `planCommit`'s `missing` filter kept treating it as a hole forever —
+    // bypassing hysteresis and re-running full selection/decode on every
+    // settle for any viewport with even one sparse cell (B5, 2026-07-28
+    // final review).
+    for (const key of plan.toFetch) {
+      if (!fetched.has(key)) {
+        fetched.set(key, {
+          entry: emptyCellEntry(),
+          stats: { triangles: 0, bytes: 0 },
+        });
+      }
+    }
+
+    // Fold this commit's observed LoD labels into the layer's persisted
+    // ladder (B1, 2026-07-28 final review). Previously the worker always
+    // reported `lodsSeen: []`, so `stream.ladder` never grew past its
+    // initial `[]` and `resolveLod`'s auto mode (`lodForCellSize`) always
+    // fell back to "no filter" — loading every LoD, forever. A UNION with
+    // the existing ladder (not a replacement) makes this a monotonically
+    // growing, persisted record of every label ever seen for this layer,
+    // never shrinking as cells are evicted.
+    const observedLods: string[] = [];
+    for (const { entry } of fetched.values())
+      observedLods.push(...entry.lodsSeen);
+    if (observedLods.length > 0) {
+      const newLadder = buildLadder([...stream.ladder, ...observedLods]);
+      if (!ladderEquals(newLadder, stream.ladder)) {
+        useStreamStore.getState().setLadder(layerId, newLadder);
+      }
+    }
+
     const evicted = plan.isSwap
       ? commitSwap(stream.cache, plan.desired, fetched)
       : commitNormal(stream.cache, plan.desired, fetched);
 
     if (evicted.length > 0) {
-      // Same fire-and-forget rationale as the cancel above: not awaited, so
-      // needs its own catch rather than relying on the surrounding try.
-      void stream.client
-        .send({ type: "evict", cells: evicted })
-        .catch(() => {});
+      // Same fire-and-forget rationale as the cancel above: notify() needs
+      // no catch, unlike the send()-based version this replaced.
+      stream.client.notify({ type: "evict", cells: evicted });
     }
 
     lastLod.set(layerId, plan.lod);
@@ -545,11 +612,10 @@ export function useTileStreaming(
               const stream = useStreamStore.getState().get(layer.id);
               if (!stream) return;
               stream.client.newEpoch();
-              // Fire-and-forget: see the identical rationale in
-              // commitStreamingLayer's cancel/evict sends above — not
-              // awaited, so a terminate()-triggered rejection needs its own
-              // catch rather than relying on a surrounding try/catch.
-              void stream.client.send({ type: "cancel" }).catch(() => {});
+              // notify() is genuinely fire-and-forget (workerClient.ts): no
+              // pending entry is registered, so there is nothing for a
+              // terminate()-triggered rejection to leak and no catch needed.
+              stream.client.notify({ type: "cancel" });
             },
             onSettle: () => {
               const origin: Vec3 = sceneOriginRef.current ?? [0, 0, 0];
@@ -581,4 +647,56 @@ export function useTileStreaming(
     // camera identity itself changes — not on every layer store update.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [controls, camera]);
+
+  // A manual LoD change — `setLayerLod`/`setLodMode` from LodSelector.tsx —
+  // never touches OrbitControls, so nothing above would ever notice one:
+  // `commitStreamingLayer` only ever runs from a settled camera interaction.
+  // Left unhandled, the user's choice sat inert until the next unrelated
+  // pan/zoom happened to re-evaluate `planCommit`'s `lodChanged` (B1,
+  // 2026-07-28 final review). This is a SEPARATE effect (not folded into the
+  // one above) because it reacts to the layer store, not to `controls`.
+  const lodSignature = useLayerStore((s) => {
+    let key = "";
+    for (const layer of s.layers) {
+      if (!layer.isStreaming) continue;
+      key += `${layer.id}:${layer.lodMode}:${layer.selectedLod ?? ""};`;
+    }
+    return key;
+  });
+  const prevLodKeys = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    const streamingLayers = useLayerStore
+      .getState()
+      .layers.filter((l) => l.isStreaming);
+    const seen = new Set<string>();
+    for (const layer of streamingLayers) {
+      seen.add(layer.id);
+      const key = `${layer.lodMode}:${layer.selectedLod ?? ""}`;
+      const prev = prevLodKeys.current.get(layer.id);
+      prevLodKeys.current.set(layer.id, key);
+      // `prev === undefined` means this is the layer's FIRST time appearing
+      // in this signature (just opened, or this effect's first run) — not a
+      // user-driven change, so no forced commit; its initial commit already
+      // happens via the normal camera-settle path.
+      if (prev === undefined || prev === key) continue;
+      const origin: Vec3 = sceneOriginRef.current ?? [0, 0, 0];
+      void commitStreamingLayer(layer.id, camera, origin, groundYRef.current);
+    }
+    // Non-blocking cleanup (2026-07-28 final review): `lastLod` is a
+    // module-level Map keyed by layer id with no other removal path, so a
+    // deleted layer's entry would otherwise linger for the lifetime of the
+    // tab.
+    // Deleting the CURRENT key from a Map mid-iteration is well-defined (the
+    // key was already visited, so it isn't revisited or skipped) — no
+    // defensive array copy needed before iterating, same convention as
+    // CitySceneR3F.tsx's syncStreamingCells.
+    for (const id of prevLodKeys.current.keys()) {
+      if (!seen.has(id)) {
+        prevLodKeys.current.delete(id);
+        lastLod.delete(id);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lodSignature, camera]);
 }
