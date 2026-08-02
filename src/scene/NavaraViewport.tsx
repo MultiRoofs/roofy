@@ -181,9 +181,18 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     // CitySceneHandle.ready — created eagerly so a consumer can await it before
     // the mount effect has run. Resolve-or-reject, never a hang: see the Shared
     // Interface Contract.
+    //
+    // RE-ARMABLE, and read through the ref EVERYWHERE (never captured in a
+    // closure): the lifecycle cleanup below rejects the current gate and
+    // installs a fresh one, because a gate whose engine has been torn down can
+    // never settle by itself. StrictMode makes that subtle — it runs
+    // setup/cleanup/setup against ONE render, so the second pass re-enters the
+    // *same* effect closure, and a captured gate would be the one the first
+    // pass's cleanup already rejected. Hence `readyRef.current` at use time,
+    // and a getter on the imperative handle so a consumer always sees the live
+    // promise rather than a dead one.
     const readyRef = useRef<ReadyGate | null>(null);
     readyRef.current ??= createReadyGate();
-    const readyGate = readyRef.current;
 
     // --- Engine lifecycle (StrictMode-safe, see navaraSession.ts) ---
     useEffect(() => {
@@ -198,7 +207,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           "NavaraViewport: the canvas container never mounted, so the engine cannot start.",
         );
         setInitError(error.message);
-        readyGate.reject(error);
+        // No re-arm: this is a hard, permanent failure, and returning without
+        // a cleanup means nothing will ever try again.
+        readyRef.current!.reject(error);
         return;
       }
 
@@ -266,13 +277,17 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           cityPluginRef.current = cityPlugin;
           setInitError(null);
           setEngineReady(true);
-          readyGate.resolve();
+          // `readyRef.current`, never a captured gate: a cancelled predecessor
+          // (StrictMode's first pass) has already re-armed it, and resolving
+          // the retired one would leave this mount's consumers waiting.
+          readyRef.current!.resolve();
         } catch (error) {
           // Torn down mid-init, or disposed before it went live: not a failure
-          // anyone needs to see, and the cleanup below still disposes.
+          // anyone needs to see, the cleanup below still disposes, and the
+          // cleanup has already rejected the gate this mount owned.
           if (cancelled || error instanceof NavaraSessionDisposedError) return;
           setInitError(error instanceof Error ? error.message : String(error));
-          readyGate.reject(error);
+          readyRef.current!.reject(error);
         }
       })();
 
@@ -284,6 +299,24 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         setEngineReady(false);
         viewRef.current = null;
         cityPluginRef.current = null;
+        // SETTLE, then RE-ARM. Both halves are load-bearing:
+        //   * settle — every `return` inside `started` above is guarded by
+        //     `cancelled`, so once this cleanup has run nothing can ever
+        //     resolve this gate. A consumer that grabbed `handle.ready` and is
+        //     still awaiting it (App.tsx closes the last layer mid-init, and
+        //     Task C20 replaces its 100 ms setTimeout with exactly that await)
+        //     would wait forever. Resolve-or-reject, never a hang.
+        //   * re-arm — a settled promise cannot be reused, and this component
+        //     may well mount again: StrictMode does it immediately, and so
+        //     does re-opening a file after `handleClose`. `createReadyGate`
+        //     already attaches a `.catch`, so the rejection below is never
+        //     reported as unhandled even when nobody was listening.
+        readyRef.current!.reject(
+          new Error(
+            "NavaraViewport was unmounted before the 3D engine finished starting.",
+          ),
+        );
+        readyRef.current = createReadyGate();
         // The handles die with the view; dropping them here means the next
         // mount re-adds every layer from the store instead of trusting stale
         // entries whose meshes have been disposed.
@@ -295,7 +328,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         // mount's catch: reported in its error panel, never a silent hang.
         engineSlot = started.then(() => session?.dispose());
       };
-    }, [readyGate]);
+      // `[]`: the gate now lives entirely behind `readyRef`, so there is
+      // nothing left for this effect to depend on. Re-running it would tear
+      // the engine down and rebuild it for no reason.
+    }, []);
 
     // --- FPS readout from the render loop ---
     useEffect(() => {
@@ -670,16 +706,21 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         alignView,
         getCameraState,
         setCameraState,
-        ready: readyGate.promise,
+        // A GETTER, not a captured promise, because the lifecycle cleanup
+        // RE-ARMS the gate. A snapshot taken when this handle was built would
+        // be correct only as long as React keeps re-invoking `create()` in
+        // lockstep with that cleanup — which it does today (the lifecycle
+        // effect's deps are `[]`, so it can only cycle together with this
+        // layout effect, and both are double-invoked under StrictMode). That
+        // is an ordering guarantee this component should not be spending, so
+        // read the ref instead: `handle.ready` is then, by construction, the
+        // promise of the engine that is coming up NOW. (`readyRef` is a ref,
+        // hence no dependency.)
+        get ready() {
+          return readyRef.current!.promise;
+        },
       }),
-      [
-        fitAll,
-        fitLayer,
-        alignView,
-        getCameraState,
-        setCameraState,
-        readyGate.promise,
-      ],
+      [fitAll, fitLayer, alignView, getCameraState, setCameraState],
     );
 
     return (

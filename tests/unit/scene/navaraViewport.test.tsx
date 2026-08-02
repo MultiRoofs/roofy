@@ -380,6 +380,58 @@ describe("NavaraViewport lifecycle", () => {
     await waitFor(() => expect(dispose).toHaveBeenCalledTimes(1));
   });
 
+  it("REJECTS `ready` when the viewport unmounts before the engine came up", async () => {
+    // A real race, not a hypothetical: `App.tsx` unmounts the viewport the
+    // moment the last layer goes away (`handleClose` -> `removeAllLayers`), and
+    // Task C20 replaces its 100 ms setTimeout with `await sceneRef.current
+    // .ready`. Every `return` inside the queued init body is guarded by
+    // `cancelled`, so once the cleanup has run NOTHING can resolve that gate —
+    // a consumer awaiting it would wait forever unless the cleanup settles it.
+    let release!: () => void;
+    init.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const ref = createRef<CitySceneHandle>();
+    const { unmount } = render(
+      <NavaraViewport ref={ref} onTriangleCount={() => {}} />,
+    );
+    await waitFor(() => expect(init).toHaveBeenCalled());
+    // What a consumer would already be holding — `ref.current` is null after
+    // the unmount, so this has to be captured first.
+    const pending = ref.current!.ready;
+
+    unmount();
+    await expect(pending).rejects.toThrow(
+      /unmounted before the 3D engine finished starting/,
+    );
+
+    // The engine finally comes up with nobody home: the dead gate must not be
+    // re-settled, and nothing may throw.
+    release();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // …and the rejection must not poison the module-level engine slot: the
+    // next mount still comes up and resolves its OWN gate.
+    init.mockImplementation(async () => {});
+    const ref2 = createRef<CitySceneHandle>();
+    render(<NavaraViewport ref={ref2} onTriangleCount={() => {}} />);
+    await waitFor(() => expect(ref2.current).not.toBeNull());
+    await expect(ref2.current!.ready).resolves.toBeUndefined();
+  });
+
+  // ALSO the regression guard for the ready gate's RE-ARM. StrictMode runs
+  // setup/cleanup/setup against one render, so the first pass's cleanup rejects
+  // the gate the component was born with; without the replacement installed in
+  // the same breath, the second pass would resolve a promise nobody can reuse
+  // and `ready` below would stay rejected forever. (It does NOT guard the
+  // getter on the handle — React happens to rebuild the imperative handle in
+  // lockstep with this cleanup, so a captured promise would pass here too.
+  // The getter is there to stop the component depending on that ordering.)
   it("builds exactly ONE engine across a StrictMode double mount", async () => {
     // Not cosmetic: `@navaramap/three` keeps its worker pool in a module-level
     // singleton, and a second `view.init()` overlapping the first throws
