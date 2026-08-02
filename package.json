@@ -19,7 +19,13 @@
   },
   "dependencies": {
     "@cityjson/flatcitybuf": "^0.3.0",
+    "@cityjson/navara-cityjson": "file:packages/cityjson-navara-plugins/packages/navara-cityjson",
+    "@cityjson/navara-cityparquet": "file:packages/cityjson-navara-plugins/packages/navara-cityparquet",
+    "@cityjson/navara-core": "file:packages/cityjson-navara-plugins/packages/navara-core",
+    "@cityjson/navara-flatcitybuf": "file:packages/cityjson-navara-plugins/packages/navara-flatcitybuf",
     "@duckdb/duckdb-wasm": "latest",
+    "@navaramap/three": "0.0.5",
+    "@navaramap/three-default-plugin": "0.0.5",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
     "@react-three/postprocessing": "^3.0.4",
@@ -33,7 +39,7 @@
     "react": "latest",
     "react-dom": "latest",
     "suncalc": "^1.9.0",
-    "three": "latest",
+    "three": "0.183.2",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
@@ -49,13 +55,13 @@
     "@vitejs/plugin-react": "latest",
     "jsdom": "latest",
     "typescript": "latest",
-    "vite": "npm:@voidzero-dev/vite-plus-core@latest",
+    "vite": "8.0.3",
     "vite-plus": "latest",
-    "vitest": "npm:@voidzero-dev/vite-plus-test@latest"
+    "vitest": "4.1.2"
   },
   "packageManager": "npm@11.12.1",
   "overrides": {
-    "vite": "npm:@voidzero-dev/vite-plus-core@latest",
-    "vitest": "npm:@voidzero-dev/vite-plus-test@latest"
+    "vite": "8.0.3",
+    "vitest": "4.1.2"
   }
 }
