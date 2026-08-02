@@ -294,8 +294,10 @@ are unrelated to Milestone 7 (CityGML) above. Phase status:
 
 - M7.1 (plugin monorepo scaffold + submodule + app wiring): Complete
 - M7.2 (format-agnostic domain moved into @cityjson/navara-core; app re-exports at the old paths): Complete
-- M7.3 (plugin + viewport rendering a static CityJSON layer): Not started
-- M7.4 (picking, cursor readout, rules, highlight, LoD): Not started
+- M7.3 (plugin + viewport rendering a static CityJSON layer): Complete
+- M7.4 (picking, cursor readout, rules, highlight, LoD): Complete — verified end-to-end
+  in the browser on the real engine; log in
+  `docs/superpowers/research/2026-08-01-navara-spike-findings.md` §10
 - M7.5 (@cityjson/navara-flatcitybuf streaming plugin): Not started
 - M7.6 (solar, Google 3D Tiles, geographic persistence): Not started
 - M7.7 (teardown, dependency pinning, docs): Not started
