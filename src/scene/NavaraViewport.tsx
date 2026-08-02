@@ -56,6 +56,7 @@ import {
   syncLayers,
   syncStyles,
   totalTriangles,
+  type HighlightMemo,
   type InteractionHandle,
   type LiveLayer,
 } from "./handleSync";
@@ -413,6 +414,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     // select — has to repaint too, not just one made by a click in here.
     const selections = useSelectionStore((s) => s.selections);
     const hovered = useSelectionStore((s) => s.hovered);
+    /** What each live handle was last told. Keyed by handle identity, so a
+     *  deleted layer's entry disappears with it and a re-added layer's fresh
+     *  handle is always pushed to. */
+    const highlightMemoRef = useRef<HighlightMemo>(new WeakMap());
     useEffect(() => {
       if (!engineReady) return;
       syncHighlight(
@@ -421,6 +426,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         allInteractionHandles(layers, liveRef.current, streamsRef.current),
         selections,
         hovered,
+        // Hovering a building in one layer must not repaint the others:
+        // `setHighlight` recolors the whole layer, and this effect runs on
+        // every hover step.
+        highlightMemoRef.current,
       );
     }, [engineReady, layers, selections, hovered]);
 
@@ -490,6 +499,14 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           const lle = vector3ToGeodetic(ecef);
           onCursorPosition(
             crsFromGeodetic(
+              // RADIANS in, degrees out. Evidence, not assumption: the B1 spike
+              // placed its probe mesh with the exact inverse of this call —
+              // `geodeticToVector3({ lng: degreeToRadian(site.lng), lat:
+              // degreeToRadian(site.lat), height })` (`src/spike/
+              // navaraMrtSpike.ts`) — and the mesh rendered at the right place
+              // on the globe in the browser. The engine's `LatLngHeight` is
+              // degrees elsewhere in its own API (`flyTo`,
+              // `camera.positionGeographic`), so this must stay explicit.
               radianToDegree(lle.lng),
               radianToDegree(lle.lat),
               // ELLIPSOIDAL -> ORTHOMETRIC. The layer sits `heightOffset`
@@ -504,9 +521,29 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         });
       };
 
+      /**
+       * The last mousemove the ENGINE reported, by object identity.
+       *
+       * `convertMouseEventToMapEvent` `Object.assign`s `{ map }` onto the very
+       * DOM event it received and returns `null` when the screen ray misses the
+       * ellipsoid — so the object the engine emits IS the object our own DOM
+       * listener sees afterwards (the engine binds to the canvas, we bind to its
+       * parent, so bubbling puts the engine first). Comparing them is therefore
+       * an exact "did the engine handle this move?" test.
+       */
+      let lastEngineMove: unknown = null;
+
+      /** Nothing is under the cursor: drop the hover and the readout. */
+      const clearCursorState = () => {
+        const store = useSelectionStore.getState();
+        if (store.hovered !== null) store.hover(null);
+        onCursorPosition?.(null);
+      };
+
       const onMouseDown = (e: MouseEvent) => clickGate.down(canvasPointOf(e));
 
       const onMouseMove = (e: MouseEvent) => {
+        lastEngineMove = e;
         const point = canvasPointOf(e);
         clickGate.move(point);
         const store = useSelectionStore.getState();
@@ -543,10 +580,33 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         );
       };
 
-      const onMouseLeave = () => {
-        useSelectionStore.getState().hover(null);
-        onCursorPosition?.(null);
+      /**
+       * SKY DETECTOR, and the reason the two listeners below exist at all.
+       *
+       * The engine emits NO pointer event — not `mousemove`, not even
+       * `mouseleave` — when the screen ray misses the ellipsoid, because
+       * `convertMouseEventToMapEvent` returns null and the emit is skipped.
+       * Relying on engine events alone therefore freezes the hover highlight
+       * and the status bar at their last on-globe values the moment the cursor
+       * moves onto the sky, and leaves them frozen if the pointer exits the
+       * canvas across a sky pixel.
+       *
+       * The DOM always fires, so the container listens too: a move the engine
+       * did NOT claim is a move over the sky.
+       */
+      const onDomMouseMove = (e: MouseEvent) => {
+        // Feed the drag gate from here as well: a gesture that starts or moves
+        // over the sky is invisible to the engine, and a stale gate would let
+        // the click that ends it commit a selection.
+        clickGate.move(canvasPointOf(e));
+        if (lastEngineMove === e) return;
+        clearCursorState();
       };
+      const onDomMouseDown = (e: MouseEvent) =>
+        clickGate.down(canvasPointOf(e));
+      // Leaving the canvas: unconditional, and the one case the engine's own
+      // `mouseleave` cannot be trusted for.
+      const onDomMouseLeave = () => clearCursorState();
 
       // No `view.on("pick", ...)`: PICK_PATH is "own-raycast" (Task B1).
       // `PickableMeshWrapper` allocates ONE batch id per mesh, so an engine
@@ -557,12 +617,19 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       view.on("mousedown", onMouseDown);
       view.on("mousemove", onMouseMove);
       view.on("click", onClick);
-      view.on("mouseleave", onMouseLeave);
+
+      const host = containerRef.current;
+      host?.addEventListener("mousemove", onDomMouseMove);
+      host?.addEventListener("mousedown", onDomMouseDown);
+      host?.addEventListener("mouseleave", onDomMouseLeave);
+
       return () => {
         view.off("mousedown", onMouseDown);
         view.off("mousemove", onMouseMove);
         view.off("click", onClick);
-        view.off("mouseleave", onMouseLeave);
+        host?.removeEventListener("mousemove", onDomMouseMove);
+        host?.removeEventListener("mousedown", onDomMouseDown);
+        host?.removeEventListener("mouseleave", onDomMouseLeave);
       };
     }, [engineReady, layers, onCursorPosition]);
 

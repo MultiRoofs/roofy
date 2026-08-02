@@ -637,7 +637,34 @@ describe("NavaraViewport lifecycle", () => {
     await waitFor(() =>
       expect(on.mock.calls.some((c) => c[0] === "mousemove")).toBe(true),
     );
-    return { ...view, handles };
+    // The div the engine would append its canvas to — and the element the
+    // viewport binds its own DOM listeners to.
+    const host = view.container.querySelector(
+      ".navara-viewport__canvas",
+    ) as HTMLElement;
+    return { ...view, handles, host };
+  }
+
+  /** A real DOM mouse event, optionally announced to the engine bus FIRST —
+   *  which is the real ordering: the engine listens on the canvas, the viewport
+   *  on its parent, so bubbling puts the engine handler first. */
+  function domMouse(
+    host: HTMLElement,
+    type: string,
+    x: number,
+    y: number,
+    opts: { engineSees?: boolean } = {},
+  ) {
+    const ev = new MouseEvent(type, { bubbles: true, clientX: x + 300 });
+    Object.defineProperty(ev, "offsetX", { value: x });
+    Object.defineProperty(ev, "offsetY", { value: y });
+    const relay = (e: Event) => fire(type, e);
+    if (opts.engineSees) host.addEventListener(type, relay, true);
+    act(() => {
+      host.dispatchEvent(ev);
+    });
+    if (opts.engineSees) host.removeEventListener(type, relay, true);
+    return ev;
   }
 
   it("hovers the NEAREST layer under the cursor, not the first in the list", async () => {
@@ -752,15 +779,67 @@ describe("NavaraViewport lifecycle", () => {
   });
 
   it("clears the hover and the readout when the pointer leaves the canvas", async () => {
+    // A DOM listener, not the engine's `mouseleave`: the engine skips the emit
+    // whenever the screen ray misses the ellipsoid, so leaving the canvas
+    // across a sky pixel would never be reported.
     const onCursorPosition = vi.fn();
-    await mountTwoLayers({ a: null, b: 12 }, { onCursorPosition });
+    const { host } = await mountTwoLayers(
+      { a: null, b: 12 },
+      { onCursorPosition },
+    );
     act(() => fire("mousemove", mouse(10, 20)));
     expect(useSelectionStore.getState().hovered).not.toBeNull();
 
     onCursorPosition.mockClear();
-    act(() => fire("mouseleave", mouse(0, 0)));
+    domMouse(host, "mouseleave", 0, 0);
     expect(useSelectionStore.getState().hovered).toBeNull();
     expect(onCursorPosition).toHaveBeenCalledWith(null);
+  });
+
+  it("clears hover and readout on a move the engine never reported (SKY)", async () => {
+    // The engine emits nothing at all — not even mouseleave — when the screen
+    // ray misses the ellipsoid, so without this the highlight and the status
+    // bar freeze at their last on-globe values.
+    const onCursorPosition = vi.fn();
+    const { host } = await mountTwoLayers(
+      { a: null, b: 12 },
+      { onCursorPosition },
+    );
+    act(() => fire("mousemove", mouse(10, 20)));
+    expect(useSelectionStore.getState().hovered).not.toBeNull();
+
+    onCursorPosition.mockClear();
+    domMouse(host, "mousemove", 400, 400); // engine stayed silent => sky
+    expect(useSelectionStore.getState().hovered).toBeNull();
+    expect(onCursorPosition).toHaveBeenCalledWith(null);
+  });
+
+  it("does NOT clear on a move the engine did report", async () => {
+    const onCursorPosition = vi.fn();
+    const { host } = await mountTwoLayers(
+      { a: null, b: 12 },
+      { onCursorPosition },
+    );
+    pickDepthPosition.mockReturnValue({
+      x: (4.348 * Math.PI) / 180,
+      y: (52.006 * Math.PI) / 180,
+      z: 14,
+    });
+    onCursorPosition.mockClear();
+    domMouse(host, "mousemove", 10, 20, { engineSees: true });
+    // Same event object reached both listeners: the cursor is on the globe.
+    expect(useSelectionStore.getState().hovered).not.toBeNull();
+    expect(onCursorPosition.mock.calls.at(-1)![0]).not.toBeNull();
+  });
+
+  it("arms the drag gate from the DOM too, so a gesture over sky still blocks", async () => {
+    // A mousedown over the sky is invisible to the engine; a gate armed only by
+    // engine events would still be holding the previous gesture's state.
+    const { host } = await mountTwoLayers({ a: null, b: 12 });
+    domMouse(host, "mousedown", 100, 100);
+    domMouse(host, "mousemove", 160, 100);
+    act(() => fire("click", mouse(160, 100)));
+    expect(useSelectionStore.getState().selections).toEqual([]);
   });
 
   it("reports the cursor in the layer's source CRS at ORTHOMETRIC height", async () => {
@@ -800,30 +879,79 @@ describe("NavaraViewport lifecycle", () => {
     expect(onCursorPosition).toHaveBeenLastCalledWith(null);
   });
 
-  it("pushes selection and hover to every handle, hidden layers included", async () => {
+  it("pushes a selection to its owning handle, HIDDEN or not", async () => {
     const { handles } = await mountTwoLayers({ a: null, b: null });
-    const sel = { kind: "object" as const, layerId: "b", objectId: "b-obj" };
+    const inB = { kind: "object" as const, layerId: "b", objectId: "b-obj" };
     handles.a.setHighlight.mockClear();
     handles.b.setHighlight.mockClear();
 
-    act(() => useSelectionStore.setState({ selections: [sel] }));
+    // The whole array goes to the handle unfiltered — it keeps only its own
+    // entries — but only the handle whose own view moved is pushed to.
+    act(() => useSelectionStore.setState({ selections: [inB] }));
     await waitFor(() =>
-      expect(handles.b.setHighlight).toHaveBeenCalledWith([sel], undefined),
+      expect(handles.b.setHighlight).toHaveBeenCalledWith([inB], undefined),
     );
-    // Layer "a" is told too: it filters by its own layerId, and a handle that
-    // owns nothing in the selection has to CLEAR itself.
-    expect(handles.a.setHighlight).toHaveBeenCalledWith([sel], undefined);
+    expect(handles.a.setHighlight).not.toHaveBeenCalled();
 
-    // ...and a hidden layer keeps up, so re-showing it does not reveal a stale
+    // A HIDDEN layer still keeps up, so re-showing it cannot reveal a stale
     // highlight.
     useLayerStore.setState({
       layers: [makeLayer({ id: "a", visible: false }), makeLayer({ id: "b" })],
     });
-    handles.a.setHighlight.mockClear();
-    act(() => useSelectionStore.setState({ selections: [] }));
+    const inA = { kind: "object" as const, layerId: "a", objectId: "a-obj" };
+    act(() => useSelectionStore.setState({ selections: [inA] }));
     await waitFor(() =>
-      expect(handles.a.setHighlight).toHaveBeenCalledWith([], undefined),
+      expect(handles.a.setHighlight).toHaveBeenCalledWith([inA], undefined),
     );
+    // ...and "b" is cleared, because its own selection went away.
+    expect(handles.b.setHighlight).toHaveBeenLastCalledWith([inA], undefined);
+  });
+
+  it("repaints only the layer whose own highlight changed", async () => {
+    // `setHighlight` recolors the WHOLE layer, and this runs on every hover
+    // step: without a per-handle memo, hovering a building in one layer costs a
+    // full recolor of every other layer too.
+    const { handles } = await mountTwoLayers({ a: null, b: null });
+    const inB = (objectId: string) => ({
+      kind: "object" as const,
+      layerId: "b",
+      objectId,
+    });
+
+    act(() => useSelectionStore.setState({ hovered: inB("B1") }));
+    await waitFor(() => expect(handles.b.setHighlight).toHaveBeenCalled());
+    handles.a.setHighlight.mockClear();
+    handles.b.setHighlight.mockClear();
+
+    // Hover moves to another building WITHIN layer b.
+    act(() => useSelectionStore.setState({ hovered: inB("B2") }));
+    await waitFor(() =>
+      expect(handles.b.setHighlight).toHaveBeenCalledTimes(1),
+    );
+    expect(handles.a.setHighlight).not.toHaveBeenCalled();
+  });
+
+  it("repaints BOTH layers when a selection change touches both", async () => {
+    const { handles } = await mountTwoLayers({ a: null, b: null });
+    act(() =>
+      useSelectionStore.setState({
+        selections: [{ kind: "object", layerId: "a", objectId: "A1" }],
+      }),
+    );
+    await waitFor(() => expect(handles.a.setHighlight).toHaveBeenCalled());
+    handles.a.setHighlight.mockClear();
+    handles.b.setHighlight.mockClear();
+
+    // Selecting in b instead: a must CLEAR and b must paint.
+    act(() =>
+      useSelectionStore.setState({
+        selections: [{ kind: "object", layerId: "b", objectId: "B1" }],
+      }),
+    );
+    await waitFor(() =>
+      expect(handles.b.setHighlight).toHaveBeenCalledTimes(1),
+    );
+    expect(handles.a.setHighlight).toHaveBeenCalledTimes(1);
   });
 
   it("never subscribes to the engine's pick event (PICK_PATH = own-raycast)", async () => {
@@ -835,10 +963,20 @@ describe("NavaraViewport lifecycle", () => {
   });
 
   it("unsubscribes every pointer listener on unmount", async () => {
-    const { unmount } = await mountTwoLayers({ a: null, b: null });
+    const { unmount, host } = await mountTwoLayers({ a: null, b: 12 });
+    act(() => fire("mousemove", mouse(10, 20)));
+    const hovered = useSelectionStore.getState().hovered;
+    expect(hovered).not.toBeNull();
     unmount();
+
+    // The DOM listeners went with it: a stray move must not clear a hover the
+    // component no longer owns.
+    domMouse(host, "mousemove", 400, 400);
+    domMouse(host, "mouseleave", 0, 0);
+    expect(useSelectionStore.getState().hovered).toBe(hovered);
+
     const removed = off.mock.calls.map((c) => c[0]);
-    for (const name of ["mousedown", "mousemove", "click", "mouseleave"]) {
+    for (const name of ["mousedown", "mousemove", "click"]) {
       expect(removed).toContain(name);
     }
     expect(listeners.get("mousemove")?.size ?? 0).toBe(0);
