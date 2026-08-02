@@ -1,8 +1,15 @@
 /**
  * Zustand store for per-layer viewport-streaming state, keyed by layer id.
  *
- * This is a SEPARATE store from `useLayerStore` on purpose. `layerStore`'s
- * `layers` array is subscribed to WHOLE by `CitySceneR3F.tsx`,
+ * The streaming state machine itself is NOT here: it lives in
+ * `@cityjson/navara-flatcitybuf`'s `FcbStreamLayerHandle`, which owns the
+ * worker, the resident cell cache, the LoD ladder and the commit counter, and
+ * only *reports* what it did through `onStatus`/`onLadder`/`onCommit`. This
+ * store is the React-visible mirror of those reports plus the handle itself —
+ * nothing recomputes here, and no consumer drives the stream through it.
+ *
+ * It is a SEPARATE store from `useLayerStore` on purpose. `layerStore`'s
+ * `layers` array is subscribed to WHOLE by `NavaraViewport.tsx`,
  * `InspectorPanel.tsx`, `TablePanel.tsx`, and read field-by-field by
  * `App.tsx` for object counts — and Zustand re-evaluates every selector on
  * every store notification to decide whether to re-render. A cell commit
@@ -17,43 +24,41 @@
  * streamStore.test.ts by reference equality (`toBe`), not deep equality.
  */
 import { create } from "zustand";
-import type { CellCache } from "./cellCache";
-import type { WorkerClient } from "./workerClient";
-import type { Grid } from "./tileGrid";
-import type { CellEntry } from "@cityjson/navara-flatcitybuf";
-import type { FcbHeaderModel } from "../../domain/citymodel/flatcitybuf/fcbSource";
+import type {
+  FcbHeaderModel,
+  FcbStreamLayerHandle,
+  Grid,
+  StreamStatus,
+} from "@cityjson/navara-flatcitybuf";
 
-/** Re-export shim — `CellEntry` (the resident-cell payload) and its empty
- *  constructor moved to `@cityjson/navara-flatcitybuf` in M7.5, alongside the
- *  commit planner that types its cache against them. */
-export { emptyCellEntry } from "@cityjson/navara-flatcitybuf";
-export type { CellEntry } from "@cityjson/navara-flatcitybuf";
-
-export type StreamStatus =
-  | "idle"
-  | "probing"
-  | "fetching"
-  | "too-far"
-  | "error";
+/** Re-export shim — the streaming status vocabulary moved to
+ *  `@cityjson/navara-flatcitybuf` with the handle that emits it. */
+export type { StreamStatus };
 
 export interface StreamState {
-  readonly client: WorkerClient;
+  /** The layer's plugin handle: the owner of the worker, the resident cell
+   *  cache and the commit loop. Held by REFERENCE and never replaced by any
+   *  action below — a version bump mirrors a commit, it does not re-create
+   *  the thing that committed. */
+  readonly handle: FcbStreamLayerHandle;
+  /** `handle.grid`, mirrored so `LodSelector` can size a cell without
+   *  reaching into the handle on every render. Immutable for the layer's
+   *  lifetime, which is why mirroring it needs no updater. */
   readonly grid: Grid;
   readonly header: FcbHeaderModel;
-  readonly cache: CellCache<CellEntry>;
+  /** The tile level the last commit settled on, mirrored from `handle.level`
+   *  by {@link StreamStoreActions.setLevel}. `null` until the first commit —
+   *  `LodSelector`'s auto read-out shows a bare "Auto" until then. */
   readonly level: number | null;
   readonly ladder: ReadonlyArray<string>;
   readonly ladderVersion: number;
   readonly status: StreamStatus;
   readonly message: string | null;
-  readonly lastCommit: {
-    readonly centre: readonly [number, number];
-    readonly span: number;
-  } | null;
   /** Bumped on every cell commit. The ONLY thing that changes on a commit —
    *  see the module doc comment for why. Consumers that need to react to a
-   *  commit (e.g. the R3F scene syncing cell meshes) select this field, not
-   *  `streams` as a whole and not `useLayerStore.layers`. */
+   *  commit (the layer panel's feature count, the inspector's resident
+   *  model) select this field, not `streams` as a whole and not
+   *  `useLayerStore.layers`. */
   readonly version: number;
 }
 
@@ -71,11 +76,17 @@ export interface StreamStoreActions {
     status: StreamStatus,
     message?: string | null,
   ) => void;
-  /** Persists the LoD ladder `useTileStreaming.ts` derives from what the
-   *  worker has actually observed across every commit so far (see
-   *  `buildLadder` in levelPolicy.ts). A no-op for an unregistered layer id,
-   *  same race-tolerance convention as `bumpVersion`/`setStatus`. */
+  /** Persists the LoD ladder the handle derives from what the worker has
+   *  actually observed across every commit so far (see `buildLadder` in the
+   *  plugin's levelPolicy). A no-op for an unregistered layer id, same
+   *  race-tolerance convention as `bumpVersion`/`setStatus`. */
   setLadder: (layerId: string, ladder: ReadonlyArray<string>) => void;
+  /** Mirrors `handle.level` after a commit. Separate from `bumpVersion`
+   *  because the two have different audiences — `LodSelector` re-renders on
+   *  the level, everything else on the version — and Zustand notifies per
+   *  `set`, so folding them into one write would re-render both on either
+   *  change. A no-op for an unregistered layer id. */
+  setLevel: (layerId: string, level: number | null) => void;
 }
 
 export type StreamStore = StreamStoreState & StreamStoreActions;
@@ -137,6 +148,15 @@ export const useStreamStore = create<StreamStore>((set, getState) => ({
             ladderVersion: entry.ladderVersion + 1,
           },
         },
+      };
+    }),
+
+  setLevel: (layerId, level) =>
+    set((s) => {
+      const entry = s.streams[layerId];
+      if (!entry || entry.level === level) return s;
+      return {
+        streams: { ...s.streams, [layerId]: { ...entry, level } },
       };
     }),
 }));

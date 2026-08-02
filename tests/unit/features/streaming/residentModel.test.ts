@@ -1,66 +1,51 @@
 /**
- * The merge itself (and its memo) moved to `@cityjson/navara-flatcitybuf` in
- * M7.5 — see that package's `tests/residentModel.test.ts` for the cell-merge,
- * attr-key-union and reference-equality cases. What is left here is the app's
- * store binding: resolving a layer id to its cache via `useStreamStore`, one
- * memo per layer id, and the unregistered-layer case.
+ * The merge moved to `@cityjson/navara-flatcitybuf` in M7.5, and its memo
+ * moved INTO `FcbStreamLayerHandle` in Task C9 — see that package's
+ * `tests/residentModel.test.ts` for the cell-merge, attr-key-union and
+ * reference-equality cases. What is left here is the app's store binding:
+ * resolving a layer id to its handle, and the unregistered-layer case.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import {
-  getResidentModel,
-  __resetMemo,
-} from "../../../../src/features/streaming/residentModel";
+import { getResidentModel } from "../../../../src/features/streaming/residentModel";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
-import { CellCache } from "../../../../src/features/streaming/cellCache";
+import type { ResidentModel } from "@cityjson/navara-flatcitybuf";
 
-function entry(ids: string[]) {
+function model(ids: string[]): ResidentModel {
   return {
-    objects: ids.map((id) => ({
-      id,
-      objectType: "Building",
-      attributes: {},
-      bbox: [0, 0, 0, 1, 1, 1],
-      lod: "2.2",
-      surfaceCount: 2,
-      roofMetrics: [],
-      footprintAreaSqM: 10,
-      volumeCuM: 30,
-      parents: [],
-      children: [],
-    })),
+    objects: Object.fromEntries(
+      ids.map((id) => [id, { id } as ResidentModel["objects"][string]]),
+    ),
+    cellCount: 1,
+    featureCount: ids.length,
     surfaceAttrKeys: ["slope"],
   };
 }
 
-let cache: CellCache<never>;
+let getResident: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
-  __resetMemo();
-  cache = new CellCache<never>({
-    maxTriangles: Infinity,
-    maxBytes: Infinity,
+  getResident = vi.fn(() => model(["a", "b"]));
+  useStreamStore.setState({
+    streams: { L: { handle: { getResidentModel: getResident } } as never },
   });
-  cache.set("2/0/0", entry(["a", "b"]) as never, { triangles: 1, bytes: 1 });
-  cache.set("2/1/0", entry(["c"]) as never, { triangles: 1, bytes: 1 });
-  useStreamStore.setState({ streams: { L: { cache, version: 1 } as never } });
 });
 
 describe("getResidentModel", () => {
-  it("merges the objects of the cells resident in the layer's cache", () => {
+  it("delegates to the layer's handle", () => {
     const m = getResidentModel("L", 1);
-    expect(Object.keys(m.objects).sort()).toEqual(["a", "b", "c"]);
-    expect(m.cellCount).toBe(2);
-    expect(m.featureCount).toBe(3);
-    expect(m.surfaceAttrKeys).toEqual(["slope"]);
+    expect(Object.keys(m.objects).sort()).toEqual(["a", "b"]);
+    expect(m.featureCount).toBe(2);
+    expect(getResident).toHaveBeenCalledTimes(1);
   });
 
-  it("returns the identical object for the same version (memoised)", () => {
-    expect(getResidentModel("L", 1)).toBe(getResidentModel("L", 1));
-  });
-
-  it("recomputes when the version changes", () => {
-    const first = getResidentModel("L", 1);
-    expect(getResidentModel("L", 2)).not.toBe(first);
+  it("does NOT memoise on `version` — the handle memoises on its own commit counter, which is the only one that knows a cell landed", () => {
+    getResidentModel("L", 1);
+    getResidentModel("L", 1);
+    // Two calls in, two calls through: an app-side memo keyed on the version
+    // passed in would have swallowed the second, and would then have served a
+    // stale model for any commit that did not change the version it was
+    // handed (a recolor, a mid-flight eviction).
+    expect(getResident).toHaveBeenCalledTimes(2);
   });
 
   it("returns an empty model for a layer with no stream registered", () => {
@@ -73,90 +58,38 @@ describe("getResidentModel", () => {
     });
   });
 
-  it("keeps a separate memo entry per layer", () => {
-    const cacheB = new CellCache<never>({
-      maxTriangles: Infinity,
-      maxBytes: Infinity,
-    });
-    cacheB.set("2/0/0", entry(["z"]) as never, { triangles: 1, bytes: 1 });
-    useStreamStore.setState((s) => ({
-      streams: {
-        ...s.streams,
-        M: { cache: cacheB, version: 1 } as never,
-      },
-    }));
-
-    const mL = getResidentModel("L", 1);
-    const mM = getResidentModel("M", 1);
-    expect(Object.keys(mL.objects).sort()).toEqual(["a", "b", "c"]);
-    expect(Object.keys(mM.objects)).toEqual(["z"]);
-    // Recomputing L again at the same version must still be memoised and
-    // unaffected by M's entry having been computed in between.
-    expect(getResidentModel("L", 1)).toBe(mL);
-  });
-
-  it("is genuinely lazy: recomputation only happens when a caller actually asks for the new version, not on every commit", () => {
-    // First call actually reads the cache (spy proves the merge ran).
-    const keysSpy = vi.spyOn(cache, "keys");
-    const first = getResidentModel("L", 1);
-    expect(keysSpy).toHaveBeenCalledTimes(1);
-
-    // Simulate several cell commits bumping the store's version WITHOUT any
-    // consumer calling getResidentModel — this is the exact scenario the
-    // module doc warns a Zustand selector would get wrong (materialising on
-    // every notification). A plain function only runs when called.
-    for (let i = 0; i < 5; i++) useStreamStore.getState().bumpVersion("L");
-    expect(useStreamStore.getState().streams.L!.version).toBe(6);
-
-    // No call happened in between, so asking again for the STALE version 1
-    // must still hit the memo (no new cache read) and return the same
-    // object — proving no background/eager recomputation occurred.
-    expect(keysSpy).toHaveBeenCalledTimes(1);
-    expect(getResidentModel("L", 1)).toBe(first);
-    expect(keysSpy).toHaveBeenCalledTimes(1);
-
-    // Only calling with the NEW version triggers exactly one more merge.
-    const second = getResidentModel("L", 6);
-    expect(keysSpy).toHaveBeenCalledTimes(2);
-    expect(second).not.toBe(first);
-  });
-
-  it("gives the same empty model object every time for an unregistered layer", () => {
+  it("gives the same empty model object every time for an unregistered layer, so it is safe as a hook dependency", () => {
     expect(getResidentModel("nope", 0)).toBe(getResidentModel("nope", 1));
   });
 
-  it("drops the memo of an unregistered layer so its cache can be collected", () => {
-    const keysSpy = vi.spyOn(cache, "keys");
+  it("stops answering from a layer that was unregistered — nothing keeps its cells alive", () => {
     getResidentModel("L", 1);
-    expect(keysSpy).toHaveBeenCalledTimes(1);
-
     useStreamStore.getState().unregister("L");
-    // Any later call prunes the dead entry — nothing must keep holding L's
-    // cache (and its decoded cell geometry) alive.
-    getResidentModel("other", 0);
-
-    // Re-registering the very same cache at the very same version therefore
-    // merges again instead of answering from a memo that outlived the layer.
-    useStreamStore.setState({ streams: { L: { cache, version: 1 } as never } });
-    getResidentModel("L", 1);
-    expect(keysSpy).toHaveBeenCalledTimes(2);
+    expect(getResidentModel("L", 1).featureCount).toBe(0);
   });
 
-  it("does not serve a model merged from a torn-down layer's cache", () => {
-    const first = getResidentModel("L", 1);
-    // Re-registering restarts the layer with a fresh cache — and a version
-    // counter that starts over, so version alone cannot tell them apart.
-    const restarted = new CellCache<never>({
-      maxTriangles: Infinity,
-      maxBytes: Infinity,
-    });
-    restarted.set("2/0/0", entry(["z"]) as never, { triangles: 1, bytes: 1 });
+  it("does not serve a model from a torn-down layer's handle after the layer restarts", () => {
+    expect(Object.keys(getResidentModel("L", 1).objects).sort()).toEqual([
+      "a",
+      "b",
+    ]);
     useStreamStore.setState({
-      streams: { L: { cache: restarted, version: 1 } as never },
+      streams: {
+        L: { handle: { getResidentModel: () => model(["z"]) } } as never,
+      },
     });
+    // Same layer id, same version — only the handle changed, and the answer
+    // follows the handle.
+    expect(Object.keys(getResidentModel("L", 1).objects)).toEqual(["z"]);
+  });
 
-    const after = getResidentModel("L", 1);
-    expect(after).not.toBe(first);
-    expect(Object.keys(after.objects)).toEqual(["z"]);
+  it("is genuinely lazy: nothing recomputes until a caller actually asks, however many commits land", () => {
+    getResidentModel("L", 1);
+    expect(getResident).toHaveBeenCalledTimes(1);
+    for (let i = 0; i < 5; i++) useStreamStore.getState().bumpVersion("L");
+    // Five commits, no consumer call: the merge must not have run again. This
+    // is the exact scenario the module doc warns a Zustand selector would get
+    // wrong (materialising on every notification).
+    expect(getResident).toHaveBeenCalledTimes(1);
   });
 });

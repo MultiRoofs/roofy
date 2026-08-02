@@ -18,8 +18,19 @@ import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import { CellCache } from "../../../../src/features/streaming/cellCache";
-import { __resetMemo } from "../../../../src/features/streaming/residentModel";
+import { buildResidentModel } from "@cityjson/navara-flatcitybuf";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
+
+/** The streaming layer's plugin handle, reduced to the one method the UI
+ *  reaches: the resident-model merge (which the plugin owns and memoises on
+ *  its own commit counter). Built over a real `CellCache` so the merge under
+ *  test is the real `buildResidentModel`, not a hand-written stand-in. */
+function residentHandle(cache: unknown) {
+  return {
+    getResidentModel: () =>
+      buildResidentModel(cache as Parameters<typeof buildResidentModel>[0]),
+  };
+}
 
 afterEach(() => {
   cleanup();
@@ -29,7 +40,6 @@ afterEach(() => {
   // version) — several tests below reuse layerId "L" at version 1 with
   // DIFFERENT cache contents, so a stale memo entry would silently serve
   // the wrong test's data instead of recomputing.
-  __resetMemo();
 });
 
 function emptyModel(): CityModel {
@@ -113,7 +123,9 @@ describe("LayerPanel — streaming layer", () => {
       triangles: 1,
       bytes: 1,
     });
-    useStreamStore.setState({ streams: { L: { cache, version: 1 } as never } });
+    useStreamStore.setState({
+      streams: { L: { handle: residentHandle(cache), version: 1 } as never },
+    });
     useLayerStore.setState({
       layers: [baseLayer({ isStreaming: true })],
       activeLayerId: "L",
@@ -135,7 +147,9 @@ describe("LayerPanel — streaming layer", () => {
       triangles: 1,
       bytes: 1,
     });
-    useStreamStore.setState({ streams: { L: { cache, version: 1 } as never } });
+    useStreamStore.setState({
+      streams: { L: { handle: residentHandle(cache), version: 1 } as never },
+    });
     useLayerStore.setState({
       layers: [baseLayer({ isStreaming: true })],
       activeLayerId: "L",
@@ -157,7 +171,9 @@ describe("LayerPanel — streaming layer", () => {
       triangles: 1,
       bytes: 1,
     });
-    useStreamStore.setState({ streams: { L: { cache, version: 1 } as never } });
+    useStreamStore.setState({
+      streams: { L: { handle: residentHandle(cache), version: 1 } as never },
+    });
     useLayerStore.setState({
       layers: [baseLayer({ isStreaming: true })],
       activeLayerId: "L",

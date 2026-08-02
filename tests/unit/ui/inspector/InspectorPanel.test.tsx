@@ -13,8 +13,8 @@
  * real gap: the surfaces fetch originally fired for ANY selected object on
  * a streaming layer regardless of which tab was showing, not just when the
  * Surfaces/Analysis tab actually needed rings. Fixed in InspectorPanel.tsx
- * (`needsSurfaces`), proven here by asserting the worker's `send` is NOT
- * called while the Object tab is showing.
+ * (`needsSurfaces`), proven here by asserting the handle's `fetchSurfaces`
+ * is NOT called while the Object tab is showing.
  */
 import {
   afterEach,
@@ -37,13 +37,25 @@ import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import { CellCache } from "../../../../src/features/streaming/cellCache";
-import type { WorkerClient } from "../../../../src/features/streaming/workerClient";
-import type { WorkerResponse } from "../../../../src/features/streaming/workerProtocol";
+import { buildResidentModel } from "@cityjson/navara-flatcitybuf";
+import type { FcbStreamLayerHandle } from "@cityjson/navara-flatcitybuf";
+import type { Surface } from "../../../../src/domain/citymodel/types";
 import type {
   CityModel,
   CityObject,
 } from "../../../../src/domain/citymodel/types";
 import type { Selection } from "../../../../src/domain/selection/types";
+
+/** The streaming layer's plugin handle, reduced to the one method the UI
+ *  reaches: the resident-model merge (which the plugin owns and memoises on
+ *  its own commit counter). Built over a real `CellCache` so the merge under
+ *  test is the real `buildResidentModel`, not a hand-written stand-in. */
+function residentHandle(cache: unknown) {
+  return {
+    getResidentModel: () =>
+      buildResidentModel(cache as Parameters<typeof buildResidentModel>[0]),
+  };
+}
 
 afterEach(() => {
   cleanup();
@@ -76,10 +88,6 @@ function baseLayer(overrides: Partial<Layer>): Layer {
     isStreaming: false,
     ...overrides,
   };
-}
-
-function fakeClient(send: WorkerClient["send"]): WorkerClient {
-  return { send } as unknown as WorkerClient;
 }
 
 function tabButton(name: string): HTMLElement {
@@ -201,13 +209,18 @@ describe("InspectorPanel — streaming layer", () => {
     children: [],
   };
 
-  let send: Mock<WorkerClient["send"]>;
-  let resolveSend: (r: WorkerResponse) => void;
+  let fetchSurfaces: Mock<FcbStreamLayerHandle["fetchSurfaces"]>;
+  let resolveSurfaces: (s: readonly Surface[]) => void;
+  let rejectSurfaces: (e: Error) => void;
 
   beforeEach(() => {
-    send = vi.fn((..._args: Parameters<WorkerClient["send"]>) => {
-      return new Promise<WorkerResponse>((r) => (resolveSend = r));
-    });
+    fetchSurfaces = vi.fn(
+      () =>
+        new Promise<readonly Surface[]>((res, rej) => {
+          resolveSurfaces = res;
+          rejectSurfaces = rej;
+        }),
+    );
     const cache = new CellCache<never>({
       maxTriangles: Infinity,
       maxBytes: Infinity,
@@ -219,7 +232,10 @@ describe("InspectorPanel — streaming layer", () => {
     );
     useStreamStore.setState({
       streams: {
-        L: { cache, version: 1, client: fakeClient(send) } as never,
+        L: {
+          handle: { ...residentHandle(cache), fetchSurfaces },
+          version: 1,
+        } as never,
       },
     });
     useLayerStore.setState({
@@ -241,7 +257,7 @@ describe("InspectorPanel — streaming layer", () => {
     expect(screen.getByText("≈ 128.0 m³")).toBeTruthy();
     // The Object tab needs no ring geometry, so the worker's 'surfaces'
     // message must not have been sent just from selecting the object.
-    expect(send).not.toHaveBeenCalled();
+    expect(fetchSurfaces).not.toHaveBeenCalled();
   });
 
   it("renders 'N/A' for a null volumeCuM instead of crashing", () => {
@@ -261,20 +277,12 @@ describe("InspectorPanel — streaming layer", () => {
 
     fireEvent.click(tabButton("Surfaces"));
     expect(screen.getByText("Loading surfaces…")).toBeTruthy();
-    expect(send).toHaveBeenCalledWith({
-      type: "surfaces",
-      objectId: "stream-1",
-    });
+    expect(fetchSurfaces).toHaveBeenCalledWith("stream-1");
 
     await act(async () => {
-      resolveSend({
-        type: "surfaceData",
-        id: 1,
-        objectId: "stream-1",
-        surfaces: [
-          { type: "WallSurface", rings: [], attributes: {}, lod: null },
-        ],
-      });
+      resolveSurfaces([
+        { type: "WallSurface", rings: [], attributes: {}, lod: null },
+      ]);
       await Promise.resolve();
     });
 
@@ -282,7 +290,7 @@ describe("InspectorPanel — streaming layer", () => {
     expect(screen.getByText("WallSurface")).toBeTruthy();
   });
 
-  it("shows an error message instead of hanging when the worker reports one", async () => {
+  it("shows an error message instead of hanging when the fetch rejects", async () => {
     const selections: Selection[] = [
       { kind: "object", layerId: "L", objectId: "stream-1" },
     ];
@@ -290,12 +298,7 @@ describe("InspectorPanel — streaming layer", () => {
 
     fireEvent.click(tabButton("Analysis"));
     await act(async () => {
-      resolveSend({
-        type: "error",
-        id: 1,
-        message: "not resident",
-        aborted: false,
-      });
+      rejectSurfaces(new Error("not resident"));
       await Promise.resolve();
     });
 

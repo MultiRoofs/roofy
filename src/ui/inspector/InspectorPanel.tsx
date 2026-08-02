@@ -130,8 +130,8 @@ export function InspectorPanel({
   const streamVersion = useStreamStore((s) =>
     displayLayer ? s.streams[displayLayer.id]?.version : undefined,
   );
-  const streamClient = useStreamStore((s) =>
-    displayLayer ? s.streams[displayLayer.id]?.client : undefined,
+  const streamHandle = useStreamStore((s) =>
+    displayLayer ? s.streams[displayLayer.id]?.handle : undefined,
   );
 
   const residentModel =
@@ -193,7 +193,7 @@ export function InspectorPanel({
   // need rings is showing.
   const needsSurfaces = activeTab === "surfaces" || activeTab === "analysis";
   const surfacesFetch = useObjectSurfaces(
-    isStreaming && needsSurfaces ? (streamClient ?? null) : null,
+    isStreaming && needsSurfaces ? (streamHandle ?? null) : null,
     isStreaming && needsSurfaces ? singleSelectedId : null,
   );
 
