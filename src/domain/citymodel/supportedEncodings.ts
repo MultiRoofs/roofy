@@ -1,30 +1,11 @@
-export const CITYMODEL_ENCODING_PRIORITY = [
-  "cityjson",
-  "cityjsonseq",
-  "flatcitybuf",
-  "citygml",
-] as const;
+/**
+ * Re-export shim — the encoding list now lives in `@cityjson/navara-core`
+ * (M7.2 of the Navara migration).
+ */
 
-export type CityModelEncoding = (typeof CITYMODEL_ENCODING_PRIORITY)[number];
-
-const SUPPORTED_CITYMODEL_ENCODINGS = new Set<string>(
+export type { CityModelEncoding } from "@cityjson/navara-core";
+export {
   CITYMODEL_ENCODING_PRIORITY,
-);
-
-export function isSupportedCityModelEncoding(
-  value: string,
-): value is CityModelEncoding {
-  return SUPPORTED_CITYMODEL_ENCODINGS.has(value);
-}
-
-export function getPreferredCityModelEncoding(
-  encodings: readonly CityModelEncoding[],
-): CityModelEncoding | null {
-  for (const candidate of CITYMODEL_ENCODING_PRIORITY) {
-    if (encodings.includes(candidate)) {
-      return candidate;
-    }
-  }
-
-  return null;
-}
+  isSupportedCityModelEncoding,
+  getPreferredCityModelEncoding,
+} from "@cityjson/navara-core";
