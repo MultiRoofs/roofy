@@ -115,41 +115,79 @@ describe("boundsDiagonalMetres", () => {
 });
 
 describe("cameraForBounds", () => {
-  it("centres on the box with a tilted view above the top of the model", () => {
+  const DEG = Math.PI / 180;
+  const METRES_PER_DEGREE_LAT = 111_320;
+  const fitDistance = (bounds: typeof a) =>
+    Math.max(boundsDiagonalMetres(bounds) * 1.5, 200);
+
+  it("stands SOUTH of and ABOVE the box, looking north and 60 degrees down", () => {
+    // BROWSER-VERIFIED regression guard (M7.3 smoke): the earlier framing put
+    // the camera directly OVER the centre at `maxHeight + 1.5 * diagonal` and
+    // still pitched it -60, which leaves the model 30 degrees below the view
+    // axis — outside the frustum. `fitAll` then framed empty space.
     const c = cameraForBounds(a);
+    const d = fitDistance(a);
     expect(c.lng).toBeCloseTo(4.345, 6);
-    expect(c.lat).toBeCloseTo(52.005, 6);
-    expect(c.height).toBeGreaterThan(12);
+    expect(c.lat).toBeCloseTo(
+      52.005 - (d * Math.cos(60 * DEG)) / METRES_PER_DEGREE_LAT,
+      9,
+    );
+    expect(c.height).toBeCloseTo(6 + d * Math.sin(60 * DEG), 6);
     expect(c.heading).toBe(0);
-    expect(c.pitch).toBe(-60);
+    expect(c.pitch).toBeCloseTo(-60, 9);
     expect(c.roll).toBe(0);
   });
 
-  it("never drops below the minimum viewing height for a tiny model", () => {
-    const c = cameraForBounds({
+  it("looks straight back at the centre from one fit distance away", () => {
+    // The same invariant `alignCameraForBounds` obeys — both derive the
+    // orientation from the offset, so a fit can never point away from the box.
+    const c = cameraForBounds(a);
+    const east =
+      (4.345 - c.lng) * METRES_PER_DEGREE_LAT * Math.cos(52.005 * DEG);
+    const north = (52.005 - c.lat) * METRES_PER_DEGREE_LAT;
+    const up = 6 - c.height;
+    expect(Math.hypot(east, north, up)).toBeCloseTo(fitDistance(a), 3);
+    expect(Math.atan2(up, Math.hypot(east, north)) / DEG).toBeCloseTo(
+      c.pitch,
+      6,
+    );
+  });
+
+  it("never stands closer than the minimum distance to a tiny model", () => {
+    const tiny = {
       west: 4.35,
       south: 52,
       east: 4.3501,
       north: 52.0001,
       minHeight: 0,
       maxHeight: 3,
-    });
-    expect(c.height).toBeGreaterThanOrEqual(200);
+    };
+    const c = cameraForBounds(tiny);
+    const east = (4.35005 - c.lng) * METRES_PER_DEGREE_LAT * Math.cos(52 * DEG);
+    const north = (52.00005 - c.lat) * METRES_PER_DEGREE_LAT;
+    const up = 1.5 - c.height;
+    expect(Math.hypot(east, north, up)).toBeCloseTo(200, 3);
   });
 
   it("centres inside the box when it wraps the antimeridian", () => {
-    const c = cameraForBounds({
+    const wrapped = {
       west: 179.9,
       south: 0,
       east: -179.9,
       north: 0.1,
       minHeight: 0,
       maxHeight: 5,
-    });
+    };
+    const c = cameraForBounds(wrapped);
     // Midpoint of [179.9, 180.1] is the antimeridian itself (+/-180), NOT the
-    // 0.0 that a naive (west + east) / 2 would produce.
+    // 0.0 that a naive (west + east) / 2 would produce. Only the LATITUDE is
+    // offset by the fit, so the camera stays on the seam.
     expect(Math.abs(Math.abs(c.lng) - 180)).toBeLessThan(1e-9);
-    expect(c.lat).toBeCloseTo(0.05, 6);
+    expect(c.lat).toBeCloseTo(
+      0.05 -
+        (fitDistance(wrapped) * Math.cos(60 * DEG)) / METRES_PER_DEGREE_LAT,
+      9,
+    );
     expect(Number.isFinite(c.height)).toBe(true);
   });
 });

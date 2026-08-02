@@ -29,8 +29,12 @@ import {
 import type { DuckDBStatus } from "../analytics/duckdb";
 import { browserPlatform } from "../platform/browser";
 import type { PlatformServices } from "../platform/types";
-import { CityScene } from "../scene/CitySceneR3F";
-import type { CitySceneHandle } from "../scene/CitySceneR3F";
+import { NavaraViewport } from "../scene/NavaraViewport";
+import type { CitySceneHandle } from "../scene/NavaraViewport";
+import {
+  cameraStateFromTuples,
+  cameraStateToTuples,
+} from "../scene/cameraStateBridge";
 import { useSelectionStore } from "../features/selection/selectionStore";
 import { useLayerStore } from "../features/layers/layerStore";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
@@ -264,6 +268,9 @@ export function App({
   const handleSave = useCallback(async () => {
     const cameraState = sceneRef.current?.getCameraState();
     if (!cameraState) return;
+    // The snapshot schema still carries two 3-tuples; `cameraStateBridge` is
+    // the temporary carrier for the geographic camera until Task C18 bumps it.
+    const cameraTuples = cameraStateToTuples(cameraState);
 
     const { datetime } = useSolarStore.getState();
     const { layers: allLayers } = useLayerStore.getState();
@@ -285,8 +292,8 @@ export function App({
         lodMode: l.lodMode,
         ...(l.isStreaming ? { stream: streamSourceSnapshot(l.modelRef) } : {}),
       })),
-      cameraPosition: cameraState.position,
-      cameraTarget: cameraState.target,
+      cameraPosition: cameraTuples.position,
+      cameraTarget: cameraTuples.target,
       datetime,
       pickMode,
     });
@@ -435,10 +442,14 @@ export function App({
         }
 
         if (cameraTimerRef.current) clearTimeout(cameraTimerRef.current);
+        // The 100 ms wait survives only until Task C20, which replaces it with
+        // `await sceneRef.current.ready` inside a try/catch.
         cameraTimerRef.current = setTimeout(() => {
           sceneRef.current?.setCameraState(
-            viewState.cameraPosition,
-            viewState.cameraTarget,
+            cameraStateFromTuples(
+              viewState.cameraPosition,
+              viewState.cameraTarget,
+            ),
           );
         }, 100);
       } catch (e) {
@@ -462,6 +473,7 @@ export function App({
   const handleShare = useCallback(() => {
     const cameraState = sceneRef.current?.getCameraState();
     if (!cameraState) return;
+    const cameraTuples = cameraStateToTuples(cameraState);
 
     const { datetime } = useSolarStore.getState();
     const { layers: allLayers } = useLayerStore.getState();
@@ -477,8 +489,8 @@ export function App({
           rulesEnabled: l.rulesEnabled,
           visible: l.visible,
         })),
-      cp: cameraState.position,
-      ct: cameraState.target,
+      cp: cameraTuples.position,
+      ct: cameraTuples.target,
       dt: datetime.toISOString(),
       pm: pickMode,
     };
@@ -572,7 +584,9 @@ export function App({
       }
       if (cameraTimerRef.current) clearTimeout(cameraTimerRef.current);
       cameraTimerRef.current = setTimeout(() => {
-        sceneRef.current?.setCameraState(shared.cp, shared.ct);
+        sceneRef.current?.setCameraState(
+          cameraStateFromTuples(shared.cp, shared.ct),
+        );
       }, 100);
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -640,6 +654,14 @@ export function App({
 
   const handleFitAll = useCallback(() => {
     sceneRef.current?.fitAll();
+  }, []);
+
+  /** A layer the engine refused (the CRS gate — no reference system, or a
+   *  non-metric one). Stable identity on purpose: `NavaraViewport`'s layer-sync
+   *  effect lists it as a dependency. */
+  const handleLayerError = useCallback((layerId: string, message: string) => {
+    setToast(`Layer ${layerId}: ${message}`);
+    setTimeout(() => setToast(null), 6000);
   }, []);
 
   const handleLoadSample = useCallback(() => {
@@ -714,11 +736,12 @@ export function App({
         />
 
         <div className="viewport">
-          <CityScene
+          <NavaraViewport
             ref={sceneRef}
             onTriangleCount={setTriangleCount}
             onFps={setFps}
             onCursorPosition={setCursorPosition}
+            onLayerError={handleLayerError}
           />
           <LegendOverlay />
           <AttributePanel objects={selectedObjects} />

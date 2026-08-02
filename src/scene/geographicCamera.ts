@@ -195,13 +195,6 @@ function centreHeight(bounds: GeodeticBounds): number {
   return (bounds.minHeight + bounds.maxHeight) / 2;
 }
 
-function fitHeight(bounds: GeodeticBounds): number {
-  return Math.max(
-    bounds.maxHeight + boundsDiagonalMetres(bounds) * FIT_DISTANCE_FACTOR,
-    MIN_VIEW_DISTANCE_M,
-  );
-}
-
 /**
  * How far from the centre of the box a fitted camera stands, in metres — 1.5
  * space diagonals, floored so a single small building is still framed from
@@ -214,16 +207,27 @@ export function fitDistanceMetres(bounds: GeodeticBounds): number {
   );
 }
 
-/** Default framing: above the centre of the box, tilted down at 60 degrees. */
+/** Downward tilt of the default (non-axis-aligned) framing, in degrees. */
+const FIT_PITCH_DEG = -60;
+
+/**
+ * Default framing: one {@link fitDistanceMetres} from the centre of the box,
+ * looking north and tilted down 60 degrees — i.e. the camera stands SOUTH of
+ * and ABOVE the model, with the model in front of it.
+ *
+ * BROWSER-VERIFIED that the obvious alternative does not work: parking the
+ * camera at `maxHeight + 1.5 * diagonal` directly OVER the centre (the shape
+ * this had in B11a) leaves the model 30 degrees outside a 60-degree-pitched
+ * view frustum's lower edge, so the first `fitAll` of the M7.3 smoke framed
+ * empty space. Offsetting along the view axis is the same thing
+ * {@link alignCameraForBounds} does, so both now share one derivation.
+ */
 export function cameraForBounds(bounds: GeodeticBounds): GeographicCameraState {
-  return {
-    lng: centreLng(bounds),
-    lat: centreLat(bounds),
-    height: fitHeight(bounds),
-    heading: 0,
-    pitch: -60,
-    roll: 0,
-  };
+  const pitch = FIT_PITCH_DEG * DEG_TO_RAD;
+  // Unit vector FROM the centre TO the camera: back down the view direction
+  // (heading 0 = north), so `cameraFromUnitOffset` derives exactly heading 0 /
+  // pitch -60 back out of it.
+  return cameraFromUnitOffset(bounds, [0, -Math.cos(pitch), -Math.sin(pitch)]);
 }
 
 /**
@@ -272,7 +276,19 @@ export function alignCameraForBounds(
   bounds: GeodeticBounds,
   direction: ViewDirection,
 ): GeographicCameraState {
-  const [east, north, up] = ALIGN_OFFSETS[direction];
+  return cameraFromUnitOffset(bounds, ALIGN_OFFSETS[direction]);
+}
+
+/**
+ * The shared body of {@link cameraForBounds} and {@link alignCameraForBounds}:
+ * stand one {@link fitDistanceMetres} from the centre of the box along the unit
+ * ENU vector `offset`, then DERIVE heading/pitch from where that landed.
+ */
+function cameraFromUnitOffset(
+  bounds: GeodeticBounds,
+  offset: readonly [east: number, north: number, up: number],
+): GeographicCameraState {
+  const [east, north, up] = offset;
   const distance = fitDistanceMetres(bounds);
   const lat0 = centreLat(bounds);
   const metresPerDegreeLng =
