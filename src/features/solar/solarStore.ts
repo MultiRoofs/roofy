@@ -12,7 +12,11 @@ import { create } from "zustand";
 import SunCalc from "suncalc";
 import proj4 from "proj4";
 import type { BBox3 } from "../../domain/citymodel/types";
-import { ensureProjDef } from "../../domain/citymodel/crsProjDefs";
+import { ensureProjDef, parseEpsgCode } from "@cityjson/navara-core";
+
+/** Re-exported for existing call sites; the definition now lives in
+ *  @cityjson/navara-core (M7.2). Task C15 drops this re-export. */
+export { parseEpsgCode };
 
 // ---------------------------------------------------------------------------
 // Types
@@ -57,19 +61,6 @@ export type SolarStore = SolarState & SolarActions;
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for unit testing)
 // ---------------------------------------------------------------------------
-
-/**
- * Parse EPSG code from an OGC URI like
- * "https://www.opengis.net/def/crs/EPSG/0/7415" → 7415.
- */
-export function parseEpsgCode(uri: string | undefined): number | null {
-  if (!uri) return null;
-  const segments = uri.split("/");
-  const last = segments[segments.length - 1];
-  if (!last) return null;
-  const code = Number(last);
-  return Number.isFinite(code) && code > 0 ? code : null;
-}
 
 /**
  * Compute sun direction vector in Three.js Y-up space from suncalc output.
