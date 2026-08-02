@@ -214,6 +214,13 @@ export default defineConfig({
         import.meta.dirname,
         "packages/cityjson-navara-plugins/packages/navara-cityjson/src/index.ts",
       ),
+      // Same ordering rule as the CityJSON pair above: the subpath entry must
+      // precede the bare key. This one carries `FlatCityBufPlugin` and the
+      // `getPickRay` binding (Task C11).
+      "@cityjson/navara-flatcitybuf/plugin": resolve(
+        import.meta.dirname,
+        "packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/plugin.ts",
+      ),
       "@cityjson/navara-flatcitybuf": resolve(
         import.meta.dirname,
         "packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/index.ts",
