@@ -175,7 +175,20 @@ export default defineConfig({
     // registry the app never reads. Both are declared `peerDependencies` of
     // the packages precisely so the host supplies one instance; deduping here
     // is what makes that true for the aliased-source path.
-    dedupe: ["proj4", "three"],
+    // `@navaramap/*` joins the list for the same reason, and with sharper
+    // consequences: from Task B7 the aliased plugin sources import the engine
+    // directly (`CityJSONPlugin`, `CityModelMeshDesc`, `CityMeshArraysDesc`),
+    // and a second engine copy would break `instanceof` and give the app a
+    // descriptor registry the plugin never registered into. The plugin packages
+    // declare the engine as a `peerDependency` precisely so the host supplies
+    // one instance; deduping here is what makes that true for the
+    // aliased-source path.
+    dedupe: [
+      "proj4",
+      "three",
+      "@navaramap/three",
+      "@navaramap/three-default-plugin",
+    ],
     alias: {
       // Dev HMR: resolve the submodule packages to their TypeScript sources so
       // editing a plugin file hot-reloads the app instead of requiring a
