@@ -15,6 +15,22 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "jsx": "react-jsx",
+    // No `baseUrl`: TypeScript 6 deprecates it, and since TS 4.4 `paths`
+    // entries resolve relative to this file's directory on their own.
+    "paths": {
+      "@cityjson/navara-core": [
+        "./packages/cityjson-navara-plugins/packages/navara-core/src/index.ts"
+      ],
+      "@cityjson/navara-cityjson": [
+        "./packages/cityjson-navara-plugins/packages/navara-cityjson/src/index.ts"
+      ],
+      "@cityjson/navara-flatcitybuf": [
+        "./packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/index.ts"
+      ],
+      "@cityjson/navara-cityparquet": [
+        "./packages/cityjson-navara-plugins/packages/navara-cityparquet/src/index.ts"
+      ]
+    },
     "types": [
       "vite/client",
       "vitest/globals",
