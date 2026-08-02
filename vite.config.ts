@@ -198,6 +198,14 @@ export default defineConfig({
         import.meta.dirname,
         "packages/cityjson-navara-plugins/packages/navara-core/src/index.ts",
       ),
+      // MUST precede the bare "@cityjson/navara-cityjson" entry: Vite matches
+      // string aliases by prefix, in order, so the bare key would otherwise
+      // swallow this subpath. It is the package's engine-bound entry point —
+      // the main barrel stays free of @navaramap so it loads under Node.
+      "@cityjson/navara-cityjson/plugin": resolve(
+        import.meta.dirname,
+        "packages/cityjson-navara-plugins/packages/navara-cityjson/src/plugin.ts",
+      ),
       "@cityjson/navara-cityjson": resolve(
         import.meta.dirname,
         "packages/cityjson-navara-plugins/packages/navara-cityjson/src/index.ts",

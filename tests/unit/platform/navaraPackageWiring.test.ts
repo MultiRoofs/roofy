@@ -1,23 +1,15 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { NAVARA_CORE_VERSION } from "@cityjson/navara-core";
-import { CITYJSON_PLUGIN_PLACEHOLDER } from "@cityjson/navara-cityjson";
+import {
+  CITY_MODEL_MESH_KEY,
+  CITYJSON_PLUGIN_PLACEHOLDER,
+} from "@cityjson/navara-cityjson";
 import { FLATCITYBUF_PLUGIN_PLACEHOLDER } from "@cityjson/navara-flatcitybuf";
 import { CITYPARQUET_PLUGIN_PLACEHOLDER } from "@cityjson/navara-cityparquet";
-
-// `@cityjson/navara-cityjson`'s barrel re-exports its three engine-binding
-// modules (CityJSONPlugin, CityModelMeshDesc, CityMeshArraysDesc), so importing
-// it evaluates `@navaramap/three` — which crashes at module scope under Node
-// (`os.cpus is not a function`; Task B1's NODE_IMPORT_SAFE = false). Stubbing
-// the four engine symbols those modules use keeps this tripwire meaningful: the
-// alias still resolves and every plugin source file is still evaluated, only the
-// engine itself is replaced. Browser code (and the browser smokes) load the real
-// engine; nothing else in the app's jsdom suite may import it.
-vi.mock("@navaramap/three", () => ({
-  MeshDesc: class {},
-  Plugin: class {},
-  PickableMeshWrapper: class {},
-  getPickRay: () => null,
-}));
+// Type-only on purpose: it pins the "@cityjson/navara-cityjson/plugin" tsconfig
+// path (Task B8's import) without evaluating the engine at test time — a
+// type-only import is erased before this file ever runs.
+import type { CityJSONPlugin } from "@cityjson/navara-cityjson/plugin";
 
 // The submodule packages are aliased to their `src/` entry points (see
 // vite.config.ts). This test is the tripwire for that wiring: if the alias,
@@ -26,6 +18,17 @@ vi.mock("@navaramap/three", () => ({
 describe("@cityjson/navara-* package wiring", () => {
   it("resolves navara-core to the submodule source", () => {
     expect(NAVARA_CORE_VERSION).toBe("0.0.0");
+  });
+
+  it("keeps @cityjson/navara-cityjson's main barrel engine-free, so it loads under Node", () => {
+    // If anything reachable from the barrel starts importing @navaramap/*, this
+    // file fails to even load ("os.cpus is not a function" — Task B1's
+    // NODE_IMPORT_SAFE = false). The engine-bound half is published separately
+    // as "@cityjson/navara-cityjson/plugin", which only browser code imports.
+    expect(CITY_MODEL_MESH_KEY).toBe("cityModel");
+    // Keeps the type-only subpath import above load-bearing.
+    const plugin: CityJSONPlugin | null = null;
+    expect(plugin).toBeNull();
   });
 
   it("resolves the three plugin packages to the submodule source", () => {

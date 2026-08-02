@@ -24,6 +24,11 @@
       "@cityjson/navara-cityjson": [
         "./packages/cityjson-navara-plugins/packages/navara-cityjson/src/index.ts"
       ],
+      // The engine-bound entry point: everything reachable from it imports
+      // @navaramap/three, so it is deliberately NOT part of the main barrel.
+      "@cityjson/navara-cityjson/plugin": [
+        "./packages/cityjson-navara-plugins/packages/navara-cityjson/src/plugin.ts"
+      ],
       "@cityjson/navara-flatcitybuf": [
         "./packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/index.ts"
       ],
