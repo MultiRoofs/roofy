@@ -191,9 +191,9 @@ export interface CityMeshHandle {
   triangleCount(): number;
   /** index = engine batch id, entry = (objectIndex, surfaceIndex). */
   batchIdMap(): ReadonlyArray<SurfaceRef>;
-  /** ECEF ray in, the hit face's (objectIndex, surfaceIndex) out, or null.
-   *  Flat, like every other member — there is no `handle.mesh.` indirection. */
-  resolveRaycast(ray: EcefRay): SurfaceRef | null;
+  /** ECEF ray in, the hit face plus its ray distance out, or null. Flat,
+   *  like every other member — there is no `handle.mesh.` indirection. */
+  resolveRaycast(ray: EcefRay): RaycastHit | null;
   delete(): void;
 }
 /** One shape for "which surface is this", shared by the static and streaming
@@ -201,6 +201,11 @@ export interface CityMeshHandle {
 export interface SurfaceRef {
   readonly objectIndex: number;
   readonly surfaceIndex: number;
+}
+/** ...plus how far along the ray it was hit, so a caller raycasting many
+ *  meshes (a streaming layer's resident cells) can pick the nearest. */
+export interface RaycastHit extends SurfaceRef {
+  readonly distance: number;
 }
 export interface EcefRay {
   readonly origin: {
@@ -6640,13 +6645,16 @@ interface SurfaceRef {
   readonly objectIndex: number;
   readonly surfaceIndex: number;
 }
+interface RaycastHit extends SurfaceRef {
+  readonly distance: number;
+}
 interface CityMeshHandle {
   readonly ref: unknown;
   setColors(colors: Float32Array): void;
   setVisible(v: boolean): void;
   triangleCount(): number;
   batchIdMap(): ReadonlyArray<SurfaceRef>;
-  resolveRaycast(ray: EcefRay): SurfaceRef | null;
+  resolveRaycast(ray: EcefRay): RaycastHit | null;
   delete(): void;
 }
 
@@ -7394,6 +7402,7 @@ export type {
   AddCityMeshArraysOptions,
   CityMeshHandle,
   EcefRay,
+  RaycastHit,
   SurfaceRef,
 } from "./cityMesh";
 
@@ -7466,6 +7475,18 @@ export interface SurfaceRef {
   readonly surfaceIndex: number;
 }
 
+/** A raycast result: which surface, and how far along the ray it was hit.
+ *  `distance` exists because a streaming layer raycasts MANY cell meshes for
+ *  one screen point and has to pick the nearest — the first cell that reports
+ *  a hit is whichever the iteration order happened to reach, which is not the
+ *  one the user clicked when cells overlap in screen space (adjacent LoD
+ *  levels, or a tall building spanning a cell boundary). `batchIdMap()` keeps
+ *  the bare `SurfaceRef`: a batch id carries no distance. */
+export interface RaycastHit extends SurfaceRef {
+  /** Metres from the ray origin to the hit face. */
+  readonly distance: number;
+}
+
 export interface EcefRay {
   readonly origin: {
     readonly x: number;
@@ -7488,10 +7509,12 @@ export interface CityMeshHandle {
   triangleCount(): number;
   /** index = engine batch id, entry = that triangle's SurfaceRef. */
   batchIdMap(): ReadonlyArray<SurfaceRef>;
-  /** ECEF ray in, hit surface out. Flat, not `handle.mesh.resolveRaycast` —
-   *  the behaviour object is an implementation detail, `ref` is the escape
-   *  hatch for anything that genuinely needs the Object3D. */
-  resolveRaycast(ray: EcefRay): SurfaceRef | null;
+  /** ECEF ray in, hit surface + distance out. Flat, not
+   *  `handle.mesh.resolveRaycast` — the behaviour object is an implementation
+   *  detail, `ref` is the escape hatch for anything that genuinely needs the
+   *  Object3D. The distance is what lets a caller holding many of these pick
+   *  the nearest hit (Task C10b). */
+  resolveRaycast(ray: EcefRay): RaycastHit | null;
   delete(): void;
 }
 
@@ -7539,7 +7562,7 @@ export class CityMeshArraysMesh {
   /** Own-raycast pick path for a streamed cell: ECEF ray in, the hit face's
    *  (objectIndex, surfaceIndex) out. The caller (Task C10b's stream layer)
    *  knows its own layerId and objectKeys and builds the Selection. */
-  resolveRaycast(ray: EcefRay): SurfaceRef | null {
+  resolveRaycast(ray: EcefRay): RaycastHit | null {
     if (!this.object3d.visible) return null;
     const raycaster = new Raycaster(
       new Vector3(ray.origin.x, ray.origin.y, ray.origin.z),
@@ -7551,11 +7574,14 @@ export class CityMeshArraysMesh {
       0,
       Infinity,
     );
+    // intersectObject returns hits sorted near-to-far, so [0] is this mesh's
+    // nearest face; `distance` lets the caller compare across meshes.
     const hit = raycaster.intersectObject(this.object3d, false)[0];
     if (!hit?.face) return null;
     return {
       objectIndex: this.arrays.objectIndices[hit.face.a]!,
       surfaceIndex: this.arrays.surfaceIndices[hit.face.a]!,
+      distance: hit.distance,
     };
   }
 
@@ -7672,11 +7698,12 @@ export class CityMeshArraysDesc extends MeshDesc<CityMeshArraysDescConfig> {
 }
 ```
 
-`AddCityMeshArraysOptions` gains two optional fields the streaming plugin sets:
-`readonly pickStrategy?: PickStrategy` and `readonly batchIdMap?: ReadonlyArray<{ objectIndex: number; surfaceIndex: number }>`
-(`CityMeshArraysMesh` exposes the latter through `batchIdMap()`, exactly as
-`CityModelMesh` does, so a streamed cell resolves a pick the same way a static
-layer does — Task C10b).
+`AddCityMeshArraysOptions` gains the optional fields the streaming plugin sets:
+`layerId`, `cellKey` and `pickStrategy`. There is deliberately **no**
+`batchIdMap` option — the map is _derived_, not supplied: `CityMeshArraysMesh`
+computes it from the arrays it already holds and exposes it through
+`batchIdMap()`, exactly as `CityModelMesh` does, so a streamed cell resolves a
+pick the same way a static layer does (Task C10b).
 
 `CityJSONPlugin.init` registers both descriptors through the injected
 `descriptors` list; there is no separate `registerMesh` call to add.
@@ -11454,12 +11481,20 @@ Task B1 proved the **engine's** WASM/assets survive dev and a production bundle.
 
 - Consumes: `SETTLE_MS` from `./constants`
 - Produces:
+
   ```ts
   export interface SettleController {
     onMoveStart(): void;
     onMove(): void;
     onMoveEnd(): void;
     onIdle(): void;
+    /** Run `fn` with every camera event ignored, then keep ignoring for
+     *  `quietMs` after it returns (default `settleMs`). Step 3b. */
+    suppress<T>(fn: () => T, quietMs?: number): T;
+    /** Same, but the gate is held until `promise` settles — the shape an
+     *  animated `flyTo` needs, and what `FlatCityBufPlugin.suppressSettle`
+     *  (Task C11) is built on. Step 3b. */
+    suppressUntil(promise: Promise<unknown>, quietMs?: number): void;
     dispose(): void;
   }
   export function createSettleController(opts: {
@@ -11468,6 +11503,11 @@ Task B1 proved the **engine's** WASM/assets survive dev and a production bundle.
     readonly onSettle: () => void;
   }): SettleController;
   ```
+
+  `suppress`/`suppressUntil` are part of the published contract, not an
+  afterthought: they are how every programmatic camera move (restore, share
+  link, `fitAll`, `alignView`) avoids masquerading as a user gesture. Step 3b
+  implements them; Tasks C11 and C13 consume them.
 
 **PREREQUISITE — Task B1 Step 7's measured camera trace.** Do not start this task until `docs/superpowers/research/2026-08-01-navara-spike-findings.md` records `CAMERA_BURST_SHAPE` and `PROGRAMMATIC_MOVE_EMITS` from a real browser. The cadence below is a _hypothesis_ the API report does not confirm; B1 measures it for drag-with-inertia, `flyTo`, `setCamera` and `resize`. Reconcile before writing code:
 
@@ -11745,7 +11785,30 @@ Record which branch was taken at the top of `settleController.ts` as a comment c
 
 **Interfaces:**
 
-- Consumes: `@cityjson/navara-cityjson` → `addCityMeshArrays(view, opts): CityMeshHandle` (built in Task B7, Step 4), where `CityMeshHandle = { setColors(c: Float32Array): void; setVisible(v: boolean): void; triangleCount(): number; delete(): void; readonly ref: unknown }`; `@cityjson/navara-core` → `makeEnuFrame`, `PickingIndex`; `./tileGrid` → `cellCentre`
+- Consumes: `@cityjson/navara-cityjson` → `addCityMeshArrays(view, opts): CityMeshHandle` plus the types `CityMeshHandle`, `SurfaceRef`, `RaycastHit` and `EcefRay` (all built in Task B7, Step 4). The handle shape is **imported, never redeclared here** — it is:
+
+  ```ts
+  interface SurfaceRef {
+    readonly objectIndex: number;
+    readonly surfaceIndex: number;
+  }
+  interface RaycastHit extends SurfaceRef {
+    /** Metres from the ray origin — Task C10b picks the nearest cell. */
+    readonly distance: number;
+  }
+  interface CityMeshHandle {
+    readonly ref: unknown;
+    setColors(colors: Float32Array): void;
+    setVisible(visible: boolean): void;
+    triangleCount(): number;
+    batchIdMap(): ReadonlyArray<SurfaceRef>;
+    resolveRaycast(ray: EcefRay): RaycastHit | null;
+    delete(): void;
+  }
+  ```
+
+  Task C10b calls `batchIdMap()` and `resolveRaycast()` on exactly this handle, so an abridged local copy of it is what would break. Also consumes `@cityjson/navara-core` → `makeEnuFrame`, `PickingIndex`; `./tileGrid` → `cellCentre`
+
 - Produces:
   ```ts
   export interface CellMeshFactory {
@@ -12049,24 +12112,21 @@ The drafted version claimed "because ENU is x=east/y=north/z=up and CityJSON sou
   // Type-only import: `@cityjson/navara-cityjson`'s barrel re-exports the
   // engine-binding modules, but `import type` is erased at compile time, so
   // this file stays runnable in Node (Global Constraints -> Testing
-  // conventions). Redeclaring these locally is what let C10b's call sites
-  // drift from the real handle shape.
-  import type { CityMeshHandle } from "@cityjson/navara-cityjson";
-  import { cellCentre, type CellKey, type Grid } from "./tileGrid";
-  import type { CellCache } from "./cellCache";
-  import type { CellEntry } from "./streamLayer";
-
-  // NOT redeclared here: `CityMeshHandle`, `SurfaceRef` and `EcefRay` come
-  // from @cityjson/navara-cityjson (Task B7), so the streaming cell path and
-  // the static layer path agree on one shape. A local copy would drift the
-  // moment either side gained a member — which is exactly how C10b ended up
-  // calling `handle.mesh.resolveRaycast` against an interface that had
+  // conventions).
+  //
+  // These are imported rather than redeclared: a local copy would drift the
+  // moment either side gained a member — which is exactly how Task C10b ended
+  // up calling `handle.mesh.resolveRaycast` against an interface that had
   // neither `mesh` nor `resolveRaycast`.
   import type {
     CityMeshHandle,
     EcefRay,
+    RaycastHit,
     SurfaceRef,
   } from "@cityjson/navara-cityjson";
+  import { cellCentre, type CellKey, type Grid } from "./tileGrid";
+  import type { CellCache } from "./cellCache";
+  import type { CellEntry } from "./streamLayer";
 
   export interface CellMeshFactory {
     create(key: CellKey, entry: CellEntry, frame: EnuFrame): CityMeshHandle;
@@ -12673,7 +12733,7 @@ The second half of the split. C10a landed meshes; this task makes a streaming la
 
 **Interfaces:**
 
-- Consumes: everything C10a consumed, plus `Selection`/`ScreenPoint`/`GeodeticBounds`/`SurfaceRef`/`EcefRay` and `paintLayers` from `@cityjson/navara-cityjson`. Every pick/highlight call goes through the flat `CityMeshHandle` members (`resolveRaycast`, `batchIdMap`, `setColors`) — the same interface Task B7 defines and Task C8 imports, so there is exactly one shape.
+- Consumes: everything C10a consumed, plus `Selection`/`ScreenPoint`/`GeodeticBounds`/`SurfaceRef`/`RaycastHit`/`EcefRay` and `paintLayers` from `@cityjson/navara-cityjson`. Every pick/highlight call goes through the flat `CityMeshHandle` members (`resolveRaycast`, `batchIdMap`, `setColors`) — the same interface Task B7 defines and Task C8 imports, so there is exactly one shape.
 - Produces (added to `FcbStreamLayerHandle`):
   - `setRules(rules: ReadonlyArray<Rule>, enabled: boolean): void`
   - `setLod(mode: "auto" | "manual", lod: string | null): void`
@@ -12682,7 +12742,7 @@ The second half of the split. C10a landed meshes; this task makes a streaming la
   - `getResidentModel(): ResidentModel`
   - `delete(): void`
   - `setHighlight(sel: readonly Selection[], hovered?: Selection): void`
-  - `resolvePick(pick: ScreenPoint | PickedFeatureLike): Selection | null`
+  - `resolvePick(pick: ScreenPoint | PickedFeatureLike): Selection | null` — for a screen point, raycasts every resident cell and returns the **nearest** hit (cells overlap whenever the ladder mixes levels)
   - `getBoundsGeodetic(): GeodeticBounds | null`
   - `triangleCount(): number`
   - `readonly rays: PickRaySource | null` is **not** added — `resolvePick` takes the ray source through the same `pickRays` option the plugin injects, so this module stays engine-free.
@@ -12704,9 +12764,12 @@ The second half of the split. C10a landed meshes; this task makes a streaming la
   } as const;
 
   /** A mesh factory whose handles record what they were told, and whose
-   *  raycast answers for one nominated cell — enough to drive resolvePick and
-   *  setHighlight without a renderer. */
-  function recordingFactory(hitKey?: string) {
+   *  raycast answers for the nominated cells at the nominated ray distances —
+   *  enough to drive resolvePick and setHighlight without a renderer.
+   *  `hitDistances` maps cellKey -> metres; a cell absent from it never hits. */
+  function recordingFactory(
+    hitDistances: Readonly<Record<string, number>> = {},
+  ) {
     const created = new Map<
       string,
       {
@@ -12737,7 +12800,13 @@ The second half of the split. C10a landed meshes; this task makes a streaming la
           triangleCount: () => 7,
           batchIdMap: () => [{ objectIndex: 0, surfaceIndex: 4 }],
           resolveRaycast: () =>
-            key === hitKey ? { objectIndex: 0, surfaceIndex: 4 } : null,
+            key in hitDistances
+              ? {
+                  objectIndex: 0,
+                  surfaceIndex: 4,
+                  distance: hitDistances[key]!,
+                }
+              : null,
           delete: () => {
             rec.deleted = true;
           },
@@ -12780,16 +12849,18 @@ The second half of the split. C10a landed meshes; this task makes a streaming la
       expect(b.east).toBeLessThan(5.5);
     });
 
-    it("resolvePick raycasts the resident cells and returns a surface selection carrying THIS layer's id", async () => {
-      // `hitKey` is set on the factory, so the fake mesh for that cell — and
-      // only that one — reports a hit. Commit twice is unnecessary: the first
-      // commit is deterministic for these rays, so take the key it produces.
+    /** The keys a top-down commit makes resident, in commit order. Taken from
+     *  a throwaway handle so the real assertions can nominate specific cells. */
+    async function residentKeys(): Promise<string[]> {
       const probe = recordingFactory();
-      const first = makeHandle({ meshFactory: probe });
-      await first.handle.commit(topDownRays());
-      const hitKey = [...probe.created.keys()][0]!;
+      const { handle } = makeHandle({ meshFactory: probe });
+      await handle.commit(topDownRays());
+      return [...probe.created.keys()];
+    }
 
-      const factory = recordingFactory(hitKey);
+    it("resolvePick raycasts the resident cells and returns a surface selection carrying THIS layer's id", async () => {
+      const [hitKey] = await residentKeys();
+      const factory = recordingFactory({ [hitKey!]: 120 });
       const { handle } = makeHandle({ meshFactory: factory });
       await handle.commit(topDownRays());
       expect(handle.resolvePick({ x: 400, y: 300 })).toEqual({
@@ -12798,6 +12869,35 @@ The second half of the split. C10a landed meshes; this task makes a streaming la
         objectId: expect.any(String),
         surfaceIndex: 4,
       });
+    });
+
+    it("returns the NEAREST hit when two resident cells overlap, not the first one committed", async () => {
+      const keys = await residentKeys();
+      expect(keys.length).toBeGreaterThan(1); // otherwise this proves nothing
+      const [firstCommitted, secondCommitted] = keys as [string, string];
+
+      // The cell committed SECOND is the nearer one. A first-hit-wins
+      // implementation returns the far cell, because Map iteration is
+      // insertion order.
+      const factory = recordingFactory({
+        [firstCommitted]: 900,
+        [secondCommitted]: 120,
+      });
+      const { handle } = makeHandle({ meshFactory: factory });
+      await handle.commit(topDownRays());
+
+      const picked = handle.resolvePick({ x: 400, y: 300 });
+      const nearObjectId = factory.created.get(secondCommitted)!.objectKeys[0]!;
+      const farObjectId = factory.created.get(firstCommitted)!.objectKeys[0]!;
+      expect(picked).toEqual({
+        kind: "surface",
+        layerId: "l1",
+        objectId: nearObjectId,
+        surfaceIndex: 4,
+      });
+      // Guard against the fixture accidentally giving both cells the same
+      // objectId, which would make the assertion above vacuous.
+      expect(nearObjectId).not.toBe(farObjectId);
     });
 
     it("resolvePick returns null when no resident cell is hit", async () => {
@@ -12863,6 +12963,9 @@ The second half of the split. C10a landed meshes; this task makes a streaming la
 
   ```ts
   // packages/navara-flatcitybuf/src/streamLayer.ts — added to FcbStreamLayerHandle
+  // (imports: `type RaycastHit` alongside the Selection/GeodeticBounds types
+  //  already taken from @cityjson/navara-cityjson, and `type CellMesh` from
+  //  ./cellMeshes)
 
   /** Sum over resident cells. `syncLayers` never puts a streaming layer in the
    *  app's `live` map, so this is the ONLY source of a streaming layer's
@@ -12945,11 +13048,24 @@ The second half of the split. C10a landed meshes; this task makes a streaming la
       y: ray.direction[1],
       z: ray.direction[2],
     };
+    // NEAREST wins, not first. Resident cells overlap in screen space
+    // whenever the ladder mixes levels or a tall building straddles a cell
+    // boundary, and Map iteration order is insertion order — i.e. whichever
+    // cell happened to commit first, which has nothing to do with what the
+    // user clicked. So every candidate is raycast and the smallest distance
+    // is taken.
+    let best: RaycastHit | null = null;
+    let bestCell: CellMesh | null = null;
     for (const cell of this.cells.values()) {
       const hit = cell.handle.resolveRaycast({ origin, direction });
-      if (hit) return this.selectionFor(cell, hit.objectIndex, hit.surfaceIndex);
+      if (!hit) continue;
+      if (best === null || hit.distance < best.distance) {
+        best = hit;
+        bestCell = cell;
+      }
     }
-    return null;
+    if (!best || !bestCell) return null;
+    return this.selectionFor(bestCell, best.objectIndex, best.surfaceIndex);
   }
 
   private selectionFor(
@@ -13001,7 +13117,7 @@ The second half of the split. C10a landed meshes; this task makes a streaming la
   `syncCellMeshes(...)` returns, and into `recolorCells` after each cell's
   `setColors`, so a recolor never wipes an active highlight.
 
-- [ ] **Step 6: Run — expect pass.** `pnpm vitest run packages/navara-flatcitybuf/tests/streamLayer.test.ts` → 16 passed (7 from C10a + 9 here).
+- [ ] **Step 6: Run — expect pass.** `pnpm vitest run packages/navara-flatcitybuf/tests/streamLayer.test.ts` → 17 passed (7 from C10a + 10 here).
 
 - [ ] **Step 7: Commit.**
   ```bash
@@ -13190,6 +13306,11 @@ meshFactory: {
       id: `${opts.id}:${key}`,
       arrays: entryToArrays(entry),
       frame,
+      // Both are stamped into the mesh's pick properties. Without them a
+      // streamed cell's PickedFeature carries no layerId, so Task B15's
+      // router cannot reach this handle and no cell is ever pickable.
+      layerId: opts.id,
+      cellKey: key,
       pickStrategy: this.options.pickStrategy,
     }),
 },
