@@ -4,6 +4,7 @@ import {
   boundsDiagonalMetres,
   cameraForBounds,
   unionGeodeticBounds,
+  type GeographicCameraState,
 } from "../../../src/scene/geographicCamera";
 
 const a = {
@@ -154,37 +155,154 @@ describe("cameraForBounds", () => {
 });
 
 describe("alignCameraForBounds", () => {
-  it("maps top to a straight-down view", () => {
+  const DEG = Math.PI / 180;
+  const METRES_PER_DEGREE_LAT = 111_320;
+  const ALL_DIRECTIONS = [
+    "top",
+    "bottom",
+    "front",
+    "back",
+    "right",
+    "left",
+  ] as const;
+
+  function centreOf(bounds: typeof a) {
+    return {
+      lng: (bounds.west + bounds.east) / 2,
+      lat: (bounds.south + bounds.north) / 2,
+      height: (bounds.minHeight + bounds.maxHeight) / 2,
+    };
+  }
+
+  /** ENU vector, in metres, pointing from the camera at the box centre. */
+  function toCentre(cam: GeographicCameraState, bounds: typeof a) {
+    const c = centreOf(bounds);
+    return {
+      east: (c.lng - cam.lng) * METRES_PER_DEGREE_LAT * Math.cos(c.lat * DEG),
+      north: (c.lat - cam.lat) * METRES_PER_DEGREE_LAT,
+      up: c.height - cam.height,
+    };
+  }
+
+  /** What the fit distance is documented to be: 1.5 diagonals, floored. */
+  function fitDistance(bounds: typeof a) {
+    return Math.max(boundsDiagonalMetres(bounds) * 1.5, 200);
+  }
+
+  it("stands one fit distance off the centre, whatever the direction", () => {
+    for (const direction of ALL_DIRECTIONS) {
+      const v = toCentre(alignCameraForBounds(a, direction), a);
+      expect(Math.hypot(v.east, v.north, v.up)).toBeCloseTo(fitDistance(a), 3);
+    }
+  });
+
+  it("DERIVES heading and pitch so the camera faces the box centre", () => {
+    // The whole point of the rework: the orientation is computed from where
+    // the camera ended up, not read off a fixed table. A camera that is level
+    // with the centre gets pitch 0; one above it gets a negative pitch.
+    for (const direction of ALL_DIRECTIONS) {
+      const cam = alignCameraForBounds(a, direction);
+      const v = toCentre(cam, a);
+      const horizontal = Math.hypot(v.east, v.north);
+      const expectedHeading =
+        (((Math.atan2(v.east, v.north) / DEG) % 360) + 360) % 360;
+      expect(cam.heading).toBeCloseTo(expectedHeading, 6);
+      expect(cam.pitch).toBeCloseTo(Math.atan2(v.up, horizontal) / DEG, 6);
+      expect(cam.roll).toBe(0);
+    }
+  });
+
+  it("maps top to a straight-down view directly over the centre", () => {
     const c = alignCameraForBounds(a, "top");
     expect(c.pitch).toBe(-90);
     expect(c.heading).toBe(0);
+    expect(c.lng).toBeCloseTo(4.345, 9);
+    expect(c.lat).toBeCloseTo(52.005, 9);
+    expect(c.height).toBeCloseTo(centreOf(a).height + fitDistance(a), 6);
   });
 
-  it("maps bottom to a straight-up view", () => {
+  it("maps bottom to a straight-up view directly under the centre", () => {
     const c = alignCameraForBounds(a, "bottom");
     expect(c.pitch).toBe(90);
     expect(c.heading).toBe(0);
+    expect(c.lng).toBeCloseTo(4.345, 9);
+    expect(c.lat).toBeCloseTo(52.005, 9);
+    expect(c.height).toBeCloseTo(centreOf(a).height - fitDistance(a), 6);
   });
 
-  it("maps the four horizontal directions to distinct headings at pitch 0", () => {
+  it("makes the four horizontal directions true LEVEL elevation views", () => {
+    // Regression guard for the old fixed-pitch presets, which kept the fit
+    // ALTITUDE and pitched to the horizon — the model was then below the
+    // camera and out of frame. A level view sits at the centre's own height.
+    for (const direction of ["front", "back", "right", "left"] as const) {
+      const c = alignCameraForBounds(a, direction);
+      expect(c.pitch).toBeCloseTo(0, 9);
+      expect(c.height).toBeCloseTo(centreOf(a).height, 9);
+    }
+  });
+
+  it("puts each horizontal camera on the side its name implies", () => {
+    // Matches the pre-Navara viewport (X=east, Y=up, Z=south): front looks
+    // north from the south side, and `right` views the model's right-hand
+    // side, i.e. the camera stands EAST and looks west.
     const headings = (["front", "back", "right", "left"] as const).map(
       (d) => alignCameraForBounds(a, d).heading,
     );
-    expect(headings).toEqual([0, 180, 90, 270]);
-    expect(alignCameraForBounds(a, "right").pitch).toBe(0);
+    expect(headings).toEqual([0, 180, 270, 90]);
+
+    const centre = centreOf(a);
+    expect(alignCameraForBounds(a, "front").lat).toBeLessThan(centre.lat);
+    expect(alignCameraForBounds(a, "back").lat).toBeGreaterThan(centre.lat);
+    expect(alignCameraForBounds(a, "right").lng).toBeGreaterThan(centre.lng);
+    expect(alignCameraForBounds(a, "left").lng).toBeLessThan(centre.lng);
   });
 
-  it("keeps the fit distance when aligning", () => {
-    expect(alignCameraForBounds(a, "front").height).toBe(
-      cameraForBounds(a).height,
-    );
+  it("never stands closer than the minimum distance to a tiny model", () => {
+    const tiny = {
+      west: 4.35,
+      south: 52,
+      east: 4.3501,
+      north: 52.0001,
+      minHeight: 0,
+      maxHeight: 3,
+    };
+    const v = toCentre(alignCameraForBounds(tiny, "front"), tiny);
+    expect(Math.hypot(v.east, v.north, v.up)).toBeCloseTo(200, 3);
   });
 
-  it("keeps the fit centre when aligning", () => {
-    const fit = cameraForBounds(a);
-    const aligned = alignCameraForBounds(a, "left");
-    expect(aligned.lng).toBe(fit.lng);
-    expect(aligned.lat).toBe(fit.lat);
-    expect(aligned.roll).toBe(0);
+  it("stays finite for a box that wraps the antimeridian", () => {
+    const wrapped = {
+      west: 179.9,
+      south: 0,
+      east: -179.9,
+      north: 0.1,
+      minHeight: 0,
+      maxHeight: 5,
+    };
+    for (const direction of ALL_DIRECTIONS) {
+      const c = alignCameraForBounds(wrapped, direction);
+      expect(Number.isFinite(c.lng)).toBe(true);
+      expect(c.lng).toBeGreaterThanOrEqual(-180);
+      expect(c.lng).toBeLessThanOrEqual(180);
+      expect(Number.isFinite(c.lat)).toBe(true);
+      expect(Number.isFinite(c.height)).toBe(true);
+    }
+  });
+
+  it("does not divide by zero at the pole", () => {
+    const polar = {
+      west: 0,
+      south: 89.999,
+      east: 0.001,
+      north: 90,
+      minHeight: 0,
+      maxHeight: 5,
+    };
+    for (const direction of ALL_DIRECTIONS) {
+      const c = alignCameraForBounds(polar, direction);
+      expect(Number.isFinite(c.lng)).toBe(true);
+      expect(Math.abs(c.lat)).toBeLessThanOrEqual(90);
+      expect(Number.isFinite(c.height)).toBe(true);
+    }
   });
 });
