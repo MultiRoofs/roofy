@@ -6,18 +6,9 @@
 import type { CityObject, Vec3 } from "../citymodel/types";
 import { computeArea } from "../roofMetrics/metrics";
 
-/**
- * Compute the footprint area from GroundSurface rings.
- * Returns null if no GroundSurface exists.
- */
-export function computeFootprintArea(obj: CityObject): number | null {
-  const groundSurfaces = obj.surfaces.filter((s) => s.type === "GroundSurface");
-  if (groundSurfaces.length === 0) return null;
-  return groundSurfaces.reduce(
-    (sum, s) => sum + computeArea(s.rings[0] ?? []),
-    0,
-  );
-}
+/** Re-export shim — moved to `@cityjson/navara-core` in M7.2 (the FCB worker
+ *  needs it); the remaining functions in this file stay app-side. */
+export { computeFootprintArea } from "@cityjson/navara-core";
 
 /**
  * Compute total roof area across all RoofSurface surfaces.
