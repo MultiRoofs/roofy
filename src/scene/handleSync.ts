@@ -310,6 +310,46 @@ export function totalTriangles(
 }
 
 /**
+ * What each handle was last told, keyed by handle IDENTITY.
+ *
+ * A `WeakMap` rather than a `Map` keyed by layer id, for two reasons: a deleted
+ * handle takes its entry with it (nothing to clear, no leak), and a layer that
+ * is removed and re-added gets a FRESH handle whose new mesh is unhighlighted —
+ * identity keying means it is pushed to, where an id key would wrongly report
+ * "already up to date".
+ */
+export type HighlightMemo = WeakMap<InteractionHandle, string>;
+
+function selectionKey(s: Selection): string {
+  return s.kind === "surface"
+    ? `s:${s.layerId}:${s.objectId}:${s.surfaceIndex}`
+    : `o:${s.layerId}:${s.objectId}`;
+}
+
+/**
+ * The part of `(selections, hovered)` that can change what ONE handle paints.
+ *
+ * Everything else in the arguments belongs to other layers and is discarded by
+ * `CityModelMesh.setHighlight` anyway, so two pushes with the same value here
+ * are indistinguishable on screen.
+ */
+function highlightKey(
+  handle: InteractionHandle,
+  selections: readonly Selection[],
+  hovered: Selection | null,
+): string {
+  const own: string[] = [];
+  for (const s of selections) {
+    if (s.layerId === handle.id) own.push(selectionKey(s));
+  }
+  const hover =
+    hovered !== null && hovered.layerId === handle.id
+      ? selectionKey(hovered)
+      : "-";
+  return `${own.join(",")}#${hover}`;
+}
+
+/**
  * Push the current selection/hover to every handle in one pass.
  *
  * The whole selection array goes to every handle unfiltered: each handle
@@ -318,13 +358,28 @@ export function totalTriangles(
  * nothing in the selection clears itself — which is exactly what a deselect has
  * to do. That is also why the caller must pass {@link allInteractionHandles}
  * and not {@link interactionHandles}: a hidden layer still has to be cleared.
+ *
+ * `memo` makes that cheap. `setHighlight` is not a cheap setter — it re-runs
+ * `computeStyleColors` over the whole layer and repaints every vertex — so
+ * hovering one building in layer A must not repaint layers B and C, whose own
+ * filtered view of `(selections, hovered)` did not move. Without a memo every
+ * hover step costs one full recolor PER LAYER, at pointer rate.
+ *
+ * Omitting `memo` pushes unconditionally, which is what a caller that has no
+ * state to keep (a one-shot resync) wants.
  */
 export function syncHighlight(
   handles: readonly InteractionHandle[],
   selections: readonly Selection[],
   hovered?: Selection | null,
+  memo?: HighlightMemo,
 ): void {
   for (const handle of handles) {
+    if (memo) {
+      const key = highlightKey(handle, selections, hovered ?? null);
+      if (memo.get(handle) === key) continue;
+      memo.set(handle, key);
+    }
     handle.setHighlight(selections, hovered ?? undefined);
   }
 }

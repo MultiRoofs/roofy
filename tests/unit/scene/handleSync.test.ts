@@ -490,6 +490,85 @@ describe("syncHighlight", () => {
     expect(h1.setHighlight).toHaveBeenCalledWith([], undefined);
   });
 
+  it("skips a handle whose OWN filtered view did not change", () => {
+    // `setHighlight` re-runs computeStyleColors over the whole layer, so this
+    // is the difference between one recolor and one recolor PER LAYER on every
+    // hover step.
+    const a = fakeHandle("L1");
+    const b = fakeHandle("L2");
+    const memo = new WeakMap<never, string>();
+    const inA: Selection = { kind: "object", layerId: "L1", objectId: "B1" };
+    const alsoInA: Selection = {
+      kind: "object",
+      layerId: "L1",
+      objectId: "B2",
+    };
+
+    syncHighlight([a, b] as never, [], inA, memo as never);
+    expect(a.setHighlight).toHaveBeenCalledTimes(1);
+    expect(b.setHighlight).toHaveBeenCalledTimes(1);
+
+    // The hover moved to another building in layer L1: L1 repaints, L2 does not.
+    syncHighlight([a, b] as never, [], alsoInA, memo as never);
+    expect(a.setHighlight).toHaveBeenCalledTimes(2);
+    expect(b.setHighlight).toHaveBeenCalledTimes(1);
+
+    // Nothing at all changed: neither repaints.
+    syncHighlight([a, b] as never, [], alsoInA, memo as never);
+    expect(a.setHighlight).toHaveBeenCalledTimes(2);
+    expect(b.setHighlight).toHaveBeenCalledTimes(1);
+  });
+
+  it("pushes to BOTH handles when a selection change touches both layers", () => {
+    const a = fakeHandle("L1");
+    const b = fakeHandle("L2");
+    const memo = new WeakMap<never, string>();
+    const inA: Selection = { kind: "object", layerId: "L1", objectId: "B1" };
+    const inB: Selection = { kind: "object", layerId: "L2", objectId: "B9" };
+
+    syncHighlight([a, b] as never, [inA], null, memo as never);
+    // Selecting in L2 instead: L1 must CLEAR and L2 must paint.
+    syncHighlight([a, b] as never, [inB], null, memo as never);
+    expect(a.setHighlight).toHaveBeenCalledTimes(2);
+    expect(b.setHighlight).toHaveBeenCalledTimes(2);
+  });
+
+  it("distinguishes a surface selection from the object it belongs to", () => {
+    const a = fakeHandle("L1");
+    const memo = new WeakMap<never, string>();
+    syncHighlight(
+      [a] as never,
+      [{ kind: "object", layerId: "L1", objectId: "B1" }],
+      null,
+      memo as never,
+    );
+    syncHighlight(
+      [a] as never,
+      [{ kind: "surface", layerId: "L1", objectId: "B1", surfaceIndex: 0 }],
+      null,
+      memo as never,
+    );
+    expect(a.setHighlight).toHaveBeenCalledTimes(2);
+  });
+
+  it("always pushes to a FRESH handle, even for the same layer id", () => {
+    // A removed-and-re-added layer gets a new mesh with no highlight on it; an
+    // id-keyed memo would report "already up to date" and leave it blank.
+    const memo = new WeakMap<never, string>();
+    const sel: Selection = { kind: "object", layerId: "L1", objectId: "B1" };
+    syncHighlight([fakeHandle("L1")] as never, [sel], null, memo as never);
+    const reborn = fakeHandle("L1");
+    syncHighlight([reborn] as never, [sel], null, memo as never);
+    expect(reborn.setHighlight).toHaveBeenCalledTimes(1);
+  });
+
+  it("pushes unconditionally when no memo is supplied", () => {
+    const a = fakeHandle("L1");
+    syncHighlight([a] as never, [sel], null);
+    syncHighlight([a] as never, [sel], null);
+    expect(a.setHighlight).toHaveBeenCalledTimes(2);
+  });
+
   it("reaches HIDDEN layers through allInteractionHandles", () => {
     // Task B5 carry-forward: each handle filters the selection by its own
     // layerId, so pushing the whole array is safe — but a hidden layer must
