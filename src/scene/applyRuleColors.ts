@@ -38,15 +38,26 @@ function cachedLinear(hex: string): RGB {
 }
 
 /**
- * Compile enabled rules into a per-surface styling hook.
+ * Compile a layer's rules into a per-surface styling hook — the app side of
+ * spec 5's `ruleStore-per-layer --compile--> SurfaceStyleEvaluator -->
+ * handle.setStyle` edge (Task B14; `syncStyles` in `handleSync.ts` is the
+ * caller that pushes the result into a `CityModelHandle`).
  *
- * Returns null when no rule is enabled, so callers can fall back to
- * baseColors without walking any vertices. Only RoofSurfaces are rule-colored
- * — every other semantic type keeps its base color.
+ * Returns null when the layer's rules are switched off (`rulesEnabled`) or
+ * when no rule is enabled, so callers can fall back to baseColors without
+ * walking any vertices — the same `hasRules = rulesEnabled && rules.length`
+ * gate the pre-Navara `updateRuleColors` had. Only RoofSurfaces are
+ * rule-colored — every other semantic type keeps its base color.
+ *
+ * `rulesEnabled` defaults to true so the callers that already applied the
+ * layer gate themselves (the FCB worker, via `buildRuleColorsFromArrays`)
+ * keep their one-argument call.
  */
 export function compileRuleEvaluator(
   rules: ReadonlyArray<Rule>,
+  rulesEnabled = true,
 ): SurfaceStyleEvaluator | null {
+  if (!rulesEnabled) return null;
   const enabledRules = rules.filter((r) => r.enabled);
   if (enabledRules.length === 0) return null;
 
