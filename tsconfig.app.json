@@ -32,6 +32,11 @@
       "@cityjson/navara-flatcitybuf": [
         "./packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/index.ts"
       ],
+      // Likewise engine-bound: `FlatCityBufPlugin` plus the `getPickRay`
+      // binding (Task C11).
+      "@cityjson/navara-flatcitybuf/plugin": [
+        "./packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/plugin.ts"
+      ],
       "@cityjson/navara-cityparquet": [
         "./packages/cityjson-navara-plugins/packages/navara-cityparquet/src/index.ts"
       ]
