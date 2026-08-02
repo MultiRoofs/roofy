@@ -282,6 +282,24 @@ Deliverables:
 - Progress reporting during parse
 - Memory-efficient incremental object emission
 
+## Milestone 8: Navara Engine Migration
+
+Goal: replace the bespoke React Three Fiber scene with the Navara engine, moving all
+format-agnostic CityJSON domain code into a reusable plugin monorepo consumed as a git
+submodule (`packages/cityjson-navara-plugins`).
+
+Tracked in detail in `docs/superpowers/plans/2026-08-01-navara-migration.md`. That plan
+numbers its own phases M7.1–M7.7; those labels belong to the plan's internal numbering and
+are unrelated to Milestone 7 (CityGML) above. Phase status:
+
+- M7.1 (plugin monorepo scaffold + submodule + app wiring): Complete
+- M7.2 (format-agnostic domain moved into @cityjson/navara-core; app re-exports at the old paths): Complete
+- M7.3 (plugin + viewport rendering a static CityJSON layer): Not started
+- M7.4 (picking, cursor readout, rules, highlight, LoD): Not started
+- M7.5 (@cityjson/navara-flatcitybuf streaming plugin): Not started
+- M7.6 (solar, Google 3D Tiles, geographic persistence): Not started
+- M7.7 (teardown, dependency pinning, docs): Not started
+
 ## Cross-Cutting Workstreams
 
 - Data quality and semantic assumptions
