@@ -13,7 +13,7 @@ export default defineConfig({
     env: {
       builtin: true,
     },
-    ignorePatterns: ["coverage", "dist", "node_modules"],
+    ignorePatterns: ["coverage", "dist", "node_modules", "packages"],
     overrides: [
       {
         files: ["**/*.{ts,tsx}"],
@@ -128,7 +128,7 @@ export default defineConfig({
     trailingComma: "all",
     printWidth: 80,
     sortPackageJson: false,
-    ignorePatterns: ["dist", "coverage", "node_modules"],
+    ignorePatterns: ["dist", "coverage", "node_modules", "packages"],
   },
   plugins: [
     react(),
