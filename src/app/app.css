@@ -501,9 +501,14 @@ body {
     color 0.15s;
 }
 
-.tb-btn:hover {
+.tb-btn:hover:not(:disabled) {
   background: var(--bg-panel-hover);
   color: var(--fg);
+}
+
+.tb-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .tb-btn.tb-btn-active {

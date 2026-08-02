@@ -7,6 +7,22 @@ import type { Theme } from "../../features/theme/useTheme";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useSolarStore } from "../../features/solar/solarStore";
 
+/**
+ * Tooltip suffix for the tools the Navara viewport does not implement yet.
+ *
+ * `NavaraViewport` gates pointer events on `toolMode` (`acceptsPointer` in
+ * `pickEventHandlers.ts`), so selecting "box-select" or "measure" only ever
+ * turns picking OFF — nothing draws a rubber band or a measurement, because
+ * the R3F components that used to do it are no longer rendered (Task B11b).
+ * A button whose only effect is to break selection is worse than one that is
+ * visibly unavailable, so both are disabled until their Navara equivalents
+ * land. `toolMode` itself is untouched — the store and `acceptsPointer` keep
+ * their behaviour, and re-enabling is deleting `disabled` here — and the
+ * toolbar is the only way into either mode (there are no key bindings).
+ */
+const NAVARA_DEAD_TOOL_TITLE =
+  "temporarily unavailable during the Navara migration";
+
 interface ViewerToolbarProps {
   readonly fileName: string | null;
   readonly layerCount: number;
@@ -116,16 +132,12 @@ export function ViewerToolbar({
 
         <div className="toolbar-sep-inline" />
 
-        {/* Box select — only works in object mode */}
+        {/* Box select — DEAD under NavaraViewport (see NAVARA_DEAD_TOOL_TITLE). */}
         <button
           className={`tb-btn ${toolMode === "box-select" ? "tb-btn-active" : ""}`}
-          title={
-            pickMode === "surface"
-              ? "Box select (object mode only)"
-              : "Box select (B)"
-          }
+          title={`Box select — ${NAVARA_DEAD_TOOL_TITLE}`}
           aria-pressed={toolMode === "box-select"}
-          disabled={pickMode === "surface"}
+          disabled
           onClick={() => onSetToolMode("box-select")}
         >
           <svg viewBox="0 0 24 24">
@@ -141,11 +153,12 @@ export function ViewerToolbar({
           </svg>
         </button>
 
-        {/* Measure */}
+        {/* Measure — DEAD under NavaraViewport (see NAVARA_DEAD_TOOL_TITLE). */}
         <button
           className={`tb-btn ${toolMode === "measure" ? "tb-btn-active" : ""}`}
-          title="Measure distance (M)"
+          title={`Measure distance — ${NAVARA_DEAD_TOOL_TITLE}`}
           aria-pressed={toolMode === "measure"}
+          disabled
           onClick={() => onSetToolMode("measure")}
         >
           <svg viewBox="0 0 24 24">
