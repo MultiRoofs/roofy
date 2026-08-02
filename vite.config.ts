@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { defineConfig } from "vite-plus";
 import react from "@vitejs/plugin-react";
 
@@ -153,5 +154,29 @@ export default defineConfig({
   ],
   optimizeDeps: {
     exclude: ["@cityjson/flatcitybuf", "@duckdb/duckdb-wasm"],
+  },
+  resolve: {
+    alias: {
+      // Dev HMR: resolve the submodule packages to their TypeScript sources so
+      // editing a plugin file hot-reloads the app instead of requiring a
+      // `pnpm -r build` round trip. Production builds go through the same
+      // alias; the packages' own `dist/` output is what external consumers use.
+      "@cityjson/navara-core": resolve(
+        import.meta.dirname,
+        "packages/cityjson-navara-plugins/packages/navara-core/src/index.ts",
+      ),
+      "@cityjson/navara-cityjson": resolve(
+        import.meta.dirname,
+        "packages/cityjson-navara-plugins/packages/navara-cityjson/src/index.ts",
+      ),
+      "@cityjson/navara-flatcitybuf": resolve(
+        import.meta.dirname,
+        "packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/index.ts",
+      ),
+      "@cityjson/navara-cityparquet": resolve(
+        import.meta.dirname,
+        "packages/cityjson-navara-plugins/packages/navara-cityparquet/src/index.ts",
+      ),
+    },
   },
 });
