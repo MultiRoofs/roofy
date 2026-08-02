@@ -6,17 +6,19 @@
  * is imperative, so the whole engine lives behind refs and focused effects, and
  * React only owns the DOM around it.
  *
- * SCOPE (Task B11b): engine lifecycle, the photorealistic globe, the static
- * layer store -> `CityModelHandle` mirror (`handleSync.ts`), fit/align against
- * the live handles' geodetic bounds, the triangle readout, and the
- * init-failure panel. This is what `App.tsx` renders.
+ * SCOPE (Tasks B11b + B14): engine lifecycle, the photorealistic globe, the
+ * static layer store -> `CityModelHandle` mirror (`handleSync.ts`) including
+ * per-layer rule styling, fit/align against the live handles' geodetic bounds,
+ * the triangle readout, and the init-failure panel. This is what `App.tsx`
+ * renders.
  *
  * STILL DARK, by design (the props are already in the contract so the
- * component's public shape does not move again): picking and `onCursorPosition`
- * (Task B12), rule styling (B13), highlight (B14), the picking router across
- * static + streaming handles (B15 — it imports `handleSync`'s
- * `interactionHandles`/`syncHighlight`, which nothing here needs yet),
- * streaming cells (M7.5).
+ * component's public shape does not move again): the picking/hover router
+ * across static + streaming handles and the highlight and cursor-readout
+ * pushes it drives (Task B15 — the pure pieces already exist in
+ * `pickEventHandlers.ts`, `cursorCrsReadout.ts` and `handleSync`'s
+ * `interactionHandles`/`syncHighlight`, and `onCursorPosition` stays unwired
+ * until then), streaming cells (M7.5).
  */
 import {
   forwardRef,
@@ -33,7 +35,12 @@ import { DefaultPlugin } from "@navaramap/three-default-plugin";
 import { CityJSONPlugin } from "@cityjson/navara-cityjson/plugin";
 import type { CityModelHandle } from "@cityjson/navara-cityjson";
 import { useLayerStore } from "../features/layers/layerStore";
-import { syncLayers, totalTriangles, type LiveLayer } from "./handleSync";
+import {
+  syncLayers,
+  syncStyles,
+  totalTriangles,
+  type LiveLayer,
+} from "./handleSync";
 import {
   createNavaraSession,
   NavaraSessionDisposedError,
@@ -349,6 +356,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
             error instanceof Error ? error.message : String(error),
           ),
       );
+      // Rule colors, after the handles exist so a newly added layer is styled
+      // on the same pass it appears (Task B14). Memoised inside — a rule edit
+      // repaints only the layer whose rules changed.
+      syncStyles(layers, liveRef.current);
       onTriangleCount(totalTriangles(layers, liveRef.current));
       // Only a NEW layer earns a camera move: a visibility toggle, a LoD
       // change or a rule edit must not yank the camera out from under the user.

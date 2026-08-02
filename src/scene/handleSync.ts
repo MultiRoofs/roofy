@@ -10,9 +10,11 @@
  * registry so picking, highlighting, fit and the triangle readout cover
  * streamed cells too (Shared Interface Contract -> Interaction registries).
  *
- * Engine-free by construction: every import here is `import type`, and the
- * runtime-free `@cityjson/navara-cityjson` barrel never reaches an
- * `@navaramap/*` module (NODE_IMPORT_SAFE = false — see Global Constraints).
+ * Engine-free by construction: the only runtime import is
+ * `compileRuleEvaluator` (pure, `@cityjson/navara-core` underneath);
+ * everything else is `import type`, and the runtime-free
+ * `@cityjson/navara-cityjson` barrel never reaches an `@navaramap/*` module
+ * (NODE_IMPORT_SAFE = false — see Global Constraints).
  */
 import type {
   CityModelHandle,
@@ -21,7 +23,9 @@ import type {
   ScreenPoint,
   Selection,
 } from "@cityjson/navara-cityjson";
+import type { Rule } from "../features/rules/types";
 import type { Layer } from "../features/layers/layerStore";
+import { compileRuleEvaluator } from "./applyRuleColors";
 
 /** What the app remembers about a live static handle, so the next sync can
  *  tell an actual change from a re-render. */
@@ -29,6 +33,13 @@ export interface LiveLayer {
   readonly handle: CityModelHandle;
   lod: string | null;
   visible: boolean;
+  /** The `rules` array last compiled into `handle.setStyle`, by IDENTITY —
+   *  `undefined` means "this handle has never been styled". `layerStore`
+   *  replaces the array on every rule edit, so reference equality is an exact
+   *  "did the rules change?" test and costs nothing per frame. */
+  styledRules?: ReadonlyArray<Rule>;
+  /** The `rulesEnabled` flag that went with {@link styledRules}. */
+  styledRulesEnabled?: boolean;
 }
 
 /**
@@ -100,6 +111,59 @@ export function syncLayers(
       entry.visible = layer.visible;
       entry.handle.setVisible(layer.visible);
     }
+  }
+}
+
+/**
+ * Push each static layer's rules to its handle as a `SurfaceStyleEvaluator`
+ * (spec 5's `ruleStore-per-layer --compile--> SurfaceStyleEvaluator -->
+ * handle.setStyle` edge, Task B14).
+ *
+ * Separate from {@link syncLayers} because styling and existence change on
+ * different beats: a rule edit must recolor without touching visibility, LoD
+ * or the fit token, and an added layer must be styled only after its handle
+ * exists. Call it right after `syncLayers`.
+ *
+ * Memoised on `(rules identity, rulesEnabled)`: `handle.setStyle` repaints
+ * every vertex of the layer, so pushing on an unrelated store change (another
+ * layer's visibility toggle, a selection) would be a full recolor per
+ * keystroke.
+ *
+ * Two deliberate skips:
+ * - **streaming layers** — their colors are baked in the FCB worker from the
+ *   `Rule[]` wire payload, and a `SurfaceStyleEvaluator` must never reach a
+ *   streaming handle (Shared Interface Contract -> Streaming styling). Task
+ *   C13 gives them `setRules(rules, enabled)` instead;
+ * - **the first push when nothing would be painted** — a layer with no rules
+ *   (or `rulesEnabled: false`) leaves a freshly added handle untouched
+ *   instead of calling `setStyle(null)` on a mesh that is already unstyled.
+ *   The equivalent of the old `hasRules ? buildRuleColors(...) : null`.
+ */
+export function syncStyles(
+  layers: readonly Layer[],
+  live: ReadonlyMap<string, LiveLayer>,
+): void {
+  for (const layer of layers) {
+    if (layer.isStreaming) continue;
+    const entry = live.get(layer.id);
+    // No entry means the add was refused (CRS gate) or has not happened yet;
+    // when it does, `styledRules` is undefined on the new entry and the style
+    // is pushed then.
+    if (!entry) continue;
+    if (
+      entry.styledRules === layer.rules &&
+      entry.styledRulesEnabled === layer.rulesEnabled
+    ) {
+      continue;
+    }
+
+    const neverStyled = entry.styledRules === undefined;
+    entry.styledRules = layer.rules;
+    entry.styledRulesEnabled = layer.rulesEnabled;
+
+    const evaluator = compileRuleEvaluator(layer.rules, layer.rulesEnabled);
+    if (evaluator === null && neverStyled) continue;
+    entry.handle.setStyle(evaluator);
   }
 }
 

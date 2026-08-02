@@ -491,6 +491,48 @@ describe("NavaraViewport lifecycle", () => {
     expect(setCamera).toHaveBeenCalledTimes(1);
   });
 
+  // -------------------------------------------------------------------------
+  // Task B14: per-layer rules -> handle.setStyle. The compile step and the
+  // memoisation are `applyRuleColors`/`handleSync`'s (covered in their own
+  // tests); what is tested here is that a rule edit in the store reaches the
+  // engine at all, and that an unrelated store change does not repaint.
+  // -------------------------------------------------------------------------
+
+  it("pushes a layer's rules to its handle, and clears them when switched off", async () => {
+    const rules = [
+      {
+        id: "r1",
+        name: "all roofs",
+        color: "#4ec84e",
+        conditions: [],
+        logic: "AND" as const,
+        enabled: true,
+      },
+    ];
+    useLayerStore.setState({ layers: [makeLayer({ id: "a", rules })] });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() =>
+      expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(1),
+    );
+    const handle = cityPluginInstance.addCityModel.mock.results[0]!.value;
+    await waitFor(() => expect(handle.setStyle).toHaveBeenCalledTimes(1));
+    expect(typeof handle.setStyle.mock.calls[0]![0]).toBe("function");
+
+    // An unrelated change (visibility) must not repaint the layer.
+    useLayerStore.setState({
+      layers: [makeLayer({ id: "a", rules, visible: false })],
+    });
+    await waitFor(() => expect(handle.setVisible).toHaveBeenCalledWith(false));
+    expect(handle.setStyle).toHaveBeenCalledTimes(1);
+
+    // Switching the layer's rules off clears the style.
+    useLayerStore.setState({
+      layers: [makeLayer({ id: "a", rules, rulesEnabled: false })],
+    });
+    await waitFor(() => expect(handle.setStyle).toHaveBeenCalledTimes(2));
+    expect(handle.setStyle).toHaveBeenLastCalledWith(null);
+  });
+
   it("forgets its handles when the engine is disposed, so a remount re-adds", async () => {
     useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
     const { unmount } = render(<NavaraViewport onTriangleCount={() => {}} />);
