@@ -6,12 +6,17 @@
  * is imperative, so the whole engine lives behind refs and focused effects, and
  * React only owns the DOM around it.
  *
- * SCOPE (Task B11a): engine lifecycle, the photorealistic globe, camera
- * accessors and the init-failure panel. There are no city layers yet — Task
- * B11b mirrors the layer store into `CityModelHandle`s (`handleSync.ts`), fills
- * in the bounds sources the fit/align helpers below ask for, and switches
- * `App.tsx` over from `CityScene`. Until then this component is reachable only
- * from the `navara.html` harness page.
+ * SCOPE (Task B11b): engine lifecycle, the photorealistic globe, the static
+ * layer store -> `CityModelHandle` mirror (`handleSync.ts`), fit/align against
+ * the live handles' geodetic bounds, the triangle readout, and the
+ * init-failure panel. This is what `App.tsx` renders.
+ *
+ * STILL DARK, by design (the props are already in the contract so the
+ * component's public shape does not move again): picking and `onCursorPosition`
+ * (Task B12), rule styling (B13), highlight (B14), the picking router across
+ * static + streaming handles (B15 — it imports `handleSync`'s
+ * `interactionHandles`/`syncHighlight`, which nothing here needs yet),
+ * streaming cells (M7.5).
  */
 import {
   forwardRef,
@@ -26,6 +31,9 @@ import { DefaultPlugin } from "@navaramap/three-default-plugin";
 // The engine-bound subpath, NOT the package barrel: the barrel must stay
 // importable from Node (Global Constraints -> NODE_IMPORT_SAFE = false).
 import { CityJSONPlugin } from "@cityjson/navara-cityjson/plugin";
+import type { CityModelHandle } from "@cityjson/navara-cityjson";
+import { useLayerStore } from "../features/layers/layerStore";
+import { syncLayers, totalTriangles, type LiveLayer } from "./handleSync";
 import {
   createNavaraSession,
   NavaraSessionDisposedError,
@@ -110,15 +118,23 @@ function createReadyGate(): ReadyGate {
 
 export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
   function NavaraViewport(props, ref) {
-    // Only `onFps` is wired in B11a; `onTriangleCount` / `onCursorPosition` /
-    // `onLayerError` stay in the props contract so B11b, which reports them,
-    // does not change this component's public shape.
-    const { onFps } = props;
+    // `onCursorPosition` is still unwired — it is fed by the pick/hover path
+    // that lands in Task B12. It stays in the props contract so this
+    // component's public shape does not move again.
+    const { onFps, onTriangleCount, onLayerError } = props;
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<ViewInstance | null>(null);
     const cityPluginRef = useRef<CityJSONPlugin | null>(null);
+    /** The live static handles, keyed by layer id. A ref, not state: the
+     *  engine owns the meshes, and re-rendering on a handle change would only
+     *  invalidate the imperative callbacks below. */
+    const liveRef = useRef(new Map<string, LiveLayer>());
     const [engineReady, setEngineReady] = useState(false);
     const [initError, setInitError] = useState<string | null>(null);
+    /** Bumped by the sync effect when a layer was newly added, which is the
+     *  only thing that triggers an automatic fit. */
+    const [fitToken, setFitToken] = useState(0);
+    const layers = useLayerStore((s) => s.layers);
 
     // CitySceneHandle.ready — created eagerly so a consumer can await it before
     // the mount effect has run. Resolve-or-reject, never a hang: see the Shared
@@ -130,7 +146,19 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     // --- Engine lifecycle (StrictMode-safe, see navaraSession.ts) ---
     useEffect(() => {
       const container = containerRef.current;
-      if (!container) return;
+      if (!container) {
+        // Unreachable in practice — the div below is rendered unconditionally,
+        // so React has attached the ref by the time this effect runs — but an
+        // early `return` here would leave `ready` pending FOREVER, which is
+        // the same hang class as the plugin-constructor escape fixed in B11a.
+        // Resolve-or-reject, never a hang (Shared Interface Contract).
+        const error = new Error(
+          "NavaraViewport: the canvas container never mounted, so the engine cannot start.",
+        );
+        setInitError(error.message);
+        readyGate.reject(error);
+        return;
+      }
 
       mountedViewports += 1;
       if (import.meta.env.DEV && mountedViewports > 1) {
@@ -214,6 +242,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         setEngineReady(false);
         viewRef.current = null;
         cityPluginRef.current = null;
+        // The handles die with the view; dropping them here means the next
+        // mount re-adds every layer from the store instead of trusting stale
+        // entries whose meshes have been disposed.
+        liveRef.current.clear();
         // `started` settles only after `session.ready` has, so by the time
         // this runs the session disposes synchronously — which is what lets
         // the next mount initialise a fresh worker pool. If `dispose()` itself
@@ -243,11 +275,20 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     }, [engineReady, onFps]);
 
     // --- camera helpers ---
-    // The bounds sources arrive in Task B11b (static handles + streaming
-    // cells); with none registered every box is empty, so a fit is a no-op
-    // rather than a jump to a NaN camera.
-    const boundsOf = useCallback((_layerIds?: readonly string[]) => {
-      return unionGeodeticBounds([]);
+    // Bounds come from the live handles, so a fit frames the model where it is
+    // actually PLACED (the geoid offset is baked into `getBoundsGeodetic`).
+    // With nothing registered the union is empty and a fit is a no-op rather
+    // than a jump to a NaN camera. Deps stay `[]` on purpose: `liveRef` is a
+    // ref, so `fitAll`'s identity is stable and the fit-once effect below
+    // cannot be re-triggered by an unrelated store update.
+    // Streaming cells join this union in M7.5.
+    const boundsOf = useCallback((ids?: readonly string[]) => {
+      const handles: CityModelHandle[] = [];
+      for (const [id, entry] of liveRef.current) {
+        if (ids && !ids.includes(id)) continue;
+        handles.push(entry.handle);
+      }
+      return unionGeodeticBounds(handles.map((h) => h.getBoundsGeodetic()));
     }, []);
 
     const fitAll = useCallback(() => {
@@ -278,6 +319,46 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       },
       [boundsOf],
     );
+
+    // --- layer store -> engine handles ---
+    // The reconciliation itself lives in `handleSync.ts` (pure, unit-tested);
+    // this effect only supplies the registry binding and reports the results.
+    // Streaming layers are skipped by `syncLayers` — @cityjson/navara-flatcitybuf
+    // creates and owns their meshes from M7.5 on.
+    useEffect(() => {
+      const plugin = cityPluginRef.current;
+      if (!engineReady || !plugin) return;
+      const before = liveRef.current.size;
+      syncLayers(
+        {
+          get: (id) => plugin.getHandle(id),
+          add: (layer) =>
+            plugin.addCityModel(layer.model, {
+              id: layer.id,
+              crs: layer.model.metadata.referenceSystem,
+              lod: layer.selectedLod,
+            }),
+        },
+        layers,
+        liveRef.current,
+        (layerId, error) =>
+          onLayerError?.(
+            layerId,
+            error instanceof Error ? error.message : String(error),
+          ),
+      );
+      onTriangleCount(totalTriangles(layers, liveRef.current));
+      // Only a NEW layer earns a camera move: a visibility toggle, a LoD
+      // change or a rule edit must not yank the camera out from under the user.
+      if (liveRef.current.size > before) setFitToken((t) => t + 1);
+    }, [engineReady, layers, onTriangleCount, onLayerError]);
+
+    // Fit once whenever a layer is newly added. Separate from the sync effect
+    // so the fit runs after the handles exist and `boundsOf` can see them.
+    useEffect(() => {
+      if (fitToken === 0) return;
+      fitAll();
+    }, [fitToken, fitAll]);
 
     const getCameraState = useCallback((): GeographicCameraState | null => {
       const view = viewRef.current;

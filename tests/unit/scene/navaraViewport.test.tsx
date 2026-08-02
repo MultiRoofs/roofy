@@ -69,6 +69,66 @@ vi.mock("@cityjson/navara-cityjson/plugin", () => ({
 
 const { NavaraViewport } = await import("../../../src/scene/NavaraViewport");
 import type { CitySceneHandle } from "../../../src/scene/NavaraViewport";
+import {
+  useLayerStore,
+  type Layer,
+} from "../../../src/features/layers/layerStore";
+import type { CityModel } from "../../../src/domain/citymodel/types";
+
+// ---------------------------------------------------------------------------
+// Layer fixtures. The store is driven directly (`setState`) rather than through
+// `addLayer`, so a test can pin ids and LoDs.
+// ---------------------------------------------------------------------------
+
+function makeModel(referenceSystem?: string): CityModel {
+  return {
+    objects: {},
+    vertices: [],
+    transform: { scale: [1, 1, 1], translate: [0, 0, 0] },
+    metadata: referenceSystem === undefined ? {} : { referenceSystem },
+    bbox: [0, 0, 0, 1, 1, 1],
+  } as unknown as CityModel;
+}
+
+function makeLayer(patch: Partial<Layer> & { id: string }): Layer {
+  return {
+    name: patch.id,
+    model: makeModel("EPSG:7415"),
+    modelRef: { type: "url", url: `https://example.test/${patch.id}` },
+    visible: true,
+    rules: [],
+    rulesEnabled: true,
+    selectedLod: "2.2",
+    availableLods: ["2.2"],
+    lodMode: "auto",
+    isStreaming: false,
+    ...patch,
+  } as Layer;
+}
+
+/** A `CityModelHandle` stub: only the members `handleSync`/`boundsOf` touch. */
+function makeHandle(id: string, triangles = 10) {
+  return {
+    id,
+    setVisible: vi.fn(),
+    setLod: vi.fn(),
+    setStyle: vi.fn(),
+    setHighlight: vi.fn(),
+    resolvePick: vi.fn(),
+    resolveRaycast: vi.fn(),
+    batchIdMap: vi.fn(() => []),
+    triangleCount: vi.fn(() => triangles),
+    getBoundsGeodetic: vi.fn(() => ({
+      west: 4.35,
+      south: 52,
+      east: 4.36,
+      north: 52.01,
+      minHeight: 0,
+      maxHeight: 20,
+    })),
+    delete: vi.fn(),
+  };
+}
 
 describe("NavaraViewport lifecycle", () => {
   beforeEach(() => {
@@ -86,10 +146,17 @@ describe("NavaraViewport lifecycle", () => {
     viewOptions.length = 0;
     cameraThrows = false;
     defaultPluginThrows = null;
+    cityPluginInstance.getHandle.mockReset();
+    cityPluginInstance.addCityModel.mockReset();
+    cityPluginInstance.addCityModel.mockImplementation(
+      (_model: unknown, opts: { id: string }) => makeHandle(opts.id),
+    );
+    useLayerStore.setState({ layers: [], activeLayerId: null });
   });
 
   afterEach(() => {
     cleanup();
+    useLayerStore.setState({ layers: [], activeLayerId: null });
   });
 
   it("registers DefaultPlugin then CityJSONPlugin, both before view.init()", async () => {
@@ -227,7 +294,7 @@ describe("NavaraViewport lifecycle", () => {
     expect(ref.current!.getCameraState()).toBeNull();
   });
 
-  it("moves no camera while there are no bounds to fit (layers land in B11b)", async () => {
+  it("moves no camera while there are no layers to fit", async () => {
     const ref = createRef<CitySceneHandle>();
     render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
     await waitFor(() => expect(ref.current).not.toBeNull());
@@ -275,5 +342,169 @@ describe("NavaraViewport lifecycle", () => {
     );
     unmount();
     expect(off.mock.calls.some((c) => c[0] === "postRender")).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Task B11b: the layer store -> CityJSONPlugin registry mirror.
+  //
+  // The reconciliation rules themselves are `handleSync.ts`'s (covered in
+  // handleSync.test.ts); what is tested here is the WIRING — that the effect
+  // binds the plugin's registry, reports triangles and errors, fits on a new
+  // layer only, and drops its handles when the engine goes away.
+  // -------------------------------------------------------------------------
+
+  it("adds every static layer through the plugin registry, filtered to its LoD", async () => {
+    useLayerStore.setState({
+      layers: [
+        makeLayer({ id: "a", selectedLod: "1.2" }),
+        makeLayer({ id: "b", selectedLod: null }),
+      ],
+    });
+    const onTriangleCount = vi.fn();
+    render(<NavaraViewport onTriangleCount={onTriangleCount} />);
+
+    await waitFor(() =>
+      expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(2),
+    );
+    expect(cityPluginInstance.addCityModel.mock.calls.map((c) => c[1])).toEqual(
+      [
+        { id: "a", crs: "EPSG:7415", lod: "1.2" },
+        { id: "b", crs: "EPSG:7415", lod: null },
+      ],
+    );
+    // 2 handles x 10 triangles.
+    await waitFor(() => expect(onTriangleCount).toHaveBeenLastCalledWith(20));
+  });
+
+  it("never adds a streaming layer (its meshes belong to the FCB plugin)", async () => {
+    useLayerStore.setState({
+      layers: [
+        makeLayer({ id: "static" }),
+        makeLayer({ id: "streamed", isStreaming: true }),
+      ],
+    });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() =>
+      expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(1),
+    );
+    expect(cityPluginInstance.addCityModel.mock.calls[0]![1]).toMatchObject({
+      id: "static",
+    });
+  });
+
+  it("reports a refused layer through onLayerError and keeps the scene up", async () => {
+    cityPluginInstance.addCityModel.mockImplementation(
+      (_model: unknown, opts: { id: string }) => {
+        if (opts.id === "bad") throw new Error("CRS is not metric");
+        return makeHandle(opts.id);
+      },
+    );
+    useLayerStore.setState({
+      layers: [makeLayer({ id: "bad" }), makeLayer({ id: "good" })],
+    });
+    const onLayerError = vi.fn();
+    const onTriangleCount = vi.fn();
+    render(
+      <NavaraViewport
+        onTriangleCount={onTriangleCount}
+        onLayerError={onLayerError}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(onLayerError).toHaveBeenCalledWith("bad", "CRS is not metric"),
+    );
+    // The good layer still rendered and still counts.
+    await waitFor(() => expect(onTriangleCount).toHaveBeenLastCalledWith(10));
+  });
+
+  it("fits the camera when a layer is ADDED, and not when one is merely toggled", async () => {
+    useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(1));
+    // A camera derived from the handle's real bounds, not a NaN jump.
+    const camera = flyTo.mock.calls[0]![0] as Record<string, number>;
+    expect(camera.lng).toBeCloseTo(4.355, 6);
+    // South of the box centre (52.005) and above it, looking north — the
+    // default framing, derived from the handle's own bounds.
+    expect(camera.lat).toBeLessThan(52.005);
+    expect(camera.height).toBeGreaterThan(20);
+    expect(camera.pitch).toBeCloseTo(-60, 6);
+
+    // Visibility change: reconciled, but the camera stays put.
+    useLayerStore.setState({
+      layers: [makeLayer({ id: "a", visible: false })],
+    });
+    await waitFor(() =>
+      expect(
+        cityPluginInstance.addCityModel.mock.results[0]!.value.setVisible,
+      ).toHaveBeenCalledWith(false),
+    );
+    expect(flyTo).toHaveBeenCalledTimes(1);
+
+    // A second layer IS a new fit.
+    useLayerStore.setState({
+      layers: [makeLayer({ id: "a", visible: false }), makeLayer({ id: "b" })],
+    });
+    await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(2));
+  });
+
+  it("deletes the handle of a layer that left the store", async () => {
+    useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
+    const onTriangleCount = vi.fn();
+    render(<NavaraViewport onTriangleCount={onTriangleCount} />);
+    await waitFor(() =>
+      expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(1),
+    );
+    const handle = cityPluginInstance.addCityModel.mock.results[0]!.value;
+
+    useLayerStore.setState({ layers: [] });
+    await waitFor(() => expect(handle.delete).toHaveBeenCalledTimes(1));
+    expect(onTriangleCount).toHaveBeenLastCalledWith(0);
+  });
+
+  it("fitLayer frames one layer; fitAll frames them all", async () => {
+    useLayerStore.setState({
+      layers: [makeLayer({ id: "a" }), makeLayer({ id: "b" })],
+    });
+    const ref = createRef<CitySceneHandle>();
+    render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
+    await waitFor(() =>
+      expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(2),
+    );
+    const handleA = cityPluginInstance.addCityModel.mock.results[0]!.value;
+    const handleB = cityPluginInstance.addCityModel.mock.results[1]!.value;
+
+    handleA.getBoundsGeodetic.mockClear();
+    handleB.getBoundsGeodetic.mockClear();
+    ref.current!.fitLayer("b");
+    expect(handleA.getBoundsGeodetic).not.toHaveBeenCalled();
+    expect(handleB.getBoundsGeodetic).toHaveBeenCalled();
+
+    handleB.getBoundsGeodetic.mockClear();
+    ref.current!.fitAll();
+    expect(handleA.getBoundsGeodetic).toHaveBeenCalled();
+    expect(handleB.getBoundsGeodetic).toHaveBeenCalled();
+
+    // alignView reads the same union, so the align buttons work on real bounds.
+    ref.current!.alignView("top");
+    expect(setCamera).toHaveBeenCalledTimes(1);
+  });
+
+  it("forgets its handles when the engine is disposed, so a remount re-adds", async () => {
+    useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
+    const { unmount } = render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() =>
+      expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(1),
+    );
+    unmount();
+    await waitFor(() => expect(dispose).toHaveBeenCalled());
+
+    // Stale entries would make the second mount believe the (disposed) meshes
+    // were still live and render nothing.
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() =>
+      expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(2),
+    );
   });
 });
