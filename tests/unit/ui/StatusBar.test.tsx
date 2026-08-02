@@ -3,8 +3,8 @@
  *
  * Covers the exact wording the task brief pins down: "too-far" always
  * shows the fixed, user-facing "Zoom in to load features" — NOT the
- * driver's internal reason-coded message (`useTileStreaming.ts` sets
- * `"Zoom in (${plan.reason})"`, which is debug detail, not UI copy.
+ * driver's internal reason-coded message (`FcbStreamLayerHandle.commit`
+ * emits `"Zoom in (${plan.reason})"`, which is debug detail, not UI copy).
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";

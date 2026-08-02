@@ -10,6 +10,8 @@ import { useLayerStore } from "../../features/layers/layerStore";
 import type { Layer } from "../../features/layers/layerStore";
 import { useStreamStore } from "../../features/streaming/streamStore";
 import { getResidentModel } from "../../features/streaming/residentModel";
+import { closeStreamingLayer } from "../../features/streaming/openStreamingLayer";
+import { getStreamPlugin } from "../../features/streaming/streamPlugin";
 import { LodSelector } from "../sidebar/LodSelector";
 
 interface LayerPanelProps {
@@ -189,6 +191,11 @@ export function LayerPanel({
                 title="Remove layer"
                 onClick={(e) => {
                   e.stopPropagation();
+                  // Before the store entry goes: the stream is only reachable
+                  // BY layer id, so dropping the layer first would strand the
+                  // worker and its cell meshes for the lifetime of the tab.
+                  // A no-op for a static layer.
+                  closeStreamingLayer(getStreamPlugin(), layer.id);
                   removeLayer(layer.id);
                 }}
               >

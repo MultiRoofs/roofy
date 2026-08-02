@@ -19,7 +19,6 @@ import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import type { StreamState } from "../../../../src/features/streaming/streamStore";
-import { CellCache } from "../../../../src/features/streaming/cellCache";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 
 afterEach(() => {
@@ -59,16 +58,16 @@ function baseLayer(overrides: Partial<Layer>): Layer {
 // LAST/highest-detail rung of the ladder — see levelPolicy.ts).
 function baseStream(overrides: Partial<StreamState> = {}): StreamState {
   return {
-    client: {} as never,
+    // The handle is never touched by this component — it reads the store's
+    // mirrored level/grid/ladder only — so it is the one field cast here.
+    handle: {} as never,
     header: {} as never,
     grid: { originX: 0, originY: 0, rootCell: 800, maxLevel: 5 },
-    cache: new CellCache<never>({ maxTriangles: Infinity, maxBytes: Infinity }),
     level: 3,
     ladder: ["1.2", "2.2"],
     ladderVersion: 1,
     status: "idle",
     message: null,
-    lastCommit: null,
     version: 1,
     ...overrides,
   };

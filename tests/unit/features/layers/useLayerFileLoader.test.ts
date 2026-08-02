@@ -5,32 +5,15 @@
  * a clear error if anything still reaches it for `.fcb`). Everything else
  * must be unaffected.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import type { WorkerResponse } from "../../../../src/features/streaming/workerProtocol";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import { useLayerFileLoader } from "../../../../src/features/layers/useLayerFileLoader";
+import { setStreamPlugin } from "../../../../src/features/streaming/streamPlugin";
+import type { StreamPlugin } from "../../../../src/features/streaming/streamPlugin";
+import type { FcbStreamLayerHandle } from "@cityjson/navara-flatcitybuf";
 import type { FcbHeaderModel } from "../../../../src/domain/citymodel/flatcitybuf/fcbSource";
-
-class FakeWorker {
-  static instances: FakeWorker[] = [];
-  onmessage: ((ev: MessageEvent<WorkerResponse>) => void) | null = null;
-  postMessage = vi.fn();
-  terminate = vi.fn();
-  constructor(
-    public url: string | URL,
-    public options?: WorkerOptions,
-  ) {
-    FakeWorker.instances.push(this);
-  }
-}
-
-function currentWorker(): FakeWorker {
-  const w = FakeWorker.instances.at(-1);
-  if (!w) throw new Error("no FakeWorker constructed");
-  return w;
-}
 
 const HEADER: FcbHeaderModel = {
   version: "1.0",
@@ -40,36 +23,52 @@ const HEADER: FcbHeaderModel = {
   epsg: 28992,
 };
 
+/** The engine is faked at the plugin seam, not at `Worker`: `openStream` now
+ *  owns the worker, admission, the CRS gate and the vertical datum, and the
+ *  real `FlatCityBufPlugin` cannot be imported under Node at all (Global
+ *  Constraints -> NODE_IMPORT_SAFE = false). */
+let openStream: ReturnType<typeof vi.fn>;
+
+function installPlugin(): void {
+  openStream = vi.fn((opts: { id: string }) =>
+    Promise.resolve({
+      id: opts.id,
+      grid: { originX: 0, originY: 0, rootCell: 100, maxLevel: 3 },
+      header: HEADER,
+      level: null,
+      ladder: [],
+      status: "idle",
+      message: null,
+      version: 0,
+      onStatus: () => () => undefined,
+      onLadder: () => () => undefined,
+      onCommit: () => () => undefined,
+    } as unknown as FcbStreamLayerHandle),
+  );
+  setStreamPlugin({ openStream, remove: vi.fn() } as unknown as StreamPlugin);
+}
+
 beforeEach(() => {
-  FakeWorker.instances.length = 0;
-  vi.stubGlobal("Worker", FakeWorker);
+  installPlugin();
   useLayerStore.getState().removeAllLayers();
   useStreamStore.setState({ streams: {} });
+});
+
+afterEach(() => {
+  setStreamPlugin(null);
 });
 
 describe("useLayerFileLoader — .fcb routing", () => {
   it("addLayerFromUrl routes a .fcb URL through openStreamingLayer, producing an isStreaming layer", async () => {
     const { result } = renderHook(() => useLayerFileLoader());
 
-    let idPromise: Promise<string | null>;
-    act(() => {
-      idPromise = result.current.addLayerFromUrl("https://x/delft.fcb");
-    });
-    const worker = currentWorker();
-    const call = worker.postMessage.mock.calls[0]![0] as {
-      id: number;
-      type: string;
-      url?: string;
-    };
-    expect(call.type).toBe("open");
-    expect(call.url).toBe("https://x/delft.fcb");
-
     await act(async () => {
-      worker.onmessage?.({
-        data: { type: "opened", id: call.id, header: HEADER, admission: null },
-      } as unknown as MessageEvent<WorkerResponse>);
-      await idPromise;
+      await result.current.addLayerFromUrl("https://x/delft.fcb");
     });
+    expect(openStream).toHaveBeenCalledTimes(1);
+    expect(
+      (openStream.mock.calls[0]![0] as { source: unknown }).source,
+    ).toEqual({ url: "https://x/delft.fcb" });
 
     const layers = useLayerStore.getState().layers;
     expect(layers).toHaveLength(1);
@@ -82,26 +81,13 @@ describe("useLayerFileLoader — .fcb routing", () => {
     const file = new File(["fake fcb bytes"], "local.fcb");
     const textSpy = vi.spyOn(file, "text");
 
-    let idPromise: Promise<string | null>;
-    act(() => {
-      idPromise = result.current.addLayerFromFile(file);
-    });
-    const worker = currentWorker();
-    const call = worker.postMessage.mock.calls[0]![0] as {
-      id: number;
-      type: string;
-      blob?: Blob;
-    };
-    expect(call.type).toBe("open");
-    expect(call.blob).toBe(file);
-    expect(textSpy).not.toHaveBeenCalled();
-
     await act(async () => {
-      worker.onmessage?.({
-        data: { type: "opened", id: call.id, header: HEADER, admission: null },
-      } as unknown as MessageEvent<WorkerResponse>);
-      await idPromise;
+      await result.current.addLayerFromFile(file);
     });
+    const source = (openStream.mock.calls[0]![0] as { source: { blob: Blob } })
+      .source;
+    expect(source.blob).toBe(file);
+    expect(textSpy).not.toHaveBeenCalled();
 
     const layers = useLayerStore.getState().layers;
     expect(layers).toHaveLength(1);
@@ -115,38 +101,35 @@ describe("useLayerFileLoader — .fcb routing", () => {
   it("surfaces an admission refusal as the hook's error state, and adds no layer", async () => {
     const { result } = renderHook(() => useLayerFileLoader());
 
-    let idPromise: Promise<string | null>;
-    act(() => {
-      idPromise = result.current.addLayerFromUrl("https://x/degrees.fcb");
-    });
-    const worker = currentWorker();
-    const call = worker.postMessage.mock.calls[0]![0] as { id: number };
+    openStream.mockRejectedValueOnce(new Error("refused: degrees"));
 
     await act(async () => {
-      worker.onmessage?.({
-        data: {
-          type: "opened",
-          id: call.id,
-          header: HEADER,
-          admission: { code: "non-metric-crs", message: "refused: degrees" },
-        },
-      } as unknown as MessageEvent<WorkerResponse>);
-      await idPromise;
+      await result.current.addLayerFromUrl("https://x/degrees.fcb");
     });
 
     expect(useLayerStore.getState().layers).toHaveLength(0);
     expect(result.current.error).toMatch(/refused: degrees/);
   });
 
-  it("a non-.fcb URL is unaffected — still goes through the plain CityJSON path, never opens a worker", async () => {
+  it("a non-.fcb URL is unaffected — still goes through the plain CityJSON path, never opening a stream", async () => {
     const { result } = renderHook(() => useLayerFileLoader());
     // A CityJSON URL will fail to fetch in this test environment (no
-    // network mock), which is fine — the point is that no Worker is ever
-    // constructed for it.
+    // network mock), which is fine — the point is that the streaming plugin
+    // is never asked for it.
     await act(async () => {
       await result.current.addLayerFromUrl("https://x/model.city.json");
     });
-    expect(FakeWorker.instances).toHaveLength(0);
+    expect(openStream).not.toHaveBeenCalled();
+  });
+
+  it("reports a clear error (and adds no layer) when a .fcb is opened before the 3D engine is up", async () => {
+    setStreamPlugin(null);
+    const { result } = renderHook(() => useLayerFileLoader());
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/delft.fcb");
+    });
+    expect(useLayerStore.getState().layers).toHaveLength(0);
+    expect(result.current.error).toMatch(/3D engine is not running yet/);
   });
 });
 
@@ -195,20 +178,11 @@ describe("useLayerFileLoader — addLayerFromFile overrides", () => {
     const { result } = renderHook(() => useLayerFileLoader());
     const file = new File(["fake fcb bytes"], "restored.fcb");
 
-    let idPromise: Promise<string | null>;
-    act(() => {
-      idPromise = result.current.addLayerFromFile(file, {
+    await act(async () => {
+      await result.current.addLayerFromFile(file, {
         rulesEnabled: false,
         visible: false,
       });
-    });
-    const worker = currentWorker();
-    const call = worker.postMessage.mock.calls[0]![0] as { id: number };
-    await act(async () => {
-      worker.onmessage?.({
-        data: { type: "opened", id: call.id, header: HEADER, admission: null },
-      } as unknown as MessageEvent<WorkerResponse>);
-      await idPromise;
     });
 
     const layer = useLayerStore.getState().layers[0]!;

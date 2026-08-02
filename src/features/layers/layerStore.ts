@@ -43,6 +43,11 @@ export interface LayerStoreActions {
       Layer,
       "id" | "selectedLod" | "availableLods" | "lodMode" | "isStreaming"
     > & {
+      /** Defaults to a fresh UUID. Supplied only by `openStreamingLayer`,
+       *  where the plugin has already registered its handle under an id it
+       *  minted first — the layer and the handle must share one id or every
+       *  `plugin.getHandle(layer.id)` lookup misses. */
+      readonly id?: string;
       /** Defaults to false. Set true for a layer opened via viewport
        *  streaming (Task 17's `openStreamingLayer`) — its `model` is a stub
        *  (bbox only, empty objects) rather than a fully-parsed model. */
@@ -93,7 +98,7 @@ export const useLayerStore = create<LayerStore>((set) => ({
   activeLayerId: null,
 
   addLayer: (input) => {
-    const id = crypto.randomUUID();
+    const id = input.id ?? crypto.randomUUID();
     const availableLods = computeAvailableLods(input.model);
     const selectedLod = availableLods[0] ?? null;
     set((state) => ({

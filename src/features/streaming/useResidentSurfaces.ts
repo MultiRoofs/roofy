@@ -1,22 +1,22 @@
 /**
- * Fetches full ring geometry for one object on demand, via the worker's
- * `surfaces` message.
+ * Fetches full ring geometry for one object on demand, via the streaming
+ * layer's handle.
  *
  * `ResidentObjectRecord` (the payload shipped for every resident cell)
  * deliberately excludes `Surface.rings` — see the doc comment on
- * `ResidentObjectRecord` in workerProtocol.ts. The two main-thread consumers
- * that need rings (rooftop solar scoring in AnalysisTab, and the Surfaces
- * tab) act on exactly one selected object at a time, so this hook fetches
- * rings for that one object lazily instead of shipping every object's full
- * geometry on every cell fetch/recolor.
+ * `ResidentObjectRecord` in the plugin's workerProtocol. The two main-thread
+ * consumers that need rings (rooftop solar scoring in AnalysisTab, and the
+ * Surfaces tab) act on exactly one selected object at a time, so this hook
+ * fetches rings for that one object lazily instead of shipping every object's
+ * full geometry on every cell fetch/recolor.
  *
  * Static (non-streaming) layers never use this — `CityObject.surfaces` is
  * already resident and synchronous, so callers keep using it directly and
- * only reach for this hook (with a non-null client) for streaming layers.
+ * only reach for this hook (with a non-null handle) for streaming layers.
  */
 import { useEffect, useState } from "react";
+import type { FcbStreamLayerHandle } from "@cityjson/navara-flatcitybuf";
 import type { Surface } from "../../domain/citymodel/types";
-import type { WorkerClient } from "./workerClient";
 
 export type SurfacesFetchState =
   | { readonly status: "empty" }
@@ -25,20 +25,20 @@ export type SurfacesFetchState =
   | { readonly status: "error"; readonly message: string };
 
 /**
- * `client`/`objectId` are `null` when there's nothing to fetch — no
+ * `handle`/`objectId` are `null` when there's nothing to fetch — no
  * selection, or a non-streaming layer that doesn't need this hook's result
  * at all. The hook still has to be called unconditionally on every render
  * (Rules of Hooks), so `null` is the "stay idle" signal rather than a
  * caller-side conditional hook call.
  */
 export function useObjectSurfaces(
-  client: WorkerClient | null,
+  handle: FcbStreamLayerHandle | null,
   objectId: string | null,
 ): SurfacesFetchState {
   const [state, setState] = useState<SurfacesFetchState>({ status: "empty" });
 
   useEffect(() => {
-    if (!client || !objectId) {
+    if (!handle || !objectId) {
       setState({ status: "empty" });
       return;
     }
@@ -46,26 +46,14 @@ export function useObjectSurfaces(
     let cancelled = false;
     setState({ status: "loading" });
 
-    client
-      .send({ type: "surfaces", objectId })
-      .then((r) => {
-        if (cancelled) return; // objectId/client changed or unmounted — stale
-        if (r.type === "surfaceData") {
-          // The wire type is `unknown[]` (workerProtocol.ts) because
-          // postMessage can't carry a static type across the worker boundary.
-          // fcb.worker.ts's `surfaces` handler builds this from
-          // `obj.surfaces as unknown[]`, so it IS a `Surface[]` structurally —
-          // this cast documents that contract rather than asserting something
-          // unverified.
-          setState({ status: "ready", surfaces: r.surfaces as Surface[] });
-        } else if (r.type === "error") {
-          setState({ status: "error", message: r.message });
-        } else {
-          setState({
-            status: "error",
-            message: `unexpected worker response for 'surfaces': ${r.type}`,
-          });
-        }
+    // No response-shape branch any more: `fetchSurfaces` types its result and
+    // REJECTS both for a worker error and for an object that is not resident
+    // in any cached cell, so every failure arrives on the one path below.
+    handle
+      .fetchSurfaces(objectId)
+      .then((surfaces) => {
+        if (cancelled) return; // objectId/handle changed or unmounted — stale
+        setState({ status: "ready", surfaces });
       })
       .catch((err: unknown) => {
         // A layer removed mid-request terminates its WorkerClient, which
@@ -83,7 +71,7 @@ export function useObjectSurfaces(
     return () => {
       cancelled = true;
     };
-  }, [client, objectId]);
+  }, [handle, objectId]);
 
   return state;
 }

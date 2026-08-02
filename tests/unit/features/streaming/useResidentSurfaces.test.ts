@@ -1,170 +1,111 @@
 import { describe, it, expect, vi } from "vitest";
-import { act, renderHook, cleanup } from "@testing-library/react";
+import { act, renderHook, cleanup, waitFor } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { useObjectSurfaces } from "../../../../src/features/streaming/useResidentSurfaces";
-import type { WorkerClient } from "../../../../src/features/streaming/workerClient";
-import type { WorkerResponse } from "../../../../src/features/streaming/workerProtocol";
+import type { FcbStreamLayerHandle } from "@cityjson/navara-flatcitybuf";
+import type { Surface } from "../../../../src/domain/citymodel/types";
 
 afterEach(() => {
   cleanup();
 });
 
-function fakeClient(send: WorkerClient["send"]): WorkerClient {
-  return { send } as unknown as WorkerClient;
+/** Only `fetchSurfaces` is reached; the rest of the handle owns a worker and
+ *  GPU meshes that jsdom cannot provide. */
+function fakeHandle(
+  fetchSurfaces: FcbStreamLayerHandle["fetchSurfaces"],
+): FcbStreamLayerHandle {
+  return { fetchSurfaces } as unknown as FcbStreamLayerHandle;
 }
 
+const SURFACES: Surface[] = [
+  { type: "RoofSurface", rings: [], attributes: {}, lod: null },
+];
+
 describe("useObjectSurfaces", () => {
-  it("stays 'empty' and does not call send when objectId is null (client present)", () => {
-    // `client` is hoisted to a stable reference BEFORE renderHook, not
+  it("stays 'empty' and does not fetch when objectId is null (handle present)", () => {
+    // `handle` is hoisted to a stable reference BEFORE renderHook, not
     // constructed inline in the render callback — a fresh object literal
     // there would change identity on every render, retriggering the
-    // effect (whose deps include `client`) forever. That's a test-fixture
+    // effect (whose deps include `handle`) forever. That's a test-fixture
     // trap, not a hook bug: caught by hand while writing this suite (see
     // task-15-report.md).
-    const send = vi.fn();
-    const client = fakeClient(send);
-    const { result } = renderHook(() => useObjectSurfaces(client, null));
+    const fetchSurfaces = vi.fn();
+    const handle = fakeHandle(fetchSurfaces);
+    const { result } = renderHook(() => useObjectSurfaces(handle, null));
     expect(result.current).toEqual({ status: "empty" });
-    expect(send).not.toHaveBeenCalled();
+    expect(fetchSurfaces).not.toHaveBeenCalled();
   });
 
-  it("stays 'empty' and does not call send when objectId is null", () => {
-    const send = vi.fn();
+  it("stays 'empty' and does not fetch when the handle is null", () => {
+    const fetchSurfaces = vi.fn();
     const { result } = renderHook(() => useObjectSurfaces(null, "obj-1"));
     expect(result.current).toEqual({ status: "empty" });
-    expect(send).not.toHaveBeenCalled();
+    expect(fetchSurfaces).not.toHaveBeenCalled();
   });
 
-  it("goes 'loading' immediately, then 'ready' once the worker resolves", async () => {
-    let resolve!: (r: WorkerResponse) => void;
-    const send = vi.fn(() => new Promise<WorkerResponse>((r) => (resolve = r)));
-    const client = fakeClient(send);
-
-    const { result } = renderHook(() => useObjectSurfaces(client, "obj-1"));
-    expect(result.current).toEqual({ status: "loading" });
-    expect(send).toHaveBeenCalledWith({ type: "surfaces", objectId: "obj-1" });
-
-    const surfaces = [
-      { type: "RoofSurface", rings: [], attributes: {}, lod: null },
-    ];
-    await act(async () => {
-      resolve({
-        type: "surfaceData",
-        id: 1,
-        objectId: "obj-1",
-        surfaces,
-      });
-      await Promise.resolve();
-    });
-
-    expect(result.current).toEqual({ status: "ready", surfaces });
-  });
-
-  it("goes 'loading' then 'error' when the worker reports an error", async () => {
-    let resolve!: (r: WorkerResponse) => void;
-    const send = vi.fn(() => new Promise<WorkerResponse>((r) => (resolve = r)));
-    const client = fakeClient(send);
-
-    const { result } = renderHook(() => useObjectSurfaces(client, "obj-1"));
-
-    await act(async () => {
-      resolve({
-        type: "error",
-        id: 1,
-        message: "not resident",
-        aborted: false,
-      });
-      await Promise.resolve();
-    });
-
-    expect(result.current).toEqual({
-      status: "error",
-      message: "not resident",
-    });
-  });
-
-  it("treats an unexpected response type as an error rather than hanging in 'loading'", async () => {
-    let resolve!: (r: WorkerResponse) => void;
-    const send = vi.fn(() => new Promise<WorkerResponse>((r) => (resolve = r)));
-    const client = fakeClient(send);
-
-    const { result } = renderHook(() => useObjectSurfaces(client, "obj-1"));
-
-    await act(async () => {
-      resolve({ type: "done", id: 1 });
-      await Promise.resolve();
-    });
-
-    expect(result.current.status).toBe("error");
-  });
-
-  it("goes 'loading' then 'error' when send() REJECTS (e.g. terminate() racing a layer removal), rather than an unhandled rejection", async () => {
-    let reject!: (e: Error) => void;
-    const send = vi.fn(
-      () => new Promise<WorkerResponse>((_, r) => (reject = r)),
+  it("goes 'loading' immediately, then 'ready' once the handle resolves", async () => {
+    let resolve!: (s: readonly Surface[]) => void;
+    const fetchSurfaces = vi.fn(
+      () => new Promise<readonly Surface[]>((r) => (resolve = r)),
     );
-    const client = fakeClient(send);
+    const handle = fakeHandle(fetchSurfaces);
 
-    const { result } = renderHook(() => useObjectSurfaces(client, "obj-1"));
+    const { result } = renderHook(() => useObjectSurfaces(handle, "obj-1"));
     expect(result.current).toEqual({ status: "loading" });
+    expect(fetchSurfaces).toHaveBeenCalledWith("obj-1");
 
-    // If this rejection had no `.catch`, it would surface as an unhandled
-    // promise rejection — vitest fails the run on those, so simply reaching
-    // the assertion below is part of the proof (mirrors
-    // useTileStreaming.test.ts's identical rationale for commitStreamingLayer).
     await act(async () => {
-      reject(new Error("WorkerClient terminated"));
+      resolve(SURFACES);
       await Promise.resolve();
     });
 
-    expect(result.current).toEqual({
-      status: "error",
-      message: "WorkerClient terminated",
-    });
+    expect(result.current).toEqual({ status: "ready", surfaces: SURFACES });
   });
 
-  it("does not resurrect a resolved/rejected result after unmount (cancelled guard covers the rejection path too)", async () => {
-    let reject!: (e: Error) => void;
-    const send = vi.fn(
-      () => new Promise<WorkerResponse>((_, r) => (reject = r)),
+  it("reports an error when the handle rejects (object not resident, or the layer was removed mid-request)", async () => {
+    const handle = fakeHandle(
+      vi.fn().mockRejectedValue(new Error("WorkerClient terminated")),
     );
-    const client = fakeClient(send);
+    const { result } = renderHook(() => useObjectSurfaces(handle, "b1"));
+    await waitFor(() => expect(result.current.status).toBe("error"));
+    expect((result.current as { message: string }).message).toBe(
+      "WorkerClient terminated",
+    );
+  });
+
+  it("does not resurrect a rejected result after unmount (the cancelled guard covers the rejection path too)", async () => {
+    let reject!: (e: Error) => void;
+    const fetchSurfaces = vi.fn(
+      () => new Promise<readonly Surface[]>((_, r) => (reject = r)),
+    );
+    const handle = fakeHandle(fetchSurfaces);
 
     const { result, unmount } = renderHook(() =>
-      useObjectSurfaces(client, "obj-1"),
+      useObjectSurfaces(handle, "obj-1"),
     );
     unmount();
 
+    // If this rejection had no `.catch`, it would surface as an unhandled
+    // promise rejection — vitest fails the run on those, so simply reaching
+    // the assertion below is part of the proof.
     await act(async () => {
       reject(new Error("WorkerClient terminated"));
       await Promise.resolve();
     });
 
-    // Nothing to assert on `result.current` post-unmount beyond "did not
-    // throw" — the real proof is the absence of an unhandled rejection.
     expect(result.current).toEqual({ status: "loading" });
   });
 
-  it("re-fetches (a new send call) when objectId changes", async () => {
-    const send = vi
+  it("re-fetches when objectId changes", async () => {
+    const fetchSurfaces = vi
       .fn()
-      .mockResolvedValueOnce({
-        type: "surfaceData",
-        id: 1,
-        objectId: "a",
-        surfaces: [],
-      })
-      .mockResolvedValueOnce({
-        type: "surfaceData",
-        id: 2,
-        objectId: "b",
-        surfaces: [],
-      });
-    const client = fakeClient(send);
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    const handle = fakeHandle(fetchSurfaces);
 
     const { result, rerender } = renderHook(
       ({ objectId }: { objectId: string }) =>
-        useObjectSurfaces(client, objectId),
+        useObjectSurfaces(handle, objectId),
       { initialProps: { objectId: "a" } },
     );
 
@@ -175,23 +116,20 @@ describe("useObjectSurfaces", () => {
     expect(result.current).toEqual({ status: "ready", surfaces: [] });
 
     rerender({ objectId: "b" });
-    expect(send).toHaveBeenCalledTimes(2);
-    expect(send).toHaveBeenNthCalledWith(2, {
-      type: "surfaces",
-      objectId: "b",
-    });
+    expect(fetchSurfaces).toHaveBeenCalledTimes(2);
+    expect(fetchSurfaces).toHaveBeenNthCalledWith(2, "b");
   });
 
   it("ignores a stale response that resolves after objectId already changed", async () => {
-    const resolvers: Array<(r: WorkerResponse) => void> = [];
-    const send = vi.fn(
-      () => new Promise<WorkerResponse>((r) => resolvers.push(r)),
+    const resolvers: Array<(s: readonly Surface[]) => void> = [];
+    const fetchSurfaces = vi.fn(
+      () => new Promise<readonly Surface[]>((r) => resolvers.push(r)),
     );
-    const client = fakeClient(send);
+    const handle = fakeHandle(fetchSurfaces);
 
     const { result, rerender } = renderHook(
       ({ objectId }: { objectId: string }) =>
-        useObjectSurfaces(client, objectId),
+        useObjectSurfaces(handle, objectId),
       { initialProps: { objectId: "a" } },
     );
 
@@ -200,14 +138,9 @@ describe("useObjectSurfaces", () => {
 
     // Resolve the FIRST (now-stale) request after the second has started.
     await act(async () => {
-      resolvers[0]!({
-        type: "surfaceData",
-        id: 1,
-        objectId: "a",
-        surfaces: [
-          { type: "WallSurface", rings: [], attributes: {}, lod: null },
-        ],
-      });
+      resolvers[0]!([
+        { type: "WallSurface", rings: [], attributes: {}, lod: null },
+      ]);
       await Promise.resolve();
     });
 

@@ -15,6 +15,7 @@ import {
 } from "../../domain/citymodel/loadCityModel";
 import { useLayerStore } from "./layerStore";
 import { openStreamingLayer } from "../streaming/openStreamingLayer";
+import { requireStreamPlugin } from "../streaming/streamPlugin";
 import type { Rule } from "../rules/types";
 
 /** Optional per-layer settings to apply instead of the usual fresh-layer
@@ -75,6 +76,7 @@ export function useLayerFileLoader(): LayerFileLoader {
           // an ArrayBuffer first (see openStreamingLayer.ts's doc comment
           // on why fromBytes' copy would OOM a multi-GB local file).
           layerId = await openStreamingLayer({
+            plugin: requireStreamPlugin(),
             source: { blob: file },
             name: file.name,
             modelRef: { type: "file", fileName: file.name },
@@ -113,6 +115,7 @@ export function useLayerFileLoader(): LayerFileLoader {
       try {
         if (detectEncoding(url) === "flatcitybuf") {
           return await openStreamingLayer({
+            plugin: requireStreamPlugin(),
             source: { url },
             name: fileNameFromUrl(url),
             modelRef: { type: "url", url },

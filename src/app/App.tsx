@@ -40,7 +40,14 @@ import { useLayerStore } from "../features/layers/layerStore";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
 import { useStreamStore } from "../features/streaming/streamStore";
 import { getResidentModel } from "../features/streaming/residentModel";
-import { openStreamingLayer } from "../features/streaming/openStreamingLayer";
+import {
+  closeAllStreamingLayers,
+  openStreamingLayer,
+} from "../features/streaming/openStreamingLayer";
+import {
+  getStreamPlugin,
+  requireStreamPlugin,
+} from "../features/streaming/streamPlugin";
 import { useTheme } from "../features/theme/useTheme";
 import { useSolarStore } from "../features/solar/solarStore";
 import { InspectorPanel } from "../ui/inspector/InspectorPanel";
@@ -320,7 +327,10 @@ export function App({
 
         const viewState = restoreSnapshot(snapshot);
 
-        // Remove all existing layers
+        // Remove all existing layers — the streaming ones first, so their
+        // workers and cell meshes die with them rather than outliving the
+        // layer entry that was the only way to reach them.
+        closeAllStreamingLayers(getStreamPlugin());
         useLayerStore.getState().removeAllLayers();
         setUnavailableLayers([]);
 
@@ -396,6 +406,7 @@ export function App({
             let layerId: string;
             if (detectEncoding(modelRef.url) === "flatcitybuf") {
               layerId = await openStreamingLayer({
+                plugin: requireStreamPlugin(),
                 source: { url: modelRef.url },
                 name,
                 modelRef,
@@ -550,6 +561,7 @@ export function App({
 
           if (detectEncoding(sl.modelUrl) === "flatcitybuf") {
             await openStreamingLayer({
+              plugin: requireStreamPlugin(),
               source: { url: sl.modelUrl },
               name,
               modelRef: { type: "url", url: sl.modelUrl },
@@ -609,6 +621,7 @@ export function App({
   );
 
   const handleClose = useCallback(() => {
+    closeAllStreamingLayers(getStreamPlugin());
     useLayerStore.getState().removeAllLayers();
     setTriangleCount(0);
     setDuckdbModelLoaded(false);
