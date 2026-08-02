@@ -21,6 +21,8 @@ const viewInstances: unknown[] = [];
 const viewOptions: unknown[] = [];
 /** Reproduces the engine's real pre-first-frame behaviour (see the test). */
 let cameraThrows = false;
+/** Set to make `new DefaultPlugin()` throw, i.e. an unsupported browser. */
+let defaultPluginThrows: string | null = null;
 
 // NOTE: the factories below are `function` expressions, not arrows — the
 // component calls `new ThreeView(...)` / `new DefaultPlugin()`, and an arrow
@@ -52,6 +54,7 @@ vi.mock("@navaramap/three", () => ({
 const defaultPluginInstance = { addDefaultPhotorealScene: vi.fn() };
 vi.mock("@navaramap/three-default-plugin", () => ({
   DefaultPlugin: vi.fn(function () {
+    if (defaultPluginThrows !== null) throw new Error(defaultPluginThrows);
     return defaultPluginInstance;
   }),
 }));
@@ -82,6 +85,7 @@ describe("NavaraViewport lifecycle", () => {
     viewInstances.length = 0;
     viewOptions.length = 0;
     cameraThrows = false;
+    defaultPluginThrows = null;
   });
 
   afterEach(() => {
@@ -136,6 +140,36 @@ describe("NavaraViewport lifecycle", () => {
     // The failure is visible, not just a console line: C20's restore flow
     // catches the rejection, and the user sees why nothing rendered.
     expect((await findByRole("alert")).textContent).toMatch(/wasm boom/);
+  });
+
+  it("REJECTS `ready` and shows the panel when a plugin CONSTRUCTOR throws", async () => {
+    // The boot sequence is more than `init()`: a plugin constructor can throw
+    // on an unsupported browser long before a session exists. `ready` must
+    // still settle — resolve-or-reject, never a hang.
+    defaultPluginThrows = "no WebGL2";
+    const ref = createRef<CitySceneHandle>();
+    const { findByRole } = render(
+      <NavaraViewport ref={ref} onTriangleCount={() => {}} />,
+    );
+    await waitFor(() => expect(ref.current).not.toBeNull());
+    await expect(ref.current!.ready).rejects.toThrow("no WebGL2");
+    expect((await findByRole("alert")).textContent).toMatch(/no WebGL2/);
+    expect(init).not.toHaveBeenCalled();
+  });
+
+  it("warns in DEV when a second viewport is mounted alongside the first", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    render(
+      <>
+        <NavaraViewport onTriangleCount={() => {}} />
+        <NavaraViewport onTriangleCount={() => {}} />
+      </>,
+    );
+    await waitFor(() => expect(warn).toHaveBeenCalled());
+    expect(String(warn.mock.calls[0]![0])).toMatch(
+      /NavaraViewport: 2 instances are mounted at once/,
+    );
+    warn.mockRestore();
   });
 
   it("getCameraState reads the engine camera; setCameraState writes it", async () => {
