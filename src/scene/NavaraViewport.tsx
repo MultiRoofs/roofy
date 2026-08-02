@@ -82,9 +82,18 @@ interface ReadyGate {
  * the engine exactly once instead of twice.
  *
  * Corollary: at most ONE `NavaraViewport` may be mounted at a time. That is an
- * engine constraint, not a design choice.
+ * engine constraint, not a design choice — {@link mountedViewports} enforces
+ * it loudly in development.
  */
 let engineSlot: Promise<unknown> = Promise.resolve();
+
+/**
+ * How many `NavaraViewport`s are mounted right now. StrictMode never pushes
+ * this past 1 (its first pass is cleaned up before the second mounts), so
+ * anything above 1 is a genuine second instance — which cannot come up until
+ * the first unmounts, because of the worker-pool singleton above.
+ */
+let mountedViewports = 0;
 
 function createReadyGate(): ReadyGate {
   let resolve!: () => void;
@@ -123,15 +132,30 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       const container = containerRef.current;
       if (!container) return;
 
+      mountedViewports += 1;
+      if (import.meta.env.DEV && mountedViewports > 1) {
+        console.warn(
+          `NavaraViewport: ${mountedViewports} instances are mounted at once. ` +
+            "Navara's tile worker pool is a process-wide singleton, so only " +
+            "one view can be live: the extra instances stay blank until the " +
+            "first one unmounts. Render exactly one NavaraViewport.",
+        );
+      }
+
       let cancelled = false;
       let session: NavaraSession<ViewInstance> | null = null;
 
-      const started = engineSlot
-        .catch(() => undefined)
-        .then(async () => {
+      // ONE try/catch around the WHOLE queued body. Everything that can throw
+      // lives inside it — a rejected predecessor, a plugin constructor on an
+      // unsupported browser, `createView`, `init()`, an `afterInit` hook — so
+      // there is no escape that leaves `ready` pending. Resolve-or-reject,
+      // never a hang (Shared Interface Contract → CitySceneHandle.ready).
+      const started = (async () => {
+        try {
           // Our turn only comes once any previous view has been disposed. If
           // this mount was already torn down by then (StrictMode's first
           // pass), build nothing at all.
+          await engineSlot;
           if (cancelled) return;
 
           // Constructed here so this component keeps typed refs; the session
@@ -165,21 +189,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
             ],
           });
 
-          let result;
-          try {
-            result = await session.ready;
-          } catch (error) {
-            // Torn down mid-init, or disposed before it went live: not a
-            // failure anyone needs to see. The cleanup below still disposes.
-            if (cancelled || error instanceof NavaraSessionDisposedError) {
-              return;
-            }
-            setInitError(
-              error instanceof Error ? error.message : String(error),
-            );
-            readyGate.reject(error);
-            return;
-          }
+          const result = await session.ready;
           if (cancelled) return;
 
           viewRef.current = result.view;
@@ -187,19 +197,28 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           setInitError(null);
           setEngineReady(true);
           readyGate.resolve();
-        })
-        .catch(() => undefined);
+        } catch (error) {
+          // Torn down mid-init, or disposed before it went live: not a failure
+          // anyone needs to see, and the cleanup below still disposes.
+          if (cancelled || error instanceof NavaraSessionDisposedError) return;
+          setInitError(error instanceof Error ? error.message : String(error));
+          readyGate.reject(error);
+        }
+      })();
 
       engineSlot = started;
 
       return () => {
         cancelled = true;
+        mountedViewports -= 1;
         setEngineReady(false);
         viewRef.current = null;
         cityPluginRef.current = null;
         // `started` settles only after `session.ready` has, so by the time
         // this runs the session disposes synchronously — which is what lets
-        // the next mount initialise a fresh worker pool.
+        // the next mount initialise a fresh worker pool. If `dispose()` itself
+        // throws, the next mount's `await engineSlot` re-raises it into that
+        // mount's catch: reported in its error panel, never a silent hang.
         engineSlot = started.then(() => session?.dispose());
       };
     }, [readyGate]);
