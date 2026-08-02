@@ -155,6 +155,17 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ["@cityjson/flatcitybuf", "@duckdb/duckdb-wasm"],
   },
+  build: {
+    rollupOptions: {
+      // TEMPORARY (Task B1 spike, removed in C21): Vite only treats
+      // `index.html` as an entry unless the inputs are listed explicitly, so
+      // the spike page would be missing from `npm run build` output.
+      input: {
+        index: resolve(import.meta.dirname, "index.html"),
+        spike: resolve(import.meta.dirname, "spike.html"),
+      },
+    },
+  },
   resolve: {
     // The aliases below pull the submodule packages in as *source*, so their
     // own `import proj4 from "proj4"` / `import … from "three"` would
