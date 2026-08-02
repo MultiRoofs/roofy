@@ -8,15 +8,42 @@
  */
 import { createRef, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 
 const addPlugin = vi.fn();
 const init = vi.fn(async () => {});
 const dispose = vi.fn();
 const setCamera = vi.fn();
 const flyTo = vi.fn();
-const on = vi.fn();
-const off = vi.fn();
+
+/** The engine's event bus, reduced to what `view.on/off` need. Tests drive the
+ *  viewport by FIRING these, which is the only honest way to exercise a
+ *  component whose whole input surface is `view.on(...)`. */
+const listeners = new Map<string, Set<(...args: never[]) => void>>();
+const on = vi.fn((name: string, fn: (...args: never[]) => void) => {
+  const set = listeners.get(name) ?? new Set();
+  set.add(fn);
+  listeners.set(name, set);
+});
+const off = vi.fn((name: string, fn: (...args: never[]) => void) => {
+  listeners.get(name)?.delete(fn);
+});
+function fire(name: string, ...args: unknown[]): void {
+  for (const fn of [...(listeners.get(name) ?? [])]) {
+    (fn as (...a: unknown[]) => void)(...args);
+  }
+}
+/** A mouse event as the engine delivers it: canvas-relative `offsetX/offsetY`
+ *  plus the viewport-relative `clientX/clientY` the router must NOT use. */
+function mouse(x: number, y: number, patch: Record<string, unknown> = {}) {
+  return { offsetX: x, offsetY: y, clientX: x + 300, clientY: y, ...patch };
+}
+
+/** `pickDepthPosition` — the ECEF point under the cursor, or null (sky). */
+const pickDepthPosition = vi.fn((_x: number, _y: number) => null as unknown);
+/** `getPickRay` — the ECEF ray the router raycasts every handle with. */
+const RAY = { origin: { x: 0, y: 0, z: 0 }, direction: { x: 0, y: 0, z: 1 } };
+const getPickRay = vi.fn(() => RAY as unknown);
 const viewInstances: unknown[] = [];
 const viewOptions: unknown[] = [];
 /** Reproduces the engine's real pre-first-frame behaviour (see the test). */
@@ -37,6 +64,7 @@ vi.mock("@navaramap/three", () => ({
       on,
       off,
       camera: {
+        raw: {},
         get positionGeographic() {
           if (cameraThrows) throw new Error("Invariant failed");
           return { lng: 4.35, lat: 52, height: 500 };
@@ -45,10 +73,22 @@ vi.mock("@navaramap/three", () => ({
       },
       setCamera,
       flyTo,
+      screenSize: { x: 800, y: 600 },
+      pixelRatio: 1,
+      pickDepthPosition,
     };
     viewInstances.push(view);
     return view;
   }),
+  getPickRay,
+  // The engine reports geodetic angles in RADIANS; the readout wants degrees.
+  // Both are identity-ish here so a test can assert the exact numbers.
+  vector3ToGeodetic: vi.fn((v: { x: number; y: number; z: number }) => ({
+    lng: v.x,
+    lat: v.y,
+    height: v.z,
+  })),
+  radianToDegree: vi.fn((r: number) => (r * 180) / Math.PI),
 }));
 
 const defaultPluginInstance = { addDefaultPhotorealScene: vi.fn() };
@@ -73,6 +113,7 @@ import {
   useLayerStore,
   type Layer,
 } from "../../../src/features/layers/layerStore";
+import { useSelectionStore } from "../../../src/features/selection/selectionStore";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 
 // ---------------------------------------------------------------------------
@@ -90,10 +131,15 @@ function makeModel(referenceSystem?: string): CityModel {
   } as unknown as CityModel;
 }
 
+/** CityJSON spells its CRS as an OGC URI, and that is the only form
+ *  `parseEpsgCode` accepts — a bare "EPSG:7415" would be refused by the CRS
+ *  gate, so the fixture must not use one. */
+const CRS_URI = "https://www.opengis.net/def/crs/EPSG/0/7415";
+
 function makeLayer(patch: Partial<Layer> & { id: string }): Layer {
   return {
     name: patch.id,
-    model: makeModel("EPSG:7415"),
+    model: makeModel(CRS_URI),
     modelRef: { type: "url", url: `https://example.test/${patch.id}` },
     visible: true,
     rules: [],
@@ -114,10 +160,16 @@ function makeHandle(id: string, triangles = 10) {
     setLod: vi.fn(),
     setStyle: vi.fn(),
     setHighlight: vi.fn(),
-    resolvePick: vi.fn(),
-    resolveRaycast: vi.fn(),
+    resolvePick: vi.fn((pick: { properties?: { surfaceIndex?: number } }) => ({
+      kind: "surface",
+      layerId: id,
+      objectId: `${id}-obj`,
+      surfaceIndex: pick.properties?.surfaceIndex ?? 0,
+    })),
+    resolveRaycast: vi.fn(() => null as unknown),
     batchIdMap: vi.fn(() => []),
     triangleCount: vi.fn(() => triangles),
+    heightOffset: vi.fn(() => 0),
     getBoundsGeodetic: vi.fn(() => ({
       west: 4.35,
       south: 52,
@@ -139,7 +191,17 @@ describe("NavaraViewport lifecycle", () => {
     flyTo.mockClear();
     on.mockClear();
     off.mockClear();
+    listeners.clear();
+    getPickRay.mockClear();
+    pickDepthPosition.mockClear();
+    pickDepthPosition.mockReturnValue(null);
     CityJSONPluginMock.mockClear();
+    useSelectionStore.setState({
+      mode: "object",
+      toolMode: "select",
+      selections: [],
+      hovered: null,
+    });
     init.mockImplementation(async () => {});
     defaultPluginInstance.addDefaultPhotorealScene.mockClear();
     viewInstances.length = 0;
@@ -157,6 +219,11 @@ describe("NavaraViewport lifecycle", () => {
   afterEach(() => {
     cleanup();
     useLayerStore.setState({ layers: [], activeLayerId: null });
+    useSelectionStore.setState({
+      toolMode: "select",
+      selections: [],
+      hovered: null,
+    });
   });
 
   it("registers DefaultPlugin then CityJSONPlugin, both before view.init()", async () => {
@@ -368,8 +435,8 @@ describe("NavaraViewport lifecycle", () => {
     );
     expect(cityPluginInstance.addCityModel.mock.calls.map((c) => c[1])).toEqual(
       [
-        { id: "a", crs: "EPSG:7415", lod: "1.2" },
-        { id: "b", crs: "EPSG:7415", lod: null },
+        { id: "a", crs: CRS_URI, lod: "1.2" },
+        { id: "b", crs: CRS_URI, lod: null },
       ],
     );
     // 2 handles x 10 triangles.
@@ -531,6 +598,250 @@ describe("NavaraViewport lifecycle", () => {
     });
     await waitFor(() => expect(handle.setStyle).toHaveBeenCalledTimes(2));
     expect(handle.setStyle).toHaveBeenLastCalledWith(null);
+  });
+
+  // -------------------------------------------------------------------------
+  // Task B15: the interaction hub. Pointer events -> pick intents -> the
+  // selection store, selection/hover -> setHighlight, and the cursor readout.
+  // The decisions themselves live in `pickEventHandlers`/`handleSync`/
+  // `cursorCrsReadout`; what is tested here is that the engine's events reach
+  // them, in the right coordinate space, and that the results reach the store.
+  // -------------------------------------------------------------------------
+
+  /** Two static layers whose raycasts land at the given distances. Layer "a"
+   *  comes FIRST in the store, so a first-layer-wins router would always
+   *  return it. */
+  async function mountTwoLayers(
+    distances: { a: number | null; b: number | null },
+    props: Record<string, unknown> = {},
+  ) {
+    useLayerStore.setState({
+      layers: [makeLayer({ id: "a" }), makeLayer({ id: "b" })],
+    });
+    const view = render(
+      <NavaraViewport onTriangleCount={() => {}} {...props} />,
+    );
+    await waitFor(() =>
+      expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(2),
+    );
+    const handles = {
+      a: cityPluginInstance.addCityModel.mock.results[0]!.value,
+      b: cityPluginInstance.addCityModel.mock.results[1]!.value,
+    };
+    for (const key of ["a", "b"] as const) {
+      const d = distances[key];
+      handles[key].resolveRaycast.mockReturnValue(
+        d === null ? null : { objectIndex: 0, surfaceIndex: 7, distance: d },
+      );
+    }
+    await waitFor(() =>
+      expect(on.mock.calls.some((c) => c[0] === "mousemove")).toBe(true),
+    );
+    return { ...view, handles };
+  }
+
+  it("hovers the NEAREST layer under the cursor, not the first in the list", async () => {
+    const { handles } = await mountTwoLayers({ a: 900, b: 12 });
+    act(() => fire("mousemove", mouse(10, 20)));
+
+    // Every visible layer is raycast — you cannot know which is nearest
+    // without asking — but only the winner interprets its own indices.
+    expect(handles.a.resolveRaycast).toHaveBeenCalledWith(RAY);
+    expect(handles.b.resolveRaycast).toHaveBeenCalledWith(RAY);
+    expect(handles.a.resolvePick).not.toHaveBeenCalled();
+    // Default PickMode is "object", so the surface hit is narrowed.
+    expect(useSelectionStore.getState().hovered).toEqual({
+      kind: "object",
+      layerId: "b",
+      objectId: "b-obj",
+    });
+  });
+
+  it("raycasts from CANVAS-relative pixels, not viewport clientX/clientY", async () => {
+    // The app renders the canvas beside a left sidebar; using clientX would
+    // put every pick a sidebar's width to the right of the cursor.
+    await mountTwoLayers({ a: null, b: null });
+    act(() => fire("mousemove", mouse(10, 20)));
+    const [windowLike, camera, point] = getPickRay.mock
+      .calls[0]! as unknown as [
+      { width: number; height: number; pixelRatio: number },
+      unknown,
+      { x: number; y: number },
+    ];
+    expect(point.x).toBe(10);
+    expect(point.y).toBe(20);
+    expect(windowLike).toEqual({ width: 800, height: 600, pixelRatio: 1 });
+    expect(camera).toBe(
+      (viewInstances[0] as { camera: { raw: unknown } }).camera.raw,
+    );
+  });
+
+  it("does not re-push an unchanged hover (a repaint per mousemove otherwise)", async () => {
+    const { handles } = await mountTwoLayers({ a: null, b: 12 });
+    act(() => fire("mousemove", mouse(10, 20)));
+    handles.b.setHighlight.mockClear();
+    act(() => fire("mousemove", mouse(11, 21)));
+    // Same surface: the resolved Selection is a fresh object each time, so
+    // without a value comparison the store would churn and every layer would
+    // repaint its vertex colors at pointer rate.
+    expect(handles.b.setHighlight).not.toHaveBeenCalled();
+  });
+
+  it("selects on click and toggles on shift-click", async () => {
+    await mountTwoLayers({ a: null, b: 12 });
+    act(() => {
+      fire("mousedown", mouse(10, 20));
+      fire("click", mouse(10, 20));
+    });
+    expect(useSelectionStore.getState().selections).toEqual([
+      { kind: "object", layerId: "b", objectId: "b-obj" },
+    ]);
+
+    act(() => {
+      fire("mousedown", mouse(10, 20));
+      fire("click", mouse(10, 20, { shiftKey: true }));
+    });
+    expect(useSelectionStore.getState().selections).toEqual([]);
+  });
+
+  it("clicking empty space clears the selection", async () => {
+    await mountTwoLayers({ a: null, b: null });
+    useSelectionStore.setState({
+      selections: [{ kind: "object", layerId: "b", objectId: "b-obj" }],
+    });
+    act(() => {
+      fire("mousedown", mouse(10, 20));
+      fire("click", mouse(10, 20));
+    });
+    expect(useSelectionStore.getState().selections).toEqual([]);
+  });
+
+  it("ignores the click that ends a camera DRAG", async () => {
+    // The engine's `click` is the raw DOM click and fires after an orbit too;
+    // without the gate every camera gesture would clear the selection.
+    await mountTwoLayers({ a: null, b: 12 });
+    act(() => {
+      fire("mousedown", mouse(100, 100));
+      fire("mousemove", mouse(160, 100));
+      fire("click", mouse(160, 100));
+    });
+    expect(useSelectionStore.getState().selections).toEqual([]);
+  });
+
+  it("swallows both gestures in measure mode and never commits in box-select", async () => {
+    await mountTwoLayers({ a: null, b: 12 });
+    useSelectionStore.setState({ toolMode: "measure" });
+    act(() => {
+      fire("mousemove", mouse(10, 20));
+      fire("mousedown", mouse(10, 20));
+      fire("click", mouse(10, 20));
+    });
+    expect(useSelectionStore.getState().hovered).toBeNull();
+    expect(useSelectionStore.getState().selections).toEqual([]);
+
+    // box-select still hovers (the old app did) but leaves the commit to its
+    // drag overlay.
+    useSelectionStore.setState({ toolMode: "box-select" });
+    act(() => fire("mousemove", mouse(10, 20)));
+    expect(useSelectionStore.getState().hovered).not.toBeNull();
+    act(() => {
+      fire("mousedown", mouse(10, 20));
+      fire("click", mouse(10, 20));
+    });
+    expect(useSelectionStore.getState().selections).toEqual([]);
+  });
+
+  it("clears the hover and the readout when the pointer leaves the canvas", async () => {
+    const onCursorPosition = vi.fn();
+    await mountTwoLayers({ a: null, b: 12 }, { onCursorPosition });
+    act(() => fire("mousemove", mouse(10, 20)));
+    expect(useSelectionStore.getState().hovered).not.toBeNull();
+
+    onCursorPosition.mockClear();
+    act(() => fire("mouseleave", mouse(0, 0)));
+    expect(useSelectionStore.getState().hovered).toBeNull();
+    expect(onCursorPosition).toHaveBeenCalledWith(null);
+  });
+
+  it("reports the cursor in the layer's source CRS at ORTHOMETRIC height", async () => {
+    const onCursorPosition = vi.fn();
+    const { handles } = await mountTwoLayers(
+      { a: null, b: 12 },
+      { onCursorPosition },
+    );
+    // The layer is placed 43.2 m up by the geoid sample, so the ellipsoidal
+    // height under the cursor is 43.2 m above the file's own z.
+    handles.b.heightOffset.mockReturnValue(43.2);
+    const rad = (deg: number) => (deg * Math.PI) / 180;
+    pickDepthPosition.mockReturnValue({
+      x: rad(4.348),
+      y: rad(52.006),
+      z: 14 + 43.2,
+    });
+
+    act(() => fire("mousemove", mouse(10, 20)));
+    expect(pickDepthPosition).toHaveBeenCalledWith(10, 20);
+    const out = onCursorPosition.mock.calls.at(-1)![0] as [
+      number,
+      number,
+      number,
+    ];
+    // RD New metres for Delft, and the file's own z back — NOT 57.2.
+    expect(out[0]).toBeCloseTo(83574.16, 1);
+    expect(out[1]).toBeCloseTo(446893.03, 1);
+    expect(out[2]).toBeCloseTo(14, 6);
+  });
+
+  it("reports no position when the cursor is on the sky", async () => {
+    const onCursorPosition = vi.fn();
+    await mountTwoLayers({ a: null, b: null }, { onCursorPosition });
+    pickDepthPosition.mockReturnValue(null);
+    act(() => fire("mousemove", mouse(10, 20)));
+    expect(onCursorPosition).toHaveBeenLastCalledWith(null);
+  });
+
+  it("pushes selection and hover to every handle, hidden layers included", async () => {
+    const { handles } = await mountTwoLayers({ a: null, b: null });
+    const sel = { kind: "object" as const, layerId: "b", objectId: "b-obj" };
+    handles.a.setHighlight.mockClear();
+    handles.b.setHighlight.mockClear();
+
+    act(() => useSelectionStore.setState({ selections: [sel] }));
+    await waitFor(() =>
+      expect(handles.b.setHighlight).toHaveBeenCalledWith([sel], undefined),
+    );
+    // Layer "a" is told too: it filters by its own layerId, and a handle that
+    // owns nothing in the selection has to CLEAR itself.
+    expect(handles.a.setHighlight).toHaveBeenCalledWith([sel], undefined);
+
+    // ...and a hidden layer keeps up, so re-showing it does not reveal a stale
+    // highlight.
+    useLayerStore.setState({
+      layers: [makeLayer({ id: "a", visible: false }), makeLayer({ id: "b" })],
+    });
+    handles.a.setHighlight.mockClear();
+    act(() => useSelectionStore.setState({ selections: [] }));
+    await waitFor(() =>
+      expect(handles.a.setHighlight).toHaveBeenCalledWith([], undefined),
+    );
+  });
+
+  it("never subscribes to the engine's pick event (PICK_PATH = own-raycast)", async () => {
+    // `PickableMeshWrapper` carries one uniform batch id per MESH (Task B1), so
+    // a `pick` listener could only ever resolve a layer, not a surface — and it
+    // would fire alongside `click`, committing a second, coarser selection.
+    await mountTwoLayers({ a: null, b: null });
+    expect(on.mock.calls.some((c) => c[0] === "pick")).toBe(false);
+  });
+
+  it("unsubscribes every pointer listener on unmount", async () => {
+    const { unmount } = await mountTwoLayers({ a: null, b: null });
+    unmount();
+    const removed = off.mock.calls.map((c) => c[0]);
+    for (const name of ["mousedown", "mousemove", "click", "mouseleave"]) {
+      expect(removed).toContain(name);
+    }
+    expect(listeners.get("mousemove")?.size ?? 0).toBe(0);
   });
 
   it("forgets its handles when the engine is disposed, so a remount re-adds", async () => {

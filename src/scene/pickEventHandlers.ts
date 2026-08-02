@@ -2,27 +2,31 @@
  * Pointer/pick events -> selection store intents.
  *
  * Pure and engine-free: no `@navaramap/*`, no Three.js, no store singleton, no
- * DOM. The Navara router (Task B15) owns the engine seam — it turns a
- * `view.on("pick"|"click"|"mouseMove")` payload into the small structural
- * event this module takes, reads `PickMode` off the store, and pushes the
- * resulting intent back. Everything decision-shaped lives here so it is
- * testable in Node.
+ * DOM. `NavaraViewport` owns the engine seam — it turns a
+ * `view.on("mousedown"|"mousemove"|"click"|"mouseleave")` payload into the
+ * small structural shapes this module takes (a canvas point, an ECEF ray),
+ * reads `PickMode`/`ToolMode` off the store, and pushes the resulting intent
+ * back. Everything decision-shaped lives here so it is testable in Node.
  *
  * Handles resolve picks at SURFACE granularity always (see
  * `CityModelHandle.resolvePick`); narrowing to object granularity is the app's
  * job, exactly as the pre-Navara `resolvePicking.ts` documented and
  * `CitySceneR3F`'s `resolveFromEvent` did.
  *
- * PARITY SCOPE (deliberate omission, carried to Task B15): `ToolMode` is not
- * modelled here. The old `handlePointerUp` swallowed picks entirely in
- * `measure` mode and returned early in `box-select` (the overlay owned that
- * gesture), while `handlePointerMove` hovered in `select`/`box-select` only.
- * Measure and box-select are out of the Navara parity scope, so the router
- * must gate on `toolMode` before calling into this module once those tools
- * come back.
+ * `ToolMode` gating lives here too, in {@link acceptsPointer}: the old
+ * `handlePointerUp` swallowed picks entirely in `measure` mode and returned
+ * early in `box-select` (the overlay owned that gesture), while
+ * `handlePointerMove` hovered in `select`/`box-select` alike. The router asks
+ * that question BEFORE it resolves anything, so a measure click never costs a
+ * raycast.
  */
-import type { PickMode, Selection } from "../domain/selection/types";
-import type { PickedFeatureLike, ScreenPoint } from "@cityjson/navara-cityjson";
+import type { PickMode, Selection, ToolMode } from "../domain/selection/types";
+import type {
+  EcefRay,
+  PickedFeatureLike,
+  RaycastHit,
+  ScreenPoint,
+} from "@cityjson/navara-cityjson";
 
 export type PickIntent =
   | { readonly kind: "hover"; readonly selection: Selection | null }
@@ -30,18 +34,23 @@ export type PickIntent =
   | { readonly kind: "toggle"; readonly selection: Selection };
 
 /** The pointer gestures that produce a selection intent. `move` is a hover,
- *  `click` is a commit — B1 established that the engine only fires a pick on
- *  mouseup with no intervening mousemove, so a drag (camera gesture) never
- *  reaches here as a `click`. */
+ *  `click` is a commit. The engine's own `pick` event fires only on a mouseup
+ *  with no intervening mousemove (Task B1), but the own-raycast path listens to
+ *  the raw `click` — which fires after a camera drag too — so the router must
+ *  put a {@link createClickGate} in front of this. */
 export interface PickPointerEvent {
   readonly type: "move" | "click";
   readonly shiftKey: boolean;
 }
 
-/** The only member this module needs from an interaction handle. Declared
+/** The members this module needs from an interaction handle. Declared
  *  structurally (rather than importing `InteractionHandle`) so both plugins'
  *  handles and a test fake satisfy it without a cast. */
-export interface PickResolver {
+export interface RaycastResolver {
+  readonly id: string;
+  /** ECEF ray in, hit surface + ray distance out. The distance is what makes
+   *  nearest-across-layers possible at all. */
+  resolveRaycast(ray: EcefRay): RaycastHit | null;
   resolvePick(pick: ScreenPoint | PickedFeatureLike): Selection | null;
 }
 
@@ -54,23 +63,159 @@ export interface SelectionActionsSubset {
 }
 
 /**
- * Ask each handle in turn and take the first answer.
+ * Ask EVERY handle and take the globally nearest hit.
  *
- * `handles` arrives in layer order (`interactionHandles`), so this is
- * first-layer-wins, not nearest-hit-wins across layers: each handle already
- * returns the nearest hit among its OWN meshes (own-raycast, Task B1), and
- * layers rarely overlap in depth. Iteration stops at the first hit, so the
- * common case costs one raycast.
+ * Not first-layer-wins. Each handle already returns the nearest hit among its
+ * own meshes (own-raycast, Task B1), but layer order is a UI ordering, not a
+ * depth ordering: with two overlapping layers — or a streaming layer's cells
+ * drawn over a static model — stopping at the first answer picks whatever
+ * happens to sit higher in the layer list, which is the building BEHIND the one
+ * under the cursor as often as not. `RaycastHit.distance` is exactly the
+ * tie-breaker that makes the right answer available, so the router pays for
+ * every handle's raycast and keeps the closest.
+ *
+ * The winner — and only the winner — is then asked to interpret its own hit:
+ * an `objectIndex`/`surfaceIndex` pair is meaningful only inside the mesh that
+ * produced it, so handing it to another layer would yield a real-looking but
+ * WRONG selection rather than none.
  */
-export function resolveFirstHit(
-  handles: Iterable<PickResolver>,
-  pick: ScreenPoint | PickedFeatureLike,
+export function resolveNearestHit(
+  handles: Iterable<RaycastResolver>,
+  ray: EcefRay,
 ): Selection | null {
+  let best: RaycastHit | null = null;
+  let owner: RaycastResolver | null = null;
   for (const handle of handles) {
-    const hit = handle.resolvePick(pick);
-    if (hit) return hit;
+    const hit = handle.resolveRaycast(ray);
+    if (!hit) continue;
+    // `<` (rather than `>=` inverted) on purpose: a NaN distance compares false
+    // against everything, so a broken hit can never displace a real one, and
+    // equal distances keep the earlier layer for a stable result.
+    if (best !== null && !(hit.distance < best.distance)) continue;
+    best = hit;
+    owner = handle;
   }
-  return null;
+  if (best === null || owner === null) return null;
+  return owner.resolvePick({
+    layerId: owner.id,
+    properties: {
+      layerId: owner.id,
+      objectIndex: best.objectIndex,
+      surfaceIndex: best.surfaceIndex,
+    },
+  });
+}
+
+/**
+ * Does the active tool want this gesture routed to a pick at all?
+ *
+ * Old-app parity, verbatim: `measure` owns both gestures (its clicks place
+ * measurement points and it never hovers), `box-select` hovers but leaves the
+ * commit to its drag overlay, `select` takes both. Asked BEFORE resolving, so
+ * a gesture the tool owns never costs a raycast.
+ */
+export function acceptsPointer(
+  toolMode: ToolMode,
+  type: PickPointerEvent["type"],
+): boolean {
+  if (toolMode === "measure") return false;
+  if (toolMode === "box-select") return type === "move";
+  return true;
+}
+
+/** Value equality for selections — the same rule `selectionStore` uses
+ *  internally. Exported because the router needs it BEFORE the store does:
+ *  every resolved pick is a fresh object, so hovering one surface would push a
+ *  new `hovered` on every mousemove and repaint every layer's vertex colors at
+ *  pointer rate. */
+export function sameSelection(
+  a: Selection | null,
+  b: Selection | null,
+): boolean {
+  if (a === null || b === null) return a === b;
+  if (a.kind !== b.kind) return false;
+  if (a.layerId !== b.layerId || a.objectId !== b.objectId) return false;
+  if (a.kind === "surface" && b.kind === "surface") {
+    return a.surfaceIndex === b.surfaceIndex;
+  }
+  return true;
+}
+
+/**
+ * The pointer position in CANVAS-relative CSS pixels.
+ *
+ * Both engine seams the router uses — `getPickRay` and `pickDepthPosition` —
+ * measure from the canvas' top-left corner, while a `MouseEvent`'s `x`/`y`
+ * (i.e. `clientX`/`clientY`) measure from the viewport. The app renders the
+ * canvas beside a left sidebar, so the two differ by the sidebar's width and
+ * using the wrong one puts every pick that far to the right of the cursor.
+ * `offsetX`/`offsetY` are already canvas-relative because the engine binds its
+ * listeners directly to the canvas element.
+ */
+export function canvasPointOf(event: {
+  readonly offsetX?: number;
+  readonly offsetY?: number;
+  readonly clientX?: number;
+  readonly clientY?: number;
+}): ScreenPoint {
+  return {
+    x: firstFinite(event.offsetX, event.clientX),
+    y: firstFinite(event.offsetY, event.clientY),
+  };
+}
+
+function firstFinite(...values: ReadonlyArray<number | undefined>): number {
+  for (const v of values) {
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+  }
+  return 0;
+}
+
+/** How far the pointer may travel between mousedown and click and still count
+ *  as a click rather than a camera drag. Zero would be the engine's own rule;
+ *  a few pixels absorb hand jitter without letting an orbit through. */
+export const CLICK_DRAG_TOLERANCE_PX = 3;
+
+export interface ClickGate {
+  down(point: ScreenPoint): void;
+  move(point: ScreenPoint): void;
+  /** True when the pointer has not travelled past the tolerance since the last
+   *  mousedown — i.e. this really is a click and not the end of a drag. */
+  isClean(): boolean;
+}
+
+/**
+ * Suppress the click that ends a camera drag.
+ *
+ * The engine's `click` event is the raw DOM click, which fires after an orbit
+ * or pan just as it does after a tap: without this gate, every camera gesture
+ * would end by clearing (or changing) the selection. The engine's own `pick`
+ * event guards itself exactly this way — it fires "only on a clean mouseup"
+ * (Task B1) — but the own-raycast path does not go through `pick`, so the
+ * router has to reimplement the guard.
+ */
+export function createClickGate(
+  tolerancePx: number = CLICK_DRAG_TOLERANCE_PX,
+): ClickGate {
+  let origin: ScreenPoint | null = null;
+  let dragged = false;
+  return {
+    down(point) {
+      origin = point;
+      dragged = false;
+    },
+    move(point) {
+      // A hover with no button down has no origin, and must not disarm the
+      // click that may follow.
+      if (origin === null || dragged) return;
+      const dx = point.x - origin.x;
+      const dy = point.y - origin.y;
+      if (dx * dx + dy * dy > tolerancePx * tolerancePx) dragged = true;
+    },
+    isClean() {
+      return !dragged;
+    },
+  };
 }
 
 /**
