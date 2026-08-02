@@ -186,17 +186,33 @@ spike touches those, and only to probe the engine.
 ```ts
 export interface CityMeshHandle {
   readonly ref: unknown;
-  /** The engine-free behaviour object (raycast, colors, visibility). */
-  readonly mesh: CityMeshArraysMesh;
   setColors(colors: Float32Array): void;
   setVisible(v: boolean): void;
   triangleCount(): number;
   /** index = engine batch id, entry = (objectIndex, surfaceIndex). */
-  batchIdMap(): ReadonlyArray<{
-    readonly objectIndex: number;
-    readonly surfaceIndex: number;
-  }>;
+  batchIdMap(): ReadonlyArray<SurfaceRef>;
+  /** ECEF ray in, the hit face's (objectIndex, surfaceIndex) out, or null.
+   *  Flat, like every other member — there is no `handle.mesh.` indirection. */
+  resolveRaycast(ray: EcefRay): SurfaceRef | null;
   delete(): void;
+}
+/** One shape for "which surface is this", shared by the static and streaming
+ *  paths so a pick resolves identically on both. */
+export interface SurfaceRef {
+  readonly objectIndex: number;
+  readonly surfaceIndex: number;
+}
+export interface EcefRay {
+  readonly origin: {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+  };
+  readonly direction: {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+  };
 }
 export function addCityMeshArrays(
   view: ThreeView,
@@ -5738,7 +5754,19 @@ export interface ScreenPoint {
 export interface PickedFeatureLike {
   readonly batchId?: number;
   readonly layerId?: string;
-  readonly properties?: Readonly<Record<string, unknown>>;
+  /** Free-form on the engine side. The two keys this plan relies on are
+   *  stamped by our own descriptors (Task B7): `layerId` on every mesh, and
+   *  `cellKey` on streaming cell meshes only. They are declared here so the
+   *  routing in Task B15 and the cell lookup in Task C10b type-check without
+   *  a cast. */
+  readonly properties?: Readonly<
+    Record<string, unknown> & {
+      readonly layerId?: string;
+      readonly cellKey?: string;
+      readonly objectIndex?: number;
+      readonly surfaceIndex?: number;
+    }
+  >;
 }
 ```
 
@@ -5963,22 +5991,61 @@ describe("pick strategy capability", () => {
     raycast.dispose();
   });
 
-  it("setHeightOffset re-places the mesh and re-projects its vertices", () => {
-    // The default placement matrix is injected in `opts`, so assert on the
-    // frame the vertices were projected into: raising the offset by 43 m
-    // must move every vertex down by ~43 m in the NEW frame (the frame origin
-    // rose with it), not leave them untouched.
-    const m = new CityModelMesh({ ...opts, lod: "2" });
-    const before = Float32Array.from(
+  // `heightOffset` is added to BOTH the vertex's geodetic height and the
+  // frame's origin height (`ellipsoidal = orthometric + N`), so the two
+  // cancel in local coordinates: the whole frame slides outward along the
+  // ellipsoid normal and the vertices keep their positions within it. Assert
+  // that, not a local-Z shift — a local-Z shift would mean the frame had NOT
+  // moved, i.e. the model would still be sunk.
+  //
+  // These two cases use the REAL placement matrix, so `opts`'s injected
+  // `makePlacementMatrix` is dropped.
+  const geoOpts = { id: opts.id, model: opts.model, crs: opts.crs };
+
+  it("setHeightOffset moves the frame origin ~+43 m along the ellipsoid normal", () => {
+    const m = new CityModelMesh({ ...geoOpts, lod: "2" });
+    const before = new Vector3().setFromMatrixPosition(m.object3d.matrix);
+    m.setHeightOffset(43);
+    const after = new Vector3().setFromMatrixPosition(m.object3d.matrix);
+
+    // The translation column IS the frame origin in ECEF.
+    expect(after.distanceTo(before)).toBeCloseTo(43, 2);
+    // ...and it moved OUTWARD (away from the geocentre), not sideways or in.
+    expect(after.length() - before.length()).toBeCloseTo(43, 2);
+    m.dispose();
+  });
+
+  it("leaves LOCAL vertex coordinates unchanged, while the vertex's ECEF position rises by ~43 m", () => {
+    const m = new CityModelMesh({ ...geoOpts, lod: "2" });
+    const beforeLocal = Float32Array.from(
       m.object3d.geometry.getAttribute("position").array as Float32Array,
     );
+    const beforeEcef = new Vector3(
+      beforeLocal[0]!,
+      beforeLocal[1]!,
+      beforeLocal[2]!,
+    ).applyMatrix4(m.object3d.matrix);
+
     m.setHeightOffset(43);
-    const after = m.object3d.geometry.getAttribute("position")
+
+    const afterLocal = m.object3d.geometry.getAttribute("position")
       .array as Float32Array;
-    expect(after.length).toBe(before.length);
-    for (let i = 2; i < after.length; i += 3) {
-      expect(after[i]! - before[i]!).toBeCloseTo(-43, 3);
+    expect(afterLocal.length).toBe(beforeLocal.length);
+    // Local coordinates are invariant to within the float32 noise of a
+    // re-projection (the ellipsoid normal at the vertex and at the origin are
+    // not exactly parallel, which is millimetres over a 10 m fixture).
+    for (let i = 0; i < afterLocal.length; i++) {
+      expect(afterLocal[i]!).toBeCloseTo(beforeLocal[i]!, 2);
     }
+
+    // The visible effect is entirely in world space: the building RISES.
+    const afterEcef = new Vector3(
+      afterLocal[0]!,
+      afterLocal[1]!,
+      afterLocal[2]!,
+    ).applyMatrix4(m.object3d.matrix);
+    expect(afterEcef.distanceTo(beforeEcef)).toBeCloseTo(43, 2);
+    expect(afterEcef.length() - beforeEcef.length()).toBeCloseTo(43, 2);
     m.dispose();
   });
 
@@ -6017,7 +6084,7 @@ describe("pick strategy capability", () => {
 ```ts
 // packages/navara-cityjson/test/cityModelMesh.test.ts
 import { describe, it, expect } from "vitest";
-import { Matrix4 } from "three";
+import { Matrix4, Vector3 } from "three";
 import type { CityModel } from "@cityjson/navara-core";
 import { CityModelMesh } from "../src/cityModelMesh";
 
@@ -6344,6 +6411,14 @@ export class CityModelMesh {
   /**
    * Re-place the mesh at a new vertical-datum offset.
    *
+   * `ellipsoidal = orthometric + N`, and the offset is added to BOTH the
+   * frame origin's height and every vertex's height — so in ECEF the whole
+   * mesh slides outward along the ellipsoid normal by N (a Delft model RISES
+   * ~43 m, from sunk to correct), while its LOCAL coordinates are unchanged
+   * to within float32 noise. The re-projection below is therefore not what
+   * moves the model; the new frame is. It runs because the vertices were
+   * projected into the OLD frame and must be expressed in the new one.
+   *
    * The geoid sample is asynchronous (a network fetch), and blocking first
    * render on it would mean a blank viewport whenever the terrain service is
    * slow. So the mesh is built at offset 0 and re-placed the moment the
@@ -6356,8 +6431,9 @@ export class CityModelMesh {
     this.heightOffset = metres;
     this.applyHeightOffset();
     this.applyPlacement();
-    // Vertices are baked in the OLD frame, so they must be re-projected, not
-    // just re-matrixed — the frame origin moved along the ellipsoid normal.
+    // Vertices were expressed in the OLD frame, so re-project them into the
+    // new one. Their local values barely change (both the vertex and the
+    // origin rose by the same N); the visible movement comes from the frame.
     this.rebuildGeometry();
   }
 
@@ -6487,7 +6563,7 @@ export class CityModelMesh {
 cd /data2/hideba/multiroof-viewer/packages/cityjson-navara-plugins && pnpm vitest run packages/navara-cityjson/test/cityModelMesh.test.ts
 ```
 
-Expected: 11 passed (the 7 original cases, the two pick-strategy cases and the two `setHeightOffset` cases from Step 0).
+Expected: 12 passed (the 7 original cases, the two pick-strategy cases and the three `setHeightOffset` cases from Step 0).
 
 - [ ] **Step 5: Commit**
 
@@ -6557,18 +6633,35 @@ interface AddCityModelOptions {
 }
 
 /** Low-level primitive the streaming plugin builds one of per resident cell
- *  (Task C8); CityModelHandle is a composition over the same machinery. */
+ *  (Task C8); CityModelHandle is a composition over the same machinery.
+ *  Task C10b picks and highlights through exactly these members, so they are
+ *  flat — there is no `handle.mesh.` indirection. */
+interface SurfaceRef {
+  readonly objectIndex: number;
+  readonly surfaceIndex: number;
+}
 interface CityMeshHandle {
   readonly ref: unknown;
   setColors(colors: Float32Array): void;
   setVisible(v: boolean): void;
   triangleCount(): number;
+  batchIdMap(): ReadonlyArray<SurfaceRef>;
+  resolveRaycast(ray: EcefRay): SurfaceRef | null;
   delete(): void;
 }
 
 function addCityMeshArrays(
   view: ThreeView,
-  opts: { id: string; arrays: CityMeshArrays; frame: EnuFrame },
+  opts: {
+    id: string;
+    arrays: CityMeshArrays;
+    frame: EnuFrame;
+    /** Stamped into the descriptor's pick properties (Task B7 Step 4), so a
+     *  PickedFeature routes back to its layer and, for streaming, its cell. */
+    layerId?: string;
+    cellKey?: string;
+    pickStrategy?: PickStrategy;
+  },
 ): CityMeshHandle;
 
 /** Engine-free. Everything the engine supplies is injected here. */
@@ -6965,6 +7058,8 @@ export class CityModelMeshDesc extends MeshDesc<CityModelDescConfig> {
     if (this.cityMesh.pickStrategy === "pickable-wrapper") {
       this.pickable = new PickableMeshWrapper(this.cityMesh.object3d, {
         layerId: config.id,
+        // No `cellKey`: a static layer is one mesh. Task B15's router only
+        // needs `layerId` to reach the right handle.
         properties: { layerId: config.id },
       });
     }
@@ -7295,7 +7390,12 @@ export {
   computeStyleColors,
   paintLayers,
 } from "./surfaceColorLayers";
-export type { AddCityMeshArraysOptions, CityMeshHandle } from "./cityMesh";
+export type {
+  AddCityMeshArraysOptions,
+  CityMeshHandle,
+  EcefRay,
+  SurfaceRef,
+} from "./cityMesh";
 
 // NOTE: this barrel re-exports the three engine-binding modules
 // (CityJSONPlugin, CityModelMeshDesc, CityMeshArraysDesc), so it transitively
@@ -7348,24 +7448,50 @@ export interface AddCityMeshArraysOptions {
   readonly id: string;
   readonly arrays: CityMeshArrays;
   readonly frame: EnuFrame;
+  /** Stamped into the descriptor's pick properties so a PickedFeature routes
+   *  back to the owning handle (Task B15). Defaults to `id`. */
+  readonly layerId?: string;
+  /** Streaming only: which resident cell this mesh is. Task C10b reads it off
+   *  `properties.cellKey` to find the cell that owns a batchId. */
+  readonly cellKey?: string;
   /** Task B1's PICK_PATH verdict; defaults to DEFAULT_PICK_STRATEGY. */
   readonly pickStrategy?: PickStrategy;
+}
+
+/** One shape for "which surface is this". `CityModelMesh` (B6) resolves the
+ *  same pair internally before wrapping it in a `SurfaceSelection`; the cell
+ *  path stops here because the caller owns the layer id and objectKeys. */
+export interface SurfaceRef {
+  readonly objectIndex: number;
+  readonly surfaceIndex: number;
+}
+
+export interface EcefRay {
+  readonly origin: {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+  };
+  readonly direction: {
+    readonly x: number;
+    readonly y: number;
+    readonly z: number;
+  };
 }
 
 export interface CityMeshHandle {
   /** The descriptor instance, for callers that need the raw Object3D. */
   readonly ref: unknown;
-  /** The behaviour object, so a caller can raycast it directly (Task C10b). */
-  readonly mesh: CityMeshArraysMesh;
   /** Swap the vertex-color buffer (rule recolor of a resident cell). */
   setColors(colors: Float32Array): void;
   setVisible(visible: boolean): void;
   triangleCount(): number;
-  /** index = engine batch id, entry = (objectIndex, surfaceIndex). */
-  batchIdMap(): ReadonlyArray<{
-    readonly objectIndex: number;
-    readonly surfaceIndex: number;
-  }>;
+  /** index = engine batch id, entry = that triangle's SurfaceRef. */
+  batchIdMap(): ReadonlyArray<SurfaceRef>;
+  /** ECEF ray in, hit surface out. Flat, not `handle.mesh.resolveRaycast` —
+   *  the behaviour object is an implementation detail, `ref` is the escape
+   *  hatch for anything that genuinely needs the Object3D. */
+  resolveRaycast(ray: EcefRay): SurfaceRef | null;
   delete(): void;
 }
 
@@ -7413,10 +7539,7 @@ export class CityMeshArraysMesh {
   /** Own-raycast pick path for a streamed cell: ECEF ray in, the hit face's
    *  (objectIndex, surfaceIndex) out. The caller (Task C10b's stream layer)
    *  knows its own layerId and objectKeys and builds the Selection. */
-  resolveRaycast(ray: {
-    origin: { x: number; y: number; z: number };
-    direction: { x: number; y: number; z: number };
-  }): { objectIndex: number; surfaceIndex: number } | null {
+  resolveRaycast(ray: EcefRay): SurfaceRef | null {
     if (!this.object3d.visible) return null;
     const raycaster = new Raycaster(
       new Vector3(ray.origin.x, ray.origin.y, ray.origin.z),
@@ -7439,12 +7562,9 @@ export class CityMeshArraysMesh {
   /** Same contract as CityModelMesh.batchIdMap(): index = engine batch id,
    *  entry = that triangle's (objectIndex, surfaceIndex). Lets a streamed cell
    *  resolve a pick exactly the way a static layer does (Task C10b). */
-  batchIdMap(): ReadonlyArray<{
-    readonly objectIndex: number;
-    readonly surfaceIndex: number;
-  }> {
+  batchIdMap(): ReadonlyArray<SurfaceRef> {
     if (this.pickStrategy !== "pickable-wrapper") return [];
-    const map: Array<{ objectIndex: number; surfaceIndex: number }> = [];
+    const map: SurfaceRef[] = [];
     for (let t = 0; t < this.arrays.triangleCount; t++) {
       const v = t * 3;
       map.push({
@@ -7481,7 +7601,6 @@ export function addCityMeshArrays(
   const mesh = ref.cityMesh ?? (meshHandle.ref as CityMeshArraysMesh);
   return {
     ref: meshHandle.ref,
-    mesh,
     setColors: (colors) => mesh.setColors(colors),
     setVisible: (visible) => {
       mesh.setVisible(visible);
@@ -7489,6 +7608,7 @@ export function addCityMeshArrays(
     },
     triangleCount: () => mesh.triangleCount(),
     batchIdMap: () => mesh.batchIdMap(),
+    resolveRaycast: (ray) => mesh.resolveRaycast(ray),
     delete: () => meshHandle.delete(),
   };
 }
@@ -7523,9 +7643,17 @@ export class CityMeshArraysDesc extends MeshDesc<CityMeshArraysDescConfig> {
     const config = this.config.cityMeshArrays;
     this.cityMesh = new CityMeshArraysMesh(config);
     if ((config.pickStrategy ?? DEFAULT_PICK_STRATEGY) === "pickable-wrapper") {
+      const layerId = config.layerId ?? config.id;
       this.pickable = new PickableMeshWrapper(this.cityMesh.object3d, {
-        layerId: config.id,
-        properties: { layerId: config.id },
+        layerId,
+        // `layerId` is what Task B15's router uses to pick the owning handle;
+        // `cellKey` is what Task C10b uses to find the resident cell inside a
+        // streaming layer. Both travel on `properties` because that is the
+        // only free-form field on Navara's PickedFeature.
+        properties:
+          config.cellKey === undefined
+            ? { layerId }
+            : { layerId, cellKey: config.cellKey },
       });
     }
     this.ctx.setupMaterialForMRT?.(this.cityMesh.object3d.material);
@@ -8264,7 +8392,7 @@ EOF
   - `interface CityModelRegistry { get(id: string): CityModelHandle | undefined; add(layer: Layer): CityModelHandle; }`
   - `syncLayers(registry: CityModelRegistry, layers: readonly Layer[], live: Map<string, LiveLayer>, onError: (layerId: string, error: unknown) => void): void`
   - `interface LiveLayer { readonly handle: CityModelHandle; lod: string | null; visible: boolean }`
-  - `interface InteractionHandle { readonly id: string; setHighlight(sel: readonly Selection[], hovered?: Selection): void; resolvePick(pick: ScreenPoint): Selection | null; getBoundsGeodetic(): GeodeticBounds | null; triangleCount(): number }` — the four members static `CityModelHandle`s and streaming `FcbStreamLayerHandle`s have in common (Shared Interface Contract → Interaction registries). Declared here in Part B with only static implementors; Task C13 adds the streaming ones.
+  - `interface InteractionHandle { readonly id: string; setHighlight(sel: readonly Selection[], hovered?: Selection): void; resolvePick(pick: ScreenPoint | PickedFeatureLike): Selection | null; getBoundsGeodetic(): GeodeticBounds | null; triangleCount(): number }` — the four members static `CityModelHandle`s and streaming `FcbStreamLayerHandle`s have in common (Shared Interface Contract → Interaction registries). Declared here in Part B with only static implementors; Task C13 adds the streaming ones.
   - `totalTriangles(layers: readonly Layer[], live: ReadonlyMap<string, LiveLayer>, streams?: ReadonlyMap<string, InteractionHandle>): number` — `streams` defaults to an empty map, so every Part B call site is unchanged
 
 - [ ] **Step 1: Write the failing test**
@@ -8474,6 +8602,7 @@ Expected: `Failed to resolve import "../../../src/scene/handleSync"`.
 import type {
   CityModelHandle,
   GeodeticBounds,
+  PickedFeatureLike,
   ScreenPoint,
   Selection,
 } from "@cityjson/navara-cityjson";
@@ -8540,7 +8669,9 @@ export function syncLayers(
 export interface InteractionHandle {
   readonly id: string;
   setHighlight(sel: readonly Selection[], hovered?: Selection): void;
-  resolvePick(pick: ScreenPoint): Selection | null;
+  /** Accepts either a screen point (own-raycast path) or an engine
+   *  PickedFeature (pickable-wrapper path); both plugins' handles do. */
+  resolvePick(pick: ScreenPoint | PickedFeatureLike): Selection | null;
   getBoundsGeodetic(): GeodeticBounds | null;
   triangleCount(): number;
 }
@@ -8585,7 +8716,7 @@ Note: the first `handle.setVisible(layer.visible)` right after `add` is intentio
 cd /data2/hideba/multiroof-viewer && npx vitest run tests/unit/scene/handleSync.test.ts && npx tsc -b --noEmit
 ```
 
-Expected: 12 passed, no type errors.
+Expected: 17 passed, no type errors.
 
 - [ ] **Step 5: Commit**
 
@@ -9182,7 +9313,18 @@ Expected observations:
 
 - No page errors; console free of WASM/asset 404s.
 - Screenshot: two red-roofed buildings sitting on the photorealistic globe near Delft, camera tilted (pitch −60), sky visible.
-- The buildings sit **on** the terrain, not ~43 m below it. This is the first end-to-end check of the geoid-sampled vertical offset (Global Constraints → Vertical datum) and of the exact source-CRS→ENU vertex transform (Task A13b). Note they may render sunk for a fraction of a second and then snap up — that is `setHeightOffset()` re-placing them when the async sample lands (Task B7), and it is expected. If they stay sunk, check the network panel for the `terrain.reearth.land` requests and the console for the `[geoid]` warning; if they float, check `projectPositionsToEnu` and the Terrain-RGB decode branch (Task A13b Step 15).
+- The buildings sit **on** the terrain, not ~43 m below it. This is the first end-to-end check of the geoid-sampled vertical offset (Global Constraints → Vertical datum) and of the exact source-CRS→ENU vertex transform (Task A13b).
+
+  Expect a visible two-stage placement on first load: the model appears **sunk** (it is drawn at `heightOffset = 0`, i.e. NAP heights treated as ellipsoidal, ≈43 m too low near Delft) and then **rises** by the geoid undulation the moment the sample resolves and `setHeightOffset()` re-places the frame (Task B7). Rising is correct — `ellipsoidal = orthometric + N` — and it is the frame origin that moves outward along the ellipsoid normal; the mesh's local vertex coordinates are unchanged. Take two screenshots if it helps:
+
+  ```bash
+  agent-browser screenshot /tmp/claude-1020/-data2-hideba-multiroof-viewer/7733ee34-be62-4509-ac05-8e6d09eb77f2/scratchpad/m73-before-geoid.png
+  sleep 3
+  agent-browser screenshot /tmp/claude-1020/-data2-hideba-multiroof-viewer/7733ee34-be62-4509-ac05-8e6d09eb77f2/scratchpad/m73-after-geoid.png
+  ```
+
+  Diagnosis if it does not settle correctly: **stays sunk** → the sample never landed; check the network panel for the `terrain.reearth.land` requests and the console for the `[geoid]` warning. **Ends up floating ~43 m high** → the offset was applied twice, or applied with the wrong sign; check that `sourceToEnuPoint` adds it to the vertex height _and_ `applyHeightOffset()` adds the same value to the frame origin (both, not one). **Drops instead of rising** → the decode branch is wrong; re-check Task A13b Step 15's `encoding` verdict.
+
 - Status bar reports a non-zero triangle count.
 - Clicking the toolbar "Fit all" and the T/F/R align buttons visibly re-frames the model:
 
@@ -9801,12 +9943,18 @@ EOF
 - Produces (added to `handleSync.ts`):
   - `syncStyles(layers: readonly Layer[], live: ReadonlyMap<string, LiveLayer>, compile: (rules: ReadonlyArray<Rule>, enabled: boolean) => SurfaceStyleEvaluator | null, applied: Map<string, string>): void` — only layers present in `live` are styled, and `syncLayers` never puts a streaming layer there, so streaming layers are untouched here: their rules are baked in the worker via the streaming handle's `setRules` (Task C13)
   - `syncHighlight(layers: readonly Layer[], live: ReadonlyMap<string, LiveLayer>, selections: readonly Selection[], hovered: Selection | null, streams?: ReadonlyMap<string, InteractionHandle>): void` — `streams` defaults to an empty map so Part B call sites are unchanged; Task C13 passes the streaming registry so streamed cells highlight exactly like static layers (Shared Interface Contract → Interaction registries)
+  - `resolvePickedFeature(handles: readonly InteractionHandle[], feature: PickedFeatureLike): Selection | null` — routes an engine `pick` event to the **owning** handle by `feature.properties.layerId`, then delegates. A `PickedFeature` is not tried against handle after handle the way a screen point is: the engine already knows which mesh was hit, our descriptors stamp `layerId` into `properties` (Task B7), and asking the wrong handle to interpret another layer's `batchId` would silently return a **wrong** selection rather than none
 
 - [ ] **Step 1: Write the failing tests (appended to `handleSync.test.ts`)**
 
 ```ts
 // tests/unit/scene/handleSync.test.ts — append
-import { syncHighlight, syncStyles } from "../../../src/scene/handleSync";
+import {
+  resolvePickedFeature,
+  syncHighlight,
+  syncStyles,
+} from "../../../src/scene/handleSync";
+import type { Selection } from "../../../src/domain/selection/types";
 
 describe("syncStyles", () => {
   it("compiles and pushes a style once per rule-signature change", () => {
@@ -9892,6 +10040,76 @@ describe("syncHighlight", () => {
     expect(stream.setStyle).not.toHaveBeenCalled();
   });
 });
+
+describe("resolvePickedFeature", () => {
+  const hit = {
+    kind: "surface" as const,
+    layerId: "L2",
+    objectId: "B1",
+    surfaceIndex: 3,
+  };
+
+  function handle(id: string, result: Selection | null) {
+    return {
+      id,
+      setHighlight: vi.fn(),
+      resolvePick: vi.fn(() => result),
+      getBoundsGeodetic: vi.fn(() => null),
+      triangleCount: () => 0,
+    };
+  }
+
+  it("delegates to the handle named by properties.layerId, not the first one that answers", () => {
+    // h1 would happily return a selection if asked — the point is that it is
+    // never asked, because the feature says it belongs to L2.
+    const h1 = handle("L1", {
+      kind: "surface",
+      layerId: "L1",
+      objectId: "WRONG",
+      surfaceIndex: 0,
+    });
+    const h2 = handle("L2", hit);
+    const feature = { batchId: 7, properties: { layerId: "L2" } };
+
+    expect(resolvePickedFeature([h1, h2] as never, feature)).toBe(hit);
+    expect(h1.resolvePick).not.toHaveBeenCalled();
+    expect(h2.resolvePick).toHaveBeenCalledWith(feature);
+  });
+
+  it("returns null for an unknown layerId instead of guessing", () => {
+    const h1 = handle("L1", hit);
+    expect(
+      resolvePickedFeature([h1] as never, {
+        batchId: 7,
+        properties: { layerId: "GONE" },
+      }),
+    ).toBeNull();
+    expect(h1.resolvePick).not.toHaveBeenCalled();
+  });
+
+  it("returns null when the feature carries no layerId at all", () => {
+    const h1 = handle("L1", hit);
+    expect(resolvePickedFeature([h1] as never, { batchId: 7 })).toBeNull();
+    expect(h1.resolvePick).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the top-level layerId the engine reports, if properties has none", () => {
+    const h1 = handle("L1", hit);
+    expect(
+      resolvePickedFeature([h1] as never, { batchId: 7, layerId: "L1" }),
+    ).toBe(hit);
+  });
+
+  it("passes a null through when the owning handle cannot resolve the feature", () => {
+    const h1 = handle("L1", null);
+    expect(
+      resolvePickedFeature([h1] as never, {
+        batchId: 99,
+        properties: { layerId: "L1" },
+      }),
+    ).toBeNull();
+  });
+});
 ```
 
 - [ ] **Step 2: Run — expect failure**
@@ -9940,6 +10158,28 @@ export function syncStyles(
   }
 }
 
+/**
+ * Route an engine `pick` event to the handle that owns the hit mesh.
+ *
+ * Unlike a screen point — which legitimately has to be tried against each
+ * visible layer until one reports a hit — a `PickedFeature` already identifies
+ * its mesh, and our descriptors stamp `layerId` into `properties` (Task B7).
+ * Handing it to the first handle in the list would be worse than useless: a
+ * `batchId` is only meaningful inside the mesh that produced it, so another
+ * layer would map it to a real-looking but WRONG surface. Unknown layer =>
+ * null, never a guess.
+ */
+export function resolvePickedFeature(
+  handles: readonly InteractionHandle[],
+  feature: PickedFeatureLike,
+): Selection | null {
+  const layerId = feature.properties?.layerId ?? feature.layerId;
+  if (layerId === undefined) return null;
+  const owner = handles.find((h) => h.id === layerId);
+  if (!owner) return null;
+  return owner.resolvePick(feature);
+}
+
 export function syncHighlight(
   layers: readonly Layer[],
   live: ReadonlyMap<string, LiveLayer>,
@@ -9980,6 +10220,7 @@ import {
 } from "./cursorCrsReadout";
 import {
   interactionHandles,
+  resolvePickedFeature,
   syncHighlight,
   syncStyles,
   type InteractionHandle,
@@ -10105,7 +10346,30 @@ useEffect(() => {
 
 Also destructure `onCursorPosition` in the component signature (Tasks B11a/B11b left it unused).
 
-If the Task B1 spike set `PICK_PATH = "pickable-wrapper"`, additionally register `view.on("pick", ...)` and pass the `PickedFeatureLike` straight to `handle.resolvePick` instead of the screen point — `resolvePick` already accepts both.
+If the Task B1 spike set `PICK_PATH = "pickable-wrapper"`, register `view.on("pick", ...)` as well and route the feature through `resolvePickedFeature` — **not** straight to some handle:
+
+```tsx
+// src/scene/NavaraViewport.tsx — inside the same events effect
+const onPick = (feature: PickedFeatureLike | null) => {
+  const store = useSelectionStore.getState();
+  if (store.toolMode !== "select" || !feature) return;
+  // The engine tells us which mesh was hit; `resolvePickedFeature` uses the
+  // layerId our descriptors stamped to reach that mesh's handle. Trying
+  // handles in order would map another layer's batchId to a wrong surface.
+  const hit = narrowToMode(
+    resolvePickedFeature(handles(), feature),
+    store.mode,
+  );
+  applyPickIntent(
+    pickIntentFor({ type: "click", shiftKey: false }, hit),
+    store,
+  );
+};
+view.on("pick", onPick);
+// ...and `view.off("pick", onPick)` in the effect's cleanup.
+```
+
+Under `PICK_PATH = "own-raycast"` this block is omitted entirely and the `click`/`mousemove` screen-point path above is the only one.
 
 ```bash
 cd /data2/hideba/multiroof-viewer && npx vitest run tests/unit/scene/handleSync.test.ts && npx tsc -b --noEmit
@@ -11208,7 +11472,7 @@ Task B1 proved the **engine's** WASM/assets survive dev and a production bundle.
 **PREREQUISITE — Task B1 Step 7's measured camera trace.** Do not start this task until `docs/superpowers/research/2026-08-01-navara-spike-findings.md` records `CAMERA_BURST_SHAPE` and `PROGRAMMATIC_MOVE_EMITS` from a real browser. The cadence below is a _hypothesis_ the API report does not confirm; B1 measures it for drag-with-inertia, `flyTo`, `setCamera` and `resize`. Reconcile before writing code:
 
 - If `CAMERA_BURST_SHAPE` shows **more than one** `movestart … moveend` pair per user gesture (e.g. inertia emits a second burst after pointer-up), the "settles `settleMs` after moveend" case below must instead treat a new `movestart` inside the armed window as a continuation — add a case `"a second burst arriving inside the armed window defers the settle rather than committing twice"` and make `onMoveStart` clear the armed timer (it already does).
-- If `PROGRAMMATIC_MOVE_EMITS` is **true**, add the `suppress()` method described in Step 3b and its test case; Task C20 then brackets its `setCameraState` call with it. If it is false, skip Step 3b entirely and note that in the commit message.
+- `PROGRAMMATIC_MOVE_EMITS` decides the **trailing quiet window**, not whether `suppress()` exists. `suppress()` ships unconditionally (Step 3b): it is a handful of lines, it is what Tasks C11/C13 build `suppressSettle` on, and a viewer that only _sometimes_ has it would leave the camera-restore path silently depending on a spike verdict. If the verdict is `false`, note in the commit message that the quiet window is defensive rather than load-bearing; if `true`, size the default window from the measured `flyTo` trace.
 
 Record which branch was taken at the top of `settleController.ts` as a comment citing the findings doc, so a future reader can tell a measured decision from an assumed one.
 
@@ -11418,9 +11682,11 @@ Record which branch was taken at the top of `settleController.ts` as a comment c
   }
   ```
 
-- [ ] **Step 3b: (only if `PROGRAMMATIC_MOVE_EMITS` is true) add `suppress()`**
+- [ ] **Step 3b: Add `suppress()` — the seam every programmatic camera move goes through**
 
-  A camera restore (`setCameraState`, Task C20) or a `fitAll` must not look like a user gesture, or restoring a share link would immediately fire a streaming commit — the exact "no commits after programmatic camera restoration" property. Add to the interface `suppress<T>(fn: () => T): T` and to the implementation a `suppressed` counter that `onMoveStart`/`onMove`/`onMoveEnd`/`onIdle` check first and ignore while non-zero, decremented in a `finally`. Because `flyTo` is animated, `suppress` also takes an optional trailing quiet window: `suppress(fn, quietMs)` keeps ignoring events for `quietMs` after `fn` returns. Test cases to add:
+  A camera restore (`setCameraState`, Task C20), a `fitAll`, a `fitLayer` or an `alignView` must not look like a user gesture, or restoring a share link would immediately fire a streaming commit — the exact "no commits after programmatic camera restoration" property.
+
+  Add to the interface `suppress<T>(fn: () => T, quietMs?: number): T` and to the implementation a `suppressed` counter that `onMoveStart`/`onMove`/`onMoveEnd`/`onIdle` check first and ignore while non-zero, decremented in a `finally`. Because `flyTo` is animated and keeps emitting after the call returns, `suppress` also takes a trailing quiet window: `suppress(fn, quietMs)` keeps ignoring events for `quietMs` after `fn` returns (default `settleMs`, so a synchronous `setCamera` is covered without the caller thinking about it). Task C11 wraps this as `FlatCityBufPlugin.suppressSettle`, which is what `NavaraViewport`'s camera methods actually call (Task C13). Test cases to add:
 
   ```ts
   it("ignores a programmatic camera burst wrapped in suppress()", () => {
@@ -11499,7 +11765,10 @@ Record which branch was taken at the top of `settleController.ts` as a comment c
     toLngLat: (x: number, y: number) => readonly [number, number],
     heightOffsetM?: number,
   ): EnuFrame;
-  export function syncCellMeshes(ctx: SyncCtx): Map<CellKey, CellKey[]>; // -> stale keys needing recolor
+  /** Returns the keys of cells built or rebuilt here whose baked colours no
+   *  longer match the current rules — Task C10a feeds exactly these to
+   *  `recolorCells()`. A flat array, matching the implementation. */
+  export function syncCellMeshes(ctx: SyncCtx): CellKey[];
   export function rulesStale(
     entry: CellEntry,
     rules: ReadonlyArray<Rule>,
@@ -11530,6 +11799,7 @@ The drafted version claimed "because ENU is x=east/y=north/z=up and CityJSON sou
   import type { CellEntry } from "../src/streamLayer";
   import type { Grid } from "../src/tileGrid";
   import type { Rule } from "@cityjson/navara-core";
+  import type { CityMeshHandle } from "@cityjson/navara-cityjson";
 
   const GRID: Grid = { originX: 0, originY: 0, rootCell: 1000, maxLevel: 4 };
 
@@ -11553,6 +11823,10 @@ The drafted version claimed "because ENU is x=east/y=north/z=up and CityJSON sou
     };
   }
 
+  /** Fake CityMeshHandle. Every member of the real interface is present —
+   *  including `batchIdMap`/`resolveRaycast`, which Task C10b calls — so a
+   *  future member added to the interface breaks this file loudly instead of
+   *  only breaking at runtime in the streaming path. */
   function factory() {
     const created: Array<{ key: string; deleted: boolean }> = [];
     return {
@@ -11561,14 +11835,16 @@ The drafted version claimed "because ENU is x=east/y=north/z=up and CityJSON sou
         const rec = { key, deleted: false };
         created.push(rec);
         return {
+          ref: null,
           setColors: vi.fn(),
           setVisible: vi.fn(),
           triangleCount: () => 1,
+          batchIdMap: () => [{ objectIndex: 0, surfaceIndex: 0 }],
+          resolveRaycast: () => null,
           delete: () => {
             rec.deleted = true;
           },
-          ref: null,
-        };
+        } satisfies CityMeshHandle;
       },
     };
   }
@@ -11770,17 +12046,27 @@ The drafted version claimed "because ENU is x=east/y=north/z=up and CityJSON sou
     type PickingIndex,
     type Rule,
   } from "@cityjson/navara-core";
+  // Type-only import: `@cityjson/navara-cityjson`'s barrel re-exports the
+  // engine-binding modules, but `import type` is erased at compile time, so
+  // this file stays runnable in Node (Global Constraints -> Testing
+  // conventions). Redeclaring these locally is what let C10b's call sites
+  // drift from the real handle shape.
+  import type { CityMeshHandle } from "@cityjson/navara-cityjson";
   import { cellCentre, type CellKey, type Grid } from "./tileGrid";
   import type { CellCache } from "./cellCache";
   import type { CellEntry } from "./streamLayer";
 
-  export interface CityMeshHandle {
-    setColors(colors: Float32Array): void;
-    setVisible(visible: boolean): void;
-    triangleCount(): number;
-    delete(): void;
-    readonly ref: unknown;
-  }
+  // NOT redeclared here: `CityMeshHandle`, `SurfaceRef` and `EcefRay` come
+  // from @cityjson/navara-cityjson (Task B7), so the streaming cell path and
+  // the static layer path agree on one shape. A local copy would drift the
+  // moment either side gained a member — which is exactly how C10b ended up
+  // calling `handle.mesh.resolveRaycast` against an interface that had
+  // neither `mesh` nor `resolveRaycast`.
+  import type {
+    CityMeshHandle,
+    EcefRay,
+    SurfaceRef,
+  } from "@cityjson/navara-cityjson";
 
   export interface CellMeshFactory {
     create(key: CellKey, entry: CellEntry, frame: EnuFrame): CityMeshHandle;
@@ -12206,11 +12492,11 @@ export function entryToArrays(entry: CellEntry): CityMeshArrays {
       meshFactory: opts.meshFactory ?? {
         create: () => ({
           ref: null,
-          mesh: { resolveRaycast: () => null, batchIdMap: () => [] },
           setColors() {},
           setVisible() {},
           triangleCount: () => 1,
           batchIdMap: () => [],
+          resolveRaycast: () => null,
           delete() {},
         }),
       },
@@ -12349,10 +12635,15 @@ export function entryToArrays(entry: CellEntry): CityMeshArrays {
   meshFactory: {
     create: (key, entry, frame) =>
       addCityMeshArrays(this.view!, {
-        id: `${id}:${key}`,
+        id: `${opts.id}:${key}`,
         arrays: entryToArrays(entry),
         frame,
-        pickStrategy: this.pickStrategy,
+        // Both are stamped into the mesh's pick properties: `layerId` routes
+        // the PickedFeature to this handle (Task B15), `cellKey` finds the
+        // resident cell inside it (Task C10b).
+        layerId: opts.id,
+        cellKey: key,
+        pickStrategy: this.options.pickStrategy,
       }),
   },
   ```
@@ -12382,7 +12673,7 @@ The second half of the split. C10a landed meshes; this task makes a streaming la
 
 **Interfaces:**
 
-- Consumes: everything C10a consumed, plus `Selection`/`ScreenPoint`/`GeodeticBounds` from `@cityjson/navara-cityjson` and `ecefToGeodetic` from `@cityjson/navara-core`.
+- Consumes: everything C10a consumed, plus `Selection`/`ScreenPoint`/`GeodeticBounds`/`SurfaceRef`/`EcefRay` and `paintLayers` from `@cityjson/navara-cityjson`. Every pick/highlight call goes through the flat `CityMeshHandle` members (`resolveRaycast`, `batchIdMap`, `setColors`) — the same interface Task B7 defines and Task C8 imports, so there is exactly one shape.
 - Produces (added to `FcbStreamLayerHandle`):
   - `setRules(rules: ReadonlyArray<Rule>, enabled: boolean): void`
   - `setLod(mode: "auto" | "manual", lod: string | null): void`
@@ -12437,11 +12728,6 @@ The second half of the split. C10a landed meshes; this task makes a streaming la
         created.set(key, rec);
         return {
           ref: null,
-          mesh: {
-            resolveRaycast: () =>
-              key === hitKey ? { objectIndex: 0, surfaceIndex: 4 } : null,
-            batchIdMap: () => [{ objectIndex: 0, surfaceIndex: 4 }],
-          },
           setColors: (c: Float32Array) => {
             rec.colors = c;
           },
@@ -12450,10 +12736,12 @@ The second half of the split. C10a landed meshes; this task makes a streaming la
           },
           triangleCount: () => 7,
           batchIdMap: () => [{ objectIndex: 0, surfaceIndex: 4 }],
+          resolveRaycast: () =>
+            key === hitKey ? { objectIndex: 0, surfaceIndex: 4 } : null,
           delete: () => {
             rec.deleted = true;
           },
-        };
+        } satisfies CityMeshHandle;
       },
     };
   }
@@ -12658,7 +12946,7 @@ The second half of the split. C10a landed meshes; this task makes a streaming la
       z: ray.direction[2],
     };
     for (const cell of this.cells.values()) {
-      const hit = cell.handle.mesh.resolveRaycast({ origin, direction });
+      const hit = cell.handle.resolveRaycast({ origin, direction });
       if (hit) return this.selectionFor(cell, hit.objectIndex, hit.surfaceIndex);
     }
     return null;
@@ -12750,6 +13038,13 @@ The second half of the split. C10a landed meshes; this task makes a streaming la
   export class FlatCityBufPlugin extends Plugin<ThreeView<unknown>, unknown> {
     constructor(options: FlatCityBufPluginOptions);
     init(view: ThreeView<unknown>, ctx: unknown): Promise<void>;
+    /**
+     * Run `fn` with the settle controller deaf to camera events, so a
+     * programmatic camera move (restore, fitAll, alignView, flyTo) never looks
+     * like a user gesture and never triggers a commit. A no-op passthrough
+     * before `init()` has run, so the viewport can call it unconditionally.
+     */
+    suppressSettle<T>(fn: () => Promise<T> | T): Promise<T>;
     openStream(opts: {
       readonly id: string;
       readonly source: { readonly url: string } | { readonly blob: Blob };
@@ -12903,8 +13198,123 @@ pickRays: this.raySource,
 
 It registers the handle in `this.layers`, wires `handle.onLodChanged = () => void handle.commit(cornerRays(this.raySource!))`, and fires an initial commit.
 
+- [ ] **Step 3b: Implement `suppressSettle`**
+
+  ```ts
+  // packages/navara-flatcitybuf/src/plugin.ts
+  /**
+   * The single entry point the app uses to say "this camera move is mine, not
+   * the user's". Delegates to the settle controller's `suppress` (Task C7) and
+   * tolerates being called before init(), so NavaraViewport does not have to
+   * branch on plugin readiness for every fitAll.
+   *
+   * The trailing quiet window matters for `flyTo`: the call returns
+   * immediately while the animation keeps emitting `move` for seconds
+   * afterwards, so the controller stays deaf until FLYTO_QUIET_MS after `fn`
+   * settles. A synchronous `setCamera` costs one extra quiet window and
+   * nothing else.
+   */
+  async suppressSettle<T>(fn: () => Promise<T> | T): Promise<T> {
+    const controller = this.controller;
+    if (!controller) return await fn();
+    return await controller.suppress(async () => await fn(), FLYTO_QUIET_MS);
+  }
+  ```
+
+  `suppress` is declared `<T>(fn: () => T, quietMs?: number): T`, so passing an
+  async `fn` returns the promise unchanged and the quiet window starts when
+  `suppress` returns — i.e. immediately, not when the promise settles. That is
+  the wrong shape for an awaited `flyTo`, so widen the C7 signature to
+  `suppress<T>(fn: () => T, quietMs?: number): T` **plus** an explicit
+  `suppressUntil(promise: Promise<unknown>, quietMs?: number): void` that holds
+  the counter until the promise settles, and have `suppressSettle` use it:
+
+  ```ts
+  async suppressSettle<T>(fn: () => Promise<T> | T): Promise<T> {
+    const controller = this.controller;
+    if (!controller) return await fn();
+    const result = Promise.resolve(fn());
+    controller.suppressUntil(result, FLYTO_QUIET_MS);
+    return await result;
+  }
+  ```
+
+  Add `FLYTO_QUIET_MS` to `constants.ts` (2000 ms — comfortably past the
+  `flyTo` traces Task B1 Step 7 recorded), and add `suppressUntil` to Task C7's
+  `SettleController` interface and implementation next to `suppress`, with this
+  test appended to `settleController.test.ts`:
+
+  ```ts
+  it("suppressUntil holds the gate until the promise settles, plus the quiet window", async () => {
+    vi.useRealTimers();
+    const onSettle = vi.fn();
+    const c = createSettleController({
+      settleMs: 10,
+      onFirstChange: vi.fn(),
+      onSettle,
+    });
+    let release!: () => void;
+    c.suppressUntil(new Promise<void>((r) => (release = r)), 20);
+    c.onMoveStart();
+    c.onMoveEnd();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(onSettle).not.toHaveBeenCalled(); // still in flight
+    release();
+    await new Promise((r) => setTimeout(r, 40)); // settle + quiet window
+    c.onMoveStart();
+    c.onMoveEnd();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(onSettle).toHaveBeenCalledTimes(1); // the USER gesture commits
+  });
+  ```
+
+  Add the matching plugin-level cases to `tests/plugin.test.ts`:
+
+  ```ts
+  it("does not commit for a camera move wrapped in suppressSettle", async () => {
+    const view = new FakeView();
+    const p = new FlatCityBufPlugin(opts);
+    await p.init(view as never, {});
+    const handle = { commit: vi.fn(async () => {}), abortInFlight: vi.fn() };
+    (p as never as { layers: Map<string, unknown> }).layers.set("l1", handle);
+
+    await p.suppressSettle(() => {
+      // Stand-in for view.flyTo(...), which emits a camera burst.
+      view.emit("movestart");
+      view.emit("move");
+      view.emit("moveend");
+    });
+    vi.advanceTimersByTime(5000);
+    expect(handle.commit).not.toHaveBeenCalled();
+    expect(handle.abortInFlight).not.toHaveBeenCalled();
+  });
+
+  it("still commits for a real user gesture after the suppressed move", async () => {
+    const view = new FakeView();
+    const p = new FlatCityBufPlugin(opts);
+    await p.init(view as never, {});
+    const handle = { commit: vi.fn(async () => {}), abortInFlight: vi.fn() };
+    (p as never as { layers: Map<string, unknown> }).layers.set("l1", handle);
+
+    await p.suppressSettle(() => {
+      view.emit("movestart");
+      view.emit("moveend");
+    });
+    vi.advanceTimersByTime(5000);
+    view.emit("movestart");
+    view.emit("moveend");
+    vi.advanceTimersByTime(400);
+    expect(handle.commit).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppressSettle before init just runs the function", async () => {
+    const p = new FlatCityBufPlugin(opts);
+    await expect(p.suppressSettle(() => 42)).resolves.toBe(42);
+  });
+  ```
+
 - [ ] **Step 4: Export from `src/index.ts`:** add `export * from "./plugin"; export * from "./streamLayer"; export * from "./viewportFootprint"; export * from "./residentModel"; export * from "./cellMeshes";`
-- [ ] **Step 5: Run — expect pass.** `pnpm vitest run packages/navara-flatcitybuf` → all plugin test files green.
+- [ ] **Step 5: Run — expect pass.** `pnpm vitest run packages/navara-flatcitybuf` → all plugin test files green (`plugin.test.ts` 6 cases, `settleController.test.ts` 11).
 - [ ] **Step 6: Commit + bump the parent pointer.**
   ```bash
   git -C /data2/hideba/multiroof-viewer/packages/cityjson-navara-plugins add -A
@@ -13110,6 +13520,9 @@ It registers the handle in `this.layers`, wires `handle.onLodChanged = () => voi
 
 1. **Registration.** `NavaraViewport` never sees the view before `createNavaraSession()` has started `init()`, and Navara rejects `addPlugin()` afterwards. So the FCB plugin is **appended to the session's ordered plugin list** (Task B8) — `[DefaultPlugin, CityJSONPlugin, FlatCityBufPlugin]` — not added later. There is no `view.addPlugin` call anywhere in this task.
 2. **Interaction registry.** Streaming handles go into `streamsRef` (the map Task B15 already reads), so picking, highlighting, `fitAll`/`fitLayer` and the triangle readout cover streamed cells. The handle's `onCommit` callback re-runs the triangle count and re-applies the highlight as new cells arrive.
+
+   **2b. Programmatic camera suppression.** The same four camera methods now route through `FlatCityBufPlugin.suppressSettle` (Step 5b), so a restore, a share-link open or a `fitAll` cannot masquerade as a user gesture and trigger a streaming commit.
+
 3. **Open-before-ready race.** `fcbPluginRef.current!` was a non-null assertion on a ref that is null until the session resolves — a share hash processed on first render would throw. The plugin is handed out through `CitySceneHandle.getStreamingPlugin(): Promise<FlatCityBufPlugin>`, which awaits `ready`, so an early open queues instead of crashing and an engine failure rejects instead of hanging.
 
 **Steps:**
@@ -13127,7 +13540,15 @@ It registers the handle in `this.layers`, wires `handle.onLodChanged = () => voi
   vi.mock("@navaramap/three", () => ({
     default: vi.fn(() => ({ addPlugin, init, dispose, on: vi.fn(), off: vi.fn(), atmosphere: {}, camera: {} })),
   }));
-  const flatPluginInstance = { init: vi.fn(async () => {}), openStream: vi.fn(), remove: vi.fn(), dispose: vi.fn() };
+  const flatPluginInstance = {
+    init: vi.fn(async () => {}),
+    openStream: vi.fn(),
+    remove: vi.fn(),
+    dispose: vi.fn(),
+    // Passthrough by default: the camera call still happens, and the test can
+    // assert it was routed through here (Step 5b).
+    suppressSettle: vi.fn(async (fn: () => unknown) => fn()),
+  };
   vi.mock("@cityjson/navara-flatcitybuf", () => ({
     FlatCityBufPlugin: vi.fn(() => flatPluginInstance),
   }));
@@ -13350,6 +13771,80 @@ It registers the handle in `this.layers`, wires `handle.onLodChanged = () => voi
 
   Add `getStreamingPlugin(): Promise<FlatCityBufPlugin>` to `CitySceneHandle` and to the `useImperativeHandle` value. `src/features/streaming/openStreamingLayer.ts` (Task C12) keeps its `{ plugin, ... }` input unchanged — callers just obtain the plugin by awaiting instead of dereferencing a ref, so there is no `!`, no race, and the failure mode is a rejected promise the caller can toast.
 
+- [ ] **Step 5b: Route every programmatic camera move through `suppressSettle`**
+
+  `setCameraState`, `fitAll`, `fitLayer` and `alignView` all move the camera without the user touching anything. If the engine emits a camera burst for those (Task B1 Step 7's `PROGRAMMATIC_MOVE_EMITS`), each one triggers a streaming commit — most visibly on restore, where reopening a share link would immediately re-fetch tiles for a camera the user never moved.
+
+  Wrap them at the one place they all pass through. Use the **ref**, not `getStreamingPlugin()`: a static-only workspace has no FCB plugin and must never block a `fitAll` on streaming readiness.
+
+  ```tsx
+  // src/scene/NavaraViewport.tsx
+  /** Runs a camera mutation with the streaming settle controller deaf to the
+   *  resulting camera burst. No streaming plugin (or not ready yet) => run it
+   *  directly: a static-only app must not wait on streaming readiness to move
+   *  its camera. Fire-and-forget, so the CitySceneHandle methods stay void. */
+  const withSettleSuppressed = useCallback((move: () => void): void => {
+    const plugin = flatPluginRef.current;
+    if (!plugin) {
+      move();
+      return;
+    }
+    void plugin.suppressSettle(move);
+  }, []);
+  ```
+
+  Then change the four method bodies from Task B11a to route their engine call through it — `fitAll` becomes `withSettleSuppressed(() => view.flyTo(cameraForBounds(bounds)))`, `fitLayer` the same, `alignView` wraps its `view.setCamera(...)`, and `setCameraState` becomes:
+
+  ```tsx
+  const setCameraState = useCallback(
+    (state: GeographicCameraState) => {
+      const view = viewRef.current;
+      if (!view) return;
+      withSettleSuppressed(() => view.setCamera(state));
+    },
+    [withSettleSuppressed],
+  );
+  ```
+
+  Add `withSettleSuppressed` to the dependency arrays of `fitAll`/`fitLayer`/`alignView`. Task C20 then needs **no** extra work: its restore and share-hash flows already go through `setCameraState`.
+
+  Tests (appended to `navaraViewportStreaming.test.tsx`):
+
+  ```tsx
+  it("wraps a programmatic camera move in the streaming plugin's suppressSettle", async () => {
+    const ref = createRef<CitySceneHandle>();
+    render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
+    await waitFor(() => expect(init).toHaveBeenCalled());
+    await ref.current!.ready;
+
+    ref.current!.setCameraState({
+      lng: 4.35,
+      lat: 52,
+      height: 500,
+      heading: 0,
+      pitch: -60,
+      roll: 0,
+    });
+    expect(flatPluginInstance.suppressSettle).toHaveBeenCalledTimes(1);
+    // The camera really moved — suppression must not swallow the call itself.
+    expect(viewInstance.setCamera).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves the camera directly when no streaming plugin is present, without awaiting anything", async () => {
+    // Simulates a static-only build: the ref never gets a plugin.
+    (FlatCityBufPlugin as unknown as Mock).mockImplementationOnce(() => {
+      throw new Error("not configured");
+    });
+    const ref = createRef<CitySceneHandle>();
+    render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
+    await waitFor(() => expect(ref.current).not.toBeNull());
+    ref.current!.alignView("top");
+    expect(viewInstance.setCamera).toHaveBeenCalled();
+  });
+  ```
+
+  (`flatPluginInstance` gains `suppressSettle: vi.fn(async (fn) => fn())` in the Step 1 mock, and the `@navaramap/three` mock exposes its constructed view as `viewInstance` so `setCamera` is assertable.)
+
 - [ ] **Step 6: Register streaming handles in the interaction registry**
 
   ```tsx
@@ -13411,7 +13906,7 @@ It registers the handle in `this.layers`, wires `handle.onLodChanged = () => voi
 
   The queueing from Step 5 makes an early call safe, and `onPluginsReady` becomes optional (keep it only if something else still needs the plugin instances).
 
-- [ ] **Step 10: Run — expect pass.** `npx vitest run tests/unit/scene/navaraViewportStreaming.test.tsx && npx tsc -b --noEmit` → 10 passed, no type errors.
+- [ ] **Step 10: Run — expect pass.** `npx vitest run tests/unit/scene/navaraViewportStreaming.test.tsx && npx tsc -b --noEmit` → 12 passed, no type errors.
 
 - [ ] **Step 11: Commit.**
 
@@ -14330,7 +14825,7 @@ It registers the handle in `this.layers`, wires `handle.onLodChanged = () => voi
 
 **Interfaces:**
 
-- Consumes: `CitySceneHandle.getCameraState(): GeographicCamera | null`, `setCameraState(cam: GeographicCamera): void`, `ready: Promise<void>` — resolve-or-reject (Task B11a + Task C13)
+- Consumes: `CitySceneHandle.getCameraState(): GeographicCamera | null`, `setCameraState(cam: GeographicCamera): void`, `ready: Promise<void>` — resolve-or-reject (Task B11a + Task C13). **No suppression work is needed here:** Task C13 Step 5b already wraps `setCameraState` (and `fitAll`/`fitLayer`/`alignView`) in the streaming plugin's `suppressSettle`, so a restored camera cannot trigger a streaming commit. This task just calls the handle.
 - Produces: `handleSave`, `handleRestore`, `handleShare`, share-hash effect — all camera-tuple-free
 
 **Steps:**
@@ -14444,7 +14939,7 @@ It registers the handle in `this.layers`, wires `handle.onLodChanged = () => voi
 
   Expected: the model reloads and the camera lands at the saved viewpoint (same visible extent as before the reload, verified from the snapshot), with no 100 ms flash of the default camera. Then click Share, paste the copied hash into a new tab, and confirm the same viewpoint — including that a **share hash present on first load** (the ref-not-yet-mounted case Step 4b guards) still restores the camera. Finally, hand-craft a `#share=` hash from an old v2 payload and confirm it is ignored (default view, no crash).
 
-  If Task B1 Step 7 recorded `PROGRAMMATIC_MOVE_EMITS = true`, also confirm the restore does **not** kick off a streaming commit: open the FCB layer, save, reload, restore, and check the status bar goes straight to `idle` without a `probing → fetching` cycle (Task C7 Step 3b's `suppress()` is what makes this hold; wrap the `setCameraState` call in it).
+  Also confirm the restore does **not** kick off a streaming commit — this is the acceptance check for the suppression chain (Task C7's `suppressUntil` → Task C11's `suppressSettle` → Task C13 Step 5b's `withSettleSuppressed`): open the FCB layer, save, reload, restore, and watch the status bar go straight to `idle` with no `probing → fetching` cycle. Then pan by hand and confirm a commit **does** fire — suppression that never lifts would be just as broken.
 
 - [ ] **Step 8: Commit.**
   ```bash
