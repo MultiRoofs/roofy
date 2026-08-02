@@ -157,6 +157,15 @@ export default defineConfig({
     exclude: ["@cityjson/flatcitybuf", "@duckdb/duckdb-wasm"],
   },
   resolve: {
+    // The aliases below pull the submodule packages in as *source*, so their
+    // own `import proj4 from "proj4"` / `import … from "three"` would
+    // otherwise resolve against the submodule's pnpm store and load a SECOND
+    // copy of each library. proj4 keeps its EPSG definitions in module-level
+    // state, so two copies mean `ensureProjDef` registers RD New in a
+    // registry the app never reads. Both are declared `peerDependencies` of
+    // the packages precisely so the host supplies one instance; deduping here
+    // is what makes that true for the aliased-source path.
+    dedupe: ["proj4", "three"],
     alias: {
       // Dev HMR: resolve the submodule packages to their TypeScript sources so
       // editing a plugin file hot-reloads the app instead of requiring a
