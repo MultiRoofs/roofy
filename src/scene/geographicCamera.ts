@@ -10,10 +10,11 @@
  *
  * Semantics: the returned `lng`/`lat`/`height` are the CAMERA's own geodetic
  * position (Navara's `setCamera(camPos)` with `distance` omitted), and
- * `heading`/`pitch`/`roll` are degrees, with pitch negative when looking down.
- * Every fit therefore parks the camera directly ABOVE the centre of the box —
- * see the caveat on `alignCameraForBounds` for what that costs the horizontal
- * presets.
+ * `heading`/`pitch`/`roll` are degrees, with pitch negative when looking down
+ * and heading measured clockwise from north. `cameraForBounds` parks the
+ * camera directly ABOVE the centre of the box; `alignCameraForBounds` moves it
+ * one fit distance along the requested axis instead and DERIVES the
+ * orientation that looks back at the centre.
  */
 import type { GeodeticBounds } from "@cityjson/navara-cityjson";
 import type { ViewDirection } from "./ViewAlignButtons";
@@ -30,9 +31,17 @@ export interface GeographicCameraState {
 /** Metres per degree of latitude (spherical approximation — fit maths only). */
 const METRES_PER_DEGREE_LAT = 111_320;
 /** Floor so a single small building does not put the camera inside the roof. */
-const MIN_VIEW_HEIGHT_M = 200;
-/** How many box diagonals above the model the fit camera sits. */
+const MIN_VIEW_DISTANCE_M = 200;
+/** How many box diagonals away from the model the fit camera sits. */
 const FIT_DISTANCE_FACTOR = 1.5;
+const DEG_TO_RAD = Math.PI / 180;
+const RAD_TO_DEG = 180 / Math.PI;
+/**
+ * Floor on cos(latitude) when converting metres to degrees of longitude. A
+ * camera aligned on a box that touches a pole would otherwise divide by zero
+ * and hand `setCamera` a NaN longitude, which wedges the engine's camera.
+ */
+const MIN_COS_LAT = 1e-6;
 
 function isUsable(bounds: GeodeticBounds): boolean {
   return (
@@ -182,10 +191,26 @@ function centreLng(bounds: GeodeticBounds): number {
   return normaliseLng(bounds.west + span / 2);
 }
 
+function centreHeight(bounds: GeodeticBounds): number {
+  return (bounds.minHeight + bounds.maxHeight) / 2;
+}
+
 function fitHeight(bounds: GeodeticBounds): number {
   return Math.max(
     bounds.maxHeight + boundsDiagonalMetres(bounds) * FIT_DISTANCE_FACTOR,
-    MIN_VIEW_HEIGHT_M,
+    MIN_VIEW_DISTANCE_M,
+  );
+}
+
+/**
+ * How far from the centre of the box a fitted camera stands, in metres — 1.5
+ * space diagonals, floored so a single small building is still framed from
+ * outside its own roof.
+ */
+export function fitDistanceMetres(bounds: GeodeticBounds): number {
+  return Math.max(
+    boundsDiagonalMetres(bounds) * FIT_DISTANCE_FACTOR,
+    MIN_VIEW_DISTANCE_M,
   );
 }
 
@@ -201,41 +226,91 @@ export function cameraForBounds(bounds: GeodeticBounds): GeographicCameraState {
   };
 }
 
-const ALIGN_PRESETS: Record<
+/**
+ * Unit ENU offset (east, north, up) FROM the centre of the box TO the camera.
+ *
+ * The axes match the pre-Navara viewport's scene frame (X=east, Y=up,
+ * Z=south), so the buttons keep meaning what they meant: `front` looks north
+ * from the south side, and `right` shows the model's right-hand side as seen
+ * from the front — the camera stands EAST and looks west.
+ */
+const ALIGN_OFFSETS: Record<
   ViewDirection,
-  { readonly heading: number; readonly pitch: number }
+  readonly [east: number, north: number, up: number]
 > = {
-  top: { heading: 0, pitch: -90 },
-  bottom: { heading: 0, pitch: 90 },
-  front: { heading: 0, pitch: 0 },
-  back: { heading: 180, pitch: 0 },
-  right: { heading: 90, pitch: 0 },
-  left: { heading: 270, pitch: 0 },
+  top: [0, 0, 1],
+  bottom: [0, 0, -1],
+  front: [0, -1, 0],
+  back: [0, 1, 0],
+  right: [1, 0, 0],
+  left: [-1, 0, 0],
 };
 
+/** Heading normalised into [0, 360). */
+function normaliseHeading(heading: number): number {
+  return ((heading % 360) + 360) % 360;
+}
+
 /**
- * The same framing as {@link cameraForBounds} with a preset orientation, so
- * alignment changes where the camera looks without changing how far out it is.
+ * A true elevation/plan view of the box from `direction`: the camera is moved
+ * one {@link fitDistanceMetres} along that axis from the centre of the box,
+ * and its heading/pitch are then DERIVED from where it landed, so it looks
+ * straight back at the centre.
  *
- * KNOWN LIMITATION (Shared Interface Contract keeps the state to six scalars,
- * so it cannot be fixed here): the four horizontal presets keep the fit
- * altitude while pitching to the horizon, which puts the model below the
- * camera rather than in front of it. Making them true elevation views needs
- * the target-anchored form of `setCamera` (`{lng, lat, height, distance}`,
- * where lng/lat/height is the aim point) — a viewport-side (B11a) decision,
- * not a change to this module's contract.
+ * This is what makes the four horizontal directions usable. Parking the camera
+ * at the fit ALTITUDE and pitching to the horizon — the earlier preset table —
+ * left the model below the camera and out of frame; standing level with the
+ * centre of the box and looking at it does not, and still needs only the six
+ * scalars the Shared Interface Contract allows (no target-anchored
+ * `setCamera({lng, lat, height, distance})` form required).
+ *
+ * The offset uses the same spherical metres-per-degree approximation as the
+ * rest of this module, which is exact enough at the hundreds-of-metres to
+ * kilometres range a fit distance covers.
  */
 export function alignCameraForBounds(
   bounds: GeodeticBounds,
   direction: ViewDirection,
 ): GeographicCameraState {
-  const preset = ALIGN_PRESETS[direction];
+  const [east, north, up] = ALIGN_OFFSETS[direction];
+  const distance = fitDistanceMetres(bounds);
+  const lat0 = centreLat(bounds);
+  const metresPerDegreeLng =
+    METRES_PER_DEGREE_LAT *
+    Math.max(Math.abs(Math.cos(lat0 * DEG_TO_RAD)), MIN_COS_LAT);
+
+  const lat = Math.max(
+    -90,
+    Math.min(90, lat0 + (north * distance) / METRES_PER_DEGREE_LAT),
+  );
+  // Normalise only when the offset actually pushed the camera off the map:
+  // running an in-range longitude through the modular arithmetic costs a
+  // sub-nanodegree of drift, which is enough to turn the exactly-zero east
+  // offset of a top/bottom view into a spurious 90-degree heading below.
+  const lngRaw = centreLng(bounds) + (east * distance) / metresPerDegreeLng;
+  const lng = lngRaw >= -180 && lngRaw <= 180 ? lngRaw : normaliseLng(lngRaw);
+  const height = centreHeight(bounds) + up * distance;
+
+  // Look back down the offset: the vector from the camera to the centre is the
+  // negated offset, so heading/pitch fall out of it rather than out of a table.
+  const toCentreEast = -east * distance;
+  const toCentreNorth = -north * distance;
+  const toCentreUp = -up * distance;
+  const horizontal = Math.hypot(toCentreEast, toCentreNorth);
+
   return {
-    lng: centreLng(bounds),
-    lat: centreLat(bounds),
-    height: fitHeight(bounds),
-    heading: preset.heading,
-    pitch: preset.pitch,
+    lng,
+    lat,
+    height,
+    // Straight up/down has no heading to derive — `atan2(-0, -0)` would report
+    // 180 degrees, silently spinning a plan view round.
+    heading:
+      horizontal === 0
+        ? 0
+        : normaliseHeading(
+            Math.atan2(toCentreEast, toCentreNorth) * RAD_TO_DEG,
+          ),
+    pitch: Math.atan2(toCentreUp, horizontal) * RAD_TO_DEG,
     roll: 0,
   };
 }
