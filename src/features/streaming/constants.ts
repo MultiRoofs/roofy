@@ -1,15 +1,20 @@
-/** Every streaming tunable. All distances are metres. Provisional — tune
- *  against delft.fcb and one large real dataset before treating as settled. */
-export const SETTLE_MS = 350;
-export const MOVE_FRAC = 0.2;
-export const SCALE_FACTOR = 1.3;
-export const T_MAX_M = 5000;
-export const MAX_FOOTPRINT_SPAN_M = 8000;
-export const VIEWPORT_FEATURE_BUDGET = 20000;
-export const RESIDENT_TRIANGLE_BUDGET = 4_000_000;
-export const RESIDENT_BYTE_BUDGET = 512 * 1024 * 1024;
-export const MIN_COVER_CELLS = 9;
-export const MAX_COVER_CELLS = 64;
-export const LEVEL_SWAP_TIMEOUT_MS = 1500;
-export const MIN_CELL_M = 50;
-export const BASE_CELL_M = 100;
+/**
+ * Re-export shim — every streaming tunable now lives in
+ * `@cityjson/navara-flatcitybuf` (M7.5), because the modules that read them
+ * (tile grid, level policy, hysteresis gate) moved into that package.
+ */
+export {
+  BASE_CELL_M,
+  LEVEL_SWAP_TIMEOUT_MS,
+  MAX_COVER_CELLS,
+  MAX_FOOTPRINT_SPAN_M,
+  MIN_CELL_M,
+  MIN_COVER_CELLS,
+  MOVE_FRAC,
+  RESIDENT_BYTE_BUDGET,
+  RESIDENT_TRIANGLE_BUDGET,
+  SCALE_FACTOR,
+  SETTLE_MS,
+  T_MAX_M,
+  VIEWPORT_FEATURE_BUDGET,
+} from "@cityjson/navara-flatcitybuf";
