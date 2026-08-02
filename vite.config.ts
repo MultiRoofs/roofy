@@ -163,6 +163,10 @@ export default defineConfig({
       input: {
         index: resolve(import.meta.dirname, "index.html"),
         spike: resolve(import.meta.dirname, "spike.html"),
+        // TEMPORARY (Task B11a harness, removed in C21 with the spike):
+        // `NavaraViewport` has no route in the app until Task B11b swaps
+        // `App.tsx` over, so its browser smoke runs against this page.
+        navara: resolve(import.meta.dirname, "navara.html"),
       },
     },
   },

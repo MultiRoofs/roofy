@@ -577,6 +577,33 @@ body {
   background: var(--bg-viewport);
 }
 
+/* Navara viewport (Task B11a). Fills whatever positioned box it is dropped
+   into — `.viewport` in the app shell, the page body in the harness. */
+.navara-viewport {
+  position: absolute;
+  inset: 0;
+}
+
+/* The engine appends its own canvas here; React keeps this node empty. */
+.navara-viewport__canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.navara-viewport__error {
+  position: absolute;
+  inset-inline: 1rem;
+  top: 1rem;
+  z-index: 20;
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(197, 48, 48, 0.4);
+  border-radius: var(--radius, 0.5rem);
+  background: rgba(90, 29, 29, 0.92);
+  color: #ffdede;
+  font-size: 0.8rem;
+  backdrop-filter: blur(8px);
+}
+
 /* ═══════════════════════════════════════════════════════════════
    SELECTION TOOLTIP
    ═══════════════════════════════════════════════════════════════ */
