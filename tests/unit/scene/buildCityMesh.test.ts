@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildCityMesh,
-  computeOriginOffset,
-} from "../../../src/scene/buildCityMesh";
+import { buildCityMesh } from "../../../src/scene/buildCityMesh";
 import type {
   CityModel,
   CityObject,
@@ -50,33 +47,6 @@ function makeModel(objects: Record<string, CityObject>): CityModel {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-
-describe("computeOriginOffset", () => {
-  it("returns zero offset when model has no bbox", () => {
-    const model: CityModel = {
-      sourceEncoding: "cityjson",
-      metadata: {},
-      bbox: null,
-      objects: {},
-      vertexCount: 0,
-    };
-    expect(computeOriginOffset(model)).toEqual([0, 0, 0]);
-  });
-
-  it("returns the center of the bounding box", () => {
-    const model: CityModel = {
-      sourceEncoding: "cityjson",
-      metadata: {},
-      bbox: [100, 200, 0, 110, 210, 10],
-      objects: {},
-      vertexCount: 0,
-    };
-    const offset = computeOriginOffset(model);
-    expect(offset[0]).toBeCloseTo(105);
-    expect(offset[1]).toBeCloseTo(205);
-    expect(offset[2]).toBeCloseTo(5);
-  });
-});
 
 describe("buildCityMesh", () => {
   it("returns zero triangles for an empty model", () => {
