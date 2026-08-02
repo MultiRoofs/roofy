@@ -461,3 +461,222 @@ npx tsc -b --noEmit   -> clean
 npx vitest run        -> 58 test files, 637 tests, all passing
 npm run build         -> exit 0
 ```
+
+---
+
+## 10. M7.4 browser smoke log (Task B16)
+
+Interactive smoke of the whole M7.3 + M7.4 surface on the **real engine**:
+`npm run dev` (port 5177) + the raw CDP driver
+(`scratchpad/cdp3.mjs` — B11b's `cdp2.mjs` plus `move` / `clickAt` with
+modifier masks, `drag` and `wheel`), Playwright Chromium
+`--headless=new --no-sandbox --enable-unsafe-swiftshader`, 1280x800, DPR 1.
+`agent-browser` remains unusable on this host (§8). The fixture is loaded
+through the app's own `input[type=file]` via `DOM.setFileInputFiles`.
+
+Geometry of the page under test: canvas at `(240, 44) 720x585` — the left
+sidebar and the toolbar are both visible, so every pointer result below is also
+a test that canvas-relative coordinates are computed correctly.
+
+Rules were added **through the UI** (Inspector -> Rules -> the "Flat roofs"
+preset button); the app exposes no store hook on `window` other than
+`__multiroofRenderDebug`, and none was added for this.
+
+### Results
+
+| #   | Check                                                                     | Verdict                                          | Evidence                                                                                                                                                                  |
+| --- | ------------------------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Fixture renders, no page exceptions, no failed requests                   | **PASS**                                         | `Objects 3 / Triangles 37`; `Runtime.exceptionThrown` empty across every run; only non-200 ever seen is `/favicon.ico`                                                    |
+| 2   | Hover tints ONE building amber, the other untouched                       | **PASS**                                         | roof B `(124,43,39) -> (145,107,45)`; roof A unchanged. `…-hover.png`                                                                                                     |
+| 3   | Click selects the object; attribute panel + inspector name it             | **PASS**                                         | `Selected 1`, inspector `ID NL.IMBAG.Pand.0002 / Type Building / LoD 2.2`; clicking building A instead reports its own attributes (`gabled`, 1923). `…-object-select.png` |
+| 4   | Cursor readout is source-CRS metres, not lat/lon                          | **PASS**                                         | `XYZ 85027.4, 446005.5, 13.7` — RD New / EPSG:7415                                                                                                                        |
+| 5   | Object-mode shift-click multi-selects across objects                      | **PASS**                                         | `Selected 2`, and BOTH buildings paint orange                                                                                                                             |
+| 6   | Surface mode picks ONE face, not the solid                                | **PASS**                                         | roof face highlighted `(118,70,31)`, the wall below stays base `(3,5,12)`. `…-surface-select.png`                                                                         |
+| 7   | Surface-mode shift-click reports two selections                           | **PASS**                                         | `Selected 2`; inspector switches to the 2-object aggregate view                                                                                                           |
+| 7b  | …and paints both faces                                                    | **FAIL (pre-existing, not a Navara regression)** | see "Carry-forward" below. `…-surface-multi.png`                                                                                                                          |
+| 8   | Rules repaint matching faces, walls keep base colors                      | **PASS**                                         | all three roofs `(104,29,27) -> (22,68,120)` = `#3b82f6`; every wall pixel unchanged. `…-rules-legend.png`                                                                |
+| 9   | Legend lists the active rule + color                                      | **PASS**                                         | `RULES / Flat roofs`, swatch `rgb(59,130,246)`; toolbar pill `Rules 1 active`                                                                                             |
+| 10  | Rules toggle off restores base colors, on repaints                        | **PASS**                                         | off -> pixel-exact base; legend disappears; on -> blue again                                                                                                              |
+| 11  | LoD switch changes geometry + triangle count, and switching back restores | **PASS**                                         | `Triangles 37 -> 36 -> 37`; 583 px changed between 2.2 and 1.2 (bbox x531-593, y240-276); 2.2 -> 2.2 diff is **0 px**. `…-lod-1-2.png`                                    |
+| 12  | Layer visibility toggle                                                   | **PASS**                                         | `Triangles 37 -> 0 -> 37`, viewport goes black and back. `…-layer-hidden.png`                                                                                             |
+| 13  | `agent-browser errors` equivalent (console exceptions) empty              | **PASS**                                         | only the two known benign warnings: "Multiple instances of Three.js" (§ two-copies finding) and the DuckDB cityjson extension 404 (offline host)                          |
+
+LoD switching needed a **two-LoD fixture**, which `fixtures/two-buildings.city.json`
+is not (every geometry is `lod 2.2`). A throwaway copy with a bbox-box `lod 1.2`
+`Solid` added per object was generated into the scratchpad for that check only —
+nothing was committed to `fixtures/`.
+
+### Additional checks carried forward from earlier reviews
+
+1. **`vector3ToGeodetic` radians assumption — CONFIRMED CORRECT.** Seven probe
+   points across the model, each compared against the fixture's own coordinates:
+
+   | screen                  | readout                   | fixture object (true extent)      |
+   | ----------------------- | ------------------------- | --------------------------------- |
+   | (550, 250)              | `85004.7, 446005.5, 7.8`  | Pand.0001 — x 85000-85010, z<=8.4 |
+   | (586, 268)              | `85013.8, 446001.7, 5.0`  | Pand.0001-part1 — x 85012-85016   |
+   | (618, 240)              | `85021.9, 446003.7, 13.7` | Pand.0002 — x 85020-85035         |
+   | (640, 234)              | `85027.4, 446005.5, 13.7` | Pand.0002                         |
+   | (660, 232)              | `85032.4, 446006.0, 13.7` | Pand.0002                         |
+   | (400, 500) / (850, 150) | _(cleared)_               | nothing drawn there               |
+
+   Every horizontal pair lands inside the correct footprint and increases
+   monotonically west -> east. A radians/degrees mix-up would put the readout on
+   another continent, so this is settled. **Height caveat:** the vertical
+   component scatters by up to ~1.8 m against the known roof heights (roof B
+   reads 13.7 for a true 12.1; part reads 5.0 for a true 3.2; roof A reads 7.8
+   for a true 8.4 — the sign is not constant, so it is scatter, not an offset).
+   At the ~200 m fit distance that is <1% of range and it shrinks when zoomed in
+   (a wall sample from 20x closer read `1.8`), which is the signature of
+   `pickDepthPosition`'s depth-buffer reconstruction on a software rasteriser,
+   not of the `heightOffset` arithmetic. **The geoid round trip is in fact
+   verified here, not merely assumed:** every smoke run fetched the undulation
+   successfully (`200` for both `terrain.reearth.land/mapbox/geoid/tilejson.json`
+   and the EGM08 tile, and **no** `[geoid] Could not sample…` fallback warning),
+   so the ~43.9 m Delft offset was genuinely added at placement and subtracted
+   again by `layerHeightOffset` in the readout — and the result still lands
+   within ~2 m of the file's own orthometric z. A one-sided error would read
+   ~56 m or ~-32 m; neither appeared. Non-gating; re-measure the residual scatter
+   on real GPU hardware.
+
+2. **`pickDepthPosition` coordinate space with the sidebar visible — PASS.** The
+   canvas starts at `x=240, y=44`, i.e. it is nowhere near the page origin. The
+   table above is the proof: a handler using `clientX/clientY` instead of
+   `canvasPointOf` would read the depth 240 px right and 44 px down of the
+   cursor, which for every one of those probes is empty space (readout would go
+   null) or a different building. `canvasPointOf` is correct.
+
+3. **Hover perf on SwiftShader — no stalls (known-limitation check, not a gate).**
+   `requestAnimationFrame` deltas, same session, same camera:
+
+   | window                               | n   | mean     | p50   | p95   | max   |
+   | ------------------------------------ | --- | -------- | ----- | ----- | ----- |
+   | idle, 6 s                            | 31  | 188.0 ms | 186.3 | 224.1 | 256.5 |
+   | 40-step hover sweep across the model | 40  | 198.5 ms | 196.6 | 241.3 | 241.4 |
+
+   ~5 fps either way (the host has no GPU — §8), and the sweep's **max frame
+   time is lower than idle's**: hovering across every object costs ~5% of an
+   already software-bound frame and produces no spike. No console output during
+   the sweep. Frame _counts_ on this host mean nothing; the absence of an
+   outlier does.
+
+4. **Sky-clear — PASS, and the DOM sky-detector is what does it.** The default
+   fit camera (pitch -60) has no sky in frame at all, so this needed a camera
+   with the model _and_ sky visible: `Front` align + 12 wheel notches in, which
+   puts the horizon at y~345 with building B spanning y 270-415 across it.
+   - cursor at `(700, 395)` — building B, **below** the horizon: `XYZ 85025.8,
+446000.2, 1.8` and building B repaints (26 835 px). `…-sky-hover.png`
+   - cursor at `(400, 150)` — **sky**: readout `null` **and** building B reverts
+     pixel-exactly to base. `…-sky-cleared.png`
+   - back to `(700, 395)`: identical to the hover shot, byte for byte.
+
+   This is precisely the branch B15 added: over the sky the engine emits no
+   `mousemove` at all (`convertMouseEventToMapEvent` returns null), and the
+   container's own DOM listener clears hover + readout instead of freezing them.
+   Two further observations from the same session: (a) a **near-horizon camera
+   makes the engine silent over the model too** — in the un-zoomed `Front` view,
+   hovering the building silhouette produces no hover and no readout, because
+   the rays there are within a pixel or two of the ellipsoid tangent; the app
+   fails _safe_ (clears) rather than freezing. (b) Moving the pointer off the
+   canvas onto the align buttons fires the container's `mouseleave` and clears
+   both — the other half of the B15 fix, observed incidentally.
+
+5. **Measure / box-select toolbar buttons — now DISABLED** (orchestrator ruling
+   for this task). Under `NavaraViewport` both tool modes are gated by
+   `acceptsPointer` but have no consumer at all, so choosing either one only
+   turned picking off. Both buttons now render `disabled` with the tooltip
+   `"… — temporarily unavailable during the Navara migration"`; verified in the
+   browser (`[{title:"Box select — temporarily unavailable during the Navara
+migration", disabled:true}, {title:"Measure distance — …", disabled:true}]`)
+   and pinned by `tests/unit/ui/viewerToolbar.test.tsx` (6 tests). `.tb-btn` had
+   **no** `:disabled` rule at all — box-select's old `pickMode === "surface"`
+   gating was invisible — so `app.css` gained `opacity .35 / cursor
+not-allowed` and a `:hover:not(:disabled)` guard; confirmed in the browser
+   via `getComputedStyle`. `…-toolbar-disabled.png`
+
+6. **hi-DPI / retina — UNVERIFIABLE on this host.** The headless run is DPR 1
+   and there is no display to emulate a real device pixel ratio against;
+   `Emulation.setDeviceMetricsOverride` can fake `devicePixelRatio` but not the
+   backing store WebGL actually allocates, so a pass there would prove nothing
+   about `view.pixelRatio` in `getPickRay`. Left open for a run on real
+   hardware.
+
+### Carry-forward: two surfaces of the SAME object highlight as one
+
+Confirmed in the browser (check 7b): shift-clicking a roof face and then a wall
+face of the same building leaves `Selected 2` in the status bar and the 2-object
+aggregate in the inspector, but only the **last** face is painted — the first
+reverts to its base color.
+
+Cause, in `packages/navara-cityjson/src/surfaceColorLayers.ts` -> `paintLayers`:
+
+```ts
+const selectedByIdx = new Map<number, Selection>();
+for (const sel of selections) {
+  const idx = objectKeys.indexOf(sel.objectId);
+  if (idx >= 0) selectedByIdx.set(idx, sel); // <- second surface evicts the first
+}
+```
+
+The map is keyed by **object** index, so two selections on one object collapse to
+one. Selections on _different_ objects are unaffected (check 5 passes).
+
+**This is pre-existing, not a migration regression:** the retired R3F path had
+the identical line (`src/scene/highlightMesh.ts:53`, `const selectedSet = new
+Map<number, Selection>()`), and `selectionStore.toggleSelect` has always been
+able to hold two surfaces of one object. It is left as a carry-forward rather
+than fixed inside a docs task: the fix is a submodule change (`Map<number,
+Selection[]>` + `sels.some(s => matchesSurface(s, sIdx))`) and therefore its own
+commit under the submodule-first protocol.
+
+### Milestone code review — one critical finding, fixed
+
+The `feature-dev:code-reviewer` pass over the cumulative Part B diff (required by
+CLAUDE.md at a milestone boundary) turned up one critical defect:
+`CitySceneHandle.ready` could **hang forever**. Every `return` inside
+`NavaraViewport`'s queued init body is guarded by `cancelled`, and the effect
+cleanup did not settle the gate — so unmounting while `session.ready` was still
+pending left the promise permanently unsettled. Reachable today via `App.tsx`'s
+`handleClose` (closing the file unmounts the viewport), and it becomes an
+observable hang the moment Task C20 replaces its 100 ms `setTimeout` with
+`await sceneRef.current.ready`.
+
+The reviewer's suggested one-liner — reject in the cleanup — was **verified
+wrong** before being applied: under StrictMode the discarded first pass's cleanup
+rejects the gate the second pass then tries to resolve, and the existing
+"builds exactly ONE engine across a StrictMode double mount" test goes red
+(reproduced, then reverted). The gate must therefore be **settled _and_
+re-armed**, and read through `readyRef` at use time rather than captured in the
+effect closure (StrictMode re-enters the _same_ closure). `CitySceneHandle.ready`
+is now a getter over the live gate.
+
+Re-verified in the browser afterwards, since this is engine-lifecycle code:
+load → pick → **Close file** (viewport unmounts, `canvas` count 0, no error
+panel) → load again → engine back up, `Triangles 37`, picking and the CRS
+readout working, zero page exceptions.
+
+### Screenshots
+
+All under `docs/superpowers/research/assets/`, all from the runs above.
+
+| Asset                                     | Shows                                                                                 |
+| ----------------------------------------- | ------------------------------------------------------------------------------------- |
+| `2026-08-02-b16-m74-hover.png`            | Hover: building B amber, building A untouched                                         |
+| `2026-08-02-b16-m74-object-select.png`    | Object pick: whole solid orange, inspector naming `NL.IMBAG.Pand.0002`                |
+| `2026-08-02-b16-m74-surface-select.png`   | Surface pick: only the roof face orange, wall still base                              |
+| `2026-08-02-b16-m74-surface-multi.png`    | Shift multi-surface: `Selected 2`, but only the last face painted (the carry-forward) |
+| `2026-08-02-b16-m74-rules-legend.png`     | "Flat roofs" rule applied + legend overlay                                            |
+| `2026-08-02-b16-m74-lod-1-2.png`          | The two-LoD scratchpad fixture switched to LoD 1.2                                    |
+| `2026-08-02-b16-m74-sky-hover.png`        | Front+zoom camera, cursor on the building below the horizon: readout live             |
+| `2026-08-02-b16-m74-sky-cleared.png`      | Same camera, cursor on the sky: hover and readout both gone                           |
+| `2026-08-02-b16-m74-layer-hidden.png`     | Layer visibility off — empty viewport, `Triangles 0`                                  |
+| `2026-08-02-b16-m74-toolbar-disabled.png` | The greyed-out box-select / measure buttons                                           |
+
+### Green bar at the end of B16
+
+```
+npx tsc -b --noEmit                              -> clean
+npx vitest run                                   -> 67 test files, 760 tests, all passing
+(cd packages/cityjson-navara-plugins && pnpm vitest run) -> 22 files, 267 tests, all passing
+npm run build                                    -> exit 0
+```
