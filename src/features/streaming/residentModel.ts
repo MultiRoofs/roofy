@@ -1,90 +1,84 @@
 /**
- * Merges a streaming layer's resident cells into a flat view for consumers
- * (stats, inspector, table, rule builder) that need "the objects currently
- * loaded for this layer" without caring about cell boundaries.
+ * Store binding for the resident model — the merge itself moved to
+ * `@cityjson/navara-flatcitybuf` in M7.5 (`buildResidentModel` /
+ * `createResidentModelMemo`, which are store-free and take the cache as an
+ * argument). What stays app-side is exactly what the package must not know:
+ * where a layer id's cache comes from (`useStreamStore`) and the one memo per
+ * layer id that keeps repeated calls at the same version free.
  *
- * Deliberately a plain memoised function, NOT a Zustand selector.
+ * Still deliberately a plain memoised function, NOT a Zustand selector.
  * `useStreamStore.streams[layerId].version` bumps on every cell commit —
  * every pan/zoom settle, per the store's own doc comment — and Zustand
  * evaluates every selector on every store notification to decide whether to
- * re-render. A selector like `s => residentModel(s)` would rebuild this
- * merged Record on every single commit, whether or not anything ever reads
- * the result — exactly the eager materialization viewport streaming exists
- * to avoid. Calling this function imperatively from a mounted consumer's
- * render body means the merge only runs when something actually asks for
- * it, and the single-entry-per-layer memo below means even repeated calls
- * at the same version are free (a Map lookup, not a rebuild).
+ * re-render. A selector like `s => residentModel(s)` would rebuild the merged
+ * Record on every single commit, whether or not anything ever reads the
+ * result — exactly the eager materialization viewport streaming exists to
+ * avoid. Calling this function imperatively from a mounted consumer's render
+ * body means the merge only runs when something actually asks for it.
  */
+import {
+  createResidentModelMemo,
+  type ResidentModel,
+} from "@cityjson/navara-flatcitybuf";
 import { useStreamStore } from "./streamStore";
-import type { ResidentObjectRecord } from "./workerProtocol";
 
-export interface ResidentModel {
-  readonly objects: Readonly<Record<string, ResidentObjectRecord>>;
-  readonly cellCount: number;
-  readonly featureCount: number;
-  readonly surfaceAttrKeys: ReadonlyArray<string>;
-}
+export type { ResidentModel };
 
-interface MemoEntry {
-  readonly version: number;
-  readonly model: ResidentModel;
-}
+/** One memo per layer: that layer's most recently computed model and the
+ *  (cache, version) it was computed at. Layers never share an entry — a
+ *  shared one would thrash as consumers ask about different layers. */
+const memos = new Map<string, ReturnType<typeof createResidentModelMemo>>();
 
-/** Single entry per layer: this layer's most recently computed model, and
- *  the version it was computed at. A newer/older version request just
- *  overwrites the one entry — there is no history to keep. */
-const memo = new Map<string, MemoEntry>();
+/** What a layer id with no stream registered gets: a non-streaming layer, or
+ *  one asked about after `unregister`. Shared and frozen, so the answer is
+ *  reference-stable for hook dependencies and can't be mutated by a caller. */
+const EMPTY_MODEL: ResidentModel = Object.freeze({
+  objects: Object.freeze({}),
+  cellCount: 0,
+  featureCount: 0,
+  surfaceAttrKeys: Object.freeze([]) as ReadonlyArray<string>,
+});
 
 /**
  * Returns the merged resident model for `layerId` at `version`. Recomputes
- * only when `version` differs from what's cached for this layer; otherwise
- * returns the identical cached object (reference equality), so callers can
- * use it directly as a `useMemo`/`useEffect` dependency without extra work.
+ * only when `version` (or the layer's cache object) differs from what's cached
+ * for this layer; otherwise returns the identical cached object (reference
+ * equality), so callers can use it directly as a `useMemo`/`useEffect`
+ * dependency without extra work.
  *
  * `version` is supplied by the caller (typically read via a `useStreamStore`
  * selector on `streams[layerId]?.version`) rather than read from the store
- * internally here — that split keeps this function pure and cheap to call
- * from a render body without inventing its own subscription.
+ * internally here — that split keeps this cheap to call from a render body
+ * without inventing its own subscription.
  */
 export function getResidentModel(
   layerId: string,
   version: number,
 ): ResidentModel {
-  const cached = memo.get(layerId);
-  if (cached && cached.version === version) return cached.model;
+  const streams = useStreamStore.getState().streams;
 
-  const model = buildResidentModel(layerId);
-  memo.set(layerId, { version, model });
-  return model;
-}
-
-function buildResidentModel(layerId: string): ResidentModel {
-  const stream = useStreamStore.getState().streams[layerId];
-  const objects: Record<string, ResidentObjectRecord> = {};
-  const attrKeys = new Set<string>();
-  let cellCount = 0;
-
-  if (stream) {
-    for (const key of stream.cache.keys()) {
-      const entry = stream.cache.get(key);
-      if (!entry) continue; // evicted between keys() and get() — skip, don't fabricate
-      cellCount++;
-      for (const obj of entry.objects) {
-        objects[obj.id] = obj;
-      }
-      for (const attrKey of entry.surfaceAttrKeys) attrKeys.add(attrKey);
-    }
+  // A memo entry pins both the merged model and the layer's whole cell cache
+  // (its decoded geometry, up to the byte budget), so an entry for a layer
+  // that has been unregistered is a real leak, not a stale-but-cheap one.
+  // Layers come and go rarely and there are only ever a handful, so the
+  // cheapest reliable release point is here: drop every memo whose layer no
+  // longer has a stream. Non-streaming layers never get an entry at all.
+  for (const id of memos.keys()) {
+    if (!Object.hasOwn(streams, id)) memos.delete(id);
   }
 
-  return {
-    objects,
-    cellCount,
-    featureCount: Object.keys(objects).length,
-    surfaceAttrKeys: [...attrKeys].sort(),
-  };
+  const stream = streams[layerId];
+  if (!stream) return EMPTY_MODEL;
+
+  let memo = memos.get(layerId);
+  if (!memo) {
+    memo = createResidentModelMemo();
+    memos.set(layerId, memo);
+  }
+  return memo(stream.cache, version);
 }
 
-/** Test-only: clears the memo so tests don't leak state across cases. */
+/** Test-only: clears the memos so tests don't leak state across cases. */
 export function __resetMemo(): void {
-  memo.clear();
+  memos.clear();
 }

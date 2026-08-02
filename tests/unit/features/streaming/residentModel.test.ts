@@ -1,3 +1,10 @@
+/**
+ * The merge itself (and its memo) moved to `@cityjson/navara-flatcitybuf` in
+ * M7.5 — see that package's `tests/residentModel.test.ts` for the cell-merge,
+ * attr-key-union and reference-equality cases. What is left here is the app's
+ * store binding: resolving a layer id to its cache via `useStreamStore`, one
+ * memo per layer id, and the unregistered-layer case.
+ */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   getResidentModel,
@@ -39,11 +46,12 @@ beforeEach(() => {
 });
 
 describe("getResidentModel", () => {
-  it("merges objects across resident cells", () => {
+  it("merges the objects of the cells resident in the layer's cache", () => {
     const m = getResidentModel("L", 1);
     expect(Object.keys(m.objects).sort()).toEqual(["a", "b", "c"]);
     expect(m.cellCount).toBe(2);
     expect(m.featureCount).toBe(3);
+    expect(m.surfaceAttrKeys).toEqual(["slope"]);
   });
 
   it("returns the identical object for the same version (memoised)", () => {
@@ -53,10 +61,6 @@ describe("getResidentModel", () => {
   it("recomputes when the version changes", () => {
     const first = getResidentModel("L", 1);
     expect(getResidentModel("L", 2)).not.toBe(first);
-  });
-
-  it("unions surface attribute keys", () => {
-    expect(getResidentModel("L", 1).surfaceAttrKeys).toEqual(["slope"]);
   });
 
   it("returns an empty model for a layer with no stream registered", () => {
@@ -115,5 +119,44 @@ describe("getResidentModel", () => {
     const second = getResidentModel("L", 6);
     expect(keysSpy).toHaveBeenCalledTimes(2);
     expect(second).not.toBe(first);
+  });
+
+  it("gives the same empty model object every time for an unregistered layer", () => {
+    expect(getResidentModel("nope", 0)).toBe(getResidentModel("nope", 1));
+  });
+
+  it("drops the memo of an unregistered layer so its cache can be collected", () => {
+    const keysSpy = vi.spyOn(cache, "keys");
+    getResidentModel("L", 1);
+    expect(keysSpy).toHaveBeenCalledTimes(1);
+
+    useStreamStore.getState().unregister("L");
+    // Any later call prunes the dead entry — nothing must keep holding L's
+    // cache (and its decoded cell geometry) alive.
+    getResidentModel("other", 0);
+
+    // Re-registering the very same cache at the very same version therefore
+    // merges again instead of answering from a memo that outlived the layer.
+    useStreamStore.setState({ streams: { L: { cache, version: 1 } as never } });
+    getResidentModel("L", 1);
+    expect(keysSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not serve a model merged from a torn-down layer's cache", () => {
+    const first = getResidentModel("L", 1);
+    // Re-registering restarts the layer with a fresh cache — and a version
+    // counter that starts over, so version alone cannot tell them apart.
+    const restarted = new CellCache<never>({
+      maxTriangles: Infinity,
+      maxBytes: Infinity,
+    });
+    restarted.set("2/0/0", entry(["z"]) as never, { triangles: 1, bytes: 1 });
+    useStreamStore.setState({
+      streams: { L: { cache: restarted, version: 1 } as never },
+    });
+
+    const after = getResidentModel("L", 1);
+    expect(after).not.toBe(first);
+    expect(Object.keys(after.objects)).toEqual(["z"]);
   });
 });
