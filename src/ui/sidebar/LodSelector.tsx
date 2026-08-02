@@ -8,7 +8,7 @@
  * dropdown ignores it rather than gating on a mode that does nothing here.
  *
  * For a streaming layer, `lodMode` DOES matter: "auto" hands the choice to
- * the viewport-streaming driver (useTileStreaming.ts's `resolveLod`), which
+ * the viewport-streaming driver (commitPlanner.ts's `resolveLod`), which
  * re-derives it every commit from the current cell size via
  * `lodForCellSize` (levelPolicy.ts) — the same call this component makes to
  * describe it. Because the user isn't choosing in that mode, the control
@@ -147,7 +147,7 @@ export function LodSelector({
 function describeLodSelection(sel: LodSelection): string {
   if (sel.kind === "exact") return `LoD ${sel.lod}`;
   // `{kind:"unlabelled"}` is unreachable from `lodForCellSize` today (see
-  // useTileStreaming.ts's `lodToWireLabel` doc comment — a ladder of length
+  // commitPlanner.ts's `lodToWireLabel` doc comment — a ladder of length
   // 0 already maps to "all") but handled here rather than silently
   // mismatching `LodSelection`'s full type.
   if (sel.kind === "unlabelled") return "Unlabelled";
