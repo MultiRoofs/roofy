@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Selection } from "@cityjson/navara-cityjson";
 import type { Layer } from "../../../src/features/layers/layerStore";
+import type { Rule } from "../../../src/features/rules/types";
+import type { Surface } from "../../../src/domain/citymodel/types";
 import {
   interactionHandles,
   syncHighlight,
   syncLayers,
+  syncStyles,
   totalTriangles,
   type LiveLayer,
 } from "../../../src/scene/handleSync";
@@ -258,6 +261,204 @@ describe("interactionHandles", () => {
         live,
       ),
     ).toEqual([h1]);
+  });
+});
+
+describe("syncStyles", () => {
+  const roofRule: Rule = {
+    id: "r1",
+    name: "flat roofs",
+    color: "#4ec84e",
+    conditions: [],
+    logic: "AND",
+    enabled: true,
+  };
+  const roof: Surface = {
+    type: "RoofSurface",
+    rings: [
+      [
+        [0, 0, 10],
+        [10, 0, 10],
+        [10, 10, 10],
+      ],
+    ],
+    attributes: {},
+    lod: "2",
+  };
+
+  function live(handle: ReturnType<typeof fakeHandle>) {
+    return new Map<string, LiveLayer>([
+      ["L1", { handle: handle as never, lod: "2", visible: true }],
+    ]);
+  }
+
+  it("compiles the layer's rules and pushes them to the handle", () => {
+    const handle = fakeHandle("L1");
+    const entries = live(handle);
+    syncStyles(
+      [layer({ id: "L1", rules: [roofRule], rulesEnabled: true })],
+      entries,
+    );
+
+    expect(handle.setStyle).toHaveBeenCalledTimes(1);
+    // What was pushed is a working evaluator, not just "some function":
+    // a roof gets the rule color, a wall keeps its base color.
+    const evaluate = handle.setStyle.mock.calls[0]![0] as (
+      s: unknown,
+      o: unknown,
+    ) => readonly number[] | null;
+    const object = {
+      objectId: "B1",
+      object: { attributes: {}, surfaces: [roof] },
+    };
+    expect(evaluate({ surfaceIndex: 0, surface: roof }, object)).toHaveLength(
+      3,
+    );
+    expect(
+      evaluate(
+        { surfaceIndex: 0, surface: { ...roof, type: "WallSurface" } },
+        object,
+      ),
+    ).toBeNull();
+  });
+
+  it("never touches a handle whose layer has no rules", () => {
+    const handle = fakeHandle("L1");
+    syncStyles([layer({ id: "L1" })], live(handle));
+    // Not even setStyle(null): a fresh handle is already unstyled, and a
+    // needless push would repaint every vertex of the layer.
+    expect(handle.setStyle).not.toHaveBeenCalled();
+  });
+
+  it("never styles a layer whose rules are switched off", () => {
+    const handle = fakeHandle("L1");
+    syncStyles(
+      [layer({ id: "L1", rules: [roofRule], rulesEnabled: false })],
+      live(handle),
+    );
+    expect(handle.setStyle).not.toHaveBeenCalled();
+  });
+
+  it("pushes once, then not again while the rules are unchanged", () => {
+    const handle = fakeHandle("L1");
+    const entries = live(handle);
+    const rules = [roofRule];
+    const l = layer({ id: "L1", rules, rulesEnabled: true });
+    syncStyles([l], entries);
+    // A re-render with the same rules array (any unrelated store change) must
+    // not recompile or repaint.
+    syncStyles([layer({ id: "L1", rules, rulesEnabled: true })], entries);
+    syncStyles([l], entries);
+    expect(handle.setStyle).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-pushes when the rules array changes", () => {
+    const handle = fakeHandle("L1");
+    const entries = live(handle);
+    syncStyles(
+      [layer({ id: "L1", rules: [roofRule], rulesEnabled: true })],
+      entries,
+    );
+    syncStyles(
+      [
+        layer({
+          id: "L1",
+          rules: [{ ...roofRule, color: "#ff0000" }],
+          rulesEnabled: true,
+        }),
+      ],
+      entries,
+    );
+    expect(handle.setStyle).toHaveBeenCalledTimes(2);
+    expect(handle.setStyle.mock.calls[1]![0]).not.toBe(
+      handle.setStyle.mock.calls[0]![0],
+    );
+  });
+
+  it("clears the style when the layer's rules are switched off", () => {
+    const handle = fakeHandle("L1");
+    const entries = live(handle);
+    const rules = [roofRule];
+    syncStyles([layer({ id: "L1", rules, rulesEnabled: true })], entries);
+    syncStyles([layer({ id: "L1", rules, rulesEnabled: false })], entries);
+    expect(handle.setStyle).toHaveBeenCalledTimes(2);
+    expect(handle.setStyle).toHaveBeenLastCalledWith(null);
+  });
+
+  it("clears the style when the last enabled rule is disabled", () => {
+    const handle = fakeHandle("L1");
+    const entries = live(handle);
+    syncStyles(
+      [layer({ id: "L1", rules: [roofRule], rulesEnabled: true })],
+      entries,
+    );
+    syncStyles(
+      [
+        layer({
+          id: "L1",
+          rules: [{ ...roofRule, enabled: false }],
+          rulesEnabled: true,
+        }),
+      ],
+      entries,
+    );
+    expect(handle.setStyle).toHaveBeenLastCalledWith(null);
+  });
+
+  it("styles a layer again after it was re-added (a fresh handle is unstyled)", () => {
+    const first = fakeHandle("L1");
+    const entries = live(first);
+    const rules = [roofRule];
+    syncStyles([layer({ id: "L1", rules, rulesEnabled: true })], entries);
+
+    const second = fakeHandle("L1");
+    entries.set("L1", { handle: second as never, lod: "2", visible: true });
+    syncStyles([layer({ id: "L1", rules, rulesEnabled: true })], entries);
+    expect(second.setStyle).toHaveBeenCalledTimes(1);
+  });
+
+  it("never styles a streaming layer (its colors are worker-baked)", () => {
+    const handle = fakeHandle("S1");
+    const entries = new Map<string, LiveLayer>([
+      ["S1", { handle: handle as never, lod: "2", visible: true }],
+    ]);
+    syncStyles(
+      [
+        layer({
+          id: "S1",
+          isStreaming: true,
+          rules: [roofRule],
+          rulesEnabled: true,
+        }),
+      ],
+      entries,
+    );
+    expect(handle.setStyle).not.toHaveBeenCalled();
+  });
+
+  it("skips a layer that has no live handle (its add was refused)", () => {
+    expect(() =>
+      syncStyles(
+        [layer({ id: "L1", rules: [roofRule], rulesEnabled: true })],
+        new Map(),
+      ),
+    ).not.toThrow();
+  });
+
+  it("styles hidden layers too, so a re-shown layer is already correct", () => {
+    const handle = fakeHandle("L1");
+    syncStyles(
+      [
+        layer({
+          id: "L1",
+          visible: false,
+          rules: [roofRule],
+          rulesEnabled: true,
+        }),
+      ],
+      live(handle),
+    );
+    expect(handle.setStyle).toHaveBeenCalledTimes(1);
   });
 });
 
