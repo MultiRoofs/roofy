@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { GoogleCloudAuthPlugin, GLTFExtensionsPlugin, TileCompressionPlugin, TilesFadePlugin, UpdateOnChangePlugin } from "3d-tiles-renderer/plugins";
+import {
+  GoogleCloudAuthPlugin,
+  GLTFExtensionsPlugin,
+  TileCompressionPlugin,
+  TilesFadePlugin,
+  UpdateOnChangePlugin,
+} from "3d-tiles-renderer/plugins";
 import {
   getGoogleTilesPluginSpecs,
   TILE_CREASE_ANGLE,
