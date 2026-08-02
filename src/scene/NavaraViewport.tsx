@@ -6,19 +6,22 @@
  * is imperative, so the whole engine lives behind refs and focused effects, and
  * React only owns the DOM around it.
  *
- * SCOPE (Tasks B11b + B14): engine lifecycle, the photorealistic globe, the
- * static layer store -> `CityModelHandle` mirror (`handleSync.ts`) including
- * per-layer rule styling, fit/align against the live handles' geodetic bounds,
- * the triangle readout, and the init-failure panel. This is what `App.tsx`
- * renders.
+ * SCOPE (Tasks B11b + B14 + B15): engine lifecycle, the photorealistic globe,
+ * the static layer store -> `CityModelHandle` mirror (`handleSync.ts`)
+ * including per-layer rule styling, fit/align against the live handles'
+ * geodetic bounds, the triangle readout, the init-failure panel, and the
+ * interaction hub — pointer events -> pick intents -> `selectionStore`,
+ * selection/hover -> `setHighlight`, and the source-CRS cursor readout.
  *
- * STILL DARK, by design (the props are already in the contract so the
- * component's public shape does not move again): the picking/hover router
- * across static + streaming handles and the highlight and cursor-readout
- * pushes it drives (Task B15 — the pure pieces already exist in
- * `pickEventHandlers.ts`, `cursorCrsReadout.ts` and `handleSync`'s
- * `interactionHandles`/`syncHighlight`, and `onCursorPosition` stays unwired
- * until then), streaming cells (M7.5).
+ * This file is the ENGINE SEAM for interaction, and holds only that: which
+ * engine event carries what, and how a screen point becomes an ECEF ray. Every
+ * decision it feeds is pure and tested elsewhere — `pickEventHandlers.ts`
+ * (nearest-hit routing, tool gating, drag suppression, intents),
+ * `handleSync.ts` (the handle registries) and `cursorCrsReadout.ts` (geodetic
+ * -> source CRS, throttling).
+ *
+ * STILL DARK, by design: streaming cells (M7.5). `streamsRef` is already
+ * threaded through every interaction path, so Task C13 only has to fill it.
  */
 import {
   forwardRef,
@@ -28,19 +31,49 @@ import {
   useRef,
   useState,
 } from "react";
-import ThreeView from "@navaramap/three";
+import ThreeView, {
+  getPickRay,
+  radianToDegree,
+  vector3ToGeodetic,
+} from "@navaramap/three";
 import { DefaultPlugin } from "@navaramap/three-default-plugin";
+import { Vector2 } from "three";
 // The engine-bound subpath, NOT the package barrel: the barrel must stay
 // importable from Node (Global Constraints -> NODE_IMPORT_SAFE = false).
 import { CityJSONPlugin } from "@cityjson/navara-cityjson/plugin";
-import type { CityModelHandle } from "@cityjson/navara-cityjson";
+import type {
+  CityModelHandle,
+  EcefRay,
+  ScreenPoint,
+} from "@cityjson/navara-cityjson";
 import { useLayerStore } from "../features/layers/layerStore";
+import { useSelectionStore } from "../features/selection/selectionStore";
 import {
+  allInteractionHandles,
+  interactionHandles,
+  layerHeightOffset,
+  syncHighlight,
   syncLayers,
   syncStyles,
   totalTriangles,
+  type InteractionHandle,
   type LiveLayer,
 } from "./handleSync";
+import {
+  acceptsPointer,
+  applyPickIntent,
+  canvasPointOf,
+  createClickGate,
+  narrowToMode,
+  pickIntentFor,
+  resolveNearestHit,
+  sameSelection,
+} from "./pickEventHandlers";
+import {
+  createThrottle,
+  crsFromGeodetic,
+  epsgForLayer,
+} from "./cursorCrsReadout";
 import {
   createNavaraSession,
   NavaraSessionDisposedError,
@@ -125,12 +158,7 @@ function createReadyGate(): ReadyGate {
 
 export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
   function NavaraViewport(props, ref) {
-    // `onCursorPosition` is still unwired — its math now lives in
-    // `cursorCrsReadout.ts` (geodetic -> source CRS + the throttle gate), and
-    // the pointer events that feed it arrive with the picking router (Task
-    // B15). It stays in the props contract so this component's public shape
-    // does not move again.
-    const { onFps, onTriangleCount, onLayerError } = props;
+    const { onFps, onTriangleCount, onLayerError, onCursorPosition } = props;
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<ViewInstance | null>(null);
     const cityPluginRef = useRef<CityJSONPlugin | null>(null);
@@ -138,6 +166,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
      *  engine owns the meshes, and re-rendering on a handle change would only
      *  invalidate the imperative callbacks below. */
     const liveRef = useRef(new Map<string, LiveLayer>());
+    /** Streaming layer handles, keyed by layer id. Empty until Task C13 opens a
+     *  FlatCityBuf layer; every interaction path already reads it, so C13 adds
+     *  no branch here. */
+    const streamsRef = useRef(new Map<string, InteractionHandle>());
     const [engineReady, setEngineReady] = useState(false);
     const [initError, setInitError] = useState<string | null>(null);
     /** Bumped by the sync effect when a layer was newly added, which is the
@@ -360,7 +392,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       // on the same pass it appears (Task B14). Memoised inside — a rule edit
       // repaints only the layer whose rules changed.
       syncStyles(layers, liveRef.current);
-      onTriangleCount(totalTriangles(layers, liveRef.current));
+      onTriangleCount(
+        totalTriangles(layers, liveRef.current, streamsRef.current),
+      );
       // Only a NEW layer earns a camera move: a visibility toggle, a LoD
       // change or a rule edit must not yank the camera out from under the user.
       if (liveRef.current.size > before) setFitToken((t) => t + 1);
@@ -372,6 +406,165 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       if (fitToken === 0) return;
       fitAll();
     }, [fitToken, fitAll]);
+
+    // --- selection / hover -> handle.setHighlight ---
+    // Subscribed as state (not read from `getState()`) because a selection made
+    // anywhere else in the app — the inspector, a share link restore, box
+    // select — has to repaint too, not just one made by a click in here.
+    const selections = useSelectionStore((s) => s.selections);
+    const hovered = useSelectionStore((s) => s.hovered);
+    useEffect(() => {
+      if (!engineReady) return;
+      syncHighlight(
+        // ALL handles, hidden layers included: highlight outlives a visibility
+        // toggle, and each handle filters the array by its own layerId.
+        allInteractionHandles(layers, liveRef.current, streamsRef.current),
+        selections,
+        hovered,
+      );
+    }, [engineReady, layers, selections, hovered]);
+
+    // --- engine pointer events -> pick intents + the cursor readout ---
+    useEffect(() => {
+      const view = viewRef.current;
+      if (!engineReady || !view) return;
+
+      // ONE registry for interaction. In Part B it only ever holds static
+      // handles; Task C13 fills `streamsRef` and this same closure then picks
+      // and highlights streamed cells with no further change here. Rebuilt per
+      // event rather than captured: `liveRef` mutates in place, and a captured
+      // array would go stale the moment a layer is added.
+      const handles = () =>
+        interactionHandles(layers, liveRef.current, streamsRef.current);
+
+      /**
+       * Screen point -> ECEF ray.
+       *
+       * `getPickRay` is a free function taking a `{width, height, pixelRatio}`
+       * window-like and the raw three camera (Task B1 finding 5). It measures
+       * from the CANVAS' top-left, which is why every caller below goes through
+       * `canvasPointOf` rather than the event's `clientX`/`clientY`.
+       */
+      const rayAt = (point: ScreenPoint): EcefRay | null => {
+        const size = view.screenSize;
+        return getPickRay(
+          { width: size.x, height: size.y, pixelRatio: view.pixelRatio },
+          view.camera.raw,
+          new Vector2(point.x, point.y),
+        );
+      };
+
+      const pickAt = (point: ScreenPoint) => {
+        const ray = rayAt(point);
+        return ray ? resolveNearestHit(handles(), ray) : null;
+      };
+
+      // ~15 Hz, the old app's inline `performance.now()` gate. Hover is NOT
+      // throttled — it is what makes the highlight follow the pointer — but the
+      // readout costs a depth read plus a proj4 transform, and the status bar
+      // cannot show more than this anyway.
+      const throttleCursor = createThrottle(66);
+      const clickGate = createClickGate();
+
+      const reportCursor = (point: ScreenPoint, hitLayerId?: string) => {
+        if (!onCursorPosition) return;
+        throttleCursor(() => {
+          const ecef = view.pickDepthPosition(point.x, point.y);
+          if (!ecef) {
+            // Nothing rendered under the cursor at all (the sky). Not a
+            // ground-plane fallback: the engine's depth read already answers
+            // with the globe surface wherever the terrain is drawn.
+            onCursorPosition(null);
+            return;
+          }
+          // No hit means the cursor is on the terrain rather than a model; the
+          // readout then speaks the first layer's CRS, which is the only CRS
+          // the user has asked to see.
+          const layerId = hitLayerId ?? layers[0]?.id;
+          const layer = layers.find((l) => l.id === layerId);
+          const epsg = epsgForLayer(layer?.model.metadata.referenceSystem);
+          if (epsg === null) {
+            onCursorPosition(null);
+            return;
+          }
+          const lle = vector3ToGeodetic(ecef);
+          onCursorPosition(
+            crsFromGeodetic(
+              radianToDegree(lle.lng),
+              radianToDegree(lle.lat),
+              // ELLIPSOIDAL -> ORTHOMETRIC. The layer sits `heightOffset`
+              // metres up because its geodetic heights were raised by the geoid
+              // undulation (Global Constraints -> Vertical datum); subtracting
+              // it again yields the z the source file actually contains.
+              lle.height -
+                layerHeightOffset(layerId, liveRef.current, streamsRef.current),
+              epsg,
+            ),
+          );
+        });
+      };
+
+      const onMouseDown = (e: MouseEvent) => clickGate.down(canvasPointOf(e));
+
+      const onMouseMove = (e: MouseEvent) => {
+        const point = canvasPointOf(e);
+        clickGate.move(point);
+        const store = useSelectionStore.getState();
+        // Gate on the tool BEFORE resolving: a measure-mode move must not cost
+        // a raycast across every layer.
+        if (!acceptsPointer(store.toolMode, "move")) {
+          reportCursor(point);
+          return;
+        }
+        const hit = narrowToMode(pickAt(point), store.mode);
+        // Every resolved pick is a fresh object, so pushing it unconditionally
+        // would change `hovered` on every mousemove and repaint every layer's
+        // vertex colors at pointer rate.
+        if (!sameSelection(store.hovered, hit)) {
+          applyPickIntent(
+            pickIntentFor({ type: "move", shiftKey: false }, hit),
+            store,
+          );
+        }
+        reportCursor(point, hit?.layerId);
+      };
+
+      const onClick = (e: MouseEvent) => {
+        const store = useSelectionStore.getState();
+        if (!acceptsPointer(store.toolMode, "click")) return;
+        // The engine's `click` is the raw DOM click and fires at the end of a
+        // camera orbit too; without this, every gesture would clear the
+        // selection on mouseup.
+        if (!clickGate.isClean()) return;
+        const hit = narrowToMode(pickAt(canvasPointOf(e)), store.mode);
+        applyPickIntent(
+          pickIntentFor({ type: "click", shiftKey: e.shiftKey === true }, hit),
+          store,
+        );
+      };
+
+      const onMouseLeave = () => {
+        useSelectionStore.getState().hover(null);
+        onCursorPosition?.(null);
+      };
+
+      // No `view.on("pick", ...)`: PICK_PATH is "own-raycast" (Task B1).
+      // `PickableMeshWrapper` allocates ONE batch id per mesh, so an engine
+      // pick could only ever name a layer, and it would fire alongside `click`
+      // — committing a second, coarser selection over the right one.
+      // `handleSync.resolvePickedFeature` stands ready for the day that
+      // changes.
+      view.on("mousedown", onMouseDown);
+      view.on("mousemove", onMouseMove);
+      view.on("click", onClick);
+      view.on("mouseleave", onMouseLeave);
+      return () => {
+        view.off("mousedown", onMouseDown);
+        view.off("mousemove", onMouseMove);
+        view.off("click", onClick);
+        view.off("mouseleave", onMouseLeave);
+      };
+    }, [engineReady, layers, onCursorPosition]);
 
     const getCameraState = useCallback((): GeographicCameraState | null => {
       const view = viewRef.current;

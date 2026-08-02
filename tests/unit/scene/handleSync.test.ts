@@ -4,7 +4,10 @@ import type { Layer } from "../../../src/features/layers/layerStore";
 import type { Rule } from "../../../src/features/rules/types";
 import type { Surface } from "../../../src/domain/citymodel/types";
 import {
+  allInteractionHandles,
   interactionHandles,
+  layerHeightOffset,
+  resolvePickedFeature,
   syncHighlight,
   syncLayers,
   syncStyles,
@@ -20,8 +23,10 @@ function fakeHandle(id: string, triangles = 100) {
     setStyle: vi.fn(),
     setHighlight: vi.fn(),
     resolvePick: vi.fn(),
+    resolveRaycast: vi.fn(),
     getBoundsGeodetic: vi.fn(),
     triangleCount: () => triangles,
+    heightOffset: vi.fn(() => 0),
     delete: vi.fn(),
   };
 }
@@ -483,5 +488,152 @@ describe("syncHighlight", () => {
     const h1 = fakeHandle("L1");
     syncHighlight([h1] as never, [], null);
     expect(h1.setHighlight).toHaveBeenCalledWith([], undefined);
+  });
+
+  it("reaches HIDDEN layers through allInteractionHandles", () => {
+    // Task B5 carry-forward: each handle filters the selection by its own
+    // layerId, so pushing the whole array is safe — but a hidden layer must
+    // still be updated, or re-showing it would reveal a stale highlight.
+    const hidden = fakeHandle("L1");
+    const live = new Map<string, LiveLayer>([
+      ["L1", { handle: hidden as never, lod: "2", visible: false }],
+    ]);
+    const layers = [layer({ id: "L1", visible: false })];
+    expect(interactionHandles(layers, live)).toEqual([]);
+    syncHighlight(allInteractionHandles(layers, live), [sel], null);
+    expect(hidden.setHighlight).toHaveBeenCalledWith([sel], undefined);
+  });
+
+  it("highlights streaming layers from the second registry too", () => {
+    const stream = fakeHandle("S1");
+    const streamSel: Selection = {
+      kind: "object",
+      layerId: "S1",
+      objectId: "B7",
+    };
+    syncHighlight(
+      allInteractionHandles(
+        [layer({ id: "S1", isStreaming: true })],
+        new Map(),
+        new Map([["S1", stream as never]]),
+      ),
+      [streamSel],
+      null,
+    );
+    expect(stream.setHighlight).toHaveBeenCalledWith([streamSel], undefined);
+  });
+});
+
+describe("resolvePickedFeature", () => {
+  const hit: Selection = {
+    kind: "surface",
+    layerId: "L2",
+    objectId: "B1",
+    surfaceIndex: 3,
+  };
+
+  function owner(id: string, result: Selection | null) {
+    return {
+      id,
+      setHighlight: vi.fn(),
+      resolvePick: vi.fn(() => result),
+      resolveRaycast: vi.fn(() => null),
+      getBoundsGeodetic: vi.fn(() => null),
+      triangleCount: () => 0,
+    };
+  }
+
+  it("delegates to the handle named by properties.layerId, not the first one that answers", () => {
+    // h1 would happily return a selection if asked — the point is that it is
+    // never asked, because the feature says it belongs to L2. A batchId is only
+    // meaningful inside the mesh that produced it, so asking the wrong handle
+    // would return a real-looking but WRONG surface.
+    const h1 = owner("L1", {
+      kind: "surface",
+      layerId: "L1",
+      objectId: "WRONG",
+      surfaceIndex: 0,
+    });
+    const h2 = owner("L2", hit);
+    const feature = { batchId: 7, properties: { layerId: "L2" } };
+
+    expect(resolvePickedFeature([h1, h2] as never, feature)).toBe(hit);
+    expect(h1.resolvePick).not.toHaveBeenCalled();
+    expect(h2.resolvePick).toHaveBeenCalledWith(feature);
+  });
+
+  it("reads the layer id our meshes actually stamp: object3d.userData", () => {
+    // Task B7 review: `PickedFeature.properties` is null for custom meshes, so
+    // the identity carrier is the Object3D's userData — which is where
+    // `CityModelMesh` writes `layerId`.
+    const h1 = owner("L1", hit);
+    const feature = { batchId: 7, object3d: { userData: { layerId: "L1" } } };
+    expect(resolvePickedFeature([h1] as never, feature)).toBe(hit);
+    expect(h1.resolvePick).toHaveBeenCalledWith(feature);
+  });
+
+  it("returns null for an unknown layerId instead of guessing", () => {
+    const h1 = owner("L1", hit);
+    expect(
+      resolvePickedFeature([h1] as never, {
+        batchId: 7,
+        properties: { layerId: "GONE" },
+      }),
+    ).toBeNull();
+    expect(h1.resolvePick).not.toHaveBeenCalled();
+  });
+
+  it("returns null when the feature carries no layerId at all", () => {
+    const h1 = owner("L1", hit);
+    expect(resolvePickedFeature([h1] as never, { batchId: 7 })).toBeNull();
+    expect(h1.resolvePick).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the top-level layerId the engine reports", () => {
+    const h1 = owner("L1", hit);
+    expect(
+      resolvePickedFeature([h1] as never, { batchId: 7, layerId: "L1" }),
+    ).toBe(hit);
+  });
+
+  it("passes a null through when the owning handle cannot resolve the feature", () => {
+    const h1 = owner("L1", null);
+    expect(
+      resolvePickedFeature([h1] as never, {
+        batchId: 99,
+        properties: { layerId: "L1" },
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("layerHeightOffset", () => {
+  it("reads the live handle's offset, so a cursor readout can go orthometric", () => {
+    const handle = fakeHandle("L1");
+    handle.heightOffset.mockReturnValue(43.2);
+    const live = new Map<string, LiveLayer>([
+      ["L1", { handle: handle as never, lod: "2", visible: true }],
+    ]);
+    expect(layerHeightOffset("L1", live)).toBe(43.2);
+  });
+
+  it("is 0 for an unknown layer, an absent id, or a handle that has none", () => {
+    const live = new Map<string, LiveLayer>();
+    expect(layerHeightOffset("L1", live)).toBe(0);
+    expect(layerHeightOffset(undefined, live)).toBe(0);
+    // A streaming handle from Part C may not publish one yet.
+    const stream = { id: "S1", setHighlight: vi.fn() };
+    expect(
+      layerHeightOffset("S1", live, new Map([["S1", stream as never]])),
+    ).toBe(0);
+  });
+
+  it("falls back to a non-finite offset as 0 rather than poisoning the readout", () => {
+    const handle = fakeHandle("L1");
+    handle.heightOffset.mockReturnValue(Number.NaN);
+    const live = new Map<string, LiveLayer>([
+      ["L1", { handle: handle as never, lod: "2", visible: true }],
+    ]);
+    expect(layerHeightOffset("L1", live)).toBe(0);
   });
 });

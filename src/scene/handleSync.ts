@@ -18,8 +18,10 @@
  */
 import type {
   CityModelHandle,
+  EcefRay,
   GeodeticBounds,
   PickedFeatureLike,
+  RaycastHit,
   ScreenPoint,
   Selection,
 } from "@cityjson/navara-cityjson";
@@ -177,29 +179,122 @@ export interface InteractionHandle {
   /** Accepts either a screen point (own-raycast path) or an engine
    *  PickedFeature (pickable-wrapper path); both plugins' handles do. */
   resolvePick(pick: ScreenPoint | PickedFeatureLike): Selection | null;
+  /** The raw form of the same path: distance included, so the router can pick
+   *  the NEAREST hit across layers instead of the first layer that answers. */
+  resolveRaycast(ray: EcefRay): RaycastHit | null;
   getBoundsGeodetic(): GeodeticBounds | null;
   triangleCount(): number;
+  /** Metres of geoid undulation baked into this layer's placement, for turning
+   *  an ellipsoidal height back into the source file's orthometric z. Optional
+   *  because a streaming handle does not publish one yet (Task C13); absent
+   *  reads as 0, which is what its cells are placed at. */
+  heightOffset?(): number;
 }
 
 const NO_STREAMS: ReadonlyMap<string, InteractionHandle> = new Map();
 
-/** Visible layers' interaction handles, in layer order — static from `live`,
- *  streaming from `streams`. One registry, so picking, highlighting, fit and
- *  the triangle readout can never disagree about which layers exist. */
-export function interactionHandles(
+function gatherHandles(
   layers: readonly Layer[],
   live: ReadonlyMap<string, LiveLayer>,
-  streams: ReadonlyMap<string, InteractionHandle> = NO_STREAMS,
+  streams: ReadonlyMap<string, InteractionHandle>,
+  visibleOnly: boolean,
 ): readonly InteractionHandle[] {
   const out: InteractionHandle[] = [];
   for (const layer of layers) {
-    if (!layer.visible) continue;
+    if (visibleOnly && !layer.visible) continue;
     // No cast: this is where the compiler checks that a static
     // `CityModelHandle` really does satisfy `InteractionHandle`.
     const handle = live.get(layer.id)?.handle ?? streams.get(layer.id);
     if (handle) out.push(handle);
   }
   return out;
+}
+
+/** Visible layers' interaction handles, in layer order — static from `live`,
+ *  streaming from `streams`. One registry, so picking, fit and the triangle
+ *  readout can never disagree about which layers exist. */
+export function interactionHandles(
+  layers: readonly Layer[],
+  live: ReadonlyMap<string, LiveLayer>,
+  streams: ReadonlyMap<string, InteractionHandle> = NO_STREAMS,
+): readonly InteractionHandle[] {
+  return gatherHandles(layers, live, streams, true);
+}
+
+/**
+ * The same registry, hidden layers included — what {@link syncHighlight} runs
+ * over.
+ *
+ * Highlight is state that OUTLIVES a visibility toggle: skipping a hidden layer
+ * would leave last week's selection painted on it, and re-showing it would
+ * reveal that instead of the current one. Picking and the triangle readout have
+ * the opposite need, which is why they get {@link interactionHandles}.
+ */
+export function allInteractionHandles(
+  layers: readonly Layer[],
+  live: ReadonlyMap<string, LiveLayer>,
+  streams: ReadonlyMap<string, InteractionHandle> = NO_STREAMS,
+): readonly InteractionHandle[] {
+  return gatherHandles(layers, live, streams, false);
+}
+
+/**
+ * Metres of geoid undulation baked into one layer's placement, or 0.
+ *
+ * The cursor readout converts an ECEF point to an ELLIPSOIDAL height, while the
+ * source file's z is ORTHOMETRIC: `orthometric = geodetic - heightOffset`
+ * (Global Constraints -> Vertical datum). Without this the status bar reports a
+ * Delft model ~43 m high — the exact error the offset exists to remove, only
+ * in the other direction.
+ */
+export function layerHeightOffset(
+  layerId: string | undefined,
+  live: ReadonlyMap<string, LiveLayer>,
+  streams: ReadonlyMap<string, InteractionHandle> = NO_STREAMS,
+): number {
+  if (layerId === undefined) return 0;
+  const handle: InteractionHandle | undefined =
+    live.get(layerId)?.handle ?? streams.get(layerId);
+  const offset = handle?.heightOffset?.();
+  return typeof offset === "number" && Number.isFinite(offset) ? offset : 0;
+}
+
+/**
+ * Route an engine `pick` event to the handle that owns the hit mesh.
+ *
+ * Unlike a screen point — which is legitimately tried against every visible
+ * layer to find the nearest hit — a `PickedFeature` already identifies its
+ * mesh. Handing it to the first handle in the list would be worse than useless:
+ * a `batchId` (or an index pair) is only meaningful inside the mesh that
+ * produced it, so another layer would map it to a real-looking but WRONG
+ * surface. Unknown layer => null, never a guess.
+ *
+ * Three carriers, in order of how explicit they are: `properties.layerId` (what
+ * a replayed or synthesised pick stamps), the Object3D's `userData.layerId`
+ * (what `CityModelMesh` actually writes, and the only one that survives an
+ * engine pick — `PickedFeature.properties` is null for custom meshes, Task B7
+ * review), and finally the engine's own `layerId` field.
+ *
+ * Unwired in Part B by design: `PICK_PATH = "own-raycast"` (Task B1), so no
+ * `view.on("pick")` listener exists and clicks travel the screen-point path
+ * above. It is kept — and tested — because it is the contract Task C10b's
+ * streaming router and any future per-triangle-batch-id engine plug into.
+ */
+export function resolvePickedFeature(
+  handles: readonly InteractionHandle[],
+  feature: PickedFeatureLike & {
+    readonly object3d?: { readonly userData?: Record<string, unknown> };
+  },
+): Selection | null {
+  const stamped = feature.object3d?.userData?.layerId;
+  const layerId =
+    feature.properties?.layerId ??
+    (typeof stamped === "string" ? stamped : undefined) ??
+    feature.layerId;
+  if (layerId === undefined) return null;
+  const owner = handles.find((h) => h.id === layerId);
+  if (!owner) return null;
+  return owner.resolvePick(feature);
 }
 
 export function totalTriangles(
@@ -219,8 +314,10 @@ export function totalTriangles(
  *
  * The whole selection array goes to every handle unfiltered: each handle
  * already keeps only the entries whose `layerId` is its own (`CityModelMesh`
- * -> `setHighlight`), so a handle that owns nothing in the selection clears
- * itself — which is exactly what a deselect has to do.
+ * -> `setHighlight`, the Task B5 per-layer filter), so a handle that owns
+ * nothing in the selection clears itself — which is exactly what a deselect has
+ * to do. That is also why the caller must pass {@link allInteractionHandles}
+ * and not {@link interactionHandles}: a hidden layer still has to be cleared.
  */
 export function syncHighlight(
   handles: readonly InteractionHandle[],
