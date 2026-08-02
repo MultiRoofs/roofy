@@ -9,14 +9,15 @@ Spike code: `spike.html`, `src/spike/navaraMrtSpike.ts` (deleted in Task C21).
 
 ## 0. Verdicts (the only part later tasks quote)
 
-| Verdict                   | Value                                                                      |
-| ------------------------- | -------------------------------------------------------------------------- |
-| `MRT_VERTEX_COLORS_OK`    | **true**                                                                   |
-| `PICK_PATH`               | **`"own-raycast"`**                                                        |
-| `PROD_BUNDLE_OK`          | **true**                                                                   |
-| `NODE_IMPORT_SAFE`        | **false** (`NODE_IMPORT_SAFE=false jl(...).cpus is not a function`)        |
-| `CAMERA_BURST_SHAPE`      | **one `movestart` … N `move` … one `moveend` per gesture** (incl. inertia) |
-| `PROGRAMMATIC_MOVE_EMITS` | **split: `flyTo` = yes, `setCamera` = no, `resize` = no**                  |
+| Verdict                   | Value                                                                         |
+| ------------------------- | ----------------------------------------------------------------------------- |
+| `MRT_VERTEX_COLORS_OK`    | **true**                                                                      |
+| `PICK_PATH`               | **`"own-raycast"`**                                                           |
+| `PROD_BUNDLE_OK`          | **true**                                                                      |
+| `NODE_IMPORT_SAFE`        | **false** (`NODE_IMPORT_SAFE=false jl(...).cpus is not a function`)           |
+| `CAMERA_BURST_SHAPE`      | **one `movestart` … N `move` … one `moveend` per gesture** (incl. inertia)    |
+| `PROGRAMMATIC_MOVE_EMITS` | **split: `flyTo` = yes, `setCamera` = no, `resize` = no**                     |
+| `WORKER_URL_FORM_OK`      | **true** — Task C4b, see §11 (not a B1 verdict; recorded here so C5 finds it) |
 
 No verdict failed in a way that requires a re-plan. One **new** risk was found that
 is not in the plan: the engine ships a second, inlined copy of three (§7).
@@ -680,3 +681,149 @@ npx vitest run                                   -> 67 test files, 760 tests, al
 (cd packages/cityjson-navara-plugins && pnpm vitest run) -> 22 files, 267 tests, all passing
 npm run build                                    -> exit 0
 ```
+
+---
+
+## 11. C4b worker bundling — `WORKER_URL_FORM_OK = true`
+
+Date: 2026-08-02. Decision gate that runs **before** Task C5 moves
+`src/features/streaming/fcb.worker.ts` into `@cityjson/navara-flatcitybuf`.
+B1 §4 proved the _engine's_ prebuilt assets survive a production bundle; it said
+nothing about **our own** worker source living inside a plugin package and being
+instantiated from the app across the `resolve.alias` boundary.
+
+| Verdict                | Value                                                             |
+| ---------------------- | ----------------------------------------------------------------- |
+| `WORKER_URL_FORM_OK`   | **true**                                                          |
+| Required config change | **none** (beyond listing the temporary spike HTML entry)          |
+| C5 packaging decision  | keep the worker **in the package**, consumed via the source alias |
+
+### What was tested
+
+A throwaway worker at
+`packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/spike/ping.worker.ts`
+plus `spike/pingClient.ts` using the exact C5 URL form:
+
+```ts
+new Worker(new URL("./ping.worker.ts", import.meta.url), { type: "module" });
+```
+
+exported from the package barrel, imported by the app as
+`import { ping } from "@cityjson/navara-flatcitybuf"` from
+`src/spike/workerBundlingSpike.ts` / `worker-spike.html`. All four files, the
+barrel line, and the temporary `build.rollupOptions.input` entry were removed
+again at the end of the task — nothing but this section is committed.
+
+The spike was run **twice**: once dependency-free (the brief's version, pure
+module resolution), then a second time with the two import shapes C5's real
+worker actually has — a **relative sibling** inside the package (`../constants`)
+and a **cross-package bare specifier** that only resolves through the app's
+alias (`@cityjson/navara-core`). The second run is the load-bearing one.
+
+### Results
+
+| Run                       | `window.__workerSpike`                                       | Worker target URL                                                                                                |
+| ------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| dev, no imports           | `{"ok":true,"pong":42}`                                      | `/packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/spike/ping.worker.ts?worker_file&type=module` |
+| preview, no imports       | `{"ok":true,"pong":42}`                                      | `/assets/ping.worker-CNkn7j8g.js` (200, 372 B transferred)                                                       |
+| **dev, with imports**     | `{"ok":true,"pong":42,"sibling":100,"crossPackage":"0.0.0"}` | same dev URL form                                                                                                |
+| **preview, with imports** | `{"ok":true,"pong":42,"sibling":100,"crossPackage":"0.0.0"}` | `/assets/ping.worker-C07tPBcS.js` (200, 405 B transferred)                                                       |
+
+`sibling=100` is `BASE_CELL_M` from `../constants`; `crossPackage="0.0.0"` is
+`NAVARA_CORE_VERSION` from the aliased `@cityjson/navara-core`. Both crossed the
+alias boundary **into the worker**, in dev and in the production bundle.
+
+Zero page exceptions, zero `Runtime.exceptionThrown`, zero
+`Network.loadingFailed` in every run. The only non-200 anywhere is the repo's
+long-standing `GET /favicon.ico 404`. No MIME error: the built chunk is served
+`text/javascript`, and the dev worker module is served with `?worker_file&type=module`.
+
+### Emitted output (production)
+
+```
+dist/worker-spike.html                    0.37 kB
+dist/assets/workerSpike-CL4e8Szv.js       0.60 kB   (page entry)
+dist/assets/ping.worker-C07tPBcS.js       0.10 kB   (hashed worker chunk)
+```
+
+and the page entry rewrites the call site to the hashed asset:
+
+```js
+new Worker(new URL(`/assets/ping.worker-C07tPBcS.js`, `` + import.meta.url), {
+  type: "module",
+});
+```
+
+### Things that were expected to be needed and were NOT
+
+- **No `worker: { format: "es" }`.** See the caveat below — Vite emits the
+  worker as an **IIFE** even though the call site says `{ type: "module" }`, and
+  that is fine.
+- **No `optimizeDeps.exclude` entry** for `@cityjson/navara-*`. The source alias
+  keeps the packages out of pre-bundling already.
+- **No alias change.** The existing `@cityjson/navara-flatcitybuf` → `src/index.ts`
+  alias is exactly right; a `dist/` alias would have failed (see the tsup caveat).
+- The only `vite.config.ts` edit was adding `worker-spike.html` to
+  `build.rollupOptions.input` — required solely because that option is already
+  explicit in this repo, so unlisted HTML pages are skipped. It is the same
+  bookkeeping B1 §4 recorded for `spike.html`, not a worker fix, and it was
+  reverted.
+
+### Caveat 1 — the emitted worker chunk is IIFE, not ESM
+
+Vite's default `worker.format` is `"iife"`, so the built chunk is
+`(function(){…})();` with every import inlined and constant-folded. It loads
+fine under `{ type: "module" }` because an IIFE is a valid module script with no
+imports left in it. The app's **existing** `fcb.worker.ts` is emitted the same
+way today (`dist/assets/fcb.worker-C-xemPGH.js`, 327 kB, 0 top-level imports),
+so C5 is not changing the format of anything.
+
+The consequence to remember: a worker in IIFE format **cannot code-split and
+cannot keep a live dynamic `import()`**. If C5's worker ever needs one (e.g. lazy
+WASM glue that must stay a real import), switch `worker: { format: "es" }` in
+`vite.config.ts` — this spike shows nothing else stands in the way.
+
+### Caveat 2 (IMPORTANT for C5) — the package's own `dist/` does NOT carry the worker
+
+`pnpm build` (tsup) leaves the specifier **verbatim** in `dist/index.js`:
+
+```js
+const worker = new Worker(new URL("./ping.worker.ts", import.meta.url), { … });
+```
+
+and emits **no** `dist/ping.worker.*` next to it. tsup/esbuild does not implement
+Vite's `new URL(…, import.meta.url)` worker convention. So:
+
+- The app is safe **because it consumes the package through `resolve.alias` →
+  `src/index.ts`**, where Vite sees the `.ts` and does the right thing.
+- Any future consumer importing the **published** package would 404 on a `.ts`
+  URL. If the package ever has to ship a usable `dist`, that is fallback (c) from
+  the C4b brief — a pre-built worker asset from tsup — and it is a separate task.
+  C5 does not need it.
+
+### Type checking
+
+Both repos' type checks stay clean with the worker in the package:
+`npx tsc -b --noEmit` (app) and `pnpm typecheck` (submodule) both exit 0.
+The submodule's `tsconfig.base.json` already has `"lib": ["ES2022", "DOM",
+"DOM.Iterable", "WebWorker"]`, so `self.onmessage` inside the worker and
+`new Worker(...)` in the client both typecheck in the same package with no
+per-file tsconfig split. C5 needs no tsconfig work.
+
+### Decision for Task C5
+
+Proceed as planned: move `fcb.worker.ts` into
+`packages/navara-flatcitybuf/src/` and instantiate it with
+`new Worker(new URL("./fcb.worker.ts", import.meta.url), { type: "module" })`.
+No `createWorker` injection seam (fallback b) and no pre-built asset
+(fallback c) are needed. Keep the app on the **source alias** — that is the
+precondition the verdict depends on.
+
+### Tooling note
+
+`agent-browser` still cannot drive pages on this host (B1 §8). Verified with a
+raw CDP driver (Playwright's Chromium 1228 at
+`~/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome`, `--headless=new
+--no-sandbox`), attaching with `Target.setAutoAttach` so the **worker** target
+and its errors are visible too — that is how the worker's real URL above was
+captured.
