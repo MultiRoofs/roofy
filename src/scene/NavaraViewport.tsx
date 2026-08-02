@@ -118,9 +118,11 @@ function createReadyGate(): ReadyGate {
 
 export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
   function NavaraViewport(props, ref) {
-    // `onCursorPosition` is still unwired — it is fed by the pick/hover path
-    // that lands in Task B12. It stays in the props contract so this
-    // component's public shape does not move again.
+    // `onCursorPosition` is still unwired — its math now lives in
+    // `cursorCrsReadout.ts` (geodetic -> source CRS + the throttle gate), and
+    // the pointer events that feed it arrive with the picking router (Task
+    // B15). It stays in the props contract so this component's public shape
+    // does not move again.
     const { onFps, onTriangleCount, onLayerError } = props;
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<ViewInstance | null>(null);
