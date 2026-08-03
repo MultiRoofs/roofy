@@ -47,25 +47,16 @@ export function computeVolume(obj: CityObject): number {
  * Compute solar score: cos(angle) between surface normal and sun direction.
  * Returns 0-1 (1 = surface directly facing sun).
  *
- * @param surfaceNormal Unit normal in CityJSON Z-up space
- * @param sunDirectionThreeJs Sun direction in Three.js Y-up space
+ * Both vectors are in CityJSON/ENU Z-up space — since the Navara migration
+ * there is no Y-up scene space left to convert from.
  */
 export function computeSolarScore(
   surfaceNormal: Vec3,
-  sunDirectionThreeJs: readonly [number, number, number],
+  sunDirectionEnu: readonly [number, number, number],
 ): number {
-  // Convert Three.js Y-up to CityJSON Z-up:
-  // threeX = cjX, threeY = cjZ, threeZ = -cjY
-  // So: cjX = threeX, cjY = -threeZ, cjZ = threeY
-  const sunCJ: Vec3 = [
-    sunDirectionThreeJs[0],
-    -sunDirectionThreeJs[2],
-    sunDirectionThreeJs[1],
-  ];
-
   const dot =
-    surfaceNormal[0] * sunCJ[0] +
-    surfaceNormal[1] * sunCJ[1] +
-    surfaceNormal[2] * sunCJ[2];
+    surfaceNormal[0] * sunDirectionEnu[0] +
+    surfaceNormal[1] * sunDirectionEnu[1] +
+    surfaceNormal[2] * sunDirectionEnu[2];
   return Math.max(0, dot);
 }
