@@ -102,4 +102,29 @@ describe("SolarPresetMenu", () => {
     fireEvent.mouseDown(screen.getByText("Presets"));
     expect(screen.getByText("Presets")).not.toBeNull();
   });
+
+  // Keyboard users: opening must put the caret inside the thing that just
+  // appeared, and Escape must not strand the focus ring on a node React has
+  // just unmounted.
+  it("moves focus into the dialog on open and back to the trigger on Escape", () => {
+    render(<SolarPresetMenu />);
+    const trigger = screen.getByLabelText("Solar presets");
+
+    fireEvent.click(trigger);
+    expect(document.activeElement).toBe(screen.getByTitle("Summer Morning"));
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("announces itself as a modal dialog off a popup trigger", () => {
+    render(<SolarPresetMenu />);
+    const trigger = screen.getByLabelText("Solar presets");
+    expect(trigger.getAttribute("aria-haspopup")).toBe("dialog");
+
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(dialog.getAttribute("aria-label")).toBe("Solar");
+  });
 });

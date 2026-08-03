@@ -36,6 +36,8 @@ export function SolarPresetMenu() {
   const setDatetime = useSolarStore((s) => s.setDatetime);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   // Dismiss on an outside click or Escape — a popover anchored in a toolbar
   // that only closes via its own button is a popover that covers the viewport
@@ -47,7 +49,11 @@ export function SolarPresetMenu() {
       setOpen(false);
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key !== "Escape") return;
+      setOpen(false);
+      // Escape must not strand the focus ring on a node that has just been
+      // unmounted: put it back where the user opened this from.
+      triggerRef.current?.focus();
     };
     document.addEventListener("mousedown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
@@ -55,6 +61,15 @@ export function SolarPresetMenu() {
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
+  }, [open]);
+
+  // Move the focus INTO the dialog when it opens. Without this a keyboard user
+  // who activates the trigger is still standing on the trigger, and tabbing
+  // walks the rest of the toolbar before it ever reaches the presets.
+  useEffect(() => {
+    if (!open) return;
+    const first = dialogRef.current?.querySelector<HTMLElement>("button");
+    first?.focus();
   }, [open]);
 
   const applyPreset = (month: number, day: number, hour: number) => {
@@ -65,9 +80,11 @@ export function SolarPresetMenu() {
   return (
     <div className="toolbar-solar-menu" ref={rootRef}>
       <button
+        ref={triggerRef}
         className={`tb-btn ${open ? "tb-btn-active" : ""}`}
         aria-label="Solar presets"
         aria-expanded={open}
+        aria-haspopup="dialog"
         title="Solar presets and sun position"
         onClick={() => setOpen((v) => !v)}
       >
@@ -78,7 +95,13 @@ export function SolarPresetMenu() {
       </button>
 
       {open && (
-        <div className="toolbar-solar-popover" role="dialog" aria-label="Solar">
+        <div
+          ref={dialogRef}
+          className="toolbar-solar-popover"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Solar"
+        >
           <div className="attr-section">
             <div className="attr-section-title">Presets</div>
             <div className="solar-presets">

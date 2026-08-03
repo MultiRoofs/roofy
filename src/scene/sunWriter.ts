@@ -3,8 +3,8 @@
  *
  * Navara's atmosphere owns sun position now (spec §4.4): it derives the sun
  * from `atmosphere.date` and publishes it as a unit vector in **ECEF**. Every
- * consumer in this app speaks local **ENU** instead — `SolarTab`'s
- * altitude/azimuth rows, the toolbar's sun pill and `computeSolarScore`, which
+ * consumer in this app speaks local **ENU** instead — the toolbar's sun pill,
+ * `SolarPresetMenu`'s altitude/azimuth rows and `computeSolarScore`, which
  * dots the direction with a surface normal in CityJSON's own axes (Task C15).
  *
  * This module is that one conversion, and nothing else: engine-free (so it is

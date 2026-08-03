@@ -10,7 +10,7 @@
  * What is asserted here is the WIRING, all of it through the mocked bus:
  *
  *  - the loaded layers' bounds become `solarStore.latLon` — the site the sun is
- *    read at, and the one `SolarTab` shows;
+ *    read at, and the one the toolbar's `SolarPresetMenu` shows;
  *  - `solarStore.datetime` reaches `atmosphere.date`, and a share-link restore
  *    or a slider edit does too;
  *  - `preUpdate` drives the atmosphere EVERY frame while the clock runs, but
