@@ -7,6 +7,7 @@ import type { Theme } from "../../features/theme/useTheme";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useTotalObjectCount } from "../../features/streaming/useTotalObjectCount";
 import { useSolarStore } from "../../features/solar/solarStore";
+import { SolarControls } from "./SolarControls";
 
 /**
  * Tooltip suffix for the tools the Navara viewport does not implement yet.
@@ -202,16 +203,21 @@ export function ViewerToolbar({
         )}
       </div>
 
+      {/* The solar clock is GLOBAL scene configuration, so it lives here
+          rather than in a tab of the selection inspector. The pill stays as
+          the read-only summary the cluster is anchored to; it only appears
+          once there is a site to read the sun at (`solarStore.latLon`), which
+          is what `sunPosition` being non-null means. */}
+      <div className="toolbar-sep" />
       {sunPosition && (
-        <>
-          <div className="toolbar-sep" />
-          <div
-            className={`pill sun-pill ${sunPosition.altitudeDeg > 0 ? "sun-pill-up" : ""}`}
-          >
-            Sun <span className="value">{formatDatetimePill(datetime)}</span>
-          </div>
-        </>
+        <div
+          className={`pill sun-pill ${sunPosition.altitudeDeg > 0 ? "sun-pill-up" : ""}`}
+          title={`Sun ${sunPosition.altitudeDeg.toFixed(1)}° above horizon`}
+        >
+          Sun <span className="value">{formatDatetimePill(datetime)}</span>
+        </div>
       )}
+      <SolarControls />
 
       {ruleCount > 0 && (
         <>

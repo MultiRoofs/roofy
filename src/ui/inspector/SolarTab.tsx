@@ -1,12 +1,20 @@
 /**
  * Solar tab in the inspector panel.
  *
- * Provides datetime controls (date picker, time slider), time animation
- * (play/pause with speed selector), preset buttons (seasonal × time-of-day),
- * and read-only sun position display.
+ * The PRIMARY clock — date, time, play/pause, speed, "now" — moved to the top
+ * header (`ui/toolbar/SolarControls.tsx`): it is global scene configuration,
+ * and this panel is about the current selection. What stays here is what does
+ * not fit a header row and does not need to be one click away:
+ *
+ *  - the seasonal × time-of-day preset grid, and
+ *  - the read-only sun position (altitude, azimuth, above/below horizon).
+ *
+ * Deliberately NOT a second copy of the toolbar controls. Two live editors for
+ * one `solarStore.datetime` is a UI that disagrees with itself the moment the
+ * animation runs, and there is nothing this panel could offer that the header
+ * does not already.
  */
 
-import type { ChangeEvent } from "react";
 import { useSolarStore } from "../../features/solar/solarStore";
 
 // Preset dates: summer/winter solstice, spring equinox.
@@ -22,41 +30,11 @@ const PRESET_TIMES = [
   { label: "Evening", hour: 17 },
 ] as const;
 
-const SPEED_OPTIONS = [
-  { label: "1x", value: 1 },
-  { label: "60x", value: 60 },
-  { label: "6min/s", value: 360 },
-  { label: "1hr/s", value: 3600 },
-] as const;
-
 export function SolarTab() {
   const datetime = useSolarStore((s) => s.datetime);
   const sunPosition = useSolarStore((s) => s.sunPosition);
   const latLon = useSolarStore((s) => s.latLon);
   const setDatetime = useSolarStore((s) => s.setDatetime);
-  const timeAnimating = useSolarStore((s) => s.timeAnimating);
-  const timeSpeed = useSolarStore((s) => s.timeSpeed);
-  const setTimeAnimating = useSolarStore((s) => s.setTimeAnimating);
-  const setTimeSpeed = useSolarStore((s) => s.setTimeSpeed);
-
-  const dateStr = toLocalDateStr(datetime);
-  const minuteOfDay = datetime.getHours() * 60 + datetime.getMinutes();
-
-  const handleDateChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    if (!val) return;
-    const [y, m, d] = val.split("-").map(Number) as [number, number, number];
-    const next = new Date(datetime);
-    next.setFullYear(y, m - 1, d);
-    setDatetime(next);
-  };
-
-  const handleTimeSlider = (e: ChangeEvent<HTMLInputElement>) => {
-    const minutes = Number(e.target.value);
-    const next = new Date(datetime);
-    next.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
-    setDatetime(next);
-  };
 
   const applyPreset = (month: number, day: number, hour: number) => {
     const year = datetime.getFullYear();
@@ -74,56 +52,10 @@ export function SolarTab() {
 
   return (
     <>
-      {/* Date + Time controls */}
-      <div className="attr-section">
-        <div className="attr-section-title">Date &amp; Time</div>
-        <div className="solar-control-row">
-          <input
-            type="date"
-            className="solar-input"
-            value={dateStr}
-            onChange={handleDateChange}
-          />
-        </div>
-        <div className="solar-control-row">
-          <input
-            type="range"
-            className="solar-slider"
-            min={0}
-            max={1425}
-            step={15}
-            value={minuteOfDay}
-            onChange={handleTimeSlider}
-          />
-          <span className="solar-time-label">{formatTime(minuteOfDay)}</span>
-        </div>
-      </div>
-
-      {/* Time animation */}
-      <div className="attr-section">
-        <div className="attr-section-title">Animation</div>
-        <div className="solar-control-row">
-          <button
-            className={`solar-preset-btn ${timeAnimating ? "tb-btn-active" : ""}`}
-            onClick={() => setTimeAnimating(!timeAnimating)}
-            title={timeAnimating ? "Pause" : "Play"}
-            style={{ minWidth: "3.5rem" }}
-          >
-            {timeAnimating ? "Pause" : "Play"}
-          </button>
-          <select
-            className="solar-input"
-            value={timeSpeed}
-            onChange={(e) => setTimeSpeed(Number(e.target.value))}
-            style={{ marginLeft: "0.5rem", flex: 1 }}
-          >
-            {SPEED_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </div>
+      {/* Where the clock actually lives now. Said once, here, so nobody hunts
+          this tab for a control that moved. */}
+      <div className="inspector-note">
+        Date, time, playback and speed are in the toolbar.
       </div>
 
       {/* Presets */}
@@ -191,19 +123,6 @@ export function SolarTab() {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function toLocalDateStr(dt: Date): string {
-  const y = dt.getFullYear();
-  const m = String(dt.getMonth() + 1).padStart(2, "0");
-  const d = String(dt.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-
-function formatTime(minutes: number): string {
-  const h = String(Math.floor(minutes / 60)).padStart(2, "0");
-  const m = String(minutes % 60).padStart(2, "0");
-  return `${h}:${m}`;
-}
 
 function cardinalFromDeg(deg: number): string {
   if (deg >= 337.5 || deg < 22.5) return "N";

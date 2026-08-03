@@ -1570,6 +1570,67 @@ body {
   color: var(--accent-text);
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   TOOLBAR SOLAR CLUSTER
+   The scene clock is global configuration, so it sits in the header
+   beside the sun pill rather than inside the selection inspector.
+   ═══════════════════════════════════════════════════════════════ */
+
+.toolbar-solar {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.toolbar-solar-input {
+  height: 1.65rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg);
+  font-size: 0.72rem;
+  font-family: inherit;
+}
+
+.toolbar-solar-input:focus-visible {
+  outline: 1px solid var(--accent);
+}
+
+/* The native date/time pickers render their own indicator; in the dark theme
+   it is black-on-dark without this. */
+[data-theme="dark"] .toolbar-solar-input::-webkit-calendar-picker-indicator {
+  filter: invert(0.8);
+}
+
+.toolbar-solar-time {
+  width: 5.4rem;
+}
+
+.toolbar-solar-speed {
+  width: 5rem;
+}
+
+/* The toolbar is one flex row; below this width the clock would push the
+   right-hand action buttons off the edge, so the two widest fields go. */
+@media (max-width: 1100px) {
+  .toolbar-solar-input[type="date"],
+  .toolbar-solar-speed {
+    display: none;
+  }
+}
+
+/* A one-line "this moved" note inside an inspector tab. */
+.inspector-note {
+  margin: 0 0 0.5rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-muted);
+  color: var(--fg-muted);
+  font-size: 0.72rem;
+}
+
 /* Tighten inspector tabs when 5+ tabs */
 .inspector-tabs:has(button:nth-child(5)) .inspector-tab {
   padding: 0.5rem 0.35rem;
