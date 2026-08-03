@@ -1,6 +1,8 @@
 # Roadmap
 
-Status: Draft v0.1
+Status: Living document — last revised 2026-08-03, after Milestone 8 (Navara engine
+migration). Milestones 0–6 and 8 are delivered; Milestone 7 (CityGML) is partially
+delivered (M7.1 only). Per-milestone status is recorded in each section below.
 
 ## Delivery Strategy
 
@@ -384,9 +386,16 @@ the migration as a single diff. Per-task reviews were run and closed throughout.
 
 ## Recommended Immediate Next Step
 
-Start Milestone 1 with a minimal but disciplined shell:
+Milestone 8 (Navara) is implemented through phase M7.7 and the verification bar is green.
+The next steps, in order:
 
-1. Lock the repository structure and core module boundaries.
-2. Scaffold the viewer shell with Vite, React, and Three.js.
-3. Introduce the persistence interfaces before the first feature state is implemented.
-4. Use a small representative CityJSON sample as the first end-to-end target, with CityJSONSeq close behind for analytics-oriented flows.
+1. Land the Navara migration: run the outstanding whole-branch review over
+   `git diff main...HEAD` plus the submodule log, address any critical findings, then merge
+   `develop` and push the pinned submodule pointer.
+2. Close Milestone 8's deferred items (listed in that section): wire or delete the Advanced
+   Settings rendering/debug toggles, measure `LEVEL_SWAP_TIMEOUT_MS` on GPU-backed hardware,
+   and bound the first streaming commit's fetch.
+3. Decide whether to restore the two features dropped in the migration — the measure tool and
+   box-select — against Navara, or remove their `ViewerToolbar` entries.
+4. Resume Milestone 7 (CityGML) at M7.2 (non-building city object types), then M7.3
+   (SAX streaming parser for files >100 MB).
