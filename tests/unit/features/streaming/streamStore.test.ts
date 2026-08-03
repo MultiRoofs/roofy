@@ -5,7 +5,7 @@ import {
 } from "../../../../src/features/streaming/streamStore";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import type { FcbStreamLayerHandle, Grid } from "@cityjson/navara-flatcitybuf";
-import type { FcbHeaderModel } from "../../../../src/domain/citymodel/flatcitybuf/fcbSource";
+import type { FcbHeaderModel } from "@cityjson/navara-flatcitybuf";
 
 const grid: Grid = { originX: 0, originY: 0, rootCell: 800, maxLevel: 3 };
 

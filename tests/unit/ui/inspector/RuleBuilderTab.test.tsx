@@ -13,7 +13,7 @@ import { RuleBuilderTab } from "../../../../src/ui/inspector/RuleBuilderTab";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
-import { CellCache } from "../../../../src/features/streaming/cellCache";
+import { CellCache } from "@cityjson/navara-flatcitybuf";
 import { buildResidentModel } from "@cityjson/navara-flatcitybuf";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 

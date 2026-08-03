@@ -23,7 +23,7 @@ import type {
   Grid,
   StreamStatus,
 } from "@cityjson/navara-flatcitybuf";
-import type { FcbHeaderModel } from "../../../../src/domain/citymodel/flatcitybuf/fcbSource";
+import type { FcbHeaderModel } from "@cityjson/navara-flatcitybuf";
 
 const HEADER: FcbHeaderModel = {
   version: "1.0",

@@ -18,8 +18,8 @@
 import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { CityJSONRoot } from "../../src/domain/citymodel/cityjson/types";
-import { parseCityJSON } from "../../src/domain/citymodel/cityjson/parseCityJSON";
+import type { CityJSONRoot } from "@cityjson/navara-core";
+import { parseCityJSON } from "@cityjson/navara-core";
 
 // ---------------------------------------------------------------------------
 // Load fixture

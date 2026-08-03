@@ -13,7 +13,7 @@ import { useLayerFileLoader } from "../../../../src/features/layers/useLayerFile
 import { setStreamPlugin } from "../../../../src/features/streaming/streamPlugin";
 import type { StreamPlugin } from "../../../../src/features/streaming/streamPlugin";
 import type { FcbStreamLayerHandle } from "@cityjson/navara-flatcitybuf";
-import type { FcbHeaderModel } from "../../../../src/domain/citymodel/flatcitybuf/fcbSource";
+import type { FcbHeaderModel } from "@cityjson/navara-flatcitybuf";
 
 const HEADER: FcbHeaderModel = {
   version: "1.0",

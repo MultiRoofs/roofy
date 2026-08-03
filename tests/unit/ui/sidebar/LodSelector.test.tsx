@@ -55,7 +55,7 @@ function baseLayer(overrides: Partial<Layer>): Layer {
 }
 
 // rootCell 800, level 3 -> cellSize 100m (< 200, so lodForCellSize picks the
-// LAST/highest-detail rung of the ladder — see levelPolicy.ts).
+// LAST/highest-detail rung of the ladder — see the plugin's levelPolicy.ts).
 function baseStream(overrides: Partial<StreamState> = {}): StreamState {
   return {
     // The handle is never touched by this component — it reads the store's

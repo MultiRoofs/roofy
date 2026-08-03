@@ -14,11 +14,11 @@ import type {
   Surface,
 } from "../../domain/citymodel/types";
 import type { Selection } from "../../domain/selection/types";
-import { SURFACE_COLOR_HEX } from "../../shared/surfaceColorMap";
+import { SURFACE_COLOR_HEX, computeFootprintArea } from "@cityjson/navara-core";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useStreamStore } from "../../features/streaming/streamStore";
 import { getResidentModel } from "../../features/streaming/residentModel";
-import type { ResidentObjectRecord } from "../../features/streaming/workerProtocol";
+import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
 import {
   useObjectSurfaces,
   type SurfacesFetchState,
@@ -29,7 +29,6 @@ import { RuleBuilderTab } from "./RuleBuilderTab";
 import { SolarTab } from "./SolarTab";
 import { StatsTab } from "./StatsTab";
 import {
-  computeFootprintArea,
   computeTotalRoofArea,
   computeVolume,
 } from "../../domain/geometry/derived";
@@ -49,8 +48,8 @@ interface InspectorPanelProps {
 // need, so those views don't have to branch on which kind of layer they're
 // looking at. A ResidentObjectRecord carries no ring geometry, so its
 // footprint/roof-area/volume are read from precomputed fields instead of
-// being derived from Surface.rings — see workerProtocol.ts's doc comment
-// on ResidentObjectRecord for why.
+// being derived from Surface.rings — see `@cityjson/navara-flatcitybuf`'s
+// workerProtocol.ts, which declares ResidentObjectRecord, for why.
 // ---------------------------------------------------------------------------
 
 interface ObjectDisplayData {

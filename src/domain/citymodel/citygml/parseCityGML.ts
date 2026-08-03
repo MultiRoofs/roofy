@@ -27,7 +27,7 @@ import type {
   Surface,
   Vec3,
 } from "../types";
-import { mergeBBox } from "../cityjson/parseHelpers";
+import { mergeBBox } from "@cityjson/navara-core";
 import type {
   GMLEnvelope,
   GMLMultiSurface,

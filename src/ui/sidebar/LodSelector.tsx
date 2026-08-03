@@ -10,7 +10,7 @@
  * For a streaming layer, `lodMode` DOES matter: "auto" hands the choice to
  * the viewport-streaming driver (commitPlanner.ts's `resolveLod`), which
  * re-derives it every commit from the current cell size via
- * `lodForCellSize` (levelPolicy.ts) — the same call this component makes to
+ * `lodForCellSize` (the plugin's levelPolicy.ts) — the same call this makes to
  * describe it. Because the user isn't choosing in that mode, the control
  * becomes a read-out instead of a `<select>`: it shows the LoD actually in
  * use and the cell size that produced it, so a user can tell *why* they're
@@ -24,7 +24,7 @@ import {
   cellSize,
   lodForCellSize,
   type LodSelection,
-} from "../../features/streaming/levelPolicy";
+} from "@cityjson/navara-flatcitybuf";
 
 interface LodSelectorProps {
   readonly layerId: string;
