@@ -7,16 +7,18 @@
  * selection. This is the compact cluster: date, time, play/pause and speed,
  * rendered beside the existing sun pill.
  *
- * The inspector's `SolarTab` keeps what does NOT fit a header: the seasonal ×
- * time-of-day presets and the altitude/azimuth readout.
+ * The seasonal presets and the altitude/azimuth readout — everything that does
+ * not fit a header row — hang off the cluster's own popover
+ * (`SolarPresetMenu`). The inspector's Solar tab, which used to hold them, is
+ * gone: it was a tab of the SELECTION panel showing scene-wide state.
  *
- * All wiring is unchanged — this reads and writes exactly the `solarStore`
- * fields `SolarTab` did, so `NavaraViewport`'s atmosphere push, the animation
- * loop and the persistence layer are untouched.
+ * All wiring reads and writes `solarStore` only, so `NavaraViewport`'s
+ * atmosphere push, the animation loop and the persistence layer are untouched.
  */
 
 import type { ChangeEvent } from "react";
 import { useSolarStore } from "../../features/solar/solarStore";
+import { SolarPresetMenu } from "./SolarPresetMenu";
 
 const SPEED_OPTIONS = [
   { label: "1×", value: 1 },
@@ -128,6 +130,7 @@ export function SolarControls() {
           <path d="M12 7v5l3 2" />
         </svg>
       </button>
+      <SolarPresetMenu />
     </div>
   );
 }

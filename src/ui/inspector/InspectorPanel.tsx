@@ -3,7 +3,12 @@
  *
  * Shows details about the selected CityObject(s) or surface.
  * Supports multi-select with statistical aggregation.
- * Tabs: Object, Surfaces, Analysis, Rules, Solar, Stats.
+ * Tabs: Object, Surfaces, Analysis, Rules, Stats.
+ *
+ * There is no Solar tab: the scene clock, the seasonal presets and the sun
+ * readout are all scene-wide configuration, so they live in the toolbar's
+ * solar cluster (`ui/toolbar/SolarControls.tsx` + `SolarPresetMenu.tsx`).
+ * This panel is about the current selection.
  */
 
 import { useState } from "react";
@@ -26,14 +31,13 @@ import {
 import { ErrorBoundary } from "../ErrorBoundary";
 import { AnalysisTab } from "./AnalysisTab";
 import { RuleBuilderTab } from "./RuleBuilderTab";
-import { SolarTab } from "./SolarTab";
 import { StatsTab } from "./StatsTab";
 import {
   computeTotalRoofArea,
   computeVolume,
 } from "../../domain/geometry/derived";
 
-type Tab = "object" | "surfaces" | "analysis" | "rules" | "solar" | "stats";
+type Tab = "object" | "surfaces" | "analysis" | "rules" | "stats";
 type AggMode = "sum" | "avg" | "min" | "max";
 
 interface InspectorPanelProps {
@@ -261,12 +265,6 @@ export function InspectorPanel({
           Rules
         </button>
         <button
-          className={`inspector-tab ${activeTab === "solar" ? "active" : ""}`}
-          onClick={() => setActiveTab("solar")}
-        >
-          Solar
-        </button>
-        <button
           className={`inspector-tab ${activeTab === "stats" ? "active" : ""}`}
           onClick={() => setActiveTab("stats")}
         >
@@ -284,8 +282,6 @@ export function InspectorPanel({
             ) : (
               <div className="inspector-placeholder">No layer selected</div>
             )
-          ) : activeTab === "solar" ? (
-            <SolarTab />
           ) : activeTab === "stats" ? (
             model ? (
               <StatsTab
