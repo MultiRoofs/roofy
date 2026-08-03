@@ -34,6 +34,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -55,6 +56,7 @@ import type {
 } from "@cityjson/navara-cityjson";
 import { useLayerStore } from "../features/layers/layerStore";
 import { useSelectionStore } from "../features/selection/selectionStore";
+import { useSolarStore } from "../features/solar/solarStore";
 import { useStreamStore } from "../features/streaming/streamStore";
 import { setStreamPlugin } from "../features/streaming/streamPlugin";
 import {
@@ -96,6 +98,8 @@ import {
   NavaraSessionDisposedError,
   type NavaraSession,
 } from "./navaraSession";
+import { advanceTime } from "./timeAnimation";
+import { siteEnuFrame, sunPositionFromEcef } from "./sunWriter";
 import {
   alignCameraForBounds,
   cameraForBounds,
@@ -429,6 +433,12 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         // mount re-adds every layer from the store instead of trusting stale
         // entries whose meshes have been disposed.
         live.clear();
+        // The solar site died with them. `App.tsx` unmounts this component in
+        // the same commit that empties the layer store (`handleClose`), so the
+        // site effect below never gets to clear it — and a `latLon` with no
+        // scene behind it is a sun readout for a model that is gone.
+        useSolarStore.getState().setLatLon(null);
+        useSolarStore.getState().setSunPosition(null);
         // `started` settles only after `session.ready` has, so by the time
         // this runs the session disposes synchronously — which is what lets
         // the next mount initialise a fresh worker pool. If `dispose()` itself
@@ -700,6 +710,199 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         for (const off of unsubscribes) off();
       };
     }, [engineReady, layers, streamIds, onTriangleCount]);
+
+    // --- solar: the atmosphere's clock, and the sun it reports back ---
+    //
+    // Task C16. Four seams, in the order the data flows:
+    //
+    //   the loaded layers -> `solarStore.latLon`      (which site the sun is read at)
+    //   `solarStore.datetime` -> `atmosphere.date`    (a user edit, a restored link)
+    //   the render loop -> `atmosphere.date` + a throttled `setDatetime`
+    //   `sunChanged` -> `solarStore.setSunPosition`   (in the site's ENU frame)
+    //
+    // The animation deliberately does NOT run on React state. At 60 fps a
+    // `useState` clock would re-render this component — and re-run the engine
+    // bindings hanging off it — every frame; the loop writes the atmosphere
+    // imperatively and publishes to the store on a ~10 Hz beat instead, which
+    // is the only rate any readout can be read at anyway.
+
+    /** The date the atmosphere is currently showing. The animation's
+     *  accumulator: while the clock runs it is AHEAD of
+     *  `solarStore.datetime`, which only catches up on the sync beat. */
+    const datetimeRef = useRef<Date>(useSolarStore.getState().datetime);
+    /** The exact `Date` this component last put INTO the store, so the
+     *  subscription below can tell its own echo from a real edit. */
+    const publishedDatetimeRef = useRef<Date | null>(null);
+    /** Publishes the engine's current sun direction into the store — null
+     *  until there is a site to read it at. */
+    const publishSunRef = useRef<(() => void) | null>(null);
+
+    // The site the sun readout speaks for: the centre of everything loaded.
+    // Derived from the live handles' geodetic bounds rather than a model's
+    // CRS + bbox (the retired `CitySceneR3F` called `initFromModel` here),
+    // because bounds are the one source a STREAMING layer has too — its FCB
+    // header extent, Task C14 — and they need no reprojection.
+    const latLon = useSolarStore((s) => s.latLon);
+    useEffect(() => {
+      if (!engineReady) return;
+      const bounds = boundsOf();
+      const next =
+        bounds === null
+          ? null
+          : {
+              lat: (bounds.south + bounds.north) / 2,
+              lon: (bounds.west + bounds.east) / 2,
+            };
+      const current = useSolarStore.getState().latLon;
+      // Value comparison, not identity: this effect re-runs on every layer
+      // change, and publishing a fresh object per run would rebuild the ENU
+      // frame — and re-subscribe the sun writer — on a visibility toggle.
+      if (current === null && next === null) return;
+      if (
+        current !== null &&
+        next !== null &&
+        current.lat === next.lat &&
+        current.lon === next.lon
+      ) {
+        return;
+      }
+      useSolarStore.getState().setLatLon(next);
+    }, [engineReady, layers, streamIds, boundsOf]);
+
+    /** The site's ENU frame. Rebuilt only when the site itself moves. */
+    const siteFrame = useMemo(
+      () => (latLon === null ? null : siteEnuFrame(latLon)),
+      [latLon],
+    );
+
+    // `sunChanged` -> the store, in the site's local ENU frame.
+    useEffect(() => {
+      const view = viewRef.current;
+      if (!engineReady || !view) return;
+      if (siteFrame === null) {
+        // Nothing loaded: the last model's sun must not linger in the readout.
+        if (useSolarStore.getState().sunPosition !== null) {
+          useSolarStore.getState().setSunPosition(null);
+        }
+        return;
+      }
+      const atmosphere = view.atmosphere;
+      const publish = () => {
+        useSolarStore
+          .getState()
+          .setSunPosition(
+            sunPositionFromEcef(siteFrame, atmosphere.getSunDirection()),
+          );
+      };
+      publishSunRef.current = publish;
+      // Once, immediately: the engine emits `sunChanged` only when the date
+      // moves, so a site that appears afterwards — the usual case, a file
+      // dropped into a running engine — would otherwise leave every solar
+      // readout empty until the user touched the clock.
+      publish();
+      const onSunChanged = () => {
+        // While the clock runs, the loop below publishes on its own beat:
+        // `sunChanged` fires once per frame, and a store write per frame is a
+        // re-render of the toolbar, the solar tab and the analysis tab per
+        // frame.
+        if (useSolarStore.getState().timeAnimating) return;
+        publish();
+      };
+      atmosphere.on("sunChanged", onSunChanged);
+      return () => {
+        atmosphere.off("sunChanged", onSunChanged);
+        publishSunRef.current = null;
+      };
+    }, [engineReady, siteFrame]);
+
+    // `solarStore.datetime` -> `atmosphere.date`, for every change this
+    // component did not make itself.
+    //
+    // A store SUBSCRIPTION rather than `useSolarStore((s) => s.datetime)`:
+    // the loop publishes ten times a second, and a selector would re-render
+    // the whole viewport at that rate for a value it only ever hands to the
+    // engine.
+    useEffect(() => {
+      const view = viewRef.current;
+      if (!engineReady || !view) return;
+      const push = (datetime: Date) => {
+        // Our own publication coming back around. The atmosphere is already
+        // showing this date — or a LATER one, since the loop runs ahead of the
+        // store between beats — so writing it back would rewind the sun by up
+        // to one beat every time the clock ticks.
+        if (datetime === publishedDatetimeRef.current) return;
+        datetimeRef.current = datetime;
+        view.atmosphere.date = datetime;
+      };
+      // The engine starts on its own default date (the real clock), so the
+      // store's datetime has to be pushed once as soon as there is a view —
+      // including the one a share link restored before the engine came up.
+      push(useSolarStore.getState().datetime);
+      return useSolarStore.subscribe((state, previous) => {
+        if (state.datetime !== previous.datetime) push(state.datetime);
+      });
+    }, [engineReady]);
+
+    // The animation itself: one `preUpdate` subscription for the lifetime of
+    // the engine, driving the atmosphere directly.
+    useEffect(() => {
+      const view = viewRef.current;
+      if (!engineReady || !view) return;
+      /** The previous frame's timestamp, or null before there has been one. */
+      let previous: number | null = null;
+      let lastSync = 0;
+      /** Whether the clock was running on the previous frame. */
+      let running = false;
+
+      const publishDatetime = (datetime: Date) => {
+        publishedDatetimeRef.current = datetime;
+        useSolarStore.getState().setDatetime(datetime);
+        // The sun belongs to the same beat: `sunChanged` is ignored while the
+        // clock runs, so this is what moves the altitude/azimuth readout.
+        publishSunRef.current?.();
+      };
+
+      // `now` is the engine's own `DOMHighResTimeStamp` (`setAnimationLoop`),
+      // i.e. the same clock as `performance.now()` — and, being an argument,
+      // the seam a test drives the animation through.
+      const onPreUpdate = (now: number) => {
+        const last = previous;
+        previous = now;
+        const solar = useSolarStore.getState();
+        if (!solar.timeAnimating) {
+          if (running) {
+            running = false;
+            // A pause lands between beats, so the store can be up to 100 ms of
+            // wall clock — six minutes of sun at 3600x — behind the date the
+            // atmosphere is showing. Publish the animation's last value so the
+            // clock the user reads matches the sky they are looking at.
+            publishDatetime(datetimeRef.current);
+          }
+          return;
+        }
+        if (!running) {
+          running = true;
+          lastSync = now;
+        }
+        // First frame after subscribing: no previous timestamp, so no delta.
+        if (last === null) return;
+        const step = advanceTime(
+          datetimeRef.current,
+          (now - last) / 1000,
+          solar.timeSpeed,
+          now - lastSync,
+        );
+        datetimeRef.current = step.next;
+        view.atmosphere.date = step.next;
+        if (step.shouldSyncStore) {
+          lastSync = now;
+          publishDatetime(step.next);
+        }
+      };
+
+      view.on("preUpdate", onPreUpdate);
+      return () => view.off("preUpdate", onPreUpdate);
+    }, [engineReady]);
 
     // --- selection / hover -> handle.setHighlight ---
     // Subscribed as state (not read from `getState()`) because a selection made

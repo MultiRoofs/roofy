@@ -39,6 +39,17 @@ function mouse(x: number, y: number, patch: Record<string, unknown> = {}) {
   return { offsetX: x, offsetY: y, clientX: x + 300, clientY: y, ...patch };
 }
 
+/** The engine's atmosphere, reduced to the surface the solar wiring touches
+ *  (Task C16). Exercised for real in `navaraViewportSolar.test.tsx`; here it
+ *  only has to exist, because the viewport pushes the store's datetime into it
+ *  as soon as the engine is up. */
+const atmosphere = {
+  date: new Date("2026-06-21T12:00:00.000Z"),
+  getSunDirection: vi.fn(() => ({ x: 1, y: 0, z: 0 })),
+  on: vi.fn(),
+  off: vi.fn(),
+};
+
 /** `pickDepthPosition` — the ECEF point under the cursor, or null (sky). */
 const pickDepthPosition = vi.fn((_x: number, _y: number) => null as unknown);
 /** `getPickRay` — the ECEF ray the router raycasts every handle with. */
@@ -73,6 +84,7 @@ vi.mock("@navaramap/three", () => ({
       },
       setCamera,
       flyTo,
+      atmosphere,
       screenSize: { x: 800, y: 600 },
       pixelRatio: 1,
       pickDepthPosition,
