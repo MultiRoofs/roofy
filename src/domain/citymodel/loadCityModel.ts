@@ -6,10 +6,12 @@
  */
 
 import type { CityModel } from "./types";
-import type { CityJSONRoot } from "./cityjson/types";
 import type { HttpClient } from "../../platform/types";
-import { parseCityJSON } from "./cityjson/parseCityJSON";
-import { parseCityJSONSeq } from "./cityjsonseq/parseCityJSONSeq";
+import {
+  parseCityJSON,
+  parseCityJSONSeq,
+  type CityJSONRoot,
+} from "@cityjson/navara-core";
 import { parseCityGML } from "./citygml/parseCityGML";
 import { detectEncoding } from "./detectEncoding";
 

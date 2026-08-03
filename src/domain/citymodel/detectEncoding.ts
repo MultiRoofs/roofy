@@ -5,7 +5,7 @@
  * to route to the correct parser.
  */
 
-import type { CityModelEncoding } from "./supportedEncodings";
+import type { CityModelEncoding } from "@cityjson/navara-core";
 
 /**
  * Strip query string and fragment from a URL path for extension matching.

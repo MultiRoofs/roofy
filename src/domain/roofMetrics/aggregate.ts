@@ -2,7 +2,7 @@
  * Aggregation functions for roof metrics across multiple surfaces.
  */
 
-import type { RoofMetrics } from "./types";
+import type { RoofMetrics } from "@cityjson/navara-core";
 
 /** Inclination threshold below which a surface is considered flat (degrees). */
 const FLAT_THRESHOLD_DEG = 1;

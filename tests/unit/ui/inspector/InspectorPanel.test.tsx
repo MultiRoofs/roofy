@@ -36,7 +36,7 @@ import { InspectorPanel } from "../../../../src/ui/inspector/InspectorPanel";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
-import { CellCache } from "../../../../src/features/streaming/cellCache";
+import { CellCache } from "@cityjson/navara-flatcitybuf";
 import { buildResidentModel } from "@cityjson/navara-flatcitybuf";
 import type { FcbStreamLayerHandle } from "@cityjson/navara-flatcitybuf";
 import type { Surface } from "../../../../src/domain/citymodel/types";

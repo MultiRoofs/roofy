@@ -4,11 +4,7 @@
  */
 
 import type { CityObject, Vec3 } from "../citymodel/types";
-import { computeArea } from "../roofMetrics/metrics";
-
-/** Re-export shim — moved to `@cityjson/navara-core` in M7.2 (the FCB worker
- *  needs it); the remaining functions in this file stay app-side. */
-export { computeFootprintArea } from "@cityjson/navara-core";
+import { computeArea } from "@cityjson/navara-core";
 
 /**
  * Compute total roof area across all RoofSurface surfaces.

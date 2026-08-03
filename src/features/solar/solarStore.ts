@@ -1,19 +1,17 @@
 /**
  * Zustand store for solar / datetime state.
  *
- * Holds the user-selected datetime, the lat/lon derived from the model CRS
- * (the atmosphere's site), and the sun position the engine reported. The store
- * no longer computes sun position itself: since the Navara migration the
- * atmosphere owns sun position (spec §4.4) and pushes it in via
- * `setSunPosition`.
- *
- * Dependencies: proj4 (CRS reprojection).
+ * Holds the user-selected datetime, the atmosphere's site lat/lon, and the sun
+ * position the engine reported. The store computes none of it: since the
+ * Navara migration the atmosphere owns sun position (spec §4.4) and pushes it
+ * in via `setSunPosition`, and the site comes from the live layer handles'
+ * geodetic bounds — which a STREAMING layer has too — pushed in via
+ * `setLatLon` by `NavaraViewport` (Task C16). The old CRS+bbox derivation
+ * (`initFromModel`/`reprojectToLatLon`) died with `CitySceneR3F`; bounds need
+ * no reprojection, so this store no longer touches proj4 at all.
  */
 
 import { create } from "zustand";
-import proj4 from "proj4";
-import type { BBox3 } from "../../domain/citymodel/types";
-import { ensureProjDef, parseEpsgCode } from "@cityjson/navara-core";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -51,11 +49,6 @@ export interface SolarActions {
   setSunPosition: (sun: SunPosition | null) => void;
   setTimeAnimating: (v: boolean) => void;
   setTimeSpeed: (v: number) => void;
-  /** Extract the atmosphere's site lat/lon from the model CRS and bbox. */
-  initFromModel: (
-    referenceSystem: string | undefined,
-    bbox: BBox3 | null,
-  ) => void;
 }
 
 export type SolarStore = SolarState & SolarActions;
@@ -83,34 +76,11 @@ export function sunPositionFromEnu(
   };
 }
 
-/**
- * Reproject bbox center from source CRS to WGS84.
- */
-export function reprojectToLatLon(
-  bbox: BBox3,
-  epsgCode: number,
-): LatLon | null {
-  if (!ensureProjDef(epsgCode)) return null;
-
-  const cx = (bbox[0] + bbox[3]) / 2;
-  const cy = (bbox[1] + bbox[4]) / 2;
-
-  try {
-    const [lon, lat] = proj4(`EPSG:${epsgCode}`, "WGS84", [cx, cy]) as [
-      number,
-      number,
-    ];
-    return { lat, lon };
-  } catch {
-    return null;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 
-export const useSolarStore = create<SolarStore>((set, get) => ({
+export const useSolarStore = create<SolarStore>((set) => ({
   datetime: new Date(),
   latLon: null,
   sunPosition: null,
@@ -125,18 +95,4 @@ export const useSolarStore = create<SolarStore>((set, get) => ({
 
   setTimeAnimating: (v) => set({ timeAnimating: v }),
   setTimeSpeed: (v) => set({ timeSpeed: v }),
-
-  initFromModel: (referenceSystem, bbox) => {
-    if (!bbox) {
-      get().setLatLon(null);
-      return;
-    }
-    const epsgCode = parseEpsgCode(referenceSystem);
-    if (!epsgCode) {
-      get().setLatLon(null);
-      return;
-    }
-    const latLon = reprojectToLatLon(bbox, epsgCode);
-    get().setLatLon(latLon);
-  },
 }));

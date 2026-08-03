@@ -1,16 +1,17 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   sunPositionFromEnu,
-  reprojectToLatLon,
   useSolarStore,
 } from "../../../../src/features/solar/solarStore";
-import type { BBox3 } from "../../../../src/domain/citymodel/types";
 
 // ---------------------------------------------------------------------------
 // sunPositionFromEnu
 //
 // `parseEpsgCode` moved to @cityjson/navara-core in Task A13; its cases live in
 // packages/.../navara-core/tests/citymodel/crsProjDefs.test.ts, not here.
+// The CRS->site derivation (`initFromModel`/`reprojectToLatLon`) is gone
+// entirely (Task C22): the site now comes from the layer handles' geodetic
+// bounds, which `NavaraViewport` pushes in through `setLatLon`.
 // ---------------------------------------------------------------------------
 
 describe("sunPositionFromEnu", () => {
@@ -44,30 +45,6 @@ describe("sunPositionFromEnu", () => {
     const p = sunPositionFromEnu([0, 0, 0]);
     expect(p.direction).toEqual([0, 0, 0]);
     expect(p.altitudeDeg).toBeCloseTo(0, 6);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// reprojectToLatLon
-// ---------------------------------------------------------------------------
-
-describe("reprojectToLatLon", () => {
-  it("reprojects Dutch RD New (EPSG:7415) bbox to WGS84", () => {
-    // Fixture bbox center approximately at Delft, Netherlands
-    const bbox: BBox3 = [85000, 446000, 0, 87500, 446012, 10];
-    const result = reprojectToLatLon(bbox, 7415);
-
-    expect(result).not.toBeNull();
-    // Should be in western Netherlands
-    expect(result!.lat).toBeGreaterThan(51);
-    expect(result!.lat).toBeLessThan(53);
-    expect(result!.lon).toBeGreaterThan(3);
-    expect(result!.lon).toBeLessThan(6);
-  });
-
-  it("returns null for unknown EPSG code", () => {
-    const bbox: BBox3 = [0, 0, 0, 1, 1, 1];
-    expect(reprojectToLatLon(bbox, 99999)).toBeNull();
   });
 });
 
@@ -108,30 +85,30 @@ describe("useSolarStore", () => {
     expect(useSolarStore.getState().sunPosition).not.toBeNull();
   });
 
-  it("initFromModel still derives lat/lon via proj4 for the atmosphere's site", () => {
-    useSolarStore
-      .getState()
-      .initFromModel(
-        "https://www.opengis.net/def/crs/EPSG/0/7415",
-        [84000, 446000, 0, 86000, 448000, 20],
-      );
-    const { latLon } = useSolarStore.getState();
-    expect(latLon!.lat).toBeCloseTo(52.0, 1);
-    expect(latLon!.lon).toBeCloseTo(4.36, 1);
-  });
-
-  it("initFromModel clears latLon for an unknown CRS", () => {
-    useSolarStore
-      .getState()
-      .initFromModel("urn:ogc:def:crs:UNKNOWN:0:9999", [0, 0, 0, 1, 1, 1]);
-    expect(useSolarStore.getState().latLon).toBeNull();
-  });
-
-  it("initFromModel clears latLon when the model has no bbox", () => {
+  it("setLatLon(null) clears the site — the only way a site is now cleared", () => {
     useSolarStore.getState().setLatLon({ lat: 52.37, lon: 4.9 });
-    useSolarStore
-      .getState()
-      .initFromModel("https://www.opengis.net/def/crs/EPSG/0/7415", null);
+    useSolarStore.getState().setLatLon(null);
     expect(useSolarStore.getState().latLon).toBeNull();
+  });
+
+  // Migrated from the retired tests/integration/solarPipeline.test.ts, whose
+  // fixture->CRS->proj4->site chain died with `initFromModel` (Task C22).
+  // This sweep is the one case that file covered and this one did not.
+  it("azimuth stays in [0, 360) across the compass", () => {
+    const dirs: ReadonlyArray<[number, number, number]> = [
+      [0, 1, 0.2],
+      [1, 1, 0.2],
+      [1, 0, 0.2],
+      [1, -1, 0.2],
+      [0, -1, 0.2],
+      [-1, -1, 0.2],
+      [-1, 0, 0.2],
+      [-1, 1, 0.2],
+    ];
+    for (const d of dirs) {
+      const p = sunPositionFromEnu(d);
+      expect(p.azimuthDeg).toBeGreaterThanOrEqual(0);
+      expect(p.azimuthDeg).toBeLessThan(360);
+    }
   });
 });

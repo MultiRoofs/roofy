@@ -6,9 +6,8 @@
  */
 
 import type { CityModel, CityObject } from "../domain/citymodel/types";
-import { computeRoofMetrics } from "../domain/roofMetrics/metrics";
-import type { RoofMetrics } from "../domain/roofMetrics/types";
-import type { ResidentObjectRecord } from "../features/streaming/workerProtocol";
+import { computeRoofMetrics, type RoofMetrics } from "@cityjson/navara-core";
+import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
 import type { ModelStats, ObjectStats, OrientationCount } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -130,10 +129,10 @@ export function computeModelStats(model: CityModel): ModelStats {
 /**
  * Streaming counterpart of `computeModelStats`: a `ResidentObjectRecord`
  * carries no ring geometry (see `ResidentObjectRecord` in
- * workerProtocol.ts), so roof metrics are read from `r.roofMetrics`
- * (already computed by the worker when the cell was decoded) instead of
- * being recomputed from surfaces, and `r.surfaceCount` stands in for
- * `obj.surfaces.length`.
+ * `@cityjson/navara-flatcitybuf`'s workerProtocol.ts), so roof metrics are
+ * read from `r.roofMetrics` (already computed by the worker when the cell was
+ * decoded) instead of being recomputed from surfaces, and `r.surfaceCount`
+ * stands in for `obj.surfaces.length`.
  */
 export function computeModelStatsFromRecords(
   records: ReadonlyArray<ResidentObjectRecord>,

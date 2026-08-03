@@ -17,7 +17,7 @@
 import * as duckdb from "@duckdb/duckdb-wasm";
 import type { CityModel } from "../domain/citymodel/types";
 import type { CityModelReference, UrlModelRef } from "../persistence/types";
-import type { ResidentObjectRecord } from "../features/streaming/workerProtocol";
+import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -281,7 +281,7 @@ export async function loadCityModelFromMemory(
  * Row shape mirrors `loadCityModelFromMemory`'s field-for-field, but reads
  * `surface_count` from `r.surfaceCount` directly rather than
  * `surfaces.length` — a `ResidentObjectRecord` never carries ring geometry
- * (see workerProtocol.ts's doc comment on why).
+ * (see `@cityjson/navara-flatcitybuf`'s workerProtocol.ts for why).
  */
 export async function loadResidentObjectsIntoDuckDB(
   records: ReadonlyArray<ResidentObjectRecord>,

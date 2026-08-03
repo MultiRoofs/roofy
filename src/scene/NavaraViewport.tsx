@@ -855,7 +855,8 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
 
     // The site the sun readout speaks for: the centre of everything loaded.
     // Derived from the live handles' geodetic bounds rather than a model's
-    // CRS + bbox (the retired `CitySceneR3F` called `initFromModel` here),
+    // CRS + bbox (the retired `CitySceneR3F` called `solarStore`'s
+    // `initFromModel` here; that action and its proj4 reprojection are gone),
     // because bounds are the one source a STREAMING layer has too — its FCB
     // header extent, Task C14 — and they need no reprojection.
     const latLon = useSolarStore((s) => s.latLon);

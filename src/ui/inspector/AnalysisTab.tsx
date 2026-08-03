@@ -10,7 +10,7 @@ import type { Surface } from "../../domain/citymodel/types";
 import {
   computeRoofMetrics,
   computeSurfaceNormal,
-} from "../../domain/roofMetrics/metrics";
+} from "@cityjson/navara-core";
 import { aggregateRoofMetrics } from "../../domain/roofMetrics/aggregate";
 import { computeSolarScore } from "../../domain/geometry/derived";
 import { useSolarStore } from "../../features/solar/solarStore";

@@ -13,7 +13,7 @@ import { useSelectionStore } from "../../features/selection/selectionStore";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useStreamStore } from "../../features/streaming/streamStore";
 import { getResidentModel } from "../../features/streaming/residentModel";
-import type { ResidentObjectRecord } from "../../features/streaming/workerProtocol";
+import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
 import type { Selection } from "../../domain/selection/types";
 
 const PAGE_SIZE = 100;
@@ -463,7 +463,7 @@ function getObjectValue(obj: CityObject, col: string): unknown {
 // Streaming (ResidentObjectRecord) helpers — mirror the in-memory helpers
 // above field-for-field, but read `surface_count` from `r.surfaceCount`
 // instead of `surfaces.length`, since a ResidentObjectRecord never carries
-// a `surfaces` array (see workerProtocol.ts's doc comment on why).
+// a `surfaces` array (see `@cityjson/navara-flatcitybuf`'s workerProtocol.ts for why).
 // ---------------------------------------------------------------------------
 
 function getColumnsFromRecords(
