@@ -23,6 +23,12 @@
  * The 7.6 MB fixture is read from disk ONCE at module scope and shared by
  * every test below; only one test (the bucketing test) fully decodes every
  * feature into CityObjects, so the suite stays fast despite the file size.
+ *
+ * Task C14 repointed every import at the PACKAGES (`@cityjson/navara-core`,
+ * `@cityjson/navara-flatcitybuf`) rather than the app-side re-export shims, so
+ * this is now a genuine check of the packaged pipeline. The test itself stays
+ * in the app repo because it owns the 7.6 MB fixture — the plugin repo's unit
+ * tests deliberately run against fakes.
  */
 import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
@@ -35,32 +41,26 @@ import {
   type ReadOpts,
 } from "@cityjson/flatcitybuf";
 import {
-  checkAdmission,
-  headerModel,
-} from "../../src/domain/citymodel/flatcitybuf/fcbSource";
-import {
+  bucketFeatures,
   cellBBox,
-  makeGrid,
+  checkAdmission,
+  chooseLevel,
+  headerModel,
   keysCovering,
-} from "../../src/features/streaming/tileGrid";
-import { chooseLevel } from "../../src/features/streaming/levelPolicy";
-import { bucketFeatures } from "../../src/features/streaming/bucketFeatures";
+  makeGrid,
+} from "@cityjson/navara-flatcitybuf";
 import {
   dequantizeAll,
   mapMetadata,
   mergeBBox,
   parseCityObject,
-} from "../../src/domain/citymodel/cityjson/parseHelpers";
-import type {
-  CityJSONObject,
-  CityJSONRoot,
-} from "../../src/domain/citymodel/cityjson/types";
-import type { CityJSONFeature } from "../../src/domain/citymodel/cityjsonseq/types";
-import type {
-  BBox3,
-  CityModel,
-  CityObject,
-} from "../../src/domain/citymodel/types";
+  type BBox3,
+  type CityJSONFeature,
+  type CityJSONObject,
+  type CityJSONRoot,
+  type CityModel,
+  type CityObject,
+} from "@cityjson/navara-core";
 
 const bytes = new Uint8Array(
   fs.readFileSync(

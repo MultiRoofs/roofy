@@ -66,6 +66,17 @@ const defaultStore = new LocalStorageProjectStateStore();
 const SAMPLE_DATA_URL =
   "https://storage.googleapis.com/cityjson/delft.city.jsonl";
 
+/**
+ * How long a queued `.fcb` open waits for the just-mounted viewport to publish
+ * its imperative handle.
+ *
+ * A React commit takes microseconds, so reaching this means the viewer shell
+ * never mounted at all. Bounded rather than open-ended because of the Shared
+ * Interface Contract's resolve-or-reject rule: the caller gets an error it can
+ * show in the load-error slot, never a promise that silently never settles.
+ */
+export const ENGINE_BOOT_TIMEOUT_MS = 15_000;
+
 /** How a streaming layer's `.fcb` source was opened, for the save/restore
  *  round-trip (`LayerSnapshot.stream`, `migrateSnapshot`'s `unavailable`
  *  flag). Only meaningful for `l.isStreaming` layers — see handleSave. */
@@ -126,8 +137,25 @@ export function App({
   const [cursorPosition, setCursorPosition] = useState<
     readonly [number, number, number] | null
   >(null);
-  const sceneRef = useRef<CitySceneHandle>(null);
+  const sceneRef = useRef<CitySceneHandle | null>(null);
   const cameraTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * A `.fcb` open is in flight and needs the 3D engine, so the viewer shell
+   * (and with it `NavaraViewport`, and with that the FlatCityBuf plugin) must
+   * be mounted even though no layer exists yet.
+   *
+   * Without this a `.fcb` could never be the FIRST layer: streaming has no
+   * parse step that produces a model, so the layer only appears once the
+   * plugin has opened the source — and the plugin only exists once a viewport
+   * is mounted, which used to require a layer. The shell already tolerates
+   * zero layers (every `activeLayer` read below is optional-chained), so the
+   * user watches the globe come up and the buildings stream onto it.
+   */
+  const [engineBooting, setEngineBooting] = useState(false);
+  /** How many `.fcb` opens are currently holding the shell open. A counter,
+   *  not a boolean, so two concurrent opens (a restored workspace) cannot have
+   *  the first one to finish unmount the engine under the second. */
+  const bootHoldsRef = useRef(0);
 
   const { theme, toggleTheme } = useTheme();
 
@@ -153,6 +181,57 @@ export function App({
   );
 
   /**
+   * Resolved the moment `NavaraViewport` publishes its imperative handle.
+   *
+   * A ref cannot be awaited and React does not notify on one, so the callback
+   * ref below hands the handle over through this gate: `setEngineBooting(true)`
+   * only SCHEDULES the mount, and the `.fcb` open that asked for it is already
+   * past its own `await` by the time React commits.
+   */
+  const sceneGateRef = useRef<{
+    readonly promise: Promise<CitySceneHandle>;
+    readonly resolve: (handle: CitySceneHandle) => void;
+  } | null>(null);
+
+  /** One shared gate per boot: concurrent `.fcb` opens all wait on the same
+   *  handle. Bounded — see {@link ENGINE_BOOT_TIMEOUT_MS}. */
+  const awaitSceneHandle = useCallback((): Promise<CitySceneHandle> => {
+    const existing = sceneGateRef.current;
+    if (existing) return existing.promise;
+    let settle!: (handle: CitySceneHandle) => void;
+    let fail!: (error: unknown) => void;
+    const promise = new Promise<CitySceneHandle>((res, rej) => {
+      settle = res;
+      fail = rej;
+    });
+    const timer = setTimeout(() => {
+      sceneGateRef.current = null;
+      fail(
+        new Error(
+          "The 3D viewport did not start, so the .fcb layer could not be opened.",
+        ),
+      );
+    }, ENGINE_BOOT_TIMEOUT_MS);
+    sceneGateRef.current = {
+      promise,
+      resolve: (handle) => {
+        clearTimeout(timer);
+        sceneGateRef.current = null;
+        settle(handle);
+      },
+    };
+    return promise;
+  }, []);
+
+  /** `NavaraViewport`'s ref — a CALLBACK ref, because publication is an event
+   *  the pending `.fcb` opens above need to observe, not just a slot to read.
+   *  Stable identity, so React never detaches/reattaches for it. */
+  const attachScene = useCallback((handle: CitySceneHandle | null) => {
+    sceneRef.current = handle;
+    if (handle) sceneGateRef.current?.resolve(handle);
+  }, []);
+
+  /**
    * The live FlatCityBuf plugin for a `.fcb` open.
    *
    * Through the viewport's `getStreamingPlugin()` whenever there IS a viewport:
@@ -160,14 +239,48 @@ export function App({
    * is still coming up — a restored workspace, a share hash — queues instead of
    * failing, and an engine that never came up rejects rather than hangs.
    *
-   * With no viewport mounted (the landing page renders none until the first
-   * layer exists) it falls back to `requireStreamPlugin()`, whose message names
-   * the real cause. Stable identity: `sceneRef` is a ref.
+   * With no viewport yet, a `.fcb` open that went through
+   * {@link withEngineBooting} is mounting one right now, so this waits for the
+   * handle instead of failing. A caller that did NOT take a boot hold gets the
+   * old `requireStreamPlugin()` error immediately, whose message names the real
+   * cause — better than a 15 s wait for a viewport nobody asked for.
+   *
+   * Stable identity: everything it touches is a ref.
    */
   const resolveStreamPlugin = useCallback(async (): Promise<StreamPlugin> => {
-    const scene = sceneRef.current;
+    const scene =
+      sceneRef.current ??
+      (bootHoldsRef.current > 0 ? await awaitSceneHandle() : null);
     return scene ? await scene.getStreamingPlugin() : requireStreamPlugin();
-  }, []);
+  }, [awaitSceneHandle]);
+
+  /**
+   * Run a layer open with the 3D engine mounted, when the source needs it.
+   *
+   * `.fcb` only: streaming is the one format whose layer cannot exist before
+   * the engine does. Every other encoding parses to a `CityModel` first and
+   * mounts the viewport as a consequence, so booting for those would put a
+   * globe behind the landing page for no reason.
+   *
+   * The hold is released in `finally`, which is what returns the user to the
+   * landing page when the open FAILS (a 404, a refused CRS) rather than
+   * stranding them on an empty globe with no drop zone. On success the new
+   * layer keeps the shell mounted on its own.
+   */
+  const withEngineBooting = useCallback(
+    async <T,>(source: string, open: () => Promise<T>): Promise<T> => {
+      if (detectEncoding(source) !== "flatcitybuf") return await open();
+      bootHoldsRef.current += 1;
+      setEngineBooting(true);
+      try {
+        return await open();
+      } finally {
+        bootHoldsRef.current -= 1;
+        if (bootHoldsRef.current === 0) setEngineBooting(false);
+      }
+    },
+    [],
+  );
 
   // File loading
   const {
@@ -277,17 +390,17 @@ export function App({
   const handleFile = useCallback(
     async (file: File) => {
       clearError();
-      await addLayerFromFile(file);
+      await withEngineBooting(file.name, () => addLayerFromFile(file));
     },
-    [addLayerFromFile, clearError],
+    [addLayerFromFile, clearError, withEngineBooting],
   );
 
   const handleUrl = useCallback(
     async (url: string) => {
       clearError();
-      await addLayerFromUrl(url);
+      await withEngineBooting(url, () => addLayerFromUrl(url));
     },
-    [addLayerFromUrl, clearError],
+    [addLayerFromUrl, clearError, withEngineBooting],
   );
 
   const handleSave = useCallback(async () => {
@@ -423,15 +536,17 @@ export function App({
 
             let layerId: string;
             if (detectEncoding(modelRef.url) === "flatcitybuf") {
-              layerId = await openStreamingLayer({
-                plugin: await resolveStreamPlugin(),
-                source: { url: modelRef.url },
-                name,
-                modelRef,
-                rules,
-                rulesEnabled,
-                visible,
-              });
+              layerId = await withEngineBooting(modelRef.url, async () =>
+                openStreamingLayer({
+                  plugin: await resolveStreamPlugin(),
+                  source: { url: modelRef.url },
+                  name,
+                  modelRef,
+                  rules,
+                  rulesEnabled,
+                  visible,
+                }),
+              );
             } else {
               const parsed = await loadFromUrl(modelRef.url);
               layerId = useLayerStore.getState().addLayer({
@@ -488,7 +603,7 @@ export function App({
         setTimeout(() => setToast(null), 3000);
       }
     },
-    [persistenceStore, clearError, resolveStreamPlugin],
+    [persistenceStore, clearError, resolveStreamPlugin, withEngineBooting],
   );
 
   const handleDeleteSnapshot = useCallback(
@@ -578,15 +693,18 @@ export function App({
           const visible = sl.visible ?? true;
 
           if (detectEncoding(sl.modelUrl) === "flatcitybuf") {
-            await openStreamingLayer({
-              plugin: await resolveStreamPlugin(),
-              source: { url: sl.modelUrl },
-              name,
-              modelRef: { type: "url", url: sl.modelUrl },
-              rules,
-              rulesEnabled,
-              visible,
-            });
+            const modelUrl = sl.modelUrl;
+            await withEngineBooting(modelUrl, async () =>
+              openStreamingLayer({
+                plugin: await resolveStreamPlugin(),
+                source: { url: modelUrl },
+                name,
+                modelRef: { type: "url", url: modelUrl },
+                rules,
+                rulesEnabled,
+                visible,
+              }),
+            );
           } else {
             const parsed = await loadFromUrl(sl.modelUrl);
             useLayerStore.getState().addLayer({
@@ -663,20 +781,22 @@ export function App({
       const entry = unavailableLayers.find((u) => u.id === entryId);
       setUnavailableLayers((prev) => prev.filter((u) => u.id !== entryId));
       clearError();
-      void addLayerFromFile(
-        file,
-        entry
-          ? {
-              rules: entry.rules,
-              rulesEnabled: entry.rulesEnabled,
-              visible: entry.visible,
-              lodMode: entry.lodMode,
-              selectedLod: entry.selectedLod,
-            }
-          : undefined,
+      void withEngineBooting(file.name, () =>
+        addLayerFromFile(
+          file,
+          entry
+            ? {
+                rules: entry.rules,
+                rulesEnabled: entry.rulesEnabled,
+                visible: entry.visible,
+                lodMode: entry.lodMode,
+                selectedLod: entry.selectedLod,
+              }
+            : undefined,
+        ),
       );
     },
-    [unavailableLayers, addLayerFromFile, clearError],
+    [unavailableLayers, addLayerFromFile, clearError, withEngineBooting],
   );
 
   const handleDismissUnavailableLayer = useCallback((entryId: string) => {
@@ -712,8 +832,13 @@ export function App({
     }
   }
 
-  // Viewer state
-  if (hasLayers) {
+  // Viewer state. `engineBooting` puts the shell up with ZERO layers for the
+  // duration of a `.fcb` open — the engine has to be running before a
+  // streaming layer can exist at all, so this is the only way a `.fcb` can be
+  // the first thing opened. Everything below already reads `activeLayer`
+  // optional-chained, so an empty workspace renders an empty globe rather than
+  // throwing.
+  if (hasLayers || engineBooting) {
     const totalObjects = layers.reduce(
       (sum, l) => sum + Object.keys(l.model.objects).length,
       0,
@@ -768,7 +893,7 @@ export function App({
 
         <div className="viewport">
           <NavaraViewport
-            ref={sceneRef}
+            ref={attachScene}
             onTriangleCount={setTriangleCount}
             onFps={setFps}
             onCursorPosition={setCursorPosition}

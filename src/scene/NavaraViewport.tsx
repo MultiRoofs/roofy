@@ -469,8 +469,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     // cannot be re-triggered by an unrelated store update.
     // Streaming layers are in the union too — an FCB-only workspace has NOTHING
     // in `liveRef`, so reading only that map would make "Fit all" a no-op for
-    // the one layer on screen. A streaming handle answers `null` until its
-    // first commit, which `unionGeodeticBounds` already skips.
+    // the one layer on screen. A streaming handle answers from its FCB header
+    // extent as soon as it is open (Task C14) — it does NOT wait for a first
+    // commit, which would be unreachable — and `null` only once deleted, which
+    // `unionGeodeticBounds` already skips.
     const boundsOf = useCallback((ids?: readonly string[]) => {
       const handles: InteractionHandle[] = [];
       for (const [id, entry] of liveRef.current) {
@@ -501,7 +503,12 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
      *
      * Deliberately the REF, not `getStreamingPlugin()`: a static-only workspace
      * has no FlatCityBuf plugin and must never block a `fitAll` on streaming
-     * readiness. Fire-and-forget, so the `CitySceneHandle` methods stay `void`.
+     * readiness. Fire-and-forget, so the `CitySceneHandle` methods stay `void`
+     * — but REPORTED, not swallowed: `suppressSettle` runs `move()` inside its
+     * own promise, so a throwing `flyTo`/`setCamera` becomes the rejection of a
+     * promise nobody awaits. Without the `.catch` that is an unhandled
+     * rejection with no stack pointing here (Task C13 fold-in); the no-plugin
+     * branch above, by contrast, throws synchronously into its caller.
      */
     const withSettleSuppressed = useCallback((move: () => void): void => {
       const plugin = flatPluginRef.current;
@@ -509,7 +516,12 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         move();
         return;
       }
-      void plugin.suppressSettle(move);
+      plugin.suppressSettle(move).catch((error: unknown) => {
+        console.error(
+          "NavaraViewport: a camera move failed inside the streaming settle-suppression window.",
+          error,
+        );
+      });
     }, []);
 
     const fitAll = useCallback(() => {
@@ -605,6 +617,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       const store = useStreamStore.getState();
       const unsubscribes: Array<() => void> = [];
       const present = new Set<string>();
+      /** A streaming layer joined the registry on this pass — the streaming
+       *  half of the layer effect's "only a NEW layer earns a camera move". */
+      let added = false;
 
       for (const layer of layers) {
         if (!layer.isStreaming) continue;
@@ -620,6 +635,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         )?.handle;
         if (!handle) continue;
         present.add(layer.id);
+        if (!streams.has(layer.id)) added = true;
         streams.set(layer.id, handle);
         // Rules, LoD and visibility — the streaming replacement for
         // `syncLayers` + `syncStyles`, memoised per layer (`handleSync.ts`).
@@ -661,6 +677,15 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       }
 
       onTriangleCount(totalTriangles(layers, liveRef.current, streams));
+      // A newly opened stream earns the same one-off fit a newly added static
+      // layer does — and needs it MORE: a streaming layer only fetches cells
+      // once the camera is close enough for the cover to fit the budget, so a
+      // `.fcb` opened as the first layer would otherwise sit on a whole-globe
+      // camera reporting "Zoom in to load features" forever, with nothing on
+      // screen to aim at. `getBoundsGeodetic` answers from the header extent
+      // (plugin, Task C14), so this frames the file before a single cell has
+      // arrived.
+      if (added) setFitToken((t) => t + 1);
       return () => {
         for (const off of unsubscribes) off();
       };

@@ -827,3 +827,57 @@ raw CDP driver (Playwright's Chromium 1228 at
 --no-sandbox`), attaching with `Target.setAutoAttach` so the **worker** target
 and its errors are visible too — that is how the worker's real URL above was
 captured.
+
+---
+
+## M7.5 closer — FCB streaming browser smoke (Task C14, 2026-08-03)
+
+Raw CDP driver again (`agent-browser` still cannot drive pages here — B1 §8):
+Playwright Chromium 1228, `--headless=new --no-sandbox
+--enable-unsafe-swiftshader`, `Target.setAutoAttach` so the FCB **worker's**
+range requests are visible (main-thread `performance.getEntriesByType` never
+sees them — it reported 0 while the worker had issued 57). Clean clicks are
+`mousePressed`+`mouseReleased` with no move between; camera gestures are
+button-down drags. ~3–4 fps, so every wait is generous.
+
+**Source:** no public `.fcb` URL exists — the plan's
+`https://storage.googleapis.com/cityjson/delft.fcb` 404s. The smoke streamed
+the repo's own `fixtures/delft.fcb` over the dev server
+(`http://127.0.0.1:<port>/fixtures/delft.fcb`), which answers `206 Partial
+Content` with `Content-Range`, so it is a real HTTP range-read path.
+
+| screenshot                                 | what it shows                                                                            |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `2026-08-03-c14-m75-01-landing.png`        | Landing page, no viewport mounted                                                        |
+| `2026-08-03-c14-m75-02-globe-booting.png`  | `.fcb` submitted → globe up with **zero layers** (`engineBooting`)                       |
+| `2026-08-03-c14-m75-03-cells-streamed.png` | First cells resident after a zoom settle                                                 |
+| `2026-08-03-c14-m75-04-top-cells.png`      | Top view: streamed cells with semantic surface colours                                   |
+| `2026-08-03-c14-m75-05-pick.png`           | Pick on a streamed building → inspector `NL.IMBAG.Pand.0503100000025028-0`, 294 surfaces |
+| `2026-08-03-c14-m75-06-after-pan.png`      | Pan → 2123 features resident, 36.9K triangles, **same** building still highlighted       |
+| `2026-08-03-c14-m75-07-rule-recolor.png`   | "Flat roofs" preset recolours every streamed cell, highlight survives                    |
+| `2026-08-03-c14-m75-08-rule-after-pan.png` | Cells arriving after the rule render in the rule colour                                  |
+| `2026-08-03-c14-m75-09-lod.png`            | LoD read-out (auto ↔ manual), `LoD 1.2 / 400 m cells`                                    |
+
+Console over the whole session: no errors or exceptions, only `favicon.ico`
+404s. 57 range requests total across three settles — tens, not hundreds.
+
+### Findings
+
+1. **A streaming layer's bounds must not wait for its first commit.**
+   `getBoundsGeodetic()` returned `null` until a cell was resident, but cells
+   only arrive once the camera is close enough for the cover to fit the cell
+   budget — so "Fit all" was a no-op on the globe and the data was
+   unreachable. Fixed in the plugin (`e280907`): the FCB header extent is
+   reported from `openStream` onwards; `null` now means _deleted_.
+2. **A newly opened streaming layer needs its own auto-fit.** The viewport's
+   fit-once effect keyed on `liveRef` growing, and streaming layers never
+   enter `liveRef`. Added to the streaming reconciliation effect.
+3. **`Level swap timed out; kept the previous level`** fires on the first
+   commit after the auto-fit: that camera frames the whole file, so the cover
+   asks for all 1115 features (7.6 MB read in ~1 MB ranges) and the
+   `LEVEL_SWAP_TIMEOUT_MS = 1500` budget is missed on a 3 fps SwiftShader
+   host. Recovers on the next settle. Host-speed dependent; worth re-measuring
+   on real hardware before treating the constant as settled.
+4. The engine's default photoreal sun follows the real clock, so a run at
+   local night renders an almost-black scene regardless of the model. The
+   driver shifts the page's `Date` to put Delft in daylight.
