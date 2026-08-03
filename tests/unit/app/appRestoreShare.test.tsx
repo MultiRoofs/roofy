@@ -32,6 +32,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -46,6 +47,7 @@ import type {
   ProjectStateStore,
 } from "../../../src/persistence/types";
 import type { StreamPlugin } from "../../../src/features/streaming/streamPlugin";
+import type { PlatformServices } from "../../../src/platform/types";
 
 // jsdom ships no `matchMedia`, which `useTheme` reads on its first render.
 window.matchMedia ??= ((query: string) =>
@@ -149,6 +151,9 @@ vi.mock("../../../src/analytics/duckdb", () => ({
  *  evidence that the shell was up with NO layer — i.e. that the share path
  *  took the engine-boot hold. */
 const openCalls: Array<{ plugin: unknown; layersAtCall: number }> = [];
+/** Swapped per test: a `.fcb` open that fails is the whole point of the
+ *  share-link failure case. */
+let openStreamingLayerImpl: () => Promise<string> = async () => "stream-1";
 
 vi.mock("../../../src/features/streaming/openStreamingLayer", () => ({
   openStreamingLayer: vi.fn(async (input: { plugin: unknown }) => {
@@ -158,17 +163,7 @@ vi.mock("../../../src/features/streaming/openStreamingLayer", () => ({
       plugin: input.plugin,
       layersAtCall: useLayerStore.getState().layers.length,
     });
-    useLayerStore.getState().addLayer({
-      id: "stream-1",
-      name: "delft.fcb",
-      model,
-      modelRef: { type: "url", url: FCB_URL },
-      visible: true,
-      rules: [],
-      rulesEnabled: true,
-      isStreaming: true,
-    });
-    return "stream-1";
+    return openStreamingLayerImpl();
   }),
   closeStreamingLayer: vi.fn(),
   closeAllStreamingLayers: vi.fn(),
@@ -240,6 +235,19 @@ async function clickRestore(): Promise<void> {
 
 beforeEach(() => {
   openCalls.length = 0;
+  openStreamingLayerImpl = async () => {
+    useLayerStore.getState().addLayer({
+      id: "stream-1",
+      name: "delft.fcb",
+      model,
+      modelRef: { type: "url", url: FCB_URL },
+      visible: true,
+      rules: [],
+      rulesEnabled: true,
+      isStreaming: true,
+    });
+    return "stream-1";
+  };
   readyGate = createGate();
   setCameraState.mockClear();
   cameraState = CAM;
@@ -324,25 +332,31 @@ describe("App restore against CitySceneHandle.ready", () => {
   });
 });
 
+/** A current share link carrying one `.fcb` layer. */
+function fcbShareHash(): string {
+  return (
+    "#" +
+    encodeShareState({
+      v: 3,
+      layers: [
+        {
+          name: "delft.fcb",
+          modelUrl: FCB_URL,
+          rules: [],
+          rulesEnabled: true,
+          visible: true,
+        },
+      ],
+      cam: CAM,
+      dt: "2025-06-21T12:00:00.000Z",
+      pm: "object",
+    })
+  );
+}
+
 describe("App share-hash restore", () => {
   it("cold-loads a .fcb share link through the engine-boot hold and restores the camera", async () => {
-    location.hash =
-      "#" +
-      encodeShareState({
-        v: 3,
-        layers: [
-          {
-            name: "delft.fcb",
-            modelUrl: FCB_URL,
-            rules: [],
-            rulesEnabled: true,
-            visible: true,
-          },
-        ],
-        cam: CAM,
-        dt: "2025-06-21T12:00:00.000Z",
-        pm: "object",
-      });
+    location.hash = fcbShareHash();
 
     render(<App persistenceStore={storeWith(null)} />);
 
@@ -396,6 +410,30 @@ describe("App share-hash restore", () => {
     // ...and the dead hash is off the URL, so a reload does not re-explain it.
     expect(location.hash).toBe("");
   });
+
+  it("reports a share layer that fails to open instead of showing a bare landing page", async () => {
+    // A .fcb source that 404s, fails admission, or times out waiting for the
+    // engine. The open ran (so the boot hold was taken and released), no layer
+    // landed, and the user is back on the drop zone — which without a message
+    // is indistinguishable from the link having done nothing at all.
+    openStreamingLayerImpl = async () => {
+      throw new Error("Streaming refused: non-metric CRS");
+    };
+    location.hash = fcbShareHash();
+
+    render(<App persistenceStore={storeWith(null)} />);
+
+    await waitFor(() => expect(openCalls).toHaveLength(1));
+    await waitFor(() =>
+      expect(
+        screen.getByText("1 layer failed to load from the share link."),
+      ).toBeInTheDocument(),
+    );
+    expect(useLayerStore.getState().layers).toHaveLength(0);
+    // No viewport to point, so no camera was pushed and no 15 s wait for one.
+    expect(screen.queryByTestId("navara-viewport")).toBeNull();
+    expect(setCameraState).not.toHaveBeenCalled();
+  });
 });
 
 /** Put the viewer shell up with one ordinary layer, without going through a
@@ -431,5 +469,66 @@ describe("App save with a camera that is not readable yet", () => {
       expect(screen.getByText(/still starting/)).toBeInTheDocument(),
     );
     expect(save).not.toHaveBeenCalled();
+  });
+
+  it("reports the same for a share link, rather than minting one with no viewpoint", async () => {
+    const writeText = vi.fn(async () => true);
+    render(
+      <App
+        persistenceStore={storeWith(null)}
+        platform={{ clipboard: { writeText } } as unknown as PlatformServices}
+      />,
+    );
+    await mountShellWithLayer();
+
+    cameraState = null;
+    fireEvent.click(screen.getByTitle("Copy share link"));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/still starting — try sharing again/),
+      ).toBeInTheDocument(),
+    );
+    expect(writeText).not.toHaveBeenCalled();
+  });
+});
+
+describe("App toast timers", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("does not let an expiring message take the next one down with it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<App persistenceStore={storeWith(null)} />);
+    await mountShellWithLayer();
+    cameraState = null;
+
+    // A 3 s status toast...
+    fireEvent.click(screen.getByTitle("Save workspace"));
+    await waitFor(() =>
+      expect(screen.getByText(/try saving again/)).toBeInTheDocument(),
+    );
+
+    // ...replaced one second later by another message, which is entitled to
+    // its own full 3 s.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    fireEvent.click(screen.getByTitle("Copy share link"));
+    await waitFor(() =>
+      expect(screen.getByText(/try sharing again/)).toBeInTheDocument(),
+    );
+
+    // Past the FIRST toast's expiry: the second must still be on screen —
+    // one timer per toast, cleared before the next is armed.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2100);
+    });
+    expect(screen.getByText(/try sharing again/)).toBeInTheDocument();
+
+    // ...and it does go away on its own schedule.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(screen.queryByText(/try sharing again/)).toBeNull();
   });
 });

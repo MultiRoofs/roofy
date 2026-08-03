@@ -285,7 +285,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
      * effect cares about.
      */
     const streamIds = useStreamStore((s) =>
-      Object.keys(s.streams).sort().join(" "),
+      Object.keys(s.streams).sort().join(" "),
     );
 
     // CitySceneHandle.ready — created eagerly so a consumer can await it before

@@ -166,14 +166,33 @@ export function App({
 
   const { theme, toggleTheme } = useTheme();
 
+  /** The dismissal timer of the toast currently on screen, so a NEW message
+   *  cannot be wiped by the OLD one's expiry — an 8 s explanation raised one
+   *  second after a 3 s status toast used to vanish after two. */
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   /** Show a transient message. One place, so every call site states its
    *  duration in the same terms — {@link STATUS_TOAST_MS} for an
    *  acknowledgement, {@link EXPLANATION_TOAST_MS} for a sentence that has to
-   *  be read. */
+   *  be read — and so each message really gets the time it asked for. */
   const showToast = useCallback((message: string, ms: number) => {
+    if (toastTimerRef.current !== null) clearTimeout(toastTimerRef.current);
     setToast(message);
-    setTimeout(() => setToast(null), ms);
+    toastTimerRef.current = setTimeout(() => {
+      toastTimerRef.current = null;
+      setToast(null);
+    }, ms);
   }, []);
+
+  // A toast raised just before an unmount must not tick on into a component
+  // that is gone (the app is unmounted by tests, and by a host that swaps the
+  // viewer out).
+  useEffect(
+    () => () => {
+      if (toastTimerRef.current !== null) clearTimeout(toastTimerRef.current);
+    },
+    [],
+  );
 
   // Layer store
   const layers = useLayerStore((s) => s.layers);
@@ -781,6 +800,13 @@ export function App({
     const layersToLoad = shared.layers ?? [];
 
     void (async () => {
+      // Per-layer failures are COUNTED, not swallowed: a `.fcb` link whose
+      // source 404s, fails admission or times out waiting for the engine used
+      // to leave a bare landing page with no explanation at all — and, since
+      // no layer landed, no camera and no toast either. One layer failing
+      // still must not abort the ones after it, hence a count rather than a
+      // rethrow (the restore path above works the same way).
+      let failedCount = 0;
       for (const sl of layersToLoad) {
         if (!sl.modelUrl) continue;
         try {
@@ -814,7 +840,7 @@ export function App({
             });
           }
         } catch {
-          // Skip failed layers silently
+          failedCount++;
         }
       }
 
@@ -828,12 +854,23 @@ export function App({
         useSolarStore.getState().setDatetime(dt);
       }
 
+      // Said BEFORE the camera wait, so the news is on screen while the
+      // engine comes up rather than after it. An explanation, not a status:
+      // the user clicked a link and got less than it promised.
+      if (failedCount > 0) {
+        showToast(
+          `${failedCount} layer${failedCount === 1 ? "" : "s"} failed to load from the share link.`,
+          EXPLANATION_TOAST_MS,
+        );
+      }
+
       // The shared viewpoint, once a viewport exists to take it — this effect
       // runs on MOUNT, so there is none yet, and a `.fcb` link is still
       // booting the engine through the hold above. Skipped when nothing
       // loaded (a camera-only link, or a link whose every layer failed):
       // there is no scene to point, and the landing page mounts no viewport
-      // to wait for.
+      // to wait for. Partial success still gets its camera — the layers that
+      // DID load are what the link was pointing at.
       if (useLayerStore.getState().layers.length === 0) return;
       try {
         await applyCameraWhenReady(shared.cam);
