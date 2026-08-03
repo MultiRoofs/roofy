@@ -1907,6 +1907,46 @@ describe("NavaraViewport render settings", () => {
     await waitFor(() => expect(deleteLight).toHaveBeenCalledTimes(1));
   });
 
+  // The other half of capturing the photoreal handles: they die with the view,
+  // and the cleanup drops them. Without that, a store change after an unmount
+  // would push `visible` through a descriptor whose scene has been disposed —
+  // and under StrictMode, through the PREVIOUS engine's handles over a live
+  // view.
+  it("stops pushing settings once the engine is gone", async () => {
+    useRenderDebugStore.setState({ ambientIntensity: 0.6 });
+    const { unmount } = render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() =>
+      expect(photorealHandles.sun.update).toHaveBeenCalledWith({
+        sun: { castShadow: true },
+      }),
+    );
+    await waitFor(() => expect(addLight).toHaveBeenCalledTimes(1));
+    const view = currentView();
+
+    unmount();
+    // The mount's own teardown deletes the light; what must NOT happen is a
+    // fresh push afterwards.
+    photorealHandles.sun.update.mockClear();
+    updateLight.mockClear();
+    addLight.mockClear();
+    const exposureBefore = view.toneMappingExposure;
+
+    act(() => {
+      useRenderDebugStore.getState().setSunShadowsEnabled(false);
+      useRenderDebugStore.getState().setAerialPerspectiveEnabled(false);
+      useRenderDebugStore.getState().setAmbientIntensity(2);
+      useRenderDebugStore.getState().setExposure(2);
+    });
+
+    expect(photorealHandles.sun.update).not.toHaveBeenCalled();
+    expect(updateLight).not.toHaveBeenCalled();
+    expect(addLight).not.toHaveBeenCalled();
+    expect(view.toneMappingExposure).toBe(exposureBefore);
+    // The handles themselves are untouched, which is the visible symptom the
+    // ref-nulling prevents.
+    expect(photorealHandles.aerialPerspective.visible).toBe(true);
+  });
+
   it("keeps the viewer alive when the engine refuses a settings push", async () => {
     useRenderDebugStore.setState({ ambientIntensity: 0.6 });
     addLight.mockImplementationOnce(() => {
