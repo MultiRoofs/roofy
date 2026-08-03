@@ -582,6 +582,17 @@ body {
   background: var(--bg-viewport);
 }
 
+/* Basemap picker in the left sidebar. */
+.basemap-select {
+  width: 100%;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg);
+  font-size: 0.75rem;
+}
+
 /* Navara viewport (Task B11a). Fills whatever positioned box it is dropped
    into — `.viewport` in the app shell, the page body in the harness. */
 .navara-viewport {

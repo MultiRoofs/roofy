@@ -59,6 +59,7 @@ import { useSelectionStore } from "../features/selection/selectionStore";
 import { useSolarStore } from "../features/solar/solarStore";
 import { useStreamStore } from "../features/streaming/streamStore";
 import { useTilesStore } from "../features/tiles/tilesStore";
+import { useBasemapStore } from "../features/basemap/basemapStore";
 import { setStreamPlugin } from "../features/streaming/streamPlugin";
 import {
   closeAllStreamingLayers,
@@ -109,6 +110,7 @@ import {
 } from "./geographicCamera";
 import { ViewAlignButtons, type ViewDirection } from "./ViewAlignButtons";
 import { googleTilesConfig } from "./googleTiles";
+import { basemapById, type BasemapOption } from "./basemaps";
 import { isAutoFitSuppressed } from "./autoFitSuppression";
 import { AttributionOverlay } from "../ui/viewport/AttributionOverlay";
 
@@ -195,6 +197,51 @@ function createReadyGate(): ReadyGate {
 interface GoogleTilesHandles {
   readonly layer: ReturnType<ViewInstance["addLayer"]>;
   readonly source: ReturnType<ViewInstance["addSource"]>;
+}
+
+/** The raster basemap's source+layer, so a change of option can swap them. */
+type BasemapHandles = GoogleTilesHandles;
+
+/**
+ * Drape the selected raster basemap over the globe.
+ *
+ * The fix for "the globe is black": `addDefaultPhotorealScene()` adds sky,
+ * stars, a sun and the post chain but NO imagery (see `basemaps.ts`), so
+ * without this there is simply nothing on the ellipsoid to look at.
+ *
+ * Same failure policy as `addGoogleTiles`: a basemap is a backdrop, and a tile
+ * service that is down, blocked or renamed must leave the viewer running. So a
+ * refusal is reported and answered with `null`, which is also what keeps the
+ * attribution overlay from crediting a provider whose imagery is not on screen.
+ */
+function addBasemap(
+  view: ViewInstance,
+  option: BasemapOption,
+): BasemapHandles | null {
+  if (option.source === null) return null;
+  try {
+    const source = view.addSource(option.source);
+    const layer = view.addLayer({ type: "raster", source });
+    return { layer, source };
+  } catch (error) {
+    console.error(
+      `NavaraViewport: the "${option.label}" basemap could not be added; ` +
+        "the viewer continues without imagery.",
+      error,
+    );
+    return null;
+  }
+}
+
+/** Take the basemap back out, layer first — `Source.delete()` is a no-op while
+ *  a layer still references the source, so the reverse order leaks it. */
+function removeBasemap(handles: BasemapHandles): void {
+  try {
+    handles.layer.delete();
+    handles.source.delete();
+  } catch (error) {
+    console.error("NavaraViewport: the basemap could not be removed.", error);
+  }
 }
 
 /**
@@ -302,6 +349,14 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
      *  in the scene: with no API key, or after the engine refuses the layer,
      *  the flag stays on while the credit stays off. */
     const tilesWanted = useTilesStore((s) => s.enabled);
+    /** Which basemap the user picked. */
+    const basemapId = useBasemapStore((s) => s.basemapId);
+    /** The basemap whose imagery is actually IN the scene, or `null` — the
+     *  same "credit what is on screen, not what was asked for" rule the Google
+     *  credit follows. */
+    const [activeBasemap, setActiveBasemap] = useState<BasemapOption | null>(
+      null,
+    );
     /** Bumped by the sync effect when a layer was newly added, which is the
      *  only thing that triggers an automatic fit. */
     const [fitToken, setFitToken] = useState(0);
@@ -570,6 +625,27 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         if (viewRef.current === view) removeGoogleTiles(handles);
       };
     }, [engineReady, tilesWanted]);
+
+    // --- The raster basemap, following the picker ---
+    //
+    // Declared after the lifecycle effect for the same reason the tiles effect
+    // is: React runs cleanups in declaration order, so on unmount the engine is
+    // already disposed and the `viewRef.current === view` guard declines to
+    // call `delete()` through a dead view. Keyed on `basemapId`, so changing
+    // the option removes the old pair and adds the new one in one commit.
+    useEffect(() => {
+      const view = viewRef.current;
+      if (!engineReady || view === null) return;
+      const option = basemapById(basemapId);
+      const handles = addBasemap(view, option);
+      // "None", or the engine refused: nothing is draped, so nobody is credited.
+      if (handles === null) return;
+      setActiveBasemap(option);
+      return () => {
+        setActiveBasemap(null);
+        if (viewRef.current === view) removeBasemap(handles);
+      };
+    }, [engineReady, basemapId]);
 
     // --- FPS readout from the render loop ---
     useEffect(() => {
@@ -1370,8 +1446,12 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         <ViewAlignButtons onAlign={alignView} />
         {/* Licence obligation, not decoration: the geoid credits are shown
             whatever is loaded (every georeferenced layer samples it), the
-            Google credit only while its tiles are in the scene. */}
-        <AttributionOverlay googleTiles={tilesEnabled} />
+            Google credit only while its tiles are in the scene, and the
+            basemap credit only for the option actually draped on the globe. */}
+        <AttributionOverlay
+          googleTiles={tilesEnabled}
+          basemapAttribution={activeBasemap?.attribution}
+        />
       </div>
     );
   },
