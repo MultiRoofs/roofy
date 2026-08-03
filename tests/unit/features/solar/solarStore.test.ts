@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
+  defaultSolarDatetime,
   sunPositionFromEnu,
   useSolarStore,
 } from "../../../../src/features/solar/solarStore";
@@ -51,6 +52,26 @@ describe("sunPositionFromEnu", () => {
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
+
+describe("defaultSolarDatetime", () => {
+  // The scene starts on the wall clock no longer: an evening session used to
+  // open onto an almost-black globe, which reads as a broken renderer.
+  it("keeps today's UTC date but pins midday UTC", () => {
+    const dt = defaultSolarDatetime(new Date("2026-08-03T22:41:07.500Z"));
+    expect(dt.toISOString()).toBe("2026-08-03T12:00:00.000Z");
+  });
+
+  it("uses the UTC date, not the local one, so it never drifts a day", () => {
+    const dt = defaultSolarDatetime(new Date("2026-01-01T00:30:00.000Z"));
+    expect(dt.toISOString()).toBe("2026-01-01T12:00:00.000Z");
+  });
+
+  it("puts the sun well above the horizon over Europe", () => {
+    // 12:00 UTC is solar noon on the prime meridian; Delft (4.35E) is within
+    // 20 minutes of it, so the sun is at its daily maximum whatever the date.
+    expect(defaultSolarDatetime().getUTCHours()).toBe(12);
+  });
+});
 
 describe("useSolarStore", () => {
   beforeEach(() => {

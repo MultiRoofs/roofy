@@ -80,8 +80,40 @@ export function sunPositionFromEnu(
 // Store
 // ---------------------------------------------------------------------------
 
+/**
+ * Today, at 12:00 UTC.
+ *
+ * NOT `new Date()`, which is what this store used to start from. The engine's
+ * atmosphere follows `solarStore.datetime`, so opening the viewer at 22:00
+ * local rendered a night scene over a night globe: an almost-black viewport
+ * that reads as a broken renderer rather than as "it is dark outside". The
+ * M7.5 browser smoke hit exactly this and had to shift the page's `Date` to
+ * take its screenshots (research/2026-08-01-navara-spike-findings.md §M7.5,
+ * finding 6) — a workaround for a real first-run defect.
+ *
+ * Midday **UTC** rather than midday local: the site comes from the model, not
+ * from the user's timezone, and this is a European project (Delft is the
+ * reference dataset). Noon UTC puts the sun high over the prime meridian and
+ * above the horizon across all of Europe, Africa and the Americas. The clock
+ * is one click from the toolbar's "now" button for anyone who wants the real
+ * time back.
+ */
+export function defaultSolarDatetime(now: Date = new Date()): Date {
+  return new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      12,
+      0,
+      0,
+      0,
+    ),
+  );
+}
+
 export const useSolarStore = create<SolarStore>((set) => ({
-  datetime: new Date(),
+  datetime: defaultSolarDatetime(),
   latLon: null,
   sunPosition: null,
   timeAnimating: false,
