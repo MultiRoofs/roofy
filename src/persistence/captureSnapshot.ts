@@ -6,23 +6,26 @@
  */
 
 import type { PickMode } from "../domain/selection/types";
-import type { LayerSnapshot, ProjectSnapshot, ViewState } from "./types";
-
-const SNAPSHOT_VERSION = "2";
+import type {
+  GeographicCamera,
+  LayerSnapshot,
+  ProjectSnapshot,
+  ViewState,
+} from "./types";
+import { SNAPSHOT_VERSION } from "./types";
 
 export interface CaptureInput {
   readonly label: string;
   readonly layers: ReadonlyArray<LayerSnapshot>;
-  readonly cameraPosition: readonly [number, number, number];
-  readonly cameraTarget: readonly [number, number, number];
+  /** The viewport's own `getCameraState()` result — geographic since v3. */
+  readonly camera: GeographicCamera;
   readonly datetime: Date;
   readonly pickMode: PickMode;
 }
 
 export function captureSnapshot(input: CaptureInput): ProjectSnapshot {
   const viewState: ViewState = {
-    cameraPosition: input.cameraPosition,
-    cameraTarget: input.cameraTarget,
+    camera: input.camera,
     datetime: input.datetime.toISOString(),
   };
 
