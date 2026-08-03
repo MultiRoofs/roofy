@@ -1,8 +1,17 @@
 /**
  * Advanced rendering settings panel.
  *
- * Floating overlay at top-right of viewport, toggled from toolbar gear button.
- * Contains rendering configuration: lens flare, cloud coverage, etc.
+ * Floating overlay at top-right of the viewport, toggled from the toolbar gear
+ * button.
+ *
+ * EVERY control here drives live engine state — a `DefaultPlugin`
+ * photoreal-scene handle, a `view.addEffect` pass, `view.addLight`,
+ * `view.toneMappingExposure`, or a source/layer pair. That is the whole point
+ * of this file's second pass: it previously carried "City Shadows", "Double
+ * Sided" and "City Material", none of which was read by anything, so a third
+ * of the panel was decorative. They are gone rather than wired — their real
+ * counterpart is the city mesh's three.js material, which lives in
+ * `@cityjson/navara-cityjson`, not in the app (see `renderDebugStore.ts`).
  */
 
 import { useAtmosphereStore } from "../../features/atmosphere/atmosphereStore";
@@ -10,8 +19,9 @@ import { useTilesStore } from "../../features/tiles/tilesStore";
 import { useBasemapStore } from "../../features/basemap/basemapStore";
 import { BASEMAPS, type BasemapId } from "../../scene/basemaps";
 import {
+  AMBIENT_RANGE,
+  EXPOSURE_RANGE,
   useRenderDebugStore,
-  type CityMaterialMode,
 } from "../../features/debug/renderDebugStore";
 
 interface AdvancedSettingsPanelProps {
@@ -45,15 +55,11 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
   const setSunShadowsEnabled = useRenderDebugStore(
     (s) => s.setSunShadowsEnabled,
   );
-  const cityShadowsEnabled = useRenderDebugStore((s) => s.cityShadowsEnabled);
-  const setCityShadowsEnabled = useRenderDebugStore(
-    (s) => s.setCityShadowsEnabled,
-  );
-  const cityDoubleSided = useRenderDebugStore((s) => s.cityDoubleSided);
-  const setCityDoubleSided = useRenderDebugStore((s) => s.setCityDoubleSided);
-  const cityMaterialMode = useRenderDebugStore((s) => s.cityMaterialMode);
-  const setCityMaterialMode = useRenderDebugStore((s) => s.setCityMaterialMode);
-  const resetDebugSettings = useRenderDebugStore((s) => s.reset);
+  const exposure = useRenderDebugStore((s) => s.exposure);
+  const setExposure = useRenderDebugStore((s) => s.setExposure);
+  const ambientIntensity = useRenderDebugStore((s) => s.ambientIntensity);
+  const setAmbientIntensity = useRenderDebugStore((s) => s.setAmbientIntensity);
+  const resetRenderSettings = useRenderDebugStore((s) => s.reset);
 
   return (
     <div className="advanced-settings-panel">
@@ -66,11 +72,57 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
         </button>
       </div>
       <div className="advanced-settings-body">
-        {/* Rendering */}
+        {/* Lighting — the section that decides how bright the scene reads. */}
         <div className="attr-section">
-          <div className="attr-section-title">Rendering</div>
+          <div className="attr-section-title">Lighting</div>
+          <div className="attr-row">
+            <span className="attr-key">Exposure</span>
+            <span className="attr-value">{exposure.toFixed(1)}</span>
+          </div>
+          <div className="advanced-slider-row">
+            <input
+              type="range"
+              className="advanced-slider"
+              aria-label="Exposure"
+              min={EXPOSURE_RANGE.min}
+              max={EXPOSURE_RANGE.max}
+              step={EXPOSURE_RANGE.step}
+              value={exposure}
+              onChange={(e) => setExposure(Number(e.target.value))}
+            />
+          </div>
+          <div className="attr-row">
+            <span className="attr-key">Ambient Light</span>
+            <span className="attr-value">{ambientIntensity.toFixed(2)}</span>
+          </div>
+          <div className="advanced-slider-row">
+            <input
+              type="range"
+              className="advanced-slider"
+              aria-label="Ambient Light"
+              min={AMBIENT_RANGE.min}
+              max={AMBIENT_RANGE.max}
+              step={AMBIENT_RANGE.step}
+              value={ambientIntensity}
+              onChange={(e) => setAmbientIntensity(Number(e.target.value))}
+            />
+          </div>
           <div className="advanced-toggle-row">
-            <span>Post Processing</span>
+            <span>Sun Shadows</span>
+            <input
+              type="checkbox"
+              aria-label="Sun Shadows"
+              checked={sunShadowsEnabled}
+              onChange={(e) => setSunShadowsEnabled(e.target.checked)}
+            />
+          </div>
+        </div>
+
+        {/* Post processing */}
+        <div className="attr-section">
+          <div className="attr-section-title">Post Processing</div>
+          <div className="advanced-toggle-row">
+            <span>Enabled</span>
             <input
               type="checkbox"
               aria-label="Post Processing"
@@ -108,6 +160,30 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
               onChange={(e) => setLensFlareEnabled(e.target.checked)}
             />
           </div>
+          <div className="attr-row">
+            <span className="attr-key">Cloud Coverage</span>
+            <span className="attr-value">
+              {(cloudCoverage * 100).toFixed(0)}%
+            </span>
+          </div>
+          <div className="advanced-slider-row">
+            <input
+              type="range"
+              className="advanced-slider"
+              aria-label="Cloud Coverage"
+              min={0}
+              max={1}
+              step={0.01}
+              disabled={!postProcessingEnabled || !cloudsEnabled}
+              value={cloudCoverage}
+              onChange={(e) => setCoverage(Number(e.target.value))}
+            />
+          </div>
+        </div>
+
+        {/* Backdrop */}
+        <div className="attr-section">
+          <div className="attr-section-title">Backdrop</div>
           <div className="advanced-toggle-row">
             <span>Google 3D Tiles</span>
             <input
@@ -132,77 +208,10 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
               ))}
             </select>
           </div>
-        </div>
-
-        <div className="attr-section">
-          <div className="attr-section-title">Scene Debug</div>
-          <div className="advanced-toggle-row">
-            <span>Sun Shadows</span>
-            <input
-              type="checkbox"
-              aria-label="Sun Shadows"
-              checked={sunShadowsEnabled}
-              onChange={(e) => setSunShadowsEnabled(e.target.checked)}
-            />
-          </div>
-          <div className="advanced-toggle-row">
-            <span>City Shadows</span>
-            <input
-              type="checkbox"
-              aria-label="City Shadows"
-              checked={cityShadowsEnabled}
-              onChange={(e) => setCityShadowsEnabled(e.target.checked)}
-            />
-          </div>
-          <div className="advanced-toggle-row">
-            <span>Double Sided</span>
-            <input
-              type="checkbox"
-              aria-label="Double Sided"
-              checked={cityDoubleSided}
-              onChange={(e) => setCityDoubleSided(e.target.checked)}
-            />
-          </div>
-          <div className="advanced-toggle-row advanced-select-row">
-            <label htmlFor="city-material-mode">City Material</label>
-            <select
-              id="city-material-mode"
-              className="advanced-select"
-              value={cityMaterialMode}
-              onChange={(e) =>
-                setCityMaterialMode(e.target.value as CityMaterialMode)
-              }
-            >
-              <option value="standard">Standard</option>
-              <option value="basic">Basic</option>
-            </select>
-          </div>
           <div className="advanced-settings-actions">
-            <button className="rule-cancel-btn" onClick={resetDebugSettings}>
-              Reset Debug
+            <button className="rule-cancel-btn" onClick={resetRenderSettings}>
+              Reset Rendering
             </button>
-          </div>
-        </div>
-
-        {/* Clouds */}
-        <div className="attr-section">
-          <div className="attr-section-title">Clouds</div>
-          <div className="attr-row">
-            <span className="attr-key">Coverage</span>
-            <span className="attr-value">
-              {(cloudCoverage * 100).toFixed(0)}%
-            </span>
-          </div>
-          <div className="solar-control-row">
-            <input
-              type="range"
-              className="solar-slider"
-              min={0}
-              max={1}
-              step={0.01}
-              value={cloudCoverage}
-              onChange={(e) => setCoverage(Number(e.target.value))}
-            />
           </div>
         </div>
       </div>

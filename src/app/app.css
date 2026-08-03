@@ -742,6 +742,22 @@ body {
   font-size: 0.74rem;
 }
 
+.advanced-slider-row {
+  display: flex;
+  align-items: center;
+  padding: 0 0.75rem 0.35rem;
+}
+
+.advanced-slider {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.advanced-slider:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 .advanced-settings-actions {
   display: flex;
   justify-content: flex-end;
