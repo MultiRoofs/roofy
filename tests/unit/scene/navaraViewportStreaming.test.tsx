@@ -61,6 +61,15 @@ let pendingInitRelease: (() => void) | null = null;
 
 const RAY = { origin: { x: 0, y: 0, z: 0 }, direction: { x: 0, y: 0, z: 1 } };
 const getPickRay = vi.fn(() => RAY as unknown);
+/** The engine's atmosphere, reduced to the surface the solar wiring touches
+ *  (Task C16) — it only has to exist here; `navaraViewportSolar.test.tsx`
+ *  drives it for real. */
+const atmosphere = {
+  date: new Date("2026-06-21T12:00:00.000Z"),
+  getSunDirection: vi.fn(() => ({ x: 1, y: 0, z: 0 })),
+  on: vi.fn(),
+  off: vi.fn(),
+};
 const viewInstances: Array<Record<string, unknown>> = [];
 
 vi.mock("@navaramap/three", () => ({
@@ -78,6 +87,7 @@ vi.mock("@navaramap/three", () => ({
       },
       setCamera,
       flyTo,
+      atmosphere,
       screenSize: { x: 800, y: 600 },
       pixelRatio: 1,
       pickDepthPosition: vi.fn(() => null as unknown),
