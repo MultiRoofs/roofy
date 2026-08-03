@@ -27,11 +27,18 @@ const RAY: EcefRay = {
 
 /** A handle that reports a hit `distance` metres away and resolves it to
  *  a selection carrying its own layer id. */
-function rayHandle(id: string, distance: number | null) {
+function rayHandle(id: string, distance: number | null, cellKey?: string) {
   return {
     id,
     resolveRaycast: vi.fn(() =>
-      distance === null ? null : { objectIndex: 2, surfaceIndex: 4, distance },
+      distance === null
+        ? null
+        : {
+            objectIndex: 2,
+            surfaceIndex: 4,
+            distance,
+            ...(cellKey === undefined ? {} : { cellKey }),
+          },
     ),
     resolvePick: vi.fn(
       (): Selection => ({
@@ -75,6 +82,23 @@ describe("resolveNearestHit", () => {
         layerId: "NEAR",
         objectIndex: 2,
         surfaceIndex: 4,
+      },
+    });
+  });
+
+  it("forwards a multi-mesh handle's cellKey, without which a streamed pick resolves to nothing", () => {
+    // A streaming layer's resident cells each have their own index space, so
+    // `objectIndex: 2` means nothing until the handle is told WHICH cell it was
+    // measured in. The router never interprets the key — it only carries it.
+    const streamed = rayHandle("S1", 12, "4/7/9");
+    resolveNearestHit([streamed] as never, RAY);
+    expect(streamed.resolvePick).toHaveBeenCalledWith({
+      layerId: "S1",
+      properties: {
+        layerId: "S1",
+        objectIndex: 2,
+        surfaceIndex: 4,
+        cellKey: "4/7/9",
       },
     });
   });

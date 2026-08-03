@@ -107,6 +107,23 @@ vi.mock("@cityjson/navara-cityjson/plugin", () => ({
   CityJSONPlugin: CityJSONPluginMock,
 }));
 
+/** The streaming plugin is mocked here only so this file can keep testing the
+ *  STATIC half in isolation — `suppressSettle` is a passthrough, so every
+ *  camera assertion below reads exactly as it did before Task C13 wrapped the
+ *  four programmatic moves. The streaming wiring itself is asserted in
+ *  `navaraViewportStreaming.test.tsx`. */
+const flatPluginInstance = {
+  openStream: vi.fn(),
+  remove: vi.fn(),
+  dispose: vi.fn(),
+  suppressSettle: vi.fn(async (fn: () => unknown) => fn()),
+};
+vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
+  FlatCityBufPlugin: vi.fn(function () {
+    return flatPluginInstance;
+  }),
+}));
+
 const { NavaraViewport } = await import("../../../src/scene/NavaraViewport");
 import type { CitySceneHandle } from "../../../src/scene/NavaraViewport";
 import {
@@ -229,7 +246,9 @@ describe("NavaraViewport lifecycle", () => {
   it("registers DefaultPlugin then CityJSONPlugin, both before view.init()", async () => {
     render(<NavaraViewport onTriangleCount={() => {}} />);
     await waitFor(() => expect(init).toHaveBeenCalled());
-    expect(addPlugin.mock.calls.map((c) => c[0])).toEqual([
+    // The FlatCityBuf plugin is third; its own ordering guarantees live in
+    // `navaraViewportStreaming.test.tsx`.
+    expect(addPlugin.mock.calls.map((c) => c[0]).slice(0, 2)).toEqual([
       defaultPluginInstance,
       cityPluginInstance,
     ]);

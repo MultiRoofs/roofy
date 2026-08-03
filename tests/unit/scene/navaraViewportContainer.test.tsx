@@ -63,6 +63,13 @@ vi.mock("@cityjson/navara-cityjson/plugin", () => ({
     return { getHandle: vi.fn(), addCityModel: vi.fn() };
   }),
 }));
+// Mocked for the same reason as the engine itself: the `/plugin` subpath
+// imports `@navaramap/three` at module scope (Task B1: NODE_IMPORT_SAFE=false).
+vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
+  FlatCityBufPlugin: vi.fn(function () {
+    return { openStream: vi.fn(), remove: vi.fn(), suppressSettle: vi.fn() };
+  }),
+}));
 
 describe("NavaraViewport without a canvas container", () => {
   it("REJECTS `ready` and shows the error panel instead of hanging", async () => {

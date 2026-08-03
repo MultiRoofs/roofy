@@ -35,6 +35,7 @@ function fakeHandle(): FcbStreamLayerHandle {
 function makeStreamState(overrides: Partial<StreamState> = {}): StreamState {
   return {
     handle: fakeHandle(),
+    disposers: [],
     grid,
     header,
     level: null,

@@ -41,6 +41,17 @@ export interface StreamState {
    *  action below — a version bump mirrors a commit, it does not re-create
    *  the thing that committed. */
   readonly handle: FcbStreamLayerHandle;
+  /**
+   * The unsubscribes for the three handle events this store mirrors
+   * (`onStatus`/`onLadder`/`onCommit`), to be run by `closeStreamingLayer`.
+   *
+   * Held here because `handle.delete()` does NOT clear the handle's listener
+   * sets: without these, a closed layer's callbacks stay reachable from the
+   * handle, keeping this store's closures — and through them the layer id and
+   * anything else they capture — alive for as long as anything still holds the
+   * handle. `NavaraViewport`'s `streamsRef` is exactly such a holder.
+   */
+  readonly disposers: ReadonlyArray<() => void>;
   /** `handle.grid`, mirrored so `LodSelector` can size a cell without
    *  reaching into the handle on every render. Immutable for the layer's
    *  lifetime, which is why mirroring it needs no updater. */
