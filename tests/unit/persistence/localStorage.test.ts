@@ -13,17 +13,29 @@ function makeSnapshot(
   overrides: Partial<ProjectSnapshot> = {},
 ): ProjectSnapshot {
   return {
-    version: "1",
+    version: "3",
     savedAt: "2025-06-21T12:00:00Z",
     label: "Test snapshot",
-    modelRef: { type: "url", url: "https://example.com/model.city.json" },
+    layers: [
+      {
+        name: "delft",
+        modelRef: { type: "url", url: "https://example.com/model.city.json" },
+        rules: [],
+        rulesEnabled: true,
+        visible: true,
+      },
+    ],
     viewState: {
-      cameraPosition: [50, 50, 50],
-      cameraTarget: [0, 0, 0],
+      camera: {
+        lng: 4.3571,
+        lat: 52.0116,
+        height: 800,
+        heading: 30,
+        pitch: -45,
+        roll: 0,
+      },
       datetime: "2025-06-21T12:00:00Z",
     },
-    rules: [],
-    rulesEnabled: true,
     pickMode: "object",
     ...overrides,
   };
@@ -47,11 +59,19 @@ describe("LocalStorageProjectStateStore", () => {
     const loaded = await store.load(id);
     expect(loaded).not.toBeNull();
     expect(loaded!.label).toBe("Test snapshot");
-    expect(loaded!.modelRef).toEqual({
+    expect(loaded!.version).toBe("3");
+    expect(loaded!.layers![0]!.modelRef).toEqual({
       type: "url",
       url: "https://example.com/model.city.json",
     });
-    expect(loaded!.viewState.cameraPosition).toEqual([50, 50, 50]);
+    expect(loaded!.viewState.camera).toEqual({
+      lng: 4.3571,
+      lat: 52.0116,
+      height: 800,
+      heading: 30,
+      pitch: -45,
+      roll: 0,
+    });
   });
 
   it("list returns summaries of all saved snapshots", async () => {
@@ -80,16 +100,24 @@ describe("LocalStorageProjectStateStore", () => {
     expect(loaded).toBeNull();
   });
 
-  it("preserves rules in the snapshot", async () => {
+  it("preserves per-layer rules in the snapshot", async () => {
     const snapshot = makeSnapshot({
-      rules: [
+      layers: [
         {
-          id: "r1",
-          name: "South-facing",
-          color: "#ff0000",
-          conditions: [{ field: "azimuthDeg", operator: ">", value: 135 }],
-          logic: "AND",
-          enabled: true,
+          name: "delft",
+          modelRef: { type: "url", url: "https://example.com/model.city.json" },
+          rules: [
+            {
+              id: "r1",
+              name: "South-facing",
+              color: "#ff0000",
+              conditions: [{ field: "azimuthDeg", operator: ">", value: 135 }],
+              logic: "AND",
+              enabled: true,
+            },
+          ],
+          rulesEnabled: true,
+          visible: true,
         },
       ],
     });
@@ -97,31 +125,41 @@ describe("LocalStorageProjectStateStore", () => {
     const id = await store.save(snapshot);
     const loaded = await store.load(id);
 
-    expect(loaded!.rules).toHaveLength(1);
-    expect(loaded!.rules![0]!.name).toBe("South-facing");
-    expect(loaded!.rules![0]!.conditions[0]!.field).toBe("azimuthDeg");
+    expect(loaded!.layers![0]!.rules).toHaveLength(1);
+    expect(loaded!.layers![0]!.rules[0]!.name).toBe("South-facing");
+    expect(loaded!.layers![0]!.rules[0]!.conditions[0]!.field).toBe(
+      "azimuthDeg",
+    );
   });
 
-  it("preserves file model reference", async () => {
+  it("preserves a file-backed layer's model reference", async () => {
     const snapshot = makeSnapshot({
-      modelRef: { type: "file", fileName: "delft.city.json" },
+      layers: [
+        {
+          name: "delft",
+          modelRef: { type: "file", fileName: "delft.city.json" },
+          rules: [],
+          rulesEnabled: true,
+          visible: true,
+        },
+      ],
     });
 
     const id = await store.save(snapshot);
     const loaded = await store.load(id);
 
-    expect(loaded!.modelRef).toEqual({
+    expect(loaded!.layers![0]!.modelRef).toEqual({
       type: "file",
       fileName: "delft.city.json",
     });
   });
 
-  it("handles null modelRef", async () => {
-    const snapshot = makeSnapshot({ modelRef: null });
+  it("handles a snapshot with no layers", async () => {
+    const snapshot = makeSnapshot({ layers: [] });
     const id = await store.save(snapshot);
     const loaded = await store.load(id);
 
-    expect(loaded!.modelRef).toBeNull();
+    expect(loaded!.layers).toEqual([]);
   });
 
   it("multiple saves create distinct IDs", async () => {

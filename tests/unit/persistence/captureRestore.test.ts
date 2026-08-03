@@ -5,14 +5,39 @@
  * restoreSnapshot writes to Zustand stores (selection, solar).
  * Layer state (including rules) is handled by the layer store,
  * restored by the caller (App.tsx), not by restoreSnapshot.
+ *
+ * Snapshot v3 stores the camera geographically
+ * (`{lng, lat, height, heading, pitch, roll}`); v1/v2 snapshots carried two
+ * scene-space 3-tuples and are rejected outright rather than migrated.
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { captureSnapshot } from "../../../src/persistence/captureSnapshot";
 import { restoreSnapshot } from "../../../src/persistence/restoreSnapshot";
+import { UnsupportedSnapshotVersionError } from "../../../src/persistence/types";
+import type { GeographicCamera } from "../../../src/persistence/types";
+import type { GeographicCameraState } from "../../../src/scene/geographicCamera";
 import { useSelectionStore } from "../../../src/features/selection/selectionStore";
 import { useSolarStore } from "../../../src/features/solar/solarStore";
 import type { Rule } from "../../../src/features/rules/types";
+
+const CAM = {
+  lng: 4.3571,
+  lat: 52.0116,
+  height: 800,
+  heading: 30,
+  pitch: -45,
+  roll: 0,
+} as const;
+
+/**
+ * Compile-time guard that the snapshot's `GeographicCamera` and the scene's
+ * `GeographicCameraState` stay one shape. They are declared separately so
+ * persistence never imports the scene layer (and vice versa); this assignment
+ * fails `tsc` the moment either side gains or renames a field.
+ */
+const _sceneToSnapshot: GeographicCamera = CAM satisfies GeographicCameraState;
+void _sceneToSnapshot;
 
 const testRule: Rule = {
   id: "r1",
@@ -49,21 +74,19 @@ describe("captureSnapshot", () => {
           visible: true,
         },
       ],
-      cameraPosition: [10, 20, 30],
-      cameraTarget: [0, 5, 0],
+      camera: CAM,
       datetime: new Date("2025-12-21T10:00:00Z"),
       pickMode: "surface",
     });
 
-    expect(snapshot.version).toBe("2");
+    expect(snapshot.version).toBe("3");
     expect(snapshot.label).toBe("Test");
     expect(snapshot.layers).toHaveLength(1);
     expect(snapshot.layers![0]!.name).toBe("delft");
     expect(snapshot.layers![0]!.rules).toHaveLength(1);
     expect(snapshot.layers![0]!.rules[0]!.name).toBe("South-facing");
     expect(snapshot.layers![0]!.rulesEnabled).toBe(false);
-    expect(snapshot.viewState.cameraPosition).toEqual([10, 20, 30]);
-    expect(snapshot.viewState.cameraTarget).toEqual([0, 5, 0]);
+    expect(snapshot.viewState.camera).toEqual(CAM);
     expect(snapshot.viewState.datetime).toBe("2025-12-21T10:00:00.000Z");
     expect(snapshot.pickMode).toBe("surface");
     expect(snapshot.savedAt).toBeTruthy();
@@ -74,8 +97,7 @@ describe("captureSnapshot", () => {
     const snapshot = captureSnapshot({
       label: "Pure",
       layers: [],
-      cameraPosition: [0, 0, 0],
-      cameraTarget: [0, 0, 0],
+      camera: CAM,
       datetime: new Date("2030-01-01T00:00:00Z"),
       pickMode: "object",
     });
@@ -89,8 +111,7 @@ describe("restoreSnapshot", () => {
     const snapshot = captureSnapshot({
       label: "Restore test",
       layers: [],
-      cameraPosition: [100, 200, 300],
-      cameraTarget: [10, 10, 10],
+      camera: CAM,
       datetime: new Date(Date.UTC(2025, 5, 21, 12, 0, 0)),
       pickMode: "object",
     });
@@ -105,16 +126,14 @@ describe("restoreSnapshot", () => {
 
     expect(useSelectionStore.getState().mode).toBe("object");
     expect(useSelectionStore.getState().selections).toEqual([]);
-    expect(viewState.cameraPosition).toEqual([100, 200, 300]);
-    expect(viewState.cameraTarget).toEqual([10, 10, 10]);
+    expect(viewState.camera).toEqual(CAM);
   });
 
   it("restores datetime to the solar store", () => {
     const snapshot = captureSnapshot({
       label: "Datetime test",
       layers: [],
-      cameraPosition: [0, 0, 0],
-      cameraTarget: [0, 0, 0],
+      camera: CAM,
       datetime: new Date("2025-12-21T10:00:00Z"),
       pickMode: "object",
     });
@@ -137,8 +156,7 @@ describe("restoreSnapshot", () => {
           visible: true,
         },
       ],
-      cameraPosition: [0, 0, 0],
-      cameraTarget: [0, 0, 0],
+      camera: CAM,
       datetime: new Date(Date.UTC(2025, 5, 21, 12, 0, 0)),
       pickMode: "object",
     });
@@ -153,12 +171,29 @@ describe("restoreSnapshot", () => {
     expect(snapshot.layers![0]!.rulesEnabled).toBe(false);
   });
 
+  it("survives a JSON round-trip, the shape localStorage and the share hash actually store", () => {
+    const snapshot = captureSnapshot({
+      label: "JSON round-trip",
+      layers: [],
+      camera: CAM,
+      datetime: new Date("2025-12-21T10:00:00Z"),
+      pickMode: "surface",
+    });
+
+    const viewState = restoreSnapshot(
+      JSON.parse(JSON.stringify(snapshot)) as typeof snapshot,
+    );
+
+    expect(viewState.camera).toEqual(CAM);
+    expect(viewState.datetime).toBe("2025-12-21T10:00:00.000Z");
+    expect(useSelectionStore.getState().mode).toBe("surface");
+  });
+
   it("handles invalid datetime gracefully", () => {
     const snapshot = captureSnapshot({
       label: "Bad datetime",
       layers: [],
-      cameraPosition: [0, 0, 0],
-      cameraTarget: [0, 0, 0],
+      camera: CAM,
       datetime: new Date(Date.UTC(2025, 5, 21, 12, 0, 0)),
       pickMode: "object",
     });
@@ -176,5 +211,62 @@ describe("restoreSnapshot", () => {
 
     // Datetime should remain unchanged (invalid date skipped)
     expect(after.toISOString()).toBe(before.toISOString());
+  });
+
+  it("rejects a v2 snapshot with a clear message instead of silently restoring a broken camera", () => {
+    const v2 = {
+      version: "2",
+      savedAt: new Date().toISOString(),
+      label: "old",
+      layers: [],
+      viewState: {
+        cameraPosition: [1, 2, 3],
+        cameraTarget: [0, 0, 0],
+        datetime: new Date().toISOString(),
+      },
+      pickMode: "object",
+    };
+    expect(() => restoreSnapshot(v2 as never)).toThrow(
+      UnsupportedSnapshotVersionError,
+    );
+    expect(() => restoreSnapshot(v2 as never)).toThrow(/older version/i);
+  });
+
+  it("rejects a v1 snapshot too", () => {
+    expect(() => restoreSnapshot({ version: "1" } as never)).toThrow(
+      UnsupportedSnapshotVersionError,
+    );
+  });
+
+  it("names the version it found in the error", () => {
+    try {
+      restoreSnapshot({ version: "2" } as never);
+      expect.unreachable("restoreSnapshot should have thrown");
+    } catch (e) {
+      expect(e).toBeInstanceOf(UnsupportedSnapshotVersionError);
+      expect((e as UnsupportedSnapshotVersionError).found).toBe("2");
+      expect((e as Error).name).toBe("UnsupportedSnapshotVersionError");
+    }
+  });
+
+  it("rejects a snapshot with no version at all", () => {
+    expect(() =>
+      restoreSnapshot({
+        label: "x",
+        viewState: { camera: CAM, datetime: "" },
+      } as never),
+    ).toThrow(UnsupportedSnapshotVersionError);
+  });
+
+  it("does NOT mutate the selection or solar stores when it rejects", () => {
+    useSelectionStore.setState({
+      mode: "surface",
+      selections: [],
+      hovered: null,
+    });
+    const datetimeBefore = useSolarStore.getState().datetime;
+    expect(() => restoreSnapshot({ version: "2" } as never)).toThrow();
+    expect(useSelectionStore.getState().mode).toBe("surface");
+    expect(useSolarStore.getState().datetime).toBe(datetimeBefore);
   });
 });

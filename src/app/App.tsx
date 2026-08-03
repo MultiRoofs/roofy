@@ -12,7 +12,10 @@ import type {
   SnapshotSummary,
   StreamSourceSnapshot,
 } from "../persistence/types";
-import { migrateSnapshot } from "../persistence/types";
+import {
+  normalizeLayers,
+  UnsupportedSnapshotVersionError,
+} from "../persistence/types";
 import { LocalStorageProjectStateStore } from "../persistence/localStorage";
 import { captureSnapshot } from "../persistence/captureSnapshot";
 import { restoreSnapshot } from "../persistence/restoreSnapshot";
@@ -31,10 +34,6 @@ import { browserPlatform } from "../platform/browser";
 import type { PlatformServices } from "../platform/types";
 import { NavaraViewport } from "../scene/NavaraViewport";
 import type { CitySceneHandle } from "../scene/NavaraViewport";
-import {
-  cameraStateFromTuples,
-  cameraStateToTuples,
-} from "../scene/cameraStateBridge";
 import { useSelectionStore } from "../features/selection/selectionStore";
 import { useLayerStore } from "../features/layers/layerStore";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
@@ -79,7 +78,7 @@ const SAMPLE_DATA_URL =
 export const ENGINE_BOOT_TIMEOUT_MS = 15_000;
 
 /** How a streaming layer's `.fcb` source was opened, for the save/restore
- *  round-trip (`LayerSnapshot.stream`, `migrateSnapshot`'s `unavailable`
+ *  round-trip (`LayerSnapshot.stream`, `normalizeLayers`' `unavailable`
  *  flag). Only meaningful for `l.isStreaming` layers — see handleSave. */
 function streamSourceSnapshot(
   modelRef: CityModelReference,
@@ -430,9 +429,6 @@ export function App({
   const handleSave = useCallback(async () => {
     const cameraState = sceneRef.current?.getCameraState();
     if (!cameraState) return;
-    // The snapshot schema still carries two 3-tuples; `cameraStateBridge` is
-    // the temporary carrier for the geographic camera until Task C18 bumps it.
-    const cameraTuples = cameraStateToTuples(cameraState);
 
     const { datetime } = useSolarStore.getState();
     const { layers: allLayers } = useLayerStore.getState();
@@ -454,8 +450,7 @@ export function App({
         lodMode: l.lodMode,
         ...(l.isStreaming ? { stream: streamSourceSnapshot(l.modelRef) } : {}),
       })),
-      cameraPosition: cameraTuples.position,
-      cameraTarget: cameraTuples.target,
+      camera: cameraState,
       datetime,
       pickMode,
     });
@@ -489,32 +484,20 @@ export function App({
         useLayerStore.getState().removeAllLayers();
         setUnavailableLayers([]);
 
-        // Restore layers from snapshot
+        // Restore layers from snapshot. A v1 single-model save (`modelRef`
+        // at the top level, no `layers`) is not handled here: it is a v1
+        // snapshot, and `restoreSnapshot` above already rejected it.
         const snapshotLayers = snapshot.layers ?? [];
-        // Legacy single-model fallback
-        const legacyLayers =
-          snapshotLayers.length === 0 && snapshot.modelRef
-            ? [
-                {
-                  name: snapshot.label,
-                  modelRef: snapshot.modelRef,
-                  rules: [...(snapshot.rules ?? [])],
-                  rulesEnabled: snapshot.rulesEnabled ?? true,
-                  visible: true,
-                },
-              ]
-            : snapshotLayers;
 
-        // Upgrades an older save (missing lodMode/stream) to the current
-        // per-layer schema and flags a file-backed streaming layer as
-        // needing re-selection — see migrateSnapshot's own doc comment.
-        // Cast at the boundary: `legacyLayers` is genuinely well-typed
-        // (`LayerSnapshot[]`), but `migrateSnapshot` accepts a deliberately
-        // LOOSE shape so it can also upgrade an older save that predates
-        // some of these fields — the same reason its own test file casts
-        // its fixtures `as never`.
-        const migrated = migrateSnapshot({
-          layers: legacyLayers as unknown as RawLayerSnapshot[],
+        // Defaults the optional per-layer fields and flags a file-backed
+        // streaming layer as needing re-selection — see normalizeLayers'
+        // own doc comment. Cast at the boundary: `snapshotLayers` is
+        // genuinely well-typed (`LayerSnapshot[]`), but `normalizeLayers`
+        // accepts a deliberately LOOSE shape so it also copes with a saved
+        // document missing optional fields — the same reason its own test
+        // file casts its fixtures `as never`.
+        const normalized = normalizeLayers({
+          layers: snapshotLayers as unknown as RawLayerSnapshot[],
         });
 
         // Each layer gets its OWN try/catch: one .fcb layer failing
@@ -526,7 +509,7 @@ export function App({
         let hasUrlLayer = false;
         let failedCount = 0;
         const newUnavailable: UnavailableLayer[] = [];
-        for (const sl of migrated.layers) {
+        for (const sl of normalized) {
           try {
             const name = (sl.name as string | undefined) ?? "Untitled layer";
             const modelRef = sl.modelRef as CityModelReference | undefined;
@@ -613,18 +596,18 @@ export function App({
         // The 100 ms wait survives only until Task C20, which replaces it with
         // `await sceneRef.current.ready` inside a try/catch.
         cameraTimerRef.current = setTimeout(() => {
-          sceneRef.current?.setCameraState(
-            cameraStateFromTuples(
-              viewState.cameraPosition,
-              viewState.cameraTarget,
-            ),
-          );
+          sceneRef.current?.setCameraState(viewState.camera);
         }, 100);
       } catch (e) {
         setToast(
           e instanceof Error ? e.message : "Failed to restore workspace.",
         );
-        setTimeout(() => setToast(null), 3000);
+        // The unsupported-version message is a full sentence explaining that
+        // the workspace must be re-saved; 3 s is not long enough to read it.
+        setTimeout(
+          () => setToast(null),
+          e instanceof UnsupportedSnapshotVersionError ? 8000 : 3000,
+        );
       }
     },
     [persistenceStore, clearError, resolveStreamPlugin, withEngineBooting],
@@ -641,7 +624,6 @@ export function App({
   const handleShare = useCallback(() => {
     const cameraState = sceneRef.current?.getCameraState();
     if (!cameraState) return;
-    const cameraTuples = cameraStateToTuples(cameraState);
 
     const { datetime } = useSolarStore.getState();
     const { layers: allLayers } = useLayerStore.getState();
@@ -657,8 +639,7 @@ export function App({
           rulesEnabled: l.rulesEnabled,
           visible: l.visible,
         })),
-      cp: cameraTuples.position,
-      ct: cameraTuples.target,
+      cam: cameraState,
       dt: datetime.toISOString(),
       pm: pickMode,
     };
@@ -685,25 +666,10 @@ export function App({
 
     history.replaceState(null, "", location.pathname);
 
-    // Load shared layers
-    const sharedLayers = shared.layers ?? [];
-    // Legacy single-model fallback
-    const legacyUrl =
-      "modelUrl" in shared ? (shared as { modelUrl?: string }).modelUrl : null;
-    const layersToLoad =
-      sharedLayers.length > 0
-        ? sharedLayers
-        : legacyUrl
-          ? [
-              {
-                name: fileNameFromUrl(legacyUrl),
-                modelUrl: legacyUrl,
-                rules: (shared as { rules?: unknown[] }).rules ?? [],
-                rulesEnabled: true,
-                visible: true,
-              },
-            ]
-          : [];
+    // Load shared layers. A pre-v3 link carried its single model at the top
+    // level (`modelUrl`); such links no longer decode at all, so there is no
+    // legacy shape to fall back to here.
+    const layersToLoad = shared.layers ?? [];
 
     if (layersToLoad.length === 0) return;
 
@@ -756,9 +722,7 @@ export function App({
       }
       if (cameraTimerRef.current) clearTimeout(cameraTimerRef.current);
       cameraTimerRef.current = setTimeout(() => {
-        sceneRef.current?.setCameraState(
-          cameraStateFromTuples(shared.cp, shared.ct),
-        );
+        sceneRef.current?.setCameraState(shared.cam);
       }, 100);
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
