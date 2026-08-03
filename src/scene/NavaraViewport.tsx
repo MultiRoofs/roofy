@@ -213,6 +213,60 @@ interface CloudsHandle {
   delete: () => void;
 }
 
+/** The same structural slice for the app-added ambient light. */
+interface LightHandleLike {
+  update: (updates: unknown) => void;
+  delete: () => void;
+}
+
+/**
+ * What `DefaultPlugin.addDefaultPhotorealScene()` hands back.
+ *
+ * Captured — it used to be discarded (`void defaultPlugin.addDefault…()`) —
+ * because these handles ARE the engine counterparts of the Advanced Settings
+ * panel. Without them the panel's aerial-perspective, lens-flare and
+ * sun-shadow switches had nothing to drive and were pure state.
+ *
+ * Structural, and every member optional, for two reasons: the engine's own
+ * types would drag `@navaramap/three-default-descs` in for four property
+ * reads, and `lensFlare` is genuinely `| undefined` in the engine's signature
+ * (0.0.5 omits it on backends that cannot afford the pass). A defensive
+ * `?? undefined` shape also means an engine build that stops returning one of
+ * these degrades to "that toggle does nothing" instead of a TypeError inside a
+ * store subscription.
+ */
+interface PhotorealScene {
+  readonly sky?: VisibilityHandle;
+  readonly stars?: VisibilityHandle;
+  readonly skyLightProbe?: VisibilityHandle;
+  readonly sun?: VisibilityHandle & { update: (updates: unknown) => void };
+  readonly aerialPerspective?: VisibilityHandle;
+  readonly lensFlare?: VisibilityHandle;
+  readonly toneMapping?: VisibilityHandle;
+  readonly antialiasing?: VisibilityHandle;
+}
+
+/** `BaseHandle`'s `visible` accessor, which every mesh/light/effect handle
+ *  inherits (`@navaramap/three` `BaseHandle`). */
+interface VisibilityHandle {
+  visible: boolean;
+}
+
+/**
+ * Push one engine mutation, reporting rather than propagating a refusal.
+ *
+ * The settings panel is a debug surface: a toggle the engine rejects — a
+ * handle already deleted, a pass that failed to compile on this GPU — must
+ * leave the viewer running, exactly as the clouds/tiles/basemap paths do.
+ */
+function applyToEngine(what: string, mutate: () => void): void {
+  try {
+    mutate();
+  } catch (error) {
+    console.error(`NavaraViewport: ${what} could not be applied.`, error);
+  }
+}
+
 /**
  * Drape the selected raster basemap over the globe.
  *
@@ -406,7 +460,23 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     const postProcessingEnabled = useRenderDebugStore(
       (s) => s.postProcessingEnabled,
     );
+    const aerialPerspectiveEnabled = useRenderDebugStore(
+      (s) => s.aerialPerspectiveEnabled,
+    );
+    const sunShadowsEnabled = useRenderDebugStore((s) => s.sunShadowsEnabled);
+    const exposure = useRenderDebugStore((s) => s.exposure);
+    const ambientIntensity = useRenderDebugStore((s) => s.ambientIntensity);
+    /** Whether there is an ambient light AT ALL — the only thing that may add
+     *  or remove it. Its intensity is pushed into the live handle instead. */
+    const ambientOn = ambientIntensity > 0;
     const cloudCoverage = useAtmosphereStore((s) => s.cloudCoverage);
+    const lensFlareEnabled = useAtmosphereStore((s) => s.lensFlareEnabled);
+    /** The handles the default photoreal scene handed back — the sky, stars,
+     *  sun, sky light probe and the whole post chain. See {@link PhotorealScene}. */
+    const photorealRef = useRef<PhotorealScene | null>(null);
+    /** The app-added ambient fill light (advanced settings), or null while the
+     *  intensity is 0 / the engine is down. */
+    const ambientHandleRef = useRef<LightHandleLike | null>(null);
     /** The live clouds effect handle, so coverage can be pushed to the pass
      *  instead of rebuilding it. */
     const cloudsHandleRef = useRef<CloudsHandle | null>(null);
@@ -556,8 +626,15 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
                 key: "default",
                 instance: defaultPlugin,
                 // Must run after `view.init()` — hence an afterInit hook
-                // rather than a call next to the constructor.
-                afterInit: () => void defaultPlugin.addDefaultPhotorealScene(),
+                // rather than a call next to the constructor. The RETURN VALUE
+                // is kept: those handles are the only way to drive the sky,
+                // the sun and the post chain afterwards (see PhotorealScene).
+                afterInit: () => {
+                  photorealRef.current =
+                    (defaultPlugin.addDefaultPhotorealScene() as
+                      | PhotorealScene
+                      | undefined) ?? null;
+                },
               },
               { key: "cityjson", instance: cityPlugin },
               ...(flatPlugin === null
@@ -608,6 +685,11 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         setTilesEnabled(false);
         viewRef.current = null;
         cityPluginRef.current = null;
+        // The photoreal handles died with the view. Dropping them here is what
+        // stops the settings effects below from pushing `visible` through a
+        // descriptor whose scene has been disposed on the next store change.
+        photorealRef.current = null;
+        ambientHandleRef.current = null;
         // Streaming state dies with the engine, and it has to be TOLD to: the
         // plugin's `dispose()` deletes every handle, but `streamStore` holds
         // the only other reference to them, so leaving its entries behind
@@ -762,6 +844,131 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         );
       }
     }, [cloudCoverage]);
+
+    // --- Tone-mapping exposure ---
+    //
+    // THE fix for "the scene is far darker than Navara's samples". Navara's
+    // getting-started sets `view.toneMappingExposure = 10` and every published
+    // sample renders at that value; three's default is 1, and this app never
+    // set it at all. The atmosphere hands the tone mapper physically-scaled
+    // radiance, so at exposure 1 the whole city sits in the bottom of the
+    // curve — dim, low-contrast and blue-grey, which is exactly what was
+    // reported. Driven from the store so the slider in Advanced Settings is
+    // the same knob rather than a second one.
+    useEffect(() => {
+      const view = viewRef.current;
+      if (!engineReady || view === null) return;
+      applyToEngine("the tone-mapping exposure", () => {
+        view.toneMappingExposure = exposure;
+      });
+    }, [engineReady, exposure]);
+
+    // --- Ambient fill light ---
+    //
+    // Added ONCE and then updated in place, for the same reason the clouds
+    // pass is: dragging the slider must not delete and re-add a light per
+    // pointer move. Skipped entirely at intensity 0, so "off" is genuinely no
+    // light in the scene rather than a zero-intensity one.
+    useEffect(() => {
+      const view = viewRef.current;
+      if (!engineReady || view === null) return;
+      // The LIVE value, not the one this render closed over: this effect is
+      // keyed on `ambientOn` alone, so it must read the intensity that just
+      // crossed 0 rather than the last one the push effect below recorded
+      // (effects run in declaration order, so that one has not run yet).
+      const intensity = useRenderDebugStore.getState().ambientIntensity;
+      if (intensity <= 0) return;
+      let handle: LightHandleLike | null = null;
+      try {
+        handle = view.addLight({
+          ambient: { intensity },
+        }) as unknown as LightHandleLike;
+      } catch (error) {
+        console.error(
+          "NavaraViewport: the ambient fill light could not be added; the " +
+            "scene renders on the photoreal sun and sky probe alone.",
+          error,
+        );
+        return;
+      }
+      ambientHandleRef.current = handle;
+      return () => {
+        ambientHandleRef.current = null;
+        if (viewRef.current !== view) return;
+        applyToEngine("the ambient fill light removal", () => handle?.delete());
+      };
+      // `ambientOn`, not `ambientIntensity`: only crossing the 0 boundary may
+      // add or remove the light. Every other change goes through the effect
+      // below.
+    }, [engineReady, ambientOn]);
+
+    // Intensity -> the live light, without rebuilding it.
+    useEffect(() => {
+      const handle = ambientHandleRef.current;
+      if (!handle || ambientIntensity <= 0) return;
+      applyToEngine("the ambient light intensity", () =>
+        handle.update({ ambient: { intensity: ambientIntensity } }),
+      );
+    }, [ambientIntensity]);
+
+    // --- The post chain: aerial perspective, lens flare, antialiasing ---
+    //
+    // These three are created by `addDefaultPhotorealScene()`, so unlike the
+    // clouds they are toggled through `handle.visible` rather than added and
+    // deleted — `BaseHandle.visible` maps onto the `postprocessing` pass's own
+    // enable flag (`Pass.visible`), which is what takes them out of the chain.
+    //
+    // Tone mapping is deliberately NOT in this list: it is the thing that maps
+    // HDR radiance to display range, so hiding it blows the frame to white
+    // instead of showing what the other passes contribute.
+    useEffect(() => {
+      const scene = photorealRef.current;
+      if (!engineReady || scene === null) return;
+      const setVisible = (
+        what: string,
+        handle: VisibilityHandle | undefined,
+        visible: boolean,
+      ) => {
+        if (!handle) return;
+        applyToEngine(what, () => {
+          handle.visible = visible;
+        });
+      };
+      setVisible(
+        "the aerial perspective toggle",
+        scene.aerialPerspective,
+        postProcessingEnabled && aerialPerspectiveEnabled,
+      );
+      setVisible(
+        "the lens flare toggle",
+        scene.lensFlare,
+        postProcessingEnabled && lensFlareEnabled,
+      );
+      setVisible(
+        "the antialiasing toggle",
+        scene.antialiasing,
+        postProcessingEnabled,
+      );
+    }, [
+      engineReady,
+      postProcessingEnabled,
+      aerialPerspectiveEnabled,
+      lensFlareEnabled,
+    ]);
+
+    // --- Sun shadows ---
+    //
+    // `SunLightDesc` owns the cascaded shadow maps, so the switch is a config
+    // update on its handle (`{ sun: { castShadow } }`) rather than a `visible`
+    // — hiding the light would take the scene's only key light with it.
+    useEffect(() => {
+      const scene = photorealRef.current;
+      if (!engineReady || scene?.sun === undefined) return;
+      const sun = scene.sun;
+      applyToEngine("the sun shadow toggle", () =>
+        sun.update({ sun: { castShadow: sunShadowsEnabled } }),
+      );
+    }, [engineReady, sunShadowsEnabled]);
 
     // --- Container resize -> engine resize ---
     //

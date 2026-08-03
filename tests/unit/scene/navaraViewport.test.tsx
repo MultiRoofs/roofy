@@ -40,9 +40,36 @@ const addEffect = vi.fn((_config: unknown) => ({
   update: updateEffect,
   delete: deleteEffect,
 }));
+/** `view.addLight` — the ambient fill light the app adds on top of the
+ *  photoreal scene's sky probe (Issue 2: a probe alone leaves every
+ *  sun-and-sky-averted surface near-black). */
+const updateLight = vi.fn();
+const deleteLight = vi.fn();
+const addLight = vi.fn((_config: unknown) => ({
+  id: "light-1",
+  update: updateLight,
+  delete: deleteLight,
+}));
 /** `view.resize` — driven by the container ResizeObserver, because the engine
  *  itself only listens on `window`. */
 const resize = vi.fn();
+/** The handles `DefaultPlugin.addDefaultPhotorealScene()` returns. These ARE
+ *  the engine counterparts of the Advanced Settings panel, so the mock has to
+ *  return real, mutable objects rather than `undefined`. */
+const photorealHandles = {
+  sky: { visible: true },
+  stars: { visible: true },
+  skyLightProbe: { visible: true },
+  sun: { visible: true, update: vi.fn() },
+  aerialPerspective: { visible: true },
+  lensFlare: { visible: true },
+  toneMapping: { visible: true },
+  antialiasing: { visible: true },
+};
+function resetPhotorealHandles(): void {
+  for (const handle of Object.values(photorealHandles)) handle.visible = true;
+  photorealHandles.sun.update.mockClear();
+}
 
 /** The engine's event bus, reduced to what `view.on/off` need. Tests drive the
  *  viewport by FIRING these, which is the only honest way to exercise a
@@ -115,7 +142,11 @@ vi.mock("@navaramap/three", () => ({
       addSource,
       addLayer,
       addEffect,
+      addLight,
       resize,
+      // Written by the exposure effect. `1` is three's own default, which is
+      // exactly the value that made the scene dark before Issue 2.
+      toneMappingExposure: 1,
       atmosphere,
       screenSize: { x: 800, y: 600 },
       pixelRatio: 2,
@@ -135,7 +166,9 @@ vi.mock("@navaramap/three", () => ({
   radianToDegree: vi.fn((r: number) => (r * 180) / Math.PI),
 }));
 
-const defaultPluginInstance = { addDefaultPhotorealScene: vi.fn() };
+const defaultPluginInstance = {
+  addDefaultPhotorealScene: vi.fn(() => photorealHandles),
+};
 vi.mock("@navaramap/three-default-plugin", () => ({
   DefaultPlugin: vi.fn(function () {
     if (defaultPluginThrows !== null) throw new Error(defaultPluginThrows);
@@ -178,7 +211,11 @@ import {
 import { useSelectionStore } from "../../../src/features/selection/selectionStore";
 import { useTilesStore } from "../../../src/features/tiles/tilesStore";
 import { useBasemapStore } from "../../../src/features/basemap/basemapStore";
-import { useRenderDebugStore } from "../../../src/features/debug/renderDebugStore";
+import {
+  DEFAULT_EXPOSURE,
+  DEFAULT_RENDER_DEBUG_STATE,
+  useRenderDebugStore,
+} from "../../../src/features/debug/renderDebugStore";
 import { useAtmosphereStore } from "../../../src/features/atmosphere/atmosphereStore";
 import { BASEMAPS } from "../../../src/scene/basemaps";
 import type { CityModel } from "../../../src/domain/citymodel/types";
@@ -225,13 +262,22 @@ globalThis.ResizeObserver =
 beforeEach(() => {
   useBasemapStore.setState({ basemapId: "none" });
   useRenderDebugStore.setState({
+    ...DEFAULT_RENDER_DEBUG_STATE,
     cloudsEnabled: false,
     postProcessingEnabled: true,
+    // Off by default here for the same reason clouds are: an ambient light
+    // would put an extra `addLight` in front of every unrelated assertion.
+    // The render-settings suite opts back in.
+    ambientIntensity: 0,
   });
-  useAtmosphereStore.setState({ cloudCoverage: 0.3 });
+  useAtmosphereStore.setState({ cloudCoverage: 0.3, lensFlareEnabled: true });
   addEffect.mockClear();
   updateEffect.mockClear();
   deleteEffect.mockClear();
+  addLight.mockClear();
+  updateLight.mockClear();
+  deleteLight.mockClear();
+  resetPhotorealHandles();
   resize.mockClear();
   resizeObservers.length = 0;
 });
@@ -1710,6 +1756,161 @@ describe("NavaraViewport clouds", () => {
     useRenderDebugStore.setState({ cloudsEnabled: true });
     addEffect.mockImplementationOnce(() => {
       throw new Error("no cloud textures");
+    });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const ref = createRef<CitySceneHandle>();
+    const { container } = render(
+      <NavaraViewport ref={ref} onTriangleCount={() => {}} />,
+    );
+    await waitFor(() => expect(ref.current).not.toBeNull());
+    await expect(ref.current!.ready).resolves.toBeUndefined();
+    await waitFor(() => expect(errors).toHaveBeenCalled());
+    expect(container.querySelector(".navara-viewport__error")).toBeNull();
+    errors.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Render settings -> the engine.
+//
+// The regression these pin is "the Advanced Settings toggles do nothing": the
+// panel wrote booleans into `renderDebugStore` and NOTHING read them. Every
+// assertion below therefore reads ENGINE state (a handle's `visible`, a
+// `sun.update()` call, `view.toneMappingExposure`, an `addLight` config) —
+// never the store, which is what the old tests checked and why they passed
+// while the feature was dead.
+// ---------------------------------------------------------------------------
+describe("NavaraViewport render settings", () => {
+  beforeEach(() => {
+    init.mockClear();
+    init.mockImplementation(async () => {});
+    listeners.clear();
+    viewInstances.length = 0;
+    defaultPluginThrows = null;
+    useTilesStore.setState({ enabled: false });
+    useLayerStore.setState({ layers: [], activeLayerId: null });
+  });
+
+  afterEach(() => {
+    cleanup();
+    useTilesStore.setState({ enabled: true });
+  });
+
+  /** The live view the component built — the object the effects mutate. */
+  function currentView() {
+    return viewInstances.at(-1) as { toneMappingExposure: number };
+  }
+
+  it("sets Navara's own tone-mapping exposure instead of three's default of 1", async () => {
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() =>
+      expect(currentView().toneMappingExposure).toBe(DEFAULT_EXPOSURE),
+    );
+    expect(DEFAULT_EXPOSURE).toBeGreaterThan(1);
+  });
+
+  it("follows the exposure slider", async () => {
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(init).toHaveBeenCalled());
+
+    act(() => useRenderDebugStore.getState().setExposure(3.5));
+    await waitFor(() => expect(currentView().toneMappingExposure).toBe(3.5));
+  });
+
+  it("captures the photoreal scene handles and toggles the post chain through them", async () => {
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() =>
+      expect(defaultPluginInstance.addDefaultPhotorealScene).toHaveBeenCalled(),
+    );
+    await waitFor(() =>
+      expect(photorealHandles.aerialPerspective.visible).toBe(true),
+    );
+
+    act(() =>
+      useRenderDebugStore.getState().setAerialPerspectiveEnabled(false),
+    );
+    await waitFor(() =>
+      expect(photorealHandles.aerialPerspective.visible).toBe(false),
+    );
+    // Independent controls: the lens flare is untouched by the aerial toggle.
+    expect(photorealHandles.lensFlare.visible).toBe(true);
+
+    act(() => useAtmosphereStore.getState().setLensFlareEnabled(false));
+    await waitFor(() => expect(photorealHandles.lensFlare.visible).toBe(false));
+  });
+
+  it("takes the whole post chain out when post-processing goes off, but keeps tone mapping", async () => {
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() =>
+      expect(photorealHandles.antialiasing.visible).toBe(true),
+    );
+
+    act(() => useRenderDebugStore.getState().setPostProcessingEnabled(false));
+
+    await waitFor(() =>
+      expect(photorealHandles.antialiasing.visible).toBe(false),
+    );
+    expect(photorealHandles.aerialPerspective.visible).toBe(false);
+    expect(photorealHandles.lensFlare.visible).toBe(false);
+    // Hiding the tone mapper would blow the frame to white, not darken it —
+    // it stays in the chain whatever the master switch says.
+    expect(photorealHandles.toneMapping.visible).toBe(true);
+  });
+
+  it("drives sun shadows through the sun light's own config", async () => {
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() =>
+      expect(photorealHandles.sun.update).toHaveBeenCalledWith({
+        sun: { castShadow: true },
+      }),
+    );
+
+    act(() => useRenderDebugStore.getState().setSunShadowsEnabled(false));
+    await waitFor(() =>
+      expect(photorealHandles.sun.update).toHaveBeenCalledWith({
+        sun: { castShadow: false },
+      }),
+    );
+    // Never `visible`: the sun is the scene's only key light.
+    expect(photorealHandles.sun.visible).toBe(true);
+  });
+
+  it("adds the ambient fill light and updates it in place", async () => {
+    useRenderDebugStore.setState({ ambientIntensity: 0.6 });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+
+    await waitFor(() => expect(addLight).toHaveBeenCalledTimes(1));
+    expect(addLight.mock.calls[0]![0]).toEqual({
+      ambient: { intensity: 0.6 },
+    });
+
+    act(() => useRenderDebugStore.getState().setAmbientIntensity(1.4));
+    await waitFor(() =>
+      expect(updateLight).toHaveBeenCalledWith({
+        ambient: { intensity: 1.4 },
+      }),
+    );
+    // Rebuilding the light per slider step would churn the scene graph.
+    expect(addLight).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes the ambient light at intensity 0 and re-adds it above it", async () => {
+    useRenderDebugStore.setState({ ambientIntensity: 0 });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(init).toHaveBeenCalled());
+    expect(addLight).not.toHaveBeenCalled();
+
+    act(() => useRenderDebugStore.getState().setAmbientIntensity(0.5));
+    await waitFor(() => expect(addLight).toHaveBeenCalledTimes(1));
+
+    act(() => useRenderDebugStore.getState().setAmbientIntensity(0));
+    await waitFor(() => expect(deleteLight).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps the viewer alive when the engine refuses a settings push", async () => {
+    useRenderDebugStore.setState({ ambientIntensity: 0.6 });
+    addLight.mockImplementationOnce(() => {
+      throw new Error("no light slots left");
     });
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const ref = createRef<CitySceneHandle>();
