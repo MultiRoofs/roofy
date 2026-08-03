@@ -72,12 +72,12 @@ the bare ellipsoid, which is black.
 - **`src/scene/basemaps.ts`** — engine-free catalogue (pure data, unit-tested
   under Node, same discipline as `googleTiles.ts`):
 
-  | id               | label              | source                                                                                          | maxZoom | attribution                           |
-  | ---------------- | ------------------ | ----------------------------------------------------------------------------------------------- | ------- | ------------------------------------- |
-  | `none`           | None               | —                                                                                               | —       | —                                     |
-  | `osm`            | OpenStreetMap      | `https://tile.openstreetmap.org/{z}/{x}/{y}.png`                                                | 19      | © OpenStreetMap contributors          |
-  | `esri-imagery`   | Esri World Imagery | `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}` | 19      | © Esri                                |
-  | `carto-positron` | CartoDB Positron   | `https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png`                                       | 19      | © CARTO, © OpenStreetMap contributors |
+  | id               | label              | source                                                                                          | maxZoom | attribution                                                             |
+  | ---------------- | ------------------ | ----------------------------------------------------------------------------------------------- | ------- | ----------------------------------------------------------------------- |
+  | `none`           | None               | —                                                                                               | —       | —                                                                       |
+  | `osm`            | OpenStreetMap      | `https://tile.openstreetmap.org/{z}/{x}/{y}.png`                                                | 19      | © OpenStreetMap contributors                                            |
+  | `esri-imagery`   | Esri World Imagery | `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}` | 19      | Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community |
+  | `carto-positron` | CartoDB Positron   | `https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png`                                       | 19      | © CARTO, © OpenStreetMap contributors                                   |
 
   Note the Esri axis order is `{z}/{y}/{x}`, not the usual `{z}/{x}/{y}`; a
   unit test pins it, because swapping them fetches the wrong place silently.
@@ -99,7 +99,11 @@ the bare ellipsoid, which is black.
   "© OpenStreetMap contributors" in a basemap credit links the OSM copyright
   page just as the geoid line does. The credit follows what the ENGINE has, not
   what the user picked: a basemap the engine refused credits nobody. The geoid
-  lines remain unconditional.
+  lines remain unconditional. Lines are DEDUPED in source order — the geoid
+  credit already names OpenStreetMap, so an OSM or CARTO basemap would
+  otherwise print it twice, which reads as a bug rather than a stronger credit.
+  Esri's line is the service's own `copyrightText` verbatim; the imagery is a
+  composite and a shortened "© Esri" under-credits everyone but Esri.
 
 ### Evidence
 
@@ -109,8 +113,9 @@ the bare ellipsoid, which is black.
   through 18 were fetched.
 - Switching options: **154 Esri/CARTO tile responses, all 200**; the overlay
   text changed in lockstep —
-  `© OpenStreetMap contributors…` → `© Esri…` → `© CARTO© OpenStreetMap contributors…`
-  → (None) only the geoid lines.
+  `© OpenStreetMap contributors…` → `Source: Esri, Vantor, Earthstar
+Geographics, and the GIS User Community…` → `© CARTO / © OpenStreetMap
+contributors…` → (None) only the geoid lines.
 - Screenshots: `2026-08-03-uxfix-05-osm-globe.png`,
   `…-06-esri-globe.png`, `…-07-carto-globe.png`, `…-08-none-globe.png`. The
   "None" shot is the black globe returning, which is the control.
@@ -266,6 +271,31 @@ zero-size guard and the disconnect.
 
 ---
 
+## Review round (2026-08-03, after "approved with findings")
+
+| Finding                                         | Commit    | Resolution                                                                                                     |
+| ----------------------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------- |
+| 1. Esri under-credited                          | `73e3612` | Full `copyrightText` shipped verbatim; OSM/CARTO re-checked, correct as they were.                             |
+| 6. "© OpenStreetMap contributors" printed twice | `73e3612` | Credits deduped in source order; every distinct obligation still rendered and linked.                          |
+| 7. Source leaked when `addLayer` throws         | `9ebaf3b` | `discardOrphanSource` in both `addBasemap` and the pre-existing `addGoogleTiles`; tests assert the delete.     |
+| 8. `BasemapHandles = GoogleTilesHandles`        | `9ebaf3b` | Renamed to a shared `SourceLayerHandles`.                                                                      |
+| 2. Wrong claim about the engine's `touchstart`  | `c26ea34` | Corrected: the engine DOES preventDefault all three touch events; the belt is a pre-init/outside-canvas guard. |
+| 3. Wrong mechanism for the stale pick           | `c26ea34` | Corrected: the ray comes from `view.screenSize`, which only `resize()` updates.                                |
+| 4. Unused exports (2 new lint warnings)         | `c26ea34` | `toLocalDateStr`/`toLocalTimeStr` unexported; `vp check` back to the pre-wave 9 warnings.                      |
+| 5. Dead CSS from the `SolarTab` slimming        | `c26ea34` | `.solar-input`, `.solar-input:focus`, `.solar-time-label` and the light-theme `.solar-input` rule removed.     |
+| 10. `overscroll-behavior` on the body           | `c26ea34` | Moved to `.viewport`; the landing page keeps pull-to-refresh (verified: body `auto`, viewport `contain`).      |
+| 9. Narrow-viewport date UX                      | —         | Skipped per verdict (disclosed, acceptable).                                                                   |
+| OSM-default policy                              | —         | Not changed; captured as a follow-up under Known limits.                                                       |
+
+Re-verified in the browser after the round: 161 tile responses all 200; the
+overlay shows exactly one OSM span with OSM active, the full Esri source line
+with Esri active, and `© CARTO` + one OSM span with CARTO active, with the
+geoid's own `…, ODbL` line (a different string) surviving all three; the wheel
+over the canvas is still cancelled with `scrollY` 0; no page errors. Screenshot
+`2026-08-03-uxfix-18-attribution-deduped.png`.
+
+---
+
 ## Verification method
 
 - **jsdom / vitest** for all store and UI logic, with the engine mocked (the
@@ -286,6 +316,16 @@ zero-size guard and the disconnect.
   needed to close issue 4 visually — and to confirm the basemap's tone mapping
   looks right, since raster imagery is being lit and tone-mapped like any other
   surface.
+- **The OSM default rides on the OSMF tile policy, and should not for long.**
+  `tile.openstreetmap.org` is a donation-funded service whose Tile Usage Policy
+  forbids heavy or systematic use and requires an identifying User-Agent, which
+  a browser app cannot set. It is the right default for a research viewer with
+  a handful of users, and a liability the moment this has real ones: a 3D globe
+  fetches many more tiles per session than a 2D map, and the fixture session
+  measured here issued 218 in a couple of minutes. Follow-up when usage grows:
+  move the default to CARTO (whose basemaps are explicitly free for
+  non-commercial use at low volume) or to a keyed provider behind an env var,
+  the way the Google tiles already are, and leave OSM as an explicit choice.
 - **The basemap selection is not persisted.** It is not in the snapshot/share
   schema (v3), so a restored workspace comes back on the default. Adding it
   means a schema bump, which is out of scope for a defect pass.
