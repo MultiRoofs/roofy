@@ -647,6 +647,32 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       };
     }, [engineReady, basemapId]);
 
+    // --- Wheel over the viewport must zoom, never scroll the page ---
+    //
+    // The engine's own wheel listener (on its canvas) forwards the delta to the
+    // Rust core and does NOT `preventDefault()`, so the browser also scrolled
+    // whatever was scrollable underneath — the page scrolled while the camera
+    // zoomed. Bound on the CONTAINER, non-passive, in the bubble phase: the
+    // engine's listener has already run and consumed the delta by then, so
+    // cancelling the default action costs the zoom nothing.
+    useEffect(() => {
+      const container = containerRef.current;
+      if (container === null) return;
+      const onWheel = (e: WheelEvent) => e.preventDefault();
+      // Touch pinch-zoom lands on the engine's own `touchmove` handler, which
+      // already calls `preventDefault()`; `touchstart` does not, so a two-
+      // finger gesture that begins over the canvas could still scroll-chain.
+      const onTouchMove = (e: TouchEvent) => e.preventDefault();
+      container.addEventListener("wheel", onWheel, { passive: false });
+      container.addEventListener("touchmove", onTouchMove, { passive: false });
+      return () => {
+        container.removeEventListener("wheel", onWheel);
+        container.removeEventListener("touchmove", onTouchMove);
+      };
+      // `[]`, not `[engineReady]`: the page must not scroll while the engine is
+      // still booting either.
+    }, []);
+
     // --- FPS readout from the render loop ---
     useEffect(() => {
       const view = viewRef.current;

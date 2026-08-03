@@ -136,6 +136,11 @@ body {
   min-height: 100vh;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   line-height: 1.5;
+  /* Belt to the viewport's `preventDefault` braces: a wheel gesture that the
+     3D view consumes must never chain into a page scroll (or a rubber-band
+     overscroll on macOS/Android). The listener in `NavaraViewport` is what
+     actually stops it; this stops the CHAIN from any inner scroller too. */
+  overscroll-behavior: none;
 }
 
 #root {
@@ -580,6 +585,8 @@ body {
   position: relative;
   overflow: hidden;
   background: var(--bg-viewport);
+  /* The wheel belongs to the camera in here — nothing may scroll-chain out. */
+  overscroll-behavior: contain;
 }
 
 /* Basemap picker in the left sidebar. */
@@ -604,6 +611,11 @@ body {
 .navara-viewport__canvas {
   position: absolute;
   inset: 0;
+  /* The engine owns every gesture over the canvas (orbit, pan, pinch-zoom);
+     letting the browser also scroll or zoom the page fights it. Scoped to the
+     canvas host, NOT `.viewport`, so the overlays stacked on top of it — the
+     legend, the attribute panel, advanced settings — still scroll on touch. */
+  touch-action: none;
 }
 
 .navara-viewport__error {

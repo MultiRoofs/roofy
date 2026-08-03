@@ -1513,3 +1513,47 @@ describe("NavaraViewport basemap", () => {
     expect(deleteSource).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// The wheel. The engine's own listener forwards the delta to the Rust core
+// without `preventDefault()`, so the page scrolled while the camera zoomed.
+// ---------------------------------------------------------------------------
+describe("NavaraViewport wheel", () => {
+  beforeEach(() => {
+    init.mockClear();
+    init.mockImplementation(async () => {});
+    listeners.clear();
+    viewInstances.length = 0;
+    defaultPluginThrows = null;
+    useTilesStore.setState({ enabled: false });
+    useLayerStore.setState({ layers: [], activeLayerId: null });
+  });
+
+  afterEach(() => {
+    cleanup();
+    useTilesStore.setState({ enabled: true });
+  });
+
+  it("cancels the page scroll a wheel over the viewport would otherwise cause", () => {
+    const { container } = render(<NavaraViewport onTriangleCount={() => {}} />);
+    const host = container.querySelector(".navara-viewport__canvas")!;
+    const wheel = new WheelEvent("wheel", {
+      deltaY: 120,
+      bubbles: true,
+      cancelable: true,
+    });
+    host.dispatchEvent(wheel);
+    // The engine's own listener (on its canvas, inside this host) has already
+    // consumed the delta by the time this fires, so the zoom is unaffected —
+    // only the browser's default scroll is cancelled.
+    expect(wheel.defaultPrevented).toBe(true);
+  });
+
+  it("cancels a touch drag over the viewport too", () => {
+    const { container } = render(<NavaraViewport onTriangleCount={() => {}} />);
+    const host = container.querySelector(".navara-viewport__canvas")!;
+    const touch = new Event("touchmove", { bubbles: true, cancelable: true });
+    host.dispatchEvent(touch);
+    expect(touch.defaultPrevented).toBe(true);
+  });
+});
