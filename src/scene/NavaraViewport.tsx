@@ -630,10 +630,18 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
                 // is kept: those handles are the only way to drive the sky,
                 // the sun and the post chain afterwards (see PhotorealScene).
                 afterInit: () => {
-                  photorealRef.current =
-                    (defaultPlugin.addDefaultPhotorealScene() as
-                      | PhotorealScene
-                      | undefined) ?? null;
+                  const scene = defaultPlugin.addDefaultPhotorealScene() as
+                    | PhotorealScene
+                    | undefined;
+                  // `cancelled`, like every other write out of this queued
+                  // body. This hook runs inside `session.ready`, which can
+                  // resolve AFTER the cleanup has torn the mount down (and,
+                  // under StrictMode, after a second mount has installed its
+                  // own handles) — publishing then would leave the settings
+                  // effects pushing `visible` through a disposed scene, or
+                  // through the previous engine's handles over a live view.
+                  if (cancelled) return;
+                  photorealRef.current = scene ?? null;
                 },
               },
               { key: "cityjson", instance: cityPlugin },
