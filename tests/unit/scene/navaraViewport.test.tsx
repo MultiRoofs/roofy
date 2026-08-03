@@ -40,6 +40,9 @@ const addEffect = vi.fn((_config: unknown) => ({
   update: updateEffect,
   delete: deleteEffect,
 }));
+/** `view.resize` — driven by the container ResizeObserver, because the engine
+ *  itself only listens on `window`. */
+const resize = vi.fn();
 
 /** The engine's event bus, reduced to what `view.on/off` need. Tests drive the
  *  viewport by FIRING these, which is the only honest way to exercise a
@@ -112,9 +115,10 @@ vi.mock("@navaramap/three", () => ({
       addSource,
       addLayer,
       addEffect,
+      resize,
       atmosphere,
       screenSize: { x: 800, y: 600 },
-      pixelRatio: 1,
+      pixelRatio: 2,
       pickDepthPosition,
     };
     viewInstances.push(view);
@@ -183,6 +187,34 @@ import type { CityModel } from "../../../src/domain/citymodel/types";
 import { GEOID_ATTRIBUTION } from "@cityjson/navara-core";
 
 /**
+ * jsdom has no `ResizeObserver`, and the container-resize wiring is exactly
+ * what the panel-collapse bug needed, so it is stubbed rather than skipped:
+ * every instance records its callback so a test can fire it, which is the only
+ * way to simulate a container that changed size without a window resize.
+ */
+const resizeObservers: Array<{
+  callback: () => void;
+  observed: Element[];
+  disconnected: boolean;
+}> = [];
+class ResizeObserverStub {
+  private entry: (typeof resizeObservers)[number];
+  constructor(callback: () => void) {
+    this.entry = { callback, observed: [], disconnected: false };
+    resizeObservers.push(this.entry);
+  }
+  observe(element: Element) {
+    this.entry.observed.push(element);
+  }
+  unobserve() {}
+  disconnect() {
+    this.entry.disconnected = true;
+  }
+}
+globalThis.ResizeObserver =
+  ResizeObserverStub as unknown as typeof ResizeObserver;
+
+/**
  * Every suite below starts with NO basemap and NO clouds.
  *
  * Both are on by default in production (a black globe reads as a broken
@@ -200,6 +232,8 @@ beforeEach(() => {
   addEffect.mockClear();
   updateEffect.mockClear();
   deleteEffect.mockClear();
+  resize.mockClear();
+  resizeObservers.length = 0;
 });
 
 // ---------------------------------------------------------------------------
@@ -896,7 +930,7 @@ describe("NavaraViewport lifecycle", () => {
     ];
     expect(point.x).toBe(10);
     expect(point.y).toBe(20);
-    expect(windowLike).toEqual({ width: 800, height: 600, pixelRatio: 1 });
+    expect(windowLike).toEqual({ width: 800, height: 600, pixelRatio: 2 });
     expect(camera).toBe(
       (viewInstances[0] as { camera: { raw: unknown } }).camera.raw,
     );
@@ -1669,5 +1703,64 @@ describe("NavaraViewport clouds", () => {
     await waitFor(() => expect(errors).toHaveBeenCalled());
     expect(container.querySelector(".navara-viewport__error")).toBeNull();
     errors.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Container resize. The engine's auto-resize listens on `window` ONLY, so
+// collapsing a side panel left the canvas at its old width.
+// ---------------------------------------------------------------------------
+describe("NavaraViewport container resize", () => {
+  beforeEach(() => {
+    init.mockClear();
+    init.mockImplementation(async () => {});
+    listeners.clear();
+    viewInstances.length = 0;
+    defaultPluginThrows = null;
+    useTilesStore.setState({ enabled: false });
+    useLayerStore.setState({ layers: [], activeLayerId: null });
+  });
+
+  afterEach(() => {
+    cleanup();
+    useTilesStore.setState({ enabled: true });
+  });
+
+  it("observes the CONTAINER and resizes the engine at its pixel ratio", async () => {
+    const { container } = render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(resizeObservers.length).toBe(1));
+    const host = container.querySelector(".navara-viewport__canvas")!;
+    expect(resizeObservers[0]!.observed).toContain(host);
+
+    Object.defineProperty(host, "clientWidth", {
+      value: 640,
+      configurable: true,
+    });
+    Object.defineProperty(host, "clientHeight", {
+      value: 480,
+      configurable: true,
+    });
+    act(() => resizeObservers[0]!.callback());
+
+    // `view.pixelRatio`, not an omitted argument: `resize()` passes `1` to the
+    // WASM core when the ratio is missing, halving the effective resolution on
+    // a HiDPI display the first time a panel is toggled.
+    expect(resize).toHaveBeenCalledWith(640, 480, 2);
+  });
+
+  it("ignores a zero-sized container instead of resizing to a degenerate aspect", async () => {
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(resizeObservers.length).toBe(1));
+    // jsdom reports 0×0 for an unlaid-out element, which is also what a fully
+    // collapsed shell reports.
+    act(() => resizeObservers[0]!.callback());
+    expect(resize).not.toHaveBeenCalled();
+  });
+
+  it("disconnects the observer when the viewport goes away", async () => {
+    const { unmount } = render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(resizeObservers.length).toBe(1));
+    unmount();
+    expect(resizeObservers[0]!.disconnected).toBe(true);
   });
 });

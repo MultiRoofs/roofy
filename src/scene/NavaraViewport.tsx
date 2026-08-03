@@ -730,6 +730,35 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       }
     }, [cloudCoverage]);
 
+    // --- Container resize -> engine resize ---
+    //
+    // The engine's own auto-resize listens on `window` ONLY (verified in the
+    // 0.0.5 bundle: `window.addEventListener("resize", this._handleResize)`
+    // plus a device-pixel-ratio media query). Collapsing a side panel changes
+    // the CONTAINER without changing the window, so the canvas kept its old
+    // width and left a blank strip — and, because the pick path measures from
+    // `container.clientWidth/Height`, every pick after such a change was
+    // offset too. A ResizeObserver on the container closes both.
+    useEffect(() => {
+      const container = containerRef.current;
+      const view = viewRef.current;
+      if (!engineReady || view === null || container === null) return;
+      if (typeof ResizeObserver === "undefined") return;
+      const observer = new ResizeObserver(() => {
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+        // A collapsed shell can report 0; resizing to it would divide by zero
+        // in the camera aspect and blow the render targets away for nothing.
+        if (width === 0 || height === 0) return;
+        // `pixelRatio` explicitly: `resize()` falls back to `1` for the WASM
+        // core when the argument is omitted, which would halve the effective
+        // resolution on a HiDPI display on the first panel toggle.
+        view.resize(width, height, view.pixelRatio);
+      });
+      observer.observe(container);
+      return () => observer.disconnect();
+    }, [engineReady]);
+
     // --- Wheel over the viewport must zoom, never scroll the page ---
     //
     // The engine's own wheel listener (on its canvas) forwards the delta to the
