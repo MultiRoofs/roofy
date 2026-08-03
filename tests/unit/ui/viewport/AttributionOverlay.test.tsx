@@ -20,6 +20,33 @@ describe("AttributionOverlay", () => {
     ).toMatch(/Google/);
   });
 
+  it("credits the active basemap, and nothing when there is none", () => {
+    expect(
+      render(<AttributionOverlay googleTiles={false} />).container.textContent,
+    ).not.toMatch(/CARTO/);
+    const { container } = render(
+      <AttributionOverlay
+        googleTiles={false}
+        basemapAttribution={["© CARTO", "© OpenStreetMap contributors"]}
+      />,
+    );
+    expect(container.textContent).toContain("© CARTO");
+  });
+
+  it("links the OSM copyright page from a basemap credit too, not just the geoid one", () => {
+    // ODbL attribution is a link obligation wherever the credit appears.
+    const { container } = render(
+      <AttributionOverlay
+        googleTiles={false}
+        basemapAttribution={["© OpenStreetMap contributors"]}
+      />,
+    );
+    expect(
+      container.querySelectorAll('a[href*="openstreetmap.org/copyright"]')
+        .length,
+    ).toBeGreaterThan(1);
+  });
+
   it("links the CC BY 4.0 licence rather than only naming it", () => {
     const { container } = render(<AttributionOverlay googleTiles />);
     expect(

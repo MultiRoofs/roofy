@@ -7,6 +7,8 @@
 
 import { useAtmosphereStore } from "../../features/atmosphere/atmosphereStore";
 import { useTilesStore } from "../../features/tiles/tilesStore";
+import { useBasemapStore } from "../../features/basemap/basemapStore";
+import { BASEMAPS, type BasemapId } from "../../scene/basemaps";
 import {
   useRenderDebugStore,
   type CityMaterialMode,
@@ -23,6 +25,8 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
   const setLensFlareEnabled = useAtmosphereStore((s) => s.setLensFlareEnabled);
   const tilesEnabled = useTilesStore((s) => s.enabled);
   const setTilesEnabled = useTilesStore((s) => s.setEnabled);
+  const basemapId = useBasemapStore((s) => s.basemapId);
+  const setBasemapId = useBasemapStore((s) => s.setBasemapId);
   const postProcessingEnabled = useRenderDebugStore(
     (s) => s.postProcessingEnabled,
   );
@@ -112,6 +116,21 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
               checked={tilesEnabled}
               onChange={(e) => setTilesEnabled(e.target.checked)}
             />
+          </div>
+          <div className="advanced-toggle-row advanced-select-row">
+            <label htmlFor="advanced-basemap">Basemap</label>
+            <select
+              id="advanced-basemap"
+              className="advanced-select"
+              value={basemapId}
+              onChange={(e) => setBasemapId(e.target.value as BasemapId)}
+            >
+              {BASEMAPS.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 

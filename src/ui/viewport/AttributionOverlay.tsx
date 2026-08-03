@@ -1,13 +1,16 @@
 /**
  * Data attributions. These are LICENCE OBLIGATIONS, not credits.
  *
- * Two of them, and only one is conditional:
+ * Three of them, and only one is unconditional:
  *
  *  - the geoid service (Re:Earth Terrain, EGM2008) is CC BY 4.0 Mapterhorn +
  *    ODbL OpenStreetMap, and is sampled for EVERY georeferenced layer (Global
  *    Constraints -> Vertical datum), so its lines are unconditional;
  *  - Google's photorealistic tiles are only fetched when an API key is
- *    configured (`googleTiles.ts`), so that credit follows the layer.
+ *    configured (`googleTiles.ts`), so that credit follows the layer;
+ *  - the raster basemap (`basemaps.ts`) is user-selectable, so its credit
+ *    follows whichever option is actually draped on the globe — ODbL for OSM,
+ *    the service credit for Esri, CARTO's own plus OSM's for Positron.
  *
  * Replaces `TilesAttributionOverlay` from 3d-tiles-renderer, which is deleted
  * with the R3F stack in Task C21.
@@ -64,14 +67,27 @@ export interface AttributionOverlayProps {
    *  scene. False with no API key configured — and then Google must NOT be
    *  credited for imagery nobody is looking at. */
   readonly googleTiles: boolean;
+  /**
+   * The active basemap's credit lines (`BasemapOption.attribution`), or empty
+   * when no raster basemap is in the scene.
+   *
+   * Passed in rather than read from the store here, for the same reason
+   * `googleTiles` is: the obligation follows what the ENGINE actually has, not
+   * what the user asked for. A basemap the engine refused must not be credited.
+   */
+  readonly basemapAttribution?: readonly string[];
 }
 
 export function AttributionOverlay({
   googleTiles,
+  basemapAttribution = [],
 }: AttributionOverlayProps): ReactElement {
   return (
     <div className="attribution-overlay">
       {googleTiles && <span>Imagery © Google</span>}
+      {basemapAttribution.map((line) => (
+        <span key={line}>{linkify(line)}</span>
+      ))}
       {GEOID_ATTRIBUTION.map((line) => (
         <span key={line}>{linkify(line)}</span>
       ))}

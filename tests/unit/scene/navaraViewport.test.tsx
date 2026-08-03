@@ -162,10 +162,23 @@ import {
 } from "../../../src/features/layers/layerStore";
 import { useSelectionStore } from "../../../src/features/selection/selectionStore";
 import { useTilesStore } from "../../../src/features/tiles/tilesStore";
+import { useBasemapStore } from "../../../src/features/basemap/basemapStore";
+import { BASEMAPS } from "../../../src/scene/basemaps";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 // The licence text the attribution overlay must show whatever else is on
 // screen (Task C17 / Global Constraints -> Vertical datum).
 import { GEOID_ATTRIBUTION } from "@cityjson/navara-core";
+
+/**
+ * Every suite below starts with NO basemap.
+ *
+ * OpenStreetMap is the production default (a black globe reads as a broken
+ * viewer), but that would put an extra `addSource`/`addLayer` in front of every
+ * assertion about the Google tiles. The basemap suite opts back in.
+ */
+beforeEach(() => {
+  useBasemapStore.setState({ basemapId: "none" });
+});
 
 // ---------------------------------------------------------------------------
 // Layer fixtures. The store is driven directly (`setState`) rather than through
@@ -1354,5 +1367,149 @@ describe("NavaraViewport Google tiles", () => {
       container.querySelector(".attribution-overlay")?.textContent,
     ).not.toMatch(/Google/);
     errors.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The raster basemap (the fix for "the globe is black").
+//
+// `DefaultPlugin.addDefaultPhotorealScene()` adds sky, stars, a sun light and
+// the post chain — and no imagery at all — so without a `raster-tile` source
+// plus a `raster` layer there is literally nothing draped on the ellipsoid.
+// ---------------------------------------------------------------------------
+describe("NavaraViewport basemap", () => {
+  beforeEach(() => {
+    addSource.mockClear();
+    addLayer.mockClear();
+    deleteSource.mockClear();
+    deleteLayer.mockClear();
+    init.mockClear();
+    init.mockImplementation(async () => {});
+    listeners.clear();
+    viewInstances.length = 0;
+    defaultPluginThrows = null;
+    // The basemap suite owns `addSource`/`addLayer`, so the Google tiles stay
+    // out of the way (no key configured is the same as the toggle being off).
+    useTilesStore.setState({ enabled: false });
+    useLayerStore.setState({ layers: [], activeLayerId: null });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllEnvs();
+    useTilesStore.setState({ enabled: true });
+  });
+
+  it("drapes OpenStreetMap by default, as a raster-tile source plus a raster layer", async () => {
+    useBasemapStore.setState({ basemapId: "osm" });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(addLayer).toHaveBeenCalledTimes(1));
+
+    expect(addSource.mock.calls[0]![0]).toEqual({
+      type: "raster-tile",
+      url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      maxZoom: 19,
+    });
+    // The layer references the SOURCE HANDLE, not a guessed id.
+    expect(addLayer.mock.calls[0]![0]).toEqual({
+      type: "raster",
+      source: addSource.mock.results[0]!.value,
+    });
+    // After `init()` — the engine refuses a source before it — and after the
+    // default photoreal scene the imagery is lit by.
+    expect(addSource.mock.invocationCallOrder[0]!).toBeGreaterThan(
+      init.mock.invocationCallOrder[0]!,
+    );
+    expect(addSource.mock.invocationCallOrder[0]!).toBeLessThan(
+      addLayer.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("adds nothing for the None option", async () => {
+    useBasemapStore.setState({ basemapId: "none" });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(init).toHaveBeenCalled());
+    expect(addSource).not.toHaveBeenCalled();
+    expect(addLayer).not.toHaveBeenCalled();
+  });
+
+  it("swaps the layer and its source, layer first, when the option changes", async () => {
+    useBasemapStore.setState({ basemapId: "osm" });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(addLayer).toHaveBeenCalledTimes(1));
+
+    act(() => useBasemapStore.getState().setBasemapId("esri-imagery"));
+
+    await waitFor(() => expect(addLayer).toHaveBeenCalledTimes(2));
+    expect(deleteLayer).toHaveBeenCalledTimes(1);
+    expect(deleteSource).toHaveBeenCalledTimes(1);
+    // `Source.delete()` is a no-op while a layer still references it.
+    expect(deleteLayer.mock.invocationCallOrder[0]!).toBeLessThan(
+      deleteSource.mock.invocationCallOrder[0]!,
+    );
+    expect(addSource.mock.calls[1]![0]).toMatchObject({
+      url: BASEMAPS.find((b) => b.id === "esri-imagery")!.source!.url,
+    });
+  });
+
+  it("credits the ACTIVE basemap, and only it", async () => {
+    useBasemapStore.setState({ basemapId: "osm" });
+    const { container } = render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() =>
+      expect(
+        container.querySelector(".attribution-overlay")?.textContent,
+      ).toContain("© OpenStreetMap contributors"),
+    );
+
+    act(() => useBasemapStore.getState().setBasemapId("esri-imagery"));
+    await waitFor(() =>
+      expect(
+        container.querySelector(".attribution-overlay")?.textContent,
+      ).toContain("© Esri"),
+    );
+
+    act(() => useBasemapStore.getState().setBasemapId("carto-positron"));
+    await waitFor(() =>
+      expect(
+        container.querySelector(".attribution-overlay")?.textContent,
+      ).toContain("© CARTO"),
+    );
+    expect(
+      container.querySelector(".attribution-overlay")?.textContent,
+    ).not.toContain("© Esri");
+  });
+
+  it("credits nobody for imagery the engine refused", async () => {
+    useBasemapStore.setState({ basemapId: "osm" });
+    addLayer.mockImplementationOnce(() => {
+      throw new Error("unsupported source");
+    });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const ref = createRef<CitySceneHandle>();
+    const { container } = render(
+      <NavaraViewport ref={ref} onTriangleCount={() => {}} />,
+    );
+    await waitFor(() => expect(ref.current).not.toBeNull());
+    // A backdrop that fails must not take the engine — or `ready` — down.
+    await expect(ref.current!.ready).resolves.toBeUndefined();
+    await waitFor(() => expect(errors).toHaveBeenCalled());
+    expect(container.querySelector(".navara-viewport__error")).toBeNull();
+    // The geoid lines happen to name OpenStreetMap too (ODbL), so the honest
+    // assertion is that NO line was added on top of them.
+    expect(
+      container.querySelectorAll(".attribution-overlay span"),
+    ).toHaveLength(GEOID_ATTRIBUTION.length);
+    errors.mockRestore();
+  });
+
+  it("does not delete basemap handles through a view the engine already disposed", async () => {
+    useBasemapStore.setState({ basemapId: "osm" });
+    const { unmount } = render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(addLayer).toHaveBeenCalledTimes(1));
+
+    unmount();
+
+    expect(deleteLayer).not.toHaveBeenCalled();
+    expect(deleteSource).not.toHaveBeenCalled();
   });
 });
