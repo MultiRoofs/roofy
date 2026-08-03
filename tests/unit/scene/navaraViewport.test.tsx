@@ -15,6 +15,14 @@ const init = vi.fn(async () => {});
 const dispose = vi.fn();
 const setCamera = vi.fn();
 const flyTo = vi.fn();
+/** `view.addSource` / `view.addLayer` — the whole of the Google tiles seam
+ *  (Task C17). `addSource` answers with a `Source`-shaped stub, which is what
+ *  the layer must reference. */
+const addSource = vi.fn((_source: unknown) => ({
+  id: "src-1",
+  type: "3d-tiles",
+}));
+const addLayer = vi.fn();
 
 /** The engine's event bus, reduced to what `view.on/off` need. Tests drive the
  *  viewport by FIRING these, which is the only honest way to exercise a
@@ -84,6 +92,8 @@ vi.mock("@navaramap/three", () => ({
       },
       setCamera,
       flyTo,
+      addSource,
+      addLayer,
       atmosphere,
       screenSize: { x: 800, y: 600 },
       pixelRatio: 1,
@@ -144,6 +154,9 @@ import {
 } from "../../../src/features/layers/layerStore";
 import { useSelectionStore } from "../../../src/features/selection/selectionStore";
 import type { CityModel } from "../../../src/domain/citymodel/types";
+// The licence text the attribution overlay must show whatever else is on
+// screen (Task C17 / Global Constraints -> Vertical datum).
+import { GEOID_ATTRIBUTION } from "@cityjson/navara-core";
 
 // ---------------------------------------------------------------------------
 // Layer fixtures. The store is driven directly (`setState`) rather than through
@@ -218,6 +231,8 @@ describe("NavaraViewport lifecycle", () => {
     dispose.mockClear();
     setCamera.mockClear();
     flyTo.mockClear();
+    addSource.mockClear();
+    addLayer.mockClear();
     on.mockClear();
     off.mockClear();
     listeners.clear();
@@ -1080,5 +1095,116 @@ describe("NavaraViewport lifecycle", () => {
     await waitFor(() =>
       expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(2),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Google Photorealistic 3D Tiles + the attribution overlay (Task C17).
+//
+// The API key is a build-time env var, so both branches are driven with
+// `vi.stubEnv` rather than by importing the module twice. The pure config
+// itself is tested in `googleTiles.test.ts`; what matters HERE is the seam —
+// which engine calls happen, in what order, and what the overlay credits as a
+// result.
+// ---------------------------------------------------------------------------
+describe("NavaraViewport Google tiles", () => {
+  beforeEach(() => {
+    addSource.mockClear();
+    addLayer.mockClear();
+    init.mockClear();
+    init.mockImplementation(async () => {});
+    listeners.clear();
+    viewInstances.length = 0;
+    defaultPluginThrows = null;
+    cityPluginInstance.getHandle.mockReset();
+    cityPluginInstance.addCityModel.mockReset();
+    useLayerStore.setState({ layers: [], activeLayerId: null });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllEnvs();
+  });
+
+  it("registers ONE 3d-tiles source and layer with the key in the URL, after init", async () => {
+    vi.stubEnv("VITE_GOOGLE_MAPS_API_KEY", "test key&1");
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(addLayer).toHaveBeenCalledTimes(1));
+
+    expect(addSource).toHaveBeenCalledTimes(1);
+    expect(addSource.mock.calls[0]![0]).toEqual({
+      type: "3d-tiles",
+      url: "https://tile.googleapis.com/v1/3dtiles/root.json?key=test%20key%261",
+    });
+    // The layer references the SOURCE HANDLE `addSource` returned — an
+    // inlined URL or a guessed id would silently render nothing.
+    expect(addLayer.mock.calls[0]![0]).toEqual({
+      type: "3d-tiles",
+      source: addSource.mock.results[0]!.value,
+      model: {
+        normals: true,
+        creaseNormalAngle: Math.PI / 6,
+        castShadow: false,
+        receiveShadow: true,
+        maxSse: 8,
+      },
+    });
+    // After `init()` (the engine rejects a source before it), and after the
+    // default photoreal scene, which the tiles are drawn on top of.
+    expect(addSource.mock.invocationCallOrder[0]!).toBeGreaterThan(
+      init.mock.invocationCallOrder[0]!,
+    );
+    expect(addSource.mock.invocationCallOrder[0]!).toBeLessThan(
+      addLayer.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("credits Google in the attribution overlay only once the layer is in the scene", async () => {
+    vi.stubEnv("VITE_GOOGLE_MAPS_API_KEY", "k");
+    const { container } = render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(addLayer).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(
+        container.querySelector(".attribution-overlay")?.textContent,
+      ).toMatch(/Google/),
+    );
+  });
+
+  it("adds nothing and credits nobody for imagery when no key is configured", async () => {
+    vi.stubEnv("VITE_GOOGLE_MAPS_API_KEY", "");
+    const { container } = render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(init).toHaveBeenCalled());
+    expect(addSource).not.toHaveBeenCalled();
+    expect(addLayer).not.toHaveBeenCalled();
+
+    // The geoid credit is NOT conditional: every georeferenced layer samples
+    // that service, so it is shown even with an empty, tile-free viewport.
+    const overlay = container.querySelector(".attribution-overlay");
+    expect(overlay?.textContent).not.toMatch(/Google/);
+    for (const line of GEOID_ATTRIBUTION) {
+      expect(overlay?.textContent).toContain(line);
+    }
+  });
+
+  it("keeps the viewer alive when the engine refuses the tiles layer", async () => {
+    vi.stubEnv("VITE_GOOGLE_MAPS_API_KEY", "k");
+    addLayer.mockImplementationOnce(() => {
+      throw new Error("unsupported source");
+    });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const ref = createRef<CitySceneHandle>();
+    const { container } = render(
+      <NavaraViewport ref={ref} onTriangleCount={() => {}} />,
+    );
+    await waitFor(() => expect(ref.current).not.toBeNull());
+    // A backdrop that fails to load must not take the engine — or `ready` —
+    // down with it, and must not claim a Google credit either.
+    await expect(ref.current!.ready).resolves.toBeUndefined();
+    expect(container.querySelector(".navara-viewport__error")).toBeNull();
+    expect(
+      container.querySelector(".attribution-overlay")?.textContent,
+    ).not.toMatch(/Google/);
+    expect(errors).toHaveBeenCalled();
+    errors.mockRestore();
   });
 });

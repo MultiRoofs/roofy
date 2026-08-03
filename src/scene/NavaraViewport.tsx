@@ -107,6 +107,8 @@ import {
   type GeographicCameraState,
 } from "./geographicCamera";
 import { ViewAlignButtons, type ViewDirection } from "./ViewAlignButtons";
+import { googleTilesConfig } from "./googleTiles";
+import { AttributionOverlay } from "../ui/viewport/AttributionOverlay";
 
 export interface CitySceneHandle {
   fitAll: () => void;
@@ -187,6 +189,54 @@ function createReadyGate(): ReadyGate {
   return { promise, resolve, reject };
 }
 
+/**
+ * Add Google's Photorealistic 3D Tiles to a live view (Task C17).
+ *
+ * The engine-facing half of `googleTiles.ts`, and the successor to
+ * `GoogleTilesLayer.tsx`: Navara renders 3D Tiles natively, so the whole
+ * 3d-tiles-renderer/r3f stack — auth plugin, compression, fade, the creased-
+ * normals plugin, the MeshBasicMaterial swap — collapses into one source and
+ * one layer.
+ *
+ * Called AFTER `view.init()` (via `session.ready`), which is also after
+ * `DefaultPlugin.addDefaultPhotorealScene()`: the tiles sit on top of the
+ * default photoreal globe, which stays visible wherever Google has no coverage.
+ *
+ * Failure here is NOT fatal. The tiles are a backdrop; the city model is the
+ * app. A rejected key, an offline session or an engine that dislikes the
+ * descriptor must leave the viewer running, so this reports and returns rather
+ * than propagating into the init failure path (which would blank the viewport
+ * and reject `CitySceneHandle.ready`).
+ *
+ * @param onEnabled - called with `true` only once the layer is really in the
+ * scene; drives the Google line of the attribution overlay.
+ */
+function addGoogleTiles(
+  view: ViewInstance,
+  onEnabled: (enabled: boolean) => void,
+): void {
+  const tiles = googleTilesConfig(import.meta.env.VITE_GOOGLE_MAPS_API_KEY);
+  if (tiles === null) {
+    if (import.meta.env.DEV) {
+      console.warn(
+        "[googleTiles] VITE_GOOGLE_MAPS_API_KEY not set. Tiles disabled.",
+      );
+    }
+    return;
+  }
+  try {
+    const source = view.addSource(tiles.source);
+    view.addLayer({ ...tiles.layer, source });
+    onEnabled(true);
+  } catch (error) {
+    console.error(
+      "NavaraViewport: Google Photorealistic 3D Tiles could not be added; " +
+        "the viewer continues on the default photoreal globe.",
+      error,
+    );
+  }
+}
+
 export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
   function NavaraViewport(props, ref) {
     const { onFps, onTriangleCount, onLayerError, onCursorPosition } = props;
@@ -214,6 +264,11 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     const streamSyncRef = useRef(new Map<string, StreamSyncMemo>());
     const [engineReady, setEngineReady] = useState(false);
     const [initError, setInitError] = useState<string | null>(null);
+    /** Whether Google's photorealistic tiles are actually IN the scene — set
+     *  when the `3d-tiles` layer was added, not merely when a key exists, so
+     *  the attribution overlay never credits Google for imagery an engine that
+     *  failed to start is not showing. */
+    const [tilesEnabled, setTilesEnabled] = useState(false);
     /** Bumped by the sync effect when a layer was newly added, which is the
      *  only thing that triggers an automatic fit. */
     const [fitToken, setFitToken] = useState(0);
@@ -374,6 +429,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           // nowhere near this component; `streamPlugin.ts` is the one place
           // they resolve the live plugin from (Task C12).
           setStreamPlugin(flatPlugin);
+          // The photorealistic backdrop, on top of the default photoreal globe
+          // `DefaultPlugin` just added. Last, and non-fatal: nothing else in
+          // this session depends on it.
+          addGoogleTiles(result.view, setTilesEnabled);
           setInitError(null);
           setEngineReady(true);
           // `readyRef.current`, never a captured gate: a cancelled predecessor
@@ -396,6 +455,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         cancelled = true;
         mountedViewports -= 1;
         setEngineReady(false);
+        // The tiles layer died with the view, so the credit for it has to go
+        // too — the geoid lines stay, because they are unconditional.
+        setTilesEnabled(false);
         viewRef.current = null;
         cityPluginRef.current = null;
         // Streaming state dies with the engine, and it has to be TOLD to: the
@@ -1236,6 +1298,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           </div>
         )}
         <ViewAlignButtons onAlign={alignView} />
+        {/* Licence obligation, not decoration: the geoid credits are shown
+            whatever is loaded (every georeferenced layer samples it), the
+            Google credit only while its tiles are in the scene. */}
+        <AttributionOverlay googleTiles={tilesEnabled} />
       </div>
     );
   },

@@ -609,6 +609,31 @@ body {
   backdrop-filter: blur(8px);
 }
 
+/* Data attributions (Task C17). A licence obligation, so it is always on top
+   of the canvas and always clickable — never `pointer-events: none`. */
+.attribution-overlay {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 45%);
+  color: #f0f0f0;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  pointer-events: auto;
+}
+
+.attribution-overlay a {
+  color: inherit;
+  text-decoration: underline;
+}
+
 /* ═══════════════════════════════════════════════════════════════
    SELECTION TOOLTIP
    ═══════════════════════════════════════════════════════════════ */
