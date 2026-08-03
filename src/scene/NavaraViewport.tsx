@@ -109,6 +109,7 @@ import {
 } from "./geographicCamera";
 import { ViewAlignButtons, type ViewDirection } from "./ViewAlignButtons";
 import { googleTilesConfig } from "./googleTiles";
+import { isAutoFitSuppressed } from "./autoFitSuppression";
 import { AttributionOverlay } from "../ui/viewport/AttributionOverlay";
 
 export interface CitySceneHandle {
@@ -304,6 +305,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     /** Bumped by the sync effect when a layer was newly added, which is the
      *  only thing that triggers an automatic fit. */
     const [fitToken, setFitToken] = useState(0);
+    /** The last `fitToken` the fit effect below acted on (or deliberately
+     *  dropped), so one token can never be served twice. */
+    const handledFitTokenRef = useRef(0);
     const layers = useLayerStore((s) => s.layers);
     /**
      * Which layer ids currently have a stream registered, as one string.
@@ -736,6 +740,17 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     // so the fit runs after the handles exist and `boundsOf` can see them.
     useEffect(() => {
       if (fitToken === 0) return;
+      // ONCE per token, and consumed even when the fit is skipped below. Two
+      // reasons: `fitAll`'s identity changes whenever `boundsOf` does, which
+      // re-runs this effect on a token it has already served; and a fit
+      // suppressed by a restore must be DROPPED, not left pending to fire
+      // after that restore's camera has landed.
+      if (handledFitTokenRef.current === fitToken) return;
+      handledFitTokenRef.current = fitToken;
+      // A restore adds layers to get where it is going and then sets the
+      // camera it saved. Fitting to those layers would overwrite exactly that
+      // camera — see `autoFitSuppression.ts` (Task C26).
+      if (isAutoFitSuppressed()) return;
       fitAll();
     }, [fitToken, fitAll]);
 

@@ -35,6 +35,7 @@ import { browserPlatform } from "../platform/browser";
 import type { PlatformServices } from "../platform/types";
 import { NavaraViewport } from "../scene/NavaraViewport";
 import type { CitySceneHandle } from "../scene/NavaraViewport";
+import { suppressAutoFit } from "../scene/autoFitSuppression";
 import { useSelectionStore } from "../features/selection/selectionStore";
 import { useLayerStore } from "../features/layers/layerStore";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
@@ -559,6 +560,11 @@ export function App({
   const handleRestore = useCallback(
     async (id: string) => {
       clearError();
+      // A restore adds layers and then applies the camera it saved. The
+      // viewport fits to any newly added layer, so without this the fit and
+      // the restored camera race, and whenever the fit lands second the saved
+      // viewpoint is silently thrown away (Task C26).
+      const releaseAutoFit = suppressAutoFit();
       try {
         const snapshot = await persistenceStore.load(id);
         if (!snapshot) {
@@ -710,6 +716,8 @@ export function App({
             ? EXPLANATION_TOAST_MS
             : STATUS_TOAST_MS,
         );
+      } finally {
+        releaseAutoFit();
       }
     },
     [
@@ -799,6 +807,11 @@ export function App({
     // legacy shape to fall back to here.
     const layersToLoad = shared.layers ?? [];
 
+    // Same race as `handleRestore`: a share link adds layers and then applies
+    // the camera it encoded, and the viewport's fit-on-add would otherwise
+    // land second and replace the shared viewpoint (Task C26).
+    const releaseAutoFit = suppressAutoFit();
+
     void (async () => {
       // Per-layer failures are COUNTED, not swallowed: a `.fcb` link whose
       // source 404s, fails admission or times out waiting for the engine used
@@ -882,7 +895,7 @@ export function App({
           EXPLANATION_TOAST_MS,
         );
       }
-    })();
+    })().finally(releaseAutoFit);
     // Deps `[]` on purpose: a share hash is read ONCE, on mount. Everything
     // this body needs is a ref or a stable callback, and the wait for the
     // viewport is the boot gate rather than a re-run on some readiness state.
