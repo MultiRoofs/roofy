@@ -334,3 +334,277 @@ over the canvas is still cancelled with `scrollY` 0; no page errors. Screenshot
   unchanged from before this pass and is a separate feature.
 - **Google tiles and the basemap are independent.** Both can be on; the tiles
   cover the basemap where they have coverage, which is why "None" is offered.
+
+---
+
+# Wave 2
+
+**Date:** 2026-08-03
+**Branch:** `develop`
+**Scope:** three further maintainer-reported defects, all of them consequences
+of the same thing wave 1 only half-finished — settings that exist in the UI but
+not in the engine.
+**Status:** all three addressed. `npx tsc -b --noEmit` clean, `npx vitest run`
+57 files / 685 tests passing, `npm run build` exit 0, `npx vp check` 0 errors /
+9 warnings (unchanged from before the wave). No submodule changes.
+
+| #   | Issue                                | Outcome                                                                                                                                                     |
+| --- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Advanced Settings toggles do nothing | Fixed. Six controls wired to real engine handles, three deleted for want of one, two new engine-backed knobs.                                               |
+| 2   | The scene looks dark                 | Fixed. `toneMappingExposure` 1 → 10, an ambient fill light, and a midday-UTC default clock. **+26.9 % mean canvas luminance** on the same scene and camera. |
+| 3   | The right-pane Solar tab             | Removed. Presets grid + sun readout moved into a popover on the toolbar's solar cluster; dead CSS deleted.                                                  |
+
+| SHA       | Subject                                                           |
+| --------- | ----------------------------------------------------------------- |
+| `c369aa6` | fix: give every advanced setting a live engine counterpart        |
+| `774dac2` | feat: rebuild the Advanced Settings panel over the wired controls |
+| `9094862` | refactor: retire the Solar inspector tab into the toolbar cluster |
+| `ad5fa31` | fix: start the scene clock at midday UTC, not at the wall clock   |
+
+---
+
+## Issue 1 — the Advanced Settings panel was mostly decorative
+
+### Full inventory, before
+
+Read from `AdvancedSettingsPanel.tsx` and grepped for every consumer of the
+store field behind it. "Wired" means some code outside the panel read it.
+
+| Control            | Store                               | Wired before?                                | Action                                                |
+| ------------------ | ----------------------------------- | -------------------------------------------- | ----------------------------------------------------- |
+| Post Processing    | `renderDebugStore`                  | Partly — only as a gate on the clouds effect | **Kept**, now the real master over the post chain     |
+| Clouds             | `renderDebugStore`                  | Yes (`view.addEffect`/`delete`, wave 1)      | Kept                                                  |
+| Cloud coverage     | `atmosphereStore`                   | Yes (`handle.update`, wave 1)                | Kept; now disabled with the Clouds toggle             |
+| Aerial Perspective | `renderDebugStore`                  | **No**                                       | **Wired** to the photoreal `aerialPerspective` handle |
+| Lens Flare         | `atmosphereStore`                   | **No**                                       | **Wired** to the photoreal `lensFlare` handle         |
+| Google 3D Tiles    | `tilesStore`                        | Yes (wave 1)                                 | Kept                                                  |
+| Basemap            | `basemapStore`                      | Yes (wave 1)                                 | Kept                                                  |
+| Sun Shadows        | `renderDebugStore`                  | **No**                                       | **Wired** to `sun.update({ sun: { castShadow } })`    |
+| City Shadows       | `renderDebugStore`                  | **No**                                       | **Deleted** (see below)                               |
+| Double Sided       | `renderDebugStore`                  | **No**                                       | **Deleted**                                           |
+| City Material      | `renderDebugStore`                  | **No**                                       | **Deleted**                                           |
+| — (new)            | `renderDebugStore.exposure`         | —                                            | **Added**, drives `view.toneMappingExposure`          |
+| — (new)            | `renderDebugStore.ambientIntensity` | —                                            | **Added**, drives `view.addLight({ ambient })`        |
+
+So of eleven controls, four reached the engine and seven did not.
+
+### The missing seam
+
+`DefaultPlugin.addDefaultPhotorealScene()` **returns** handles for `sky`,
+`stars`, `skyLightProbe`, `sun`, `aerialPerspective`, `lensFlare`,
+`toneMapping` and `antialiasing`. `NavaraViewport` threw them away
+(`afterInit: () => void defaultPlugin.addDefaultPhotorealScene()`), so after
+init the app had no reference to anything the default scene had built and could
+only add _new_ effects — which is exactly why "Clouds" (an `addEffect` of its
+own) was the one visual toggle that worked.
+
+The handles are captured now. The post chain is driven through
+`BaseHandle.visible`, which maps onto the `postprocessing` pass's own enable
+flag (`Pass.visible` in `@navaramap/three`), and the sun through its own config
+update. Deliberate asymmetries, both documented in the source:
+
+- **Sun shadows use `sun.update({ sun: { castShadow } })`, never `visible`** —
+  hiding the light would take the scene's only key light with it.
+- **Tone mapping is NOT part of the "Post Processing" master.** It is what maps
+  HDR radiance to display range; hiding it blows the frame to white rather than
+  showing what the other passes contribute.
+
+### The three deletions (disclosed)
+
+`cityShadowsEnabled`, `cityDoubleSided` and `cityMaterialMode` describe the city
+mesh's `MeshStandardMaterial` — `castShadow`/`receiveShadow`, `side`, and
+standard-vs-basic. That material is constructed in
+`packages/cityjson-navara-plugins/.../cityModelMesh.ts` and `cityMesh.ts`, and
+`CityModelHandle` (the app's whole contract with it) exposes no material
+surface at all. Wiring them means either a submodule API change — out of scope
+for this pass, and the brief expected no submodule changes — or reaching into
+another package's `object3d` from the app, which is worse than not having the
+toggle. They are deleted, and `renderDebugStore.ts` carries the reasoning so
+nobody re-adds them as booleans.
+
+### Evidence (real engine, CDP)
+
+`window.__multiroofRenderDebug` (the dev-only store handle) drives the store;
+every assertion below is a **pixel** measurement of the resulting frame, because
+the store was never the thing in doubt.
+
+| Toggle                      | Camera        | Pixels changed  | Region                                                                                     | Reversible                         |
+| --------------------------- | ------------- | --------------- | ------------------------------------------------------------------------------------------ | ---------------------------------- |
+| Sun Shadows off → on        | default (top) | 5 887 / 421 200 | bbox `531,218 → 670,284` = exactly the two buildings; their mean luminance 233.79 ↔ 214.78 | yes, pixel-exact (5 887 both ways) |
+| Ambient Light 0 → 0.6       | default (top) | 3 490           | bbox `532,218 → 670,280` = the buildings only; mean 221.91 → 226.05 (+4.14)                | yes                                |
+| Aerial Perspective off → on | horizon       | 161 804         | whole canvas; mean over the changed pixels 190.45 ↔ 43.74                                  | yes (163 354 back)                 |
+| Post Processing off → on    | horizon       | 163 520         | whole canvas                                                                               | yes                                |
+| Aerial Perspective off → on | default (top) | **43**          | —                                                                                          | —                                  |
+
+The last row is the honest one: at the default near-top-down fit camera there
+is no sky and almost no air column in frame, so the aerial-perspective pass has
+nothing to contribute and the toggle is very nearly a no-op _for that view_.
+It is unmistakably live at a horizon camera. The ambient light's effect being
+confined to the building pixels is likewise correct rather than suspicious: the
+raster basemap is drawn unlit, so a light in the scene can only touch the city
+meshes.
+
+Panel control inventory read back out of the live DOM after the rebuild:
+
+```
+Exposure | Ambient Light | Sun Shadows | Post Processing | Clouds |
+Aerial Perspective | Lens Flare | Cloud Coverage | Google 3D Tiles |
+advanced-basemap
+```
+
+Screenshots: `2026-08-03-w2-advanced-settings-panel.png`,
+`2026-08-03-w2-aerial-{off,on}.png`, `2026-08-03-w2-sun-shadows-{off,on}.png`.
+
+### jsdom coverage
+
+`tests/unit/scene/navaraViewport.test.tsx` gained a
+`NavaraViewport render settings` suite (8 tests). The mocked
+`addDefaultPhotorealScene()` now returns mutable handle objects, and every
+assertion reads **engine** state — a handle's `visible`, a `sun.update()` call,
+`view.toneMappingExposure`, an `addLight` config. That is the point: the old
+panel tests asserted store contents and stayed green through the entire period
+the feature was dead.
+
+---
+
+## Issue 2 — the scene was much darker than Navara's samples
+
+### Three causes, in order of size
+
+1. **`view.toneMappingExposure` was never set.** three's default is `1`.
+   Navara's own getting-started sets `10`
+   (`docs/superpowers/research/2026-08-01-navara-api-report.md` §Bootstrap, and
+   the B1 spike used the same value). The atmosphere feeds the tone mapper
+   physically-scaled radiance, so at exposure 1 the whole frame sits in the
+   bottom of the curve — dim, flat and blue-grey, which is what was reported.
+2. **No ambient term.** `addDefaultPhotorealScene()` supplies a
+   `skyLightProbe`, which is _directional_ sky irradiance; a surface facing away
+   from both sun and sky still falls to near-black. Navara's basic-visualization
+   sample adds `view.addLight({ ambient: {} })` for exactly this. Added at
+   intensity 0.6, slider-controlled, and genuinely removed at 0 rather than set
+   to zero intensity.
+3. **The scene clock started at `new Date()`.** The engine's atmosphere follows
+   `solarStore.datetime`, so opening the viewer in the evening rendered a night
+   scene. The M7.5 browser smoke already tripped over this and shifted the
+   page's `Date` to take its screenshots (spike findings §M7.5, finding 6) —
+   that was a workaround for a real first-run defect. The default is now
+   today at **12:00 UTC**.
+
+### Quantitative before/after
+
+Same session, same fixture (`fixtures/two-buildings.city.json`), same camera,
+same OSM basemap, canvas rect `240,44 720×585`, Rec.709 luma over sRGB 8-bit.
+Both states were held for 10 s and screenshotted **twice**; each pair differs by
+**0 pixels**, so the delta below is the settings and not tile loading.
+
+| State                                                | mean luminance | darkest pixel |
+| ---------------------------------------------------- | -------------- | ------------- |
+| **Before** — `exposure 1`, no ambient (what shipped) | **189.51**     | 54.6          |
+| **After** — `exposure 10`, ambient 0.6               | **240.49**     | 101.4         |
+| After, re-applied later in the same session          | 239.20         | 101.4         |
+
+**Δ mean luminance = +50.98 (+26.9 %)**, and the darkest pixel in the canvas
+nearly doubles (54.6 → 101.4) — the shadows lift, which is the specific
+complaint.
+
+`2026-08-03-brightness-before.png` / `2026-08-03-brightness-after.png`.
+
+Monotonic exposure sweep on a second (horizon) camera, for the record:
+`e=1` 115.6 → `e=2` 131.1 → `e=3` 138.6 → `e=5` 147.1 → `e=10` 157.0.
+
+Ambient on its own: `2026-08-03-brightness-ambient-{off,on}.png`, 3 490 pixels,
+all of them the buildings, +4.14 mean.
+
+### The clock, measured rather than argued
+
+A second run with the page's `Date` shifted +10 h (`CLOCK_OFFSET_MS`), i.e. a
+user opening the viewer at **22:27 UTC / 00:27 local**:
+
+| Scene clock                                                                             | Sun readout                                  |
+| --------------------------------------------------------------------------------------- | -------------------------------------------- |
+| **New default** — 2026-08-03 14:00 local (12:00 UTC)                                    | **Altitude 55.3°, S (185°), above horizon**  |
+| **Old default** — the wall clock, via the toolbar's own "Now" button → 2026-08-04 00:27 | **Altitude −18.5°, N (340°), below horizon** |
+
+−18.5° is astronomical night. That is what the previous default handed a user
+who opened the app in the evening.
+`2026-08-03-brightness-clock-{default-noon,wall-night}.png`.
+
+Note the frame's _mean_ luminance barely moves between those two (239.78 vs
+239.65): the OSM raster basemap is drawn unlit and dominates this camera, so
+only the 33.8 k pixels of buildings, sky and the toolbar clock actually change.
+The sun-altitude readout is the load-bearing measurement here, not the mean.
+
+---
+
+## Issue 3 — the right-pane Solar tab is gone
+
+The previous wave moved the clock into the header and left the tab holding a
+nine-button preset grid, a read-only altitude/azimuth readout, and a note saying
+where the clock had gone. A tab of the **selection** inspector whose content is
+scene-wide state, one third of which is a signpost to somewhere else.
+
+- `src/ui/inspector/SolarTab.tsx` deleted; `InspectorPanel`'s `Tab` union, tab
+  strip and render branch with it.
+- `src/ui/toolbar/SolarPresetMenu.tsx` added: a popover off the solar cluster
+  holding the same preset grid, the same "Now", and the sun readout. Dismisses
+  on Escape and on an outside click; stays open on an inside click.
+- The readout no longer vanishes when there is no site — it says
+  "Load a model to read the sun" instead of rendering an empty section.
+- Dead CSS removed this time: `.solar-control-row`, `.solar-slider` (the
+  advanced panel had already stopped using them when its sliders were renamed)
+  and `.inspector-note`, whose only consumer was the tab's signpost.
+
+### Evidence
+
+- Inspector tab strip read from the live DOM: `Object,Surfaces,Analysis,Rules,Stats`.
+- Popover content read from the live DOM:
+  `PRESETS | Summer Morning … Winter Evening | Now | SUN POSITION | Altitude | 55.3° | Azimuth | S (185°) | Status | Above horizon`.
+- Clicking **Winter Morning** moved the scene clock to `2026-12-21 09:00` and
+  the engine's sun to `Altitude 0.5°, SE (131°)` — so the preset really reaches
+  the atmosphere, not just the store.
+  `2026-08-03-w2-solar-popover.png`, `2026-08-03-w2-solar-preset-winter-morning.png`.
+- `tests/unit/ui/toolbar/SolarPresetMenu.test.tsx` (8 tests) plus an
+  `offers no Solar tab` assertion pinning the exact tab list.
+
+---
+
+## Verification method (wave 2)
+
+- Raw CDP driver (`scratchpad/c26-cdp.mjs` from wave 1), Playwright Chromium
+  1228, `--headless=new --no-sandbox --enable-unsafe-swiftshader`, 1280×800,
+  DPR 1, against `npm run dev` on `localhost:5175`. `agent-browser` still cannot
+  drive pages on this host.
+- Four sessions: toggle sweep + UI inventory; exposure ladder at a horizon
+  camera; the stable brightness A/B; the `+10 h` clock session.
+- Luminance and pixel-diff statistics computed from the PNGs with a small
+  decoder (`scratchpad/lum.mjs`, `scratchpad/diffbox.mjs`) — Rec.709 luma,
+  per-channel diff threshold 3/255, plus a bounding box of the changed pixels.
+- **Zero page errors and zero console errors** across every session
+  (`window.__errors` empty; only the known DuckDB-extension and
+  missing-Google-key warnings).
+
+## Known limits / follow-ups (wave 2)
+
+- **Exposure 10 is Navara's number, not a measured optimum for this content.**
+  On this fixture at noon the city meshes read pale (roof pixels around 222–226
+  of 255) — brighter than before, but close to the top of the curve. Navara's
+  samples pair exposure 10 with photoreal terrain, whereas this app drapes an
+  unlit OSM raster that the same exposure multiplies straight through. The
+  slider now exists precisely so this can be judged on real hardware; SwiftShader
+  posterises, so this host cannot settle it. **Re-check on a GPU before treating
+  10 as final.**
+- **Aerial Perspective is nearly inert at the default fit camera** (43 pixels).
+  Not a bug — there is no air column in frame — but a user toggling it from the
+  default view will see nothing. Worth a tooltip if it is ever reported.
+- **Sun Shadows off makes the buildings _darker_ on this host** (233.79 →
+  214.78 over the affected pixels), which is the opposite of the naive
+  expectation. Reproducible and exactly reversible, so the wiring is right; the
+  cause is inside `SunLightDesc`'s CSM path and was not chased.
+- **The render settings are not persisted.** Exposure, ambient and the toggles
+  are not in the snapshot/share schema (v3), so a restored workspace comes back
+  on the defaults. Same reasoning as the basemap in wave 1: adding them is a
+  schema bump.
+- **Midday UTC is a compromise.** It guarantees daylight across Europe, Africa
+  and the Americas — the project's reference site is Delft — but a user in
+  Japan opening the viewer at local noon still gets a scene clock nine hours
+  behind them. "Now" is one click away in the toolbar.
