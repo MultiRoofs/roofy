@@ -32,7 +32,7 @@ Goal: open a city model and provide a usable 3D exploration workflow.
 Deliverables:
 
 - Vite and React application shell
-- Three.js scene bootstrap
+- Three.js scene bootstrap (superseded by Milestone 8: Navara)
 - City model ingestion starting with CityJSON
 - Camera controls, selection, and inspection panel
 - Basic city-model metadata display
@@ -216,7 +216,7 @@ Deferred:
 
 - @takram/three-atmosphere and @takram/three-clouds integration. Packages are installed but EastNorthUpFrame places meshes at ECEF coordinates (millions of meters from origin) which breaks the local-origin camera/controls model. A future approach should either: (a) implement a globe-scale view mode where OrbitControls target is in ECEF space, or (b) use the atmosphere shaders without ENU framing by passing sun direction directly.
 
-Status: Complete (R3F migration). Atmosphere/clouds deferred.
+Status: Complete (R3F migration). Atmosphere/clouds deferred. Superseded by Milestone 8: the R3F scene was replaced by the Navara engine, which provides the atmosphere natively.
 
 ### M6.2: View Alignment Buttons and Per-Layer Fly-To
 
@@ -236,7 +236,7 @@ Exit criteria:
 
 - A user can manage layers in a left sidebar, select LoD per layer, and navigate views via alignment buttons ✓
 - A user can fly to any layer by clicking the crosshair icon ✓
-- Scene rendering uses R3F with proper lighting and shadows ✓
+- Scene rendering uses R3F with proper lighting and shadows ✓ (superseded by Milestone 8: Navara)
 
 ## Milestone 7: CityGML 2.0/3.0 Support
 
@@ -282,7 +282,7 @@ Deliverables:
 - Progress reporting during parse
 - Memory-efficient incremental object emission
 
-## Milestone 8: Navara Engine Migration
+## Milestone 8: Navara Engine Migration (plan phases M7.1–M7.7)
 
 Goal: replace the bespoke React Three Fiber scene with the Navara engine, moving all
 format-agnostic CityJSON domain code into a reusable plugin monorepo consumed as a git
@@ -293,14 +293,80 @@ numbers its own phases M7.1–M7.7; those labels belong to the plan's internal n
 are unrelated to Milestone 7 (CityGML) above. Phase status:
 
 - M7.1 (plugin monorepo scaffold + submodule + app wiring): Complete
-- M7.2 (format-agnostic domain moved into @cityjson/navara-core; app re-exports at the old paths): Complete
+- M7.2 (format-agnostic domain moved into @cityjson/navara-core; app re-exports at the old
+  paths): Complete — the re-export shims were themselves deleted in M7.7, except two kept
+  deliberately as app vocabulary (`domain/citymodel/types.ts`, `features/rules/types.ts`)
 - M7.3 (plugin + viewport rendering a static CityJSON layer): Complete
 - M7.4 (picking, cursor readout, rules, highlight, LoD): Complete — verified end-to-end
   in the browser on the real engine; log in
   `docs/superpowers/research/2026-08-01-navara-spike-findings.md` §10
-- M7.5 (@cityjson/navara-flatcitybuf streaming plugin): Not started
-- M7.6 (solar, Google 3D Tiles, geographic persistence): Not started
-- M7.7 (teardown, dependency pinning, docs): Not started
+- M7.5 (@cityjson/navara-flatcitybuf streaming plugin): Complete — browser-proven against
+  a real remote `.fcb` (range requests, resident-cell counts, level swaps)
+- M7.6 (solar, Google 3D Tiles, geographic persistence): Complete
+- M7.7 (teardown, dependency pinning, docs): Complete
+
+Delivered:
+
+- `cityjson-navara-plugins` monorepo (git submodule at `packages/cityjson-navara-plugins`):
+  `@cityjson/navara-core`, `@cityjson/navara-cityjson`, `@cityjson/navara-flatcitybuf`, and
+  `@cityjson/navara-cityparquet` (scaffold only — see Dropped)
+- `NavaraViewport` replacing `CitySceneR3F`, behind the same `CitySceneHandle` contract
+- Real ENU georeferencing per layer: an exact per-vertex source-CRS→ENU transform plus
+  EGM2008 geoid-sampled vertical placement, with a CRS gate that refuses non-metric or
+  unrecognised CRS at load
+- Picking, per-surface rule colouring, highlight and LoD selection on the plugin handles
+  (`PickStrategy = "own-raycast"` — the engine's `PickableMeshWrapper` carries a per-mesh
+  uniform id and cannot express per-surface granularity)
+- FlatCityBuf viewport streaming driven by Navara camera events, with the B1–B5 race fixes
+  (stale-commit ordering, rule-change recolour, worker eviction, budget/hole handling,
+  fetch rollback) carried over as tests
+- Engine-native atmosphere, sun and shadows; Google Photorealistic 3D Tiles as a native
+  `3d-tiles` layer, with mandatory attribution for both Google and the geoid service
+- Geographic camera persistence: snapshot/share v3 stores `{lng, lat, height, heading,
+pitch, roll}`; v1/v2 snapshots are rejected outright (pre-v3 share links decode to null)
+- R3F, `@takram/*`, `@takram/3d-tiles-renderer` and `suncalc` removed; `three@0.183.2` and
+  `postprocessing@6.39.0` pinned exactly
+
+Dropped in this migration (spec §9 non-goals):
+
+- Measure tool and box-select. `ViewerToolbar` still offers the modes and `pickEventHandlers`
+  still routes them (picking turns off), but nothing draws a rubber band or a measurement —
+  they are disabled, not implemented, pending re-implementation against Navara.
+- Vignette and lens-flare parity with the old post-processing stack
+- Non-georeferenced ("local") viewing mode — every layer must georeference or it is refused
+- CityParquet implementation: `@cityjson/navara-cityparquet` stays a scaffold
+- A 3D-Tiles-conversion plugin
+- Backward-compatible snapshots and share links (project philosophy: breaking changes are fine)
+- A React wrapper for Navara — `NavaraViewport` stays a thin imperative host
+
+Deferred during execution (known, non-blocking; recorded here so they are not lost):
+
+- The Advanced Settings panel's rendering/debug toggles — post-processing, clouds, aerial
+  perspective, lens flare, sun shadows, city shadows, double-sided, city material mode — are
+  still unwired under `NavaraViewport`: `renderDebugStore` and `atmosphereStore` have no
+  reader outside the panel itself. Wire them to the engine or delete them. (The Google 3D
+  Tiles toggle in the same panel _is_ wired.)
+- `LEVEL_SWAP_TIMEOUT_MS = 1500` (`navara-flatcitybuf/src/constants.ts`) is tuned for real
+  hardware and wants a measurement on a GPU-backed host for genuine level swaps; on the
+  GPU-less SwiftShader dev host the first post-fit commit blows it and recovers next settle.
+- The first streaming commit's fetch is unbounded (no timeout), unlike the geoid fetch's
+  `GEOID_TIMEOUT_MS`. Deliberate — the first commit has nothing to roll back to — but a
+  generous bound would still be an improvement.
+- Hover raycasting is now nearest-hit across all handles per mousemove, on a plain
+  `Raycaster.intersectObject` with no BVH. Acceptable today; if it bites with several large
+  layers, the candidates are a BVH in the plugin or throttling hover picks.
+
+Exit criteria:
+
+- A user can load CityJSON, CityJSONSeq and streaming FlatCityBuf layers onto the globe, pick
+  and recolour them, animate the sun, and save/restore/share a viewpoint ✓
+- `npx tsc -b --noEmit`, `npx vitest run`, `pnpm vitest run` (submodule) and `npm run build`
+  are all green ✓ — re-verified 2026-08-03 at `ccaf2ce`: tsc clean, app 53 files / 618 tests,
+  plugins 42 files / 572 tests, build succeeds
+
+Status: Implementation complete through phase M7.7. **The final review has not run yet** — the
+plan's last task (C26, a whole-branch review) is outstanding, so no reviewer has yet looked at
+the migration as a single diff. Per-task reviews were run and closed throughout.
 
 ## Cross-Cutting Workstreams
 
