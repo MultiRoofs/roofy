@@ -195,14 +195,14 @@ function createReadyGate(): ReadyGate {
   return { promise, resolve, reject };
 }
 
-/** What `addGoogleTiles` produced, so the toggle can take it back out again. */
-interface GoogleTilesHandles {
+/**
+ * A source plus the layer that renders it, as one unit — what both backdrops
+ * (the Google tileset and the raster basemap) add and remove together.
+ */
+interface SourceLayerHandles {
   readonly layer: ReturnType<ViewInstance["addLayer"]>;
   readonly source: ReturnType<ViewInstance["addSource"]>;
 }
-
-/** The raster basemap's source+layer, so a change of option can swap them. */
-type BasemapHandles = GoogleTilesHandles;
 
 /** The half of `EffectHandle` the clouds wiring uses. Structural rather than
  *  the engine's generic type, which needs the descriptor class as a parameter
@@ -228,10 +228,11 @@ interface CloudsHandle {
 function addBasemap(
   view: ViewInstance,
   option: BasemapOption,
-): BasemapHandles | null {
+): SourceLayerHandles | null {
   if (option.source === null) return null;
+  let source: SourceLayerHandles["source"] | null = null;
   try {
-    const source = view.addSource(option.source);
+    source = view.addSource(option.source);
     const layer = view.addLayer({ type: "raster", source });
     return { layer, source };
   } catch (error) {
@@ -240,13 +241,40 @@ function addBasemap(
         "the viewer continues without imagery.",
       error,
     );
+    // The source may already be registered — `addLayer` is the throw we
+    // actually see in practice — and nothing else holds a reference to it, so
+    // returning here without this would leak it into the engine for the life
+    // of the session, once per failed attempt.
+    discardOrphanSource(source);
     return null;
+  }
+}
+
+/**
+ * Delete a source that never got a layer.
+ *
+ * Only reachable from the two `add*` failure paths, where the source
+ * succeeded and the layer did not. `Source.delete()` answers `false` while a
+ * layer still references the source — there is none here by construction — and
+ * its own failure must not mask the error being reported by the caller.
+ */
+function discardOrphanSource(
+  source: SourceLayerHandles["source"] | null,
+): void {
+  if (source === null) return;
+  try {
+    source.delete();
+  } catch (error) {
+    console.error(
+      "NavaraViewport: an orphaned source could not be deleted.",
+      error,
+    );
   }
 }
 
 /** Take the basemap back out, layer first — `Source.delete()` is a no-op while
  *  a layer still references the source, so the reverse order leaks it. */
-function removeBasemap(handles: BasemapHandles): void {
+function removeBasemap(handles: SourceLayerHandles): void {
   try {
     handles.layer.delete();
     handles.source.delete();
@@ -278,7 +306,7 @@ function removeBasemap(handles: BasemapHandles): void {
  * or the engine refused. `null` is also what keeps the attribution overlay from
  * crediting Google for imagery nobody is looking at.
  */
-function addGoogleTiles(view: ViewInstance): GoogleTilesHandles | null {
+function addGoogleTiles(view: ViewInstance): SourceLayerHandles | null {
   const tiles = googleTilesConfig(import.meta.env.VITE_GOOGLE_MAPS_API_KEY);
   if (tiles === null) {
     if (import.meta.env.DEV) {
@@ -288,8 +316,9 @@ function addGoogleTiles(view: ViewInstance): GoogleTilesHandles | null {
     }
     return null;
   }
+  let source: SourceLayerHandles["source"] | null = null;
   try {
-    const source = view.addSource(tiles.source);
+    source = view.addSource(tiles.source);
     const layer = view.addLayer({ ...tiles.layer, source });
     return { layer, source };
   } catch (error) {
@@ -298,6 +327,10 @@ function addGoogleTiles(view: ViewInstance): GoogleTilesHandles | null {
         "the viewer continues on the default photoreal globe.",
       error,
     );
+    // Pre-existing leak, fixed alongside the basemap's: a source whose layer
+    // threw is unreachable but still registered, and the toggle can be flipped
+    // any number of times.
+    discardOrphanSource(source);
     return null;
   }
 }
@@ -311,7 +344,7 @@ function addGoogleTiles(view: ViewInstance): GoogleTilesHandles | null {
  * swallowed for the same reason `addGoogleTiles` swallows its own — a backdrop
  * that will not go away must not take the viewer with it.
  */
-function removeGoogleTiles(handles: GoogleTilesHandles): void {
+function removeGoogleTiles(handles: SourceLayerHandles): void {
   try {
     handles.layer.delete();
     handles.source.delete();
