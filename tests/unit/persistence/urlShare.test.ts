@@ -4,6 +4,12 @@
  * The share hash carries the same geographic camera as snapshot v3 (`cam`);
  * a link minted before v3 carried two scene-space tuples (`cp`/`ct`) and no
  * longer decodes at all — see the "rejects a pre-v3 share link" case.
+ *
+ * Two independent guards reject a bad hash, and both are tested on their own:
+ * the explicit `v: 3` discriminator, and the structural check that `cam`
+ * really carries six finite scalars. Fixtures aimed at the structural guard
+ * therefore always set `v: 3`, so a passing case cannot be an accident of the
+ * version check firing first.
  */
 
 import { describe, it, expect } from "vitest";
@@ -26,6 +32,7 @@ function makeState(
   overrides: Partial<ShareableViewState> = {},
 ): ShareableViewState {
   return {
+    v: 3,
     layers: [
       {
         name: "delft",
@@ -49,12 +56,23 @@ describe("encodeShareState / decodeShareState", () => {
     const decoded = decodeShareState(encoded);
 
     expect(decoded).not.toBeNull();
+    expect(decoded!.v).toBe(3);
     expect(decoded!.layers[0]!.modelUrl).toBe(
       "https://example.com/model.city.json",
     );
     expect(decoded!.cam).toEqual(CAM);
     expect(decoded!.dt).toBe("2025-06-21T12:00:00.000Z");
     expect(decoded!.pm).toBe("object");
+  });
+
+  it("writes the v:3 discriminator into the encoded payload", () => {
+    const encoded = encodeShareState(makeState());
+    const json = JSON.parse(
+      atob(
+        encoded.slice("share=".length).replace(/-/g, "+").replace(/_/g, "/"),
+      ),
+    ) as { v: unknown };
+    expect(json.v).toBe(3);
   });
 
   it("round-trips state with rules", () => {
@@ -116,8 +134,70 @@ describe("encodeShareState / decodeShareState", () => {
   });
 
   it("returns null for valid JSON but missing required fields", () => {
-    const bad = "share=" + btoa(JSON.stringify({ cam: "not an object" }));
+    const bad = "share=" + btoa(JSON.stringify({ v: 3, cam: "not an object" }));
     expect(decodeShareState(bad)).toBeNull();
+  });
+
+  it("returns null when cam carries only some of its components", () => {
+    const bad =
+      "share=" +
+      btoa(
+        JSON.stringify({
+          v: 3,
+          cam: { lng: 4.3571, lat: 52.0116 },
+          dt: "2025-06-21T12:00:00.000Z",
+          pm: "object",
+          layers: [],
+        }),
+      );
+    expect(decodeShareState(bad)).toBeNull();
+  });
+
+  it("normalises a payload whose layers key is absent entirely", () => {
+    const noLayers =
+      "share=" +
+      btoa(
+        JSON.stringify({
+          v: 3,
+          cam: CAM,
+          dt: "2025-06-21T12:00:00.000Z",
+          pm: "object",
+        }),
+      );
+    const decoded = decodeShareState(noLayers);
+
+    expect(decoded).not.toBeNull();
+    expect(decoded!.layers).toEqual([]);
+    expect(decoded!.cam).toEqual(CAM);
+  });
+
+  it("rejects a cam-shaped payload that carries no version at all", () => {
+    const versionless =
+      "share=" +
+      btoa(
+        JSON.stringify({
+          cam: CAM,
+          dt: "2025-06-21T12:00:00.000Z",
+          pm: "object",
+          layers: [],
+        }),
+      );
+    expect(decodeShareState(versionless)).toBeNull();
+  });
+
+  it("rejects a payload declaring a future version", () => {
+    const future =
+      "share=" +
+      btoa(
+        JSON.stringify({
+          v: 4,
+          cam: CAM,
+          dt: "2025-06-21T12:00:00.000Z",
+          pm: "object",
+          layers: [],
+        }),
+      );
+    expect(decodeShareState(future)).toBeNull();
   });
 
   it("rejects a pre-v3 share link carrying the old cp/ct tuples", () => {
@@ -140,6 +220,7 @@ describe("encodeShareState / decodeShareState", () => {
       "share=" +
       btoa(
         JSON.stringify({
+          v: 3,
           layers: [],
           cam: { ...CAM, lat: null },
           dt: "2025-06-21T12:00:00.000Z",

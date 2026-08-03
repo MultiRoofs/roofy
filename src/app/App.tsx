@@ -630,6 +630,7 @@ export function App({
     const { mode: pickMode } = useSelectionStore.getState();
 
     const state: ShareableViewState = {
+      v: 3,
       layers: allLayers
         .filter((l) => l.modelRef.type === "url")
         .map((l) => ({

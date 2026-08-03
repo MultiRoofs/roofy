@@ -33,6 +33,13 @@ export interface ShareableLayerState {
  * flying the camera somewhere arbitrary is worse than ignoring the link.
  */
 export interface ShareableViewState {
+  /**
+   * Schema version. Declared explicitly so a hash states which frame its
+   * numbers live in rather than leaving that to be inferred from shape:
+   * a future v4 that reuses the `cam` key with different semantics would
+   * otherwise sail past the structural check below.
+   */
+  readonly v: 3;
   /** Per-layer state. */
   readonly layers: ReadonlyArray<ShareableLayerState>;
   /** Geographic camera (v3). */
@@ -49,6 +56,9 @@ export interface ShareableViewState {
 
 const SHARE_PREFIX = "share=";
 
+/** The only schema version this build mints and the only one it accepts. */
+const SHARE_VERSION = 3;
+
 function toBase64Url(str: string): string {
   return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
@@ -59,7 +69,9 @@ function fromBase64Url(b64: string): string {
 }
 
 export function encodeShareState(state: ShareableViewState): string {
-  const json = JSON.stringify(state);
+  // The version is stamped here rather than taken from the caller so that
+  // every hash this build mints is tagged, whatever the caller passed.
+  const json = JSON.stringify({ ...state, v: SHARE_VERSION });
   return SHARE_PREFIX + toBase64Url(json);
 }
 
@@ -92,7 +104,12 @@ export function decodeShareState(hash: string): ShareableViewState | null {
     const json = fromBase64Url(b64);
     const parsed = JSON.parse(json) as ShareableViewState;
 
-    // Basic validation. A pre-v3 link (cp/ct tuples, no `cam`) fails here.
+    // Two independent guards, deliberately redundant. The version rejects a
+    // hash that declares a schema this build does not speak (v1/v2's
+    // scene-space cp/ct, or some later v4); the structural check rejects a
+    // hash that claims v3 but cannot produce a camera. A payload that is
+    // merely cam-shaped, with no version, fails the first.
+    if (parsed.v !== SHARE_VERSION) return null;
     if (!isGeographicCamera(parsed.cam)) return null;
     if (typeof parsed.dt !== "string") return null;
 
