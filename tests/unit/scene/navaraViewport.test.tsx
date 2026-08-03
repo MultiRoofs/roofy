@@ -1422,6 +1422,8 @@ describe("NavaraViewport Google tiles", () => {
     expect(
       container.querySelector(".attribution-overlay")?.textContent,
     ).not.toMatch(/Google/);
+    // ...and the source it did accept is taken back out rather than leaked.
+    await waitFor(() => expect(deleteSource).toHaveBeenCalledTimes(1));
     errors.mockRestore();
   });
 });
@@ -1521,7 +1523,7 @@ describe("NavaraViewport basemap", () => {
     await waitFor(() =>
       expect(
         container.querySelector(".attribution-overlay")?.textContent,
-      ).toContain("© Esri"),
+      ).toContain("Esri, Vantor, Earthstar Geographics"),
     );
 
     act(() => useBasemapStore.getState().setBasemapId("carto-positron"));
@@ -1532,7 +1534,7 @@ describe("NavaraViewport basemap", () => {
     );
     expect(
       container.querySelector(".attribution-overlay")?.textContent,
-    ).not.toContain("© Esri");
+    ).not.toContain("Esri");
   });
 
   it("credits nobody for imagery the engine refused", async () => {
@@ -1555,6 +1557,22 @@ describe("NavaraViewport basemap", () => {
     expect(
       container.querySelectorAll(".attribution-overlay span"),
     ).toHaveLength(GEOID_ATTRIBUTION.length);
+    errors.mockRestore();
+  });
+
+  it("deletes the source when the LAYER is what the engine refused", async () => {
+    useBasemapStore.setState({ basemapId: "osm" });
+    addLayer.mockImplementationOnce(() => {
+      throw new Error("unsupported source");
+    });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(errors).toHaveBeenCalled());
+    // The source registered fine and nothing else holds a reference to it, so
+    // returning without deleting it would leak it into the engine for the rest
+    // of the session — once per failed attempt.
+    expect(addSource).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(deleteSource).toHaveBeenCalledTimes(1));
     errors.mockRestore();
   });
 

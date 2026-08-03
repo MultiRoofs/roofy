@@ -53,7 +53,11 @@ describe("basemaps", () => {
     expect(basemapById("osm").attribution).toEqual([
       "© OpenStreetMap contributors",
     ]);
-    expect(basemapById("esri-imagery").attribution).toEqual(["© Esri"]);
+    // The service's own `copyrightText`, verbatim — the imagery is a
+    // composite and a shortened "© Esri" under-credits the other sources.
+    expect(basemapById("esri-imagery").attribution).toEqual([
+      "Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community",
+    ]);
     // CARTO's basemaps are OSM-derived, so BOTH credits are required.
     expect(basemapById("carto-positron").attribution).toEqual([
       "© CARTO",

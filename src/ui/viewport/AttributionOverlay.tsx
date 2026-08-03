@@ -82,13 +82,19 @@ export function AttributionOverlay({
   googleTiles,
   basemapAttribution = [],
 }: AttributionOverlayProps): ReactElement {
+  // DEDUPED, in source order. The geoid line already credits OpenStreetMap
+  // (the undulation tiles are OSM-derived), so an OSM or CARTO basemap would
+  // otherwise print "© OpenStreetMap contributors" twice — which reads as a
+  // bug, not as a stronger credit. A Set preserves insertion order, so the
+  // first occurrence of each obligation wins its position.
+  const lines = [
+    ...(googleTiles ? ["Imagery © Google"] : []),
+    ...basemapAttribution,
+    ...GEOID_ATTRIBUTION,
+  ];
   return (
     <div className="attribution-overlay">
-      {googleTiles && <span>Imagery © Google</span>}
-      {basemapAttribution.map((line) => (
-        <span key={line}>{linkify(line)}</span>
-      ))}
-      {GEOID_ATTRIBUTION.map((line) => (
+      {[...new Set(lines)].map((line) => (
         <span key={line}>{linkify(line)}</span>
       ))}
     </div>
