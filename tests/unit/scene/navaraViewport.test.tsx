@@ -30,6 +30,16 @@ const addLayer = vi.fn((_layer: unknown) => ({
   id: "layer-1",
   delete: deleteLayer,
 }));
+/** `view.addEffect` — the clouds seam. The default photoreal scene does NOT
+ *  add clouds (verified against the 0.0.5 bundle), so every call here is one
+ *  the viewport made itself. */
+const updateEffect = vi.fn();
+const deleteEffect = vi.fn();
+const addEffect = vi.fn((_config: unknown) => ({
+  id: "effect-1",
+  update: updateEffect,
+  delete: deleteEffect,
+}));
 
 /** The engine's event bus, reduced to what `view.on/off` need. Tests drive the
  *  viewport by FIRING these, which is the only honest way to exercise a
@@ -101,6 +111,7 @@ vi.mock("@navaramap/three", () => ({
       flyTo,
       addSource,
       addLayer,
+      addEffect,
       atmosphere,
       screenSize: { x: 800, y: 600 },
       pixelRatio: 1,
@@ -163,6 +174,8 @@ import {
 import { useSelectionStore } from "../../../src/features/selection/selectionStore";
 import { useTilesStore } from "../../../src/features/tiles/tilesStore";
 import { useBasemapStore } from "../../../src/features/basemap/basemapStore";
+import { useRenderDebugStore } from "../../../src/features/debug/renderDebugStore";
+import { useAtmosphereStore } from "../../../src/features/atmosphere/atmosphereStore";
 import { BASEMAPS } from "../../../src/scene/basemaps";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 // The licence text the attribution overlay must show whatever else is on
@@ -170,14 +183,23 @@ import type { CityModel } from "../../../src/domain/citymodel/types";
 import { GEOID_ATTRIBUTION } from "@cityjson/navara-core";
 
 /**
- * Every suite below starts with NO basemap.
+ * Every suite below starts with NO basemap and NO clouds.
  *
- * OpenStreetMap is the production default (a black globe reads as a broken
- * viewer), but that would put an extra `addSource`/`addLayer` in front of every
- * assertion about the Google tiles. The basemap suite opts back in.
+ * Both are on by default in production (a black globe reads as a broken
+ * viewer, and the clouds toggle has always defaulted to on), but that would
+ * put an extra `addSource`/`addLayer`/`addEffect` in front of every assertion
+ * about the Google tiles. The suites that DO test them opt back in.
  */
 beforeEach(() => {
   useBasemapStore.setState({ basemapId: "none" });
+  useRenderDebugStore.setState({
+    cloudsEnabled: false,
+    postProcessingEnabled: true,
+  });
+  useAtmosphereStore.setState({ cloudCoverage: 0.3 });
+  addEffect.mockClear();
+  updateEffect.mockClear();
+  deleteEffect.mockClear();
 });
 
 // ---------------------------------------------------------------------------
@@ -1555,5 +1577,97 @@ describe("NavaraViewport wheel", () => {
     const touch = new Event("touchmove", { bubbles: true, cancelable: true });
     host.dispatchEvent(touch);
     expect(touch.defaultPrevented).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Clouds. `addDefaultPhotorealScene()` registers the `"clouds"` descriptor but
+// never adds the effect, so the advanced-settings toggle and coverage slider
+// were both inert until the viewport started adding it itself.
+// ---------------------------------------------------------------------------
+describe("NavaraViewport clouds", () => {
+  beforeEach(() => {
+    init.mockClear();
+    init.mockImplementation(async () => {});
+    listeners.clear();
+    viewInstances.length = 0;
+    defaultPluginThrows = null;
+    useTilesStore.setState({ enabled: false });
+    useLayerStore.setState({ layers: [], activeLayerId: null });
+  });
+
+  afterEach(() => {
+    cleanup();
+    useTilesStore.setState({ enabled: true });
+  });
+
+  it("adds the clouds effect with the store's coverage once the engine is up", async () => {
+    useRenderDebugStore.setState({ cloudsEnabled: true });
+    useAtmosphereStore.setState({ cloudCoverage: 0.42 });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(addEffect).toHaveBeenCalledTimes(1));
+    expect(addEffect.mock.calls[0]![0]).toEqual({
+      clouds: { coverage: 0.42 },
+    });
+    // After init: the engine only accepts descriptors on a live view, and the
+    // `"clouds"` key is registered by `DefaultPlugin.init()`.
+    expect(addEffect.mock.invocationCallOrder[0]!).toBeGreaterThan(
+      init.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("pushes coverage to the live pass instead of rebuilding it", async () => {
+    useRenderDebugStore.setState({ cloudsEnabled: true });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(addEffect).toHaveBeenCalledTimes(1));
+
+    act(() => useAtmosphereStore.getState().setCoverage(0.8));
+
+    await waitFor(() =>
+      expect(updateEffect).toHaveBeenCalledWith({ clouds: { coverage: 0.8 } }),
+    );
+    // Rebuilding the pass per slider step would re-load its 3D textures.
+    expect(addEffect).toHaveBeenCalledTimes(1);
+    expect(deleteEffect).not.toHaveBeenCalled();
+  });
+
+  it("adds nothing while the toggle is off, and removes the pass when it goes off", async () => {
+    useRenderDebugStore.setState({ cloudsEnabled: false });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(init).toHaveBeenCalled());
+    expect(addEffect).not.toHaveBeenCalled();
+
+    act(() => useRenderDebugStore.getState().setCloudsEnabled(true));
+    await waitFor(() => expect(addEffect).toHaveBeenCalledTimes(1));
+
+    act(() => useRenderDebugStore.getState().setCloudsEnabled(false));
+    await waitFor(() => expect(deleteEffect).toHaveBeenCalledTimes(1));
+  });
+
+  it("adds no clouds while post-processing is off (there is no pass chain to join)", async () => {
+    useRenderDebugStore.setState({
+      cloudsEnabled: true,
+      postProcessingEnabled: false,
+    });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(init).toHaveBeenCalled());
+    expect(addEffect).not.toHaveBeenCalled();
+  });
+
+  it("keeps the viewer alive when the engine refuses the clouds pass", async () => {
+    useRenderDebugStore.setState({ cloudsEnabled: true });
+    addEffect.mockImplementationOnce(() => {
+      throw new Error("no cloud textures");
+    });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const ref = createRef<CitySceneHandle>();
+    const { container } = render(
+      <NavaraViewport ref={ref} onTriangleCount={() => {}} />,
+    );
+    await waitFor(() => expect(ref.current).not.toBeNull());
+    await expect(ref.current!.ready).resolves.toBeUndefined();
+    await waitFor(() => expect(errors).toHaveBeenCalled());
+    expect(container.querySelector(".navara-viewport__error")).toBeNull();
+    errors.mockRestore();
   });
 });
