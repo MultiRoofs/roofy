@@ -185,10 +185,104 @@ export interface InteractionHandle {
   getBoundsGeodetic(): GeodeticBounds | null;
   triangleCount(): number;
   /** Metres of geoid undulation baked into this layer's placement, for turning
-   *  an ellipsoidal height back into the source file's orthometric z. Optional
-   *  because a streaming handle does not publish one yet (Task C13); absent
-   *  reads as 0, which is what its cells are placed at. */
+   *  an ellipsoidal height back into the source file's orthometric z. Both
+   *  handle kinds publish it (Task C13 added the streaming one, whose cells are
+   *  placed with exactly this offset); optional only so a hand-rolled or future
+   *  handle need not, in which case it reads as 0. */
   heightOffset?(): number;
+}
+
+/**
+ * A streaming layer's handle: everything an {@link InteractionHandle} does,
+ * plus the three per-layer setters that replace `syncLayers`/`syncStyles` for
+ * a layer whose meshes the FlatCityBuf plugin owns.
+ *
+ * `setRules` is the whole of the difference between the two layer kinds:
+ * streaming colors are baked in the worker from the `Rule[]` wire payload, so
+ * a compiled `SurfaceStyleEvaluator` must never reach one (Shared Interface
+ * Contract -> Streaming styling). Everything else — highlight, pick, fit,
+ * triangles — goes through the shared registry above.
+ *
+ * Structural, like every other type in this module, so it stays engine-free
+ * and its tests need no plugin.
+ */
+export interface StreamInteractionHandle extends InteractionHandle {
+  setRules(rules: ReadonlyArray<Rule>, enabled: boolean): void;
+  setLod(mode: "auto" | "manual", lod: string | null): void;
+  setVisible(visible: boolean): void;
+  /** Fires after each cell commit; returns its own unsubscribe. Cells arrive
+   *  long after any store change, so this — not a React dependency — is what
+   *  tells the app to re-count triangles and re-apply the highlight. */
+  onCommit(cb: (version: number) => void): () => void;
+}
+
+/** What one streaming handle was last told, so an unrelated store change does
+ *  not re-push. Keyed by layer id and carrying the handle IDENTITY, so a layer
+ *  that was closed and re-opened is pushed to afresh. Every field is
+ *  `undefined` until its first push, which is what makes that first pass
+ *  unconditional without a separate flag. */
+export interface StreamSyncMemo {
+  readonly handle: StreamInteractionHandle;
+  rules?: ReadonlyArray<Rule>;
+  rulesEnabled?: boolean;
+  visible?: boolean;
+  lodMode?: "auto" | "manual";
+  selectedLod?: string | null;
+}
+
+/**
+ * Push one streaming layer's rules, LoD and visibility to its handle — the
+ * streaming counterpart of `syncLayers` + `syncStyles`, which both skip these
+ * layers by design.
+ *
+ * Memoised on the values actually pushed, because none of the three is free:
+ * `setRules` re-bakes every resident cell in the worker, `setLod` forces a
+ * commit (`onLodChanged`, so a LoD change refetches even for a camera that has
+ * not moved), and `setVisible` fans out to every resident cell mesh. The
+ * viewport's reconciliation effect re-runs on every `layers` change — a hover,
+ * a rename, another layer's toggle — so without the memo each of those would
+ * cost a full round trip per streaming layer.
+ *
+ * The plugin-side setters are additionally no-op-on-unchanged (Task C10b), so
+ * this memo is defence in depth rather than the only guard; what it does add is
+ * that an app-side re-push is not even attempted.
+ *
+ * NOTE the deliberate asymmetry with the first push: unlike `syncStyles`,
+ * which skips styling a never-styled handle whose rules would paint nothing,
+ * every field here IS pushed on the first pass for a handle the memo has not
+ * seen. `openStream` seeds rules/visibility from the same layer values before
+ * the first commit, so that push is a no-op at the plugin — but it is what
+ * records the memo, and it is what makes a handle adopted from a store the app
+ * did not open (a re-registered layer) correct rather than merely likely.
+ */
+export function syncStreamState(
+  layer: Layer,
+  handle: StreamInteractionHandle,
+  memos: Map<string, StreamSyncMemo>,
+): void {
+  let memo = memos.get(layer.id);
+  if (!memo || memo.handle !== handle) {
+    memo = { handle };
+    memos.set(layer.id, memo);
+  }
+
+  if (memo.rules !== layer.rules || memo.rulesEnabled !== layer.rulesEnabled) {
+    memo.rules = layer.rules;
+    memo.rulesEnabled = layer.rulesEnabled;
+    handle.setRules(layer.rules, layer.rulesEnabled);
+  }
+  if (
+    memo.lodMode !== layer.lodMode ||
+    memo.selectedLod !== layer.selectedLod
+  ) {
+    memo.lodMode = layer.lodMode;
+    memo.selectedLod = layer.selectedLod;
+    handle.setLod(layer.lodMode, layer.selectedLod);
+  }
+  if (memo.visible !== layer.visible) {
+    memo.visible = layer.visible;
+    handle.setVisible(layer.visible);
+  }
 }
 
 const NO_STREAMS: ReadonlyMap<string, InteractionHandle> = new Map();

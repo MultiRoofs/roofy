@@ -20,8 +20,14 @@
  * `handleSync.ts` (the handle registries) and `cursorCrsReadout.ts` (geodetic
  * -> source CRS, throttling).
  *
- * STILL DARK, by design: streaming cells (M7.5). `streamsRef` is already
- * threaded through every interaction path, so Task C13 only has to fill it.
+ * Task C13 turned STREAMING on: the FlatCityBuf plugin joins the session's
+ * ordered plugin list (registered before `view.init()`, which is the only
+ * moment the engine accepts one), is published through `streamPlugin.ts` and
+ * handed out by `getStreamingPlugin()`, and every open stream's handle joins
+ * `streamsRef` — the second half of the one interaction registry, so a streamed
+ * cell picks, highlights, fits and counts exactly like a static one. Only
+ * STYLING branches (`setRules` vs `setStyle`), and every programmatic camera
+ * move is bracketed by `suppressSettle` so it cannot masquerade as a gesture.
  */
 import {
   forwardRef,
@@ -38,27 +44,37 @@ import ThreeView, {
 } from "@navaramap/three";
 import { DefaultPlugin } from "@navaramap/three-default-plugin";
 import { Vector2 } from "three";
-// The engine-bound subpath, NOT the package barrel: the barrel must stay
+// The engine-bound subpaths, NOT the package barrels: the barrels must stay
 // importable from Node (Global Constraints -> NODE_IMPORT_SAFE = false).
 import { CityJSONPlugin } from "@cityjson/navara-cityjson/plugin";
+import { FlatCityBufPlugin } from "@cityjson/navara-flatcitybuf/plugin";
 import type {
-  CityModelHandle,
   EcefRay,
+  GeodeticBounds,
   ScreenPoint,
 } from "@cityjson/navara-cityjson";
 import { useLayerStore } from "../features/layers/layerStore";
 import { useSelectionStore } from "../features/selection/selectionStore";
+import { useStreamStore } from "../features/streaming/streamStore";
+import { setStreamPlugin } from "../features/streaming/streamPlugin";
+import {
+  closeAllStreamingLayers,
+  closeStreamingLayer,
+} from "../features/streaming/openStreamingLayer";
 import {
   allInteractionHandles,
   interactionHandles,
   layerHeightOffset,
   syncHighlight,
   syncLayers,
+  syncStreamState,
   syncStyles,
   totalTriangles,
   type HighlightMemo,
   type InteractionHandle,
   type LiveLayer,
+  type StreamInteractionHandle,
+  type StreamSyncMemo,
 } from "./handleSync";
 import {
   acceptsPointer,
@@ -98,6 +114,16 @@ export interface CitySceneHandle {
    *  REJECTS with the init error if it never came up. App.tsx awaits this
    *  inside try/catch instead of a 100 ms setTimeout — see Task C20. */
   readonly ready: Promise<void>;
+  /**
+   * The live FlatCityBuf plugin, once the engine is up.
+   *
+   * A promise rather than the instance, because a `.fcb` open can be requested
+   * during the first render — a share hash, a restored workspace — when the
+   * plugin does not exist yet. Awaiting {@link ready} first means such a call
+   * QUEUES instead of dereferencing a null ref, and an engine that never comes
+   * up REJECTS this rather than leaving the caller hanging.
+   */
+  getStreamingPlugin(): Promise<FlatCityBufPlugin>;
 }
 
 export interface NavaraViewportProps {
@@ -163,20 +189,45 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<ViewInstance | null>(null);
     const cityPluginRef = useRef<CityJSONPlugin | null>(null);
+    /** The live FlatCityBuf plugin, or null before the engine is up (and after
+     *  it goes away). Read through the ref everywhere: it is the difference
+     *  between a streaming-capable session and a static-only one. */
+    const flatPluginRef = useRef<FlatCityBufPlugin | null>(null);
+    /** Why there is no FlatCityBuf plugin, when there is none. Reported to a
+     *  caller that asks for one rather than swallowed — see
+     *  {@link getStreamingPlugin}. */
+    const flatPluginErrorRef = useRef<unknown>(null);
     /** The live static handles, keyed by layer id. A ref, not state: the
      *  engine owns the meshes, and re-rendering on a handle change would only
      *  invalidate the imperative callbacks below. */
     const liveRef = useRef(new Map<string, LiveLayer>());
-    /** Streaming layer handles, keyed by layer id. Empty until Task C13 opens a
-     *  FlatCityBuf layer; every interaction path already reads it, so C13 adds
-     *  no branch here. */
+    /** Streaming layer handles, keyed by layer id — the second half of the ONE
+     *  interaction registry (`handleSync.ts`). Filled by the reconciliation
+     *  effect below, which is what makes picking, highlighting, fit and the
+     *  triangle readout cover streamed cells. */
     const streamsRef = useRef(new Map<string, InteractionHandle>());
+    /** What each streaming handle was last told (rules / LoD / visibility). */
+    const streamSyncRef = useRef(new Map<string, StreamSyncMemo>());
     const [engineReady, setEngineReady] = useState(false);
     const [initError, setInitError] = useState<string | null>(null);
     /** Bumped by the sync effect when a layer was newly added, which is the
      *  only thing that triggers an automatic fit. */
     const [fitToken, setFitToken] = useState(0);
     const layers = useLayerStore((s) => s.layers);
+    /**
+     * Which layer ids currently have a stream registered, as one string.
+     *
+     * The reconciliation effect below reads the handles out of
+     * `useStreamStore.getState()`, so it needs a reason to re-run when a stream
+     * is opened or closed — but subscribing to `streams` itself would re-render
+     * this component on every cell commit (a commit replaces that object; see
+     * streamStore.ts's doc comment on exactly this hazard). The id set changes
+     * only when a layer is opened or closed, which is precisely the beat this
+     * effect cares about.
+     */
+    const streamIds = useStreamStore((s) =>
+      Object.keys(s.streams).sort().join(" "),
+    );
 
     // CitySceneHandle.ready — created eagerly so a consumer can await it before
     // the mount effect has run. Resolve-or-reject, never a hang: see the Shared
@@ -225,6 +276,13 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
 
       let cancelled = false;
       let session: NavaraSession<ViewInstance> | null = null;
+      // Captured, not read as `ref.current` from the cleanup below: the maps
+      // outlive nothing here (a ref object is stable for the component's whole
+      // life), and reading them once is what makes the cleanup provably
+      // operate on the same registries this mount filled.
+      const live = liveRef.current;
+      const streams = streamsRef.current;
+      const streamMemos = streamSyncRef.current;
 
       // ONE try/catch around the WHOLE queued body. Everything that can throw
       // lives inside it — a rejected predecessor, a plugin constructor on an
@@ -240,10 +298,39 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           if (cancelled) return;
 
           // Constructed here so this component keeps typed refs; the session
-          // only needs them in registration order (Task B8). Task C13 appends
-          // the FlatCityBuf plugin to this same array.
+          // only needs them in registration order (Task B8). There is no
+          // `view.addPlugin` call anywhere in this component: the engine
+          // rejects `addPlugin()` after `init()`, and this component never
+          // holds the view before init has started, so the ordered list is the
+          // ONLY registration point.
           const defaultPlugin = new DefaultPlugin();
           const cityPlugin = new CityJSONPlugin();
+          // Streaming is the one OPTIONAL capability of the three: a build (or
+          // a browser) in which this constructor throws must still show static
+          // layers, so the failure is recorded and re-raised only at the point
+          // someone actually asks to open a `.fcb` — unlike DefaultPlugin,
+          // whose failure is the whole viewer's failure.
+          let flatPlugin: FlatCityBufPlugin | null = null;
+          try {
+            flatPlugin = new FlatCityBufPlugin({
+              // The component owns the container element, so it — not the
+              // plugin — measures the viewport: `ThreeView` documents `canvas`
+              // as a CONSTRUCTOR option, not a readable property (Task C4).
+              // Same size source the pick path reads.
+              getViewportSize: () => ({
+                width: container.clientWidth,
+                height: container.clientHeight,
+              }),
+            });
+            flatPluginErrorRef.current = null;
+          } catch (error) {
+            flatPluginErrorRef.current = error;
+            console.error(
+              "NavaraViewport: the FlatCityBuf plugin could not be constructed, " +
+                "so .fcb streaming is unavailable in this session. Static layers are unaffected.",
+              error,
+            );
+          }
 
           session = createNavaraSession({
             // Task B1 finding 3: `Options` has NO `useNormal`. `shadow` is
@@ -267,6 +354,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
                 afterInit: () => void defaultPlugin.addDefaultPhotorealScene(),
               },
               { key: "cityjson", instance: cityPlugin },
+              ...(flatPlugin === null
+                ? []
+                : [{ key: "flatcitybuf", instance: flatPlugin }]),
             ],
           });
 
@@ -275,6 +365,11 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
 
           viewRef.current = result.view;
           cityPluginRef.current = cityPlugin;
+          flatPluginRef.current = flatPlugin;
+          // The `.fcb` open paths live in `useLayerFileLoader` and `App.tsx`,
+          // nowhere near this component; `streamPlugin.ts` is the one place
+          // they resolve the live plugin from (Task C12).
+          setStreamPlugin(flatPlugin);
           setInitError(null);
           setEngineReady(true);
           // `readyRef.current`, never a captured gate: a cancelled predecessor
@@ -299,6 +394,19 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         setEngineReady(false);
         viewRef.current = null;
         cityPluginRef.current = null;
+        // Streaming state dies with the engine, and it has to be TOLD to: the
+        // plugin's `dispose()` deletes every handle, but `streamStore` holds
+        // the only other reference to them, so leaving its entries behind
+        // would leave the layer panel, the inspector and the status bar
+        // reading a handle whose worker has been terminated. Closing them here
+        // releases those workers immediately and unregisters in one pass; the
+        // later `session.dispose()` is idempotent over the same handles.
+        const flatPlugin = flatPluginRef.current;
+        flatPluginRef.current = null;
+        setStreamPlugin(null);
+        closeAllStreamingLayers(flatPlugin);
+        streams.clear();
+        streamMemos.clear();
         // SETTLE, then RE-ARM. Both halves are load-bearing:
         //   * settle — every `return` inside `started` above is guarded by
         //     `cancelled`, so once this cleanup has run nothing can ever
@@ -320,7 +428,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         // The handles die with the view; dropping them here means the next
         // mount re-adds every layer from the store instead of trusting stale
         // entries whose meshes have been disposed.
-        liveRef.current.clear();
+        live.clear();
         // `started` settles only after `session.ready` has, so by the time
         // this runs the session disposes synchronously — which is what lets
         // the next mount initialise a fresh worker pool. If `dispose()` itself
@@ -359,31 +467,66 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     // than a jump to a NaN camera. Deps stay `[]` on purpose: `liveRef` is a
     // ref, so `fitAll`'s identity is stable and the fit-once effect below
     // cannot be re-triggered by an unrelated store update.
-    // Streaming cells join this union in M7.5.
+    // Streaming layers are in the union too — an FCB-only workspace has NOTHING
+    // in `liveRef`, so reading only that map would make "Fit all" a no-op for
+    // the one layer on screen. A streaming handle answers `null` until its
+    // first commit, which `unionGeodeticBounds` already skips.
     const boundsOf = useCallback((ids?: readonly string[]) => {
-      const handles: CityModelHandle[] = [];
+      const handles: InteractionHandle[] = [];
       for (const [id, entry] of liveRef.current) {
         if (ids && !ids.includes(id)) continue;
         handles.push(entry.handle);
       }
-      return unionGeodeticBounds(handles.map((h) => h.getBoundsGeodetic()));
+      for (const [id, handle] of streamsRef.current) {
+        if (ids && !ids.includes(id)) continue;
+        handles.push(handle);
+      }
+      const bounds: GeodeticBounds[] = [];
+      for (const handle of handles) {
+        const b = handle.getBoundsGeodetic();
+        if (b) bounds.push(b);
+      }
+      return unionGeodeticBounds(bounds);
+    }, []);
+
+    /**
+     * Run a camera mutation with the streaming settle controller deaf to the
+     * camera burst it produces.
+     *
+     * `flyTo` emits a full `movestart`/`move`/`moveend` burst (Task B1's
+     * `PROGRAMMATIC_MOVE_EMITS`), and a `moveend` is exactly what commits a
+     * streaming layer — so without this, restoring a share link, fitting a
+     * layer or aligning the view would immediately re-fetch tiles for a camera
+     * the user never moved.
+     *
+     * Deliberately the REF, not `getStreamingPlugin()`: a static-only workspace
+     * has no FlatCityBuf plugin and must never block a `fitAll` on streaming
+     * readiness. Fire-and-forget, so the `CitySceneHandle` methods stay `void`.
+     */
+    const withSettleSuppressed = useCallback((move: () => void): void => {
+      const plugin = flatPluginRef.current;
+      if (!plugin) {
+        move();
+        return;
+      }
+      void plugin.suppressSettle(move);
     }, []);
 
     const fitAll = useCallback(() => {
       const view = viewRef.current;
       const bounds = boundsOf();
       if (!view || !bounds) return;
-      view.flyTo(cameraForBounds(bounds));
-    }, [boundsOf]);
+      withSettleSuppressed(() => view.flyTo(cameraForBounds(bounds)));
+    }, [boundsOf, withSettleSuppressed]);
 
     const fitLayer = useCallback(
       (layerId: string) => {
         const view = viewRef.current;
         const bounds = boundsOf([layerId]);
         if (!view || !bounds) return;
-        view.flyTo(cameraForBounds(bounds));
+        withSettleSuppressed(() => view.flyTo(cameraForBounds(bounds)));
       },
-      [boundsOf],
+      [boundsOf, withSettleSuppressed],
     );
 
     const alignView = useCallback(
@@ -391,11 +534,15 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         const view = viewRef.current;
         const bounds = boundsOf();
         if (!view || !bounds) return;
-        // Instant, not animated: `setCamera` emits no camera events, so an
-        // alignment cannot be mistaken for a user gesture (Task C7).
-        view.setCamera(alignCameraForBounds(bounds, direction));
+        // Instant, not animated: `setCamera` emits no camera events of its own
+        // (Task C7), so an alignment cannot be mistaken for a user gesture.
+        // Still suppressed: the engine's `idle` fires on any change, and the
+        // suppression window is what keeps it from flushing a debounce.
+        withSettleSuppressed(() =>
+          view.setCamera(alignCameraForBounds(bounds, direction)),
+        );
       },
-      [boundsOf],
+      [boundsOf, withSettleSuppressed],
     );
 
     // --- layer store -> engine handles ---
@@ -444,6 +591,81 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       fitAll();
     }, [fitToken, fitAll]);
 
+    // --- stream store -> the interaction registry (Task C13) ---
+    //
+    // The streaming counterpart of the layer effect above, and the reason a
+    // streamed cell can be picked, highlighted, fitted and counted at all:
+    // `syncLayers` never puts a streaming layer in `liveRef` (the FlatCityBuf
+    // plugin owns those meshes), so `streamsRef` is the ONLY way one reaches
+    // the shared registry in `handleSync.ts`.
+    useEffect(() => {
+      if (!engineReady) return;
+      const streams = streamsRef.current;
+      const memos = streamSyncRef.current;
+      const store = useStreamStore.getState();
+      const unsubscribes: Array<() => void> = [];
+      const present = new Set<string>();
+
+      for (const layer of layers) {
+        if (!layer.isStreaming) continue;
+        // The plugin opened the stream (`openStreamingLayer`), so a layer whose
+        // handle is not registered yet is simply one whose open is still in
+        // flight: `streamIds` brings this effect back when it lands.
+        // No cast: this is where the compiler checks that the plugin's
+        // `FcbStreamLayerHandle` really does satisfy the app's structural
+        // `StreamInteractionHandle` — the same discipline `gatherHandles` uses
+        // for the static side.
+        const handle: StreamInteractionHandle | undefined = store.get(
+          layer.id,
+        )?.handle;
+        if (!handle) continue;
+        present.add(layer.id);
+        streams.set(layer.id, handle);
+        // Rules, LoD and visibility — the streaming replacement for
+        // `syncLayers` + `syncStyles`, memoised per layer (`handleSync.ts`).
+        syncStreamState(layer, handle, memos);
+        // Cells arrive asynchronously, LONG after any store change, so the
+        // triangle readout and the highlight have to be refreshed on every
+        // commit — otherwise an FCB-only workspace reports its first commit's
+        // count forever and cells that land while something is selected render
+        // unhighlighted. Subscribed on EVERY run, not only for handles that are
+        // new to the map: the cleanup below unsubscribes unconditionally, so a
+        // "skip the ones already registered" shortcut would go deaf after the
+        // first unrelated layer change.
+        unsubscribes.push(
+          handle.onCommit(() => {
+            onTriangleCount(totalTriangles(layers, liveRef.current, streams));
+            const selection = useSelectionStore.getState();
+            // Only the committing handle, and deliberately WITHOUT the memo:
+            // its highlight key has not changed — the cells under it have — so
+            // a memoised push would be skipped exactly when it is needed.
+            syncHighlight([handle], selection.selections, selection.hovered);
+          }),
+        );
+      }
+
+      // Whatever the store or the registry still holds for a layer that has
+      // left `layerStore`: stop its worker, drop its cell meshes, forget it.
+      // Normally `LayerPanel`/`App` have already called `closeStreamingLayer`
+      // before removing the layer — this is the safety net that also keeps
+      // `streamsRef` from letting `fitAll`, a pick or the triangle count read
+      // a deleted handle.
+      for (const id of new Set([
+        ...streams.keys(),
+        ...Object.keys(store.streams),
+      ])) {
+        if (present.has(id)) continue;
+        closeStreamingLayer(flatPluginRef.current, id);
+        streams.delete(id);
+        memos.delete(id);
+      }
+
+      onTriangleCount(totalTriangles(layers, liveRef.current, streams));
+      return () => {
+        for (const off of unsubscribes) off();
+      };
+    }, [engineReady, layers, streamIds, onTriangleCount]);
+
     // --- selection / hover -> handle.setHighlight ---
     // Subscribed as state (not read from `getState()`) because a selection made
     // anywhere else in the app — the inspector, a share link restore, box
@@ -467,7 +689,11 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         // every hover step.
         highlightMemoRef.current,
       );
-    }, [engineReady, layers, selections, hovered]);
+      // `streamIds`: a handle that joins the registry AFTER its layer appeared
+      // (the open resolves a tick later) must be told the current selection,
+      // not only whatever arrives next. The memo is keyed by handle identity,
+      // so this costs one push per newly opened stream and nothing else.
+    }, [engineReady, layers, streamIds, selections, hovered]);
 
     // --- engine pointer events -> pick intents + the cursor readout ---
     useEffect(() => {
@@ -694,9 +920,39 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       }
     }, []);
 
-    const setCameraState = useCallback((state: GeographicCameraState) => {
-      viewRef.current?.setCamera(state);
-    }, []);
+    const setCameraState = useCallback(
+      (state: GeographicCameraState) => {
+        const view = viewRef.current;
+        if (!view) return;
+        // A restore is the sharpest case of a move that is not a gesture:
+        // without the bracket, reopening a share link would re-fetch tiles for
+        // a camera the user never touched.
+        withSettleSuppressed(() => view.setCamera(state));
+      },
+      [withSettleSuppressed],
+    );
+
+    /**
+     * Hand the FlatCityBuf plugin out, once there is one.
+     *
+     * Awaiting `ready` is what turns the old `fcbPluginRef.current!` race — a
+     * share hash processed on the first render, when the ref is still null —
+     * into a queue. It REJECTS if the engine failed (Shared Interface Contract
+     * -> `ready`) or if the plugin itself could not be built, so a caller gets
+     * an error it can toast rather than a promise that never settles.
+     */
+    const getStreamingPlugin =
+      useCallback(async (): Promise<FlatCityBufPlugin> => {
+        await readyRef.current!.promise;
+        const plugin = flatPluginRef.current;
+        if (plugin) return plugin;
+        const cause = flatPluginErrorRef.current;
+        throw new Error(
+          "FlatCityBuf streaming is unavailable in this session, so a .fcb layer cannot be opened" +
+            (cause instanceof Error ? `: ${cause.message}` : "."),
+          cause === null ? undefined : { cause },
+        );
+      }, []);
 
     useImperativeHandle(
       ref,
@@ -706,6 +962,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         alignView,
         getCameraState,
         setCameraState,
+        getStreamingPlugin,
         // A GETTER, not a captured promise, because the lifecycle cleanup
         // RE-ARMS the gate. A snapshot taken when this handle was built would
         // be correct only as long as React keeps re-invoking `create()` in
@@ -720,7 +977,14 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           return readyRef.current!.promise;
         },
       }),
-      [fitAll, fitLayer, alignView, getCameraState, setCameraState],
+      [
+        fitAll,
+        fitLayer,
+        alignView,
+        getCameraState,
+        setCameraState,
+        getStreamingPlugin,
+      ],
     );
 
     return (

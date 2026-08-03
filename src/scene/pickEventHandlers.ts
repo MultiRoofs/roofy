@@ -102,6 +102,13 @@ export function resolveNearestHit(
       layerId: owner.id,
       objectIndex: best.objectIndex,
       surfaceIndex: best.surfaceIndex,
+      // Forwarded VERBATIM and never interpreted here: a multi-mesh handle — a
+      // streaming layer, whose resident cells each have their own index space —
+      // needs it to know which of its cells the two indices were measured in.
+      // Absent for a single-mesh `CityModelHandle`, and dropped rather than
+      // passed as `undefined` so a handle can tell "no cell named" from "a cell
+      // named nothing".
+      ...(best.cellKey === undefined ? {} : { cellKey: best.cellKey }),
     },
   });
 }

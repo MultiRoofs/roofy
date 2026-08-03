@@ -83,6 +83,31 @@ export async function openStreamingLayer(
     isStreaming: true,
   });
 
+  // The plugin owns the streaming state machine and only REPORTS; the store
+  // mirrors what the UI reads (LodSelector, LayerPanel, StatusBar, Inspector).
+  // Subscribed BEFORE the register below so the three unsubscribes can be
+  // stored with the entry — `handle.delete()` does not clear the handle's
+  // listener sets, so `closeStreamingLayer` is the only thing that can
+  // (streamStore.ts -> `StreamState.disposers`). A report that fired between
+  // here and the register would find no entry and be dropped, which is the
+  // same no-op every one of these actions already is for an unknown layer id.
+  const disposers = [
+    handle.onStatus((status, message) =>
+      useStreamStore.getState().setStatus(layerId, status, message),
+    ),
+    handle.onLadder((ladder) =>
+      useStreamStore.getState().setLadder(layerId, ladder),
+    ),
+    handle.onCommit(() => {
+      const store = useStreamStore.getState();
+      // Level first: `LodSelector` reads it alongside the ladder, and updating
+      // it after the version bump would render one frame of the new commit's
+      // cell count against the old commit's cell size.
+      store.setLevel(layerId, handle.level);
+      store.bumpVersion(layerId);
+    }),
+  ];
+
   // Seeded from the handle's CURRENT values rather than from constants,
   // because `openStream` already commits the layer once before it resolves:
   // by the time we get here the first cells may be resident, and hard-coding
@@ -93,6 +118,7 @@ export async function openStreamingLayer(
   // two and be lost.
   useStreamStore.getState().register(layerId, {
     handle,
+    disposers,
     grid: handle.grid,
     header: handle.header,
     level: handle.level,
@@ -101,23 +127,6 @@ export async function openStreamingLayer(
     status: handle.status,
     message: handle.message,
     version: handle.version,
-  });
-
-  // The plugin owns the streaming state machine and only REPORTS; the store
-  // mirrors what the UI reads (LodSelector, LayerPanel, StatusBar, Inspector).
-  handle.onStatus((status, message) =>
-    useStreamStore.getState().setStatus(layerId, status, message),
-  );
-  handle.onLadder((ladder) =>
-    useStreamStore.getState().setLadder(layerId, ladder),
-  );
-  handle.onCommit(() => {
-    const store = useStreamStore.getState();
-    // Level first: `LodSelector` reads it alongside the ladder, and updating
-    // it after the version bump would render one frame of the new commit's
-    // cell count against the old commit's cell size.
-    store.setLevel(layerId, handle.level);
-    store.bumpVersion(layerId);
   });
 
   return layerId;
@@ -137,12 +146,24 @@ export function closeStreamingLayer(
   plugin: StreamPlugin | null,
   layerId: string,
 ): void {
-  if (!useStreamStore.getState().streams[layerId]) return;
+  const entry = useStreamStore.getState().streams[layerId];
+  if (!entry) return;
+
+  // Listeners first: `handle.delete()` does not clear the handle's listener
+  // sets, so a store closure left subscribed stays reachable from the handle
+  // for as long as anything holds it (`NavaraViewport`'s `streamsRef` does).
+  for (const off of entry.disposers) off();
+
+  // Resources BEFORE the store entry, so a plugin-less close (the engine is
+  // already gone) cannot drop the only reference to a live worker. `remove` is
+  // what calls `handle.delete()`, and it also drops the layer from the
+  // plugin's settle loop — calling `handle.delete()` directly would leave a
+  // dead layer being committed on every camera settle, so it is the FALLBACK
+  // for "there is no plugin any more", not the normal path.
+  if (plugin) plugin.remove(layerId);
+  else entry.handle.delete();
+
   useStreamStore.getState().unregister(layerId);
-  // `remove` is what calls `handle.delete()`, and it also drops the layer from
-  // the plugin's settle loop — calling `handle.delete()` directly would leave
-  // a dead layer being committed on every camera settle.
-  plugin?.remove(layerId);
 }
 
 /** Every streaming layer at once, for "close the project" / "restore a

@@ -10,9 +10,11 @@ import {
   resolvePickedFeature,
   syncHighlight,
   syncLayers,
+  syncStreamState,
   syncStyles,
   totalTriangles,
   type LiveLayer,
+  type StreamSyncMemo,
 } from "../../../src/scene/handleSync";
 
 function fakeHandle(id: string, triangles = 100) {
@@ -714,5 +716,104 @@ describe("layerHeightOffset", () => {
       ["L1", { handle: handle as never, lod: "2", visible: true }],
     ]);
     expect(layerHeightOffset("L1", live)).toBe(0);
+  });
+});
+
+describe("syncStreamState", () => {
+  function fakeStreamHandle(id = "S1") {
+    return {
+      id,
+      setHighlight: vi.fn(),
+      resolvePick: vi.fn(),
+      resolveRaycast: vi.fn(),
+      getBoundsGeodetic: vi.fn(),
+      triangleCount: () => 0,
+      onCommit: vi.fn(() => () => undefined),
+      setRules: vi.fn(),
+      setLod: vi.fn(),
+      setVisible: vi.fn(),
+    };
+  }
+
+  it("pushes rules, LoD and visibility on the first pass", () => {
+    const handle = fakeStreamHandle();
+    const memos = new Map<string, StreamSyncMemo>();
+    const rules: Rule[] = [
+      {
+        id: "r",
+        name: "r",
+        color: "#fff",
+        conditions: [],
+        logic: "AND",
+        enabled: true,
+      },
+    ];
+    const l = layer({
+      id: "S1",
+      isStreaming: true,
+      rules,
+      rulesEnabled: true,
+      visible: false,
+      lodMode: "auto",
+      selectedLod: null,
+    });
+
+    syncStreamState(l, handle as never, memos);
+
+    // Rules as DATA — never a compiled SurfaceStyleEvaluator (shared contract
+    // -> Streaming styling).
+    expect(handle.setRules).toHaveBeenCalledWith(rules, true);
+    expect(handle.setLod).toHaveBeenCalledWith("auto", null);
+    expect(handle.setVisible).toHaveBeenCalledWith(false);
+  });
+
+  it("pushes nothing on a second pass with the same values", () => {
+    const handle = fakeStreamHandle();
+    const memos = new Map<string, StreamSyncMemo>();
+    const l = layer({ id: "S1", isStreaming: true });
+    syncStreamState(l, handle as never, memos);
+    handle.setRules.mockClear();
+    handle.setLod.mockClear();
+    handle.setVisible.mockClear();
+
+    // A fresh Layer object with identical values: the viewport's effect re-runs
+    // on every store change, so this is the common case, and each of the three
+    // setters costs a worker round trip or a fan-out over every cell mesh.
+    syncStreamState({ ...l }, handle as never, memos);
+
+    expect(handle.setRules).not.toHaveBeenCalled();
+    expect(handle.setLod).not.toHaveBeenCalled();
+    expect(handle.setVisible).not.toHaveBeenCalled();
+  });
+
+  it("pushes only the field that changed", () => {
+    const handle = fakeStreamHandle();
+    const memos = new Map<string, StreamSyncMemo>();
+    const l = layer({ id: "S1", isStreaming: true, visible: true });
+    syncStreamState(l, handle as never, memos);
+    handle.setRules.mockClear();
+    handle.setLod.mockClear();
+    handle.setVisible.mockClear();
+
+    syncStreamState({ ...l, visible: false }, handle as never, memos);
+    expect(handle.setVisible).toHaveBeenCalledWith(false);
+    expect(handle.setRules).not.toHaveBeenCalled();
+    expect(handle.setLod).not.toHaveBeenCalled();
+  });
+
+  it("re-pushes everything to a REPLACED handle for the same layer id", () => {
+    // A layer closed and re-opened under the same id gets a brand new handle
+    // that has been told nothing; an id-keyed memo would report "already up to
+    // date" and leave it unstyled, at the wrong LoD and possibly visible.
+    const memos = new Map<string, StreamSyncMemo>();
+    const first = fakeStreamHandle();
+    const l = layer({ id: "S1", isStreaming: true });
+    syncStreamState(l, first as never, memos);
+
+    const second = fakeStreamHandle();
+    syncStreamState(l, second as never, memos);
+    expect(second.setRules).toHaveBeenCalledTimes(1);
+    expect(second.setLod).toHaveBeenCalledTimes(1);
+    expect(second.setVisible).toHaveBeenCalledTimes(1);
   });
 });

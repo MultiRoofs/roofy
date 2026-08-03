@@ -61,6 +61,7 @@ function baseStream(overrides: Partial<StreamState> = {}): StreamState {
     // The handle is never touched by this component — it reads the store's
     // mirrored level/grid/ladder only — so it is the one field cast here.
     handle: {} as never,
+    disposers: [],
     header: {} as never,
     grid: { originX: 0, originY: 0, rootCell: 800, maxLevel: 5 },
     level: 3,

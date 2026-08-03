@@ -47,6 +47,7 @@ import {
 import {
   getStreamPlugin,
   requireStreamPlugin,
+  type StreamPlugin,
 } from "../features/streaming/streamPlugin";
 import { useTheme } from "../features/theme/useTheme";
 import { useSolarStore } from "../features/solar/solarStore";
@@ -151,6 +152,23 @@ export function App({
     activeLayerId ? s.streams[activeLayerId]?.message : undefined,
   );
 
+  /**
+   * The live FlatCityBuf plugin for a `.fcb` open.
+   *
+   * Through the viewport's `getStreamingPlugin()` whenever there IS a viewport:
+   * it awaits the engine's `ready` gate, so a stream requested while the engine
+   * is still coming up — a restored workspace, a share hash — queues instead of
+   * failing, and an engine that never came up rejects rather than hangs.
+   *
+   * With no viewport mounted (the landing page renders none until the first
+   * layer exists) it falls back to `requireStreamPlugin()`, whose message names
+   * the real cause. Stable identity: `sceneRef` is a ref.
+   */
+  const resolveStreamPlugin = useCallback(async (): Promise<StreamPlugin> => {
+    const scene = sceneRef.current;
+    return scene ? await scene.getStreamingPlugin() : requireStreamPlugin();
+  }, []);
+
   // File loading
   const {
     addLayerFromFile,
@@ -158,7 +176,7 @@ export function App({
     loading,
     error: loadError,
     clearError,
-  } = useLayerFileLoader();
+  } = useLayerFileLoader({ resolveStreamPlugin });
 
   const selections = useSelectionStore((s) => s.selections);
   const mode = useSelectionStore((s) => s.mode);
@@ -406,7 +424,7 @@ export function App({
             let layerId: string;
             if (detectEncoding(modelRef.url) === "flatcitybuf") {
               layerId = await openStreamingLayer({
-                plugin: requireStreamPlugin(),
+                plugin: await resolveStreamPlugin(),
                 source: { url: modelRef.url },
                 name,
                 modelRef,
@@ -470,7 +488,7 @@ export function App({
         setTimeout(() => setToast(null), 3000);
       }
     },
-    [persistenceStore, clearError],
+    [persistenceStore, clearError, resolveStreamPlugin],
   );
 
   const handleDeleteSnapshot = useCallback(
@@ -561,7 +579,7 @@ export function App({
 
           if (detectEncoding(sl.modelUrl) === "flatcitybuf") {
             await openStreamingLayer({
-              plugin: requireStreamPlugin(),
+              plugin: await resolveStreamPlugin(),
               source: { url: sl.modelUrl },
               name,
               modelRef: { type: "url", url: sl.modelUrl },

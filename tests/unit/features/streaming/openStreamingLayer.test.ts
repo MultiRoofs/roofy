@@ -43,9 +43,19 @@ interface FakeHandle {
   emitStatus: (status: StreamStatus, message: string | null) => void;
   emitLadder: (ladder: ReadonlyArray<string>) => void;
   emitCommit: (level: number | null) => void;
+  /** How many subscribers each fan-out still has — the observable form of
+   *  "were the disposers actually run?". */
+  listenerCount: () => number;
+  readonly deleted: Mock<() => void>;
+}
+
+function drop<T>(list: T[], item: T): void {
+  const i = list.indexOf(item);
+  if (i >= 0) list.splice(i, 1);
 }
 
 function fakeHandle(id: string): FakeHandle {
+  const deleted = vi.fn();
   const statusCbs: Array<(s: StreamStatus, m: string | null) => void> = [];
   const ladderCbs: Array<(l: ReadonlyArray<string>) => void> = [];
   const commitCbs: Array<(v: number) => void> = [];
@@ -63,21 +73,27 @@ function fakeHandle(id: string): FakeHandle {
     ladder: [] as ReadonlyArray<string>,
     status: "idle" as StreamStatus,
     message: null as string | null,
+    // Real unsubscribes, not `() => undefined`: the handle's own `delete()`
+    // does NOT clear these sets, so whether `closeStreamingLayer` runs them is
+    // the difference between a released store closure and a retained one.
     onStatus: (cb: (s: StreamStatus, m: string | null) => void) => {
       statusCbs.push(cb);
-      return () => undefined;
+      return () => drop(statusCbs, cb);
     },
     onLadder: (cb: (l: ReadonlyArray<string>) => void) => {
       ladderCbs.push(cb);
-      return () => undefined;
+      return () => drop(ladderCbs, cb);
     },
     onCommit: (cb: (v: number) => void) => {
       commitCbs.push(cb);
-      return () => undefined;
+      return () => drop(commitCbs, cb);
     },
+    delete: deleted,
   } as unknown as FcbStreamLayerHandle;
   return {
     handle,
+    listenerCount: () => statusCbs.length + ladderCbs.length + commitCbs.length,
+    deleted,
     emitStatus: (s, m) => statusCbs.forEach((cb) => cb(s, m)),
     emitLadder: (l) => ladderCbs.forEach((cb) => cb(l)),
     emitCommit: (level) => {
@@ -322,5 +338,43 @@ describe("closeStreamingLayer", () => {
     const plugin = fakePlugin();
     closeStreamingLayer(plugin, "a-static-layer");
     expect(plugin.remove).not.toHaveBeenCalled();
+  });
+
+  it("runs the three event disposers, so a closed layer stops reaching the store", async () => {
+    // `handle.delete()` does not clear the handle's listener sets, so without
+    // these the store's closures stay reachable from the handle for as long as
+    // anything holds it — and `NavaraViewport`'s `streamsRef` holds it.
+    const handles: FakeHandle[] = [];
+    const plugin = fakePlugin(handles);
+    const layerId = await openStreamingLayer({
+      plugin,
+      source: { url: "https://x/a.fcb" },
+      name: "a.fcb",
+      modelRef: { type: "url", url: "https://x/a.fcb" },
+    });
+    expect(handles[0]!.listenerCount()).toBe(3);
+
+    closeStreamingLayer(plugin, layerId);
+    expect(handles[0]!.listenerCount()).toBe(0);
+  });
+
+  it("deletes the handle itself when there is no plugin left to remove it through", async () => {
+    // The engine has gone away (the viewport unmounted), so `plugin.remove` is
+    // unreachable. Dropping the store entry regardless would strand a live
+    // worker with no reference to it anywhere.
+    const handles: FakeHandle[] = [];
+    const plugin = fakePlugin(handles);
+    const layerId = await openStreamingLayer({
+      plugin,
+      source: { url: "https://x/a.fcb" },
+      name: "a.fcb",
+      modelRef: { type: "url", url: "https://x/a.fcb" },
+    });
+
+    closeStreamingLayer(null, layerId);
+
+    expect(handles[0]!.deleted).toHaveBeenCalledTimes(1);
+    expect(handles[0]!.listenerCount()).toBe(0);
+    expect(useStreamStore.getState().streams[layerId]).toBeUndefined();
   });
 });

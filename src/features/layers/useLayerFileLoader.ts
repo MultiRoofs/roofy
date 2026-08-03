@@ -5,7 +5,7 @@
  * reused by both the landing page and the "add layer" UI.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { CityModel } from "../../domain/citymodel/types";
 import { detectEncoding } from "../../domain/citymodel/detectEncoding";
 import {
@@ -15,7 +15,10 @@ import {
 } from "../../domain/citymodel/loadCityModel";
 import { useLayerStore } from "./layerStore";
 import { openStreamingLayer } from "../streaming/openStreamingLayer";
-import { requireStreamPlugin } from "../streaming/streamPlugin";
+import {
+  requireStreamPlugin,
+  type StreamPlugin,
+} from "../streaming/streamPlugin";
 import type { Rule } from "../rules/types";
 
 /** Optional per-layer settings to apply instead of the usual fresh-layer
@@ -61,9 +64,36 @@ export interface LayerFileLoader {
   clearError: () => void;
 }
 
-export function useLayerFileLoader(): LayerFileLoader {
+export interface LayerFileLoaderOptions {
+  /**
+   * How to obtain the live FlatCityBuf plugin for a `.fcb` source.
+   *
+   * A promise, not an instance: a viewport that is still starting hands the
+   * plugin out through `CitySceneHandle.getStreamingPlugin()`, which QUEUES
+   * behind its `ready` gate instead of failing a `.fcb` opened during the
+   * first render (Task C13). Defaults to `requireStreamPlugin()`, which throws
+   * a user-facing "the 3D engine is not running yet" for a caller that has no
+   * viewport to ask — the error state below surfaces either one identically.
+   */
+  readonly resolveStreamPlugin?: () => Promise<StreamPlugin>;
+}
+
+const defaultResolveStreamPlugin = async (): Promise<StreamPlugin> =>
+  requireStreamPlugin();
+
+export function useLayerFileLoader(
+  options: LayerFileLoaderOptions = {},
+): LayerFileLoader {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Through a ref, so an inline `resolveStreamPlugin={() => …}` cannot change
+  // the identity of the two loaders below — `App.tsx` lists them in dependency
+  // arrays, and a new function per render would re-run those effects.
+  const resolveStreamPlugin = useRef(
+    options.resolveStreamPlugin ?? defaultResolveStreamPlugin,
+  );
+  resolveStreamPlugin.current =
+    options.resolveStreamPlugin ?? defaultResolveStreamPlugin;
 
   const addLayerFromFile = useCallback(
     async (file: File, overrides?: LayerOverrides): Promise<string | null> => {
@@ -76,7 +106,7 @@ export function useLayerFileLoader(): LayerFileLoader {
           // an ArrayBuffer first (see openStreamingLayer.ts's doc comment
           // on why fromBytes' copy would OOM a multi-GB local file).
           layerId = await openStreamingLayer({
-            plugin: requireStreamPlugin(),
+            plugin: await resolveStreamPlugin.current(),
             source: { blob: file },
             name: file.name,
             modelRef: { type: "file", fileName: file.name },
@@ -115,7 +145,7 @@ export function useLayerFileLoader(): LayerFileLoader {
       try {
         if (detectEncoding(url) === "flatcitybuf") {
           return await openStreamingLayer({
-            plugin: requireStreamPlugin(),
+            plugin: await resolveStreamPlugin.current(),
             source: { url },
             name: fileNameFromUrl(url),
             modelRef: { type: "url", url },
