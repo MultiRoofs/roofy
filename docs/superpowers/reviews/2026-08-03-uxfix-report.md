@@ -479,10 +479,14 @@ the feature was dead.
    bottom of the curve — dim, flat and blue-grey, which is what was reported.
 2. **No ambient term.** `addDefaultPhotorealScene()` supplies a
    `skyLightProbe`, which is _directional_ sky irradiance; a surface facing away
-   from both sun and sky still falls to near-black. Navara's basic-visualization
-   sample adds `view.addLight({ ambient: {} })` for exactly this. Added at
-   intensity 0.6, slider-controlled, and genuinely removed at 0 rather than set
-   to zero intensity.
+   from both sun and sky still falls to near-black. Navara's own
+   basic-visualization snippet adds `view.addLight({ ambient: {} })` for exactly
+   this — see `docs/superpowers/research/2026-08-01-navara-api-report.md`
+   §Bootstrap, the same section the exposure value comes from, which also lists
+   `ambient` among the default light descriptor keys
+   (`sun, ambient, skyLightProbe, lightProbe`). Added at intensity 0.6,
+   slider-controlled, and genuinely removed at 0 rather than set to zero
+   intensity.
 3. **The scene clock started at `new Date()`.** The engine's atmosphere follows
    `solarStore.datetime`, so opening the viewer in the evening rendered a night
    scene. The M7.5 browser smoke already tripped over this and shifted the
@@ -608,3 +612,41 @@ scene-wide state, one third of which is a signpost to somewhere else.
   and the Americas — the project's reference site is Delft — but a user in
   Japan opening the viewer at local noon still gets a scene clock nine hours
   behind them. "Now" is one click away in the toolbar.
+
+---
+
+## Wave 2 fix round (2026-08-03, after "approved with findings")
+
+| Finding                                     | Resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. "Reset Rendering" placement incoherent   | Moved out of the Backdrop section into a panel **footer** (its own row, above the scroll boundary), relabelled **"Reset render settings"**, and **widened** to reset `atmosphereStore` as well as `renderDebugStore` — lens flare and cloud coverage live there for purely historical reasons and are two of the controls the button now spans. The backdrop is deliberately still untouched (a basemap is what you look AT, not how it is rendered) and the button's `title` says so. `atmosphereStore` gained `DEFAULT_ATMOSPHERE_STATE` + `reset` to match its sibling. |
+| 2. Stale `SolarTab` doc references          | `src/scene/sunWriter.ts` and `tests/unit/scene/navaraViewportSolar.test.tsx` now name the toolbar's `SolarPresetMenu`.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 3. `afterInit` lacked the `cancelled` guard | `photorealRef.current` is only published when the queued init body is still live, like every other write out of it. Without it a late-resolving `session.ready` could install a dead session's handles — under StrictMode, over the live view's.                                                                                                                                                                                                                                                                                                                           |
+| 4. `SolarPresetMenu` focus management       | Focus moves to the first control in the dialog on open and returns to the trigger on Escape; `aria-modal="true"` on the dialog and `aria-haspopup="dialog"` on the trigger.                                                                                                                                                                                                                                                                                                                                                                                                |
+| 5. Missing dispose-lifecycle test           | `stops pushing settings once the engine is gone`: unmount, then flip four render-debug fields — no `sun.update`, no `addLight`/`update`, `toneMappingExposure` unchanged, handles untouched.                                                                                                                                                                                                                                                                                                                                                                               |
+| Ambient-light claim uncited                 | Issue 2, cause 2 now cites `2026-08-01-navara-api-report.md` §Bootstrap (the `view.addLight({ ambient: {} })` snippet, and the `sun, ambient, skyLightProbe, lightProbe` key list).                                                                                                                                                                                                                                                                                                                                                                                        |
+
+Test count after the round: **57 files / 689 tests**, all passing (four new
+tests: two focus/ARIA on the popover, one backdrop-survives on the panel, one
+dispose-lifecycle on the viewport; the old "atmosphere survives the reset"
+assertion was rewritten in place into "both stores reset", per the widened
+scope, so the total rises by four rather than five).
+`npx tsc -b --noEmit` clean, `npm run build` exit 0, `npx vp check` 0 errors /
+9 warnings.
+
+Re-verified in the real browser after the round (same CDP driver, dev server,
+`fixtures/two-buildings.city.json`):
+
+- Footer action reads `Reset render settings`, `insideBody: false` (it is
+  outside `.advanced-settings-body`, so it cannot scroll into a section), and
+  its title is "Restore the default lighting and post-processing settings. The
+  basemap and Google 3D Tiles choices are left alone."
+- Every knob dirtied (`exposure 2`, ambient 0, all four switches off) then
+  reset: store back to defaults, and the panel reads `Exposure 10.0`,
+  `Ambient Light 0.60`, Lens Flare checked, `Cloud Coverage 30%` — while
+  `basemap` stays `osm` and Google 3D Tiles stays on. Screenshot
+  `2026-08-03-w2-panel-footer-reset.png`.
+- Popover: opening moves focus to `Summer Morning`, the dialog reports
+  `aria-modal="true"` and the trigger `aria-haspopup="dialog"`; Escape closes it
+  and focus returns to `Solar presets`.
+- `window.__errors` empty — no page errors.
