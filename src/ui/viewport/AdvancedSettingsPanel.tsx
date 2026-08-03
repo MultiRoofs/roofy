@@ -59,7 +59,28 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
   const setExposure = useRenderDebugStore((s) => s.setExposure);
   const ambientIntensity = useRenderDebugStore((s) => s.ambientIntensity);
   const setAmbientIntensity = useRenderDebugStore((s) => s.setAmbientIntensity);
-  const resetRenderSettings = useRenderDebugStore((s) => s.reset);
+  const resetRenderDebug = useRenderDebugStore((s) => s.reset);
+  const resetAtmosphere = useAtmosphereStore((s) => s.reset);
+
+  /**
+   * Restore every LIGHTING and POST-PROCESSING default, in one action.
+   *
+   * Both stores, because the split between them is historical and invisible
+   * here: lens flare and cloud coverage live in `atmosphereStore`, the rest in
+   * `renderDebugStore`, and a reset that silently skipped two of the sliders it
+   * sits under would be exactly the incoherence this button used to have when
+   * it was tucked inside the Backdrop section resetting neither of the two
+   * controls above it.
+   *
+   * Deliberately NOT the backdrop: the basemap and the Google tileset are
+   * choices of what to look AT, not of how it is rendered, and silently
+   * swapping the user's imagery is not what "reset render settings" promises.
+   * The button's title says so out loud.
+   */
+  const resetRenderSettings = () => {
+    resetRenderDebug();
+    resetAtmosphere();
+  };
 
   return (
     <div className="advanced-settings-panel">
@@ -208,12 +229,20 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
               ))}
             </select>
           </div>
-          <div className="advanced-settings-actions">
-            <button className="rule-cancel-btn" onClick={resetRenderSettings}>
-              Reset Rendering
-            </button>
-          </div>
         </div>
+      </div>
+
+      {/* Footer, outside the scrolling body: this action spans the whole panel,
+          so it must not read as belonging to whichever section happens to be
+          last. */}
+      <div className="advanced-settings-footer">
+        <button
+          className="rule-cancel-btn"
+          title="Restore the default lighting and post-processing settings. The basemap and Google 3D Tiles choices are left alone."
+          onClick={resetRenderSettings}
+        >
+          Reset render settings
+        </button>
       </div>
     </div>
   );
