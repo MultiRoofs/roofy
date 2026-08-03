@@ -7,7 +7,7 @@
  * `addLayer`). If the auto-mode-disables-the-dropdown behaviour weren't
  * gated on `isStreaming`, every existing static layer's LoD selector would
  * silently become a non-interactive read-out — `lodMode` has no effect on
- * static rendering (buildCityMesh only ever consults `selectedLod`), so
+ * static rendering (`handleSync` only ever pushes `selectedLod`), so
  * that would be a functional regression for the overwhelming majority of
  * layers today. The first describe block below proves that does NOT
  * happen.

@@ -2,7 +2,8 @@
  * Google Photorealistic 3D Tiles toggle panel.
  *
  * Renders a built-in background layer row in the left sidebar
- * with a visibility toggle. Reads/writes useTilesStore.
+ * with a visibility toggle. Reads/writes useTilesStore, which `NavaraViewport`
+ * turns into an engine `3d-tiles` layer add/remove (Task C21).
  */
 
 import { useTilesStore } from "../../features/tiles/tilesStore";
@@ -10,7 +11,9 @@ import { useTilesStore } from "../../features/tiles/tilesStore";
 const HAS_API_KEY = !!import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
 export function GoogleTilesPanel() {
-  const enabled = useTilesStore((s) => s.enabled);
+  // Without a key the viewport adds nothing whatever the flag says, so the row
+  // must read "off" rather than showing an open eye over an empty backdrop.
+  const enabled = useTilesStore((s) => s.enabled) && HAS_API_KEY;
   const setEnabled = useTilesStore((s) => s.setEnabled);
 
   return (

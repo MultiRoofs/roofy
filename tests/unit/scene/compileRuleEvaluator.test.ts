@@ -4,9 +4,14 @@
  * handle.setStyle` edge, Task B14).
  *
  * The function was introduced in Task A12 as the shared compile step behind
- * `buildRuleColorsFromArrays`; these are its first DIRECT tests, and they pin
- * the semantics the pre-Navara `applyRuleColors` had, because
- * `CityModelHandle.setStyle` now depends on every one of them:
+ * `buildRuleColorsFromArrays` and moved into `@cityjson/navara-core` in Task
+ * C5; these are its first DIRECT tests, and they pin the semantics the
+ * pre-Navara `applyRuleColors` had, because `CityModelHandle.setStyle` now
+ * depends on every one of them:
+ *
+ * (Imported from `@cityjson/navara-core` directly since Task C21 deleted the
+ * app-side `applyRuleColors.ts` re-export shim. Core is engine-free, so this
+ * import is safe under Node — NODE_IMPORT_SAFE only bars `@navaramap/*`.)
  *
  * - only `RoofSurface` participates;
  * - roof metrics come from `computeRoofMetrics` (so `inclinationDeg` &c. are
@@ -21,7 +26,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Color } from "three";
-import { compileRuleEvaluator } from "../../../src/scene/applyRuleColors";
+import { compileRuleEvaluator } from "@cityjson/navara-core";
 import type { CityObject, Surface } from "../../../src/domain/citymodel/types";
 import type { Rule } from "../../../src/features/rules/types";
 

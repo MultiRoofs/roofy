@@ -11,11 +11,12 @@
  * streamed cells too (Shared Interface Contract -> Interaction registries).
  *
  * Engine-free by construction: the only runtime import is
- * `compileRuleEvaluator` (pure, `@cityjson/navara-core` underneath);
+ * `compileRuleEvaluator` (pure, from `@cityjson/navara-core`);
  * everything else is `import type`, and the runtime-free
  * `@cityjson/navara-cityjson` barrel never reaches an `@navaramap/*` module
  * (NODE_IMPORT_SAFE = false — see Global Constraints).
  */
+import { compileRuleEvaluator } from "@cityjson/navara-core";
 import type {
   CityModelHandle,
   EcefRay,
@@ -27,7 +28,6 @@ import type {
 } from "@cityjson/navara-cityjson";
 import type { Rule } from "../features/rules/types";
 import type { Layer } from "../features/layers/layerStore";
-import { compileRuleEvaluator } from "./applyRuleColors";
 
 /** What the app remembers about a live static handle, so the next sync can
  *  tell an actual change from a re-render. */
