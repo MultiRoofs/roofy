@@ -7,6 +7,7 @@ import {
 } from "../domain/citymodel/loadCityModel";
 import type {
   CityModelReference,
+  GeographicCamera,
   ProjectStateStore,
   RawLayerSnapshot,
   SnapshotSummary,
@@ -19,7 +20,7 @@ import {
 import { LocalStorageProjectStateStore } from "../persistence/localStorage";
 import { captureSnapshot } from "../persistence/captureSnapshot";
 import { restoreSnapshot } from "../persistence/restoreSnapshot";
-import { decodeShareState, buildShareUrl } from "../persistence/urlShare";
+import { readShareHash, buildShareUrl } from "../persistence/urlShare";
 import type { ShareableViewState } from "../persistence/urlShare";
 import {
   initDuckDB,
@@ -67,15 +68,22 @@ const SAMPLE_DATA_URL =
   "https://storage.googleapis.com/cityjson/delft.city.jsonl";
 
 /**
- * How long a queued `.fcb` open waits for the just-mounted viewport to publish
- * its imperative handle.
+ * How long work that needs the 3D engine — a queued `.fcb` open, a restored
+ * camera — waits for the just-mounted viewport to publish its imperative
+ * handle.
  *
  * A React commit takes microseconds, so reaching this means the viewer shell
  * never mounted at all. Bounded rather than open-ended because of the Shared
  * Interface Contract's resolve-or-reject rule: the caller gets an error it can
- * show in the load-error slot, never a promise that silently never settles.
+ * show in the load-error slot or a toast, never a promise that silently never
+ * settles.
  */
 export const ENGINE_BOOT_TIMEOUT_MS = 15_000;
+
+/** How long an explanatory message stays up. Longer than a status toast: these
+ *  are full sentences the user has to read, not a "saved" acknowledgement. */
+const EXPLANATION_TOAST_MS = 8000;
+const STATUS_TOAST_MS = 3000;
 
 /** How a streaming layer's `.fcb` source was opened, for the save/restore
  *  round-trip (`LayerSnapshot.stream`, `normalizeLayers`' `unavailable`
@@ -138,7 +146,6 @@ export function App({
     readonly [number, number, number] | null
   >(null);
   const sceneRef = useRef<CitySceneHandle | null>(null);
-  const cameraTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /**
    * A `.fcb` open is in flight and needs the 3D engine, so the viewer shell
    * (and with it `NavaraViewport`, and with that the FlatCityBuf plugin) must
@@ -158,6 +165,15 @@ export function App({
   const bootHoldsRef = useRef(0);
 
   const { theme, toggleTheme } = useTheme();
+
+  /** Show a transient message. One place, so every call site states its
+   *  duration in the same terms — {@link STATUS_TOAST_MS} for an
+   *  acknowledgement, {@link EXPLANATION_TOAST_MS} for a sentence that has to
+   *  be read. */
+  const showToast = useCallback((message: string, ms: number) => {
+    setToast(message);
+    setTimeout(() => setToast(null), ms);
+  }, []);
 
   // Layer store
   const layers = useLayerStore((s) => s.layers);
@@ -200,8 +216,11 @@ export function App({
     readonly cancel: () => void;
   } | null>(null);
 
-  /** One shared gate per boot: concurrent `.fcb` opens all wait on the same
-   *  handle. Bounded — see {@link ENGINE_BOOT_TIMEOUT_MS}. */
+  /** One shared gate per boot: concurrent `.fcb` opens — and the camera a
+   *  restore or a share link is holding — all wait on the same handle.
+   *  Bounded, and generic in its failure message, because the waiters no
+   *  longer all have the same reason for waiting; each composes its own
+   *  sentence around it. See {@link ENGINE_BOOT_TIMEOUT_MS}. */
   const awaitSceneHandle = useCallback((): Promise<CitySceneHandle> => {
     const existing = sceneGateRef.current;
     if (existing) return existing.promise;
@@ -213,11 +232,7 @@ export function App({
     });
     const timer = setTimeout(() => {
       sceneGateRef.current = null;
-      fail(
-        new Error(
-          "The 3D viewport did not start, so the .fcb layer could not be opened.",
-        ),
-      );
+      fail(new Error("The 3D viewport did not start."));
     }, ENGINE_BOOT_TIMEOUT_MS);
     sceneGateRef.current = {
       promise,
@@ -271,11 +286,56 @@ export function App({
    * Stable identity: everything it touches is a ref.
    */
   const resolveStreamPlugin = useCallback(async (): Promise<StreamPlugin> => {
-    const scene =
-      sceneRef.current ??
-      (bootHoldsRef.current > 0 ? await awaitSceneHandle() : null);
+    let scene = sceneRef.current;
+    if (!scene && bootHoldsRef.current > 0) {
+      try {
+        scene = await awaitSceneHandle();
+      } catch (error) {
+        // The gate says only that the viewport never came up — it is shared
+        // with the camera restore now, so it cannot know what the wait was
+        // for. Name the cost here, where it is known.
+        throw new Error(
+          `${error instanceof Error ? error.message : String(error)} The .fcb layer could not be opened.`,
+          { cause: error },
+        );
+      }
+    }
     return scene ? await scene.getStreamingPlugin() : requireStreamPlugin();
   }, [awaitSceneHandle]);
+
+  /**
+   * Point the camera at a restored viewpoint, once there is a viewport that
+   * can actually take it.
+   *
+   * Two waits, both load-bearing, and the replacement for the 100 ms
+   * `setTimeout` this used to be:
+   *
+   *   1. the imperative HANDLE — a restore is triggered from the landing page
+   *      and a share hash is read on mount, so in both flows `sceneRef` is
+   *      still null when the camera is decided. Optional-chaining past it
+   *      (`sceneRef.current?.ready`) would `await undefined`, which resolves
+   *      immediately and skips the restore in silence.
+   *   2. the engine's own `ready` — `setCameraState` on a view that has not
+   *      finished `init()` does nothing.
+   *
+   * Both can fail (a viewport that never mounts, an engine that never starts),
+   * and both failures REJECT rather than hang, so the caller can say so. The
+   * caller must therefore only call this when a viewport is genuinely
+   * expected: a workspace whose layers are all file-backed mounts nothing, and
+   * waiting 15 s to announce that would be noise, not news.
+   */
+  const applyCameraWhenReady = useCallback(
+    async (camera: GeographicCamera): Promise<void> => {
+      const scene = sceneRef.current ?? (await awaitSceneHandle());
+      await scene.ready;
+      // No suppression needed around this: `setCameraState` is already
+      // bracketed by the streaming plugin's settle suppression inside the
+      // viewport, and the engine's `setCamera` emits no camera events of its
+      // own (Task C7), so a restored camera cannot masquerade as a gesture.
+      scene.setCameraState(camera);
+    },
+    [awaitSceneHandle],
+  );
 
   /**
    * Run a layer open with the 3D engine mounted, when the source needs it.
@@ -428,7 +488,18 @@ export function App({
 
   const handleSave = useCallback(async () => {
     const cameraState = sceneRef.current?.getCameraState();
-    if (!cameraState) return;
+    // Null is a REAL state, not a defensive check: the engine's
+    // `positionGeographic` throws until its first rendered frame (Task B11a),
+    // so saving in the moment after a restore — or right after opening a file
+    // — can find no camera to save. Say so instead of writing a snapshot with
+    // a made-up viewpoint, and instead of the button doing nothing at all.
+    if (!cameraState) {
+      showToast(
+        "The 3D view is still starting — try saving again in a moment.",
+        STATUS_TOAST_MS,
+      );
+      return;
+    }
 
     const { datetime } = useSolarStore.getState();
     const { layers: allLayers } = useLayerStore.getState();
@@ -459,10 +530,12 @@ export function App({
       await persistenceStore.save(snapshot);
       await refreshSnapshots();
     } catch (e) {
-      setToast(e instanceof Error ? e.message : "Failed to save workspace.");
-      setTimeout(() => setToast(null), 3000);
+      showToast(
+        e instanceof Error ? e.message : "Failed to save workspace.",
+        STATUS_TOAST_MS,
+      );
     }
-  }, [activeLayerId, persistenceStore, refreshSnapshots]);
+  }, [activeLayerId, persistenceStore, refreshSnapshots, showToast]);
 
   const handleRestore = useCallback(
     async (id: string) => {
@@ -470,8 +543,7 @@ export function App({
       try {
         const snapshot = await persistenceStore.load(id);
         if (!snapshot) {
-          setToast("Snapshot not found.");
-          setTimeout(() => setToast(null), 3000);
+          showToast("Snapshot not found.", STATUS_TOAST_MS);
           return;
         }
 
@@ -576,8 +648,10 @@ export function App({
         setUnavailableLayers(newUnavailable);
 
         if (!hasUrlLayer && newUnavailable.length === 0 && failedCount === 0) {
-          setToast("Workspace restored. Drop file(s) to view the model.");
-          setTimeout(() => setToast(null), 3000);
+          showToast(
+            "Workspace restored. Drop file(s) to view the model.",
+            STATUS_TOAST_MS,
+          );
         } else if (newUnavailable.length > 0 || failedCount > 0) {
           const parts = [
             hasUrlLayer ? "Workspace restored." : null,
@@ -588,29 +662,45 @@ export function App({
               ? `${failedCount} layer${failedCount === 1 ? "" : "s"} failed to restore.`
               : null,
           ].filter(Boolean);
-          setToast(parts.join(" "));
-          setTimeout(() => setToast(null), 3000);
+          showToast(parts.join(" "), STATUS_TOAST_MS);
         }
 
-        if (cameraTimerRef.current) clearTimeout(cameraTimerRef.current);
-        // The 100 ms wait survives only until Task C20, which replaces it with
-        // `await sceneRef.current.ready` inside a try/catch.
-        cameraTimerRef.current = setTimeout(() => {
-          sceneRef.current?.setCameraState(viewState.camera);
-        }, 100);
+        // The camera, once there is something to point. A restore runs from
+        // the LANDING page, so the viewport does not exist yet and this waits
+        // for it — but only when a layer actually landed: a workspace of
+        // nothing but unavailable local files mounts no viewport at all, and
+        // there is no camera to restore into an empty drop zone.
+        if (useLayerStore.getState().layers.length > 0) {
+          try {
+            await applyCameraWhenReady(viewState.camera);
+          } catch (e) {
+            showToast(
+              `Workspace restored, but the 3D view could not start: ${
+                e instanceof Error ? e.message : String(e)
+              }`,
+              EXPLANATION_TOAST_MS,
+            );
+          }
+        }
       } catch (e) {
-        setToast(
+        showToast(
           e instanceof Error ? e.message : "Failed to restore workspace.",
-        );
-        // The unsupported-version message is a full sentence explaining that
-        // the workspace must be re-saved; 3 s is not long enough to read it.
-        setTimeout(
-          () => setToast(null),
-          e instanceof UnsupportedSnapshotVersionError ? 8000 : 3000,
+          // The unsupported-version message is a full sentence explaining that
+          // the workspace must be re-saved; 3 s is not long enough to read it.
+          e instanceof UnsupportedSnapshotVersionError
+            ? EXPLANATION_TOAST_MS
+            : STATUS_TOAST_MS,
         );
       }
     },
-    [persistenceStore, clearError, resolveStreamPlugin, withEngineBooting],
+    [
+      persistenceStore,
+      clearError,
+      resolveStreamPlugin,
+      withEngineBooting,
+      applyCameraWhenReady,
+      showToast,
+    ],
   );
 
   const handleDeleteSnapshot = useCallback(
@@ -623,7 +713,15 @@ export function App({
 
   const handleShare = useCallback(() => {
     const cameraState = sceneRef.current?.getCameraState();
-    if (!cameraState) return;
+    // See handleSave: no camera yet is a real, transient state (Task B11a),
+    // and a link with no viewpoint in it is not worth minting silently.
+    if (!cameraState) {
+      showToast(
+        "The 3D view is still starting — try sharing again in a moment.",
+        STATUS_TOAST_MS,
+      );
+      return;
+    }
 
     const { datetime } = useSolarStore.getState();
     const { layers: allLayers } = useLayerStore.getState();
@@ -648,22 +746,32 @@ export function App({
     const url = buildShareUrl(state);
     void platform.clipboard.writeText(url).then((ok) => {
       if (ok) {
-        setToast("Share link copied to clipboard");
-        setTimeout(() => setToast(null), 2500);
+        showToast("Share link copied to clipboard", 2500);
       } else {
-        setToast("Failed to copy link \u2014 check clipboard permissions");
-        setTimeout(() => setToast(null), 3000);
+        showToast(
+          "Failed to copy link \u2014 check clipboard permissions",
+          STATUS_TOAST_MS,
+        );
       }
     });
-  }, [platform]);
+  }, [platform, showToast]);
 
   // On mount: check URL hash for a share token
   useEffect(() => {
     const hash = location.hash;
     if (!hash) return;
 
-    const shared = decodeShareState(hash);
-    if (!shared) return;
+    const result = readShareHash(hash);
+    // A link this build cannot read is still a link somebody clicked, so it
+    // gets the same treatment an unsupported SNAPSHOT does: an explanation.
+    // Silence here reads as a broken viewer (ledger carry-forward, Task C18).
+    if (result.kind === "unsupported") {
+      history.replaceState(null, "", location.pathname);
+      showToast(result.error.message, EXPLANATION_TOAST_MS);
+      return;
+    }
+    if (result.kind !== "ok") return;
+    const shared = result.state;
 
     history.replaceState(null, "", location.pathname);
 
@@ -671,8 +779,6 @@ export function App({
     // level (`modelUrl`); such links no longer decode at all, so there is no
     // legacy shape to fall back to here.
     const layersToLoad = shared.layers ?? [];
-
-    if (layersToLoad.length === 0) return;
 
     void (async () => {
       for (const sl of layersToLoad) {
@@ -721,11 +827,28 @@ export function App({
       if (!isNaN(dt.getTime())) {
         useSolarStore.getState().setDatetime(dt);
       }
-      if (cameraTimerRef.current) clearTimeout(cameraTimerRef.current);
-      cameraTimerRef.current = setTimeout(() => {
-        sceneRef.current?.setCameraState(shared.cam);
-      }, 100);
+
+      // The shared viewpoint, once a viewport exists to take it — this effect
+      // runs on MOUNT, so there is none yet, and a `.fcb` link is still
+      // booting the engine through the hold above. Skipped when nothing
+      // loaded (a camera-only link, or a link whose every layer failed):
+      // there is no scene to point, and the landing page mounts no viewport
+      // to wait for.
+      if (useLayerStore.getState().layers.length === 0) return;
+      try {
+        await applyCameraWhenReady(shared.cam);
+      } catch (e) {
+        showToast(
+          `Shared view could not be opened: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+          EXPLANATION_TOAST_MS,
+        );
+      }
     })();
+    // Deps `[]` on purpose: a share hash is read ONCE, on mount. Everything
+    // this body needs is a ref or a stable callback, and the wait for the
+    // viewport is the boot gate rather than a re-run on some readiness state.
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDrop = useCallback(
@@ -799,10 +922,12 @@ export function App({
   /** A layer the engine refused (the CRS gate — no reference system, or a
    *  non-metric one). Stable identity on purpose: `NavaraViewport`'s layer-sync
    *  effect lists it as a dependency. */
-  const handleLayerError = useCallback((layerId: string, message: string) => {
-    setToast(`Layer ${layerId}: ${message}`);
-    setTimeout(() => setToast(null), 6000);
-  }, []);
+  const handleLayerError = useCallback(
+    (layerId: string, message: string) => {
+      showToast(`Layer ${layerId}: ${message}`, EXPLANATION_TOAST_MS);
+    },
+    [showToast],
+  );
 
   const handleLoadSample = useCallback(() => {
     void handleUrl(SAMPLE_DATA_URL);
@@ -1019,6 +1144,13 @@ export function App({
       )}
 
       {loadError && <p className="error-message">{loadError}</p>}
+
+      {/* The landing page has toasts of its own, and always did: a restore
+          that found no snapshot, a workspace whose layers all need a file
+          re-selected, a share link from an older version. Until Task C20 this
+          slot existed only in the viewer shell, so every one of those
+          messages was raised into a component that was not on screen. */}
+      {toast && <div className="toast">{toast}</div>}
     </main>
   );
 }
