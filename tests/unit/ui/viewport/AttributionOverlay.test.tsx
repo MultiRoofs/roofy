@@ -33,7 +33,30 @@ describe("AttributionOverlay", () => {
     expect(container.textContent).toContain("© CARTO");
   });
 
-  it("links the OSM copyright page from a basemap credit too, not just the geoid one", () => {
+  it("prints a credit line ONCE even when two sources require it", () => {
+    // The geoid line already carries "© OpenStreetMap contributors" (its
+    // undulation tiles are OSM-derived), so an OSM or CARTO basemap would
+    // otherwise print it twice — which reads as a bug, not a stronger credit.
+    const { container } = render(
+      <AttributionOverlay
+        googleTiles={false}
+        basemapAttribution={["© CARTO", "© OpenStreetMap contributors"]}
+      />,
+    );
+    const lines = [
+      ...container.querySelectorAll(".attribution-overlay span"),
+    ].map((el) => el.textContent);
+    expect(new Set(lines).size).toBe(lines.length);
+    expect(
+      lines.filter((l) => l === "© OpenStreetMap contributors"),
+    ).toHaveLength(1);
+    // Deduping must not DROP an obligation: CARTO is still credited, and the
+    // geoid lines are all still there.
+    expect(lines).toContain("© CARTO");
+    for (const line of GEOID_ATTRIBUTION) expect(lines).toContain(line);
+  });
+
+  it("links the OSM copyright page from every credit that names it", () => {
     // ODbL attribution is a link obligation wherever the credit appears.
     const { container } = render(
       <AttributionOverlay
@@ -44,7 +67,7 @@ describe("AttributionOverlay", () => {
     expect(
       container.querySelectorAll('a[href*="openstreetmap.org/copyright"]')
         .length,
-    ).toBeGreaterThan(1);
+    ).toBeGreaterThan(0);
   });
 
   it("links the CC BY 4.0 licence rather than only naming it", () => {

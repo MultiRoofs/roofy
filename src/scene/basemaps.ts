@@ -68,7 +68,12 @@ export const BASEMAPS: readonly BasemapOption[] = [
       url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
       maxZoom: 19,
     },
-    attribution: ["© Esri"],
+    // The service's OWN `copyrightText`, verbatim from
+    // `…/World_Imagery/MapServer?f=json`. Not a shortened "© Esri": the
+    // imagery is a composite and the terms require the whole line.
+    attribution: [
+      "Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community",
+    ],
   },
   {
     id: "carto-positron",
