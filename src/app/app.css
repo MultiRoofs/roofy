@@ -1481,20 +1481,8 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   M3: SOLAR TAB
+   SOLAR PRESETS (toolbar popover)
    ═══════════════════════════════════════════════════════════════ */
-
-.solar-control-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-bottom: 0.35rem;
-}
-
-.solar-slider {
-  flex: 1;
-  accent-color: var(--accent);
-}
 
 .solar-presets {
   display: grid;
@@ -1597,6 +1585,26 @@ body {
   width: 5rem;
 }
 
+/* The presets/sun-position popover, anchored to its button in the cluster. */
+.toolbar-solar-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.toolbar-solar-popover {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  width: 230px;
+  padding: 0.25rem 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-lg, 0.75rem);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  z-index: 30;
+}
+
 /* The toolbar is one flex row; below this width the clock would push the
    right-hand action buttons off the edge, so the two widest fields go. */
 @media (max-width: 1100px) {
@@ -1604,16 +1612,6 @@ body {
   .toolbar-solar-speed {
     display: none;
   }
-}
-
-/* A one-line "this moved" note inside an inspector tab. */
-.inspector-note {
-  margin: 0 0 0.5rem;
-  padding: 0.4rem 0.5rem;
-  border-radius: var(--radius-sm);
-  background: var(--bg-muted);
-  color: var(--fg-muted);
-  font-size: 0.72rem;
 }
 
 /* Tighten inspector tabs when 5+ tabs */

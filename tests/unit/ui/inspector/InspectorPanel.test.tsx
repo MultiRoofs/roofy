@@ -172,6 +172,18 @@ describe("InspectorPanel — static layer", () => {
     expect(screen.getByText("RoofSurface")).toBeTruthy();
     expect(screen.getByText("GroundSurface")).toBeTruthy();
   });
+
+  // The Solar tab is gone: the scene clock, the seasonal presets and the sun
+  // readout are scene-wide configuration and now live in the toolbar's solar
+  // cluster. This panel is about the current selection.
+  it("offers no Solar tab", () => {
+    render(<InspectorPanel selections={[]} onClose={() => {}} />);
+
+    const tabs = [...document.querySelectorAll(".inspector-tab")].map(
+      (b) => b.textContent,
+    );
+    expect(tabs).toEqual(["Object", "Surfaces", "Analysis", "Rules", "Stats"]);
+  });
 });
 
 // ---------------------------------------------------------------------------
