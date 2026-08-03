@@ -60,6 +60,8 @@ import { useSolarStore } from "../features/solar/solarStore";
 import { useStreamStore } from "../features/streaming/streamStore";
 import { useTilesStore } from "../features/tiles/tilesStore";
 import { useBasemapStore } from "../features/basemap/basemapStore";
+import { useAtmosphereStore } from "../features/atmosphere/atmosphereStore";
+import { useRenderDebugStore } from "../features/debug/renderDebugStore";
 import { setStreamPlugin } from "../features/streaming/streamPlugin";
 import {
   closeAllStreamingLayers,
@@ -201,6 +203,15 @@ interface GoogleTilesHandles {
 
 /** The raster basemap's source+layer, so a change of option can swap them. */
 type BasemapHandles = GoogleTilesHandles;
+
+/** The half of `EffectHandle` the clouds wiring uses. Structural rather than
+ *  the engine's generic type, which needs the descriptor class as a parameter
+ *  (`EffectHandle<CloudsEffectDesc>`) and would drag `@navaramap/
+ *  three-default-descs` into this file's type surface for two methods. */
+interface CloudsHandle {
+  update: (updates: unknown) => void;
+  delete: () => void;
+}
 
 /**
  * Drape the selected raster basemap over the globe.
@@ -357,6 +368,18 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     const [activeBasemap, setActiveBasemap] = useState<BasemapOption | null>(
       null,
     );
+    /** Whether the volumetric clouds effect is wanted (advanced settings). */
+    const cloudsWanted = useRenderDebugStore((s) => s.cloudsEnabled);
+    const postProcessingEnabled = useRenderDebugStore(
+      (s) => s.postProcessingEnabled,
+    );
+    const cloudCoverage = useAtmosphereStore((s) => s.cloudCoverage);
+    /** The live clouds effect handle, so coverage can be pushed to the pass
+     *  instead of rebuilding it. */
+    const cloudsHandleRef = useRef<CloudsHandle | null>(null);
+    /** The coverage the pass should be BORN with. A ref, so the add effect
+     *  below can read the current value without depending on it. */
+    const cloudCoverageRef = useRef(cloudCoverage);
     /** Bumped by the sync effect when a layer was newly added, which is the
      *  only thing that triggers an automatic fit. */
     const [fitToken, setFitToken] = useState(0);
@@ -646,6 +669,66 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         if (viewRef.current === view) removeBasemap(handles);
       };
     }, [engineReady, basemapId]);
+
+    // --- Volumetric clouds ---
+    //
+    // `addDefaultPhotorealScene()` registers the sky, stars, sun light,
+    // aerial perspective, lens flare, tone mapping and antialiasing — it does
+    // NOT add clouds, even though `DefaultPlugin.init()` registers the
+    // `"clouds"` effect descriptor. So the effect has to be added by hand; the
+    // advanced-settings toggle (default on) and the coverage slider that were
+    // both inert since the migration now drive it.
+    useEffect(() => {
+      const view = viewRef.current;
+      if (!engineReady || view === null) return;
+      if (!postProcessingEnabled || !cloudsWanted) return;
+      let handle: CloudsHandle | null = null;
+      try {
+        handle = view.addEffect({
+          clouds: { coverage: cloudCoverageRef.current },
+        }) as unknown as CloudsHandle;
+      } catch (error) {
+        // Clouds are weather, not the app: a browser (or a software
+        // rasteriser) that cannot afford the ray-marching pass must still get
+        // a working viewer.
+        console.error(
+          "NavaraViewport: the clouds effect could not be added; the sky renders without it.",
+          error,
+        );
+        return;
+      }
+      cloudsHandleRef.current = handle;
+      return () => {
+        cloudsHandleRef.current = null;
+        if (viewRef.current !== view) return;
+        try {
+          handle?.delete();
+        } catch (error) {
+          console.error(
+            "NavaraViewport: the clouds effect could not be removed.",
+            error,
+          );
+        }
+      };
+      // `cloudCoverage` is deliberately NOT a dependency: dragging the slider
+      // would tear the pass down and rebuild it (and re-load its 3D textures)
+      // per pointer move. The separate effect below pushes it instead.
+    }, [engineReady, postProcessingEnabled, cloudsWanted]);
+
+    // Coverage -> the live pass, without rebuilding it.
+    useEffect(() => {
+      cloudCoverageRef.current = cloudCoverage;
+      const handle = cloudsHandleRef.current;
+      if (!handle) return;
+      try {
+        handle.update({ clouds: { coverage: cloudCoverage } });
+      } catch (error) {
+        console.error(
+          "NavaraViewport: the cloud coverage could not be updated.",
+          error,
+        );
+      }
+    }, [cloudCoverage]);
 
     // --- Wheel over the viewport must zoom, never scroll the page ---
     //
