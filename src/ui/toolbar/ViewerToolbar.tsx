@@ -5,6 +5,7 @@
 import type { PickMode, ToolMode } from "../../domain/selection/types";
 import type { Theme } from "../../features/theme/useTheme";
 import { useLayerStore } from "../../features/layers/layerStore";
+import { useTotalObjectCount } from "../../features/streaming/useTotalObjectCount";
 import { useSolarStore } from "../../features/solar/solarStore";
 
 /**
@@ -66,10 +67,9 @@ export function ViewerToolbar({
   const activeLayerId = useLayerStore((s) => s.activeLayerId);
   const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
 
-  const totalObjects = layers.reduce(
-    (sum, l) => sum + Object.keys(l.model.objects).length,
-    0,
-  );
+  // NOT `layers.reduce(... model.objects ...)`: a streaming layer's model is
+  // a stub with no objects, so that undercounts it to zero (Task C14).
+  const totalObjects = useTotalObjectCount();
   const crs = activeLayer
     ? extractCrsCode(activeLayer.model.metadata.referenceSystem)
     : null;

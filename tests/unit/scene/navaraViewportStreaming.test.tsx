@@ -18,7 +18,9 @@
  *    triangle readout cover streamed cells;
  *  - rules / LoD / visibility reach the streaming handle (styling is the only
  *    capability that branches — shared contract -> Streaming styling);
- *  - every programmatic camera move is routed through `suppressSettle`.
+ *  - every programmatic camera move is routed through
+ *    `suppressSettleThenCommit`, so it neither fetches along its flight path
+ *    nor leaves its destination unfetched.
  */
 import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -106,7 +108,8 @@ vi.mock("@cityjson/navara-cityjson/plugin", () => ({
   }),
 }));
 
-/** The live FlatCityBuf plugin, as `NavaraViewport` sees it. `suppressSettle`
+/** The live FlatCityBuf plugin, as `NavaraViewport` sees it.
+ *  `suppressSettleThenCommit`
  *  is a PASSTHROUGH by default: the camera call still happens, and a test can
  *  assert it was routed through here. */
 const flatPluginInstance = {
@@ -114,7 +117,7 @@ const flatPluginInstance = {
   getHandle: vi.fn(),
   remove: vi.fn(),
   dispose: vi.fn(),
-  suppressSettle: vi.fn(async (fn: () => unknown) => fn()),
+  suppressSettleThenCommit: vi.fn(async (fn: () => unknown) => fn()),
 };
 /** Options the component constructed the plugin with (the viewport-size seam). */
 const flatPluginOptions: Array<Record<string, unknown>> = [];
@@ -315,8 +318,8 @@ describe("NavaraViewport streaming wiring", () => {
     flatPluginThrows = null;
     FlatCityBufPluginMock.mockClear();
     flatPluginInstance.remove.mockClear();
-    flatPluginInstance.suppressSettle.mockClear();
-    flatPluginInstance.suppressSettle.mockImplementation(
+    flatPluginInstance.suppressSettleThenCommit.mockClear();
+    flatPluginInstance.suppressSettleThenCommit.mockImplementation(
       async (fn: () => unknown) => fn(),
     );
     cityPluginInstance.getHandle.mockReset();
@@ -473,7 +476,7 @@ describe("NavaraViewport streaming wiring", () => {
   // Programmatic camera suppression (Step 5b)
   // -------------------------------------------------------------------------
 
-  it("wraps a programmatic camera move in the streaming plugin's suppressSettle", async () => {
+  it("wraps a programmatic camera move in the streaming plugin's suppressSettleThenCommit", async () => {
     const ref = createRef<CitySceneHandle>();
     render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
     await waitFor(() => expect(init).toHaveBeenCalled());
@@ -487,12 +490,14 @@ describe("NavaraViewport streaming wiring", () => {
       pitch: -60,
       roll: 0,
     });
-    expect(flatPluginInstance.suppressSettle).toHaveBeenCalledTimes(1);
+    expect(flatPluginInstance.suppressSettleThenCommit).toHaveBeenCalledTimes(
+      1,
+    );
     // The camera really moved — suppression must not swallow the call itself.
     expect(setCamera).toHaveBeenCalledTimes(1);
   });
 
-  it("routes fitAll, fitLayer and alignView through suppressSettle too", async () => {
+  it("routes fitAll, fitLayer and alignView through suppressSettleThenCommit too", async () => {
     useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
     const ref = createRef<CitySceneHandle>();
     render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
@@ -501,18 +506,20 @@ describe("NavaraViewport streaming wiring", () => {
     );
     // The automatic fit for the newly added layer already went through it.
     await waitFor(() => expect(flyTo).toHaveBeenCalled());
-    flatPluginInstance.suppressSettle.mockClear();
+    flatPluginInstance.suppressSettleThenCommit.mockClear();
 
     act(() => ref.current!.fitAll());
     act(() => ref.current!.fitLayer("a"));
     act(() => ref.current!.alignView("top"));
-    expect(flatPluginInstance.suppressSettle).toHaveBeenCalledTimes(3);
+    expect(flatPluginInstance.suppressSettleThenCommit).toHaveBeenCalledTimes(
+      3,
+    );
     expect(flyTo).toHaveBeenCalledTimes(3); // 1 auto-fit + fitAll + fitLayer
     expect(setCamera).toHaveBeenCalledTimes(1);
   });
 
   it("reports a camera move that throws inside the suppression window instead of leaving an unhandled rejection", async () => {
-    // `suppressSettle` runs the move inside its own promise, so a throwing
+    // The plugin runs the move inside its own promise, so a throwing
     // `setCamera` surfaces as the rejection of a promise the fire-and-forget
     // caller never awaits. Without the `.catch` this is an unhandled rejection
     // with no stack pointing at the viewport (Task C13 fold-in).
@@ -560,7 +567,7 @@ describe("NavaraViewport streaming wiring", () => {
     );
     act(() => ref.current!.alignView("top"));
     expect(setCamera).toHaveBeenCalled();
-    expect(flatPluginInstance.suppressSettle).not.toHaveBeenCalled();
+    expect(flatPluginInstance.suppressSettleThenCommit).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
@@ -675,6 +682,13 @@ describe("NavaraViewport streaming wiring", () => {
     render(<NavaraViewport onTriangleCount={() => {}} />);
     await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(1));
     expect(streamHandle.getBoundsGeodetic).toHaveBeenCalled();
+    // Through `suppressSettleThenCommit`, so the fit does not fetch along its
+    // flight path AND does not leave its destination empty — without the
+    // trailing commit the user has to nudge the camera before a single cell
+    // arrives (M7.5 smoke).
+    expect(flatPluginInstance.suppressSettleThenCommit).toHaveBeenCalledTimes(
+      1,
+    );
 
     // A visibility toggle must not yank the camera back.
     act(() =>

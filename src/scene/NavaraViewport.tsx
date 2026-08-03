@@ -501,11 +501,21 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
      * layer or aligning the view would immediately re-fetch tiles for a camera
      * the user never moved.
      *
+     * `suppressSettleThenCommit`, not the bare `suppressSettle`: suppression on
+     * its own leaves a commit OWED. Every camera event of the flight is
+     * swallowed, so a fit that lands squarely on a city fetches NOTHING — the
+     * viewport sits framed and empty until the user happens to nudge the
+     * camera (reported from the M7.5 browser smoke). The plugin queues one
+     * commit for the moment the suppression window closes, which is the
+     * destination the user is about to look at. That applies to all four
+     * callers, not just the fit: a share-link restore and an alignment land on
+     * a viewport the user reads too.
+     *
      * Deliberately the REF, not `getStreamingPlugin()`: a static-only workspace
      * has no FlatCityBuf plugin and must never block a `fitAll` on streaming
      * readiness. Fire-and-forget, so the `CitySceneHandle` methods stay `void`
-     * — but REPORTED, not swallowed: `suppressSettle` runs `move()` inside its
-     * own promise, so a throwing `flyTo`/`setCamera` becomes the rejection of a
+     * — but REPORTED, not swallowed: the move runs inside the plugin's own
+     * promise, so a throwing `flyTo`/`setCamera` becomes the rejection of a
      * promise nobody awaits. Without the `.catch` that is an unhandled
      * rejection with no stack pointing here (Task C13 fold-in); the no-plugin
      * branch above, by contrast, throws synchronously into its caller.
@@ -516,7 +526,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         move();
         return;
       }
-      plugin.suppressSettle(move).catch((error: unknown) => {
+      plugin.suppressSettleThenCommit(move).catch((error: unknown) => {
         console.error(
           "NavaraViewport: a camera move failed inside the streaming settle-suppression window.",
           error,

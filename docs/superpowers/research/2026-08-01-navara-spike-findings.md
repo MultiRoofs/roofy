@@ -846,17 +846,19 @@ the repo's own `fixtures/delft.fcb` over the dev server
 (`http://127.0.0.1:<port>/fixtures/delft.fcb`), which answers `206 Partial
 Content` with `Content-Range`, so it is a real HTTP range-read path.
 
-| screenshot                                 | what it shows                                                                            |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| `2026-08-03-c14-m75-01-landing.png`        | Landing page, no viewport mounted                                                        |
-| `2026-08-03-c14-m75-02-globe-booting.png`  | `.fcb` submitted → globe up with **zero layers** (`engineBooting`)                       |
-| `2026-08-03-c14-m75-03-cells-streamed.png` | First cells resident after a zoom settle                                                 |
-| `2026-08-03-c14-m75-04-top-cells.png`      | Top view: streamed cells with semantic surface colours                                   |
-| `2026-08-03-c14-m75-05-pick.png`           | Pick on a streamed building → inspector `NL.IMBAG.Pand.0503100000025028-0`, 294 surfaces |
-| `2026-08-03-c14-m75-06-after-pan.png`      | Pan → 2123 features resident, 36.9K triangles, **same** building still highlighted       |
-| `2026-08-03-c14-m75-07-rule-recolor.png`   | "Flat roofs" preset recolours every streamed cell, highlight survives                    |
-| `2026-08-03-c14-m75-08-rule-after-pan.png` | Cells arriving after the rule render in the rule colour                                  |
-| `2026-08-03-c14-m75-09-lod.png`            | LoD read-out (auto ↔ manual), `LoD 1.2 / 400 m cells`                                    |
+| screenshot                                        | what it shows                                                                            |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `2026-08-03-c14-m75-01-landing.png`               | Landing page, no viewport mounted                                                        |
+| `2026-08-03-c14-m75-02-globe-booting.png`         | `.fcb` submitted → globe up with **zero layers** (`engineBooting`)                       |
+| `2026-08-03-c14-m75-03-cells-streamed.png`        | First cells resident after a zoom settle                                                 |
+| `2026-08-03-c14-m75-04-top-cells.png`             | Top view: streamed cells with semantic surface colours                                   |
+| `2026-08-03-c14-m75-05-pick.png`                  | Pick on a streamed building → inspector `NL.IMBAG.Pand.0503100000025028-0`, 294 surfaces |
+| `2026-08-03-c14-m75-06-after-pan.png`             | Pan → 2123 features resident, 36.9K triangles, **same** building still highlighted       |
+| `2026-08-03-c14-m75-07-rule-recolor.png`          | "Flat roofs" preset recolours every streamed cell, highlight survives                    |
+| `2026-08-03-c14-m75-08-rule-after-pan.png`        | Cells arriving after the rule render in the rule colour                                  |
+| `2026-08-03-c14-m75-09-lod.png`                   | LoD read-out (auto ↔ manual), `LoD 1.2 / 400 m cells`                                    |
+| `2026-08-03-c14-m75-10-first-open-no-gesture.png` | After the review fixes: the whole of Delft resident with **no camera gesture at all**    |
+| `2026-08-03-c14-m75-11-first-open-top.png`        | Same run, top view — `Objects 2231` in the toolbar badge                                 |
 
 Console over the whole session: no errors or exceptions, only `favicon.ico`
 404s. 57 range requests total across three settles — tens, not hundreds.
@@ -872,12 +874,29 @@ Console over the whole session: no errors or exceptions, only `favicon.ico`
 2. **A newly opened streaming layer needs its own auto-fit.** The viewport's
    fit-once effect keyed on `liveRef` growing, and streaming layers never
    enter `liveRef`. Added to the streaming reconciliation effect.
-3. **`Level swap timed out; kept the previous level`** fires on the first
-   commit after the auto-fit: that camera frames the whole file, so the cover
-   asks for all 1115 features (7.6 MB read in ~1 MB ranges) and the
-   `LEVEL_SWAP_TIMEOUT_MS = 1500` budget is missed on a 3 fps SwiftShader
-   host. Recovers on the next settle. Host-speed dependent; worth re-measuring
-   on real hardware before treating the constant as settled.
-4. The engine's default photoreal sun follows the real clock, so a run at
+3. **A suppressed programmatic move left a commit owed.** `suppressSettle`
+   swallows every camera event of the flight, so the auto-fit landed on Delft
+   and fetched nothing: the viewport sat framed and empty until the user
+   nudged the camera. Fixed in the plugin (`4fd5afe`) —
+   `suppressSettleThenCommit` queues one commit for the moment the suppression
+   window closes.
+4. **The level-swap deadline was being applied to a layer's FIRST commit.**
+   `planCommit` calls every initial load a swap (`prevLevel` is null), so the
+   first fetch ran under `LEVEL_SWAP_TIMEOUT_MS = 1500` — with nothing to keep
+   and nothing to roll back to, timing out just produced an empty layer and
+   `Level swap timed out; kept the previous level`. The auto-fit frames the
+   whole file, so the initial cover IS the whole file (1115 features, 7.6 MB in
+   ~1 MB ranges) and takes ~10 s on this 3–4 fps host. Fixed in the plugin
+   (`97afdbd`): race only when there is a previous level to fall back to. With
+   both fixes the first open reaches `Objects 2231 / Triangles 217.8K` with no
+   camera input whatsoever.
+5. **`Objects` counted only `layer.model.objects`,** which is an empty stub for
+   a streaming layer — the toolbar badge and status bar read `Objects 0` next
+   to 2123 rendered buildings. Now unions the resident feature counts
+   (`useTotalObjectCount`).
+6. The engine's default photoreal sun follows the real clock, so a run at
    local night renders an almost-black scene regardless of the model. The
    driver shifts the page's `Date` to put Delft in daylight.
+7. Timing: the first open is fully resident in ~25 s here, not the brief's
+   ~5 s. That is the SwiftShader host decoding 1115 features — the range reads
+   themselves are only 19 requests.

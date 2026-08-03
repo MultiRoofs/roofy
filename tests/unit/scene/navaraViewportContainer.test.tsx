@@ -67,7 +67,11 @@ vi.mock("@cityjson/navara-cityjson/plugin", () => ({
 // imports `@navaramap/three` at module scope (Task B1: NODE_IMPORT_SAFE=false).
 vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
   FlatCityBufPlugin: vi.fn(function () {
-    return { openStream: vi.fn(), remove: vi.fn(), suppressSettle: vi.fn() };
+    return {
+      openStream: vi.fn(),
+      remove: vi.fn(),
+      suppressSettleThenCommit: vi.fn(async (fn: () => unknown) => fn()),
+    };
   }),
 }));
 
