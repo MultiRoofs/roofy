@@ -93,10 +93,6 @@
   color: var(--fg);
 }
 
-[data-theme="light"] .solar-input {
-  color-scheme: light;
-}
-
 [data-theme="light"] .layer-item {
   border-color: var(--border);
 }
@@ -136,11 +132,6 @@ body {
   min-height: 100vh;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   line-height: 1.5;
-  /* Belt to the viewport's `preventDefault` braces: a wheel gesture that the
-     3D view consumes must never chain into a page scroll (or a rubber-band
-     overscroll on macOS/Android). The listener in `NavaraViewport` is what
-     actually stops it; this stops the CHAIN from any inner scroller too. */
-  overscroll-behavior: none;
 }
 
 #root {
@@ -585,7 +576,10 @@ body {
   position: relative;
   overflow: hidden;
   background: var(--bg-viewport);
-  /* The wheel belongs to the camera in here — nothing may scroll-chain out. */
+  /* Belt to the viewport's `preventDefault` braces: a gesture the 3D view
+     consumes must not chain out into a page scroll or a rubber-band
+     overscroll. Scoped HERE and not to the body on purpose — the landing page
+     is an ordinary document, and pull-to-refresh has to keep working on it. */
   overscroll-behavior: contain;
 }
 
@@ -1481,34 +1475,9 @@ body {
   margin-bottom: 0.35rem;
 }
 
-.solar-input {
-  width: 100%;
-  padding: 0.3rem 0.4rem;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--fg);
-  font-size: 0.72rem;
-  font-family: inherit;
-  color-scheme: dark;
-}
-
-.solar-input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
 .solar-slider {
   flex: 1;
   accent-color: var(--accent);
-}
-
-.solar-time-label {
-  font-size: 0.7rem;
-  font-family: "Geist Mono", monospace;
-  color: var(--fg-muted);
-  min-width: 3rem;
-  text-align: right;
 }
 
 .solar-presets {
