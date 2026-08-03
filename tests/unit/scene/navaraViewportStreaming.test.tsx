@@ -511,6 +511,44 @@ describe("NavaraViewport streaming wiring", () => {
     expect(setCamera).toHaveBeenCalledTimes(1);
   });
 
+  it("reports a camera move that throws inside the suppression window instead of leaving an unhandled rejection", async () => {
+    // `suppressSettle` runs the move inside its own promise, so a throwing
+    // `setCamera` surfaces as the rejection of a promise the fire-and-forget
+    // caller never awaits. Without the `.catch` this is an unhandled rejection
+    // with no stack pointing at the viewport (Task C13 fold-in).
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    const boom = new Error("camera is not ready");
+    setCamera.mockImplementationOnce(() => {
+      throw boom;
+    });
+
+    const ref = createRef<CitySceneHandle>();
+    render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
+    await waitFor(() => expect(init).toHaveBeenCalled());
+    await ref.current!.ready;
+
+    expect(() =>
+      ref.current!.setCameraState({
+        lng: 4.35,
+        lat: 52,
+        height: 500,
+        heading: 0,
+        pitch: -60,
+        roll: 0,
+      }),
+    ).not.toThrow();
+
+    await waitFor(() =>
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining("settle-suppression window"),
+        boom,
+      ),
+    );
+    consoleError.mockRestore();
+  });
+
   it("moves the camera directly when no streaming plugin is present, without awaiting anything", async () => {
     // Simulates a static-only build: the ref never gets a plugin.
     flatPluginThrows = "not configured";
@@ -624,6 +662,27 @@ describe("NavaraViewport streaming wiring", () => {
     flyTo.mockClear();
     act(() => ref.current!.fitAll());
     expect(streamHandle.getBoundsGeodetic).toHaveBeenCalled();
+    expect(flyTo).toHaveBeenCalledTimes(1);
+  });
+
+  it("fits a newly opened streaming layer once, and does not re-fit on an unrelated change", async () => {
+    // A streaming layer only fetches cells once the camera is close enough for
+    // the cover to fit the budget, so without this a `.fcb` opened as the FIRST
+    // layer sits on a whole-globe camera reporting "Zoom in to load features"
+    // with nothing on screen to aim at (found by Task C14's browser smoke).
+    const streamHandle = makeFakeStreamHandle({ triangles: 10 });
+    registerStreamingLayer("S1", streamHandle);
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(1));
+    expect(streamHandle.getBoundsGeodetic).toHaveBeenCalled();
+
+    // A visibility toggle must not yank the camera back.
+    act(() =>
+      useLayerStore.setState((s) => ({
+        layers: s.layers.map((l) => ({ ...l, visible: false })),
+      })),
+    );
+    await waitFor(() => expect(streamHandle.setVisible).toHaveBeenCalled());
     expect(flyTo).toHaveBeenCalledTimes(1);
   });
 
