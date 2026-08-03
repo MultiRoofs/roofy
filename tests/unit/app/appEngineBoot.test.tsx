@@ -269,11 +269,14 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
     await vi.advanceTimersByTimeAsync(ENGINE_BOOT_TIMEOUT_MS + 1);
 
     // Resolve-or-reject, never a hang: the wait is bounded and the message
-    // reaches the landing page's error slot.
+    // reaches the landing page's error slot. Two sentences, because the boot
+    // gate is shared with the camera restore (Task C20) and so states only
+    // that the viewport never came up; `resolveStreamPlugin` adds what that
+    // cost this caller.
     await waitFor(() =>
       expect(
         screen.getByText(
-          "The 3D viewport did not start, so the .fcb layer could not be opened.",
+          "The 3D viewport did not start. The .fcb layer could not be opened.",
         ),
       ).toBeInTheDocument(),
     );

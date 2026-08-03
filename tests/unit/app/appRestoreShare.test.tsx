@@ -1,0 +1,435 @@
+/**
+ * `App`'s save / restore / share flows against the viewport's explicit
+ * readiness signal (Task C20 — the M7.6 closer).
+ *
+ * What these cases pin, and why each one exists:
+ *
+ *   * A restore no longer guesses when the camera can be applied. The old
+ *     `setTimeout(..., 100)` was a bet that the engine would be up by then;
+ *     the flow now waits for the handle to be published AND for
+ *     `CitySceneHandle.ready` to resolve, so a slow WASM start cannot land the
+ *     camera in the void — and a restore triggered from the LANDING page (the
+ *     only place the snapshot list is rendered) has no viewport at all when it
+ *     starts, which is exactly the case an inline `sceneRef.current?.ready`
+ *     would silently skip.
+ *   * `ready` is resolve-or-reject, so an engine that never starts must
+ *     surface as a message rather than a silently missing camera.
+ *   * A share link is processed on mount, before any viewport exists. A `.fcb`
+ *     link must therefore drive the same engine-boot hold a manual `.fcb` open
+ *     does (Task C14), or streaming could never be the first layer of a shared
+ *     workspace.
+ *   * A link minted before v3 carries a camera in a frame that no longer
+ *     exists. It cannot be opened — but "nothing happened" is indistinguishable
+ *     from a broken viewer, so it has to explain itself (ledger, Task C18).
+ *   * Saving right after a restore can find the camera transiently
+ *     unreadable: `positionGeographic` throws until the engine's first frame
+ *     (Task B11a), so `getCameraState()` answers null. That must be tolerated
+ *     and reported, never thrown or silently swallowed.
+ *
+ * The engine is never imported: `NavaraViewport` is mocked (jsdom has no
+ * WebGL, and `@navaramap/three` crashes at module scope under Node — Task B1's
+ * NODE_IMPORT_SAFE = false). The real round trip is Task C20's browser smoke.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { forwardRef, useImperativeHandle } from "react";
+import type { CitySceneHandle } from "../../../src/scene/NavaraViewport";
+import type {
+  GeographicCamera,
+  ProjectSnapshot,
+  ProjectStateStore,
+} from "../../../src/persistence/types";
+import type { StreamPlugin } from "../../../src/features/streaming/streamPlugin";
+
+// jsdom ships no `matchMedia`, which `useTheme` reads on its first render.
+window.matchMedia ??= ((query: string) =>
+  ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  }) as unknown as MediaQueryList) as typeof window.matchMedia;
+
+const FCB_URL = "https://example.test/delft.fcb";
+const JSON_URL = "https://example.test/delft.city.json";
+
+const CAM: GeographicCamera = {
+  lng: 4.3571,
+  lat: 52.0116,
+  height: 800,
+  heading: 30,
+  pitch: -45,
+  roll: 0,
+};
+
+// --- the mocked viewport -----------------------------------------------------
+
+interface Gate {
+  readonly promise: Promise<void>;
+  readonly resolve: () => void;
+  readonly reject: (error: unknown) => void;
+}
+
+function createGate(): Gate {
+  let resolve!: () => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<void>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  // Nobody may await a rejected gate (a test can finish first), so keep it
+  // from being reported as an unhandled rejection.
+  promise.catch(() => undefined);
+  return { promise, resolve, reject };
+}
+
+/** The engine's `ready`, controlled per test: these cases are ABOUT when it
+ *  settles, so it never resolves on its own. */
+let readyGate: Gate = createGate();
+const setCameraState = vi.fn();
+/** What `getCameraState()` answers — null models the pre-first-frame window
+ *  in which `positionGeographic` throws (Task B11a). */
+let cameraState: GeographicCamera | null = CAM;
+
+const streamPluginStub = {
+  openStream: vi.fn(),
+  getHandle: vi.fn(),
+  handles: vi.fn(() => []),
+  remove: vi.fn(),
+  dispose: vi.fn(),
+  suppressSettle: vi.fn(),
+} as unknown as StreamPlugin;
+
+vi.mock("../../../src/scene/NavaraViewport", () => ({
+  NavaraViewport: forwardRef<CitySceneHandle, Record<string, unknown>>(
+    function MockNavaraViewport(_props, ref) {
+      useImperativeHandle(
+        ref,
+        () =>
+          ({
+            fitAll: () => {},
+            fitLayer: () => {},
+            alignView: () => {},
+            getCameraState: () => cameraState,
+            setCameraState,
+            getStreamingPlugin: async () => streamPluginStub,
+            // A getter, like the real handle: the gate is re-armed per test.
+            get ready() {
+              return readyGate.promise;
+            },
+          }) as unknown as CitySceneHandle,
+        [],
+      );
+      return <div data-testid="navara-viewport" />;
+    },
+  ),
+}));
+
+// DuckDB-wasm is irrelevant here and expensive to even import.
+vi.mock("../../../src/analytics/duckdb", () => ({
+  initDuckDB: vi.fn(async () => {}),
+  getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
+  loadModelIntoDuckDB: vi.fn(async () => false),
+  loadCityModelFromMemory: vi.fn(async () => false),
+  loadResidentObjectsIntoDuckDB: vi.fn(async () => false),
+  shouldUseSourceUrlPath: vi.fn(() => false),
+}));
+
+/** What `openStreamingLayer` saw, and when. A zero `layersAtCall` is the
+ *  evidence that the shell was up with NO layer — i.e. that the share path
+ *  took the engine-boot hold. */
+const openCalls: Array<{ plugin: unknown; layersAtCall: number }> = [];
+
+vi.mock("../../../src/features/streaming/openStreamingLayer", () => ({
+  openStreamingLayer: vi.fn(async (input: { plugin: unknown }) => {
+    const { useLayerStore } =
+      await import("../../../src/features/layers/layerStore");
+    openCalls.push({
+      plugin: input.plugin,
+      layersAtCall: useLayerStore.getState().layers.length,
+    });
+    useLayerStore.getState().addLayer({
+      id: "stream-1",
+      name: "delft.fcb",
+      model,
+      modelRef: { type: "url", url: FCB_URL },
+      visible: true,
+      rules: [],
+      rulesEnabled: true,
+      isStreaming: true,
+    });
+    return "stream-1";
+  }),
+  closeStreamingLayer: vi.fn(),
+  closeAllStreamingLayers: vi.fn(),
+}));
+
+const loadFromUrl = vi.fn();
+vi.mock(
+  "../../../src/domain/citymodel/loadCityModel",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("../../../src/domain/citymodel/loadCityModel")
+      >();
+    return { ...actual, loadFromUrl: (url: string) => loadFromUrl(url) };
+  },
+);
+
+const { App } = await import("../../../src/app/App");
+const { useLayerStore } =
+  await import("../../../src/features/layers/layerStore");
+const { encodeShareState } = await import("../../../src/persistence/urlShare");
+
+const model = {
+  sourceEncoding: "cityjson" as const,
+  metadata: { referenceSystem: "EPSG:7415" },
+  bbox: null,
+  objects: {},
+  vertexCount: 0,
+};
+
+const SAVED_AT = "2026-08-01T10:00:00.000Z";
+
+function snapshotWithUrlLayer(): ProjectSnapshot {
+  return {
+    version: "3",
+    savedAt: SAVED_AT,
+    label: "delft",
+    layers: [
+      {
+        name: "delft",
+        modelRef: { type: "url", url: JSON_URL },
+        rules: [],
+        rulesEnabled: true,
+        visible: true,
+      },
+    ],
+    viewState: { camera: CAM, datetime: "2025-06-21T12:00:00.000Z" },
+    pickMode: "object",
+  };
+}
+
+function storeWith(snapshot: ProjectSnapshot | null): ProjectStateStore {
+  return {
+    list: async () =>
+      snapshot === null
+        ? []
+        : [{ id: "snap-1", savedAt: SAVED_AT, label: snapshot.label }],
+    load: async () => snapshot,
+    save: async () => "snap-1",
+    remove: async () => {},
+  };
+}
+
+/** Click the snapshot list's Restore button (landing page only). */
+async function clickRestore(): Promise<void> {
+  const button = await screen.findByRole("button", { name: "Restore" });
+  fireEvent.click(button);
+}
+
+beforeEach(() => {
+  openCalls.length = 0;
+  readyGate = createGate();
+  setCameraState.mockClear();
+  cameraState = CAM;
+  loadFromUrl.mockReset();
+  loadFromUrl.mockResolvedValue(model);
+  useLayerStore.setState({ layers: [], activeLayerId: null });
+  location.hash = "";
+});
+
+afterEach(() => {
+  cleanup();
+  location.hash = "";
+});
+
+describe("App restore against CitySceneHandle.ready", () => {
+  it("applies the saved camera only once the viewport reports ready", async () => {
+    render(<App persistenceStore={storeWith(snapshotWithUrlLayer())} />);
+    await clickRestore();
+
+    // The layer restored and the shell came up...
+    await waitFor(() =>
+      expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
+    );
+    await waitFor(() =>
+      expect(useLayerStore.getState().layers).toHaveLength(1),
+    );
+    // ...but the engine has NOT reported ready, so no camera has been pushed.
+    // The 100 ms timer this replaced would have fired long ago.
+    expect(setCameraState).not.toHaveBeenCalled();
+
+    readyGate.resolve();
+
+    await waitFor(() => expect(setCameraState).toHaveBeenCalledWith(CAM));
+  });
+
+  it("restores the layers and explains the failure when the engine never starts", async () => {
+    render(<App persistenceStore={storeWith(snapshotWithUrlLayer())} />);
+    await clickRestore();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
+    );
+    readyGate.reject(new Error("wasm boom"));
+
+    // The workspace itself survived: only the camera could not be applied.
+    await waitFor(() =>
+      expect(
+        screen.getByText(/could not start: wasm boom/),
+      ).toBeInTheDocument(),
+    );
+    expect(useLayerStore.getState().layers).toHaveLength(1);
+    expect(setCameraState).not.toHaveBeenCalled();
+  });
+
+  it("does not wait on a viewport that will never mount", async () => {
+    // Every layer is file-backed, so nothing renders and no engine starts:
+    // the restore must finish with its "re-select the file" prompt rather
+    // than hanging on a readiness signal that can never arrive.
+    const snapshot: ProjectSnapshot = {
+      ...snapshotWithUrlLayer(),
+      layers: [
+        {
+          name: "delft",
+          modelRef: { type: "file", fileName: "delft.city.json" },
+          rules: [],
+          rulesEnabled: true,
+          visible: true,
+        },
+      ],
+    };
+    render(<App persistenceStore={storeWith(snapshot)} />);
+    await clickRestore();
+
+    // Both the persistent banner and the restore toast say it.
+    await waitFor(() =>
+      expect(
+        screen.getAllByText(/needs? a local file re-selected/).length,
+      ).toBeGreaterThan(0),
+    );
+    expect(screen.queryByTestId("navara-viewport")).toBeNull();
+    expect(setCameraState).not.toHaveBeenCalled();
+  });
+});
+
+describe("App share-hash restore", () => {
+  it("cold-loads a .fcb share link through the engine-boot hold and restores the camera", async () => {
+    location.hash =
+      "#" +
+      encodeShareState({
+        v: 3,
+        layers: [
+          {
+            name: "delft.fcb",
+            modelUrl: FCB_URL,
+            rules: [],
+            rulesEnabled: true,
+            visible: true,
+          },
+        ],
+        cam: CAM,
+        dt: "2025-06-21T12:00:00.000Z",
+        pm: "object",
+      });
+
+    render(<App persistenceStore={storeWith(null)} />);
+
+    // The shell came up for a workspace that has no layer yet — the boot hold
+    // the share path takes, exactly like a manual .fcb open (Task C14).
+    await waitFor(() =>
+      expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
+    );
+    await waitFor(() => expect(openCalls).toHaveLength(1));
+    expect(openCalls[0]!.plugin).toBe(streamPluginStub);
+    expect(openCalls[0]!.layersAtCall).toBe(0);
+
+    // Camera still gated on readiness, as in the restore path.
+    expect(setCameraState).not.toHaveBeenCalled();
+    readyGate.resolve();
+    await waitFor(() => expect(setCameraState).toHaveBeenCalledWith(CAM));
+  });
+
+  it("says so when the link is from an older version instead of ignoring it", async () => {
+    const legacy =
+      "share=" +
+      btoa(
+        JSON.stringify({
+          layers: [
+            {
+              name: "delft",
+              modelUrl: JSON_URL,
+              rules: [],
+              rulesEnabled: true,
+              visible: true,
+            },
+          ],
+          cp: [50, 50, 50],
+          ct: [0, 0, 0],
+          dt: "2025-06-21T12:00:00.000Z",
+          pm: "object",
+        }),
+      );
+    location.hash = "#" + legacy;
+
+    render(<App persistenceStore={storeWith(null)} />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/older version of MultiRoof Viewer/),
+      ).toBeInTheDocument(),
+    );
+    // Nothing was opened from a link whose camera cannot be trusted...
+    expect(loadFromUrl).not.toHaveBeenCalled();
+    expect(useLayerStore.getState().layers).toHaveLength(0);
+    // ...and the dead hash is off the URL, so a reload does not re-explain it.
+    expect(location.hash).toBe("");
+  });
+});
+
+/** Put the viewer shell up with one ordinary layer, without going through a
+ *  restore — the save cases care about the camera, not the snapshot. */
+async function mountShellWithLayer(): Promise<void> {
+  useLayerStore.getState().addLayer({
+    id: "layer-1",
+    name: "delft",
+    model,
+    modelRef: { type: "url", url: JSON_URL },
+    visible: true,
+    rules: [],
+    rulesEnabled: true,
+  });
+  await waitFor(() =>
+    expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
+  );
+}
+
+describe("App save with a camera that is not readable yet", () => {
+  it("reports the transiently-null camera instead of silently saving nothing", async () => {
+    const save = vi.fn(async () => "snap-2");
+    const store: ProjectStateStore = { ...storeWith(null), save };
+    render(<App persistenceStore={store} />);
+    await mountShellWithLayer();
+
+    // The engine is up but has not rendered its first frame, so
+    // `positionGeographic` throws and the handle answers null (Task B11a).
+    cameraState = null;
+    fireEvent.click(screen.getByTitle("Save workspace"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/still starting/)).toBeInTheDocument(),
+    );
+    expect(save).not.toHaveBeenCalled();
+  });
+});

@@ -15,9 +15,20 @@
 import { describe, it, expect } from "vitest";
 import {
   encodeShareState,
-  decodeShareState,
+  readShareHash,
 } from "../../../src/persistence/urlShare";
 import type { ShareableViewState } from "../../../src/persistence/urlShare";
+
+/**
+ * The v3 payload, or null for any hash this build cannot open — the shape
+ * most cases below care about. `readShareHash`'s third outcome (a link that
+ * IS a share link but from another schema version) has its own cases at the
+ * end of the file.
+ */
+function decodeShareState(hash: string): ShareableViewState | null {
+  const result = readShareHash(hash);
+  return result.kind === "ok" ? result.state : null;
+}
 
 const CAM = {
   lng: 4.3571,
@@ -48,6 +59,20 @@ function makeState(
     ...overrides,
   };
 }
+
+/** A link minted before v3: no `v`, and the camera as two scene-space
+ *  3-tuples. The exact shape `encodeShareState` produced until Task C19. */
+const LEGACY_HASH =
+  "share=" +
+  btoa(
+    JSON.stringify({
+      layers: [],
+      cp: [50, 50, 50],
+      ct: [0, 0, 0],
+      dt: "2025-06-21T12:00:00.000Z",
+      pm: "object",
+    }),
+  );
 
 describe("encodeShareState / decodeShareState", () => {
   it("round-trips a complete state", () => {
@@ -201,18 +226,7 @@ describe("encodeShareState / decodeShareState", () => {
   });
 
   it("rejects a pre-v3 share link carrying the old cp/ct tuples", () => {
-    const legacy =
-      "share=" +
-      btoa(
-        JSON.stringify({
-          layers: [],
-          cp: [50, 50, 50],
-          ct: [0, 0, 0],
-          dt: "2025-06-21T12:00:00.000Z",
-          pm: "object",
-        }),
-      );
-    expect(decodeShareState(legacy)).toBeNull();
+    expect(decodeShareState(LEGACY_HASH)).toBeNull();
   });
 
   it("rejects a camera with a non-finite component rather than wedging setCamera", () => {
@@ -239,5 +253,62 @@ describe("encodeShareState / decodeShareState", () => {
     const encoded = encodeShareState(makeState());
     const payload = encoded.slice("share=".length);
     expect(payload).not.toMatch(/[+/=]/);
+  });
+});
+
+/**
+ * The three-way outcome, which is what the app needs: a URL with no share
+ * link in it and a share link from another version are both "no view state",
+ * but only the second is something the user has to be TOLD about — otherwise
+ * clicking a colleague's old link looks exactly like a broken viewer (ledger
+ * carry-forward from Task C18).
+ */
+describe("readShareHash outcomes", () => {
+  it("reports a pre-v3 link as unsupported, with a message naming the cause", () => {
+    const result = readShareHash(LEGACY_HASH);
+
+    expect(result.kind).toBe("unsupported");
+    if (result.kind !== "unsupported") throw new Error("unreachable");
+    // No `v` at all is what a pre-v3 link looks like — the discriminator
+    // only exists from v3 on.
+    expect(result.error.found).toBeNull();
+    expect(result.error.message).toContain("older version");
+    expect(result.error.name).toBe("UnsupportedShareLinkError");
+  });
+
+  it("distinguishes a link from a NEWER build, which is not an old-camera problem", () => {
+    const future =
+      "share=" +
+      btoa(
+        JSON.stringify({
+          v: 4,
+          cam: CAM,
+          dt: "2025-06-21T12:00:00.000Z",
+          pm: "object",
+          layers: [],
+        }),
+      );
+    const result = readShareHash(future);
+
+    expect(result.kind).toBe("unsupported");
+    if (result.kind !== "unsupported") throw new Error("unreachable");
+    expect(result.error.found).toBe(4);
+    expect(result.error.message).toContain("newer version");
+  });
+
+  it("reports a URL with no share hash, and a damaged one, as plain absence", () => {
+    expect(readShareHash("")).toEqual({ kind: "none" });
+    expect(readShareHash("#foo=bar")).toEqual({ kind: "none" });
+    // Truncated payload: unreadable, but that is no evidence of a version
+    // change, so it gets no "your link is old" message.
+    expect(readShareHash("share=!!!invalid!!!")).toEqual({ kind: "none" });
+  });
+
+  it("hands the decoded state back for a current link", () => {
+    const result = readShareHash(encodeShareState(makeState()));
+
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") throw new Error("unreachable");
+    expect(result.state.cam).toEqual(CAM);
   });
 });
