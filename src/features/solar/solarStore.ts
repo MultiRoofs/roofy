@@ -1,22 +1,19 @@
 /**
  * Zustand store for solar / datetime state.
  *
- * Holds the user-selected datetime, derived lat/lon from model CRS,
- * and computed sun position. Sun position is recomputed on every
- * datetime or latLon change.
+ * Holds the user-selected datetime, the lat/lon derived from the model CRS
+ * (the atmosphere's site), and the sun position the engine reported. The store
+ * no longer computes sun position itself: since the Navara migration the
+ * atmosphere owns sun position (spec §4.4) and pushes it in via
+ * `setSunPosition`.
  *
- * Dependencies: suncalc (sun position), proj4 (CRS reprojection).
+ * Dependencies: proj4 (CRS reprojection).
  */
 
 import { create } from "zustand";
-import SunCalc from "suncalc";
 import proj4 from "proj4";
 import type { BBox3 } from "../../domain/citymodel/types";
 import { ensureProjDef, parseEpsgCode } from "@cityjson/navara-core";
-
-/** Re-exported for existing call sites; the definition now lives in
- *  @cityjson/navara-core (M7.2). Task C15 drops this re-export. */
-export { parseEpsgCode };
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,7 +24,10 @@ export interface SunPosition {
   readonly altitudeDeg: number;
   /** Geographic azimuth in degrees: 0=N, 90=E, 180=S, 270=W. */
   readonly azimuthDeg: number;
-  /** Unit direction vector FROM origin TOWARD sun, in Three.js Y-up space. */
+  /**
+   * Unit vector FROM the origin TOWARD the sun in local ENU
+   * (x=east, y=north, z=up) — the same axes as CityJSON source coordinates.
+   */
   readonly direction: readonly [number, number, number];
 }
 
@@ -47,9 +47,11 @@ export interface SolarState {
 export interface SolarActions {
   setDatetime: (dt: Date) => void;
   setLatLon: (latLon: LatLon | null) => void;
+  /** Record the sun position the atmosphere reported for the current datetime. */
+  setSunPosition: (sun: SunPosition | null) => void;
   setTimeAnimating: (v: boolean) => void;
   setTimeSpeed: (v: number) => void;
-  /** Extract lat/lon from model CRS and bbox, then compute sun position. */
+  /** Extract the atmosphere's site lat/lon from the model CRS and bbox. */
   initFromModel: (
     referenceSystem: string | undefined,
     bbox: BBox3 | null,
@@ -62,57 +64,22 @@ export type SolarStore = SolarState & SolarActions;
 // Pure helpers (exported for unit testing)
 // ---------------------------------------------------------------------------
 
-/**
- * Compute sun direction vector in Three.js Y-up space from suncalc output.
- *
- * suncalc convention:
- *   azimuth  = radians, measured clockwise from South (0=S, π/2=W)
- *   altitude = radians above horizon
- *
- * CityJSON space: X=easting, Y=northing, Z=up
- * Three.js space: X=easting, Y=up, Z=-northing (after -PI/2 rotation on X)
- *
- * Returns a unit vector pointing FROM origin TOWARD the sun.
- */
-export function sunDirectionThreeJs(
-  azimuthRad: number,
-  altitudeRad: number,
-): [number, number, number] {
-  // suncalc azimuth: 0=S, positive=clockwise (west)
-  // Convert to "from north, clockwise" (geographic bearing):
-  //   bearingFromNorth = azimuthRad + π
-  // In CityJSON Z-up:
-  //   easting  = sin(bearingFromNorth) * cos(altitude) = -sin(azimuthRad) * cos(altitude)
-  //   northing = cos(bearingFromNorth) * cos(altitude) = -cos(azimuthRad) * cos(altitude)
-  //   up       = sin(altitude)
-  const cosAlt = Math.cos(altitudeRad);
-  const cjX = -Math.sin(azimuthRad) * cosAlt;
-  const cjY = -Math.cos(azimuthRad) * cosAlt;
-  const cjZ = Math.sin(altitudeRad);
-
-  // CityJSON [X, Y, Z] → Three.js Y-up via rotation.x = -PI/2:
-  //   threeX =  cjX
-  //   threeY =  cjZ
-  //   threeZ = -cjY
-  return [cjX, cjZ, -cjY];
-}
-
-/**
- * Compute sun position from lat/lon/datetime.
- */
-export function computeSunPosition(dt: Date, latLon: LatLon): SunPosition {
-  const { azimuth, altitude } = SunCalc.getPosition(dt, latLon.lat, latLon.lon);
-  const direction = sunDirectionThreeJs(azimuth, altitude);
-
-  // Convert suncalc azimuth (0=S, clockwise) to geographic (0=N, clockwise)
-  let azimuthDeg = ((azimuth + Math.PI) * 180) / Math.PI;
-  if (azimuthDeg >= 360) azimuthDeg -= 360;
+/** Engine-reported ENU sun direction -> the altitude/azimuth the UI shows.
+ *  The atmosphere owns sun position now (spec §4.4); this is only the
+ *  presentation transform, so it stays pure and unit-testable. */
+export function sunPositionFromEnu(
+  dir: readonly [number, number, number],
+): SunPosition {
+  const len = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+  const e = dir[0] / len;
+  const n = dir[1] / len;
+  const u = dir[2] / len;
+  let azimuthDeg = (Math.atan2(e, n) * 180) / Math.PI;
   if (azimuthDeg < 0) azimuthDeg += 360;
-
   return {
-    altitudeDeg: (altitude * 180) / Math.PI,
+    altitudeDeg: (Math.asin(Math.max(-1, Math.min(1, u))) * 180) / Math.PI,
     azimuthDeg,
-    direction,
+    direction: [e, n, u],
   };
 }
 
@@ -150,17 +117,11 @@ export const useSolarStore = create<SolarStore>((set, get) => ({
   timeAnimating: false,
   timeSpeed: 60,
 
-  setDatetime: (dt) => {
-    const { latLon } = get();
-    const sunPosition = latLon ? computeSunPosition(dt, latLon) : null;
-    set({ datetime: dt, sunPosition });
-  },
+  setDatetime: (dt) => set({ datetime: dt }),
 
-  setLatLon: (latLon) => {
-    const { datetime } = get();
-    const sunPosition = latLon ? computeSunPosition(datetime, latLon) : null;
-    set({ latLon, sunPosition });
-  },
+  setLatLon: (latLon) => set({ latLon }),
+
+  setSunPosition: (sunPosition) => set({ sunPosition }),
 
   setTimeAnimating: (v) => set({ timeAnimating: v }),
   setTimeSpeed: (v) => set({ timeSpeed: v }),

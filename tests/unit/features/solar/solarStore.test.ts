@@ -1,103 +1,49 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
-  parseEpsgCode,
-  sunDirectionThreeJs,
-  computeSunPosition,
+  sunPositionFromEnu,
   reprojectToLatLon,
   useSolarStore,
 } from "../../../../src/features/solar/solarStore";
 import type { BBox3 } from "../../../../src/domain/citymodel/types";
 
 // ---------------------------------------------------------------------------
-// parseEpsgCode
+// sunPositionFromEnu
+//
+// `parseEpsgCode` moved to @cityjson/navara-core in Task A13; its cases live in
+// packages/.../navara-core/tests/citymodel/crsProjDefs.test.ts, not here.
 // ---------------------------------------------------------------------------
 
-describe("parseEpsgCode", () => {
-  it("extracts code from OGC URI", () => {
-    expect(parseEpsgCode("https://www.opengis.net/def/crs/EPSG/0/7415")).toBe(
-      7415,
-    );
+describe("sunPositionFromEnu", () => {
+  it("reads a straight-up direction as 90 deg altitude", () => {
+    const p = sunPositionFromEnu([0, 0, 1]);
+    expect(p.altitudeDeg).toBeCloseTo(90, 6);
+    expect(p.direction).toEqual([0, 0, 1]);
   });
 
-  it("extracts code from short URI", () => {
-    expect(parseEpsgCode("EPSG/0/28992")).toBe(28992);
+  it("reads due east on the horizon as altitude 0, azimuth 90", () => {
+    const p = sunPositionFromEnu([1, 0, 0]);
+    expect(p.altitudeDeg).toBeCloseTo(0, 6);
+    expect(p.azimuthDeg).toBeCloseTo(90, 6);
   });
 
-  it("returns null for undefined", () => {
-    expect(parseEpsgCode(undefined)).toBeNull();
+  it("reads due south as azimuth 180 and normalises a non-unit input", () => {
+    const p = sunPositionFromEnu([0, -5, 0]);
+    expect(p.azimuthDeg).toBeCloseTo(180, 6);
+    expect(Math.hypot(...p.direction)).toBeCloseTo(1, 9);
   });
 
-  it("returns null for empty string", () => {
-    expect(parseEpsgCode("")).toBeNull();
+  it("reports a negative altitude for a below-horizon direction", () => {
+    expect(sunPositionFromEnu([0, 1, -1]).altitudeDeg).toBeLessThan(0);
   });
 
-  it("returns null for non-numeric last segment", () => {
-    expect(parseEpsgCode("https://example.com/crs/foo")).toBeNull();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// sunDirectionThreeJs
-// ---------------------------------------------------------------------------
-
-describe("sunDirectionThreeJs", () => {
-  it("returns [0, 1, 0] for sun directly overhead (altitude = 90°)", () => {
-    const dir = sunDirectionThreeJs(0, Math.PI / 2);
-    expect(dir[0]).toBeCloseTo(0, 5);
-    expect(dir[1]).toBeCloseTo(1, 5); // Three.js Y = up
-    expect(dir[2]).toBeCloseTo(0, 5);
+  it("wraps a westerly azimuth into [0,360)", () => {
+    expect(sunPositionFromEnu([-1, 0, 0]).azimuthDeg).toBeCloseTo(270, 6);
   });
 
-  it("sun at horizon from south (suncalc azimuth=0, altitude=0)", () => {
-    // suncalc azimuth 0 = south. So sun is due south at horizon.
-    // In CityJSON: easting=0, northing=-1, up=0
-    // In Three.js Y-up: [0, 0, -(-1)] = [0, 0, 1]
-    const dir = sunDirectionThreeJs(0, 0);
-    expect(dir[0]).toBeCloseTo(0, 5);
-    expect(dir[1]).toBeCloseTo(0, 5);
-    expect(dir[2]).toBeCloseTo(1, 5);
-  });
-
-  it("sun at horizon from east (suncalc azimuth = -π/2)", () => {
-    // suncalc azimuth: 0=S, positive=W. So -π/2 = east.
-    // bearingFromNorth = -π/2 + π = π/2 (east)
-    // CityJSON: easting=sin(π/2)*1=1, northing=cos(π/2)*1=0, up=0
-    // Three.js: [1, 0, 0]
-    const dir = sunDirectionThreeJs(-Math.PI / 2, 0);
-    expect(dir[0]).toBeCloseTo(1, 5);
-    expect(dir[1]).toBeCloseTo(0, 5);
-    expect(dir[2]).toBeCloseTo(0, 5);
-  });
-
-  it("sun below horizon has negative Y", () => {
-    const dir = sunDirectionThreeJs(0, -Math.PI / 6); // -30° altitude
-    expect(dir[1]).toBeLessThan(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// computeSunPosition
-// ---------------------------------------------------------------------------
-
-describe("computeSunPosition", () => {
-  it("returns a valid SunPosition for noon in Amsterdam", () => {
-    // June 21, 2025 at noon UTC
-    const dt = new Date(Date.UTC(2025, 5, 21, 12, 0, 0));
-    const pos = computeSunPosition(dt, { lat: 52.37, lon: 4.9 });
-
-    expect(pos.altitudeDeg).toBeGreaterThan(0); // sun above horizon at noon
-    expect(pos.azimuthDeg).toBeGreaterThanOrEqual(0);
-    expect(pos.azimuthDeg).toBeLessThan(360);
-    expect(pos.direction).toHaveLength(3);
-    // Direction Y should be positive (sun above horizon)
-    expect(pos.direction[1]).toBeGreaterThan(0);
-  });
-
-  it("returns negative altitude for midnight", () => {
-    const dt = new Date(Date.UTC(2025, 5, 21, 0, 0, 0));
-    const pos = computeSunPosition(dt, { lat: 52.37, lon: 4.9 });
-
-    expect(pos.altitudeDeg).toBeLessThan(0);
+  it("falls back to a zero direction for a degenerate input", () => {
+    const p = sunPositionFromEnu([0, 0, 0]);
+    expect(p.direction).toEqual([0, 0, 0]);
+    expect(p.altitudeDeg).toBeCloseTo(0, 6);
   });
 });
 
@@ -138,49 +84,54 @@ describe("useSolarStore", () => {
     });
   });
 
-  it("setLatLon computes sun position", () => {
-    useSolarStore.getState().setLatLon({ lat: 52.37, lon: 4.9 });
-
-    const { sunPosition, latLon } = useSolarStore.getState();
-    expect(latLon).not.toBeNull();
-    expect(sunPosition).not.toBeNull();
-    expect(sunPosition!.altitudeDeg).toBeGreaterThan(0);
+  it("setSunPosition stores what the engine reported, without recomputing anything", () => {
+    const sun = sunPositionFromEnu([0, 0, 1]);
+    useSolarStore.getState().setSunPosition(sun);
+    expect(useSolarStore.getState().sunPosition).toBe(sun);
   });
 
-  it("setDatetime recomputes sun position when latLon is set", () => {
-    useSolarStore.getState().setLatLon({ lat: 52.37, lon: 4.9 });
-
-    const before = useSolarStore.getState().sunPosition;
-    useSolarStore
-      .getState()
-      .setDatetime(new Date(Date.UTC(2025, 11, 21, 12, 0, 0)));
-    const after = useSolarStore.getState().sunPosition;
-
-    expect(before).not.toBeNull();
-    expect(after).not.toBeNull();
-    // Winter solstice noon should have lower altitude than summer solstice
-    expect(after!.altitudeDeg).toBeLessThan(before!.altitudeDeg);
+  it("setDatetime no longer derives a sun position — the atmosphere owns that", () => {
+    useSolarStore.getState().setSunPosition(null);
+    useSolarStore.getState().setDatetime(new Date("2026-06-21T12:00:00Z"));
+    expect(useSolarStore.getState().sunPosition).toBeNull();
+    expect(useSolarStore.getState().datetime.toISOString()).toBe(
+      "2026-06-21T12:00:00.000Z",
+    );
   });
 
-  it("initFromModel extracts lat/lon and computes sun position", () => {
+  it("setLatLon no longer derives a sun position either", () => {
+    useSolarStore.getState().setSunPosition(sunPositionFromEnu([0, 0, 1]));
+    useSolarStore.getState().setLatLon({ lat: 52.37, lon: 4.9 });
+    expect(useSolarStore.getState().latLon).toEqual({ lat: 52.37, lon: 4.9 });
+    // The engine-reported sun survives a site change; only C16's wiring
+    // replaces it.
+    expect(useSolarStore.getState().sunPosition).not.toBeNull();
+  });
+
+  it("initFromModel still derives lat/lon via proj4 for the atmosphere's site", () => {
     useSolarStore
       .getState()
       .initFromModel(
         "https://www.opengis.net/def/crs/EPSG/0/7415",
-        [85000, 446000, 0, 87500, 446012, 10],
+        [84000, 446000, 0, 86000, 448000, 20],
       );
-
-    const { latLon, sunPosition } = useSolarStore.getState();
-    expect(latLon).not.toBeNull();
-    expect(sunPosition).not.toBeNull();
+    const { latLon } = useSolarStore.getState();
+    expect(latLon!.lat).toBeCloseTo(52.0, 1);
+    expect(latLon!.lon).toBeCloseTo(4.36, 1);
   });
 
-  it("initFromModel does nothing for unknown CRS", () => {
+  it("initFromModel clears latLon for an unknown CRS", () => {
     useSolarStore
       .getState()
       .initFromModel("urn:ogc:def:crs:UNKNOWN:0:9999", [0, 0, 0, 1, 1, 1]);
+    expect(useSolarStore.getState().latLon).toBeNull();
+  });
 
-    const { latLon } = useSolarStore.getState();
-    expect(latLon).toBeNull();
+  it("initFromModel clears latLon when the model has no bbox", () => {
+    useSolarStore.getState().setLatLon({ lat: 52.37, lon: 4.9 });
+    useSolarStore
+      .getState()
+      .initFromModel("https://www.opengis.net/def/crs/EPSG/0/7415", null);
+    expect(useSolarStore.getState().latLon).toBeNull();
   });
 });
