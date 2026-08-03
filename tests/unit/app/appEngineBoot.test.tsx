@@ -33,6 +33,7 @@ import type {
   SnapshotSummary,
 } from "../../../src/persistence/types";
 import type { StreamPlugin } from "../../../src/features/streaming/streamPlugin";
+import type { StreamState } from "../../../src/features/streaming/streamStore";
 import { ENGINE_BOOT_TIMEOUT_MS } from "../../../src/app/App";
 
 // jsdom ships no `matchMedia`, which `useTheme` reads on its first render.
@@ -136,6 +137,8 @@ vi.mock(
 const { App } = await import("../../../src/app/App");
 const { useLayerStore } =
   await import("../../../src/features/layers/layerStore");
+const { useStreamStore } =
+  await import("../../../src/features/streaming/streamStore");
 
 const emptyStore: ProjectStateStore = {
   list: async (): Promise<SnapshotSummary[]> => [],
@@ -275,5 +278,77 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
       ).toBeInTheDocument(),
     );
     expect(openCalls).toHaveLength(0);
+  });
+
+  it("cancels the boot gate on unmount instead of letting its 15 s timer outlive the app", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    viewportPublishesHandle = false;
+    const { unmount } = render(<App persistenceStore={emptyStore} />);
+    loadFromUrlBox(FCB_URL);
+    await waitFor(() =>
+      expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
+    );
+
+    // The gate is armed while the open waits for a handle...
+    const armed = vi.getTimerCount();
+    expect(armed).toBeGreaterThan(0);
+    unmount();
+    // ...and dies with the component, rather than firing 15 s later into a
+    // caller that is no longer on screen.
+    expect(vi.getTimerCount()).toBeLessThan(armed);
+    await vi.advanceTimersByTimeAsync(ENGINE_BOOT_TIMEOUT_MS + 1000);
+    expect(openCalls).toHaveLength(0);
+  });
+});
+
+describe("App object count across static and streaming layers", () => {
+  beforeEach(() => {
+    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useStreamStore.setState({ streams: {} });
+  });
+  afterEach(cleanup);
+
+  it("counts a streaming layer's RESIDENT features, not its empty model stub", async () => {
+    // A streaming layer's `model.objects` is a deliberate stub, so the old
+    // `layers.reduce(... model.objects ...)` read "Objects 0" next to a
+    // viewport full of buildings (found by Task C14's browser smoke).
+    useLayerStore.getState().addLayer({
+      id: "stream-1",
+      name: "delft.fcb",
+      model,
+      modelRef: { type: "url", url: FCB_URL },
+      visible: true,
+      rules: [],
+      rulesEnabled: true,
+      isStreaming: true,
+    });
+    useStreamStore.setState({
+      streams: {
+        "stream-1": {
+          handle: {
+            getResidentModel: () => ({
+              objects: {},
+              cellCount: 4,
+              featureCount: 2123,
+              surfaceAttrKeys: [],
+            }),
+          },
+          disposers: [],
+          version: 1,
+          status: "idle",
+          message: null,
+          level: 3,
+          ladder: [],
+          ladderVersion: 0,
+        } as unknown as StreamState,
+      },
+    });
+
+    render(<App persistenceStore={emptyStore} />);
+    // Both readouts — the toolbar badge and the status bar — report the
+    // resident count.
+    await waitFor(() =>
+      expect(screen.getAllByText("2123").length).toBeGreaterThanOrEqual(2),
+    );
   });
 });

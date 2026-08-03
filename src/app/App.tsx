@@ -39,6 +39,7 @@ import { useSelectionStore } from "../features/selection/selectionStore";
 import { useLayerStore } from "../features/layers/layerStore";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
 import { useStreamStore } from "../features/streaming/streamStore";
+import { useTotalObjectCount } from "../features/streaming/useTotalObjectCount";
 import { getResidentModel } from "../features/streaming/residentModel";
 import {
   closeAllStreamingLayers,
@@ -180,6 +181,11 @@ export function App({
     activeLayerId ? s.streams[activeLayerId]?.message : undefined,
   );
 
+  /** Static layers' parsed objects PLUS streaming layers' resident features —
+   *  a streaming layer's `model.objects` is an empty stub, so summing that
+   *  alone reports 0 next to a viewport full of buildings (Task C14). */
+  const totalObjects = useTotalObjectCount();
+
   /**
    * Resolved the moment `NavaraViewport` publishes its imperative handle.
    *
@@ -191,6 +197,8 @@ export function App({
   const sceneGateRef = useRef<{
     readonly promise: Promise<CitySceneHandle>;
     readonly resolve: (handle: CitySceneHandle) => void;
+    /** Cancelled on unmount — see the cleanup effect below. */
+    readonly cancel: () => void;
   } | null>(null);
 
   /** One shared gate per boot: concurrent `.fcb` opens all wait on the same
@@ -219,9 +227,25 @@ export function App({
         sceneGateRef.current = null;
         settle(handle);
       },
+      cancel: () => {
+        clearTimeout(timer);
+        sceneGateRef.current = null;
+        // Settled, not abandoned: an open still awaiting this must not hang.
+        // `withEngineBooting`'s caller catches it into the load-error state,
+        // and on unmount nobody is left to see it.
+        fail(
+          new Error(
+            "The viewer was closed before the 3D viewport finished starting.",
+          ),
+        );
+      },
     };
     return promise;
   }, []);
+
+  // Unmount: cancel a pending boot gate, so its 15 s timer cannot outlive the
+  // component and reject into a caller that is no longer on screen.
+  useEffect(() => () => sceneGateRef.current?.cancel(), []);
 
   /** `NavaraViewport`'s ref — a CALLBACK ref, because publication is an event
    *  the pending `.fcb` opens above need to observe, not just a slot to read.
@@ -839,10 +863,6 @@ export function App({
   // optional-chained, so an empty workspace renders an empty globe rather than
   // throwing.
   if (hasLayers || engineBooting) {
-    const totalObjects = layers.reduce(
-      (sum, l) => sum + Object.keys(l.model.objects).length,
-      0,
-    );
     const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
     const hasUrlLayers = layers.some((l) => l.modelRef.type === "url");
 

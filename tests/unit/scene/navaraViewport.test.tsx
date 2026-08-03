@@ -108,7 +108,7 @@ vi.mock("@cityjson/navara-cityjson/plugin", () => ({
 }));
 
 /** The streaming plugin is mocked here only so this file can keep testing the
- *  STATIC half in isolation — `suppressSettle` is a passthrough, so every
+ *  STATIC half in isolation — `suppressSettleThenCommit` is a passthrough, so every
  *  camera assertion below reads exactly as it did before Task C13 wrapped the
  *  four programmatic moves. The streaming wiring itself is asserted in
  *  `navaraViewportStreaming.test.tsx`. */
@@ -116,7 +116,7 @@ const flatPluginInstance = {
   openStream: vi.fn(),
   remove: vi.fn(),
   dispose: vi.fn(),
-  suppressSettle: vi.fn(async (fn: () => unknown) => fn()),
+  suppressSettleThenCommit: vi.fn(async (fn: () => unknown) => fn()),
 };
 vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
   FlatCityBufPlugin: vi.fn(function () {
