@@ -155,6 +155,7 @@ vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
 
 const { NavaraViewport } = await import("../../../src/scene/NavaraViewport");
 import type { CitySceneHandle } from "../../../src/scene/NavaraViewport";
+import { suppressAutoFit } from "../../../src/scene/autoFitSuppression";
 import {
   useLayerStore,
   type Layer,
@@ -620,6 +621,63 @@ describe("NavaraViewport lifecycle", () => {
       layers: [makeLayer({ id: "a", visible: false }), makeLayer({ id: "b" })],
     });
     await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(2));
+  });
+
+  // Task C26. A restore adds layers and then applies the camera it saved; the
+  // fit-on-add would otherwise race that camera and, landing second, replace
+  // the saved viewpoint with a framing of the layers. The browser smoke caught
+  // it as two snapshots saved 65 degrees of longitude apart restoring to a
+  // bit-identical camera.
+  it("does not fit a layer added inside a suppressAutoFit scope, so the restored camera survives", async () => {
+    const release = suppressAutoFit();
+    try {
+      const ref = createRef<CitySceneHandle>();
+      useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
+      render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
+
+      // The layer really was reconciled — this is a suppressed fit, not a
+      // viewport that never got as far as adding anything.
+      await waitFor(() =>
+        expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(1),
+      );
+      await ref.current!.ready;
+
+      // The restore's own camera, applied last, exactly as App.tsx does it.
+      const restored = {
+        lng: 4.9,
+        lat: 52.37,
+        height: 2283.81,
+        heading: 0.0106,
+        pitch: -59.81,
+        roll: 0.00007,
+      };
+      ref.current!.setCameraState(restored);
+
+      expect(flyTo).not.toHaveBeenCalled();
+      expect(setCamera).toHaveBeenCalledTimes(1);
+      expect(setCamera).toHaveBeenCalledWith(restored);
+    } finally {
+      release();
+    }
+  });
+
+  it("resumes fitting once the suppressAutoFit scope is released", async () => {
+    const release = suppressAutoFit();
+    useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() =>
+      expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(1),
+    );
+    expect(flyTo).not.toHaveBeenCalled();
+
+    release();
+
+    // A layer added AFTER the restore is an ordinary user action and still
+    // earns its fit — the suppression is scoped, not a permanent opt-out.
+    useLayerStore.setState({
+      layers: [makeLayer({ id: "a" }), makeLayer({ id: "b" })],
+    });
+    await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(1));
   });
 
   it("deletes the handle of a layer that left the store", async () => {

@@ -41,6 +41,7 @@ import {
 } from "@testing-library/react";
 import { forwardRef, useImperativeHandle } from "react";
 import type { CitySceneHandle } from "../../../src/scene/NavaraViewport";
+import { isAutoFitSuppressed } from "../../../src/scene/autoFitSuppression";
 import type {
   GeographicCamera,
   ProjectSnapshot,
@@ -281,6 +282,61 @@ describe("App restore against CitySceneHandle.ready", () => {
     readyGate.resolve();
 
     await waitFor(() => expect(setCameraState).toHaveBeenCalledWith(CAM));
+  });
+
+  // Task C26. The viewport fits itself to any NEWLY ADDED layer, and a restore
+  // is nothing but new layers arriving — so unless the restore holds the
+  // suppression scope across BOTH the layer adds and the camera set, the fit
+  // races `setCameraState` and, landing second, throws the saved viewpoint
+  // away. (The viewport's own half of this is in navaraViewport.test.tsx; here
+  // the viewport is a mock, so what is under test is that App opens the scope
+  // early enough and holds it long enough.)
+  it("holds auto-fit suppressed across the layer adds AND the camera set, then releases it", async () => {
+    expect(isAutoFitSuppressed()).toBe(false);
+
+    let suppressedWhenCameraSet: boolean | null = null;
+    setCameraState.mockImplementationOnce(() => {
+      suppressedWhenCameraSet = isAutoFitSuppressed();
+    });
+
+    render(<App persistenceStore={storeWith(snapshotWithUrlLayer())} />);
+    await clickRestore();
+
+    // Layers have landed and the engine has not reported ready yet: the fit
+    // this guards would fire in exactly this window.
+    await waitFor(() =>
+      expect(useLayerStore.getState().layers).toHaveLength(1),
+    );
+    expect(isAutoFitSuppressed()).toBe(true);
+
+    readyGate.resolve();
+    await waitFor(() => expect(setCameraState).toHaveBeenCalledWith(CAM));
+
+    // The camera landed INSIDE the scope — that is the whole point.
+    expect(suppressedWhenCameraSet).toBe(true);
+    // ...and the scope closed afterwards, so an ordinary later layer add still
+    // frames itself.
+    await waitFor(() => expect(isAutoFitSuppressed()).toBe(false));
+  });
+
+  it("releases the auto-fit suppression even when the restore fails", async () => {
+    render(
+      <App
+        persistenceStore={
+          {
+            list: async () => [{ id: "s1", label: "w", savedAt: 1 }],
+            load: async () => {
+              throw new Error("storage exploded");
+            },
+            save: async () => {},
+            remove: async () => {},
+          } as unknown as Parameters<typeof App>[0]["persistenceStore"]
+        }
+      />,
+    );
+    await clickRestore();
+
+    await waitFor(() => expect(isAutoFitSuppressed()).toBe(false));
   });
 
   it("restores the layers and explains the failure when the engine never starts", async () => {
