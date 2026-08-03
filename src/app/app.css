@@ -758,10 +758,13 @@ body {
   cursor: not-allowed;
 }
 
-.advanced-settings-actions {
+/* Panel-wide action row, outside the scrolling body so it cannot read as part
+   of the last section. */
+.advanced-settings-footer {
   display: flex;
   justify-content: flex-end;
-  padding: 0.35rem 0.75rem 0.15rem;
+  padding: 0.45rem 0.75rem;
+  border-top: 1px solid var(--border);
 }
 
 /* ═══════════════════════════════════════════════════════════════

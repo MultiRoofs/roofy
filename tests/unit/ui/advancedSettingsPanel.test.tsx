@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { AdvancedSettingsPanel } from "../../../src/ui/viewport/AdvancedSettingsPanel";
-import { useAtmosphereStore } from "../../../src/features/atmosphere/atmosphereStore";
+import {
+  DEFAULT_ATMOSPHERE_STATE,
+  useAtmosphereStore,
+} from "../../../src/features/atmosphere/atmosphereStore";
 import { useTilesStore } from "../../../src/features/tiles/tilesStore";
 import {
   DEFAULT_RENDER_DEBUG_STATE,
   useRenderDebugStore,
 } from "../../../src/features/debug/renderDebugStore";
+import { useBasemapStore } from "../../../src/features/basemap/basemapStore";
 
 describe("AdvancedSettingsPanel", () => {
   afterEach(() => {
@@ -19,6 +23,7 @@ describe("AdvancedSettingsPanel", () => {
       lensFlareEnabled: true,
     });
     useTilesStore.setState({ enabled: false });
+    useBasemapStore.setState({ basemapId: "osm" });
     useRenderDebugStore.setState({
       ...DEFAULT_RENDER_DEBUG_STATE,
     });
@@ -77,7 +82,12 @@ describe("AdvancedSettingsPanel", () => {
     expect(screen.getByLabelText("Exposure")).not.toBeDisabled();
   });
 
-  it("resets render settings without changing atmosphere controls", () => {
+  // The reset is a PANEL-WIDE footer action now, not a button tucked inside
+  // the last section resetting only one of the two stores the panel's sliders
+  // come from. Lens flare and cloud coverage live in `atmosphereStore` purely
+  // for historical reasons; a reset that skipped them would leave two of the
+  // controls it sits under untouched.
+  it("resets every lighting and post-processing control, in both stores", () => {
     useAtmosphereStore.setState({
       cloudCoverage: 0.6,
       lensFlareEnabled: false,
@@ -93,14 +103,30 @@ describe("AdvancedSettingsPanel", () => {
 
     render(<AdvancedSettingsPanel onClose={() => {}} />);
 
-    fireEvent.click(screen.getByText("Reset Rendering"));
+    fireEvent.click(screen.getByText("Reset render settings"));
 
     expect(useRenderDebugStore.getState()).toMatchObject(
       DEFAULT_RENDER_DEBUG_STATE,
     );
-    expect(useAtmosphereStore.getState()).toMatchObject({
-      cloudCoverage: 0.6,
-      lensFlareEnabled: false,
-    });
+    expect(useAtmosphereStore.getState()).toMatchObject(
+      DEFAULT_ATMOSPHERE_STATE,
+    );
+  });
+
+  // The other half of the coherence fix: the backdrop is a choice of what to
+  // look AT, not of how it is rendered, so the reset must not silently swap the
+  // user's imagery — and the button says so.
+  it("leaves the backdrop choices alone, and says so", () => {
+    useTilesStore.setState({ enabled: true });
+    useBasemapStore.setState({ basemapId: "esri-imagery" });
+    render(<AdvancedSettingsPanel onClose={() => {}} />);
+
+    const reset = screen.getByText("Reset render settings");
+    expect(reset.getAttribute("title")).toContain("left alone");
+
+    fireEvent.click(reset);
+
+    expect(useTilesStore.getState().enabled).toBe(true);
+    expect(useBasemapStore.getState().basemapId).toBe("esri-imagery");
   });
 });
