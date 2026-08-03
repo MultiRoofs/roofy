@@ -1,8 +1,9 @@
 /**
  * Rule builder tab for creating and managing per-layer colorization rules.
  *
- * Rules are stored in the layer store and applied to the mesh
- * via applyRuleColors in CityScene.
+ * Rules are stored in the layer store; `handleSync` compiles them
+ * (`compileRuleEvaluator`) and pushes the result into
+ * `CityModelHandle.setStyle`.
  */
 
 import { useCallback, useRef, useState } from "react";

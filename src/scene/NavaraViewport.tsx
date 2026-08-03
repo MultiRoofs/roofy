@@ -58,6 +58,7 @@ import { useLayerStore } from "../features/layers/layerStore";
 import { useSelectionStore } from "../features/selection/selectionStore";
 import { useSolarStore } from "../features/solar/solarStore";
 import { useStreamStore } from "../features/streaming/streamStore";
+import { useTilesStore } from "../features/tiles/tilesStore";
 import { setStreamPlugin } from "../features/streaming/streamPlugin";
 import {
   closeAllStreamingLayers,
@@ -189,6 +190,12 @@ function createReadyGate(): ReadyGate {
   return { promise, resolve, reject };
 }
 
+/** What `addGoogleTiles` produced, so the toggle can take it back out again. */
+interface GoogleTilesHandles {
+  readonly layer: ReturnType<ViewInstance["addLayer"]>;
+  readonly source: ReturnType<ViewInstance["addSource"]>;
+}
+
 /**
  * Add Google's Photorealistic 3D Tiles to a live view (Task C17).
  *
@@ -198,23 +205,21 @@ function createReadyGate(): ReadyGate {
  * normals plugin, the MeshBasicMaterial swap — collapses into one source and
  * one layer.
  *
- * Called AFTER `view.init()` (via `session.ready`), which is also after
+ * Called AFTER `view.init()` (via `engineReady`), which is also after
  * `DefaultPlugin.addDefaultPhotorealScene()`: the tiles sit on top of the
  * default photoreal globe, which stays visible wherever Google has no coverage.
  *
  * Failure here is NOT fatal. The tiles are a backdrop; the city model is the
  * app. A rejected key, an offline session or an engine that dislikes the
- * descriptor must leave the viewer running, so this reports and returns rather
- * than propagating into the init failure path (which would blank the viewport
- * and reject `CitySceneHandle.ready`).
+ * descriptor must leave the viewer running, so this reports and returns `null`
+ * rather than propagating into the init failure path (which would blank the
+ * viewport and reject `CitySceneHandle.ready`).
  *
- * @param onEnabled - called with `true` only once the layer is really in the
- * scene; drives the Google line of the attribution overlay.
+ * @returns the layer+source handles, or `null` when nothing was added — no key,
+ * or the engine refused. `null` is also what keeps the attribution overlay from
+ * crediting Google for imagery nobody is looking at.
  */
-function addGoogleTiles(
-  view: ViewInstance,
-  onEnabled: (enabled: boolean) => void,
-): void {
+function addGoogleTiles(view: ViewInstance): GoogleTilesHandles | null {
   const tiles = googleTilesConfig(import.meta.env.VITE_GOOGLE_MAPS_API_KEY);
   if (tiles === null) {
     if (import.meta.env.DEV) {
@@ -222,16 +227,38 @@ function addGoogleTiles(
         "[googleTiles] VITE_GOOGLE_MAPS_API_KEY not set. Tiles disabled.",
       );
     }
-    return;
+    return null;
   }
   try {
     const source = view.addSource(tiles.source);
-    view.addLayer({ ...tiles.layer, source });
-    onEnabled(true);
+    const layer = view.addLayer({ ...tiles.layer, source });
+    return { layer, source };
   } catch (error) {
     console.error(
       "NavaraViewport: Google Photorealistic 3D Tiles could not be added; " +
         "the viewer continues on the default photoreal globe.",
+      error,
+    );
+    return null;
+  }
+}
+
+/**
+ * Take the tiles back out, layer first.
+ *
+ * Order is load-bearing, not stylistic: `Source.delete()` documents itself as
+ * removing nothing and answering `false` while any layer still references the
+ * source, so deleting the source first would leak it. Failures are reported and
+ * swallowed for the same reason `addGoogleTiles` swallows its own — a backdrop
+ * that will not go away must not take the viewer with it.
+ */
+function removeGoogleTiles(handles: GoogleTilesHandles): void {
+  try {
+    handles.layer.delete();
+    handles.source.delete();
+  } catch (error) {
+    console.error(
+      "NavaraViewport: Google Photorealistic 3D Tiles could not be removed.",
       error,
     );
   }
@@ -269,6 +296,11 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
      *  the attribution overlay never credits Google for imagery an engine that
      *  failed to start is not showing. */
     const [tilesEnabled, setTilesEnabled] = useState(false);
+    /** Whether the user WANTS them — the sidebar / advanced-settings toggle.
+     *  Distinct from `tilesEnabled` above, which is whether they are actually
+     *  in the scene: with no API key, or after the engine refuses the layer,
+     *  the flag stays on while the credit stays off. */
+    const tilesWanted = useTilesStore((s) => s.enabled);
     /** Bumped by the sync effect when a layer was newly added, which is the
      *  only thing that triggers an automatic fit. */
     const [fitToken, setFitToken] = useState(0);
@@ -429,10 +461,11 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           // nowhere near this component; `streamPlugin.ts` is the one place
           // they resolve the live plugin from (Task C12).
           setStreamPlugin(flatPlugin);
-          // The photorealistic backdrop, on top of the default photoreal globe
-          // `DefaultPlugin` just added. Last, and non-fatal: nothing else in
-          // this session depends on it.
-          addGoogleTiles(result.view, setTilesEnabled);
+          // The photorealistic backdrop is NOT added here: it follows
+          // `tilesStore.enabled` from its own effect below, which `engineReady`
+          // gates behind this point (and therefore behind `view.init()` and
+          // `DefaultPlugin.addDefaultPhotorealScene()`, which the tiles sit on
+          // top of).
           setInitError(null);
           setEngineReady(true);
           // `readyRef.current`, never a captured gate: a cancelled predecessor
@@ -512,6 +545,27 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       // nothing left for this effect to depend on. Re-running it would tear
       // the engine down and rebuild it for no reason.
     }, []);
+
+    // --- Google Photorealistic 3D Tiles, following the sidebar toggle ---
+    //
+    // Declared AFTER the lifecycle effect above on purpose: React runs cleanups
+    // in declaration order, so on unmount the engine is disposed first and the
+    // `viewRef.current === view` guard below then correctly declines to call
+    // `delete()` on handles whose view no longer exists. While the engine is
+    // alive that guard passes and the toggle really does remove the layer.
+    useEffect(() => {
+      const view = viewRef.current;
+      if (!engineReady || view === null || !tilesWanted) return;
+      const handles = addGoogleTiles(view);
+      // `null` = no key, or the engine refused: nothing was added, so there is
+      // nothing to credit and nothing to take away.
+      if (handles === null) return;
+      setTilesEnabled(true);
+      return () => {
+        setTilesEnabled(false);
+        if (viewRef.current === view) removeGoogleTiles(handles);
+      };
+    }, [engineReady, tilesWanted]);
 
     // --- FPS readout from the render loop ---
     useEffect(() => {

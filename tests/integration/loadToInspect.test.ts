@@ -1,10 +1,18 @@
 /**
- * Integration test: full load-to-inspect pipeline.
+ * Integration test: the app-side half of the load-to-inspect pipeline.
  *
- * Verifies that a CityJSON fixture can be parsed, converted to a
- * pickable mesh, and that picking + inspector data extraction works
- * end-to-end. This covers the M1 exit criterion:
- * "A user can load and inspect a sample city-model fixture end to end."
+ * Verifies that a CityJSON fixture can be parsed into the normalized domain
+ * model and that everything the inspector reads off that model is present.
+ * This covers the M1 exit criterion: "A user can load and inspect a sample
+ * city-model fixture end to end."
+ *
+ * The mesh / picking / highlight stages this file used to carry were deleted
+ * with the React Three Fiber stack in Task C21. Those steps no longer exist in
+ * the app at all: `buildCityMeshArrays` and the surface-colour layering live in
+ * `@cityjson/navara-cityjson` (with their own suites in the plugin repo), and
+ * the app's remaining share of picking is covered by
+ * `tests/unit/scene/pickEventHandlers.test.ts`. Parsing is the only pipeline
+ * stage still owned here — and these are its only tests.
  */
 
 import { describe, it, expect } from "vitest";
@@ -12,12 +20,6 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { CityJSONRoot } from "../../src/domain/citymodel/cityjson/types";
 import { parseCityJSON } from "../../src/domain/citymodel/cityjson/parseCityJSON";
-import {
-  buildCityMesh,
-  computeOriginOffset,
-} from "../../src/scene/buildCityMesh";
-import { resolveSelection } from "../../src/scene/resolvePicking";
-import { applyHighlight, clearHighlight } from "../../src/scene/highlightMesh";
 
 // ---------------------------------------------------------------------------
 // Load fixture
@@ -101,165 +103,7 @@ describe("load-to-inspect pipeline", () => {
     });
   });
 
-  // Stage 2: Mesh build
-  const originOffset = computeOriginOffset(model);
-  const meshResult = buildCityMesh(model, "test-layer", originOffset);
-
-  describe("mesh construction", () => {
-    it("produces non-zero triangles", () => {
-      expect(meshResult.triangleCount).toBeGreaterThan(0);
-    });
-
-    it("picking index covers all three objects", () => {
-      expect(meshResult.pickingIndex.objectKeys).toHaveLength(3);
-      expect(meshResult.pickingIndex.objectKeys).toContain(
-        "NL.IMBAG.Pand.0001",
-      );
-      expect(meshResult.pickingIndex.objectKeys).toContain(
-        "NL.IMBAG.Pand.0001-part1",
-      );
-      expect(meshResult.pickingIndex.objectKeys).toContain(
-        "NL.IMBAG.Pand.0002",
-      );
-    });
-
-    it("objectIndex attribute has same count as position attribute", () => {
-      const posCount = meshResult.geometry.getAttribute("position").count;
-      const objIdxCount = meshResult.geometry.getAttribute("objectIndex").count;
-      const surfIdxCount =
-        meshResult.geometry.getAttribute("surfaceIndex").count;
-      expect(objIdxCount).toBe(posCount);
-      expect(surfIdxCount).toBe(posCount);
-    });
-
-    it("baseColors has same length as color attribute", () => {
-      const colorAttr = meshResult.geometry.getAttribute("color");
-      expect(meshResult.baseColors.length).toBe(colorAttr.count * 3);
-    });
-  });
-
-  // Stage 3: Picking resolution
-  //
-  // resolveSelection is pick-mode-agnostic: it always resolves the concrete
-  // object + surface for the hit vertex. The active PickMode ("object" vs
-  // "surface") is applied by the caller (resolveFromEvent in
-  // CitySceneR3F.tsx) to decide whether to build an object-level or
-  // surface-level Selection from the PickResult.
-  describe("picking resolution", () => {
-    it("resolves a vertex from the first object", () => {
-      // Find the first vertex belonging to object index 0
-      const objIdxAttr = meshResult.geometry.getAttribute("objectIndex");
-      let vertexIdx = -1;
-      for (let i = 0; i < objIdxAttr.count; i++) {
-        if (objIdxAttr.getX(i) === 0) {
-          vertexIdx = i;
-          break;
-        }
-      }
-      expect(vertexIdx).toBeGreaterThanOrEqual(0);
-
-      const result = resolveSelection(
-        meshResult.geometry,
-        meshResult.pickingIndex,
-        vertexIdx,
-      );
-
-      expect(result).not.toBeNull();
-      expect(result!.objectId).toBe(meshResult.pickingIndex.objectKeys[0]);
-    });
-
-    it("resolves a vertex from the last object", () => {
-      const lastIdx = meshResult.pickingIndex.objectKeys.length - 1;
-      const objIdxAttr = meshResult.geometry.getAttribute("objectIndex");
-      let vertexIdx = -1;
-      for (let i = 0; i < objIdxAttr.count; i++) {
-        if (objIdxAttr.getX(i) === lastIdx) {
-          vertexIdx = i;
-          break;
-        }
-      }
-      expect(vertexIdx).toBeGreaterThanOrEqual(0);
-
-      const result = resolveSelection(
-        meshResult.geometry,
-        meshResult.pickingIndex,
-        vertexIdx,
-      );
-
-      expect(result).not.toBeNull();
-      expect(result!.objectId).toBe(
-        meshResult.pickingIndex.objectKeys[lastIdx],
-      );
-    });
-
-    it("resolves the surface index of the hit triangle", () => {
-      // Find a vertex for object 0 with surfaceIndex > 0
-      const objIdxAttr = meshResult.geometry.getAttribute("objectIndex");
-      const surfIdxAttr = meshResult.geometry.getAttribute("surfaceIndex");
-      let vertexIdx = -1;
-      for (let i = 0; i < objIdxAttr.count; i++) {
-        if (objIdxAttr.getX(i) === 0 && surfIdxAttr.getX(i) > 0) {
-          vertexIdx = i;
-          break;
-        }
-      }
-      expect(vertexIdx).toBeGreaterThanOrEqual(0);
-
-      const result = resolveSelection(
-        meshResult.geometry,
-        meshResult.pickingIndex,
-        vertexIdx,
-      );
-
-      expect(result).not.toBeNull();
-      expect(result!.surfaceIndex).toBeGreaterThan(0);
-      expect(result!.objectId).toBe(meshResult.pickingIndex.objectKeys[0]);
-    });
-  });
-
-  // Stage 4: Highlight
-  describe("highlight", () => {
-    it("applies and clears highlight without errors", () => {
-      const firstObjectId = meshResult.pickingIndex.objectKeys[0]!;
-
-      // Apply selection highlight
-      applyHighlight(
-        meshResult.geometry,
-        meshResult.baseColors,
-        [{ kind: "object", layerId: "test-layer", objectId: firstObjectId }],
-        null,
-        meshResult.pickingIndex,
-      );
-
-      // Verify some vertices were changed
-      const colorAttr = meshResult.geometry.getAttribute("color");
-      const objIdxAttr = meshResult.geometry.getAttribute("objectIndex");
-      let foundHighlighted = false;
-      for (let i = 0; i < objIdxAttr.count; i++) {
-        if (objIdxAttr.getX(i) === 0) {
-          // Should differ from base color
-          const base = i * 3;
-          if (
-            colorAttr.array[base] !== meshResult.baseColors[base] ||
-            colorAttr.array[base + 1] !== meshResult.baseColors[base + 1]
-          ) {
-            foundHighlighted = true;
-            break;
-          }
-        }
-      }
-      expect(foundHighlighted).toBe(true);
-
-      // Clear and verify restoration
-      clearHighlight(meshResult.geometry, meshResult.baseColors);
-      const colorArray = colorAttr.array as Float32Array;
-      for (let i = 0; i < meshResult.baseColors.length; i++) {
-        expect(colorArray[i]).toBe(meshResult.baseColors[i]);
-      }
-    });
-  });
-
-  // Stage 5: Inspector data extraction
+  // Stage 2: Inspector data extraction
   describe("inspector data extraction", () => {
     it("can look up a selected object's full data for the inspector", () => {
       const objectId = "NL.IMBAG.Pand.0001";

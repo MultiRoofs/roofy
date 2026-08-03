@@ -156,21 +156,10 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ["@cityjson/flatcitybuf", "@duckdb/duckdb-wasm"],
   },
-  build: {
-    rollupOptions: {
-      // TEMPORARY (Task B1 spike, removed in C21): Vite only treats
-      // `index.html` as an entry unless the inputs are listed explicitly, so
-      // the spike page would be missing from `npm run build` output.
-      input: {
-        index: resolve(import.meta.dirname, "index.html"),
-        spike: resolve(import.meta.dirname, "spike.html"),
-        // TEMPORARY (Task B11a harness, removed in C21 with the spike):
-        // `NavaraViewport` has no route in the app until Task B11b swaps
-        // `App.tsx` over, so its browser smoke runs against this page.
-        navara: resolve(import.meta.dirname, "navara.html"),
-      },
-    },
-  },
+  // No `build.rollupOptions.input`: the app is back to Vite's default single
+  // `index.html` entry. The extra `spike.html` / `navara.html` inputs existed
+  // only for the Task B1 MRT spike and the Task B11a `NavaraViewport` harness,
+  // both deleted in Task C21 now that `App.tsx` renders the viewport directly.
   resolve: {
     // The aliases below pull the submodule packages in as *source*, so their
     // own `import proj4 from "proj4"` / `import … from "three"` would

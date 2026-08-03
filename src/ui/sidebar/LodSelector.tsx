@@ -3,8 +3,8 @@
  *
  * For a static (non-streaming) layer this is unchanged from before: a
  * plain, always-interactive dropdown of the LoDs present in the model.
- * `Layer.lodMode` has no effect on a static layer's rendering — buildCityMesh
- * (see scene/buildCityMesh.ts) only ever consults `selectedLod` — so the
+ * `Layer.lodMode` has no effect on a static layer's rendering — `handleSync`
+ * only ever pushes `selectedLod` into `CityModelHandle.setLod` — so the
  * dropdown ignores it rather than gating on a mode that does nothing here.
  *
  * For a streaming layer, `lodMode` DOES matter: "auto" hands the choice to

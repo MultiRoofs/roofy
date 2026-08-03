@@ -16,13 +16,20 @@ const dispose = vi.fn();
 const setCamera = vi.fn();
 const flyTo = vi.fn();
 /** `view.addSource` / `view.addLayer` — the whole of the Google tiles seam
- *  (Task C17). `addSource` answers with a `Source`-shaped stub, which is what
- *  the layer must reference. */
+ *  (Task C17, toggled since Task C21). `addSource` answers with a
+ *  `Source`-shaped stub, which is what the layer must reference; both stubs
+ *  carry the `delete()` the toggle-off path calls. */
+const deleteSource = vi.fn(() => true);
+const deleteLayer = vi.fn();
 const addSource = vi.fn((_source: unknown) => ({
   id: "src-1",
   type: "3d-tiles",
+  delete: deleteSource,
 }));
-const addLayer = vi.fn();
+const addLayer = vi.fn((_layer: unknown) => ({
+  id: "layer-1",
+  delete: deleteLayer,
+}));
 
 /** The engine's event bus, reduced to what `view.on/off` need. Tests drive the
  *  viewport by FIRING these, which is the only honest way to exercise a
@@ -153,6 +160,7 @@ import {
   type Layer,
 } from "../../../src/features/layers/layerStore";
 import { useSelectionStore } from "../../../src/features/selection/selectionStore";
+import { useTilesStore } from "../../../src/features/tiles/tilesStore";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 // The licence text the attribution overlay must show whatever else is on
 // screen (Task C17 / Global Constraints -> Vertical datum).
@@ -1111,6 +1119,9 @@ describe("NavaraViewport Google tiles", () => {
   beforeEach(() => {
     addSource.mockClear();
     addLayer.mockClear();
+    deleteSource.mockClear();
+    deleteLayer.mockClear();
+    useTilesStore.setState({ enabled: true });
     init.mockClear();
     init.mockImplementation(async () => {});
     listeners.clear();
@@ -1124,6 +1135,7 @@ describe("NavaraViewport Google tiles", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllEnvs();
+    useTilesStore.setState({ enabled: true });
   });
 
   it("registers ONE 3d-tiles source and layer with the key in the URL, after init", async () => {
@@ -1186,6 +1198,81 @@ describe("NavaraViewport Google tiles", () => {
     }
   });
 
+  // -------------------------------------------------------------------------
+  // The sidebar / advanced-settings toggle (`tilesStore.enabled`), wired to the
+  // engine in Task C21. Between C17 and C21 the flag was read only by the two
+  // toggle UIs: clicking the eye changed an icon and nothing else.
+  // -------------------------------------------------------------------------
+
+  it("adds nothing while the toggle is off, even with a key configured", async () => {
+    vi.stubEnv("VITE_GOOGLE_MAPS_API_KEY", "k");
+    useTilesStore.setState({ enabled: false });
+    const { container } = render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(init).toHaveBeenCalled());
+    expect(addSource).not.toHaveBeenCalled();
+    expect(addLayer).not.toHaveBeenCalled();
+    expect(
+      container.querySelector(".attribution-overlay")?.textContent,
+    ).not.toMatch(/Google/);
+  });
+
+  it("removes the layer AND its source, layer first, when the toggle goes off", async () => {
+    vi.stubEnv("VITE_GOOGLE_MAPS_API_KEY", "k");
+    const { container } = render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(addLayer).toHaveBeenCalledTimes(1));
+
+    act(() => useTilesStore.getState().setEnabled(false));
+
+    await waitFor(() => expect(deleteLayer).toHaveBeenCalledTimes(1));
+    expect(deleteSource).toHaveBeenCalledTimes(1);
+    // `Source.delete()` removes nothing while a layer still references the
+    // source, so the reverse order would leak it.
+    expect(deleteLayer.mock.invocationCallOrder[0]!).toBeLessThan(
+      deleteSource.mock.invocationCallOrder[0]!,
+    );
+    // Nothing is on screen any more, so nobody is credited for it.
+    await waitFor(() =>
+      expect(
+        container.querySelector(".attribution-overlay")?.textContent,
+      ).not.toMatch(/Google/),
+    );
+  });
+
+  it("re-adds a fresh source and layer when the toggle comes back on", async () => {
+    vi.stubEnv("VITE_GOOGLE_MAPS_API_KEY", "k");
+    const { container } = render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(addLayer).toHaveBeenCalledTimes(1));
+
+    act(() => useTilesStore.getState().setEnabled(false));
+    await waitFor(() => expect(deleteLayer).toHaveBeenCalledTimes(1));
+    act(() => useTilesStore.getState().setEnabled(true));
+
+    await waitFor(() => expect(addLayer).toHaveBeenCalledTimes(2));
+    // A NEW source, not the deleted one: `Source.delete()` disposed the first.
+    expect(addSource).toHaveBeenCalledTimes(2);
+    expect(addLayer.mock.calls[1]![0]).toMatchObject({
+      source: addSource.mock.results[1]!.value,
+    });
+    await waitFor(() =>
+      expect(
+        container.querySelector(".attribution-overlay")?.textContent,
+      ).toMatch(/Google/),
+    );
+  });
+
+  it("does not delete tiles handles through a view the engine already disposed", async () => {
+    vi.stubEnv("VITE_GOOGLE_MAPS_API_KEY", "k");
+    const { unmount } = render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(addLayer).toHaveBeenCalledTimes(1));
+
+    unmount();
+
+    // `session.dispose()` already tore the whole view down; calling `delete()`
+    // on handles belonging to it would be an operation on a dead engine.
+    expect(deleteLayer).not.toHaveBeenCalled();
+    expect(deleteSource).not.toHaveBeenCalled();
+  });
+
   it("keeps the viewer alive when the engine refuses the tiles layer", async () => {
     vi.stubEnv("VITE_GOOGLE_MAPS_API_KEY", "k");
     addLayer.mockImplementationOnce(() => {
@@ -1200,11 +1287,14 @@ describe("NavaraViewport Google tiles", () => {
     // A backdrop that fails to load must not take the engine — or `ready` —
     // down with it, and must not claim a Google credit either.
     await expect(ref.current!.ready).resolves.toBeUndefined();
+    // The tiles are attached from an effect since Task C21 (they follow
+    // `tilesStore.enabled`), so the failure lands a render AFTER `ready`
+    // settles rather than inside the init sequence.
+    await waitFor(() => expect(errors).toHaveBeenCalled());
     expect(container.querySelector(".navara-viewport__error")).toBeNull();
     expect(
       container.querySelector(".attribution-overlay")?.textContent,
     ).not.toMatch(/Google/);
-    expect(errors).toHaveBeenCalled();
     errors.mockRestore();
   });
 });
