@@ -26,8 +26,9 @@ const SPEED_OPTIONS = [
 ] as const;
 
 /** `YYYY-MM-DD` in LOCAL time — `toISOString()` would shift the date across
- *  midnight for anyone east or west of UTC. */
-export function toLocalDateStr(dt: Date): string {
+ *  midnight for anyone east or west of UTC. NOT exported: the tests drive this
+ *  through the rendered inputs, which is where the behaviour actually lives. */
+function toLocalDateStr(dt: Date): string {
   const y = dt.getFullYear();
   const m = String(dt.getMonth() + 1).padStart(2, "0");
   const d = String(dt.getDate()).padStart(2, "0");
@@ -35,7 +36,7 @@ export function toLocalDateStr(dt: Date): string {
 }
 
 /** `HH:MM` in local time, for `<input type="time">`. */
-export function toLocalTimeStr(dt: Date): string {
+function toLocalTimeStr(dt: Date): string {
   const h = String(dt.getHours()).padStart(2, "0");
   const m = String(dt.getMinutes()).padStart(2, "0");
   return `${h}:${m}`;

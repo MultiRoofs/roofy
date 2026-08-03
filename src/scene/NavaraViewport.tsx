@@ -769,9 +769,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     // 0.0.5 bundle: `window.addEventListener("resize", this._handleResize)`
     // plus a device-pixel-ratio media query). Collapsing a side panel changes
     // the CONTAINER without changing the window, so the canvas kept its old
-    // width and left a blank strip — and, because the pick path measures from
-    // `container.clientWidth/Height`, every pick after such a change was
-    // offset too. A ResizeObserver on the container closes both.
+    // width and left a blank strip — and every pick after such a change was
+    // offset too, because the ray is built from `view.screenSize`, which the
+    // engine only updates inside `resize()`. A ResizeObserver on the container
+    // closes both: the canvas follows the layout, and `screenSize` with it.
     useEffect(() => {
       const container = containerRef.current;
       const view = viewRef.current;
@@ -804,9 +805,11 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       const container = containerRef.current;
       if (container === null) return;
       const onWheel = (e: WheelEvent) => e.preventDefault();
-      // Touch pinch-zoom lands on the engine's own `touchmove` handler, which
-      // already calls `preventDefault()`; `touchstart` does not, so a two-
-      // finger gesture that begins over the canvas could still scroll-chain.
+      // Touch is REDUNDANT-BUT-HARMLESS, unlike the wheel: the engine
+      // preventDefaults `touchstart`, `touchend` and `touchmove` itself, so
+      // this only covers the window before its listeners are bound (the engine
+      // binds them during `init()`, and this effect runs on mount) and any
+      // touch that lands on the container but outside the canvas.
       const onTouchMove = (e: TouchEvent) => e.preventDefault();
       container.addEventListener("wheel", onWheel, { passive: false });
       container.addEventListener("touchmove", onTouchMove, { passive: false });
