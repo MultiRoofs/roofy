@@ -78,6 +78,14 @@ export function LodSelector({
   }
 
   if (lodMode === "manual") {
+    // The LADDER, not `availableLods`. A streaming layer's `Layer.model` is an
+    // empty stub — `computeAvailableLods` has nothing to read — so the layer
+    // store's list is permanently `[]` and this select used to offer "All" and
+    // nothing else, i.e. a manual mode with no LoD to pin. The labels a
+    // streaming layer really has are LEARNED from the cells the worker
+    // returns and published on `streamStore.ladder` (openStreamingLayer.ts),
+    // which is the same source the Auto read-out below already reads.
+    const lods = ladder ?? availableLods;
     return (
       <div
         className="lod-selector-streaming"
@@ -92,7 +100,7 @@ export function LodSelector({
           title="Level of Detail (manual — pinned everywhere)"
         >
           <option value="">All</option>
-          {availableLods.map((lod) => (
+          {lods.map((lod) => (
             <option key={lod} value={lod}>
               LoD {lod}
             </option>
