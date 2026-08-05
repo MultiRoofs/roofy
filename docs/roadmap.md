@@ -349,9 +349,17 @@ Deferred during execution (known, non-blocking; recorded here so they are not lo
   reader outside the panel itself. Wire them to the engine or delete them. (The Google 3D
   Tiles toggle in the same panel _is_ wired.)
 - ~~`LEVEL_SWAP_TIMEOUT_MS = 1500` wants a GPU-backed measurement~~ — **removed**
-  2026-08-05. It livelocked every streaming layer after its first commit (uxfix report
-  § Wave 3). No streaming fetch is on a deadline now; `abortInFlight()` plus the worker
-  epoch is the cancellation path.
+  2026-08-05. On any host where a full-cover swap exceeded 1.5 s it stalled the layer
+  permanently (uxfix report § Wave 3). Cancelling work the user has moved on from is
+  `abortInFlight()` plus the worker epoch, not a timer.
+- **The streaming fetch bound wants the same real-hardware measurement the old one did.**
+  `COMMIT_FETCH_TIMEOUT_MS = 30_000` replaced it as a _liveness_ bound, sized at ~3x the
+  slowest healthy commit seen on a GPU-less host. Residual caveats, all needing a run on
+  real hardware and a large dataset: (a) 30 s may be too tight for a genuinely huge first
+  cover on a slow connection — expiry there would loop retry-and-stall rather than stall
+  outright; (b) it bounds the fetch only, not the probe, so a stuck `probe` still hangs a
+  commit; (c) it does not abort the HTTP request, only stops waiting on it, so a stalled
+  connection is left to the browser.
 - A layer still fetches its first cover TWICE: commit 1 has no LoD ladder (the FCB header
   carries none), so it pulls every LoD, and commit 2 swaps to the resolved label. Seeding
   the ladder from a cheap first probe would remove both the wasted fetch and the

@@ -681,7 +681,7 @@ The settle machine is **not** the bug, and the "arm on `move`/`frustumChanged`
 too" change that was proposed for it would have been a regression — arming on
 `move` re-introduces exactly the mid-drag commit §5(a) exists to prevent.
 
-### Root cause — the level-swap deadline livelocks the layer
+### Root cause — the level-swap deadline stalls the layer permanently
 
 The commit fires; it then dies downstream, in `FcbStreamLayerHandle.commit`.
 Traced, on a wheel zoom, from a layer that had just finished its auto-fit load:
@@ -697,20 +697,27 @@ FETCH-DONE  outcome:"timeout"  fetched:0  raced:true
 -> handle.version stays 1, triangleCount stays 217777 — NOTHING loaded
 ```
 
-Three facts compose into a permanent stall:
+Three facts compose into a permanent stall **on any host where the full-cover
+swap exceeds 1.5 s** — a property of the dataset, the connection and the
+worker's decode speed together, not of this host alone. Below that threshold
+nothing is wrong; above it, once triggered, it never recovers:
 
 1. **A layer's second commit is ALWAYS a swap.** The first commit runs with an
    empty ladder, so `resolveLod` returns `{kind:"all"}` and that is recorded as
    the previous LoD; the ladder is only LEARNED from the `lodsSeen` of the cells
    that first commit returns. From the second commit on the same camera resolves
    to an exact label, so `lodChanged` is true and `planCommit` calls it a swap.
-2. **A full-cover swap is not a 1500 ms operation.** The measured one is 16
-   cells / 1077 features of `delft.fcb`.
+2. **A full-cover swap need not be a 1500 ms operation.** The measured one is
+   16 cells / 1077 features of `delft.fcb`, which overran the deadline on the
+   host it was traced on. How much headroom a GPU-backed host has was never
+   measured — which is precisely why a _performance_ deadline was the wrong
+   instrument.
 3. **The timeout path returned before recording anything.** `_lastLod`,
    `_level` and `_lastCommit` are written only at the end of a _successful_
-   commit, so the next settle recomputed the identical doomed swap. Every
-   camera-driven commit from then on died on the deadline: the layer
-   **livelocked**.
+   commit, so the next settle recomputed the identical plan — equally slow, so
+   it timed out again. That is what turns a single overrun into a permanent
+   condition: after the first expiry, every camera-driven commit died on the
+   deadline.
 
 That is the whole report. The LoD half too: `onLodChanged` is the one path that
 forces a commit whose cover the worker has usually already decoded, so it can
@@ -719,7 +726,9 @@ once" and then sticks again at the next level change.
 
 `CLAUDE.md` had this half-recorded as a tuning note ("on a SwiftShader host the
 first post-fit commit blows the deadline **and recovers on the next settle**").
-It does not recover. There is no next settle that differs.
+It does not recover: there is no next settle that differs. The note was right
+that the host matters — host and dataset together decide whether the threshold
+is crossed at all — but wrong that crossing it is transient.
 
 ### Fix
 
@@ -736,6 +745,30 @@ by tuning:
   in-flight result both cancelled at the worker and unadoptable here
   (`isStale`). That is the mechanism built for "the user has moved on", and it
   is untouched.
+
+**In its place, a liveness bound: `COMMIT_FETCH_TIMEOUT_MS = 30_000`** (added in
+the review round). Removing the deadline left every commit's fetch unbounded,
+and a `.fcb` range read that goes silent mid-stream has no timeout of its own —
+browser `fetch` has none, the same gap `GEOID_TIMEOUT_MS` already exists to
+cover. That would leave `commit()` pending until the layer is deleted, with the
+status stuck on `fetching` and no error anywhere. The new bound differs from its
+predecessor in all three respects that made the old one harmful:
+
+|                   | `LEVEL_SWAP_TIMEOUT_MS` (retired)                           | `COMMIT_FETCH_TIMEOUT_MS`                                                                      |
+| ----------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| what expiry means | the work was slow                                           | the transport is stuck                                                                         |
+| sizing            | 1.5 s — below the cost of real work                         | 30 s — ~3x the slowest healthy commit measured (~10 s)                                         |
+| applies to        | swaps only, with a first-commit exemption bolted on         | every commit, uniformly                                                                        |
+| after expiry      | old level kept, error, **same plan recomputed next settle** | nothing recorded, so the next settle re-plans from the unchanged cache and **retries in full** |
+
+The retry is fresh by construction rather than by bookkeeping: because the
+timeout writes neither `_lastLod`/`_level`/`_lastCommit` nor the cache, the next
+`planCommit` still sees `hasHoles` (or still sees the pending swap), so
+`shouldRefetch` cannot skip it. Retrying a stuck transport is the only thing
+that can ever succeed; retrying work that had been cancelled for being slow was
+doomed by construction. On expiry the commit also tells the worker to `cancel`
+and to `evict` whatever partial cells did arrive — the B3 cache-coherence path —
+so no worker-only entry is left behind that the main thread could never reach.
 
 One adjacent defect found while verifying the LoD half in the browser and fixed
 with it: a streaming layer's **manual** LoD `<select>` was reading
@@ -758,19 +791,39 @@ read-out beside it already used.
   multi-notch wheel zoom, after the last notch"_, pinning the newly measured
   burst shape: four notches, each a full burst 250 ms apart, produce exactly one
   `onSettle` and one `onFirstChange`.
+- Same file — _"bounds a STALLED fetch at COMMIT_FETCH_TIMEOUT_MS, and the next
+  commit retries it fresh"_: a fetch that delivers one cell and then never
+  settles must still report `fetching` at 29.9 s, must be `error` at 30.1 s with
+  a message naming the unresponsive source, must `cancel` + `evict` the arrived
+  cell, must record nothing (`level` still null, cache still empty) — and the
+  NEXT commit must fetch the whole cover and succeed. Verified to hang to the
+  vitest timeout against the unbounded source, i.e. red for the right reason.
+- Same file — _"forwards budget-evicted keys to the worker, so the two caches
+  cannot drift"_: the main/worker cache-coherence invariant lost its only
+  assertion when the swap-timeout test was deleted; a one-triangle budget of two
+  over a larger cover now pins that `evictToBudget`'s keys are notified to the
+  worker and are exactly the ones the main thread no longer holds.
 - `tests/unit/ui/sidebar/LodSelector.test.tsx` — _"offers the LEARNED ladder,
   not the layer store's empty availableLods"_.
 
 ### Browser verification (post-fix, same driver and fixture)
 
-| Step                          | `handle.version` | resident                | outcome                                                            |
-| ----------------------------- | ---------------- | ----------------------- | ------------------------------------------------------------------ |
-| auto-fit settle               | 1                | 16 cells / 217 777 tris | baseline (fetched under `lod: all`)                                |
-| **wheel zoom, 4 notches**     | **1 → 2**        | 16 cells / 39 152 tris  | swap completed, `status idle`, no error — used to be `error`       |
-| **drag-pan**                  | **2 → 3**        | 12 cells / level 3      | new cover fetched (`Objects 2155 → 846`, the pan leaves the file)  |
-| **LoD switch to 2.2 (UI)**    | **1 → 2**        | 217 777 → 109 073 tris  | manual select now offers `0 / 1.2 / 1.3 / 2.2`                     |
-| **`setCamera` restore (C20)** | **3 → 3**        | unchanged               | only `view:idle` emitted, **no commit** — the property still holds |
-| **wheel zoom after restore**  | **3 → 4**        | level 2 / 36 048 tris   | organic movement still commits after a programmatic one            |
+| Step                          | `handle.version` | resident                | outcome                                                                                                                                            |
+| ----------------------------- | ---------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| auto-fit settle               | 1                | 16 cells / 217 777 tris | baseline (fetched under `lod: all`)                                                                                                                |
+| **wheel zoom, 4 notches**     | **1 → 2**        | 16 cells / 39 152 tris  | swap completed, `status idle`, no error — used to be `error`                                                                                       |
+| **drag-pan**                  | **2 → 3**        | 12 cells / level 3      | new cover fetched (`Objects 2155 → 846`, the pan leaves the file)                                                                                  |
+| **LoD switch to 2.2 (UI)**    | **1 → 2**        | 217 777 → 109 073 tris  | manual select now offers `0 / 1.2 / 1.3 / 2.2`                                                                                                     |
+| **`setCamera` restore (C20)** | **3 → 3**        | unchanged               | only `view:idle` emitted, so **no settle-driven commit**; the queued destination commit re-plans to a hysteresis skip, hence the unchanged version |
+| **wheel zoom after restore**  | **3 → 4**        | level 2 / 36 048 tris   | organic movement still commits after a programmatic one                                                                                            |
+
+(To be exact about the restore row: `setCameraState` goes through
+`suppressSettleThenCommit`, so a destination commit IS queued for the moment the
+suppression window closes — it is not that nothing runs. It runs, `planCommit`
+finds the same camera it had, `shouldRefetch` returns false, and the layer
+reports `idle` without a fetch. The C20 property being verified is "a
+programmatic restore performs no work and changes nothing", and both halves hold:
+no `move*` reached the controller, and the destination commit was a no-op.)
 
 Zero page errors and zero console exceptions across every session (only the
 host's known `favicon.ico`, DuckDB-extension and missing-Google-key noise).
@@ -790,6 +843,13 @@ Screenshots: `docs/superpowers/research/assets/2026-08-05-fcb-camera-0{1..5}-*.p
   calls `abortInFlight()` on the commit that just started. It self-corrects (the
   following `moveend` re-arms), and it was not observed on this host, but it is
   the next thing to look at if "sometimes needs a second nudge" is ever reported.
+- **`COMMIT_FETCH_TIMEOUT_MS = 30_000` wants the real-hardware measurement the
+  old constant wanted.** It is sized off a GPU-less host, and three residual
+  caveats stand: 30 s may be too tight for a genuinely huge first cover on a
+  slow connection (expiry there loops retry-and-stall rather than stalling
+  outright); it bounds the fetch only, so a stuck `probe` still hangs a commit;
+  and it stops waiting without aborting the HTTP request, leaving the stalled
+  connection to the browser. Mirrored into `docs/roadmap.md`.
 - **Frame rate still not representative.** Every measurement here is from a
   GPU-less SwiftShader host at ~5 fps. The shapes measured (burst structure, swap
   livelock, restore-no-commit) are frame-rate independent; the timings are not.
