@@ -177,8 +177,9 @@ browser-proven.
 - **S5. Advanced Settings render/debug toggles unwired** — `renderDebugStore` +
   `atmosphereStore` have no reader outside the panel (verified via C25). Wire to the
   engine or delete; a settings panel that silently does nothing erodes trust.
-- **S6. `LEVEL_SWAP_TIMEOUT_MS=1500`** needs a real-GPU measurement for genuine level
-  swaps (first-commit exemption already landed in 97afdbd).
+- **S6. `LEVEL_SWAP_TIMEOUT_MS=1500`** — **RESOLVED 2026-08-05 by removal.** It did not
+  need tuning: it livelocked every streaming layer from its second commit on (uxfix report
+  § Wave 3).
 - **S7. Hover raycast: no BVH, no throttle**, nearest-hit across all handles per
   mousemove. Fine today; profile with several large layers, then BVH or throttle.
 - **S8. `agents.md` is severely stale** — still describes the pre-migration app

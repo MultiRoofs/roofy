@@ -16,6 +16,7 @@ Spike code: `spike.html`, `src/spike/navaraMrtSpike.ts` (deleted in Task C21).
 | `PROD_BUNDLE_OK`          | **true**                                                                      |
 | `NODE_IMPORT_SAFE`        | **false** (`NODE_IMPORT_SAFE=false jl(...).cpus is not a function`)           |
 | `CAMERA_BURST_SHAPE`      | **one `movestart` … N `move` … one `moveend` per gesture** (incl. inertia)    |
+| `WHEEL_BURST_SHAPE`       | **one complete burst PER NOTCH**, notches ~250 ms apart (§5e, 2026-08-05)     |
 | `PROGRAMMATIC_MOVE_EMITS` | **split: `flyTo` = yes, `setCamera` = no, `resize` = no**                     |
 | `WORKER_URL_FORM_OK`      | **true** — Task C4b, see §11 (not a B1 verdict; recorded here so C5 finds it) |
 
@@ -317,6 +318,52 @@ to have moved.
 `resize` (on `view`) then `frustumChanged` (on `view.camera`) 2 ms later, then
 `idle` 455 ms later. No `movestart`/`moveend`.
 
+### (e) Wheel zoom — measured 2026-08-05, the hole this section had
+
+B1 traced only drags, `flyTo`, `setCamera` and `resize`; §8 recorded "scenarios
+NOT produced: touch/pinch gestures, wheel zoom, multi-tab". That gap mattered,
+because the streaming settle controller commits on `moveend` and a **silent**
+wheel would have meant no commit on zoom at all. It is now measured, on the
+real app (`npm run dev`, `fixtures/delft.fcb` loaded through the file input),
+same raw CDP driver, `Input.dispatchMouseEvent {type:"mouseWheel", deltaY:-120}`
+at 200 ms intervals over the canvas, post-processing/clouds/aerial/shadows
+switched off to lift the host to ~5 fps:
+
+```
+[{"t":55211,"e":"movestart"},{"t":55475,"e":"move"},{"t":55679,"e":"moveend"},
+ {"t":55893,"e":"movestart"},{"t":56118,"e":"move"}, … 5 × "move" …,
+ {"t":57470,"e":"moveend"},
+ (settle fires 350 ms later) {"t":58486,"e":"FIRE-settle"} -> commit
+ {"t":59480,"e":"idle"}]
+```
+
+**`WHEEL_BURST_SHAPE` = one COMPLETE `movestart … move … moveend` burst PER
+NOTCH**, not one burst per gesture. Consecutive notches arrive ~250 ms apart —
+i.e. **inside** the armed `SETTLE_MS = 350` window — so `onMoveStart`'s disarm
+is what collapses a multi-notch zoom into a single commit at the end. A wheel
+also emits a `frustumChanged` when the zoom crosses a near/far adjustment
+(observed once, at the same millisecond as a `move`).
+
+Consequences, all confirmed in the same session:
+
+- **Wheel zoom is NOT silent.** The settle controller needs no extra arming
+  source (`move`/`frustumChanged`); arming on `move` would in fact break the
+  "no commit mid-drag" rule §5(a) established.
+- **Drag-pan is unchanged** from §5(a): one burst, inertia inside it. At ~5 fps
+  the tail of `move` events ran ~2.5 s past pointer-up before `moveend`.
+- **The hold counter of `suppressSettle` returns to 0** after the auto-fit
+  completes — instrumented directly (`holds:0` on every camera event of every
+  gesture below). There is no suppression leak.
+- `attach()` subscribes to the same `view.camera` instance the events come
+  from (a second, independently-registered listener saw exactly the events the
+  controller saw).
+
+So the 2026-08-05 bug report _"FlatCityBuf doesn't load when I move the camera;
+only when I switch LoD it loads once"_ is **not** a camera-event problem. The
+commit fires; what failed is downstream, in `FcbStreamLayerHandle.commit`'s
+level-swap deadline — see
+`docs/superpowers/reviews/2026-08-03-uxfix-report.md` § Wave 3.
+
 ### Conclusions for Tasks C7 and C20
 
 - **`CAMERA_BURST_SHAPE` = one `movestart` … one `moveend` per user gesture**,
@@ -448,7 +495,8 @@ directly (`--headless=new --no-sandbox --enable-unsafe-swiftshader`) and using
 `Emulation.setDeviceMetricsOverride` (resize) and `Page.captureScreenshot`.
 Scenarios produced: page load, main-world reads, real click gestures, a real
 drag-with-inertia gesture, programmatic `flyTo`/`setCamera`, and a real resize.
-Scenarios _not_ produced: touch/pinch gestures, wheel zoom, multi-tab.
+Scenarios _not_ produced: touch/pinch gestures, multi-tab. (Wheel zoom was the
+third gap; it was closed on 2026-08-05 — see §5(e).)
 
 Recommendation for later tasks: keep a small CDP driver in the toolbox rather
 than relying on `agent-browser` for anything that must read page state.

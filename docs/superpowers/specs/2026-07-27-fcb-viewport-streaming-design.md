@@ -180,8 +180,10 @@ signal so a superseded one stops mid-traversal.
 
 **Level changes are all-or-nothing.** Because the level is uniform, a change
 rebuilds the entire cover. The new cover is built off-scene and spliced in one
-operation, or — on `LEVEL_SWAP_TIMEOUT_MS` — discarded entirely, leaving the old
-cover untouched. This is what the previous revision could not guarantee: review
+operation, or — if the user starts another gesture first — discarded entirely by
+`abortInFlight()`'s epoch bump, leaving the old cover untouched. (This
+originally also had a `LEVEL_SWAP_TIMEOUT_MS` deadline; it was removed
+2026-08-05 because it livelocked the layer — uxfix report § Wave 3.) This is what the previous revision could not guarantee: review
 finding F9 showed that with _adaptive_ levels, a partial swap must either keep a
 parent and a child simultaneously or blank three quadrants. A uniform cover has
 no such case.
@@ -587,20 +589,20 @@ Per CLAUDE.md, all test imports come from `"vitest"`, never `"vite-plus/test"`.
 
 ## 17. Constants
 
-| Constant                   | Default                 |
-| -------------------------- | ----------------------- |
-| `SETTLE_MS`                | 350                     |
-| `MOVE_FRAC`                | 0.2                     |
-| `SCALE_FACTOR`             | 1.3                     |
-| `T_MAX_M`                  | 5000                    |
-| `MAX_FOOTPRINT_SPAN_M`     | 8000                    |
-| `VIEWPORT_FEATURE_BUDGET`  | 20000 features          |
-| `RESIDENT_TRIANGLE_BUDGET` | 4,000,000               |
-| `RESIDENT_BYTE_BUDGET`     | 512 MiB (main + worker) |
-| `MIN_COVER_CELLS`          | 9                       |
-| `MAX_COVER_CELLS`          | 64                      |
-| `LEVEL_SWAP_TIMEOUT_MS`    | 1500                    |
-| `MIN_CELL_M`               | 50                      |
+| Constant                    | Default                 |
+| --------------------------- | ----------------------- |
+| `SETTLE_MS`                 | 350                     |
+| `MOVE_FRAC`                 | 0.2                     |
+| `SCALE_FACTOR`              | 1.3                     |
+| `T_MAX_M`                   | 5000                    |
+| `MAX_FOOTPRINT_SPAN_M`      | 8000                    |
+| `VIEWPORT_FEATURE_BUDGET`   | 20000 features          |
+| `RESIDENT_TRIANGLE_BUDGET`  | 4,000,000               |
+| `RESIDENT_BYTE_BUDGET`      | 512 MiB (main + worker) |
+| `MIN_COVER_CELLS`           | 9                       |
+| `MAX_COVER_CELLS`           | 64                      |
+| ~~`LEVEL_SWAP_TIMEOUT_MS`~~ | removed 2026-08-05      |
+| `MIN_CELL_M`                | 50                      |
 
 All are provisional and must be tuned against `delft.fcb` and one large real
 dataset before they are treated as settled.
