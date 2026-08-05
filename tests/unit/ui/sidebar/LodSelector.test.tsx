@@ -214,4 +214,33 @@ describe("LodSelector — streaming layer, manual mode", () => {
     fireEvent.click(screen.getByRole("button", { name: "Auto" }));
     expect(useLayerStore.getState().layers[0]?.lodMode).toBe("auto");
   });
+
+  it("offers the LEARNED ladder, not the layer store's empty availableLods", () => {
+    // A streaming layer's `Layer.model` is an empty stub, so
+    // `computeAvailableLods` yields `[]` and the layer store's list stays
+    // empty forever. Reading it here left manual mode with nothing but "All"
+    // — a mode with no LoD to pin. The labels are learned from the worker and
+    // published on `streamStore.ladder` (2026-08-05).
+    useStreamStore.setState({
+      streams: { L: baseStream({ ladder: ["1.2", "1.3", "2.2"] }) },
+    });
+    render(
+      <LodSelector
+        layerId="L"
+        availableLods={[]}
+        selectedLod={null}
+        isStreaming
+        lodMode="manual"
+      />,
+    );
+    const select = screen.getByTitle(
+      "Level of Detail (manual — pinned everywhere)",
+    ) as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual([
+      "",
+      "1.2",
+      "1.3",
+      "2.2",
+    ]);
+  });
 });

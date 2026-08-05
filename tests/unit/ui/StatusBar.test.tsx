@@ -58,11 +58,11 @@ describe("StatusBar — streaming status", () => {
       <StatusBar
         {...baseProps}
         streamStatus="error"
-        streamMessage="Level swap timed out; kept the previous level"
+        streamMessage="range read failed: 416 Range Not Satisfiable"
       />,
     );
     expect(
-      screen.getByText("Level swap timed out; kept the previous level"),
+      screen.getByText("range read failed: 416 Range Not Satisfiable"),
     ).toBeTruthy();
   });
 
