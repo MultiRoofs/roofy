@@ -934,10 +934,21 @@ Console over the whole session: no errors or exceptions, only `favicon.ico`
    and nothing to roll back to, timing out just produced an empty layer and
    `Level swap timed out; kept the previous level`. The auto-fit frames the
    whole file, so the initial cover IS the whole file (1115 features, 7.6 MB in
-   ~1 MB ranges) and takes ~10 s on this 3–4 fps host. Fixed in the plugin
-   (`97afdbd`): race only when there is a previous level to fall back to. With
-   both fixes the first open reaches `Objects 2231 / Triangles 217.8K` with no
-   camera input whatsoever.
+   ~1 MB ranges) and takes ~10 s on this 3–4 fps host. Fixed at the time in the
+   plugin (`97afdbd`): race only when there is a previous level to fall back
+   to. With both fixes the first open reaches `Objects 2231 / Triangles 217.8K`
+   with no camera input whatsoever.
+
+   **Superseded 2026-08-05 — read this item as history, not as current
+   behaviour.** The first-commit exemption treated a symptom: the deadline was
+   a _performance_ deadline on work whose only fault was being large, so it
+   also stalled the second commit and every one after it (see §5(e) and the
+   uxfix report § Wave 3). `LEVEL_SWAP_TIMEOUT_MS` and its exemption are both
+   gone. What bounds a fetch now is `COMMIT_FETCH_TIMEOUT_MS = 30_000`, a
+   _liveness_ bound: it is ~3× the slowest healthy commit measured above, it
+   applies to every commit rather than to swaps only, and expiring it records
+   nothing — so the next settle re-plans and retries in full.
+
 5. **`Objects` counted only `layer.model.objects`,** which is an empty stub for
    a streaming layer — the toolbar badge and status bar read `Objects 0` next
    to 2123 rendered buildings. Now unions the resident feature counts
