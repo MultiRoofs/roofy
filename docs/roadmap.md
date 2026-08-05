@@ -348,12 +348,14 @@ Deferred during execution (known, non-blocking; recorded here so they are not lo
   still unwired under `NavaraViewport`: `renderDebugStore` and `atmosphereStore` have no
   reader outside the panel itself. Wire them to the engine or delete them. (The Google 3D
   Tiles toggle in the same panel _is_ wired.)
-- `LEVEL_SWAP_TIMEOUT_MS = 1500` (`navara-flatcitybuf/src/constants.ts`) is tuned for real
-  hardware and wants a measurement on a GPU-backed host for genuine level swaps; on the
-  GPU-less SwiftShader dev host the first post-fit commit blows it and recovers next settle.
-- The first streaming commit's fetch is unbounded (no timeout), unlike the geoid fetch's
-  `GEOID_TIMEOUT_MS`. Deliberate — the first commit has nothing to roll back to — but a
-  generous bound would still be an improvement.
+- ~~`LEVEL_SWAP_TIMEOUT_MS = 1500` wants a GPU-backed measurement~~ — **removed**
+  2026-08-05. It livelocked every streaming layer after its first commit (uxfix report
+  § Wave 3). No streaming fetch is on a deadline now; `abortInFlight()` plus the worker
+  epoch is the cancellation path.
+- A layer still fetches its first cover TWICE: commit 1 has no LoD ladder (the FCB header
+  carries none), so it pulls every LoD, and commit 2 swaps to the resolved label. Seeding
+  the ladder from a cheap first probe would remove both the wasted fetch and the
+  stacked-LoD first frame.
 - Hover raycasting is now nearest-hit across all handles per mousemove, on a plain
   `Raycaster.intersectObject` with no BVH. Acceptable today; if it bites with several large
   layers, the candidates are a BVH in the plugin or throttling hover picks.
@@ -393,8 +395,8 @@ The next steps, in order:
    `git diff main...HEAD` plus the submodule log, address any critical findings, then merge
    `develop` and push the pinned submodule pointer.
 2. Close Milestone 8's deferred items (listed in that section): wire or delete the Advanced
-   Settings rendering/debug toggles, measure `LEVEL_SWAP_TIMEOUT_MS` on GPU-backed hardware,
-   and bound the first streaming commit's fetch.
+   Settings rendering/debug toggles, and seed a streaming layer's LoD ladder before its
+   first commit.
 3. Decide whether to restore the two features dropped in the migration — the measure tool and
    box-select — against Navara, or remove their `ViewerToolbar` entries.
 4. Resume Milestone 7 (CityGML) at M7.2 (non-building city object types), then M7.3

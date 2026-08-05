@@ -650,3 +650,146 @@ Re-verified in the real browser after the round (same CDP driver, dev server,
   `aria-modal="true"` and the trigger `aria-haspopup="dialog"`; Escape closes it
   and focus returns to `Solar presets`.
 - `window.__errors` empty — no page errors.
+
+---
+
+## Wave 3 (2026-08-05) — "FlatCityBuf doesn't load when I move the camera"
+
+User report, verbatim: _"FlatCityBuf doesn't load when I move the camera. Only
+when I switch LoD, it loads once."_
+
+### Diagnosis — three prime suspects, all disproved by trace
+
+The obvious reading is that the camera never tells the streaming driver
+anything. `settleController` commits on `moveend`, and B1 §5 had **never
+traced a wheel zoom** (its own §8 says so), so a silent wheel would have
+explained the symptom exactly. It was traced, on the real app, with the raw CDP
+driver (Playwright Chromium 1228, `--headless=new --no-sandbox
+--enable-unsafe-swiftshader`, 1280×800, `fixtures/delft.fcb` through the file
+input, post-processing/clouds/aerial/shadows off to lift the host from ~1 fps to
+~5 fps). Temporary instrumentation logged every camera event with the
+controller's internal `holds`/`armed`/`inBurst`, every `commitAll`, every
+`planCommit` outcome and every fetch outcome.
+
+| Suspect                                                 | Verdict                                                                                                                                                    |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A. Wheel zoom emits no `movestart`/`moveend`**        | **FALSE.** A wheel notch emits a COMPLETE `movestart … move … moveend` burst, one per notch, ~250 ms apart. Recorded as `WHEEL_BURST_SHAPE` in B1 §5(e).   |
+| **B. A suppression hold leaks and gates every gesture** | **FALSE.** `holds` was `0` on every one of the ~120 camera events traced, across the auto-fit, three gestures and a `setCamera`.                           |
+| **C. `attach()` bound the wrong event source**          | **FALSE.** A second listener registered independently on `view.camera` saw exactly the events the controller saw; `COMMIT-ALL` fired on wheel AND on drag. |
+
+The settle machine is **not** the bug, and the "arm on `move`/`frustumChanged`
+too" change that was proposed for it would have been a regression — arming on
+`move` re-introduces exactly the mid-drag commit §5(a) exists to prevent.
+
+### Root cause — the level-swap deadline livelocks the layer
+
+The commit fires; it then dies downstream, in `FcbStreamLayerHandle.commit`.
+Traced, on a wheel zoom, from a layer that had just finished its auto-fit load:
+
+```
+COMMIT-ALL  layers:1
+SWAP-WHY    levelChanged:false  lodChanged:TRUE
+            lod {"kind":"exact","lod":"1.2"}   prevLod {"kind":"all"}
+            ladder "0|1.2|1.3|2.2"  cellSizeM 400  level 2  prevLevel 2
+PLAN        kind:"commit"  isSwap:TRUE  toFetch:16  desired:16  probeCount:1077
+FETCH-DONE  outcome:"timeout"  fetched:0  raced:true
+-> status "error" / "Level swap timed out; kept the previous level"
+-> handle.version stays 1, triangleCount stays 217777 — NOTHING loaded
+```
+
+Three facts compose into a permanent stall:
+
+1. **A layer's second commit is ALWAYS a swap.** The first commit runs with an
+   empty ladder, so `resolveLod` returns `{kind:"all"}` and that is recorded as
+   the previous LoD; the ladder is only LEARNED from the `lodsSeen` of the cells
+   that first commit returns. From the second commit on the same camera resolves
+   to an exact label, so `lodChanged` is true and `planCommit` calls it a swap.
+2. **A full-cover swap is not a 1500 ms operation.** The measured one is 16
+   cells / 1077 features of `delft.fcb`.
+3. **The timeout path returned before recording anything.** `_lastLod`,
+   `_level` and `_lastCommit` are written only at the end of a _successful_
+   commit, so the next settle recomputed the identical doomed swap. Every
+   camera-driven commit from then on died on the deadline: the layer
+   **livelocked**.
+
+That is the whole report. The LoD half too: `onLodChanged` is the one path that
+forces a commit whose cover the worker has usually already decoded, so it can
+beat the deadline, succeed, and finally write `_lastLod` — the layer "loads
+once" and then sticks again at the next level change.
+
+`CLAUDE.md` had this half-recorded as a tuning note ("on a SwiftShader host the
+first post-fit commit blows the deadline **and recovers on the next settle**").
+It does not recover. There is no next settle that differs.
+
+### Fix
+
+**The swap deadline is removed** (`LEVEL_SWAP_TIMEOUT_MS`, its `Promise.race`,
+its cancel/evict/rollback branch and its error status). It could not be repaired
+by tuning:
+
+- Its failure mode, "keep the previous level", was **visually identical to
+  simply waiting** — `commitSwap` runs only after the fetch resolves, so the old
+  level is on screen for the duration either way. The deadline bought nothing
+  and cost convergence.
+- Cancellation was never its job anyway: `abortInFlight()` fires on the first
+  camera event of the next gesture, bumps the worker epoch, and makes the
+  in-flight result both cancelled at the worker and unadoptable here
+  (`isStale`). That is the mechanism built for "the user has moved on", and it
+  is untouched.
+
+One adjacent defect found while verifying the LoD half in the browser and fixed
+with it: a streaming layer's **manual** LoD `<select>` was reading
+`Layer.availableLods`, which is derived from `Layer.model` — an empty stub for a
+streaming layer — so it offered `All` and nothing else, i.e. a manual mode with
+no LoD to pin. It now reads `streamStore.ladder`, the same learned list the Auto
+read-out beside it already used.
+
+### Tests
+
+- `navara-flatcitybuf/tests/streamLayer.test.ts` — _"a swap fetch slower than
+  the retired 1500 ms deadline still commits, so the layer cannot livelock"_:
+  commit 1 fetches under `lod: null`, the ladder is learned, commit 2 is the
+  swap and is delayed to 1900 ms; it must fetch under `"1.2"`, be adopted, and
+  **converge** (commit 3 from the same camera is an ordinary hysteresis skip,
+  not a third doomed swap). Verified to FAIL against the pre-fix source
+  (`1 failed | 36 passed`) and pass after.
+- Same file — _"a slow FIRST fetch still commits"_, the M7.5 auto-fit case, kept.
+- `navara-flatcitybuf/tests/settleController.test.ts` — _"commits ONCE for a
+  multi-notch wheel zoom, after the last notch"_, pinning the newly measured
+  burst shape: four notches, each a full burst 250 ms apart, produce exactly one
+  `onSettle` and one `onFirstChange`.
+- `tests/unit/ui/sidebar/LodSelector.test.tsx` — _"offers the LEARNED ladder,
+  not the layer store's empty availableLods"_.
+
+### Browser verification (post-fix, same driver and fixture)
+
+| Step                          | `handle.version` | resident                | outcome                                                            |
+| ----------------------------- | ---------------- | ----------------------- | ------------------------------------------------------------------ |
+| auto-fit settle               | 1                | 16 cells / 217 777 tris | baseline (fetched under `lod: all`)                                |
+| **wheel zoom, 4 notches**     | **1 → 2**        | 16 cells / 39 152 tris  | swap completed, `status idle`, no error — used to be `error`       |
+| **drag-pan**                  | **2 → 3**        | 12 cells / level 3      | new cover fetched (`Objects 2155 → 846`, the pan leaves the file)  |
+| **LoD switch to 2.2 (UI)**    | **1 → 2**        | 217 777 → 109 073 tris  | manual select now offers `0 / 1.2 / 1.3 / 2.2`                     |
+| **`setCamera` restore (C20)** | **3 → 3**        | unchanged               | only `view:idle` emitted, **no commit** — the property still holds |
+| **wheel zoom after restore**  | **3 → 4**        | level 2 / 36 048 tris   | organic movement still commits after a programmatic one            |
+
+Zero page errors and zero console exceptions across every session (only the
+host's known `favicon.ico`, DuckDB-extension and missing-Google-key noise).
+Screenshots: `docs/superpowers/research/assets/2026-08-05-fcb-camera-0{1..5}-*.png`.
+
+### Known limits / follow-ups (wave 3)
+
+- **A layer still fetches its first cover twice.** Commit 1 has no ladder, so it
+  pulls every LoD (217 777 triangles for 1077 features — every LoD stacked, and
+  visibly so); commit 2 swaps to the resolved label. The FCB header carries no
+  LoD list, so the ladder can only be learned from cells. Seeding it from a
+  cheap first probe would remove both the wasted fetch and the stacked-LoD first
+  frame; it is a worker-protocol change and was left out of this fix.
+- **`SETTLE_MS = 350` vs `idleThreshold = 100`.** `idle` flushes an armed
+  debounce, so on fast hardware a commit can start ~100 ms after `moveend`,
+  while the engine may still emit a trailing `move` — which reopens a burst and
+  calls `abortInFlight()` on the commit that just started. It self-corrects (the
+  following `moveend` re-arms), and it was not observed on this host, but it is
+  the next thing to look at if "sometimes needs a second nudge" is ever reported.
+- **Frame rate still not representative.** Every measurement here is from a
+  GPU-less SwiftShader host at ~5 fps. The shapes measured (burst structure, swap
+  livelock, restore-no-commit) are frame-rate independent; the timings are not.
