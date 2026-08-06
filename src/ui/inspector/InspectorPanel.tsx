@@ -6,9 +6,9 @@
  * Tabs: Object, Surfaces, Analysis, Rules, Stats.
  *
  * There is no Solar tab: the scene clock, the seasonal presets and the sun
- * readout are all scene-wide configuration, so they live in the toolbar's
- * solar cluster (`ui/toolbar/SolarControls.tsx` + `SolarPresetMenu.tsx`).
- * This panel is about the current selection.
+ * readout are all scene-wide configuration, so they live outside this panel —
+ * all of it in `ui/toolbar/SolarMenu.tsx`, one popover off the header. This
+ * panel is about the current selection.
  */
 
 import { useState } from "react";
@@ -21,6 +21,7 @@ import type {
 import type { Selection } from "../../domain/selection/types";
 import { SURFACE_COLOR_HEX, computeFootprintArea } from "@cityjson/navara-core";
 import { useLayerStore } from "../../features/layers/layerStore";
+import { resolveInheritedAttributes } from "../../domain/citymodel/inheritedAttributes";
 import { useStreamStore } from "../../features/streaming/streamStore";
 import { getResidentModel } from "../../features/streaming/residentModel";
 import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
@@ -70,12 +71,22 @@ interface ObjectDisplayData {
   readonly volumeCuM: number | null;
 }
 
-function displayDataFromObject(object: CityObject): ObjectDisplayData {
+/**
+ * @param objects the layer's whole object map, so a child can inherit its
+ * parent's attributes. In CityJSON the geometry and the semantics are usually
+ * on DIFFERENT objects — a picked `BuildingPart` has none of its own — so
+ * without this every building in the Delft dataset read as attribute-less.
+ * See `domain/citymodel/inheritedAttributes.ts`.
+ */
+function displayDataFromObject(
+  object: CityObject,
+  objects: Readonly<Record<string, CityObject>>,
+): ObjectDisplayData {
   return {
     id: object.id,
     objectType: object.objectType,
     lod: object.lod,
-    attributes: object.attributes,
+    attributes: resolveInheritedAttributes(objects, object).attributes,
     children: object.children,
     parents: object.parents,
     surfaceCount: object.surfaces.length,
@@ -88,12 +99,15 @@ function displayDataFromObject(object: CityObject): ObjectDisplayData {
 
 function displayDataFromRecord(
   record: ResidentObjectRecord,
+  records: Readonly<Record<string, ResidentObjectRecord>>,
 ): ObjectDisplayData {
   return {
     id: record.id,
     objectType: record.objectType,
     lod: record.lod,
-    attributes: record.attributes,
+    // Streaming splits Building/BuildingPart exactly as the static path does,
+    // so it needs the same inheritance — see displayDataFromObject.
+    attributes: resolveInheritedAttributes(records, record).attributes,
     children: record.children,
     parents: record.parents,
     surfaceCount: record.surfaceCount,
@@ -152,7 +166,11 @@ export function InspectorPanel({
     if (residentModel && selections.length > 0) {
       for (const sel of selections) {
         const record = residentModel.objects[sel.objectId];
-        if (record) selectedObjectsData.push(displayDataFromRecord(record));
+        if (record) {
+          selectedObjectsData.push(
+            displayDataFromRecord(record, residentModel.objects),
+          );
+        }
       }
     }
     if (!isMultiSelect && selection && residentModel) {
@@ -164,7 +182,9 @@ export function InspectorPanel({
     if (model && selections.length > 0) {
       for (const sel of selections) {
         const obj = model.objects[sel.objectId];
-        if (obj) selectedObjectsData.push(displayDataFromObject(obj));
+        if (obj) {
+          selectedObjectsData.push(displayDataFromObject(obj, model.objects));
+        }
       }
     }
     if (!isMultiSelect && selection && model) {
