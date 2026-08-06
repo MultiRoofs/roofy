@@ -5,7 +5,7 @@
  * button.
  *
  * EVERY control here drives live engine state — a `DefaultPlugin`
- * photoreal-scene handle, a `view.addEffect` pass, `view.addLight`,
+ * photoreal-scene handle, a `view.addEffect` pass,
  * `view.toneMappingExposure`, or a source/layer pair. That is the whole point
  * of this file's second pass: it previously carried "City Shadows", "Double
  * Sided" and "City Material", none of which was read by anything, so a third
@@ -14,12 +14,14 @@
  * `@cityjson/navara-cityjson`, not in the app (see `renderDebugStore.ts`).
  */
 
-import { useAtmosphereStore } from "../../features/atmosphere/atmosphereStore";
+import {
+  useAtmosphereStore,
+  type Precipitation,
+} from "../../features/atmosphere/atmosphereStore";
 import { useTilesStore } from "../../features/tiles/tilesStore";
 import { useBasemapStore } from "../../features/basemap/basemapStore";
 import { BASEMAPS, type BasemapId } from "../../scene/basemaps";
 import {
-  AMBIENT_RANGE,
   EXPOSURE_RANGE,
   useRenderDebugStore,
 } from "../../features/debug/renderDebugStore";
@@ -33,6 +35,8 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
   const setCoverage = useAtmosphereStore((s) => s.setCoverage);
   const lensFlareEnabled = useAtmosphereStore((s) => s.lensFlareEnabled);
   const setLensFlareEnabled = useAtmosphereStore((s) => s.setLensFlareEnabled);
+  const precipitation = useAtmosphereStore((s) => s.precipitation);
+  const setPrecipitation = useAtmosphereStore((s) => s.setPrecipitation);
   const tilesEnabled = useTilesStore((s) => s.enabled);
   const setTilesEnabled = useTilesStore((s) => s.setEnabled);
   const basemapId = useBasemapStore((s) => s.basemapId);
@@ -57,8 +61,12 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
   );
   const exposure = useRenderDebugStore((s) => s.exposure);
   const setExposure = useRenderDebugStore((s) => s.setExposure);
-  const ambientIntensity = useRenderDebugStore((s) => s.ambientIntensity);
-  const setAmbientIntensity = useRenderDebugStore((s) => s.setAmbientIntensity);
+  const streamQueryBoxEnabled = useRenderDebugStore(
+    (s) => s.streamQueryBoxEnabled,
+  );
+  const setStreamQueryBoxEnabled = useRenderDebugStore(
+    (s) => s.setStreamQueryBoxEnabled,
+  );
   const resetRenderDebug = useRenderDebugStore((s) => s.reset);
   const resetAtmosphere = useAtmosphereStore((s) => s.reset);
 
@@ -112,22 +120,10 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
               onChange={(e) => setExposure(Number(e.target.value))}
             />
           </div>
-          <div className="attr-row">
-            <span className="attr-key">Ambient Light</span>
-            <span className="attr-value">{ambientIntensity.toFixed(2)}</span>
-          </div>
-          <div className="advanced-slider-row">
-            <input
-              type="range"
-              className="advanced-slider"
-              aria-label="Ambient Light"
-              min={AMBIENT_RANGE.min}
-              max={AMBIENT_RANGE.max}
-              step={AMBIENT_RANGE.step}
-              value={ambientIntensity}
-              onChange={(e) => setAmbientIntensity(Number(e.target.value))}
-            />
-          </div>
+          {/* No ambient-light slider: the scene is lit by the physical
+              atmosphere (the aerial-perspective pass in `irradiance` mode), not
+              by scene lights, so a flat fill term is energy on top of an
+              already-calibrated image. Exposure is the one brightness knob. */}
           <div className="advanced-toggle-row">
             <span>Sun Shadows</span>
             <input
@@ -200,6 +196,26 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
               onChange={(e) => setCoverage(Number(e.target.value))}
             />
           </div>
+          {/* Rain and snow are alternatives, not independent switches: Navara
+              models each as its own mesh and it makes no sense to ask for
+              both, so this is one picker rather than two checkboxes. Needs a
+              placed layer to fall on — with nothing loaded it selects but
+              shows nothing. */}
+          <div className="advanced-toggle-row advanced-select-row">
+            <label htmlFor="advanced-precipitation">Precipitation</label>
+            <select
+              id="advanced-precipitation"
+              className="advanced-select"
+              value={precipitation}
+              onChange={(e) =>
+                setPrecipitation(e.target.value as Precipitation)
+              }
+            >
+              <option value="none">None</option>
+              <option value="rain">Rain</option>
+              <option value="snow">Snow</option>
+            </select>
+          </div>
         </div>
 
         {/* Backdrop */}
@@ -228,6 +244,26 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
                 </option>
               ))}
             </select>
+          </div>
+        </div>
+
+        {/* Diagnostics — switches that reveal how the viewer WORKS rather than
+            changing how the scene looks. Their own section so they do not read
+            as scene furniture sitting among the render settings. They are part
+            of `renderDebugStore`, so "Reset render settings" does switch them
+            back off, which is the right default for a debug overlay. */}
+        <div className="attr-section">
+          <div className="attr-section-title">Diagnostics</div>
+          <div className="advanced-toggle-row">
+            <span title="Outline the ground rectangle each streaming (.fcb) layer's last commit actually queried, and show its coordinates.">
+              Streaming Fetch Box
+            </span>
+            <input
+              type="checkbox"
+              aria-label="Streaming Fetch Box"
+              checked={streamQueryBoxEnabled}
+              onChange={(e) => setStreamQueryBoxEnabled(e.target.checked)}
+            />
           </div>
         </div>
       </div>

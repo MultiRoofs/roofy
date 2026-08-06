@@ -87,8 +87,17 @@ export const BASEMAPS: readonly BasemapOption[] = [
   },
 ] as const;
 
-/** What a fresh session shows: imagery, so the globe is never blank. */
-export const DEFAULT_BASEMAP_ID: BasemapId = "osm";
+/**
+ * What a fresh session shows: imagery, so the globe is never blank.
+ *
+ * SATELLITE, not the cartographic OSM sheet. Under the physical-atmosphere
+ * calibration the globe is unlit albedo lit by the aerial-perspective pass at
+ * exposure ~10, and OSM's tiles are essentially white paper: they blow out
+ * where photographic imagery reads naturally (measured — see
+ * docs/superpowers/research/2026-08-04-overbright-scene-diagnosis.md). OSM and
+ * Positron stay in the picker; they are just not what a fresh session opens on.
+ */
+export const DEFAULT_BASEMAP_ID: BasemapId = "esri-imagery";
 
 /** The option for an id, falling back to the default for anything unknown (a
  *  stale share link, a hand-edited snapshot). Never throws — a bad id must not

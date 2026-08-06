@@ -38,15 +38,41 @@ export interface GoogleTilesConfig {
 }
 
 /**
+ * The prefix dotenvx writes in front of a value it has encrypted.
+ *
+ * `.env` in this repo is dotenvx-encrypted, so `VITE_GOOGLE_MAPS_API_KEY`
+ * reaches a build that did not decrypt it as this CIPHERTEXT rather than a
+ * key. Vite has no idea it is encrypted and inlines it verbatim, so the app
+ * used to hand Google a nonsense key and every tile request 400'd — silently,
+ * because a failed tile is a backdrop that "just isn't there yet". Run the
+ * dev/build commands through `dotenvx run` (that is what the `dev`, `build`
+ * and `preview` scripts do) so the real key is decrypted from `.env.keys`.
+ */
+const ENCRYPTED_VALUE_PREFIX = "encrypted:";
+
+/**
  * The source+layer pair for Google's photorealistic tileset, or `null` when no
- * API key is configured — the viewer then runs tile-free over Navara's default
- * photoreal scene rather than pointing the engine at a URL that 401s on every
- * tile request.
+ * usable API key is configured — the viewer then runs tile-free over Navara's
+ * default photoreal scene rather than pointing the engine at a URL that 400s
+ * on every tile request.
+ *
+ * "Usable" is why the second check exists: a still-encrypted value is worse
+ * than no value at all, because it looks like a key everywhere except at
+ * Google's door. Treating it as missing turns a silent, permanent failure into
+ * one console warning that names the cause.
  */
 export function googleTilesConfig(
   apiKey: string | undefined,
 ): GoogleTilesConfig | null {
   if (!apiKey) return null;
+  if (apiKey.startsWith(ENCRYPTED_VALUE_PREFIX)) {
+    console.warn(
+      "[googleTiles] VITE_GOOGLE_MAPS_API_KEY is still dotenvx-encrypted, so " +
+        "Google's Photorealistic 3D Tiles are disabled. Run the app through " +
+        "`dotenvx run` (npm run dev / npm run build already do) with `.env.keys` present.",
+    );
+    return null;
+  }
   return {
     source: {
       type: "3d-tiles",

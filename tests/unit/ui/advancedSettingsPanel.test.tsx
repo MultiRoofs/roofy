@@ -21,12 +21,27 @@ describe("AdvancedSettingsPanel", () => {
     useAtmosphereStore.setState({
       cloudCoverage: 0.3,
       lensFlareEnabled: true,
+      precipitation: "none",
     });
     useTilesStore.setState({ enabled: false });
     useBasemapStore.setState({ basemapId: "osm" });
     useRenderDebugStore.setState({
       ...DEFAULT_RENDER_DEBUG_STATE,
     });
+  });
+
+  it("picks precipitation, which is one choice rather than two switches", () => {
+    render(<AdvancedSettingsPanel onClose={() => {}} />);
+    const picker = screen.getByLabelText("Precipitation");
+    expect((picker as HTMLSelectElement).value).toBe("none");
+    fireEvent.change(picker, { target: { value: "rain" } });
+    expect(useAtmosphereStore.getState().precipitation).toBe("rain");
+    // Selecting snow REPLACES rain: Navara models them as two meshes and
+    // asking for both at once is not a state the scene can be in.
+    fireEvent.change(picker, { target: { value: "snow" } });
+    expect(useAtmosphereStore.getState().precipitation).toBe("snow");
+    fireEvent.change(picker, { target: { value: "none" } });
+    expect(useAtmosphereStore.getState().precipitation).toBe("none");
   });
 
   it("updates the render stores from the panel controls", () => {
@@ -39,23 +54,34 @@ describe("AdvancedSettingsPanel", () => {
     fireEvent.change(screen.getByLabelText("Exposure"), {
       target: { value: "14" },
     });
-    fireEvent.change(screen.getByLabelText("Ambient Light"), {
-      target: { value: "1.2" },
-    });
     // Last, because it disables the three post-processing checkboxes above.
     fireEvent.click(screen.getByLabelText("Post Processing"));
     fireEvent.click(screen.getByLabelText("Google 3D Tiles"));
 
     expect(useRenderDebugStore.getState()).toMatchObject({
       postProcessingEnabled: false,
-      cloudsEnabled: false,
+      // Clouds default OFF now, so the one click above turns them ON — the
+      // assertion is "the control wrote to the store", not "everything is off".
+      cloudsEnabled: true,
       aerialPerspectiveEnabled: false,
       sunShadowsEnabled: false,
       exposure: 14,
-      ambientIntensity: 1.2,
     });
     expect(useAtmosphereStore.getState().lensFlareEnabled).toBe(false);
     expect(useTilesStore.getState().enabled).toBe(true);
+  });
+
+  it("toggles the streaming fetch-box diagnostic, which starts off", () => {
+    render(<AdvancedSettingsPanel onClose={() => {}} />);
+    const toggle = screen.getByLabelText("Streaming Fetch Box");
+    expect(toggle).not.toBeChecked();
+    // Independent of the post chain: the outline is a mesh, not a pass.
+    expect(toggle).not.toBeDisabled();
+
+    fireEvent.click(toggle);
+    expect(useRenderDebugStore.getState().streamQueryBoxEnabled).toBe(true);
+    fireEvent.click(toggle);
+    expect(useRenderDebugStore.getState().streamQueryBoxEnabled).toBe(false);
   });
 
   it("offers no control without an engine counterpart", () => {
@@ -64,7 +90,18 @@ describe("AdvancedSettingsPanel", () => {
     // The three that were pure state until this pass. They are gone rather
     // than wired: their counterpart is the city mesh's three.js material,
     // which lives in @cityjson/navara-cityjson, not in the app.
-    for (const gone of ["City Shadows", "Double Sided", "City Material"]) {
+    //
+    // "Ambient Light" joins them for the opposite reason: it HAD a counterpart
+    // (`view.addLight({ ambient })`), but it belonged to the scene-lights
+    // calibration the scene no longer uses — the aerial-perspective pass lights
+    // the frame from the physical atmosphere now, so a flat fill term is pure
+    // over-exposure.
+    for (const gone of [
+      "City Shadows",
+      "Double Sided",
+      "City Material",
+      "Ambient Light",
+    ]) {
       expect(screen.queryByLabelText(gone)).toBeNull();
     }
   });
@@ -98,7 +135,6 @@ describe("AdvancedSettingsPanel", () => {
       aerialPerspectiveEnabled: false,
       sunShadowsEnabled: false,
       exposure: 1,
-      ambientIntensity: 0,
     });
 
     render(<AdvancedSettingsPanel onClose={() => {}} />);

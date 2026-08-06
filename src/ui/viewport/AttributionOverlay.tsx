@@ -76,11 +76,22 @@ export interface AttributionOverlayProps {
    * what the user asked for. A basemap the engine refused must not be credited.
    */
   readonly basemapAttribution?: readonly string[];
+  /**
+   * The terrain service's credit (`TERRAIN_ATTRIBUTION`), or empty when the
+   * engine has no terrain layer.
+   *
+   * Deliberately separate from the geoid lines even though both come from
+   * Re:Earth Terrain: the geoid is sampled unconditionally, the relief is a
+   * layer that can fail to load, and only what is actually on screen may be
+   * credited.
+   */
+  readonly terrainAttribution?: readonly string[];
 }
 
 export function AttributionOverlay({
   googleTiles,
   basemapAttribution = [],
+  terrainAttribution = [],
 }: AttributionOverlayProps): ReactElement {
   // DEDUPED, in source order. The geoid line already credits OpenStreetMap
   // (the undulation tiles are OSM-derived), so an OSM or CARTO basemap would
@@ -90,6 +101,7 @@ export function AttributionOverlay({
   const lines = [
     ...(googleTiles ? ["Imagery © Google"] : []),
     ...basemapAttribution,
+    ...terrainAttribution,
     ...GEOID_ATTRIBUTION,
   ];
   return (
