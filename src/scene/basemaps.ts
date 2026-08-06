@@ -22,7 +22,12 @@
  */
 
 /** The stable id persisted in the store and shown in the picker. */
-export type BasemapId = "none" | "osm" | "esri-imagery" | "carto-positron";
+export type BasemapId =
+  | "none"
+  | "osm"
+  | "esri-imagery"
+  | "carto-positron"
+  | "carto-dark";
 
 export interface BasemapSource {
   readonly type: "raster-tile";
@@ -81,6 +86,20 @@ export const BASEMAPS: readonly BasemapOption[] = [
     source: {
       type: "raster-tile",
       url: "https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+      maxZoom: 19,
+    },
+    attribution: ["© CARTO", "© OpenStreetMap contributors"],
+  },
+  {
+    id: "carto-dark",
+    label: "CartoDB Dark Matter",
+    // Positron's twin — same service, same tile scheme, the `dark_all` style.
+    // A normal option in its own right, and the sheet the CYBER theme is drawn
+    // on: it keeps STREETS legible under a night look, where "none" leaves a
+    // black void with buildings floating in it.
+    source: {
+      type: "raster-tile",
+      url: "https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
       maxZoom: 19,
     },
     attribution: ["© CARTO", "© OpenStreetMap contributors"],

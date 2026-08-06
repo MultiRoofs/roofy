@@ -493,6 +493,75 @@ interface ThemeMesh {
   delete: () => void;
 }
 
+/** A post effect a theme owns, on the same add-once-then-toggle contract. */
+interface ThemeEffect {
+  visible: boolean;
+  update: (updates: unknown) => void;
+  delete: () => void;
+}
+
+/**
+ * One neon light in the air, in GEODETIC terms.
+ *
+ * Deliberately not ECEF: the layout below is pure arithmetic that a Node test
+ * can run, and the engine's `geodeticToVector3` is applied at the last moment
+ * by the effect that pushes them.
+ */
+interface ThemeFogLightSite {
+  readonly lng: number;
+  readonly lat: number;
+  readonly height: number;
+  readonly color: number;
+  readonly intensity: number;
+  readonly radius: number;
+}
+
+/**
+ * Scatter a theme's fog lights over the bounds of what is loaded — the same
+ * set every time, for the same inputs.
+ *
+ * DETERMINISM is the whole point of the arithmetic here. `Math.random()` per
+ * render would make the neon crawl around the city on every unrelated store
+ * change, and a "shuffle once and remember" scheme would have to survive the
+ * engine being torn down and rebuilt. Instead the position of light `i` is the
+ * i-th point of the R2 low-discrepancy sequence (the 2-D generalisation of the
+ * golden-ratio sequence): a closed form in `i` alone, and far more evenly
+ * spread over the rectangle than a random sample of the same size — which
+ * matters at 14 lights, where random clumping is the normal case rather than
+ * the exception.
+ *
+ * Colours cycle through the palette by index and intensity walks a third
+ * irrational, so neighbouring lights differ in both without any state.
+ */
+const R2_ALPHA_X = 0.7548776662466927;
+const R2_ALPHA_Y = 0.5698402909980532;
+const GOLDEN_FRACTION = 0.6180339887498949;
+
+function themeFogLightSites(
+  spec: NonNullable<ThemeEnvironment["fogLights"]>,
+  bounds: GeodeticBounds,
+): ThemeFogLightSite[] {
+  const sites: ThemeFogLightSite[] = [];
+  const [lo, hi] = spec.intensityRange;
+  const height = bounds.minHeight + spec.heightM;
+  for (let i = 0; i < spec.count; i += 1) {
+    // `i + 1`, so the first light is not the sequence's degenerate (0.5, 0.5)
+    // centre point — which would sit a light exactly on the camera's fit target.
+    const u = (0.5 + R2_ALPHA_X * (i + 1)) % 1;
+    const v = (0.5 + R2_ALPHA_Y * (i + 1)) % 1;
+    const t = (0.5 + GOLDEN_FRACTION * (i + 1)) % 1;
+    sites.push({
+      lng: bounds.west + u * (bounds.east - bounds.west),
+      lat: bounds.south + v * (bounds.north - bounds.south),
+      height,
+      color: spec.colors[i % spec.colors.length]!,
+      intensity: lo + t * (hi - lo),
+      radius: spec.radius,
+    });
+  }
+  return sites;
+}
+
 /**
  * What the theme layer has to REMEMBER between switches.
  *
@@ -505,6 +574,12 @@ interface ThemeMesh {
 interface ThemeEnvironmentState {
   skyBox: ThemeMesh | null;
   glowGlobe: ThemeMesh | null;
+  /** The volumetric `fogLight` pass, and the light set it currently holds.
+   *  Added on first need and `visible`-toggled thereafter, exactly like the two
+   *  meshes above and for the same reason (Known Issue (f)); `key` is what
+   *  keeps an unrelated re-render from re-uploading identical lights. */
+  fogLight: ThemeEffect | null;
+  fogLightKey: string | null;
   /** Captured once, immediately before the first override. */
   priorGlobeColor: number | undefined;
   /** True while a non-photoreal environment is in force. */
@@ -515,6 +590,8 @@ function createThemeEnvironmentState(): ThemeEnvironmentState {
   return {
     skyBox: null,
     glowGlobe: null,
+    fogLight: null,
+    fogLightKey: null,
     priorGlobeColor: undefined,
     applied: false,
   };
@@ -2272,6 +2349,103 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       () => (latLon === null ? null : siteEnuFrame(latLon)),
       [latLon],
     );
+
+    // --- The scene theme's volumetric neon (`fogLight`) ---
+    //
+    // The DIFFUSION half of the cyber look: point lights whose glow is
+    // integrated along the view ray, so the neon bleeds into the air instead of
+    // stopping at the geometry. It lives apart from `applyThemeEnvironment`
+    // because it is the one theme lever that depends on the DATA — the lights
+    // are scattered over the bounds of what is loaded, so it has to be declared
+    // after `boundsOf` and re-run when the layers change.
+    //
+    // Add-once-then-toggle, exactly like the theme's two meshes: `visible` is
+    // the composer's enable flag, while a delete/re-add per theme switch would
+    // pay for the pass (and leak it — Known Issue (f) is about effects
+    // specifically).
+    //
+    // With nothing loaded there is nothing to light: the effect is never
+    // created in the first place, and an existing one is hidden.
+    useEffect(() => {
+      const view = viewRef.current;
+      if (!engineReady || view === null) return;
+      const state = themeEnvRef.current;
+      const spec = themePolicy.environment.fogLights;
+      const bounds = spec === null ? null : boundsOf();
+      const existing = state.fogLight;
+
+      if (spec === null || bounds === null) {
+        if (existing === null) return;
+        applyToEngine("the theme's fog lights", () => {
+          existing.visible = false;
+        });
+        return;
+      }
+
+      const sites = themeFogLightSites(spec, bounds);
+      const key = `${spec.count}:${spec.radius}:${spec.fogDensity}:${bounds.west},${bounds.south},${bounds.east},${bounds.north},${bounds.minHeight}`;
+      let lights: unknown[];
+      try {
+        lights = sites.map((site) => ({
+          position: geodeticToVector3({
+            lng: degreeToRadian(site.lng),
+            lat: degreeToRadian(site.lat),
+            height: site.height,
+          }),
+          color: site.color,
+          intensity: site.intensity,
+          radius: site.radius,
+        }));
+      } catch (error) {
+        console.error(
+          "NavaraViewport: the theme's fog lights could not be placed; the scene renders without them.",
+          error,
+        );
+        return;
+      }
+
+      // `useSurfaceLighting: false`, deliberately. The pass's surface term
+      // reads the MRT normal attachment, and our city meshes render in
+      // `scenes.opaque` without writing it (the scene-themes design's engine
+      // audit) — so at exactly the pixels this look is about, that term would
+      // be lit by whatever the globe last wrote there. The volumetric term
+      // needs no normals at all, and it is the one we came for.
+      const config = {
+        fogLight: {
+          lights,
+          fogDensity: spec.fogDensity,
+          useSurfaceLighting: false,
+        },
+      };
+
+      if (existing === null) {
+        try {
+          state.fogLight = view.addEffect(
+            config as never,
+          ) as unknown as ThemeEffect;
+          state.fogLightKey = key;
+        } catch (error) {
+          // Neon in the air is decoration, like the clouds: a backend that
+          // cannot afford the pass must still leave a working viewer.
+          console.error(
+            "NavaraViewport: the theme's fog-light effect could not be added; the scene renders without it.",
+            error,
+          );
+        }
+        return;
+      }
+
+      applyToEngine("the theme's fog lights", () => {
+        // Only when the light set actually moved. This effect re-runs on every
+        // layer-store edit, and re-uploading 14 identical lights rebuilds the
+        // pass's light textures for a rename.
+        if (state.fogLightKey !== key) {
+          existing.update(config);
+          state.fogLightKey = key;
+        }
+        existing.visible = true;
+      });
+    }, [engineReady, themePolicy, boundsOf, layers, streamIds]);
 
     // --- Precipitation ---
     //

@@ -11,12 +11,13 @@ import {
 } from "../../../src/scene/basemaps";
 
 describe("basemaps", () => {
-  it("offers None plus the three tile services, with stable ids", () => {
+  it("offers None plus the four tile services, with stable ids", () => {
     expect(BASEMAPS.map((b) => b.id)).toEqual([
       "none",
       "osm",
       "esri-imagery",
       "carto-positron",
+      "carto-dark",
     ]);
   });
 
@@ -67,6 +68,23 @@ describe("basemaps", () => {
       "© CARTO",
       "© OpenStreetMap contributors",
     ]);
+    // Dark Matter is the same service under a different style, so it carries
+    // exactly the same pair.
+    expect(basemapById("carto-dark").attribution).toEqual([
+      "© CARTO",
+      "© OpenStreetMap contributors",
+    ]);
+  });
+
+  it("gives Dark Matter CARTO's dark style, not Positron's light one", () => {
+    // The two differ ONLY in the style segment of the path, which is exactly
+    // the kind of copy-paste a test should hold still: the cyber theme picks
+    // this entry by id and would silently render a white sheet at night.
+    const dark = basemapById("carto-dark").source!;
+    expect(dark.url).toBe(
+      "https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+    );
+    expect(basemapById("carto-positron").source!.url).toContain("light_all");
   });
 
   it("falls back to the default for an unknown id rather than throwing", () => {

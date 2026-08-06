@@ -39,6 +39,7 @@ describe("sceneThemePolicy", () => {
     expect(env.starsBoost).toBeNull();
     expect(env.skyBoxColors).toBeNull();
     expect(env.glowGlobe).toBeNull();
+    expect(env.fogLights).toBeNull();
     expect(env.globeWireframe).toBeNull();
     expect(env.globeColor).toBeNull();
     expect(env.toneMappingMode).toBeNull();
@@ -96,10 +97,11 @@ describe("sceneThemePolicy", () => {
   });
 
   it("overrides the basemap where the theme needs one, and only there", () => {
-    // Cartoon wants a pastel sheet under flat-coloured buildings; the two dark
-    // themes want nothing at all under theirs.
+    // Cartoon wants a pastel sheet under flat-coloured buildings; cyber wants
+    // CARTO's dark sheet, so the night city has STREETS under it rather than a
+    // black void; wireframe wants nothing at all under its drawing.
     expect(sceneThemePolicy("cartoon").basemapOverride).toBe("carto-positron");
-    expect(sceneThemePolicy("cyber").basemapOverride).toBe("none");
+    expect(sceneThemePolicy("cyber").basemapOverride).toBe("carto-dark");
     expect(sceneThemePolicy("wireframe").basemapOverride).toBe("none");
   });
 
@@ -128,10 +130,75 @@ describe("sceneThemePolicy", () => {
     expect(sceneThemePolicy("wireframe").environment.glowGlobe).toBeNull();
   });
 
-  it("gives cartoon the flat sky box, and nobody else", () => {
+  it("gives the two coloured-backdrop themes a flat sky box, and wireframe none", () => {
     expect(sceneThemePolicy("cartoon").environment.skyBoxColors).not.toBeNull();
-    expect(sceneThemePolicy("cyber").environment.skyBoxColors).toBeNull();
+    // Cyber's box is what makes its night deep BLUE instead of the clear
+    // colour's black; wireframe's drawing wants the black.
+    expect(sceneThemePolicy("cyber").environment.skyBoxColors).not.toBeNull();
     expect(sceneThemePolicy("wireframe").environment.skyBoxColors).toBeNull();
+  });
+
+  it("paints cyber's night blue, not black — sky box and fill alike", () => {
+    // The look is neon-noir PHOTOGRAPHY: a deep blue ambient the eye reads as
+    // air. Both halves are pinned by CHANNEL DOMINANCE rather than by exact
+    // values, which are browser-tuning outcomes: blue must lead, and the fill
+    // must be far enough off zero to read as a colour rather than a hole.
+    const env = sceneThemePolicy("cyber").environment;
+    const sky = env.skyBoxColors!;
+    for (const hex of [sky.dayColor, sky.nightColor, sky.sunColor]) {
+      const [r, g, b] = [(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff];
+      expect(b).toBeGreaterThan(r);
+      expect(b).toBeGreaterThan(g);
+    }
+
+    const tint = sceneThemePolicy("cyber").meshStyle.tintRGB!;
+    expect(tint[2]).toBeGreaterThan(tint[0]);
+    expect(tint[2]).toBeGreaterThan(tint[1]);
+    expect(tint[2]).toBeGreaterThan(0.15);
+  });
+
+  it("gives cyber HOT MAGENTA edges against the cyan globe rim", () => {
+    // The reference's tension is magenta-vs-cyan: the lines carry the pink and
+    // the Fresnel halo keeps the cyan. Pinned as dominance, not as numbers.
+    const cyber = sceneThemePolicy("cyber");
+    const hdr = cyber.meshStyle.edges!.hdr!;
+    expect(hdr[0]).toBeGreaterThan(hdr[1]);
+    expect(hdr[2]).toBeGreaterThan(hdr[1]);
+    // Genuinely HDR — the whole reason the line glows rather than being bright.
+    expect(hdr[0]).toBeGreaterThan(1);
+
+    const fallback = cyber.meshStyle.edges!.color;
+    const [r, g, b] = [
+      (fallback >> 16) & 0xff,
+      (fallback >> 8) & 0xff,
+      fallback & 0xff,
+    ];
+    expect(r).toBeGreaterThan(g);
+    expect(b).toBeGreaterThan(g);
+
+    const glow = cyber.environment.glowGlobe!.glowColor;
+    expect((glow & 0xff) > ((glow >> 16) & 0xff)).toBe(true);
+  });
+
+  it("gives cyber volumetric fog lights, and nobody else", () => {
+    // The DIFFUSION half of the look. Everything about it has to be usable by
+    // the viewport without a second guess: a positive count, at least one
+    // colour to cycle, and an ordered, non-negative intensity range.
+    const fog = sceneThemePolicy("cyber").environment.fogLights!;
+    expect(fog).not.toBeNull();
+    expect(fog.count).toBeGreaterThan(0);
+    expect(Number.isInteger(fog.count)).toBe(true);
+    expect(fog.colors.length).toBeGreaterThan(0);
+    const [lo, hi] = fog.intensityRange;
+    expect(lo).toBeGreaterThan(0);
+    expect(hi).toBeGreaterThanOrEqual(lo);
+    expect(fog.radius).toBeGreaterThan(0);
+    expect(fog.fogDensity).toBeGreaterThan(0);
+    expect(fog.heightM).toBeGreaterThan(0);
+
+    for (const theme of ["photoreal", "cartoon", "wireframe"] as const) {
+      expect(sceneThemePolicy(theme).environment.fogLights).toBeNull();
+    }
   });
 
   it("switches the lens flare off in every themed look", () => {
