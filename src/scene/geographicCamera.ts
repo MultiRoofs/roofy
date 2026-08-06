@@ -28,8 +28,10 @@ export interface GeographicCameraState {
   readonly roll: number;
 }
 
-/** Metres per degree of latitude (spherical approximation — fit maths only). */
-const METRES_PER_DEGREE_LAT = 111_320;
+/** Metres per degree of latitude (spherical approximation — fit and orbit
+ *  maths only). Shared with `cameraControls.ts`, whose zoom/tilt pivots have to
+ *  use the SAME approximation as the fit they are nudging away from. */
+export const METRES_PER_DEGREE_LAT = 111_320;
 /** Floor so a single small building does not put the camera inside the roof. */
 const MIN_VIEW_DISTANCE_M = 200;
 /** How many box diagonals away from the model the fit camera sits. */
@@ -178,6 +180,56 @@ export function boundsDiagonalMetres(bounds: GeodeticBounds): number {
   const dy = (bounds.north - bounds.south) * METRES_PER_DEGREE_LAT;
   const dz = bounds.maxHeight - bounds.minHeight;
   return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+/**
+ * Where an address-search result asks the camera to be flown, in the terms the
+ * viewport's `flyTo` takes: a point and a height. Orientation is deliberately
+ * absent — the active view mode decides that (a 2D plan view must not be
+ * tilted back to -60 just because someone searched for a street).
+ */
+export interface FlyToTarget {
+  readonly lng: number;
+  readonly lat: number;
+  /** Metres above the WGS84 ellipsoid. */
+  readonly heightM: number;
+}
+
+/** Height for a result with no extent — a house number, a POI: close enough to
+ *  see the building, far enough to see the street it is on. */
+export const DEFAULT_SEARCH_HEIGHT_M = 1500;
+/** A zero-area extent (a single node) must still be flown to from far enough
+ *  away to see something. */
+export const MIN_SEARCH_HEIGHT_M = 400;
+/** A country-sized extent is not a place to fly INTO; stop where the whole of
+ *  it is on screen. */
+export const MAX_SEARCH_HEIGHT_M = 50_000;
+
+/**
+ * How high to fly for a geocoder result, from its bounding box.
+ *
+ * The box arrives in PHOTON's order — `[minLng, maxLat, maxLng, minLat]`, which
+ * is not GeoJSON's — so it is unpacked by position here rather than passed on
+ * as a `GeodeticBounds`. The height is the box's ground diagonal, the same
+ * "size of the thing" {@link boundsDiagonalMetres} measures, clamped so neither
+ * a pinpoint nor a continent produces an unusable camera.
+ */
+export function cameraHeightForExtent(
+  extent?: readonly [number, number, number, number],
+): number {
+  if (extent === undefined || !extent.every((n) => Number.isFinite(n))) {
+    return DEFAULT_SEARCH_HEIGHT_M;
+  }
+  const [minLng, maxLat, maxLng, minLat] = extent;
+  const diagonal = boundsDiagonalMetres({
+    west: Math.min(minLng, maxLng),
+    east: Math.max(minLng, maxLng),
+    south: Math.min(minLat, maxLat),
+    north: Math.max(minLat, maxLat),
+    minHeight: 0,
+    maxHeight: 0,
+  });
+  return Math.min(Math.max(diagonal, MIN_SEARCH_HEIGHT_M), MAX_SEARCH_HEIGHT_M);
 }
 
 function centreLat(bounds: GeodeticBounds): number {

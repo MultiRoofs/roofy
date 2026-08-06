@@ -3,6 +3,10 @@ import {
   alignCameraForBounds,
   boundsDiagonalMetres,
   cameraForBounds,
+  cameraHeightForExtent,
+  DEFAULT_SEARCH_HEIGHT_M,
+  MAX_SEARCH_HEIGHT_M,
+  MIN_SEARCH_HEIGHT_M,
   unionGeodeticBounds,
   type GeographicCameraState,
 } from "../../../src/scene/geographicCamera";
@@ -342,5 +346,39 @@ describe("alignCameraForBounds", () => {
       expect(Math.abs(c.lat)).toBeLessThanOrEqual(90);
       expect(Number.isFinite(c.height)).toBe(true);
     }
+  });
+});
+
+/**
+ * The height an address-search result is flown to. Same spherical
+ * metres-per-degree approximation as the fit maths above, because it is the
+ * same question asked of a geocoder's bounding box instead of a model's.
+ */
+describe("cameraHeightForExtent", () => {
+  it("falls back to a street-level height when the result has no extent", () => {
+    expect(cameraHeightForExtent(undefined)).toBe(DEFAULT_SEARCH_HEIGHT_M);
+  });
+
+  it("scales with the size of the place", () => {
+    // Photon's own order: [minLng, maxLat, maxLng, minLat].
+    const city = cameraHeightForExtent([4.31, 52.04, 4.41, 51.98]);
+    const village = cameraHeightForExtent([4.35, 52.01, 4.36, 52.0]);
+    expect(city).toBeGreaterThan(village);
+    // A ~7 km diagonal city, framed from a height of that order.
+    expect(city).toBeGreaterThan(3_000);
+    expect(city).toBeLessThan(20_000);
+  });
+
+  it("clamps a pinpoint up and a country down, so a fly always lands usably", () => {
+    expect(cameraHeightForExtent([4.35, 52.0, 4.35, 52.0])).toBe(
+      MIN_SEARCH_HEIGHT_M,
+    );
+    expect(cameraHeightForExtent([-10, 60, 30, 35])).toBe(MAX_SEARCH_HEIGHT_M);
+  });
+
+  it("ignores an extent it cannot read", () => {
+    expect(cameraHeightForExtent([Number.NaN, 1, 2, 3])).toBe(
+      DEFAULT_SEARCH_HEIGHT_M,
+    );
   });
 });
