@@ -63,7 +63,46 @@ const defaultHttp: HttpClient = {
       text,
     };
   },
+
+  async fetchBytes(url: string) {
+    const response = await fetch(url);
+    const bytes = response.ok
+      ? new Uint8Array(await response.arrayBuffer())
+      : new Uint8Array();
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      bytes,
+    };
+  },
 };
+
+const GZIP_MAGIC_0 = 0x1f;
+const GZIP_MAGIC_1 = 0x8b;
+
+/**
+ * Gunzip when the payload carries gzip magic bytes (server sent the .gz file
+ * verbatim); pass through otherwise (server already decompressed via
+ * Content-Encoding, or the file was never gzipped).
+ */
+export async function decodeModelBytes(bytes: Uint8Array): Promise<string> {
+  if (
+    bytes.length > 2 &&
+    bytes[0] === GZIP_MAGIC_0 &&
+    bytes[1] === GZIP_MAGIC_1
+  ) {
+    // Response (not Blob) as the byte source: in tests the Response and
+    // DecompressionStream globals come from the same (Node) realm, whereas
+    // jsdom's Blob.stream() would brand-check-fail against Node's streams.
+    const body = new Response(bytes as BodyInit).body;
+    if (!body) return new TextDecoder().decode(bytes);
+    return await new Response(
+      body.pipeThrough(new DecompressionStream("gzip")),
+    ).text();
+  }
+  return new TextDecoder().decode(bytes);
+}
 
 /**
  * Load a city model from a remote URL.
@@ -74,6 +113,10 @@ const defaultHttp: HttpClient = {
  *    wired up to this entry point.)
  *  - .city.jsonl / .jsonl → CityJSONSeq (fetch + parse)
  *  - everything else → CityJSON (fetch + parse)
+ *
+ * The body is fetched as bytes and gunzipped when it carries gzip magic
+ * bytes, so `*.city.json.gz` assets work whether the server hands back the
+ * compressed file verbatim or already decompressed it via Content-Encoding.
  *
  * Accepts an optional HttpClient for platform abstraction (Tauri, testing).
  */
@@ -93,10 +136,10 @@ export async function loadFromUrl(
     ok: boolean;
     status: number;
     statusText: string;
-    text: string;
+    bytes: Uint8Array;
   };
   try {
-    response = await http.fetchText(url);
+    response = await http.fetchBytes(url);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
@@ -118,7 +161,7 @@ export async function loadFromUrl(
       `Failed to fetch: ${response.status} ${response.statusText}`,
     );
   }
-  const text = response.text;
+  const text = await decodeModelBytes(response.bytes);
 
   if (encoding === "cityjsonseq") {
     return parseCityJSONSeq(text);
