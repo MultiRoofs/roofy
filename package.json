@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vp dev",
-    "build": "tsc -b && vp build",
-    "preview": "vp preview",
+    "dev": "dotenvx run --quiet -- vp dev",
+    "build": "tsc -b && dotenvx run --quiet -- vp build",
+    "preview": "dotenvx run --quiet -- vp preview",
     "devcontainer:up": "devcontainer up --workspace-folder . --docker-path podman",
     "devcontainer:exec": "devcontainer exec --workspace-folder . --docker-path podman",
     "devcontainer:shell": "bash .devcontainer/attach-container.sh podman",
@@ -36,6 +36,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@dotenvx/dotenvx": "^2.19.2",
     "@testing-library/jest-dom": "latest",
     "@testing-library/react": "latest",
     "@testing-library/user-event": "latest",

@@ -20,10 +20,14 @@ describe("basemaps", () => {
     ]);
   });
 
-  it("defaults to OpenStreetMap, so the globe is never black on first paint", () => {
-    // Navara's default photoreal scene adds sky/stars/sun and NO imagery; a
-    // "none" default would ship the exact bug this catalogue exists to fix.
-    expect(DEFAULT_BASEMAP_ID).toBe("osm");
+  it("defaults to satellite imagery, so the globe is never black and never blown out", () => {
+    // Two constraints at once. Navara's default photoreal scene adds
+    // sky/stars/sun and NO imagery, so a "none" default would ship the exact
+    // bug this catalogue exists to fix — hence a source. And under the
+    // physical-atmosphere calibration (exposure ~10, the globe lit as unlit
+    // albedo by the aerial-perspective pass) OSM's near-white cartographic
+    // tiles read as blown paper, so the default is photographic.
+    expect(DEFAULT_BASEMAP_ID).toBe("esri-imagery");
     expect(basemapById(DEFAULT_BASEMAP_ID).source).not.toBeNull();
   });
 
