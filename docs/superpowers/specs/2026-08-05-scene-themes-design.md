@@ -112,7 +112,8 @@ const DEFAULT_THEME_STYLE: ThemeStyle = { fill: "vertex", edges: null };
     `starsBoost: {pointSize, intensity} | null`, `skyBoxColors | null` (cartoon's flat sky),
     `glowGlobe: {glowColor, opacity} | null` (cyber), `globeWireframe`, `globeColor | null`,
     `toneMappingMode` ("AGX" | "LINEAR"), `exposure | null`, `apAlbedoScale | null`,
-    `skyLightProbeIntensity | null`, `cloudsOff`, `lensFlareOff`. All _tune_.
+    `skyLightProbeIntensity | null`, `lensFlareOff`. All _tune_. (`cloudsOff` was
+    removed 2026-08-06: themes no longer suppress the user's clouds.)
 - `NavaraViewport` applies the policy in one effect + the existing seams:
   - basemap/tiles: **derived selectors** (`themeOverride ?? userChoice`), exactly the
     wave-1 pattern — stores untouched, panels keep showing the user's choice (with an
@@ -167,3 +168,21 @@ undeclared `emissive`, likely a compile error upstream); Google-tiles neon via
 `model.effectIds` (works natively, but tiles are off in cyber anyway); `fogLight` volumetric
 neon; per-theme LUT grading (`colorGradingLUT` wants a shipped LUT asset); runtime clear
 colour; SSAO ink (reads globe normals at city pixels — wrong on our meshes).
+
+## Follow-up (2026-08-06): a real cel-shaded Cartoon via a custom effect
+
+The user pointed at `eukarya-biz/toon-navara` as a reference. It is the missing
+technique this design said did not exist: a CUSTOM Navara effect
+(`view.registerEffect("toon", ToonEffectDesc)`) implementing cel-shading bands,
+rim light and DEPTH-based ink outlines as a post effect — depth is shared by
+our `scenes.opaque` city meshes, so its outlines would apply to them even
+though the selective effects cannot. It also ships a `CloudMeshDesc` for
+cartoon cumulus.
+
+Constraints for whoever ports it: the repo has NO LICENSE FILE — reimplement
+the techniques, never copy the code; it runs an ambient-only lighting
+calibration (its own comment: "the ambient-only scene leaves albedo in the
+frame"), so the effect must be validated under our cartoon theme's
+LINEAR/low-exposure environment; and its cel bands read g-buffer
+normals/metalness, which our city meshes do not write (§ engine facts) — the
+depth-outline half is the safely portable part.

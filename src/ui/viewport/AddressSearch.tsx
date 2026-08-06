@@ -1,14 +1,21 @@
 /**
  * Search for a place and fly there.
  *
- * A collapsed magnifier that expands into a combobox, because the toolbar is
- * already full and a permanently open text field would push the metadata pills
- * off a laptop screen.
+ * A SCENE overlay, top-left of the canvas — where every web map puts its
+ * search, and the one free corner: the view-align cluster is top-right, the
+ * legend and scale bottom-left, the compass bottom-right. It was in the
+ * toolbar until 2026-08-06, which put "where am I looking?" in the chrome
+ * rather than on the map it answers about.
  *
- * KNOWS NO ENGINE. It is handed the app's `flyTo` (the same route "Zoom to
- * fit" takes to `fitAll`), and it decides only WHERE to go — never at what
- * angle: the active view mode owns the orientation, so a 2D plan view is not
- * tilted back to an oblique just because someone searched for a street.
+ * A collapsed magnifier that expands into a combobox, so the resting state
+ * costs the scene one button rather than a permanently open text field over
+ * the imagery.
+ *
+ * KNOWS NO ENGINE. It is handed the viewport's `flyTo` — the same callback the
+ * scene handle exposes, reaching it exactly as the compass cluster reaches
+ * `zoomIn` — and it decides only WHERE to go, never at what angle: the active
+ * view mode owns the orientation, so a 2D plan view is not tilted back to an
+ * oblique just because someone searched for a street.
  *
  * The ARIA is the full combobox pattern (input `role="combobox"` +
  * `aria-expanded` + `aria-activedescendant`, a `role="listbox"` of
@@ -28,10 +35,10 @@ import {
 } from "../../scene/geographicCamera";
 
 export interface AddressSearchProps {
-  /** Fly the camera to a point. Optional so the toolbar can render before a
-   *  viewport exists (the landing page mounts none); a select then does
-   *  nothing rather than throwing. */
-  readonly onFlyTo?: (target: FlyToTarget, durationMs?: number) => void;
+  /** Fly the camera to a point. REQUIRED, unlike in the toolbar it came from:
+   *  this renders inside the viewport, so there is always an engine — and a
+   *  search box that silently does nothing is worse than a type error. */
+  readonly onFlyTo: (target: FlyToTarget, durationMs?: number) => void;
 }
 
 export function AddressSearch({ onFlyTo }: AddressSearchProps) {
@@ -71,7 +78,7 @@ export function AddressSearch({ onFlyTo }: AddressSearchProps) {
     (result: GeocodeResult) => {
       // No duration: how long a search flight takes is the viewport's to
       // decide, and one constant beats two that can drift apart.
-      onFlyTo?.({
+      onFlyTo({
         lng: result.lng,
         lat: result.lat,
         heightM: cameraHeightForExtent(result.extent),
@@ -132,7 +139,7 @@ export function AddressSearch({ onFlyTo }: AddressSearchProps) {
       <div className="address-search" ref={rootRef}>
         <button
           type="button"
-          className="tb-btn"
+          className="address-search-toggle"
           title="Search for a place"
           aria-label="Search for a place"
           onClick={() => {

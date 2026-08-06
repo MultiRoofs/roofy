@@ -150,6 +150,7 @@ import { basemapById, type BasemapOption } from "./basemaps";
 import { TERRAIN, TERRAIN_ATTRIBUTION } from "./terrain";
 import { isAutoFitSuppressed } from "./autoFitSuppression";
 import { addQueryBox, type QueryBoxMesh } from "./streamQueryBox";
+import { AddressSearch } from "../ui/viewport/AddressSearch";
 import { AttributionOverlay } from "../ui/viewport/AttributionOverlay";
 import { CameraControls } from "../ui/viewport/CameraControls";
 import { ScaleBar } from "../ui/viewport/ScaleBar";
@@ -600,11 +601,12 @@ function syncThemeGlobeColor(
  * enters a theme and leaves one: there is no separate "restore" routine that
  * could fall out of step with the one that applied it.
  *
- * Deliberately NOT here: the clouds and the lens flare. Both already have an
- * effect of their own driven by the user's atmosphere/debug settings, so the
- * theme's `cloudsOff`/`lensFlareOff` are composed into those gates instead —
- * one owner per engine object, which is what makes "restore the user's setting"
- * automatic rather than something this function has to reproduce.
+ * Deliberately NOT here: the lens flare. It already has an effect of its own
+ * driven by the user's atmosphere settings, so the theme's `lensFlareOff` is
+ * composed into that gate instead — one owner per engine object, which is what
+ * makes "restore the user's setting" automatic rather than something this
+ * function has to reproduce. (The clouds work the same way and have no theme
+ * flag at all: the user's toggle is their only gate.)
  */
 function applyThemeEnvironment(
   view: ViewInstance,
@@ -962,9 +964,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
      */
     const effectiveBasemapId = themePolicy.basemapOverride ?? basemapId;
     const effectiveTilesWanted = tilesWanted && !themePolicy.googleTilesOff;
-    /** Pulled out as scalars so the clouds and post-chain effects can depend on
-     *  them without depending on the whole policy object. */
-    const themeCloudsOff = themePolicy.environment.cloudsOff;
+    /** Pulled out as a scalar so the lens-flare effect can depend on it without
+     *  depending on the whole policy object. The clouds have no such flag: they
+     *  follow the user's toggle in every theme. */
     const themeLensFlareOff = themePolicy.environment.lensFlareOff;
     /** The user's own GeoJSON / XYZ / 3D-Tiles layers. Reconciled into engine
      *  source+layer pairs by `geoLayerSync.ts`. */
@@ -1446,10 +1448,12 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     useEffect(() => {
       const view = viewRef.current;
       if (!engineReady || view === null) return;
-      // The theme's `cloudsOff` is COMPOSED with the user's toggle rather than
-      // written to it, so leaving the theme restores whatever the advanced
-      // settings say without this effect having to remember it.
-      if (!postProcessingEnabled || !cloudsWanted || themeCloudsOff) return;
+      // The user's toggle is the ONLY gate. No theme suppresses the clouds:
+      // one did for each of the three looks, which meant changing theme threw
+      // away weather nobody had asked to lose. They composite through the
+      // aerial-perspective pass, so a theme's exposure and albedo already
+      // restyle them along with everything else.
+      if (!postProcessingEnabled || !cloudsWanted) return;
       let handle: CloudsHandle | null = null;
       try {
         handle = view.addEffect({
@@ -1486,7 +1490,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       // `cloudCoverage` is deliberately NOT a dependency: dragging the slider
       // would tear the pass down and rebuild it (and re-load its 3D textures)
       // per pointer move. The separate effect below pushes it instead.
-    }, [engineReady, postProcessingEnabled, cloudsWanted, themeCloudsOff]);
+    }, [engineReady, postProcessingEnabled, cloudsWanted]);
 
     // Coverage -> the live pass, without rebuilding it.
     useEffect(() => {
@@ -2953,6 +2957,12 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           </div>
         )}
         <ViewAlignButtons onAlign={alignView} />
+        {/* Top-left, the one free corner (align buttons top-right, legend and
+            scale bottom-left, compass bottom-right) and where a map's search
+            belongs — on the map, not in the chrome. Takes `flyTo` directly
+            rather than through the app, exactly as the compass cluster above
+            takes `zoomIn`. */}
+        <AddressSearch onFlyTo={flyTo} />
         {/* Bottom-right, above the attribution strip: the top-right is the
             align buttons and the panels that open over them, and the bottom
             left is the legend and the sun scrubber. Subscribes to the camera's

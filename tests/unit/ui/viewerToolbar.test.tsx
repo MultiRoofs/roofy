@@ -67,6 +67,11 @@ describe("ViewerToolbar — tools with no Navara implementation", () => {
     expect(buttonByTitlePrefix("Box select").disabled).toBe(true);
   });
 
+  it("no longer carries the place search, which is a scene overlay now", () => {
+    render(<ViewerToolbar {...baseProps} />);
+    expect(screen.queryByTitle("Search for a place")).toBeNull();
+  });
+
   it("leaves the object/surface pick buttons live", () => {
     const onSetPickMode = vi.fn();
     const onSetToolMode = vi.fn();

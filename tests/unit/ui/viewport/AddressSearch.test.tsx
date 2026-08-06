@@ -1,9 +1,9 @@
 /**
- * The toolbar's address search.
+ * The scene's address search — the top-left canvas overlay.
  *
  * `fetch` is mocked (no live network in a unit test) and the camera is an
  * injected spy — the component knows no engine, it only calls the `flyTo` the
- * app hands it, exactly as "Zoom to fit" reaches `fitAll`.
+ * viewport hands it, exactly as the compass cluster is handed `zoomIn`.
  *
  * The combobox contract is the interesting half: a search box that can only be
  * driven with a mouse is a search box half the users cannot reach, so the
@@ -18,7 +18,7 @@ import {
   render,
   screen,
 } from "@testing-library/react";
-import { AddressSearch } from "../../../../src/ui/toolbar/AddressSearch";
+import { AddressSearch } from "../../../../src/ui/viewport/AddressSearch";
 import { SEARCH_DEBOUNCE_MS } from "../../../../src/features/geocode/useAddressSearch";
 import { PHOTON_ATTRIBUTION } from "../../../../src/features/geocode/photon";
 

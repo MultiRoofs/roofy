@@ -266,6 +266,26 @@ function albedoScaleUpdates(): number[] {
     .filter((v): v is number => typeof v === "number");
 }
 
+/** The clouds effect handles the viewport asked the engine for, in order —
+ *  paired back to their `addEffect` return values so a test can see whether the
+ *  live pass survived a theme switch, not merely how many were requested. */
+function cloudEffects(): CloudsEffectStub[] {
+  return addEffect.mock.calls
+    .map((call, index) => ({
+      config: call[0] as Record<string, unknown> | undefined,
+      handle: addEffect.mock.results[index]?.value as
+        | CloudsEffectStub
+        | undefined,
+    }))
+    .filter(
+      (e): e is { config: Record<string, unknown>; handle: CloudsEffectStub } =>
+        e.config?.clouds !== undefined && e.handle !== undefined,
+    )
+    .map((e) => e.handle);
+}
+
+type CloudsEffectStub = ReturnType<typeof addEffect>;
+
 function countLayersOfType(type: string): number {
   return addLayer.mock.calls.filter(
     (c) => (c[0] as { type?: string } | undefined)?.type === type,
@@ -564,23 +584,31 @@ describe("scene theme -> the user's own settings", () => {
     expect(photorealHandles.lensFlare.visible).toBe(true);
   });
 
-  it("suppresses the clouds a themed scene must not have, and gives them back", async () => {
-    await act(async () => {
-      useRenderDebugStore.setState({ cloudsEnabled: true });
-    });
+  it("keeps the user's clouds in EVERY theme, without rebuilding the pass", async () => {
+    // A theme is a look, not a weather switch. All three themed looks used to
+    // carry `cloudsOff`, so entering one threw the clouds away and leaving it
+    // paid for a fresh pass (and its 3D textures) to get them back. They
+    // composite through the aerial-perspective pass, so a theme's exposure and
+    // albedo restyle them along with everything else — washed-out clouds under
+    // cartoon are the intended result, not a missing one.
+    useRenderDebugStore.setState({ cloudsEnabled: true });
     await mount();
-    const cloudAdds = () =>
-      addEffect.mock.calls.filter(
-        (c) => (c[0] as Record<string, unknown>)?.clouds !== undefined,
-      ).length;
-    expect(cloudAdds()).toBe(1);
+    expect(cloudEffects()).toHaveLength(1);
+    const clouds = cloudEffects()[0]!;
 
-    await setTheme("cyber");
-    // Still ON in the user's settings; simply not rendered under this theme.
+    for (const theme of [
+      "cartoon",
+      "cyber",
+      "wireframe",
+      "photoreal",
+    ] as const) {
+      await setTheme(theme);
+      // Same live handle throughout: never deleted, never re-added.
+      expect(cloudEffects()).toHaveLength(1);
+      expect(clouds.delete).not.toHaveBeenCalled();
+      expect(clouds.ref.raw.dispose).not.toHaveBeenCalled();
+    }
     expect(useRenderDebugStore.getState().cloudsEnabled).toBe(true);
-
-    await setTheme("photoreal");
-    expect(cloudAdds()).toBe(2);
   });
 
   it("never touches the solar clock", async () => {

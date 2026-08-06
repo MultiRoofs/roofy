@@ -574,6 +574,19 @@ describe("NavaraViewport view modes and flyTo", () => {
     expect(lastCamera().pitch).toBe(TILTED_PITCH_DEG);
   });
 
+  it("mounts the place search IN the scene, wired to the same flyTo", async () => {
+    // It lived in the toolbar until 2026-08-06. The relocation is what this
+    // pins: the search is a canvas overlay like the compass and the scale bar,
+    // and it reaches the engine through the viewport's own `flyTo` rather than
+    // through a prop the app threads down from the chrome.
+    const { container } = await mount();
+    const search = container.querySelector(".address-search");
+    expect(search).not.toBeNull();
+    expect(
+      search!.querySelector("button[aria-label='Search for a place']"),
+    ).not.toBeNull();
+  });
+
   it("flies to a searched place, animated, and lets the mode pin the angle", async () => {
     const { ref } = await mount();
     cameraThrows = false;
