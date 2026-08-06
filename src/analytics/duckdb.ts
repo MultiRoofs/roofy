@@ -142,6 +142,45 @@ export async function queryDuckDB(sql: string): Promise<QueryResult | null> {
 }
 
 /**
+ * Register `buffer` under `fileName`, run `sql` against it, then drop the file.
+ *
+ * The whole-file registration is the point: a stac-geoparquet item index is at
+ * most a couple of megabytes, so downloading it once and handing DuckDB the
+ * bytes is strictly simpler than `httpfs` + range reads — no extension to
+ * install, no CORS preflight on `Range`, and no partially-read footer to
+ * diagnose when a bucket answers 200 to a range request.
+ *
+ * Returns null when DuckDB is not ready or the query fails, the same contract
+ * as {@link queryDuckDB} — callers already have to handle "no database" and
+ * should not have to distinguish it from "bad SQL". Works WITHOUT the cityjson
+ * extension: `read_parquet` is DuckDB core.
+ *
+ * The file is dropped in a `finally` so a repeated call may reuse the same
+ * name, but a `dropFile` failure never discards a result that was already
+ * produced.
+ */
+export async function queryParquetBuffer(
+  fileName: string,
+  buffer: Uint8Array,
+  sql: string,
+): Promise<QueryResult | null> {
+  if (!db || !conn || status.state !== "ready") return null;
+
+  const database = db;
+  try {
+    await database.registerFileBuffer(fileName, buffer);
+  } catch {
+    return null;
+  }
+
+  try {
+    return await queryDuckDB(sql);
+  } finally {
+    await database.dropFile(fileName).catch(() => {});
+  }
+}
+
+/**
  * Whether the whole-file extension reader (`loadModelIntoDuckDB`, below) is
  * allowed for a layer: only for a static (non-streaming) URL layer.
  *
