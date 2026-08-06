@@ -6,6 +6,7 @@
  */
 
 import { create } from "zustand";
+import { toplevelCityObjectType } from "@cityjson/navara-core";
 import type { CityModel } from "../../domain/citymodel/types";
 import type { CityModelReference } from "../../persistence/types";
 import type { Rule } from "../rules/types";
@@ -23,13 +24,53 @@ export interface Layer {
   /** "auto": the viewport-streaming driver (Task 14) picks the LoD ladder
    *  rung from zoom level. "manual": the user's `selectedLod` choice pins
    *  it, same as a non-streaming layer. Defaults to "auto" so a freshly
-   *  loaded streaming layer follows zoom without extra user action. */
+   *  loaded streaming layer follows zoom without extra user action.
+   *
+   *  STATIC layers only, as of the global streaming-LoD control: a streaming
+   *  layer's LoD comes from `useStreamLodStore` (see `streamLod.ts` for why
+   *  a per-layer choice cannot work for a ladder discovered at stream time),
+   *  and `syncStreamState` pushes that instead of this field. Kept because
+   *  the field is captured in snapshots and read by `useLayerFileLoader`. */
   readonly lodMode: "auto" | "manual";
+  /**
+   * Whether a STREAMING layer follows the camera. `true` (the default, and
+   * the only value a static layer ever has) is the behaviour every streaming
+   * layer has always had: each camera settle re-queries the source for the
+   * new viewport. `false` freezes the resident set where it is — the plugin
+   * handle stops committing entirely (`FcbStreamLayerHandle.setCameraSync`).
+   *
+   * Per-layer rather than global, unlike the LoD choice above, because the
+   * two answer different questions: "which detail level" is a property of how
+   * you want to look at data, while "keep THIS extract" is a property of one
+   * dataset — a user comparing a frozen reference area against a second layer
+   * they keep panning is the whole point of having it.
+   */
+  readonly cameraSync: boolean;
   /** True once a layer's stream has been opened and admitted (Task 8's
    *  `checkAdmission`) for viewport streaming, i.e. it has per-cell state
    *  in `useStreamStore` rather than one resident `model`. Defaults to
    *  false: every layer starts as a plain, fully-resident layer. */
   readonly isStreaming: boolean;
+  /**
+   * First-level object groups whose geometry this layer leaves out — hiding
+   * "Building" hides its BuildingParts too, because in real data the
+   * `Building` carries no geometry at all (`toplevelCityObjectType`).
+   *
+   * Hiding shapes GEOMETRY, not styling: rules, DuckDB, the table and the
+   * inspector still see every object; only meshes (and so raycast picking)
+   * lose them. Replaced wholesale on every edit — the sync layer compares
+   * identity, same convention as {@link Layer.rules}.
+   */
+  readonly hiddenTypes: ReadonlyArray<string>;
+  /**
+   * The first-level groups present in the model, sorted — what the layer's
+   * type toggles list.
+   *
+   * Empty for a STREAMING layer: its objects arrive cell by cell, so the list
+   * comes from `useStreamStore`'s `types` (the handle's `onTypes` union)
+   * instead, for the same reason its LoD ladder does.
+   */
+  readonly availableObjectTypes: ReadonlyArray<string>;
 }
 
 export interface LayerStoreState {
@@ -41,7 +82,14 @@ export interface LayerStoreActions {
   addLayer: (
     layer: Omit<
       Layer,
-      "id" | "selectedLod" | "availableLods" | "lodMode" | "isStreaming"
+      | "id"
+      | "selectedLod"
+      | "availableLods"
+      | "lodMode"
+      | "isStreaming"
+      | "cameraSync"
+      | "hiddenTypes"
+      | "availableObjectTypes"
     > & {
       /** Defaults to a fresh UUID. Supplied only by `openStreamingLayer`,
        *  where the plugin has already registered its handle under an id it
@@ -52,6 +100,10 @@ export interface LayerStoreActions {
        *  streaming (Task 17's `openStreamingLayer`) — its `model` is a stub
        *  (bbox only, empty objects) rather than a fully-parsed model. */
       readonly isStreaming?: boolean;
+      /** Defaults to nothing hidden. Supplied by a RESTORE, where the same
+       *  value was seeded into the plugin at add/open time so the layer never
+       *  renders one frame of the geometry it was saved without. */
+      readonly hiddenTypes?: ReadonlyArray<string>;
     },
   ) => string;
   removeLayer: (id: string) => void;
@@ -63,6 +115,12 @@ export interface LayerStoreActions {
   removeAllLayers: () => void;
   setLayerLod: (layerId: string, lod: string | null) => void;
   setLodMode: (layerId: string, mode: "auto" | "manual") => void;
+  /** Streaming layers only in practice — a static layer has nothing to
+   *  follow the camera with. See {@link Layer.cameraSync}. */
+  setCameraSync: (layerId: string, enabled: boolean) => void;
+  /** Replaces {@link Layer.hiddenTypes} — never mutates it, because the sync
+   *  layer's "did this change?" test is array identity. */
+  setHiddenTypes: (layerId: string, types: ReadonlyArray<string>) => void;
 
   // Per-layer rule actions
   addRule: (layerId: string, rule: Rule) => void;
@@ -93,6 +151,22 @@ export function computeAvailableLods(model: CityModel): string[] {
   return [...set].sort((a, b) => parseFloat(b) - parseFloat(a));
 }
 
+/**
+ * The first-level object groups present in a model, sorted alphabetically.
+ *
+ * Every `objectType` is folded through `toplevelCityObjectType` first, so a
+ * file of 66 Buildings and 66 BuildingParts offers ONE "Building" toggle —
+ * which is also the only toggle that can hide anything, since the geometry
+ * hangs off the parts.
+ */
+export function computeAvailableObjectTypes(model: CityModel): string[] {
+  const set = new Set<string>();
+  for (const obj of Object.values(model.objects)) {
+    if (obj) set.add(toplevelCityObjectType(obj.objectType));
+  }
+  return [...set].sort();
+}
+
 export const useLayerStore = create<LayerStore>((set) => ({
   layers: [],
   activeLayerId: null,
@@ -110,7 +184,17 @@ export const useLayerStore = create<LayerStore>((set) => ({
           selectedLod,
           availableLods,
           lodMode: "auto",
+          // Every layer starts following the camera: that is what streaming
+          // has always done, and freezing an extract is a deliberate act.
+          cameraSync: true,
           isStreaming: input.isStreaming ?? false,
+          hiddenTypes: input.hiddenTypes ?? [],
+          // A streaming layer's `model` is a stub (bbox only), so there is
+          // nothing to fold here; `useStreamStore`'s `types` carries its
+          // groups instead.
+          availableObjectTypes: input.isStreaming
+            ? []
+            : computeAvailableObjectTypes(input.model),
         },
       ],
       activeLayerId: state.activeLayerId ?? id,
@@ -148,6 +232,20 @@ export const useLayerStore = create<LayerStore>((set) => ({
     set((state) => ({
       layers: state.layers.map((l) =>
         l.id === layerId ? { ...l, lodMode: mode } : l,
+      ),
+    })),
+
+  setCameraSync: (layerId, enabled) =>
+    set((state) => ({
+      layers: state.layers.map((l) =>
+        l.id === layerId ? { ...l, cameraSync: enabled } : l,
+      ),
+    })),
+
+  setHiddenTypes: (layerId, types) =>
+    set((state) => ({
+      layers: state.layers.map((l) =>
+        l.id === layerId ? { ...l, hiddenTypes: types } : l,
       ),
     })),
 

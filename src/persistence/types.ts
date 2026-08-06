@@ -8,6 +8,12 @@
 
 import type { Rule } from "../features/rules/types";
 import type { PickMode } from "../domain/selection/types";
+import type { ViewMode } from "../features/viewMode/viewModeStore";
+import type {
+  GeoLayer,
+  GeoLayerInput,
+  GeoLayerKind,
+} from "../features/geoLayers/geoLayerStore";
 
 // ---------------------------------------------------------------------------
 // Model reference — how a snapshot refers to the loaded city model
@@ -50,6 +56,11 @@ export interface LayerSnapshot {
   /** Defaults to "auto" on restore (via `normalizeLayers`) when absent from
    *  a saved snapshot. */
   readonly lodMode?: "auto" | "manual";
+  /** First-level object groups hidden in this layer, defaulted to `[]` on
+   *  restore (via `normalizeLayers`) when absent. The layer's
+   *  `availableObjectTypes` is NOT saved: it is derived from the model on
+   *  load, and rediscovered cell by cell for a streaming layer. */
+  readonly hiddenTypes?: readonly string[];
   /** Present only for a streaming layer. */
   readonly stream?: StreamSourceSnapshot;
 }
@@ -69,6 +80,7 @@ export interface LayerSnapshot {
 export interface RawLayerSnapshot {
   readonly [key: string]: unknown;
   readonly lodMode?: "auto" | "manual";
+  readonly hiddenTypes?: readonly string[];
   readonly stream?: StreamSourceSnapshot;
 }
 
@@ -79,6 +91,7 @@ export interface RawLayersDocument {
 
 export interface NormalizedLayerSnapshot extends RawLayerSnapshot {
   readonly lodMode: "auto" | "manual";
+  readonly hiddenTypes: readonly string[];
   /** True when this layer streamed from a local `File`/`Blob` — that byte
    *  source cannot survive a reload, so the layer must be presented as an
    *  explicit "needs re-selection" placeholder rather than silently
@@ -90,8 +103,8 @@ export interface NormalizedLayerSnapshot extends RawLayerSnapshot {
 
 /**
  * Normalises a raw layers document to the shape the restore path consumes:
- * defaults `lodMode` to `"auto"` when absent, and marks a file-backed
- * streaming layer `unavailable`.
+ * defaults `lodMode` to `"auto"` and `hiddenTypes` to `[]` when absent, and
+ * marks a file-backed streaming layer `unavailable`.
  *
  * This is NOT a version migration — snapshot v3 rejects every older document
  * outright (see {@link UnsupportedSnapshotVersionError}). It is the
@@ -105,10 +118,134 @@ export function normalizeLayers(
 ): NormalizedLayerSnapshot[] {
   return (raw.layers ?? []).map((l): NormalizedLayerSnapshot => {
     const lodMode = l.lodMode ?? "auto";
+    const hiddenTypes = l.hiddenTypes ?? [];
     return l.stream?.kind === "file"
-      ? { ...l, lodMode, unavailable: true }
-      : { ...l, lodMode };
+      ? { ...l, lodMode, hiddenTypes, unavailable: true }
+      : { ...l, lodMode, hiddenTypes };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Geospatial layers (GeoJSON / XYZ raster / 3D Tiles)
+// ---------------------------------------------------------------------------
+
+/**
+ * One geospatial layer as it is written to a snapshot.
+ *
+ * Deliberately NOT the store's `GeoLayer`: the id is regenerated on restore
+ * (it identifies a live record, not a saved one) and — the rule this type
+ * exists to enforce — an inline GeoJSON `data` document is NEVER written. A
+ * city-sized extract is megabytes; localStorage holds a few, so persisting it
+ * would fail the whole save. `geoLayerSnapshot` is the only sanctioned way to
+ * build one.
+ */
+export interface GeoLayerSnapshot {
+  readonly name: string;
+  readonly kind: GeoLayerKind;
+  readonly visible: boolean;
+  readonly opacity: number;
+  /** The store's config MINUS any inline document. A GeoJSON layer loaded
+   *  from a file therefore saves as `{}` and restores as a re-linkable row —
+   *  the same treatment a file-backed city model gets (see `normalizeLayers`'
+   *  `unavailable` flag). */
+  readonly config: Record<string, unknown>;
+}
+
+/** Write one store record down, dropping what cannot survive the trip. */
+export function geoLayerSnapshot(layer: GeoLayer): GeoLayerSnapshot {
+  const base = {
+    name: layer.name,
+    kind: layer.kind,
+    visible: layer.visible,
+    opacity: layer.opacity,
+  };
+  if (layer.kind !== "geojson") return { ...base, config: { ...layer.config } };
+  // The URL costs nothing and restores completely; the document is dropped.
+  const { url } = layer.config;
+  return { ...base, config: url === undefined ? {} : { url } };
+}
+
+const GEO_LAYER_KINDS: readonly string[] = [
+  "geojson",
+  "raster-xyz",
+  "3d-tiles",
+];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+/**
+ * Turn saved geo layers back into `addGeoLayer` inputs, dropping anything a
+ * hand-edited (or truncated) document made unusable.
+ *
+ * The counterpart of {@link normalizeLayers}, and validating for the same
+ * reason: these values reach the ENGINE. A missing `urlTemplate` would become
+ * a raster source with no URL, which is a tile request per frame for nothing;
+ * an unknown `kind` has no description builder at all. A GeoJSON layer with
+ * neither data nor a URL is NOT dropped, though — that is the re-linkable row,
+ * and losing it would lose the user's settings with it.
+ */
+export function normalizeGeoLayers(
+  raw: ReadonlyArray<unknown> | undefined,
+): GeoLayerInput[] {
+  const out: GeoLayerInput[] = [];
+  for (const entry of raw ?? []) {
+    if (!isRecord(entry)) continue;
+    const { name, kind, config } = entry;
+    if (typeof name !== "string" || typeof kind !== "string") continue;
+    if (!GEO_LAYER_KINDS.includes(kind)) continue;
+    if (!isRecord(config)) continue;
+
+    const visible = entry.visible === undefined ? true : entry.visible === true;
+    const opacity = optionalNumber(entry.opacity) ?? 1;
+
+    if (kind === "raster-xyz") {
+      const urlTemplate = config.urlTemplate;
+      if (typeof urlTemplate !== "string" || urlTemplate === "") continue;
+      out.push({
+        name,
+        kind,
+        visible,
+        opacity,
+        config: {
+          urlTemplate,
+          // Written only when present, so an absent bound stays absent all the
+          // way to the engine description rather than becoming an explicit
+          // `undefined` the source has to interpret.
+          ...(optionalNumber(config.minZoom) === undefined
+            ? {}
+            : { minZoom: config.minZoom as number }),
+          ...(optionalNumber(config.maxZoom) === undefined
+            ? {}
+            : { maxZoom: config.maxZoom as number }),
+          ...(typeof config.tms === "boolean" ? { tms: config.tms } : {}),
+        },
+      });
+      continue;
+    }
+    if (kind === "3d-tiles") {
+      const url = config.url;
+      if (typeof url !== "string" || url === "") continue;
+      out.push({ name, kind, visible, opacity, config: { url } });
+      continue;
+    }
+    const url = typeof config.url === "string" ? config.url : undefined;
+    out.push({
+      name,
+      kind: "geojson",
+      visible,
+      opacity,
+      config: url === undefined ? {} : { url },
+    });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +284,28 @@ export interface GeographicCamera {
 export interface ViewState {
   readonly camera: GeographicCamera;
   readonly datetime: string; // ISO 8601
+  /**
+   * The camera policy the workspace was saved in ("2d" | "2.5d" | "3d").
+   *
+   * OPTIONAL, and absent means the default — exactly like `lodMode` and
+   * `hiddenTypes` on a layer. Snapshots written before view modes existed were
+   * saved from a free camera, which is what `"3d"` is, so
+   * {@link normalizeViewMode} defaults to it and no migration is needed.
+   * Type-only import: persistence takes no runtime dependency on the store.
+   */
+  readonly viewMode?: ViewMode;
+}
+
+/**
+ * A saved view mode, defaulted and validated.
+ *
+ * Validated as well as defaulted because this value drives the CAMERA: a
+ * hand-edited or truncated document that yielded an unknown mode would give
+ * `viewModePolicy` no entry to look up and leave the controller flags
+ * undefined. Unknown reads as "the default", which is always safe.
+ */
+export function normalizeViewMode(mode: ViewMode | undefined): ViewMode {
+  return mode === "2d" || mode === "2.5d" || mode === "3d" ? mode : "3d";
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +329,16 @@ export interface ProjectSnapshot {
   readonly savedAt: string; // ISO 8601
   readonly label: string;
   readonly layers?: ReadonlyArray<LayerSnapshot>;
+  /**
+   * The user's geospatial layers, if any.
+   *
+   * OPTIONAL, and absent means "none" — the same convention `viewMode` and
+   * `hiddenTypes` follow, and the reason no snapshot written before geospatial
+   * layers existed needs migrating. Share links deliberately do NOT carry
+   * these: a hash is a lightweight subset (camera, datetime, URL-backed city
+   * layers), and it stays one.
+   */
+  readonly geoLayers?: ReadonlyArray<GeoLayerSnapshot>;
   readonly viewState: ViewState;
   readonly pickMode: PickMode;
 }

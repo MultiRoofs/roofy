@@ -64,6 +64,9 @@ function baseLayer(overrides: Partial<Layer>): Layer {
     selectedLod: null,
     availableLods: [],
     lodMode: "auto",
+    cameraSync: true,
+    hiddenTypes: [],
+    availableObjectTypes: [],
     isStreaming: false,
     ...overrides,
   };
@@ -101,11 +104,14 @@ describe("LayerPanel — static layer", () => {
       activeLayerId: "L",
     });
 
-    render(<LayerPanel onAddFile={noop} onAddUrl={noop} loading={false} />);
+    const { container } = render(
+      <LayerPanel onAddFile={noop} onAddUrl={noop} loading={false} />,
+    );
 
     expect(screen.getByText("2")).toBeTruthy();
     expect(screen.queryByText("STREAM")).toBeNull();
-    expect(screen.queryByText(/resident cache/i)).toBeNull();
+    // A static layer shows a plain object count — no streaming meta at all.
+    expect(container.querySelector(".layer-meta-streaming")).toBeNull();
   });
 });
 
@@ -134,7 +140,7 @@ describe("LayerPanel — streaming layer", () => {
     render(<LayerPanel onAddFile={noop} onAddUrl={noop} loading={false} />);
 
     expect(screen.getByText("STREAM")).toBeTruthy();
-    expect(screen.getByText("3 features loaded (resident cache)")).toBeTruthy();
+    expect(screen.getByText("3 features")).toBeTruthy();
     expect(screen.queryByText(/buildings/i)).toBeNull();
   });
 
@@ -157,7 +163,7 @@ describe("LayerPanel — streaming layer", () => {
 
     render(<LayerPanel onAddFile={noop} onAddUrl={noop} loading={false} />);
 
-    const badge = screen.getByText("1 feature loaded (resident cache)");
+    const badge = screen.getByText("1 feature");
     expect(badge.title.toLowerCase()).toContain("resident cache");
     expect(badge.title.toLowerCase()).not.toContain("visible area");
   });
@@ -180,7 +186,7 @@ describe("LayerPanel — streaming layer", () => {
     });
 
     render(<LayerPanel onAddFile={noop} onAddUrl={noop} loading={false} />);
-    expect(screen.getByText("1 feature loaded (resident cache)")).toBeTruthy();
+    expect(screen.getByText("1 feature")).toBeTruthy();
 
     act(() => {
       cache.set("2/1/0", residentEntry(["b", "c"]) as never, {
@@ -190,6 +196,6 @@ describe("LayerPanel — streaming layer", () => {
       useStreamStore.getState().bumpVersion("L");
     });
 
-    expect(screen.getByText("3 features loaded (resident cache)")).toBeTruthy();
+    expect(screen.getByText("3 features")).toBeTruthy();
   });
 });

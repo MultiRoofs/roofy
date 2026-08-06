@@ -343,6 +343,8 @@ describe("App object count across static and streaming layers", () => {
           level: 3,
           ladder: [],
           ladderVersion: 0,
+          types: [],
+          typesVersion: 0,
         } as unknown as StreamState,
       },
     });

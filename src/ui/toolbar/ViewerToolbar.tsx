@@ -7,7 +7,11 @@ import type { Theme } from "../../features/theme/useTheme";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useTotalObjectCount } from "../../features/streaming/useTotalObjectCount";
 import { useSolarStore } from "../../features/solar/solarStore";
-import { SolarControls } from "./SolarControls";
+import { SolarMenu } from "./SolarMenu";
+import { AddressSearch } from "./AddressSearch";
+import { ViewModeToggle } from "./ViewModeToggle";
+import { extractCrsCode } from "./crsCode";
+import type { FlyToTarget } from "../../scene/geographicCamera";
 
 /**
  * Tooltip suffix for the tools the Navara viewport does not implement yet.
@@ -36,6 +40,10 @@ interface ViewerToolbarProps {
   readonly onToggleInspector: () => void;
   readonly onToggleLeftSidebar: () => void;
   readonly onFitAll: () => void;
+  /** Fly the camera to a searched place — the same route to the scene handle
+   *  `onFitAll` takes to `fitAll`. Optional: the toolbar renders before a
+   *  viewport exists. */
+  readonly onFlyTo?: (target: FlyToTarget, durationMs?: number) => void;
   readonly onSave?: () => void;
   readonly onShare?: () => void;
   readonly canShare?: boolean;
@@ -56,6 +64,7 @@ export function ViewerToolbar({
   onToggleInspector,
   onToggleLeftSidebar,
   onFitAll,
+  onFlyTo,
   onSave,
   onShare,
   canShare,
@@ -178,6 +187,12 @@ export function ViewerToolbar({
         </svg>
       </button>
 
+      {/* Where the camera can go: search somewhere, or change the camera
+          policy it goes there under. Next to "Zoom to fit" because all three
+          answer the same question. */}
+      <AddressSearch onFlyTo={onFlyTo} />
+      <ViewModeToggle />
+
       <div className="toolbar-sep" />
 
       {fileName && <span className="toolbar-file">{fileName}</span>}
@@ -203,11 +218,10 @@ export function ViewerToolbar({
         )}
       </div>
 
-      {/* The solar clock is GLOBAL scene configuration, so it lives here
-          rather than in a tab of the selection inspector. The pill stays as
-          the read-only summary the cluster is anchored to; it only appears
-          once there is a site to read the sun at (`solarStore.latLon`), which
-          is what `sunPosition` being non-null means. */}
+      {/* One button, one popover, for everything about the sun: the sliders
+          that sweep it, the presets that jump it, and the altitude/azimuth the
+          engine reports back. The pill beside it is the read-only summary, so
+          the scene's time is on screen without opening anything. */}
       <div className="toolbar-sep" />
       {sunPosition && (
         <div
@@ -217,7 +231,7 @@ export function ViewerToolbar({
           Sun <span className="value">{formatDatetimePill(datetime)}</span>
         </div>
       )}
-      <SolarControls />
+      <SolarMenu />
 
       {ruleCount > 0 && (
         <>
@@ -319,12 +333,6 @@ export function ViewerToolbar({
       </button>
     </header>
   );
-}
-
-function extractCrsCode(referenceSystem: string | undefined): string | null {
-  if (!referenceSystem) return null;
-  const parts = referenceSystem.split("/");
-  return parts.at(-1) ?? null;
 }
 
 function formatDatetimePill(dt: Date): string {

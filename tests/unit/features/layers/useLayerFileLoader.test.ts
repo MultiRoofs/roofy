@@ -37,11 +37,13 @@ function installPlugin(): void {
       header: HEADER,
       level: null,
       ladder: [],
+      typesSeen: [],
       status: "idle",
       message: null,
       version: 0,
       onStatus: () => () => undefined,
       onLadder: () => () => undefined,
+      onTypes: () => () => undefined,
       onCommit: () => () => undefined,
     } as unknown as FcbStreamLayerHandle),
   );

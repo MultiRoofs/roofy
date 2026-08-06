@@ -1,18 +1,35 @@
 /**
  * Layer management panel for the inspector.
  *
- * Lists all loaded layers with visibility toggles, rename, and remove.
- * Allows adding new layers via file browse, drop, or URL.
+ * TWO titled sections, because the pane holds two kinds of layer that share a
+ * word and nothing else:
+ *
+ *  - **3D City Models** — the app's subject. Rules, LoD, object types,
+ *    picking, streaming; each row is dense because each of those is a choice
+ *    worth making per layer.
+ *  - **Geospatial Layers** — context around it (GeoJSON, XYZ raster tiles, 3D
+ *    Tiles). No model, no rules, no LoD, nothing to pick: the row carries
+ *    visibility, a name, its kind and — for raster — an opacity.
+ *
+ * One shared "+ Add Layer" button opens the {@link AddLayerDialog}, whose two
+ * tabs mirror the two sections. The city-model path is unchanged: file drop,
+ * browse or remote URL through the same handlers the landing page uses.
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useState } from "react";
+import { AddLayerDialog } from "./AddLayerDialog";
 import { useLayerStore } from "../../features/layers/layerStore";
 import type { Layer } from "../../features/layers/layerStore";
 import { useStreamStore } from "../../features/streaming/streamStore";
 import { getResidentModel } from "../../features/streaming/residentModel";
 import { closeStreamingLayer } from "../../features/streaming/openStreamingLayer";
 import { getStreamPlugin } from "../../features/streaming/streamPlugin";
+import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
 import { LodSelector } from "../sidebar/LodSelector";
+import { StreamingLodControl } from "./StreamingLodControl";
+import { LayerTypeToggles } from "./LayerTypeToggles";
+import { GeoLayerRow } from "./GeoLayerRow";
+import { VisibilityIcon } from "./VisibilityIcon";
 
 interface LayerPanelProps {
   readonly onAddFile: (file: File) => void;
@@ -32,12 +49,12 @@ export function LayerPanel({
   const setActiveLayer = useLayerStore((s) => s.setActiveLayer);
   const updateLayer = useLayerStore((s) => s.updateLayer);
   const removeLayer = useLayerStore((s) => s.removeLayer);
+  const setCameraSync = useLayerStore((s) => s.setCameraSync);
+  const geoLayers = useGeoLayerStore((s) => s.layers);
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [addUrl, setAddUrl] = useState("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
 
   const handleRenameStart = (id: string, name: string) => {
     setRenamingId(id);
@@ -51,37 +68,9 @@ export function LayerPanel({
     setRenamingId(null);
   };
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const file = e.dataTransfer.files[0];
-      if (file) onAddFile(file);
-    },
-    [onAddFile],
-  );
-
-  const handleFileInput = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) onAddFile(file);
-      e.target.value = "";
-    },
-    [onAddFile],
-  );
-
-  const handleAddUrl = () => {
-    const trimmed = addUrl.trim();
-    if (trimmed) {
-      onAddUrl(trimmed);
-      setAddUrl("");
-      setShowAddForm(false);
-    }
-  };
-
   return (
     <div className="attr-section">
-      <div className="attr-section-title">Layers ({layers.length})</div>
+      <div className="attr-section-title">3D City Models ({layers.length})</div>
 
       {layers.map((layer) => {
         const isActive = layer.id === activeLayerId;
@@ -100,17 +89,7 @@ export function LayerPanel({
                 updateLayer(layer.id, { visible: !layer.visible });
               }}
             >
-              {layer.visible ? (
-                <svg viewBox="0 0 24 24">
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                  <circle cx="12" cy="12" r="3" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 24 24">
-                  <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" />
-                  <line x1="1" y1="1" x2="23" y2="23" />
-                </svg>
-              )}
+              <VisibilityIcon visible={layer.visible} />
             </button>
 
             {renamingId === layer.id ? (
@@ -150,13 +129,37 @@ export function LayerPanel({
 
             <LayerObjectCount layer={layer} />
 
-            <LodSelector
-              layerId={layer.id}
-              availableLods={layer.availableLods}
-              selectedLod={layer.selectedLod}
-              isStreaming={layer.isStreaming}
-              lodMode={layer.lodMode}
-            />
+            {/* A streaming layer's LoD is chosen GLOBALLY (its ladder is not
+                known until cells arrive, so a per-layer dropdown would be
+                empty exactly when first looked at) — see
+                `StreamingLodControl`. What it gets here instead is the one
+                choice that IS per-layer: whether to keep following the
+                camera. */}
+            {layer.isStreaming ? (
+              <button
+                className={`layer-sync-btn ${layer.cameraSync ? "is-on" : ""}`}
+                aria-pressed={layer.cameraSync}
+                title={
+                  layer.cameraSync
+                    ? "Following the camera — click to freeze this extract"
+                    : "Frozen — click to follow the camera again"
+                }
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCameraSync(layer.id, !layer.cameraSync);
+                }}
+              >
+                {layer.cameraSync ? "SYNC" : "FROZEN"}
+              </button>
+            ) : (
+              <LodSelector
+                layerId={layer.id}
+                availableLods={layer.availableLods}
+                selectedLod={layer.selectedLod}
+                isStreaming={layer.isStreaming}
+                lodMode={layer.lodMode}
+              />
+            )}
 
             <div className="layer-actions">
               {onFlyToLayer && (
@@ -202,60 +205,57 @@ export function LayerPanel({
                 del
               </button>
             </div>
+
+            {/* Last in the row on purpose: the expanded list is a wrapped
+                full-width block, and a flex line wraps at the element that
+                does not fit — anything after it would land below the list. */}
+            <LayerTypeToggles layer={layer} />
           </div>
         );
       })}
 
-      {showAddForm ? (
-        <div className="layer-add-form">
-          <div
-            className="layer-drop-zone"
-            onDrop={handleDrop}
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            {loading ? "Loading..." : "Drop file or click to browse"}
-          </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json,.city.json,.jsonl,.city.jsonl,.fcb,.gml,.citygml"
-            onChange={handleFileInput}
-            hidden
-          />
-          <div className="rule-form-row">
-            <input
-              className="rule-input"
-              placeholder="Or paste URL..."
-              value={addUrl}
-              onChange={(e) => setAddUrl(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleAddUrl();
-              }}
-            />
-            <button
-              className="rule-save-btn"
-              onClick={handleAddUrl}
-              disabled={!addUrl.trim() || loading}
-            >
-              Load
-            </button>
-          </div>
-          <button
-            className="rule-cancel-btn"
-            onClick={() => setShowAddForm(false)}
-            style={{ alignSelf: "flex-end" }}
-          >
-            Cancel
-          </button>
-        </div>
+      {/* Below the city-model list and INSIDE its section, because it governs
+          every streaming layer rather than the selected one — and a streaming
+          layer is a city model. Renders nothing when none are open. */}
+      <StreamingLodControl />
+
+      {/* The second section. Rendered even when empty: an absent heading reads
+          as "this viewer cannot do that", and the empty line below points at
+          the one button that fills it. */}
+      <div className="attr-section-title geo-section-title">
+        Geospatial Layers ({geoLayers.length})
+      </div>
+      {geoLayers.length === 0 ? (
+        <p className="layer-section-empty">
+          No geospatial layers. Add GeoJSON, XYZ tiles or a 3D Tiles tileset
+          below.
+        </p>
       ) : (
-        <button className="layer-add-btn" onClick={() => setShowAddForm(true)}>
-          + Add Layer
-        </button>
+        geoLayers.map((geoLayer) => (
+          <GeoLayerRow key={geoLayer.id} layer={geoLayer} />
+        ))
+      )}
+
+      {/* The sidebar is 180–480 px wide, so adding a source opens a real
+          modal rather than unfolding a form in the layer list: a drop zone
+          needs a target big enough to aim at, and the URL field needs room to
+          show the URL being pasted into it. */}
+      <button
+        className="layer-add-btn"
+        aria-haspopup="dialog"
+        aria-expanded={addDialogOpen}
+        onClick={() => setAddDialogOpen(true)}
+      >
+        + Add Layer
+      </button>
+
+      {addDialogOpen && (
+        <AddLayerDialog
+          onClose={() => setAddDialogOpen(false)}
+          onAddFile={onAddFile}
+          onAddUrl={onAddUrl}
+          loading={loading}
+        />
       )}
     </div>
   );
@@ -300,7 +300,7 @@ function LayerObjectCount({ layer }: { readonly layer: Layer }) {
       className="layer-meta layer-meta-streaming"
       title={`Resident cache: ${resident.featureCount} ${featureWord} loaded across ${resident.cellCount} resident ${cellWord}. Reflects what's currently held in memory — including a margin around the viewport and cells not yet evicted — not exactly what's on screen right now.`}
     >
-      {resident.featureCount} {featureWord} loaded (resident cache)
+      {resident.featureCount} {featureWord}
     </span>
   );
 }

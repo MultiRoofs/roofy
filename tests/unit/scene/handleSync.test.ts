@@ -29,6 +29,7 @@ function fakeHandle(id: string, triangles = 100) {
     getBoundsGeodetic: vi.fn(),
     triangleCount: () => triangles,
     heightOffset: vi.fn(() => 0),
+    setHiddenTypes: vi.fn(),
     delete: vi.fn(),
   };
 }
@@ -50,6 +51,11 @@ function layer(patch: Partial<Layer> & { id: string }): Layer {
     selectedLod: "2",
     availableLods: ["2", "1"],
     lodMode: "manual",
+    // Matches the store's real default (`addLayer`): every layer starts
+    // following the camera, and freezing an extract is a deliberate act.
+    cameraSync: true,
+    hiddenTypes: [],
+    availableObjectTypes: [],
     isStreaming: false,
     ...patch,
   } as Layer;
@@ -68,7 +74,10 @@ describe("syncLayers", () => {
   it("deletes the handle of a removed layer", () => {
     const handle = fakeHandle("L1");
     const live = new Map<string, LiveLayer>([
-      ["L1", { handle: handle as never, lod: "2", visible: true }],
+      [
+        "L1",
+        { handle: handle as never, lod: "2", visible: true, hiddenTypes: [] },
+      ],
     ]);
     syncLayers(
       { get: () => undefined, add: vi.fn() } as never,
@@ -83,7 +92,10 @@ describe("syncLayers", () => {
   it("pushes only changed visibility and LoD", () => {
     const handle = fakeHandle("L1");
     const live = new Map<string, LiveLayer>([
-      ["L1", { handle: handle as never, lod: "2", visible: true }],
+      [
+        "L1",
+        { handle: handle as never, lod: "2", visible: true, hiddenTypes: [] },
+      ],
     ]);
     const registry = { get: () => handle, add: vi.fn() };
     syncLayers(registry as never, [layer({ id: "L1" })], live, () => {});
@@ -103,7 +115,10 @@ describe("syncLayers", () => {
   it("rebuilds through setLod rather than recreating the handle", () => {
     const handle = fakeHandle("L1");
     const live = new Map<string, LiveLayer>([
-      ["L1", { handle: handle as never, lod: "2", visible: true }],
+      [
+        "L1",
+        { handle: handle as never, lod: "2", visible: true, hiddenTypes: [] },
+      ],
     ]);
     const registry = { get: () => handle, add: vi.fn() };
     syncLayers(
@@ -121,7 +136,10 @@ describe("syncLayers", () => {
   it("clears the LoD filter when the layer's selection goes null", () => {
     const handle = fakeHandle("L1");
     const live = new Map<string, LiveLayer>([
-      ["L1", { handle: handle as never, lod: "2", visible: true }],
+      [
+        "L1",
+        { handle: handle as never, lod: "2", visible: true, hiddenTypes: [] },
+      ],
     ]);
     syncLayers(
       { get: () => handle, add: vi.fn() } as never,
@@ -131,6 +149,51 @@ describe("syncLayers", () => {
     );
     expect(handle.setLod).toHaveBeenCalledWith(null);
     expect(live.get("L1")!.lod).toBeNull();
+  });
+
+  it("pushes hiddenTypes only when the array identity changes", () => {
+    const handle = fakeHandle("L1");
+    const live = new Map<string, LiveLayer>([
+      [
+        "L1",
+        { handle: handle as never, lod: "2", visible: true, hiddenTypes: [] },
+      ],
+    ]);
+    const registry = { get: () => handle, add: vi.fn() };
+    const hidden = ["Building"];
+
+    syncLayers(
+      registry as never,
+      [layer({ id: "L1", hiddenTypes: hidden })],
+      live,
+      () => {},
+    );
+    expect(handle.setHiddenTypes).toHaveBeenCalledWith(hidden);
+
+    // Each push rebuilds the layer's merged geometry (the seam a LoD change
+    // uses), so a re-render with the SAME array must not pay for one.
+    handle.setHiddenTypes.mockClear();
+    syncLayers(
+      registry as never,
+      [layer({ id: "L1", hiddenTypes: hidden })],
+      live,
+      () => {},
+    );
+    expect(handle.setHiddenTypes).not.toHaveBeenCalled();
+  });
+
+  it("does not push hiddenTypes to a freshly added handle — `add` built it filtered", () => {
+    const handle = fakeHandle("L1");
+    const registry = { get: () => undefined, add: vi.fn(() => handle) };
+    const live = new Map<string, LiveLayer>();
+    syncLayers(
+      registry as never,
+      [layer({ id: "L1", hiddenTypes: ["Building"] })],
+      live,
+      () => {},
+    );
+    expect(handle.setHiddenTypes).not.toHaveBeenCalled();
+    expect(live.get("L1")!.hiddenTypes).toEqual(["Building"]);
   });
 
   it("reports an add failure through onError without throwing (CRS gate)", () => {
@@ -186,7 +249,10 @@ describe("syncLayers", () => {
   it("drops the static handle of a layer that turns into a stream", () => {
     const handle = fakeHandle("L1");
     const live = new Map<string, LiveLayer>([
-      ["L1", { handle: handle as never, lod: "2", visible: true }],
+      [
+        "L1",
+        { handle: handle as never, lod: "2", visible: true, hiddenTypes: [] },
+      ],
     ]);
     syncLayers(
       { get: () => handle, add: vi.fn() } as never,
@@ -204,11 +270,21 @@ describe("totalTriangles", () => {
     const live = new Map<string, LiveLayer>([
       [
         "L1",
-        { handle: fakeHandle("L1", 30) as never, lod: "2", visible: true },
+        {
+          handle: fakeHandle("L1", 30) as never,
+          lod: "2",
+          visible: true,
+          hiddenTypes: [],
+        },
       ],
       [
         "L2",
-        { handle: fakeHandle("L2", 70) as never, lod: "2", visible: false },
+        {
+          handle: fakeHandle("L2", 70) as never,
+          lod: "2",
+          visible: false,
+          hiddenTypes: [],
+        },
       ],
     ]);
     expect(
@@ -223,7 +299,12 @@ describe("totalTriangles", () => {
     const live = new Map<string, LiveLayer>([
       [
         "L1",
-        { handle: fakeHandle("L1", 30) as never, lod: "2", visible: true },
+        {
+          handle: fakeHandle("L1", 30) as never,
+          lod: "2",
+          visible: true,
+          hiddenTypes: [],
+        },
       ],
     ]);
     const streams = new Map([["S1", fakeHandle("S1", 12) as never]]);
@@ -246,7 +327,7 @@ describe("interactionHandles", () => {
     const h1 = fakeHandle("L1");
     const s1 = fakeHandle("S1");
     const live = new Map<string, LiveLayer>([
-      ["L1", { handle: h1 as never, lod: "2", visible: true }],
+      ["L1", { handle: h1 as never, lod: "2", visible: true, hiddenTypes: [] }],
     ]);
     const streams = new Map([["S1", s1 as never]]);
     const layers = [
@@ -260,7 +341,7 @@ describe("interactionHandles", () => {
   it("defaults the streaming registry to empty", () => {
     const h1 = fakeHandle("L1");
     const live = new Map<string, LiveLayer>([
-      ["L1", { handle: h1 as never, lod: "2", visible: true }],
+      ["L1", { handle: h1 as never, lod: "2", visible: true, hiddenTypes: [] }],
     ]);
     expect(
       interactionHandles(
@@ -295,7 +376,10 @@ describe("syncStyles", () => {
 
   function live(handle: ReturnType<typeof fakeHandle>) {
     return new Map<string, LiveLayer>([
-      ["L1", { handle: handle as never, lod: "2", visible: true }],
+      [
+        "L1",
+        { handle: handle as never, lod: "2", visible: true, hiddenTypes: [] },
+      ],
     ]);
   }
 
@@ -419,7 +503,12 @@ describe("syncStyles", () => {
     syncStyles([layer({ id: "L1", rules, rulesEnabled: true })], entries);
 
     const second = fakeHandle("L1");
-    entries.set("L1", { handle: second as never, lod: "2", visible: true });
+    entries.set("L1", {
+      handle: second as never,
+      lod: "2",
+      visible: true,
+      hiddenTypes: [],
+    });
     syncStyles([layer({ id: "L1", rules, rulesEnabled: true })], entries);
     expect(second.setStyle).toHaveBeenCalledTimes(1);
   });
@@ -427,7 +516,10 @@ describe("syncStyles", () => {
   it("never styles a streaming layer (its colors are worker-baked)", () => {
     const handle = fakeHandle("S1");
     const entries = new Map<string, LiveLayer>([
-      ["S1", { handle: handle as never, lod: "2", visible: true }],
+      [
+        "S1",
+        { handle: handle as never, lod: "2", visible: true, hiddenTypes: [] },
+      ],
     ]);
     syncStyles(
       [
@@ -577,7 +669,10 @@ describe("syncHighlight", () => {
     // still be updated, or re-showing it would reveal a stale highlight.
     const hidden = fakeHandle("L1");
     const live = new Map<string, LiveLayer>([
-      ["L1", { handle: hidden as never, lod: "2", visible: false }],
+      [
+        "L1",
+        { handle: hidden as never, lod: "2", visible: false, hiddenTypes: [] },
+      ],
     ]);
     const layers = [layer({ id: "L1", visible: false })];
     expect(interactionHandles(layers, live)).toEqual([]);
@@ -693,7 +788,10 @@ describe("layerHeightOffset", () => {
     const handle = fakeHandle("L1");
     handle.heightOffset.mockReturnValue(43.2);
     const live = new Map<string, LiveLayer>([
-      ["L1", { handle: handle as never, lod: "2", visible: true }],
+      [
+        "L1",
+        { handle: handle as never, lod: "2", visible: true, hiddenTypes: [] },
+      ],
     ]);
     expect(layerHeightOffset("L1", live)).toBe(43.2);
   });
@@ -713,7 +811,10 @@ describe("layerHeightOffset", () => {
     const handle = fakeHandle("L1");
     handle.heightOffset.mockReturnValue(Number.NaN);
     const live = new Map<string, LiveLayer>([
-      ["L1", { handle: handle as never, lod: "2", visible: true }],
+      [
+        "L1",
+        { handle: handle as never, lod: "2", visible: true, hiddenTypes: [] },
+      ],
     ]);
     expect(layerHeightOffset("L1", live)).toBe(0);
   });
@@ -732,6 +833,8 @@ describe("syncStreamState", () => {
       setRules: vi.fn(),
       setLod: vi.fn(),
       setVisible: vi.fn(),
+      setCameraSync: vi.fn(),
+      setHiddenTypes: vi.fn(),
     };
   }
 
@@ -765,6 +868,24 @@ describe("syncStreamState", () => {
     expect(handle.setRules).toHaveBeenCalledWith(rules, true);
     expect(handle.setLod).toHaveBeenCalledWith("auto", null);
     expect(handle.setVisible).toHaveBeenCalledWith(false);
+    expect(handle.setCameraSync).toHaveBeenCalledWith(true);
+  });
+
+  it("freezes a layer whose camera sync was switched off, and thaws it again", () => {
+    const handle = fakeStreamHandle();
+    const memos = new Map<string, StreamSyncMemo>();
+    const l = layer({ id: "S1", isStreaming: true });
+    syncStreamState(l, handle as never, memos);
+    handle.setCameraSync.mockClear();
+
+    // OFF is the whole point of the control: the plugin stops committing, so
+    // no further cells are fetched however far the camera moves.
+    syncStreamState({ ...l, cameraSync: false }, handle as never, memos);
+    expect(handle.setCameraSync).toHaveBeenCalledWith(false);
+
+    handle.setCameraSync.mockClear();
+    syncStreamState({ ...l, cameraSync: true }, handle as never, memos);
+    expect(handle.setCameraSync).toHaveBeenCalledWith(true);
   });
 
   it("pushes nothing on a second pass with the same values", () => {
@@ -799,6 +920,22 @@ describe("syncStreamState", () => {
     expect(handle.setVisible).toHaveBeenCalledWith(false);
     expect(handle.setRules).not.toHaveBeenCalled();
     expect(handle.setLod).not.toHaveBeenCalled();
+  });
+
+  it("pushes hiddenTypes on change only — a push refetches every affected cell", () => {
+    const handle = fakeStreamHandle();
+    const memos = new Map<string, StreamSyncMemo>();
+    const hidden = ["Building"];
+    const l = layer({ id: "S1", isStreaming: true });
+    syncStreamState(l, handle as never, memos);
+    handle.setHiddenTypes.mockClear();
+
+    syncStreamState({ ...l, hiddenTypes: hidden }, handle as never, memos);
+    expect(handle.setHiddenTypes).toHaveBeenCalledWith(hidden);
+
+    handle.setHiddenTypes.mockClear();
+    syncStreamState({ ...l, hiddenTypes: hidden }, handle as never, memos);
+    expect(handle.setHiddenTypes).not.toHaveBeenCalled();
   });
 
   it("re-pushes everything to a REPLACED handle for the same layer id", () => {

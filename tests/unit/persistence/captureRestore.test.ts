@@ -270,3 +270,43 @@ describe("restoreSnapshot", () => {
     expect(useSolarStore.getState().datetime).toBe(datetimeBefore);
   });
 });
+
+describe("view mode round trip", () => {
+  it("captures the view mode into the snapshot's view state", () => {
+    const snapshot = captureSnapshot({
+      label: "L",
+      layers: [],
+      camera: CAM,
+      datetime: new Date(Date.UTC(2025, 5, 21, 12, 0, 0)),
+      pickMode: "object",
+      viewMode: "2d",
+    });
+    expect(snapshot.viewState.viewMode).toBe("2d");
+  });
+
+  it("omits the field entirely when the viewer is in the default mode", () => {
+    // Same convention as the other optional snapshot fields: absent means
+    // "whatever the default is", so a 3D workspace writes no extra bytes.
+    const snapshot = captureSnapshot({
+      label: "L",
+      layers: [],
+      camera: CAM,
+      datetime: new Date(Date.UTC(2025, 5, 21, 12, 0, 0)),
+      pickMode: "object",
+      viewMode: "3d",
+    });
+    expect(snapshot.viewState.viewMode).toBeUndefined();
+  });
+
+  it("hands the saved mode back to the caller on restore", () => {
+    const snapshot = captureSnapshot({
+      label: "L",
+      layers: [],
+      camera: CAM,
+      datetime: new Date(Date.UTC(2025, 5, 21, 12, 0, 0)),
+      pickMode: "object",
+      viewMode: "2.5d",
+    });
+    expect(restoreSnapshot(snapshot).viewMode).toBe("2.5d");
+  });
+});

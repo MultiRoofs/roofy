@@ -26,6 +26,7 @@ import type {
   ScreenPoint,
   Selection,
 } from "@cityjson/navara-cityjson";
+import type { QueryRegion } from "@cityjson/navara-flatcitybuf";
 import type { Rule } from "../features/rules/types";
 import type { Layer } from "../features/layers/layerStore";
 
@@ -35,6 +36,10 @@ export interface LiveLayer {
   readonly handle: CityModelHandle;
   lod: string | null;
   visible: boolean;
+  /** The `hiddenTypes` array last pushed, by IDENTITY — `layerStore` replaces
+   *  it on every edit. Recorded (not pushed) on the add path: `registry.add`
+   *  passes it to `addCityModel`, so a new handle is built filtered. */
+  hiddenTypes: ReadonlyArray<string>;
   /** The `rules` array last compiled into `handle.setStyle`, by IDENTITY —
    *  `undefined` means "this handle has never been styled". `layerStore`
    *  replaces the array on every rule edit, so reference equality is an exact
@@ -66,10 +71,10 @@ export interface CityModelRegistry {
  *   georeference — is reported through `onError` and skipped, never thrown,
  *   so one bad layer cannot take the whole scene down. The entry is left
  *   absent, so a later sync retries it;
- * - visibility and LoD are pushed only when they actually changed. A LoD
- *   change is `handle.setLod`, which rebuilds the geometry in place — the
- *   handle (and therefore its mesh registration, style and highlight) is
- *   never recreated.
+ * - visibility, LoD and hidden object types are pushed only when they actually
+ *   changed. A LoD or hidden-types change is `handle.setLod`/`setHiddenTypes`,
+ *   which rebuilds the geometry in place — the handle (and therefore its mesh
+ *   registration, style and highlight) is never recreated.
  */
 export function syncLayers(
   registry: CityModelRegistry,
@@ -96,6 +101,7 @@ export function syncLayers(
           handle,
           lod: layer.selectedLod,
           visible: layer.visible,
+          hiddenTypes: layer.hiddenTypes,
         };
         live.set(layer.id, entry);
         handle.setVisible(layer.visible);
@@ -112,6 +118,10 @@ export function syncLayers(
     if (entry.visible !== layer.visible) {
       entry.visible = layer.visible;
       entry.handle.setVisible(layer.visible);
+    }
+    if (entry.hiddenTypes !== layer.hiddenTypes) {
+      entry.hiddenTypes = layer.hiddenTypes;
+      entry.handle.setHiddenTypes(layer.hiddenTypes);
     }
   }
 }
@@ -210,10 +220,30 @@ export interface StreamInteractionHandle extends InteractionHandle {
   setRules(rules: ReadonlyArray<Rule>, enabled: boolean): void;
   setLod(mode: "auto" | "manual", lod: string | null): void;
   setVisible(visible: boolean): void;
+  /** Whether the layer re-queries its source as the camera settles. See
+   *  `Layer.cameraSync`. */
+  setCameraSync(enabled: boolean): void;
+  /** First-level object groups to stream without geometry. Forces a commit,
+   *  so every affected cell is refetched — the same cost as a LoD change. */
+  setHiddenTypes(types: ReadonlyArray<string>): void;
   /** Fires after each cell commit; returns its own unsubscribe. Cells arrive
    *  long after any store change, so this — not a React dependency — is what
    *  tells the app to re-count triangles and re-apply the highlight. */
   onCommit(cb: (version: number) => void): () => void;
+  /**
+   * The ground rectangle the layer's last DISPATCHED fetch queried, and an
+   * event that republishes it — the diagnostic seam behind the streaming
+   * fetch-bbox outline.
+   *
+   * Deliberately not derivable app-side: the region is the plugin's own
+   * `viewportFootprint` result, the very value its `probe`/`fetch` messages
+   * carry, so re-deriving it here from the camera would be a second
+   * computation free to disagree with the one that actually fetched. Declared
+   * on this structural interface (rather than reached for on the concrete
+   * handle) so the compiler checks the plugin still provides it.
+   */
+  lastQueryRegion(): QueryRegion | null;
+  onQueryRegion(cb: (region: QueryRegion | null) => void): () => void;
 }
 
 /** What one streaming handle was last told, so an unrelated store change does
@@ -228,17 +258,19 @@ export interface StreamSyncMemo {
   visible?: boolean;
   lodMode?: "auto" | "manual";
   selectedLod?: string | null;
+  cameraSync?: boolean;
+  hiddenTypes?: ReadonlyArray<string>;
 }
 
 /**
- * Push one streaming layer's rules, LoD and visibility to its handle — the
- * streaming counterpart of `syncLayers` + `syncStyles`, which both skip these
- * layers by design.
+ * Push one streaming layer's rules, LoD, visibility, camera sync and hidden
+ * object types to its handle — the streaming counterpart of `syncLayers` +
+ * `syncStyles`, which both skip these layers by design.
  *
- * Memoised on the values actually pushed, because none of the three is free:
- * `setRules` re-bakes every resident cell in the worker, `setLod` forces a
- * commit (`onLodChanged`, so a LoD change refetches even for a camera that has
- * not moved), and `setVisible` fans out to every resident cell mesh. The
+ * Memoised on the values actually pushed, because none of them is free:
+ * `setRules` re-bakes every resident cell in the worker, `setLod` and
+ * `setHiddenTypes` force a commit (so either refetches even for a camera that
+ * has not moved), and `setVisible` fans out to every resident cell mesh. The
  * viewport's reconciliation effect re-runs on every `layers` change — a hover,
  * a rename, another layer's toggle — so without the memo each of those would
  * cost a full round trip per streaming layer.
@@ -282,6 +314,14 @@ export function syncStreamState(
   if (memo.visible !== layer.visible) {
     memo.visible = layer.visible;
     handle.setVisible(layer.visible);
+  }
+  if (memo.cameraSync !== layer.cameraSync) {
+    memo.cameraSync = layer.cameraSync;
+    handle.setCameraSync(layer.cameraSync);
+  }
+  if (memo.hiddenTypes !== layer.hiddenTypes) {
+    memo.hiddenTypes = layer.hiddenTypes;
+    handle.setHiddenTypes(layer.hiddenTypes);
   }
 }
 

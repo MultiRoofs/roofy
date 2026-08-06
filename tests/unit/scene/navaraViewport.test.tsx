@@ -26,29 +26,92 @@ const addSource = vi.fn((_source: unknown) => ({
   type: "3d-tiles",
   delete: deleteSource,
 }));
-const addLayer = vi.fn((_layer: unknown) => ({
+const defaultAddLayer = (_layer: unknown) => ({
   id: "layer-1",
   delete: deleteLayer,
-}));
+});
+const addLayer = vi.fn(defaultAddLayer);
+
+/**
+ * Find a source/layer call BY TYPE rather than by call index.
+ *
+ * The viewport adds global terrain before either backdrop (render order = add
+ * order, and the basemap is draped over the terrain), so "the first source" is
+ * the terrain's, not the one any given test is about. Filtering by type keeps
+ * each test pinned to its own layer and immune to another backdrop joining
+ * the scene later.
+ */
+function indexOfType(
+  mock: { mock: { calls: unknown[][] } },
+  type: string,
+): number {
+  return mock.mock.calls.findIndex(
+    (call) => (call[0] as { type?: string } | undefined)?.type === type,
+  );
+}
+
+function countOfType(
+  mock: { mock: { calls: unknown[][] } },
+  type: string,
+): number {
+  return mock.mock.calls.filter(
+    (call) => (call[0] as { type?: string } | undefined)?.type === type,
+  ).length;
+}
+
+/** The LAST call of a type — the re-added layer after a swap. Hand-rolled
+ *  rather than `findLastIndex`, which needs a newer `lib` than this project
+ *  targets. */
+function lastIndexOfType(
+  mock: { mock: { calls: unknown[][] } },
+  type: string,
+): number {
+  const calls = mock.mock.calls;
+  for (let i = calls.length - 1; i >= 0; i--) {
+    if ((calls[i]![0] as { type?: string } | undefined)?.type === type)
+      return i;
+  }
+  return -1;
+}
+
+/**
+ * Make the next `addLayer` for THIS type throw, leaving every other layer
+ * working — `mockImplementationOnce` would now hit the terrain instead of the
+ * backdrop the test is about. Restores itself once it has fired.
+ */
+function failAddLayerOnce(type: string): void {
+  addLayer.mockImplementation((config: unknown) => {
+    if ((config as { type?: string } | undefined)?.type === type) {
+      addLayer.mockImplementation(defaultAddLayer);
+      throw new Error("unsupported source");
+    }
+    return defaultAddLayer(config);
+  });
+}
 /** `view.addEffect` — the clouds seam. The default photoreal scene does NOT
  *  add clouds (verified against the 0.0.5 bundle), so every call here is one
  *  the viewport made itself. */
 const updateEffect = vi.fn();
 const deleteEffect = vi.fn();
+/** `EffectHandle.ref.raw.dispose()` — the CLOUDS PASS's own dispose, which is
+ *  the only thing that resets `atmosphere.overlay` and therefore the only thing
+ *  that actually takes the clouds out of the frame. The engine never calls it
+ *  on `handle.delete()`; the viewport does. */
+const disposeEffectPass = vi.fn();
 const addEffect = vi.fn((_config: unknown) => ({
   id: "effect-1",
   update: updateEffect,
   delete: deleteEffect,
+  ref: { raw: { dispose: disposeEffectPass } },
 }));
-/** `view.addLight` — the ambient fill light the app adds on top of the
- *  photoreal scene's sky probe (Issue 2: a probe alone leaves every
- *  sun-and-sky-averted surface near-black). */
-const updateLight = vi.fn();
-const deleteLight = vi.fn();
+/** `view.addLight` — nothing in the app calls it any more (the ambient fill
+ *  light belonged to the retired scene-lights calibration), so it is here only
+ *  so a regression that re-introduces one is a failing assertion rather than a
+ *  TypeError. */
 const addLight = vi.fn((_config: unknown) => ({
   id: "light-1",
-  update: updateLight,
-  delete: deleteLight,
+  update: vi.fn(),
+  delete: vi.fn(),
 }));
 /** `view.resize` — driven by the container ResizeObserver, because the engine
  *  itself only listens on `window`. */
@@ -61,7 +124,9 @@ const photorealHandles = {
   stars: { visible: true },
   skyLightProbe: { visible: true },
   sun: { visible: true, update: vi.fn() },
-  aerialPerspective: { visible: true },
+  // `update` too: the viewport switches this pass into `irradiance` mode right
+  // after `addDefaultPhotorealScene()`, which is what lights the whole scene.
+  aerialPerspective: { visible: true, update: vi.fn() },
   lensFlare: { visible: true },
   toneMapping: { visible: true },
   antialiasing: { visible: true },
@@ -69,6 +134,8 @@ const photorealHandles = {
 function resetPhotorealHandles(): void {
   for (const handle of Object.values(photorealHandles)) handle.visible = true;
   photorealHandles.sun.update.mockClear();
+  photorealHandles.aerialPerspective.update.mockClear();
+  photorealHandles.aerialPerspective.update.mockImplementation(() => {});
 }
 
 /** The engine's event bus, reduced to what `view.on/off` need. Tests drive the
@@ -136,6 +203,11 @@ vi.mock("@navaramap/three", () => ({
           return { lng: 4.35, lat: 52, height: 500 };
         },
         orientation: { heading: 0, pitch: -60, roll: 0 },
+        // `movestart`/`move`/`moveend` live on the CAMERA, not the view
+        // (Task B1 finding 6). The compass overlay subscribes to them; the
+        // wiring itself is asserted in `navaraViewportCamera.test.tsx`.
+        on: vi.fn(),
+        off: vi.fn(),
       },
       setCamera,
       flyTo,
@@ -209,8 +281,10 @@ import {
   type Layer,
 } from "../../../src/features/layers/layerStore";
 import { useSelectionStore } from "../../../src/features/selection/selectionStore";
+import { useViewModeStore } from "../../../src/features/viewMode/viewModeStore";
 import { useTilesStore } from "../../../src/features/tiles/tilesStore";
 import { useBasemapStore } from "../../../src/features/basemap/basemapStore";
+import { useGeoLayerStore } from "../../../src/features/geoLayers/geoLayerStore";
 import {
   DEFAULT_EXPOSURE,
   DEFAULT_RENDER_DEBUG_STATE,
@@ -218,6 +292,7 @@ import {
 } from "../../../src/features/debug/renderDebugStore";
 import { useAtmosphereStore } from "../../../src/features/atmosphere/atmosphereStore";
 import { BASEMAPS } from "../../../src/scene/basemaps";
+import { TERRAIN_ATTRIBUTION } from "../../../src/scene/terrain";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 // The licence text the attribution overlay must show whatever else is on
 // screen (Task C17 / Global Constraints -> Vertical datum).
@@ -254,10 +329,11 @@ globalThis.ResizeObserver =
 /**
  * Every suite below starts with NO basemap and NO clouds.
  *
- * Both are on by default in production (a black globe reads as a broken
- * viewer, and the clouds toggle has always defaulted to on), but that would
- * put an extra `addSource`/`addLayer`/`addEffect` in front of every assertion
- * about the Google tiles. The suites that DO test them opt back in.
+ * A basemap is on by default in production (a black globe reads as a broken
+ * viewer), but it would put an extra `addSource`/`addLayer` in front of every
+ * assertion about the Google tiles. Clouds already default off; they are
+ * spelled out here so the suite does not silently change meaning if that
+ * default moves again. The suites that DO test them opt back in.
  */
 beforeEach(() => {
   useBasemapStore.setState({ basemapId: "none" });
@@ -265,18 +341,14 @@ beforeEach(() => {
     ...DEFAULT_RENDER_DEBUG_STATE,
     cloudsEnabled: false,
     postProcessingEnabled: true,
-    // Off by default here for the same reason clouds are: an ambient light
-    // would put an extra `addLight` in front of every unrelated assertion.
-    // The render-settings suite opts back in.
-    ambientIntensity: 0,
   });
   useAtmosphereStore.setState({ cloudCoverage: 0.3, lensFlareEnabled: true });
   addEffect.mockClear();
   updateEffect.mockClear();
   deleteEffect.mockClear();
+  disposeEffectPass.mockClear();
+  disposeEffectPass.mockImplementation(() => {});
   addLight.mockClear();
-  updateLight.mockClear();
-  deleteLight.mockClear();
   resetPhotorealHandles();
   resize.mockClear();
   resizeObservers.length = 0;
@@ -392,6 +464,7 @@ describe("NavaraViewport lifecycle", () => {
       selections: [],
       hovered: null,
     });
+    useViewModeStore.setState({ mode: "3d" });
   });
 
   it("registers DefaultPlugin then CityJSONPlugin, both before view.init()", async () => {
@@ -736,6 +809,22 @@ describe("NavaraViewport lifecycle", () => {
       layers: [makeLayer({ id: "a", visible: false }), makeLayer({ id: "b" })],
     });
     await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(2));
+  });
+
+  it("fits WITHIN the active view mode: a 2D fit stays a plan view", async () => {
+    // Adding a layer in 2D must not tilt the camera to the -60 framing pitch:
+    // the mode's controller flags and disabled tilt buttons would leave the
+    // user stranded in an oblique view 2D cannot recover from.
+    useViewModeStore.setState({ mode: "2d" });
+    useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(flyTo).toHaveBeenCalled());
+    const fit = flyTo.mock.calls.at(-1)![0] as Record<string, number>;
+    expect(fit.pitch).toBeCloseTo(-89.9, 6);
+    expect(fit.heading).toBeCloseTo(0, 6);
+    // Still framed on the layer's bounds — the mode changes the angle, not
+    // the destination.
+    expect(fit.lng).toBeCloseTo(4.355, 6);
   });
 
   // Task C26. A restore adds layers and then applies the camera it saved; the
@@ -1314,18 +1403,20 @@ describe("NavaraViewport Google tiles", () => {
   it("registers ONE 3d-tiles source and layer with the key in the URL, after init", async () => {
     vi.stubEnv("VITE_GOOGLE_MAPS_API_KEY", "test key&1");
     render(<NavaraViewport onTriangleCount={() => {}} />);
-    await waitFor(() => expect(addLayer).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(countOfType(addLayer, "3d-tiles")).toBe(1));
 
-    expect(addSource).toHaveBeenCalledTimes(1);
-    expect(addSource.mock.calls[0]![0]).toEqual({
+    expect(countOfType(addSource, "3d-tiles")).toBe(1);
+    const si = indexOfType(addSource, "3d-tiles");
+    const li = indexOfType(addLayer, "3d-tiles");
+    expect(addSource.mock.calls[si]![0]).toEqual({
       type: "3d-tiles",
       url: "https://tile.googleapis.com/v1/3dtiles/root.json?key=test%20key%261",
     });
     // The layer references the SOURCE HANDLE `addSource` returned — an
     // inlined URL or a guessed id would silently render nothing.
-    expect(addLayer.mock.calls[0]![0]).toEqual({
+    expect(addLayer.mock.calls[li]![0]).toEqual({
       type: "3d-tiles",
-      source: addSource.mock.results[0]!.value,
+      source: addSource.mock.results[si]!.value,
       model: {
         normals: true,
         creaseNormalAngle: Math.PI / 6,
@@ -1336,11 +1427,11 @@ describe("NavaraViewport Google tiles", () => {
     });
     // After `init()` (the engine rejects a source before it), and after the
     // default photoreal scene, which the tiles are drawn on top of.
-    expect(addSource.mock.invocationCallOrder[0]!).toBeGreaterThan(
+    expect(addSource.mock.invocationCallOrder[si]!).toBeGreaterThan(
       init.mock.invocationCallOrder[0]!,
     );
-    expect(addSource.mock.invocationCallOrder[0]!).toBeLessThan(
-      addLayer.mock.invocationCallOrder[0]!,
+    expect(addSource.mock.invocationCallOrder[si]!).toBeLessThan(
+      addLayer.mock.invocationCallOrder[li]!,
     );
   });
 
@@ -1359,8 +1450,9 @@ describe("NavaraViewport Google tiles", () => {
     vi.stubEnv("VITE_GOOGLE_MAPS_API_KEY", "");
     const { container } = render(<NavaraViewport onTriangleCount={() => {}} />);
     await waitFor(() => expect(init).toHaveBeenCalled());
-    expect(addSource).not.toHaveBeenCalled();
-    expect(addLayer).not.toHaveBeenCalled();
+    // Terrain is unconditional, so "nothing" means no TILES of their own.
+    expect(countOfType(addSource, "3d-tiles")).toBe(0);
+    expect(countOfType(addLayer, "3d-tiles")).toBe(0);
 
     // The geoid credit is NOT conditional: every georeferenced layer samples
     // that service, so it is shown even with an empty, tile-free viewport.
@@ -1382,8 +1474,9 @@ describe("NavaraViewport Google tiles", () => {
     useTilesStore.setState({ enabled: false });
     const { container } = render(<NavaraViewport onTriangleCount={() => {}} />);
     await waitFor(() => expect(init).toHaveBeenCalled());
-    expect(addSource).not.toHaveBeenCalled();
-    expect(addLayer).not.toHaveBeenCalled();
+    // Terrain is unconditional, so "nothing" means no TILES of their own.
+    expect(countOfType(addSource, "3d-tiles")).toBe(0);
+    expect(countOfType(addLayer, "3d-tiles")).toBe(0);
     expect(
       container.querySelector(".attribution-overlay")?.textContent,
     ).not.toMatch(/Google/);
@@ -1392,7 +1485,7 @@ describe("NavaraViewport Google tiles", () => {
   it("removes the layer AND its source, layer first, when the toggle goes off", async () => {
     vi.stubEnv("VITE_GOOGLE_MAPS_API_KEY", "k");
     const { container } = render(<NavaraViewport onTriangleCount={() => {}} />);
-    await waitFor(() => expect(addLayer).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(countOfType(addLayer, "3d-tiles")).toBe(1));
 
     act(() => useTilesStore.getState().setEnabled(false));
 
@@ -1414,17 +1507,19 @@ describe("NavaraViewport Google tiles", () => {
   it("re-adds a fresh source and layer when the toggle comes back on", async () => {
     vi.stubEnv("VITE_GOOGLE_MAPS_API_KEY", "k");
     const { container } = render(<NavaraViewport onTriangleCount={() => {}} />);
-    await waitFor(() => expect(addLayer).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(countOfType(addLayer, "3d-tiles")).toBe(1));
 
     act(() => useTilesStore.getState().setEnabled(false));
     await waitFor(() => expect(deleteLayer).toHaveBeenCalledTimes(1));
     act(() => useTilesStore.getState().setEnabled(true));
 
-    await waitFor(() => expect(addLayer).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(countOfType(addLayer, "3d-tiles")).toBe(2));
     // A NEW source, not the deleted one: `Source.delete()` disposed the first.
-    expect(addSource).toHaveBeenCalledTimes(2);
-    expect(addLayer.mock.calls[1]![0]).toMatchObject({
-      source: addSource.mock.results[1]!.value,
+    expect(countOfType(addSource, "3d-tiles")).toBe(2);
+    const reSi = lastIndexOfType(addSource, "3d-tiles");
+    const reLi = lastIndexOfType(addLayer, "3d-tiles");
+    expect(addLayer.mock.calls[reLi]![0]).toMatchObject({
+      source: addSource.mock.results[reSi]!.value,
     });
     await waitFor(() =>
       expect(
@@ -1436,7 +1531,7 @@ describe("NavaraViewport Google tiles", () => {
   it("does not delete tiles handles through a view the engine already disposed", async () => {
     vi.stubEnv("VITE_GOOGLE_MAPS_API_KEY", "k");
     const { unmount } = render(<NavaraViewport onTriangleCount={() => {}} />);
-    await waitFor(() => expect(addLayer).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(countOfType(addLayer, "3d-tiles")).toBe(1));
 
     unmount();
 
@@ -1448,9 +1543,7 @@ describe("NavaraViewport Google tiles", () => {
 
   it("keeps the viewer alive when the engine refuses the tiles layer", async () => {
     vi.stubEnv("VITE_GOOGLE_MAPS_API_KEY", "k");
-    addLayer.mockImplementationOnce(() => {
-      throw new Error("unsupported source");
-    });
+    failAddLayerOnce("3d-tiles");
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const ref = createRef<CitySceneHandle>();
     const { container } = render(
@@ -1507,51 +1600,60 @@ describe("NavaraViewport basemap", () => {
   it("drapes OpenStreetMap by default, as a raster-tile source plus a raster layer", async () => {
     useBasemapStore.setState({ basemapId: "osm" });
     render(<NavaraViewport onTriangleCount={() => {}} />);
-    await waitFor(() => expect(addLayer).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(countOfType(addLayer, "raster")).toBe(1));
 
-    expect(addSource.mock.calls[0]![0]).toEqual({
+    const si = indexOfType(addSource, "raster-tile");
+    const li = indexOfType(addLayer, "raster");
+    expect(addSource.mock.calls[si]![0]).toEqual({
       type: "raster-tile",
       url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
       maxZoom: 19,
     });
     // The layer references the SOURCE HANDLE, not a guessed id.
-    expect(addLayer.mock.calls[0]![0]).toEqual({
+    expect(addLayer.mock.calls[li]![0]).toEqual({
       type: "raster",
-      source: addSource.mock.results[0]!.value,
+      source: addSource.mock.results[si]!.value,
     });
     // After `init()` — the engine refuses a source before it — and after the
     // default photoreal scene the imagery is lit by.
-    expect(addSource.mock.invocationCallOrder[0]!).toBeGreaterThan(
+    expect(addSource.mock.invocationCallOrder[si]!).toBeGreaterThan(
       init.mock.invocationCallOrder[0]!,
     );
-    expect(addSource.mock.invocationCallOrder[0]!).toBeLessThan(
-      addLayer.mock.invocationCallOrder[0]!,
+    expect(addSource.mock.invocationCallOrder[si]!).toBeLessThan(
+      addLayer.mock.invocationCallOrder[li]!,
     );
+    // The terrain the basemap is draped over was added FIRST — render order
+    // is add order, so the reverse would hide the relief under the imagery.
+    expect(
+      addLayer.mock.invocationCallOrder[indexOfType(addLayer, "terrain")]!,
+    ).toBeLessThan(addLayer.mock.invocationCallOrder[li]!);
   });
 
   it("adds nothing for the None option", async () => {
     useBasemapStore.setState({ basemapId: "none" });
     render(<NavaraViewport onTriangleCount={() => {}} />);
     await waitFor(() => expect(init).toHaveBeenCalled());
-    expect(addSource).not.toHaveBeenCalled();
-    expect(addLayer).not.toHaveBeenCalled();
+    // Terrain is unconditional, so "nothing" means no RASTER of its own.
+    expect(countOfType(addSource, "raster-tile")).toBe(0);
+    expect(countOfType(addLayer, "raster")).toBe(0);
   });
 
   it("swaps the layer and its source, layer first, when the option changes", async () => {
     useBasemapStore.setState({ basemapId: "osm" });
     render(<NavaraViewport onTriangleCount={() => {}} />);
-    await waitFor(() => expect(addLayer).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(countOfType(addLayer, "raster")).toBe(1));
 
     act(() => useBasemapStore.getState().setBasemapId("esri-imagery"));
 
-    await waitFor(() => expect(addLayer).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(countOfType(addLayer, "raster")).toBe(2));
     expect(deleteLayer).toHaveBeenCalledTimes(1);
     expect(deleteSource).toHaveBeenCalledTimes(1);
     // `Source.delete()` is a no-op while a layer still references it.
     expect(deleteLayer.mock.invocationCallOrder[0]!).toBeLessThan(
       deleteSource.mock.invocationCallOrder[0]!,
     );
-    expect(addSource.mock.calls[1]![0]).toMatchObject({
+    const swapped = lastIndexOfType(addSource, "raster-tile");
+    expect(addSource.mock.calls[swapped]![0]).toMatchObject({
       url: BASEMAPS.find((b) => b.id === "esri-imagery")!.source!.url,
     });
   });
@@ -1585,9 +1687,7 @@ describe("NavaraViewport basemap", () => {
 
   it("credits nobody for imagery the engine refused", async () => {
     useBasemapStore.setState({ basemapId: "osm" });
-    addLayer.mockImplementationOnce(() => {
-      throw new Error("unsupported source");
-    });
+    failAddLayerOnce("raster");
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const ref = createRef<CitySceneHandle>();
     const { container } = render(
@@ -1599,33 +1699,36 @@ describe("NavaraViewport basemap", () => {
     await waitFor(() => expect(errors).toHaveBeenCalled());
     expect(container.querySelector(".navara-viewport__error")).toBeNull();
     // The geoid lines happen to name OpenStreetMap too (ODbL), so the honest
-    // assertion is that NO line was added on top of them.
+    // assertion is that no BASEMAP line was added on top of them. Terrain is
+    // credited because terrain really is in the scene — only the imagery
+    // failed.
     expect(
       container.querySelectorAll(".attribution-overlay span"),
-    ).toHaveLength(GEOID_ATTRIBUTION.length);
+    ).toHaveLength(GEOID_ATTRIBUTION.length + TERRAIN_ATTRIBUTION.length);
     errors.mockRestore();
   });
 
   it("deletes the source when the LAYER is what the engine refused", async () => {
     useBasemapStore.setState({ basemapId: "osm" });
-    addLayer.mockImplementationOnce(() => {
-      throw new Error("unsupported source");
-    });
+    failAddLayerOnce("raster");
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     render(<NavaraViewport onTriangleCount={() => {}} />);
-    await waitFor(() => expect(errors).toHaveBeenCalled());
+    // Wait for the basemap's OWN attempt, not merely for the first
+    // console.error of the run — the terrain effect now runs first, so a
+    // generic error gate could fire before the basemap had tried anything.
+    await waitFor(() => expect(countOfType(addSource, "raster-tile")).toBe(1));
     // The source registered fine and nothing else holds a reference to it, so
     // returning without deleting it would leak it into the engine for the rest
     // of the session — once per failed attempt.
-    expect(addSource).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(deleteSource).toHaveBeenCalledTimes(1));
+    expect(errors).toHaveBeenCalled();
     errors.mockRestore();
   });
 
   it("does not delete basemap handles through a view the engine already disposed", async () => {
     useBasemapStore.setState({ basemapId: "osm" });
     const { unmount } = render(<NavaraViewport onTriangleCount={() => {}} />);
-    await waitFor(() => expect(addLayer).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(countOfType(addLayer, "raster")).toBe(1));
 
     unmount();
 
@@ -1742,6 +1845,44 @@ describe("NavaraViewport clouds", () => {
     await waitFor(() => expect(deleteEffect).toHaveBeenCalledTimes(1));
   });
 
+  // ENGINE-BUG WORKAROUND, pinned because it is invisible from the store: the
+  // clouds composite through the AERIAL-PERSPECTIVE pass
+  // (`Clouds` publishes `atmosphere.overlay`; AP samples it), and
+  // `EffectDesc.onDestroy()` removes the pass from the composer WITHOUT
+  // disposing it — so `handle.delete()` alone leaves the AP pass compositing the
+  // clouds' last frame and the toggle reads as inert. `Clouds.dispose()` is what
+  // clears the overlay, so the viewport calls it itself, BEFORE the delete.
+  it("disposes the clouds pass before deleting its handle, so the toggle bites", async () => {
+    useRenderDebugStore.setState({ cloudsEnabled: true });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(addEffect).toHaveBeenCalledTimes(1));
+    expect(disposeEffectPass).not.toHaveBeenCalled();
+
+    act(() => useRenderDebugStore.getState().setCloudsEnabled(false));
+
+    await waitFor(() => expect(disposeEffectPass).toHaveBeenCalledTimes(1));
+    expect(deleteEffect).toHaveBeenCalledTimes(1);
+    expect(disposeEffectPass.mock.invocationCallOrder[0]!).toBeLessThan(
+      deleteEffect.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("still deletes the handle when disposing the pass throws", async () => {
+    useRenderDebugStore.setState({ cloudsEnabled: true });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(addEffect).toHaveBeenCalledTimes(1));
+    disposeEffectPass.mockImplementationOnce(() => {
+      throw new Error("pass already disposed");
+    });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    act(() => useRenderDebugStore.getState().setCloudsEnabled(false));
+
+    await waitFor(() => expect(deleteEffect).toHaveBeenCalledTimes(1));
+    expect(errors).toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
   it("adds no clouds while post-processing is off (there is no pass chain to join)", async () => {
     useRenderDebugStore.setState({
       cloudsEnabled: true,
@@ -1776,9 +1917,8 @@ describe("NavaraViewport clouds", () => {
 // The regression these pin is "the Advanced Settings toggles do nothing": the
 // panel wrote booleans into `renderDebugStore` and NOTHING read them. Every
 // assertion below therefore reads ENGINE state (a handle's `visible`, a
-// `sun.update()` call, `view.toneMappingExposure`, an `addLight` config) —
-// never the store, which is what the old tests checked and why they passed
-// while the feature was dead.
+// `sun.update()` call, `view.toneMappingExposure`) — never the store, which is
+// what the old tests checked and why they passed while the feature was dead.
 // ---------------------------------------------------------------------------
 describe("NavaraViewport render settings", () => {
   beforeEach(() => {
@@ -1875,36 +2015,35 @@ describe("NavaraViewport render settings", () => {
     expect(photorealHandles.sun.visible).toBe(true);
   });
 
-  it("adds the ambient fill light and updates it in place", async () => {
-    useRenderDebugStore.setState({ ambientIntensity: 0.6 });
+  // THE lighting model. The aerial-perspective pass defaults to
+  // `irradiance: false` — it only hazes whatever the scene lights produced.
+  // Turning it on sets `sunLight = skyLight = true` on the pass, so the physical
+  // atmosphere lights the g-buffer albedo directly. That is the calibration
+  // `DEFAULT_EXPOSURE = 10` belongs to, and the reason the city meshes are unlit
+  // (`MeshBasicMaterial`, @cityjson/navara-cityjson). Without this push the
+  // whole scene is lit twice and clips to white.
+  it("switches the aerial-perspective pass into irradiance mode at startup", async () => {
     render(<NavaraViewport onTriangleCount={() => {}} />);
-
-    await waitFor(() => expect(addLight).toHaveBeenCalledTimes(1));
-    expect(addLight.mock.calls[0]![0]).toEqual({
-      ambient: { intensity: 0.6 },
-    });
-
-    act(() => useRenderDebugStore.getState().setAmbientIntensity(1.4));
     await waitFor(() =>
-      expect(updateLight).toHaveBeenCalledWith({
-        ambient: { intensity: 1.4 },
+      expect(photorealHandles.aerialPerspective.update).toHaveBeenCalledWith({
+        // `useNormalBuffer: true` is only safe because the TERRAIN layer feeds
+        // the MRT normal attachment (`requestVertexNormals`). Without terrain
+        // the globe writes no normals, a raster basemap turns the attachment
+        // to half-float NaN, and the frame renders black — which is why this
+        // pair is asserted together. See `enableAtmosphericLighting`.
+        aerialPerspective: { irradiance: true, useNormalBuffer: true },
       }),
     );
-    // Rebuilding the light per slider step would churn the scene graph.
-    expect(addLight).toHaveBeenCalledTimes(1);
   });
 
-  it("removes the ambient light at intensity 0 and re-adds it above it", async () => {
-    useRenderDebugStore.setState({ ambientIntensity: 0 });
+  // The scene-lights calibration is GONE, ambient fill and all. A regression
+  // that adds one back is a double-exposed frame, not a brighter one.
+  it("adds no scene lights of its own", async () => {
     render(<NavaraViewport onTriangleCount={() => {}} />);
-    await waitFor(() => expect(init).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(photorealHandles.aerialPerspective.update).toHaveBeenCalled(),
+    );
     expect(addLight).not.toHaveBeenCalled();
-
-    act(() => useRenderDebugStore.getState().setAmbientIntensity(0.5));
-    await waitFor(() => expect(addLight).toHaveBeenCalledTimes(1));
-
-    act(() => useRenderDebugStore.getState().setAmbientIntensity(0));
-    await waitFor(() => expect(deleteLight).toHaveBeenCalledTimes(1));
   });
 
   // The other half of capturing the photoreal handles: they die with the view,
@@ -1913,34 +2052,28 @@ describe("NavaraViewport render settings", () => {
   // and under StrictMode, through the PREVIOUS engine's handles over a live
   // view.
   it("stops pushing settings once the engine is gone", async () => {
-    useRenderDebugStore.setState({ ambientIntensity: 0.6 });
     const { unmount } = render(<NavaraViewport onTriangleCount={() => {}} />);
     await waitFor(() =>
       expect(photorealHandles.sun.update).toHaveBeenCalledWith({
         sun: { castShadow: true },
       }),
     );
-    await waitFor(() => expect(addLight).toHaveBeenCalledTimes(1));
     const view = currentView();
 
     unmount();
-    // The mount's own teardown deletes the light; what must NOT happen is a
-    // fresh push afterwards.
+    // What must NOT happen is a fresh push afterwards.
     photorealHandles.sun.update.mockClear();
-    updateLight.mockClear();
-    addLight.mockClear();
+    photorealHandles.aerialPerspective.update.mockClear();
     const exposureBefore = view.toneMappingExposure;
 
     act(() => {
       useRenderDebugStore.getState().setSunShadowsEnabled(false);
       useRenderDebugStore.getState().setAerialPerspectiveEnabled(false);
-      useRenderDebugStore.getState().setAmbientIntensity(2);
       useRenderDebugStore.getState().setExposure(2);
     });
 
     expect(photorealHandles.sun.update).not.toHaveBeenCalled();
-    expect(updateLight).not.toHaveBeenCalled();
-    expect(addLight).not.toHaveBeenCalled();
+    expect(photorealHandles.aerialPerspective.update).not.toHaveBeenCalled();
     expect(view.toneMappingExposure).toBe(exposureBefore);
     // The handles themselves are untouched, which is the visible symptom the
     // ref-nulling prevents.
@@ -1948,9 +2081,8 @@ describe("NavaraViewport render settings", () => {
   });
 
   it("keeps the viewer alive when the engine refuses a settings push", async () => {
-    useRenderDebugStore.setState({ ambientIntensity: 0.6 });
-    addLight.mockImplementationOnce(() => {
-      throw new Error("no light slots left");
+    photorealHandles.aerialPerspective.update.mockImplementationOnce(() => {
+      throw new Error("this build has no irradiance mode");
     });
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const ref = createRef<CitySceneHandle>();
@@ -2021,5 +2153,99 @@ describe("NavaraViewport container resize", () => {
     await waitFor(() => expect(resizeObservers.length).toBe(1));
     unmount();
     expect(resizeObservers[0]!.disconnected).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Geospatial layers (section 4). The reconciliation itself is unit-tested in
+// `geoLayerSync.test.ts` against a fake view; what is checked HERE is the
+// wiring only — that the store reaches the engine at all, in the right order,
+// and that the pairs are taken back out when the viewport goes away.
+// ---------------------------------------------------------------------------
+describe("NavaraViewport geospatial layers", () => {
+  beforeEach(() => {
+    addSource.mockClear();
+    addLayer.mockClear();
+    deleteSource.mockClear();
+    deleteLayer.mockClear();
+    listeners.clear();
+    viewInstances.length = 0;
+    // This suite owns `addSource`/`addLayer`: no backdrop of its own.
+    useTilesStore.setState({ enabled: false });
+    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useGeoLayerStore.setState({ layers: [] });
+  });
+
+  afterEach(() => {
+    cleanup();
+    useGeoLayerStore.setState({ layers: [] });
+    useTilesStore.setState({ enabled: true });
+  });
+
+  function addXyz(): string {
+    return useGeoLayerStore.getState().addGeoLayer({
+      name: "overlay",
+      kind: "raster-xyz",
+      config: { urlTemplate: "https://tile.example/{z}/{x}/{y}.png" },
+    });
+  }
+
+  it("adds a source+layer pair for a layer already in the store", async () => {
+    addXyz();
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+
+    await waitFor(() => expect(countOfType(addLayer, "raster")).toBe(1));
+    const si = indexOfType(addSource, "raster-tile");
+    expect(addSource.mock.calls[si]![0]).toEqual({
+      type: "raster-tile",
+      url: "https://tile.example/{z}/{x}/{y}.png",
+    });
+    // ON TOP of the terrain: render order is add order, and imported data
+    // belongs over the ground rather than under it.
+    expect(
+      addLayer.mock.invocationCallOrder[indexOfType(addLayer, "terrain")]!,
+    ).toBeLessThan(
+      addLayer.mock.invocationCallOrder[indexOfType(addLayer, "raster")]!,
+    );
+  });
+
+  it("adds a pair for a layer added after the engine is up", async () => {
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(init).toHaveBeenCalled());
+    expect(countOfType(addLayer, "raster")).toBe(0);
+
+    act(() => {
+      addXyz();
+    });
+
+    await waitFor(() => expect(countOfType(addLayer, "raster")).toBe(1));
+  });
+
+  it("removes the pair layer-first when the record leaves the store", async () => {
+    const id = addXyz();
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(countOfType(addLayer, "raster")).toBe(1));
+
+    act(() => useGeoLayerStore.getState().removeGeoLayer(id));
+
+    await waitFor(() => expect(deleteLayer).toHaveBeenCalledTimes(1));
+    expect(deleteSource).toHaveBeenCalledTimes(1);
+    // `Source.delete()` removes nothing while a layer still references it.
+    expect(deleteLayer.mock.invocationCallOrder[0]!).toBeLessThan(
+      deleteSource.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("takes every pair back out when the viewport unmounts", async () => {
+    addXyz();
+    const { unmount } = render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(countOfType(addLayer, "raster")).toBe(1));
+
+    unmount();
+
+    // The store KEEPS the record — it is the user's layer, not the engine's —
+    // so the next mount rebuilds the pair from it.
+    expect(deleteLayer).toHaveBeenCalledTimes(1);
+    expect(useGeoLayerStore.getState().layers).toHaveLength(1);
   });
 });
