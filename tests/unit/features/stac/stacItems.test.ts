@@ -166,6 +166,22 @@ describe("fetchCollectionItems", () => {
     expect(calls[0]![0]).toBe(calls[1]![0]);
     expect(calls[0]![0]).toMatch(/^stac-items-[\w-]+\.parquet$/);
   });
+
+  it("sanitizes a hostile collection id out of the SQL", async () => {
+    stubParquetFetch();
+    vi.mocked(queryParquetBuffer).mockResolvedValue({ columns: [], rows: [] });
+
+    await fetchCollectionItems({ ...card, id: "a'; DROP TABLE x --" });
+
+    const calls = vi.mocked(queryParquetBuffer).mock.calls;
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      expect(call[0]).toMatch(/^stac-items-[A-Za-z0-9_-]+\.parquet$/);
+      // The name reaches the SQL, so nothing quote-shaped may survive in it.
+      expect(call[2]).toContain(`read_parquet('${call[0]}')`);
+      expect(call[2]).not.toContain("DROP TABLE");
+    }
+  });
 });
 
 describe("buildItemsSql", () => {

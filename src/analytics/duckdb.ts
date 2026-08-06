@@ -155,9 +155,20 @@ export async function queryDuckDB(sql: string): Promise<QueryResult | null> {
  * should not have to distinguish it from "bad SQL". Works WITHOUT the cityjson
  * extension: `read_parquet` is DuckDB core.
  *
- * The file is dropped in a `finally` so a repeated call may reuse the same
- * name, but a `dropFile` failure never discards a result that was already
- * produced.
+ * CALLING THIS TWICE WITH THE SAME `buffer` IS SAFE, and it takes both of the
+ * things below to make it so:
+ *
+ * 1. the file is dropped in a `finally`, so the name is free again (a
+ *    `dropFile` failure still never discards a result already produced); and
+ * 2. the bytes are COPIED with `.slice()` before registration, because
+ *    duckdb-wasm's async bindings post the buffer to their worker in the
+ *    TRANSFER list (`postTask(task, [buffer.buffer])`), which DETACHES the
+ *    caller's ArrayBuffer — the whole backing buffer, even for a partial
+ *    view. Without the copy, a second call with the same `Uint8Array` throws
+ *    `DataCloneError` on a detached buffer and returns null, which reads as
+ *    "the file is unreadable" when the file was fine. `.slice()` and not
+ *    `new Uint8Array(buffer)`: the latter aliases the same memory and is
+ *    detached right along with it.
  */
 export async function queryParquetBuffer(
   fileName: string,
@@ -168,7 +179,7 @@ export async function queryParquetBuffer(
 
   const database = db;
   try {
-    await database.registerFileBuffer(fileName, buffer);
+    await database.registerFileBuffer(fileName, buffer.slice());
   } catch {
     return null;
   }
