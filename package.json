@@ -28,6 +28,7 @@
     "@navaramap/three-default-descs": "0.0.5",
     "@navaramap/three-default-plugin": "0.0.5",
     "fast-xml-parser": "^5.5.12",
+    "maplibre-gl": "^6.2.0",
     "postprocessing": "6.39.0",
     "proj4": "^2.20.8",
     "react": "latest",
