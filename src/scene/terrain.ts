@@ -66,7 +66,10 @@ export const TERRAIN: TerrainConfig = {
   source: {
     type: "quantized-mesh",
     url: TERRAIN_URL,
-    maxZoom: 18,
+    // The service's layer.json reports maxzoom 14 (verified live 2026-08-06);
+    // the engine clamps via the tile availability index anyway, so this is
+    // documentation of the real ceiling, not a knob.
+    maxZoom: 14,
     requestVertexNormals: true,
     requestWaterMask: true,
   },
