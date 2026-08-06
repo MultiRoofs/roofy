@@ -12,6 +12,7 @@ describe("browserPlatform", () => {
   it("exposes http service", () => {
     expect(browserPlatform.http).toBeDefined();
     expect(typeof browserPlatform.http.fetchText).toBe("function");
+    expect(typeof browserPlatform.http.fetchBytes).toBe("function");
   });
 
   it("exposes clipboard service", () => {

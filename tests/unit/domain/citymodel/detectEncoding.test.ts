@@ -85,6 +85,18 @@ describe("detectEncoding", () => {
     expect(detectEncoding("/data/buildings.fcb")).toBe("flatcitybuf");
   });
 
+  // Gzipped assets (STAC catalogs commonly serve *.city.json.gz)
+  it("strips a trailing .gz before matching the extension", () => {
+    expect(detectEncoding("tile.city.json.gz")).toBe("cityjson");
+    expect(detectEncoding("tile.city.jsonl.gz")).toBe("cityjsonseq");
+    expect(
+      detectEncoding(
+        "https://data.3dbag.nl/v1/tiles/10/1/2/t.city.json.gz?x=1",
+      ),
+    ).toBe("cityjson");
+    expect(detectEncoding("model.gml.gz")).toBe("citygml");
+  });
+
   it("ignores extensions in query strings — only pathname matters", () => {
     expect(
       detectEncoding("https://example.com/data?file=model.city.jsonl"),

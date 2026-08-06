@@ -108,6 +108,25 @@ describe("loadFromUrl", () => {
       /viewport streaming/,
     );
   });
+
+  it("keeps the friendly 404 message on the bytes path", async () => {
+    // Envelope fake mirrors the real fetchBytes contract: never throws on
+    // non-2xx, returns { ok, status, statusText, bytes }.
+    const http = {
+      fetchText: async () => {
+        throw new Error("unused");
+      },
+      fetchBytes: async () => ({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        bytes: new Uint8Array(),
+      }),
+    };
+    await expect(
+      loadFromUrl("https://example.com/gone.city.json", http),
+    ).rejects.toThrow(/not found \(404\)/i);
+  });
 });
 
 // ---------------------------------------------------------------------------

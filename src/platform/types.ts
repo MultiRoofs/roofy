@@ -13,6 +13,18 @@ export interface HttpClient {
   fetchText(
     url: string,
   ): Promise<{ ok: boolean; status: number; statusText: string; text: string }>;
+
+  /**
+   * Fetch a URL as raw bytes. Same contract as fetchText: resolves the
+   * envelope on ANY HTTP status (callers branch on ok/status); rejects only
+   * on network-level failure.
+   */
+  fetchBytes(url: string): Promise<{
+    ok: boolean;
+    status: number;
+    statusText: string;
+    bytes: Uint8Array;
+  }>;
 }
 
 /**
