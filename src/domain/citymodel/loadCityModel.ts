@@ -161,7 +161,15 @@ export async function loadFromUrl(
       `Failed to fetch: ${response.status} ${response.statusText}`,
     );
   }
-  const text = await decodeModelBytes(response.bytes);
+  let text: string;
+  try {
+    text = await decodeModelBytes(response.bytes);
+  } catch (err) {
+    throw new Error(
+      `Corrupt or truncated compressed data for "${fileNameFromUrl(url)}". The gzipped body could not be decompressed.`,
+      { cause: err },
+    );
+  }
 
   if (encoding === "cityjsonseq") {
     return parseCityJSONSeq(text);
