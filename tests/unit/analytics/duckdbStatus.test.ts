@@ -7,7 +7,11 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { getDuckDBStatus, queryDuckDB } from "../../../src/analytics/duckdb";
+import {
+  getDuckDBStatus,
+  queryDuckDB,
+  queryParquetBuffer,
+} from "../../../src/analytics/duckdb";
 
 describe("DuckDB status", () => {
   it("starts in uninitialized state", () => {
@@ -17,6 +21,15 @@ describe("DuckDB status", () => {
 
   it("queryDuckDB returns null when not initialized", async () => {
     const result = await queryDuckDB("SELECT 1");
+    expect(result).toBeNull();
+  });
+
+  it("queryParquetBuffer returns null when not initialized", async () => {
+    const result = await queryParquetBuffer(
+      "x.parquet",
+      new Uint8Array(8),
+      "SELECT 1",
+    );
     expect(result).toBeNull();
   });
 });
