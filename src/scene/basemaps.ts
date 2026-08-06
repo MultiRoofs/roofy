@@ -85,6 +85,8 @@ export interface BasemapLayerOptions {
 }
 
 export interface BasemapOption {
+  /** Kept out of the pickers (still resolvable by id). See the one user. */
+  readonly hidden?: boolean;
   readonly id: BasemapId;
   readonly label: string;
   /** `null` for "None" — the only option that adds nothing to the scene. */
@@ -156,6 +158,16 @@ export const BASEMAPS: readonly BasemapOption[] = [
     attribution: ["© CARTO", "© OpenStreetMap contributors"],
   },
   {
+    // DOES NOT RENDER on 0.0.5 inside THIS app: the engine fetches ZERO
+    // terrarium tiles for a raster-dem source here — even the engine's own
+    // example, run verbatim through a debug handle at multiple zooms, fetches
+    // nothing, while the identical code works on the vendor's preview site.
+    // Some interaction with this app's view configuration (plugins/photoreal
+    // scene/existing raster) suppresses raster-dem fetching entirely; same
+    // renders-nothing family as Known Issue (k). Hidden from the picker until
+    // a minimal-repro bisection finds the trigger; the machinery stays so the
+    // investigation has something to re-enable.
+    hidden: true,
     id: "elevation-heatmap",
     label: "Elevation heatmap",
     // NOT imagery: a DEM read as data and colourised by the engine, which is

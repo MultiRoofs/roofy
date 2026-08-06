@@ -238,7 +238,7 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
               value={basemapId}
               onChange={(e) => setBasemapId(e.target.value as BasemapId)}
             >
-              {BASEMAPS.map((b) => (
+              {BASEMAPS.filter((b) => !b.hidden).map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.label}
                 </option>
