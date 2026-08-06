@@ -47,6 +47,13 @@ function collectionJson(id: string) {
   };
 }
 
+/** What an aborted `fetch` (or an aborted body read) rejects with. */
+function abortError() {
+  const error = new Error("aborted");
+  error.name = "AbortError";
+  return error;
+}
+
 beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
@@ -149,11 +156,7 @@ describe("fetchStacCollections", () => {
       "fetch",
       vi.fn(async (url: string, init?: { signal?: AbortSignal }) => {
         seen.push(init?.signal);
-        if (url !== ROOT) {
-          const error = new Error("aborted");
-          error.name = "AbortError";
-          throw error;
-        }
+        if (url !== ROOT) throw abortError();
         return { ok: true, status: 200, json: async () => catalogJson() };
       }),
     );
@@ -161,5 +164,52 @@ describe("fetchStacCollections", () => {
       { name: "AbortError" },
     );
     expect(seen.every((s) => s === controller.signal)).toBe(true);
+  });
+
+  // The root request can succeed and the BODY still be cut off mid-stream —
+  // a distinct rejection point from the one above. Wrapping it would report a
+  // broken catalog to a user who merely navigated away.
+  it("lets an AbortError from the root body read through unwrapped", async () => {
+    const controller = new AbortController();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => {
+          throw abortError();
+        },
+      })),
+    );
+    const rejection = await fetchStacCollections(controller.signal).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(rejection).toBeInstanceOf(Error);
+    expect((rejection as Error).name).toBe("AbortError");
+    expect((rejection as Error).message).not.toMatch(/catalog/i);
+  });
+
+  it("orders same-titled collections by id, not by which response won", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url === ROOT)
+          return { ok: true, status: 200, json: async () => catalogJson() };
+        // Both cards carry the SAME title, and the /aaa/ one resolves last.
+        const first = url.includes("/aaa/");
+        if (first) await new Promise((r) => setTimeout(r, 5));
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ...collectionJson(first ? "id-a" : "id-b"),
+            title: "Same Title",
+          }),
+        };
+      }),
+    );
+    const cards = await fetchStacCollections();
+    expect(cards.map((c) => c.id)).toEqual(["id-a", "id-b"]);
   });
 });
