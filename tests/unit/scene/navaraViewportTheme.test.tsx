@@ -27,6 +27,9 @@ const addLayer = vi.fn((_layer: unknown) => ({
 }));
 const addEffect = vi.fn((_config: unknown) => ({
   id: "effect-1",
+  // `visible` is the composer's enable flag, and the seam every theme-owned
+  // effect is toggled through instead of being deleted and re-added.
+  visible: true,
   update: vi.fn(),
   delete: vi.fn(),
   ref: { raw: { dispose: vi.fn() } },
@@ -142,7 +145,16 @@ vi.mock("@navaramap/three", () => ({
   })),
   radianToDegree: vi.fn((r: number) => (r * 180) / Math.PI),
   degreeToRadian: vi.fn((d: number) => (d * Math.PI) / 180),
-  geodeticToVector3: vi.fn(() => ({ x: 0, y: 0, z: 0 })),
+  // Echoes its input rather than answering a constant: the fog-light tests
+  // check that each light was placed at its OWN geodetic site, which a
+  // constant would hide.
+  geodeticToVector3: vi.fn(
+    (g: { lng: number; lat: number; height: number }) => ({
+      x: g.lng * 1e6,
+      y: g.lat * 1e6,
+      z: g.height,
+    }),
+  ),
 }));
 
 const defaultPluginInstance = {
@@ -228,7 +240,17 @@ function makeLayer(id: string): Layer {
   } as unknown as Layer;
 }
 
-function makeHandle(id: string) {
+/** Delft-ish geodetic bounds, so `boundsOf()` has something to scatter over. */
+const LAYER_BOUNDS = {
+  west: 4.34,
+  south: 51.99,
+  east: 4.37,
+  north: 52.01,
+  minHeight: 0,
+  maxHeight: 40,
+};
+
+function makeHandle(id: string, bounds: unknown = null) {
   return {
     id,
     setVisible: vi.fn(),
@@ -241,7 +263,7 @@ function makeHandle(id: string) {
     resolveRaycast: vi.fn(() => null as unknown),
     triangleCount: vi.fn(() => 10),
     heightOffset: vi.fn(() => 0),
-    getBoundsGeodetic: vi.fn(() => null),
+    getBoundsGeodetic: vi.fn(() => bounds),
     delete: vi.fn(),
   };
 }
@@ -285,6 +307,28 @@ function cloudEffects(): CloudsEffectStub[] {
 }
 
 type CloudsEffectStub = ReturnType<typeof addEffect>;
+
+/** The `fogLight` effect handles asked for, paired to the config they were
+ *  born with — the volumetric-neon half of the cyber theme. */
+function fogEffects(): Array<{
+  config: { lights: unknown[]; fogDensity: number };
+  handle: ReturnType<typeof addEffect>;
+}> {
+  const out: Array<{
+    config: { lights: unknown[]; fogDensity: number };
+    handle: ReturnType<typeof addEffect>;
+  }> = [];
+  addEffect.mock.calls.forEach((call, index) => {
+    const config = (call[0] as { fogLight?: unknown } | undefined)?.fogLight;
+    const handle = addEffect.mock.results[index]?.value;
+    if (config === undefined || handle === undefined) return;
+    out.push({
+      config: config as { lights: unknown[]; fogDensity: number },
+      handle,
+    });
+  });
+  return out;
+}
 
 function countLayersOfType(type: string): number {
   return addLayer.mock.calls.filter(
@@ -426,9 +470,11 @@ describe("scene theme -> the backdrops", () => {
   });
 
   it("adds NO raster layer at all for a theme that wants no basemap", async () => {
+    // Wireframe, not cyber: a hidden-line drawing is the one look with nothing
+    // under it. Cyber trades the old black void for CARTO's dark sheet.
     await mount();
     const before = countLayersOfType("raster");
-    await setTheme("cyber");
+    await setTheme("wireframe");
     // "none" has no source at all, so nothing is draped — and, because the
     // credit follows what is on screen, nobody is credited either.
     expect(countLayersOfType("raster")).toBe(before);
@@ -675,6 +721,109 @@ describe("scene theme -> theme-to-theme transitions", () => {
     );
     expect(view.toneMappingExposure).toBe(cyber.exposure);
     expect(albedoScaleUpdates().at(-1)).toBe(cyber.apAlbedoScale);
+  });
+});
+
+describe("scene theme -> the volumetric neon (fogLight)", () => {
+  async function mountWithLayer(): Promise<void> {
+    const handle = makeHandle("L1", LAYER_BOUNDS);
+    cityPluginInstance.addCityModel.mockReturnValue(handle);
+    await mount();
+    await act(async () => {
+      useLayerStore.setState({
+        layers: [makeLayer("L1")],
+        activeLayerId: "L1",
+      });
+    });
+  }
+
+  it("adds ONE fog-light effect for cyber, carrying the policy's light set", async () => {
+    await mountWithLayer();
+    expect(fogEffects()).toHaveLength(0);
+
+    await setTheme("cyber");
+    const spec = sceneThemePolicy("cyber").environment.fogLights!;
+    const effects = fogEffects();
+    expect(effects).toHaveLength(1);
+    expect(effects[0]!.config.lights).toHaveLength(spec.count);
+    expect(effects[0]!.config.fogDensity).toBe(spec.fogDensity);
+  });
+
+  it("places every light at its own ECEF position, inside the layer's bounds", async () => {
+    await mountWithLayer();
+    await setTheme("cyber");
+    const spec = sceneThemePolicy("cyber").environment.fogLights!;
+    const lights = fogEffects()[0]!.config.lights as Array<{
+      position: { x: number; y: number; z: number };
+      color: number;
+      intensity: number;
+      radius: number;
+    }>;
+
+    // The engine wants world-space (ECEF) vectors, not lng/lat — the mocked
+    // `geodeticToVector3` echoes its input scaled, so the transform is visible.
+    const seen = new Set<string>();
+    for (const light of lights) {
+      // The viewport hands `geodeticToVector3` RADIANS (as the engine wants),
+      // and the mock echoes them scaled — so degrees come back out here.
+      const lng = ((light.position.x / 1e6) * 180) / Math.PI;
+      const lat = ((light.position.y / 1e6) * 180) / Math.PI;
+      expect(lng).toBeGreaterThanOrEqual(LAYER_BOUNDS.west);
+      expect(lng).toBeLessThanOrEqual(LAYER_BOUNDS.east);
+      expect(lat).toBeGreaterThanOrEqual(LAYER_BOUNDS.south);
+      expect(lat).toBeLessThanOrEqual(LAYER_BOUNDS.north);
+      // Anchored to the LOW edge of the model, so one tall tower cannot lift
+      // the whole set into the sky.
+      expect(light.position.z).toBe(LAYER_BOUNDS.minHeight + spec.heightM);
+      expect(spec.colors).toContain(light.color);
+      expect(light.intensity).toBeGreaterThanOrEqual(spec.intensityRange[0]);
+      expect(light.intensity).toBeLessThanOrEqual(spec.intensityRange[1]);
+      expect(light.radius).toBe(spec.radius);
+      seen.add(`${light.position.x},${light.position.y}`);
+    }
+    // Scattered, not stacked: the whole point of the deterministic sequence.
+    expect(seen.size).toBe(spec.count);
+  });
+
+  it("is DETERMINISTIC — the same lights on a second entry into cyber", async () => {
+    await mountWithLayer();
+    await setTheme("cyber");
+    const first = JSON.stringify(fogEffects()[0]!.config.lights);
+    await setTheme("photoreal");
+    await setTheme("cyber");
+    // Nothing re-randomised, and nothing re-uploaded either: same set, same
+    // effect, so the neon does not crawl about the city on a theme switch.
+    expect(JSON.stringify(fogEffects()[0]!.config.lights)).toBe(first);
+  });
+
+  it("hides and re-shows the pass instead of deleting it (Known Issue (f))", async () => {
+    await mountWithLayer();
+    await setTheme("cyber");
+    const effect = fogEffects()[0]!.handle;
+    expect(effect.visible).toBe(true);
+
+    await setTheme("cartoon");
+    expect(effect.visible).toBe(false);
+    expect(effect.delete).not.toHaveBeenCalled();
+
+    await setTheme("cyber");
+    expect(fogEffects()).toHaveLength(1);
+    expect(effect.visible).toBe(true);
+    expect(effect.delete).not.toHaveBeenCalled();
+  });
+
+  it("adds nothing at all with no layer loaded — there is nothing to light", async () => {
+    await mount();
+    await setTheme("cyber");
+    expect(fogEffects()).toHaveLength(0);
+  });
+
+  it("belongs to cyber alone", async () => {
+    await mountWithLayer();
+    for (const theme of ["cartoon", "wireframe", "photoreal"] as const) {
+      await setTheme(theme);
+      expect(fogEffects()).toHaveLength(0);
+    }
   });
 });
 

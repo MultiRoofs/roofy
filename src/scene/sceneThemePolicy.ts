@@ -61,6 +61,35 @@ export interface ThemeEnvironment {
     readonly glowColor: number;
     readonly opacity: number;
   } | null;
+  /** VOLUMETRIC DIFFUSION: neon point lights bleeding into the air above the
+   *  city, through the engine's `fogLight` post effect.
+   *
+   *  The one theme lever that depends on the DATA rather than only on the
+   *  scene: the lights are scattered over the bounds of what is loaded, so
+   *  with nothing loaded there is nothing to light and the effect stays
+   *  hidden. `null` means the theme wants no fog lights at all.
+   *
+   *  `colors` is cycled by light index and `intensityRange` interpolated the
+   *  same way, both DETERMINISTICALLY (see the viewport's layout function):
+   *  a per-render `Math.random` would make the neon crawl about the city on
+   *  every unrelated re-render. */
+  readonly fogLights: {
+    readonly count: number;
+    /** Cycled by index — magenta/cyan, so the air carries the same tension as
+     *  the edges and the globe rim. */
+    readonly colors: readonly number[];
+    readonly intensityRange: readonly [number, number];
+    /** World-space influence radius, metres. */
+    readonly radius: number;
+    /** The pass's own fog density (the engine's default is 5). */
+    readonly fogDensity: number;
+    /** Metres above the BASE of what is loaded, so the lights hang among the
+     *  roofs. Anchored to the low edge rather than the high one on purpose: a
+     *  single church tower would otherwise lift every light a hundred metres
+     *  into the sky, where they read as floating lanterns instead of as a
+     *  city's glow. */
+    readonly heightM: number;
+  } | null;
   /** `view.globe.wireframe` — a live engine setter. */
   readonly globeWireframe: boolean | null;
   /** `view.globe.color`, as 0xRRGGBB. The viewport saves the prior colour once
@@ -114,6 +143,7 @@ const NO_ENVIRONMENT: ThemeEnvironment = {
   starsBoost: null,
   skyBoxColors: null,
   glowGlobe: null,
+  fogLights: null,
   globeWireframe: null,
   globeColor: null,
   toneMappingMode: null,
@@ -145,19 +175,29 @@ const CARTOON_STYLE: ThemeStyle = Object.freeze({
   edges: Object.freeze({ color: CARTOON_INK }),
 });
 
-/** Tron cyan, LINEAR and unclamped: > 1 is a genuine HDR value under the
- *  exposure-10 AgX pipeline, which is what makes the line glow rather than
- *  merely being bright. `color` is the sRGB fallback for the same hue. */
+/**
+ * Neon-noir, not Tron: HOT MAGENTA lines over a deep blue-violet fill.
+ *
+ * The reference look is night PHOTOGRAPHY — pink neon signage against a blue
+ * ambient, with the cyan left to the globe's Fresnel rim so the frame carries
+ * a magenta/cyan tension instead of a single hue. The fill is deliberately
+ * blue-VIOLET and well off zero: a near-black tint made every building read as
+ * a hole cut in the sky, which is the "black void" this restyle exists to end.
+ *
+ * `hdr` is LINEAR and unclamped: > 1 is a genuine HDR value under the AgX
+ * pipeline, which is what makes the line glow rather than merely being bright.
+ * `color` is the sRGB fallback for the same hue.
+ */
 const CYBER_STYLE: ThemeStyle = Object.freeze({
   fill: "tint",
-  tintRGB: Object.freeze([0.06, 0.07, 0.12]) as readonly [
+  tintRGB: Object.freeze([0.06, 0.08, 0.32]) as readonly [
     number,
     number,
     number,
   ],
   edges: Object.freeze({
-    color: 0x33e0ff,
-    hdr: Object.freeze([0.4, 2.2, 2.6]) as readonly [number, number, number],
+    color: 0xff3fb0,
+    hdr: Object.freeze([3.0, 0.45, 2.0]) as readonly [number, number, number],
   }),
 });
 
@@ -211,22 +251,49 @@ const POLICIES: Record<SceneTheme, SceneThemePolicy> = {
     }),
   }),
 
-  // Dark neon. Nothing under the city, the night sky turned up, a cyan Fresnel
-  // rim on the globe, and the atmosphere's own contribution turned right down
-  // — darkness by EXPOSURE and albedo, never by touching `atmosphere.date`,
-  // which is solar time and belongs to the analysis.
+  // NEON-NOIR. A deep blue NIGHT, not a black void: CARTO Dark Matter keeps the
+  // streets legible under the city, a night-blue sky box replaces the physical
+  // sky, magenta neon rides the building edges and the cyan stays on the
+  // globe's Fresnel rim. Darkness comes from EXPOSURE and albedo, never from
+  // touching `atmosphere.date`, which is solar time and belongs to the analysis.
   cyber: Object.freeze({
     meshStyle: CYBER_STYLE,
-    basemapOverride: "none",
+    // Streets, canals and blocks under the neon — the single biggest reason
+    // the old "none" read as a void. Same provider family as cartoon's sheet.
+    basemapOverride: "carto-dark",
     googleTilesOff: true,
     environment: Object.freeze({
       ...NO_ENVIRONMENT,
       skyVisible: false,
-      // Against the engine's own default (pointSize 1, intensity 10) this is a
-      // real boost, not a reduction — with the physical sky off, the stars ARE
-      // the backdrop.
+      // KEPT alongside the sky box below, and that is a browser finding rather
+      // than an assumption: the box is a full-screen triangle drawn with
+      // `transparent: true` at alpha 0.3, so it TINTS the backdrop instead of
+      // occluding it and the stars still read through the blue.
       starsBoost: Object.freeze({ pointSize: 2.5, intensity: 30 }),
+      // A deep night-blue box rather than the black clear colour: the "never a
+      // black void" half of the look lives here, and the horizon reads as air
+      // rather than as the edge of the render.
+      skyBoxColors: Object.freeze({
+        dayColor: 0x142a66,
+        nightColor: 0x080f2b,
+        sunColor: 0x3350aa,
+      }),
       glowGlobe: Object.freeze({ glowColor: 0x00e5ff, opacity: 0.55 }),
+      // The DIFFUSION half of the look: light bleeding into the air, which is
+      // what separates neon-noir photography from a flat neon drawing.
+      fogLights: Object.freeze({
+        count: 16,
+        colors: Object.freeze([
+          0xff2d9e, 0x00e5ff, 0xff2d9e, 0xff2d9e,
+        ]) as readonly number[],
+        intensityRange: Object.freeze([0.12, 0.28]) as readonly [
+          number,
+          number,
+        ],
+        radius: 150,
+        fogDensity: 5,
+        heightM: 25,
+      }),
       globeWireframe: false,
       // NO globeColor: writing `view.globe.color` (a live setter no code path
       // had ever exercised on 0.0.5) blacked out the whole frame's irradiance
@@ -235,9 +302,13 @@ const POLICIES: Record<SceneTheme, SceneThemePolicy> = {
       // terrain layer. Darkness comes from exposure/albedo instead.
       globeColor: null,
       toneMappingMode: "AGX",
-      exposure: 3,
-      apAlbedoScale: 0.15,
-      skyLightProbeIntensity: 0.05,
+      // BRIGHT night, not void: the old 3 / 0.15 / 0.05 triple crushed the
+      // basemap and the fills into black and left only the edge lines. These
+      // three are the ambient-light budget of the look and were tuned together
+      // by screenshot.
+      exposure: 4.5,
+      apAlbedoScale: 0.6,
+      skyLightProbeIntensity: 0.15,
       lensFlareOff: true,
     }),
   }),
