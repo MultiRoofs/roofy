@@ -3287,6 +3287,306 @@ button.file-label:disabled {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   STAC CATALOG BROWSER  (inside the Add Layer modal)
+
+   Two views in one box: a card grid of collections, then a list +
+   mini-map picker for one collection's items. Everything is sized in
+   rem against the modal's own max-height, because the whole panel
+   lives inside a sheet that is already `overflow: hidden auto` — a
+   scroll container in here MUST cap its own height or the modal
+   scrolls instead of it, and the search field scrolls off the top.
+   ═══════════════════════════════════════════════════════════════ */
+
+.stac-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 24rem;
+}
+
+.stac-search {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg);
+  font-size: 0.8rem;
+}
+
+/* The max-height is load-bearing, not decoration: without it the grid grows to
+   its content and `overflow-y` never engages, so 53 cards push the modal into
+   its own scrollbar and the filter field above them out of view. */
+.stac-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.6rem;
+  max-height: 26rem;
+  overflow-y: auto;
+}
+
+.stac-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.7rem;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-muted);
+  color: var(--fg);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.stac-card:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--bg-panel-hover);
+}
+
+.stac-card:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.stac-card-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.stac-card-desc {
+  font-size: 0.68rem;
+  color: var(--fg-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.stac-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.stac-badge {
+  font-size: 0.6rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+
+.stac-badge-lod {
+  color: var(--accent);
+  border-color: var(--accent-soft);
+}
+
+.stac-badge-feature {
+  color: var(--teal);
+  border-color: var(--teal-soft);
+}
+
+/* `margin-top: auto` pins the footer to the bottom of whichever card is
+   tallest, so "Browse items →" lines up across a row of uneven cards. */
+.stac-card-footer {
+  margin-top: auto;
+  font-size: 0.65rem;
+  color: var(--fg-dim);
+}
+
+.stac-items-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.stac-items-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.stac-items {
+  display: grid;
+  grid-template-columns: minmax(16rem, 22rem) 1fr;
+  gap: 0.75rem;
+  min-height: 24rem;
+}
+
+.stac-item-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  /* Grid items float to `min-content` by default; without this the list's own
+     overflow is defeated by the column stretching to fit its rows. */
+  min-width: 0;
+}
+
+.stac-item-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  overflow-y: auto;
+  max-height: 26rem;
+}
+
+/* A row is a DIV wrapping two buttons (the row itself and its Add), because a
+   button inside a button is invalid HTML. The border and hover live out here so
+   the whole strip reacts, not just the part the pointer is over. */
+.stac-item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-muted);
+  color: var(--fg);
+  font-size: 0.7rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.stac-item-row:hover,
+.stac-item-row.is-hovered {
+  border-color: var(--accent);
+}
+
+.stac-item-row.is-selected {
+  border-color: var(--accent);
+  background: var(--bg-panel-hover);
+}
+
+.stac-item-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stac-item-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stac-item-meta {
+  font-size: 0.62rem;
+  color: var(--fg-muted);
+}
+
+.stac-viewport-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.65rem;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.stac-item-detail {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem 0.55rem;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-hover);
+  font-size: 0.7rem;
+  color: var(--fg);
+}
+
+.stac-item-map {
+  min-height: 24rem;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+/* The map's degraded state (no second WebGL context). Same frame as the live
+   map so the layout does not jump, but visibly a message rather than a blank
+   rectangle — which would read as "this collection has no footprints". */
+.stac-item-map--failed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 1rem;
+  font-size: 0.7rem;
+  color: var(--fg-muted);
+}
+
+.stac-add-btn {
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-family: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.stac-add-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.stac-add-btn--inline {
+  flex: 0 0 auto;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.62rem;
+}
+
+.stac-download-link {
+  font-size: 0.7rem;
+  color: var(--teal);
+}
+
+.stac-status {
+  font-size: 0.75rem;
+  color: var(--fg-muted);
+}
+
+.stac-retry {
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  padding: 0.1rem 0.45rem;
+  background: var(--bg-muted);
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.stac-back {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0.2rem 0;
+}
+
+.stac-cap-note {
+  font-size: 0.65rem;
+  color: var(--fg-dim);
+}
+
+/* ═══════════════════════════════════════════════════════════════
    CAMERA CONTROLS — compass + zoom/tilt cluster (viewport overlay)
    ═══════════════════════════════════════════════════════════════ */
 
