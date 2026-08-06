@@ -649,3 +649,56 @@ describe("scene theme -> theme-to-theme transitions", () => {
     expect(albedoScaleUpdates().at(-1)).toBe(cyber.apAlbedoScale);
   });
 });
+
+describe("scene theme -> real-engine contracts (Known Issues (i)/(j))", () => {
+  // These two pin browser-found engine bugs the fakes cannot surface on their
+  // own. Each would pass with the buggy code UNLESS asserted exactly here.
+
+  it("hands the skyBox and glowGlobe descs engine Color INSTANCES, never hex", async () => {
+    // The real descs call `.toArray()` on every colour at createMesh time; a
+    // bare 0xRRGGBB number made `addMesh` throw and the half-registered desc
+    // froze frame presentation (Known Issue (i), second half).
+    await mount();
+    await setTheme("cartoon");
+    await setTheme("cyber");
+
+    const colorLike = (v: unknown) =>
+      typeof (v as { toArray?: unknown })?.toArray === "function" ||
+      typeof (v as { toHex?: unknown })?.toHex === "function";
+
+    const skyBox = meshCallsFor("skyBox")[0] as {
+      skyBox: { dayColor: unknown; nightColor: unknown; sunColor: unknown };
+    };
+    expect(colorLike(skyBox.skyBox.dayColor)).toBe(true);
+    expect(colorLike(skyBox.skyBox.nightColor)).toBe(true);
+    expect(colorLike(skyBox.skyBox.sunColor)).toBe(true);
+
+    const glow = meshCallsFor("glowGlobe")[0] as {
+      glowGlobe: { glowColor: unknown };
+    };
+    expect(colorLike(glow.glowGlobe.glowColor)).toBe(true);
+  });
+
+  it("never updates the aerial perspective with albedoScale alone", async () => {
+    // `onUpdateConfig` REPLACES whole config keys (Known Issue (j)): an
+    // albedoScale-only update strips `irradiance`/`useNormalBuffer` from the
+    // stored config, and the next internal pass rebuild reconstructs without
+    // the irradiance term — every albedo pixel black at any exposure.
+    await mount();
+    await setTheme("wireframe");
+    await setTheme("cartoon");
+    await setTheme("photoreal");
+
+    const themed = photorealHandles.aerialPerspective.update.mock.calls
+      .map(
+        (c) =>
+          (c[0] as { aerialPerspective?: Record<string, unknown> })
+            ?.aerialPerspective,
+      )
+      .filter((ap) => ap !== undefined && "albedoScale" in ap);
+    expect(themed.length).toBeGreaterThan(0);
+    for (const ap of themed) {
+      expect(ap).toMatchObject({ irradiance: true, useNormalBuffer: true });
+    }
+  });
+});
