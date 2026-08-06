@@ -119,6 +119,10 @@ export async function fetchStacCollections(
 
   const catalog = await (response.json() as Promise<unknown>).catch(
     (error: unknown) => {
+      // The body is still streaming here, so an abort lands on THIS read just
+      // as easily as on the request above — and wrapping it would tell the
+      // user the catalog is broken when they simply navigated away.
+      if (isAbortError(error)) throw error;
       throw rootFailure(" (its response was not valid JSON)", error);
     },
   );
