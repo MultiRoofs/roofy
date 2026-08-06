@@ -22,10 +22,14 @@
  *    hands the keyboard to controls the user cannot see;
  *  - the page behind it cannot scroll, and the backdrop swallows drag/drop so
  *    a missed drop neither navigates the browser nor reaches the viewport.
+ *
+ * All of that except the backdrop lives in {@link useModalChrome}, shared with
+ * the STAC catalog dialog.
  */
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useModalChrome } from "../useModalChrome";
 import { SourcePicker } from "./SourcePicker";
 import { GeospatialSourceForm } from "./GeospatialSourceForm";
 
@@ -41,10 +45,6 @@ interface AddLayerDialogProps {
  *  overlay is context around it. */
 type SourceTab = "city" | "geo";
 
-/** Everything that can hold focus inside the dialog, in DOM order. */
-const FOCUSABLE =
-  'button:not([disabled]), [href], input:not([disabled]):not([hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
 export function AddLayerDialog({
   onClose,
   onAddFile,
@@ -55,64 +55,7 @@ export function AddLayerDialog({
   const [tab, setTab] = useState<SourceTab>("city");
   const tabIdPrefix = useId();
 
-  // Focus in on open, focus back on close. Captured in a ref during the mount
-  // effect rather than read at cleanup time, when the trigger is long gone
-  // from `document.activeElement`.
-  useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    // The dialog itself, not its first control: a screen reader then announces
-    // the dialog's own name and role before the user starts tabbing.
-    dialogRef.current?.focus();
-    return () => {
-      previouslyFocused?.focus?.();
-    };
-  }, []);
-
-  // The page behind a modal must not scroll — a wheel over the backdrop that
-  // moves the document is the clearest possible signal that the "modal" is
-  // just a box drawn on top.
-  useEffect(() => {
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previous;
-    };
-  }, []);
-
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const root = dialogRef.current;
-      if (!root) return;
-      const focusable = Array.from(
-        root.querySelectorAll<HTMLElement>(FOCUSABLE),
-      );
-      if (focusable.length === 0) {
-        e.preventDefault();
-        root.focus();
-        return;
-      }
-      const first = focusable[0]!;
-      const last = focusable[focusable.length - 1]!;
-      const active = document.activeElement;
-      // Wrap at both ends, and pull focus back in if it has somehow escaped
-      // (the dialog container itself is focusable but not in `focusable`).
-      if (e.shiftKey && (active === first || active === root)) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKeyDown, true);
-    return () => document.removeEventListener("keydown", onKeyDown, true);
-  }, [onClose]);
+  useModalChrome(dialogRef, onClose);
 
   // mousedown, not click: a text selection that STARTS inside the dialog and
   // ends on the backdrop raises a click whose target is the backdrop, and

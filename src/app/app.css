@@ -3200,6 +3200,13 @@ button.file-label:disabled {
   box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
 }
 
+/* A browsing modal, not a form one: the catalog's collection grid collapses to
+   a single column inside `.modal`'s 30rem. Must stay AFTER `.modal` — same
+   specificity, so source order is what makes this width win. */
+.modal-wide {
+  width: min(100%, 58rem);
+}
+
 /* The dialog takes focus on open so its name and role are announced before
    the user starts tabbing — but it is not itself a control, so it must not
    wear a focus ring. Every control inside keeps its own. */
