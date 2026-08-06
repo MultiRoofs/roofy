@@ -27,13 +27,61 @@ export type BasemapId =
   | "osm"
   | "esri-imagery"
   | "carto-positron"
-  | "carto-dark";
+  | "carto-dark"
+  | "elevation-heatmap";
 
-export interface BasemapSource {
+export interface BasemapTileSource {
   readonly type: "raster-tile";
   /** `{z}/{x}/{y}` template, as the engine's `raster-tile` source expects. */
   readonly url: string;
   readonly maxZoom: number;
+}
+
+/**
+ * A DEM source: the tiles carry ELEVATION in their RGB channels, not colour.
+ *
+ * The engine decodes them with an `ElevationDecoder`, and the one this service
+ * needs is `TERRARIUM_ELEVATION_DECODER()` — an **engine export**, i.e. exactly
+ * what this module may not import (see the header: `@navaramap/three` cannot be
+ * imported under Node at all). So the field carries a MARKER and
+ * `NavaraViewport.addBasemap` — the engine-binding site — resolves it to the
+ * real decoder. The alternative, moving the catalogue into the viewport, would
+ * cost the whole catalogue its unit tests to save one lookup.
+ */
+export interface BasemapDemSource {
+  readonly type: "raster-dem";
+  readonly url: string;
+  /** The decoder to resolve at the engine seam. One value today; it is an
+   *  enum rather than a boolean because the engine also ships `mapbox` and
+   *  `japanGSI` decoders and a second DEM service would name one of those. */
+  readonly elevationDecoder: "terrarium";
+  /** Pixels per tile edge. Terrarium tiles are 512, not the raster default. */
+  readonly tileSize: number;
+  readonly maxZoom: number;
+}
+
+export type BasemapSource = BasemapTileSource | BasemapDemSource;
+
+/**
+ * Extra `raster` LAYER options an option needs, merged into the layer descriptor
+ * by `addBasemap`.
+ *
+ * Only the elevation heatmap uses it: a `raster` layer over a `raster-dem`
+ * source renders nothing legible until it is told to colourise the decoded
+ * heights. Imagery options add nothing here and pass `undefined`.
+ */
+export interface BasemapLayerOptions {
+  readonly elevationHeatmap: {
+    /** The top of the colour ramp, metres. */
+    readonly maxHeight: number;
+    readonly minHeight: number;
+    /** A logarithmic ramp, so the first few hundred metres — where almost all
+     *  inhabited land is — get most of the colour range instead of one flat
+     *  band at the bottom. */
+    readonly logarithmic: boolean;
+    /** Where the log ramp hands over, metres. */
+    readonly logBoundary: number;
+  };
 }
 
 export interface BasemapOption {
@@ -41,6 +89,9 @@ export interface BasemapOption {
   readonly label: string;
   /** `null` for "None" — the only option that adds nothing to the scene. */
   readonly source: BasemapSource | null;
+  /** Extra options for the `raster` layer this option's source is drawn by, or
+   *  absent for the plain imagery ones. */
+  readonly layer?: BasemapLayerOptions;
   /** Credit lines shown while this basemap is in the scene. */
   readonly attribution: readonly string[];
 }
@@ -103,6 +154,45 @@ export const BASEMAPS: readonly BasemapOption[] = [
       maxZoom: 19,
     },
     attribution: ["© CARTO", "© OpenStreetMap contributors"],
+  },
+  {
+    id: "elevation-heatmap",
+    label: "Elevation heatmap",
+    // NOT imagery: a DEM read as data and colourised by the engine, which is
+    // why this is the one option with a `layer` block. The terrarium tiles are
+    // the same Re:Earth service the terrain mesh and the geoid already come
+    // from (`terrain.ts`, `geoidHeight.ts`), so nothing new is fetched from
+    // anywhere new — only decoded differently.
+    source: {
+      type: "raster-dem",
+      url: "https://terrain.reearth.land/terrarium/elevation/{z}/{x}/{y}.png",
+      // A marker; `NavaraViewport.addBasemap` swaps in the engine's real
+      // `TERRARIUM_ELEVATION_DECODER()`.
+      elevationDecoder: "terrarium",
+      tileSize: 512,
+      maxZoom: 15,
+    },
+    // The engine's own example's numbers. `maxHeight` is deliberately well
+    // below Everest: a ramp that has to reach 8848 m spends its whole range on
+    // land nobody is analysing rooftops on, and the log ramp below 1000 m is
+    // what keeps a Dutch city from being one flat colour.
+    layer: {
+      elevationHeatmap: {
+        maxHeight: 3200,
+        minHeight: 0,
+        logarithmic: true,
+        logBoundary: 1000,
+      },
+    },
+    // `terrain.ts` credits only what the geoid lines do not already say, and
+    // the same reasoning gives a DIFFERENT answer here. The overlay dedupes by
+    // exact string, and the geoid's Mapterhorn line is
+    // "Geoid (EGM2008): © Mapterhorn, CC BY 4.0" — a credit for the geoid
+    // dataset specifically. This option puts Mapterhorn's ELEVATION data on
+    // screen as the picture itself, which CC BY 4.0 asks be credited in its
+    // own right, so the bare line stands beside the geoid's rather than being
+    // folded into it.
+    attribution: ["Elevation: © Re:Earth Terrain", "© Mapterhorn, CC BY 4.0"],
   },
 ] as const;
 

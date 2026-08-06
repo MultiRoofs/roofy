@@ -188,6 +188,10 @@ let defaultPluginThrows: string | null = null;
 // component calls `new ThreeView(...)` / `new DefaultPlugin()`, and an arrow
 // is not constructible.
 vi.mock("@navaramap/three", () => ({
+  // The engine's terrarium DEM decoder — the elevation-heatmap basemap's
+  // source names it as a MARKER in `basemaps.ts` (engine-free) and the
+  // viewport resolves it here, at the engine seam.
+  TERRARIUM_ELEVATION_DECODER: vi.fn(() => ({ decoder: "terrarium" })),
   default: vi.fn(function (options: unknown) {
     viewOptions.push(options);
     const view = {
@@ -274,6 +278,10 @@ vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
 }));
 
 const { NavaraViewport } = await import("../../../src/scene/NavaraViewport");
+// The mocked engine export the elevation-heatmap source's marker resolves to.
+// DYNAMIC, like the component above: a static import would evaluate the
+// `@navaramap/three` mock factory before the stubs it closes over exist.
+const { TERRARIUM_ELEVATION_DECODER } = await import("@navaramap/three");
 import type { CitySceneHandle } from "../../../src/scene/NavaraViewport";
 import { suppressAutoFit } from "../../../src/scene/autoFitSuppression";
 import {
@@ -1726,6 +1734,68 @@ describe("NavaraViewport basemap", () => {
     await waitFor(() => expect(deleteSource).toHaveBeenCalledTimes(1));
     expect(errors).toHaveBeenCalled();
     errors.mockRestore();
+  });
+
+  it("resolves the DEM decoder marker and merges the heatmap layer block", async () => {
+    // The elevation heatmap is the one option whose descriptor is not what the
+    // catalogue holds. `basemaps.ts` cannot import `TERRARIUM_ELEVATION_DECODER`
+    // (it is an engine export, and that module is unit-tested under Node), so it
+    // carries the string `"terrarium"` and THIS seam swaps in the real decoder —
+    // and the layer needs the `elevationHeatmap` ramp merged in, or the engine
+    // draws raw DEM bytes as a picture instead of a heatmap.
+    useBasemapStore.setState({ basemapId: "elevation-heatmap" });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(countOfType(addSource, "raster-dem")).toBe(1));
+
+    const si = indexOfType(addSource, "raster-dem");
+    expect(addSource.mock.calls[si]![0]).toEqual({
+      type: "raster-dem",
+      url: "https://terrain.reearth.land/terrarium/elevation/{z}/{x}/{y}.png",
+      // The engine's own decoder object, never the marker string.
+      elevationDecoder: { decoder: "terrarium" },
+      tileSize: 512,
+      maxZoom: 15,
+    });
+    expect(TERRARIUM_ELEVATION_DECODER).toHaveBeenCalled();
+
+    const li = lastIndexOfType(addLayer, "raster");
+    expect(addLayer.mock.calls[li]![0]).toEqual({
+      type: "raster",
+      elevationHeatmap: {
+        maxHeight: 3200,
+        minHeight: 0,
+        logarithmic: true,
+        logBoundary: 1000,
+      },
+      source: addSource.mock.results[si]!.value,
+    });
+  });
+
+  it("adds no heatmap block for an imagery basemap", async () => {
+    // `addBasemap` spreads `option.layer`, which is absent everywhere else —
+    // an imagery layer must reach the engine as the bare pair it always was.
+    useBasemapStore.setState({ basemapId: "esri-imagery" });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(countOfType(addLayer, "raster")).toBe(1));
+    const li = indexOfType(addLayer, "raster");
+    expect(addLayer.mock.calls[li]![0]).toEqual({
+      type: "raster",
+      source:
+        addSource.mock.results[indexOfType(addSource, "raster-tile")]!.value,
+    });
+  });
+
+  it("credits the DEM's provider while the heatmap is draped", async () => {
+    useBasemapStore.setState({ basemapId: "elevation-heatmap" });
+    const { container } = render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() =>
+      expect(
+        container.querySelector(".attribution-overlay")?.textContent,
+      ).toContain("Elevation: © Re:Earth Terrain"),
+    );
+    expect(
+      container.querySelector(".attribution-overlay")?.textContent,
+    ).toContain("© Mapterhorn, CC BY 4.0");
   });
 
   it("does not delete basemap handles through a view the engine already disposed", async () => {

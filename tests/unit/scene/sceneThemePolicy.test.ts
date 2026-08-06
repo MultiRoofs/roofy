@@ -107,10 +107,12 @@ describe("sceneThemePolicy", () => {
 
   it("never touches the globe's own setters, in ANY theme", () => {
     // Writing `view.globe.wireframe`/`view.globe.color` (live setters no code
-    // path had ever exercised) blacks out the frame's irradiance on 0.0.5 —
-    // browser-diagnosed 2026-08-06, recorded as upstream bug (i). This test is
-    // the regression guard: no theme may reach for those levers again until
-    // the engine fix is verified.
+    // path had ever exercised) kills the frame on 0.0.5 — recorded as upstream
+    // bug (i). `wireframe` was RETESTED in the browser on 2026-08-06 against
+    // the current code, both in the wireframe theme's entry path and as a bare
+    // `globe.wireframe = true` with nothing else changed: presentation freezes
+    // on the spot, writing `false` back does not recover it, and only a reload
+    // does. The ban stands on evidence, and this test is its guard.
     for (const theme of [
       "photoreal",
       "cartoon",
@@ -120,6 +122,28 @@ describe("sceneThemePolicy", () => {
       expect(sceneThemePolicy(theme).environment.globeWireframe).not.toBe(true);
       expect(sceneThemePolicy(theme).environment.globeColor).toBeNull();
     }
+  });
+
+  it("keeps wireframe a DRAWING, not a void", () => {
+    // The first pass shipped 1 / 0.05 / [0.02,0.02,0.03] and the look was a
+    // set of hairlines on black: no ground, no relief, and occluding faces
+    // that read as holes rather than as panels. These are the floors the
+    // browser pass settled on, pinned as inequalities rather than as the exact
+    // values (which stay tunable).
+    const wireframe = sceneThemePolicy("wireframe");
+    const env = wireframe.environment;
+    expect(env.exposure!).toBeGreaterThan(1);
+    expect(env.apAlbedoScale!).toBeGreaterThan(0.05);
+
+    // The fill must be a visible dark panel, not zero.
+    const tint = wireframe.meshStyle.tintRGB!;
+    for (const channel of tint) expect(channel).toBeGreaterThan(0.02);
+
+    // And the edges must stay clearly HDR against that brighter fill, or
+    // raising the exposure alone would wash the drawing out.
+    const hdr = wireframe.meshStyle.edges!.hdr!;
+    for (const channel of hdr) expect(channel).toBeGreaterThan(1);
+    expect(Math.max(...hdr)).toBeGreaterThan(3 * Math.max(...tint));
   });
 
   it("gives cyber the Fresnel halo and the star boost, and nobody else", () => {

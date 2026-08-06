@@ -11,13 +11,14 @@ import {
 } from "../../../src/scene/basemaps";
 
 describe("basemaps", () => {
-  it("offers None plus the four tile services, with stable ids", () => {
+  it("offers None plus the four tile services and the DEM, with stable ids", () => {
     expect(BASEMAPS.map((b) => b.id)).toEqual([
       "none",
       "osm",
       "esri-imagery",
       "carto-positron",
       "carto-dark",
+      "elevation-heatmap",
     ]);
   });
 
@@ -38,13 +39,17 @@ describe("basemaps", () => {
     expect(none.attribution).toEqual([]);
   });
 
-  it("gives every tile service a {z}/{x}/{y} template and a maxZoom", () => {
+  it("gives every source a {z}/{x}/{y} template and a maxZoom", () => {
     for (const b of BASEMAPS) {
       if (b.source === null) continue;
-      expect(b.source.type).toBe("raster-tile");
       expect(b.source.url).toContain("{z}");
       expect(b.source.url).toContain("{x}");
       expect(b.source.url).toContain("{y}");
+      expect(b.source.maxZoom).toBeGreaterThan(0);
+      // Every IMAGERY option is a raster-tile service at the same ceiling; the
+      // DEM is the one exception and is pinned on its own below.
+      if (b.id === "elevation-heatmap") continue;
+      expect(b.source.type).toBe("raster-tile");
       expect(b.source.maxZoom).toBe(19);
     }
   });
@@ -85,6 +90,58 @@ describe("basemaps", () => {
       "https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
     );
     expect(basemapById("carto-positron").source!.url).toContain("light_all");
+  });
+
+  it("reads the elevation heatmap as DATA, not as imagery", () => {
+    // The one option whose tiles are decoded rather than drawn: a `raster-dem`
+    // source (512 px terrarium tiles) plus the `elevationHeatmap` block on the
+    // `raster` layer that colourises them. Without the layer block the engine
+    // renders the raw DEM bytes as a picture, which is not a heatmap.
+    const dem = basemapById("elevation-heatmap");
+    expect(dem.source).toEqual({
+      type: "raster-dem",
+      url: "https://terrain.reearth.land/terrarium/elevation/{z}/{x}/{y}.png",
+      // A MARKER, not a decoder: `basemaps.ts` must stay importable under Node,
+      // and `TERRARIUM_ELEVATION_DECODER` is an engine export. The viewport
+      // resolves it (see navaraViewport.test.tsx).
+      elevationDecoder: "terrarium",
+      tileSize: 512,
+      maxZoom: 15,
+    });
+    expect(dem.layer).toEqual({
+      elevationHeatmap: {
+        maxHeight: 3200,
+        minHeight: 0,
+        logarithmic: true,
+        logBoundary: 1000,
+      },
+    });
+  });
+
+  it("gives no imagery option a layer block", () => {
+    // `addBasemap` spreads `option.layer` into the layer descriptor, so a stray
+    // block on an imagery entry would reach the engine as an unknown key.
+    for (const b of BASEMAPS) {
+      if (b.id === "elevation-heatmap") continue;
+      expect(b.layer).toBeUndefined();
+    }
+  });
+
+  it("credits the DEM's provider as well as the service", () => {
+    // CC BY 4.0. The overlay's dedupe is by exact string and the geoid's line
+    // names Mapterhorn only as the GEOID's source; here the elevation data is
+    // the picture itself, so it carries its own credit.
+    expect(basemapById("elevation-heatmap").attribution).toEqual([
+      "Elevation: © Re:Earth Terrain",
+      "© Mapterhorn, CC BY 4.0",
+    ]);
+  });
+
+  it("gives every option at least one credit line, except None", () => {
+    for (const b of BASEMAPS) {
+      if (b.source === null) continue;
+      expect(b.attribution.length).toBeGreaterThan(0);
+    }
   });
 
   it("falls back to the default for an unknown id rather than throwing", () => {

@@ -201,19 +201,29 @@ const CYBER_STYLE: ThemeStyle = Object.freeze({
   }),
 });
 
-/** Architectural hidden-line: fills dark enough to read as unlit but still
- *  OCCLUDING (which is the whole difference between a hidden-line drawing and
- *  a see-through wireframe), lines bright enough to carry the drawing. */
+/**
+ * Architectural hidden-line: fills dark enough to read as unlit but still
+ * OCCLUDING (which is the whole difference between a hidden-line drawing and a
+ * see-through wireframe), lines bright enough to carry the drawing.
+ *
+ * The fill is a dark blue-grey PANEL, not a hole. At [0.02, 0.02, 0.03] under
+ * exposure 1 the faces reached the frame at essentially zero, so a building
+ * that hid another read as a gap in the drawing rather than as a solid in
+ * front of it; the whole point of hidden-line over see-through wireframe is
+ * that the occluder is visible AS an occluder.
+ */
 const WIREFRAME_STYLE: ThemeStyle = Object.freeze({
   fill: "tint",
-  tintRGB: Object.freeze([0.02, 0.02, 0.03]) as readonly [
+  tintRGB: Object.freeze([0.04, 0.05, 0.08]) as readonly [
     number,
     number,
     number,
   ],
   edges: Object.freeze({
     color: 0xe8fff0,
-    hdr: Object.freeze([0.9, 2.0, 1.2]) as readonly [number, number, number],
+    // HDR and unclamped, like cyber's: > 1 is what makes the line carry at mid
+    // zoom instead of dissolving into the fill it is drawn against.
+    hdr: Object.freeze([1.6, 3.2, 2.0]) as readonly [number, number, number],
   }),
 });
 
@@ -323,15 +333,23 @@ const POLICIES: Record<SceneTheme, SceneThemePolicy> = {
     environment: Object.freeze({
       ...NO_ENVIRONMENT,
       skyVisible: false,
-      // Not `globeWireframe: true` — see cyber's globeColor note: the globe's
-      // untouched-by-anyone live setters corrupt the shared normal buffer on
-      // 0.0.5 and black the frame. The hidden-line look survives on the city
-      // meshes alone, over an imagery-less globe at low exposure.
+      // Still NOT `globeWireframe: true`, and now on evidence rather than on
+      // suspicion: the flag was RETESTED on 2026-08-06 against the current code
+      // (both the frame-killers it was originally convicted alongside are
+      // fixed), in isolation, and it still freezes frame presentation for the
+      // rest of the session — see Known Issue (i). The globe cannot be part of
+      // this drawing on 0.0.5; the hidden-line look lives on the city meshes.
       globeWireframe: false,
       globeColor: null,
       toneMappingMode: "LINEAR",
-      exposure: 1,
-      apAlbedoScale: 0.05,
+      // BRIGHTER than the first pass's 1 / 0.05 / 0. That triple was a drawing
+      // on black: the fills, the terrain and the ground all reached the frame
+      // at zero, so a hidden-line elevation had nothing to sit on and the edges
+      // were the only lit thing on screen. These three are the look's whole
+      // light budget and were tuned together by screenshot, exactly like
+      // cyber's.
+      exposure: 2.2,
+      apAlbedoScale: 0.2,
       skyLightProbeIntensity: 0,
       lensFlareOff: true,
     }),

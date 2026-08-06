@@ -43,6 +43,7 @@ import ThreeView, {
   geodeticToVector3,
   getPickRay,
   radianToDegree,
+  TERRARIUM_ELEVATION_DECODER,
   vector3ToGeodetic,
 } from "@navaramap/three";
 import { DefaultPlugin } from "@navaramap/three-default-plugin";
@@ -842,6 +843,24 @@ function addTerrain(view: ViewInstance): SourceLayerHandles | null {
   }
 }
 
+/**
+ * Turn a catalogue source into the descriptor the ENGINE wants.
+ *
+ * The one thing that has to change is the DEM decoder: `basemaps.ts` is
+ * engine-free by construction (it is unit-tested under Node, where importing
+ * `@navaramap/three` crashes at module scope), so it names the decoder as the
+ * string `"terrarium"` and this — the engine-binding site — swaps in the real
+ * `TERRARIUM_ELEVATION_DECODER()`. Imagery sources pass through untouched.
+ */
+function resolveBasemapSource(
+  source: NonNullable<BasemapOption["source"]>,
+): Parameters<ViewInstance["addSource"]>[0] {
+  if (source.type !== "raster-dem") return source;
+  const { elevationDecoder: _marker, ...rest } = source;
+  // One decoder today; a second DEM service would switch on the marker here.
+  return { ...rest, elevationDecoder: TERRARIUM_ELEVATION_DECODER() };
+}
+
 function addBasemap(
   view: ViewInstance,
   option: BasemapOption,
@@ -849,8 +868,11 @@ function addBasemap(
   if (option.source === null) return null;
   let source: SourceLayerHandles["source"] | null = null;
   try {
-    source = view.addSource(option.source);
-    const layer = view.addLayer({ type: "raster", source });
+    source = view.addSource(resolveBasemapSource(option.source));
+    // `option.layer` is the elevation heatmap's colour ramp and nothing else's:
+    // a `raster` layer over a `raster-dem` source draws nothing legible until
+    // it is told how to colourise the heights it decodes.
+    const layer = view.addLayer({ type: "raster", ...option.layer, source });
     return { layer, source };
   } catch (error) {
     console.error(

@@ -100,6 +100,10 @@ const photorealHandles = {
 const viewInstances: Array<Record<string, unknown>> = [];
 
 vi.mock("@navaramap/three", () => ({
+  // The engine's terrarium DEM decoder — the elevation-heatmap basemap's
+  // source names it as a MARKER in `basemaps.ts` (engine-free) and the
+  // viewport resolves it here, at the engine seam.
+  TERRARIUM_ELEVATION_DECODER: vi.fn(() => ({ decoder: "terrarium" })),
   default: vi.fn(function () {
     const view = {
       addPlugin,
