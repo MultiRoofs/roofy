@@ -19,12 +19,13 @@
  * costs a fraction of the frame budget the real viewport is already spending.
  */
 
-import { useEffect, useRef, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 // maplibre-gl 6 has NO default export; the Map class is a named export
 // (exported twice, as `Map` and `MapLibreMap` — the latter to avoid shadowing
 // the global `Map` at every use site, which is why it is the one used here).
 import {
   GeoJSONSource,
+  GPUInitializationError,
   MapLibreMap,
   type MapLayerMouseEvent,
   type StyleSpecification,
@@ -80,6 +81,26 @@ function basemapStyle(dark: boolean): StyleSpecification {
   };
 }
 
+/**
+ * Whether the map actually got a GPU.
+ *
+ * maplibre 6 does NOT throw when it cannot create a WebGL2 context — the most
+ * likely failure here, a browser refusing a SECOND context beside the Navara
+ * globe. `_setupPainter` calls `getContext("webgl2")`, and on null it fires an
+ * `ErrorEvent(GPUInitializationError)` and returns; the constructor then does
+ * `if (!this.painter) return`, handing back a half-built Map. `load` never
+ * fires, so every effect below stays gated off forever and the panel is a dead
+ * empty box. Worse, that ErrorEvent is fired DURING construction — before the
+ * caller can possibly have attached `map.on("error")` — so the listener alone
+ * cannot see it. This synchronous check is what does.
+ *
+ * `painter` is declared non-optional on the Map type but is genuinely
+ * `undefined` in that state, hence the widening.
+ */
+function hasPainter(map: MapLibreMap): boolean {
+  return (map as unknown as { painter?: unknown }).painter != null;
+}
+
 function boundsPair(map: MapLibreMap): [[number, number], [number, number]] {
   const b = map.getBounds();
   return [
@@ -106,19 +127,32 @@ export function StacItemMap(props: StacItemMapProps): ReactElement {
    *  `getSource` returns undefined until it has. */
   const loadedRef = useRef(false);
 
+  /** The last collection the camera was fitted to. See the refit effect. */
+  const lastFitRef = useRef<string | null>(null);
+  /** The map could not be created, or lost its GPU. Renders a placeholder. */
+  const [failed, setFailed] = useState(false);
+
   // Latest props, read by handlers and by the `load` callback. The map effect
   // must run ONCE (a re-created WebGL map on every prop change would be both
   // a flicker and a leak), so nothing it closes over may be a stale value.
   const itemsRef = useRef(items);
-  itemsRef.current = items;
   const fallbackRef = useRef(fallbackExtent);
-  fallbackRef.current = fallbackExtent;
   const selectedRef = useRef(selectedId);
-  selectedRef.current = selectedId;
   const hoveredRef = useRef(hoveredId);
-  hoveredRef.current = hoveredId;
   const callbacksRef = useRef({ onSelect, onHover, onViewBounds });
-  callbacksRef.current = { onSelect, onHover, onViewBounds };
+
+  // The `useRef` calls above seed these from the FIRST render; every later
+  // render updates them HERE and not in the render body, because React 19
+  // treats a render-phase ref write as unsupported (a discarded render still
+  // mutates the ref). Declared FIRST on purpose: effects run in declaration
+  // order, so the refit effect below always sees this commit's values.
+  useEffect(() => {
+    itemsRef.current = items;
+    fallbackRef.current = fallbackExtent;
+    selectedRef.current = selectedId;
+    hoveredRef.current = hoveredId;
+    callbacksRef.current = { onSelect, onHover, onViewBounds };
+  });
 
   // ---- map lifetime: mount once, remove on unmount -------------------------
   useEffect(() => {
@@ -138,13 +172,44 @@ export function StacItemMap(props: StacItemMapProps): ReactElement {
         zoom: 1,
         attributionControl: { compact: true },
       });
-    } catch {
-      // jsdom, a blocked WebGL context, a driver that gave up: the dialog is
-      // still perfectly usable as a list, so fail silently rather than take
-      // the whole panel down with an error boundary.
+    } catch (err) {
+      // A SYNCHRONOUS throw only — jsdom with no canvas, a container the
+      // constructor chokes on. The far likelier WebGL failure does not come
+      // through here at all; see `hasPainter`.
+      console.warn("[StacItemMap] map could not be created", err);
+      setFailed(true);
       return;
     }
+
+    if (!hasPainter(map)) {
+      // NO `map.remove()`: it starts with `this.painter.destroy()` and would
+      // throw on exactly this map. The half-built instance is dropped instead,
+      // and React takes its injected DOM with the container div when the
+      // placeholder renders in its place.
+      console.warn("[StacItemMap] no WebGL context; showing a placeholder");
+      setFailed(true);
+      return;
+    }
+
     mapRef.current = map;
+
+    let warnedOnce = false;
+    map.on("error", (e) => {
+      if (mapRef.current !== map) return;
+      // Only a GPU failure is fatal. A 404 on one CARTO tile also arrives as
+      // `error`, and blanking a working map over a missing tile would be a
+      // worse bug than the one this guards against.
+      if (e.error instanceof GPUInitializationError) {
+        mapRef.current = null;
+        loadedRef.current = false;
+        setFailed(true);
+        return;
+      }
+      if (!warnedOnce) {
+        warnedOnce = true;
+        console.warn("[StacItemMap] map error", e.error);
+      }
+    });
 
     const emitBounds = (): void => {
       if (mapRef.current !== map) return;
@@ -191,19 +256,28 @@ export function StacItemMap(props: StacItemMapProps): ReactElement {
         },
       });
 
-      const bounds =
-        combinedBounds(itemsRef.current) ?? extentToBounds(fallbackRef.current);
-      // `fitBounds(null)` throws, so no bounds means leaving the default world
-      // view — an empty collection shows the globe, not an exception.
-      if (bounds) {
-        map.fitBounds(bounds, { padding: 24, maxZoom: 14, duration: 0 });
-      }
-
       loadedRef.current = true;
       applyFeatureStates(map, selectedRef.current, hoveredRef.current);
-      // Once after the fit, whether or not there was anything to fit to: the
-      // list's viewport filter needs a value from the start.
-      emitBounds();
+
+      const bounds =
+        combinedBounds(itemsRef.current) ?? extentToBounds(fallbackRef.current);
+      if (bounds) {
+        // `duration: 0` finishes SYNCHRONOUSLY (`_ease` runs `frame(1);
+        // finish()` when the duration is zero) and `finish` fires `moveend`,
+        // which is already wired to `emitBounds`. So the fit emits the initial
+        // bounds exactly once, and emitting again here would double it.
+        map.fitBounds(bounds, { padding: 24, maxZoom: 14, duration: 0 });
+        // Only a real fit records the collection, so the refit effect does not
+        // re-fit the collection this one just handled.
+        lastFitRef.current = itemsRef.current[0]?.collectionId ?? null;
+      } else {
+        // `fitBounds(null)` throws, so no bounds means leaving the default
+        // world view — an empty collection shows the globe, not an exception.
+        // No camera move happened, so nothing fired `moveend`: this is the one
+        // case that has to emit by hand, because the list's viewport filter
+        // needs a value from the start either way.
+        emitBounds();
+      }
     });
 
     map.on("moveend", emitBounds);
@@ -231,7 +305,10 @@ export function StacItemMap(props: StacItemMapProps): ReactElement {
     return () => {
       mapRef.current = null;
       loadedRef.current = false;
-      map.remove();
+      // Guarded for the same reason as above: `remove()` dereferences the
+      // painter, so a map that lost its GPU after construction must not be
+      // removed — only dropped.
+      if (hasPainter(map)) map.remove();
     };
   }, []);
 
@@ -255,17 +332,26 @@ export function StacItemMap(props: StacItemMapProps): ReactElement {
     void source.setData(footprintFeatureCollection(items));
   }, [items]);
 
-  // ---- refit: only when the item set's collection changes -------------------
+  // ---- refit: only when the item set's collection actually changes ----------
+  // `items[0]?.collectionId` is the collection, but it is NOT enough on its
+  // own as an effect key: a filtered array going empty and non-empty again
+  // reads as null → "cityjson-nl" and would refit though the collection never
+  // changed — typing a no-match filter and deleting one character would snap
+  // the camera out from under the user, and Task 7's viewport filter empties
+  // this array routinely. So nulls are ignored outright and the last fitted
+  // collection is remembered.
   const collectionId = items[0]?.collectionId ?? null;
   useEffect(() => {
     const map = mapRef.current;
     // Not loaded yet means the `load` handler has not run — and it does the
     // first fit itself, so there is nothing to do here.
     if (!map || !loadedRef.current) return;
+    if (!collectionId || collectionId === lastFitRef.current) return;
     const bounds =
       combinedBounds(itemsRef.current) ?? extentToBounds(fallbackRef.current);
-    if (bounds)
-      map.fitBounds(bounds, { padding: 24, maxZoom: 14, duration: 0 });
+    if (!bounds) return;
+    map.fitBounds(bounds, { padding: 24, maxZoom: 14, duration: 0 });
+    lastFitRef.current = collectionId;
     // `itemsRef`/`fallbackRef` are read on purpose: this effect fires on the
     // COLLECTION, never on the array's identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -277,6 +363,24 @@ export function StacItemMap(props: StacItemMapProps): ReactElement {
     if (!map || !loadedRef.current) return;
     applyFeatureStates(map, selectedId, hoveredId);
   }, [selectedId, hoveredId]);
+
+  // A VISIBLE placeholder, not an empty box: the failure mode this guards
+  // against (a browser refusing a second WebGL context beside the Navara
+  // globe) is invisible otherwise, and a blank rectangle reads as "the
+  // catalog has no footprints" rather than "the map did not start". The list
+  // beside it stays fully usable, so this is a degrade, not an error.
+  if (failed) {
+    return (
+      <div
+        className="stac-item-map stac-item-map--failed"
+        data-testid="stac-item-map"
+        data-failed="true"
+        role="status"
+      >
+        Map unavailable
+      </div>
+    );
+  }
 
   return (
     <div
