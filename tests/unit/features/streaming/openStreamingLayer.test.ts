@@ -35,13 +35,14 @@ const HEADER: FcbHeaderModel = {
 
 const GRID: Grid = { originX: 0, originY: 0, rootCell: 1000, maxLevel: 4 };
 
-/** The handle's published state plus its three event fan-outs, so a test can
+/** The handle's published state plus its four event fan-outs, so a test can
  *  drive exactly what the plugin would report and assert what the store
  *  mirrored. */
 interface FakeHandle {
   readonly handle: FcbStreamLayerHandle;
   emitStatus: (status: StreamStatus, message: string | null) => void;
   emitLadder: (ladder: ReadonlyArray<string>) => void;
+  emitTypes: (types: ReadonlyArray<string>) => void;
   emitCommit: (level: number | null) => void;
   /** How many subscribers each fan-out still has — the observable form of
    *  "were the disposers actually run?". */
@@ -58,6 +59,7 @@ function fakeHandle(id: string): FakeHandle {
   const deleted = vi.fn();
   const statusCbs: Array<(s: StreamStatus, m: string | null) => void> = [];
   const ladderCbs: Array<(l: ReadonlyArray<string>) => void> = [];
+  const typesCbs: Array<(t: ReadonlyArray<string>) => void> = [];
   const commitCbs: Array<(v: number) => void> = [];
   const state = { level: null as number | null, version: 0 };
   const handle = {
@@ -71,6 +73,7 @@ function fakeHandle(id: string): FakeHandle {
       return state.version;
     },
     ladder: [] as ReadonlyArray<string>,
+    typesSeen: [] as ReadonlyArray<string>,
     status: "idle" as StreamStatus,
     message: null as string | null,
     // Real unsubscribes, not `() => undefined`: the handle's own `delete()`
@@ -84,6 +87,10 @@ function fakeHandle(id: string): FakeHandle {
       ladderCbs.push(cb);
       return () => drop(ladderCbs, cb);
     },
+    onTypes: (cb: (t: ReadonlyArray<string>) => void) => {
+      typesCbs.push(cb);
+      return () => drop(typesCbs, cb);
+    },
     onCommit: (cb: (v: number) => void) => {
       commitCbs.push(cb);
       return () => drop(commitCbs, cb);
@@ -92,10 +99,12 @@ function fakeHandle(id: string): FakeHandle {
   } as unknown as FcbStreamLayerHandle;
   return {
     handle,
-    listenerCount: () => statusCbs.length + ladderCbs.length + commitCbs.length,
+    listenerCount: () =>
+      statusCbs.length + ladderCbs.length + typesCbs.length + commitCbs.length,
     deleted,
     emitStatus: (s, m) => statusCbs.forEach((cb) => cb(s, m)),
     emitLadder: (l) => ladderCbs.forEach((cb) => cb(l)),
+    emitTypes: (t) => typesCbs.forEach((cb) => cb(t)),
     emitCommit: (level) => {
       state.level = level;
       state.version += 1;
@@ -224,6 +233,40 @@ describe("openStreamingLayer", () => {
     expect(opts.rules).toEqual([]);
   });
 
+  it("seeds hiddenTypes into the plugin AND onto the layer, so a restored layer's very first fetch is already filtered", async () => {
+    const plugin = fakePlugin();
+    const layerId = await openStreamingLayer({
+      plugin,
+      source: { url: "https://x/a.fcb" },
+      name: "a.fcb",
+      modelRef: { type: "url", url: "https://x/a.fcb" },
+      hiddenTypes: ["Building"],
+    });
+
+    expect(plugin.openStream.mock.calls[0]![0].hiddenTypes).toEqual([
+      "Building",
+    ]);
+    const layer = useLayerStore
+      .getState()
+      .layers.find((l) => l.id === layerId)!;
+    expect(layer.hiddenTypes).toEqual(["Building"]);
+  });
+
+  it("defaults hiddenTypes to nothing hidden", async () => {
+    const plugin = fakePlugin();
+    const layerId = await openStreamingLayer({
+      plugin,
+      source: { url: "https://x/a.fcb" },
+      name: "a.fcb",
+      modelRef: { type: "url", url: "https://x/a.fcb" },
+    });
+    expect(plugin.openStream.mock.calls[0]![0].hiddenTypes).toEqual([]);
+    expect(
+      useLayerStore.getState().layers.find((l) => l.id === layerId)!
+        .hiddenTypes,
+    ).toEqual([]);
+  });
+
   it("defaults rulesEnabled/visible to true in BOTH the layer and the plugin — the handle's own default is false, so an unseeded first fetch would bake no rule colours", async () => {
     const plugin = fakePlugin();
     const layerId = await openStreamingLayer({
@@ -268,6 +311,16 @@ describe("openStreamingLayer — the store mirrors the handle's reports", () => 
       "2.2",
     ]);
     expect(useStreamStore.getState().get(layerId)!.ladderVersion).toBe(1);
+
+    // Types are discovered from the cells the worker decodes, exactly like the
+    // ladder — a streaming layer's toggles read this, not the layer's own
+    // (always empty) `availableObjectTypes`.
+    fake.emitTypes(["Building", "Road"]);
+    expect(useStreamStore.getState().get(layerId)!.types).toEqual([
+      "Building",
+      "Road",
+    ]);
+    expect(useStreamStore.getState().get(layerId)!.typesVersion).toBe(1);
 
     fake.emitCommit(3);
     const after = useStreamStore.getState().get(layerId)!;
@@ -352,7 +405,7 @@ describe("closeStreamingLayer", () => {
       name: "a.fcb",
       modelRef: { type: "url", url: "https://x/a.fcb" },
     });
-    expect(handles[0]!.listenerCount()).toBe(3);
+    expect(handles[0]!.listenerCount()).toBe(4);
 
     closeStreamingLayer(plugin, layerId);
     expect(handles[0]!.listenerCount()).toBe(0);

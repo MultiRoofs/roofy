@@ -32,6 +32,9 @@ export interface LayerOverrides {
   readonly visible?: boolean;
   readonly lodMode?: "auto" | "manual";
   readonly selectedLod?: string | null;
+  /** Applied at creation, not afterwards: the layer is built (or its first
+   *  cell fetched) already filtered. */
+  readonly hiddenTypes?: ReadonlyArray<string>;
 }
 
 function applyPostCreateOverrides(
@@ -113,6 +116,7 @@ export function useLayerFileLoader(
             rules: overrides?.rules,
             rulesEnabled: overrides?.rulesEnabled,
             visible: overrides?.visible,
+            hiddenTypes: overrides?.hiddenTypes,
           });
         } else {
           const text = await file.text();
@@ -124,6 +128,7 @@ export function useLayerFileLoader(
             visible: overrides?.visible ?? true,
             rules: overrides?.rules ?? [],
             rulesEnabled: overrides?.rulesEnabled ?? true,
+            hiddenTypes: overrides?.hiddenTypes,
           });
         }
         applyPostCreateOverrides(layerId, overrides);

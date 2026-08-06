@@ -7,7 +7,11 @@
  */
 
 import type { ProjectSnapshot, ViewState } from "./types";
-import { SNAPSHOT_VERSION, UnsupportedSnapshotVersionError } from "./types";
+import {
+  normalizeViewMode,
+  SNAPSHOT_VERSION,
+  UnsupportedSnapshotVersionError,
+} from "./types";
 import { useSelectionStore } from "../features/selection/selectionStore";
 import { useSolarStore } from "../features/solar/solarStore";
 
@@ -31,5 +35,12 @@ export function restoreSnapshot(snapshot: ProjectSnapshot): ViewState {
     useSolarStore.getState().setDatetime(dt);
   }
 
-  return snapshot.viewState;
+  // The view mode is NOT written to its store here, unlike the pick mode and
+  // the datetime: entering a mode flies the camera, and the caller applies the
+  // saved camera in the same breath. App.tsx therefore sets the mode itself,
+  // before the camera, and this only guarantees the value is one of the three.
+  return {
+    ...snapshot.viewState,
+    viewMode: normalizeViewMode(snapshot.viewState.viewMode),
+  };
 }

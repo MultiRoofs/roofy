@@ -112,6 +112,10 @@ vi.mock("@navaramap/three", () => ({
         raw: {},
         positionGeographic: { lng: 4.35, lat: 52, height: 500 },
         orientation: { heading: 0, pitch: -60, roll: 0 },
+        // The compass overlay subscribes to `movestart`/`move`/`moveend`,
+        // which live on the CAMERA rather than the view (Task B1 finding 6).
+        on: vi.fn(),
+        off: vi.fn(),
       },
       setCamera: vi.fn(),
       flyTo: vi.fn(),
@@ -192,6 +196,9 @@ function makeLayer(id: string): Layer {
     selectedLod: "2.2",
     availableLods: ["2.2"],
     lodMode: "auto",
+    cameraSync: true,
+    hiddenTypes: [],
+    availableObjectTypes: [],
     isStreaming: false,
   } as Layer;
 }

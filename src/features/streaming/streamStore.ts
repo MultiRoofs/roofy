@@ -4,7 +4,8 @@
  * The streaming state machine itself is NOT here: it lives in
  * `@cityjson/navara-flatcitybuf`'s `FcbStreamLayerHandle`, which owns the
  * worker, the resident cell cache, the LoD ladder and the commit counter, and
- * only *reports* what it did through `onStatus`/`onLadder`/`onCommit`. This
+ * only *reports* what it did through
+ * `onStatus`/`onLadder`/`onTypes`/`onCommit`. This
  * store is the React-visible mirror of those reports plus the handle itself —
  * nothing recomputes here, and no consumer drives the stream through it.
  *
@@ -42,8 +43,9 @@ export interface StreamState {
    *  the thing that committed. */
   readonly handle: FcbStreamLayerHandle;
   /**
-   * The unsubscribes for the three handle events this store mirrors
-   * (`onStatus`/`onLadder`/`onCommit`), to be run by `closeStreamingLayer`.
+   * The unsubscribes for the four handle events this store mirrors
+   * (`onStatus`/`onLadder`/`onTypes`/`onCommit`), to be run by
+   * `closeStreamingLayer`.
    *
    * Held here because `handle.delete()` does NOT clear the handle's listener
    * sets: without these, a closed layer's callbacks stay reachable from the
@@ -63,6 +65,12 @@ export interface StreamState {
   readonly level: number | null;
   readonly ladder: ReadonlyArray<string>;
   readonly ladderVersion: number;
+  /** The first-level object groups the worker has decoded so far, mirrored
+   *  from `handle.onTypes`. Monotonic and sorted, like the ladder, and empty
+   *  until the first cell arrives — which is why a streaming layer's type
+   *  toggles read this instead of `Layer.availableObjectTypes`. */
+  readonly types: ReadonlyArray<string>;
+  readonly typesVersion: number;
   readonly status: StreamStatus;
   readonly message: string | null;
   /** Bumped on every cell commit. The ONLY thing that changes on a commit —
@@ -92,6 +100,10 @@ export interface StreamStoreActions {
    *  plugin's levelPolicy). A no-op for an unregistered layer id, same
    *  race-tolerance convention as `bumpVersion`/`setStatus`. */
   setLadder: (layerId: string, ladder: ReadonlyArray<string>) => void;
+  /** Persists the union of first-level object groups the handle has seen
+   *  across every commit so far (`handle.onTypes`). Same race tolerance as
+   *  `setLadder`: a no-op for an unregistered layer id. */
+  setTypes: (layerId: string, types: ReadonlyArray<string>) => void;
   /** Mirrors `handle.level` after a commit. Separate from `bumpVersion`
    *  because the two have different audiences — `LodSelector` re-renders on
    *  the level, everything else on the version — and Zustand notifies per
@@ -157,6 +169,22 @@ export const useStreamStore = create<StreamStore>((set, getState) => ({
             ...entry,
             ladder,
             ladderVersion: entry.ladderVersion + 1,
+          },
+        },
+      };
+    }),
+
+  setTypes: (layerId, types) =>
+    set((s) => {
+      const entry = s.streams[layerId];
+      if (!entry) return s;
+      return {
+        streams: {
+          ...s.streams,
+          [layerId]: {
+            ...entry,
+            types,
+            typesVersion: entry.typesVersion + 1,
           },
         },
       };

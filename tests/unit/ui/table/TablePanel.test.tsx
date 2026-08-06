@@ -77,6 +77,9 @@ function baseLayer(overrides: Partial<Layer>): Layer {
     selectedLod: null,
     availableLods: [],
     lodMode: "auto",
+    cameraSync: true,
+    hiddenTypes: [],
+    availableObjectTypes: [],
     isStreaming: false,
     ...overrides,
   };

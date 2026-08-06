@@ -19,7 +19,7 @@
  *     the plugin knows the layer by, so `plugin.getHandle(layerId)` works and
  *     removal needs no second mapping.
  *  3. Register the `StreamState` and subscribe the store to the handle's
- *     three reports. The plugin owns the streaming state machine and only
+ *     four reports. The plugin owns the streaming state machine and only
  *     tells us what it did; the store mirrors what the UI reads (LodSelector,
  *     LayerPanel, StatusBar, InspectorPanel).
  *
@@ -47,6 +47,11 @@ export interface OpenStreamingLayerInput {
   readonly rules?: ReadonlyArray<Rule>;
   readonly rulesEnabled?: boolean;
   readonly visible?: boolean;
+  /** First-level object groups to stream without geometry, seeded into the
+   *  plugin before its first commit — a restored layer's very first fetch is
+   *  then already filtered, rather than fetching what it must immediately
+   *  refetch without. */
+  readonly hiddenTypes?: ReadonlyArray<string>;
 }
 
 export async function openStreamingLayer(
@@ -62,6 +67,7 @@ export async function openStreamingLayer(
     rules: input.rules ?? [],
     rulesEnabled: input.rulesEnabled ?? true,
     visible: input.visible ?? true,
+    hiddenTypes: input.hiddenTypes ?? [],
   });
 
   const model: CityModel = {
@@ -80,12 +86,13 @@ export async function openStreamingLayer(
     visible: input.visible ?? true,
     rules: input.rules ?? [],
     rulesEnabled: input.rulesEnabled ?? true,
+    hiddenTypes: input.hiddenTypes ?? [],
     isStreaming: true,
   });
 
   // The plugin owns the streaming state machine and only REPORTS; the store
   // mirrors what the UI reads (LodSelector, LayerPanel, StatusBar, Inspector).
-  // Subscribed BEFORE the register below so the three unsubscribes can be
+  // Subscribed BEFORE the register below so the four unsubscribes can be
   // stored with the entry — `handle.delete()` does not clear the handle's
   // listener sets, so `closeStreamingLayer` is the only thing that can
   // (streamStore.ts -> `StreamState.disposers`). A report that fired between
@@ -97,6 +104,11 @@ export async function openStreamingLayer(
     ),
     handle.onLadder((ladder) =>
       useStreamStore.getState().setLadder(layerId, ladder),
+    ),
+    // Like the ladder, discovered rather than declared: the union only grows
+    // as cells are decoded, so the type toggles fill in as the user pans.
+    handle.onTypes((types) =>
+      useStreamStore.getState().setTypes(layerId, types),
     ),
     handle.onCommit(() => {
       const store = useStreamStore.getState();
@@ -124,6 +136,8 @@ export async function openStreamingLayer(
     level: handle.level,
     ladder: handle.ladder,
     ladderVersion: 0,
+    types: handle.typesSeen,
+    typesVersion: 0,
     status: handle.status,
     message: handle.message,
     version: handle.version,

@@ -14,6 +14,8 @@ import type {
   StreamSourceSnapshot,
 } from "../persistence/types";
 import {
+  geoLayerSnapshot,
+  normalizeGeoLayers,
   normalizeLayers,
   UnsupportedSnapshotVersionError,
 } from "../persistence/types";
@@ -35,10 +37,14 @@ import { browserPlatform } from "../platform/browser";
 import type { PlatformServices } from "../platform/types";
 import { NavaraViewport } from "../scene/NavaraViewport";
 import type { CitySceneHandle } from "../scene/NavaraViewport";
+import type { FlyToTarget } from "../scene/geographicCamera";
+import { useViewModeStore } from "../features/viewMode/viewModeStore";
 import { suppressAutoFit } from "../scene/autoFitSuppression";
 import { useSelectionStore } from "../features/selection/selectionStore";
 import { useLayerStore } from "../features/layers/layerStore";
+import { useGeoLayerStore } from "../features/geoLayers/geoLayerStore";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
+import { useFileDropGuard } from "../features/layers/useFileDropGuard";
 import { useStreamStore } from "../features/streaming/streamStore";
 import { useTotalObjectCount } from "../features/streaming/useTotalObjectCount";
 import { getResidentModel } from "../features/streaming/residentModel";
@@ -56,6 +62,7 @@ import { useSolarStore } from "../features/solar/solarStore";
 import { InspectorPanel } from "../ui/inspector/InspectorPanel";
 import { ViewerToolbar } from "../ui/toolbar/ViewerToolbar";
 import { LeftSidebar } from "../ui/sidebar/LeftSidebar";
+import { SourcePicker } from "../ui/layers/SourcePicker";
 import { StatusBar } from "../ui/StatusBar";
 import { LegendOverlay } from "../ui/viewport/LegendOverlay";
 import { AttributePanel } from "../ui/viewport/AttributePanel";
@@ -114,6 +121,7 @@ interface UnavailableLayer {
   readonly visible: boolean;
   readonly lodMode: "auto" | "manual";
   readonly selectedLod: string | null;
+  readonly hiddenTypes: readonly string[];
 }
 
 interface AppProps {
@@ -166,6 +174,11 @@ export function App({
   const bootHoldsRef = useRef(0);
 
   const { theme, toggleTheme } = useTheme();
+
+  // A file dropped anywhere OTHER than a drop zone must do nothing — the
+  // browser's default is to navigate to it, which would throw the whole
+  // session away. See useFileDropGuard.
+  useFileDropGuard();
 
   /** The dismissal timer of the toast currently on screen, so a NEW message
    *  cannot be wiped by the OLD one's expiry — an 8 s explanation raised one
@@ -524,6 +537,7 @@ export function App({
     const { datetime } = useSolarStore.getState();
     const { layers: allLayers } = useLayerStore.getState();
     const { mode: pickMode } = useSelectionStore.getState();
+    const { mode: viewMode } = useViewModeStore.getState();
 
     const activeLayer =
       allLayers.find((l) => l.id === activeLayerId) ?? allLayers[0];
@@ -539,11 +553,16 @@ export function App({
         visible: l.visible,
         selectedLod: l.selectedLod,
         lodMode: l.lodMode,
+        hiddenTypes: [...l.hiddenTypes],
         ...(l.isStreaming ? { stream: streamSourceSnapshot(l.modelRef) } : {}),
       })),
+      // Stripped of anything that cannot survive a reload — an inline GeoJSON
+      // document above all; see `geoLayerSnapshot`.
+      geoLayers: useGeoLayerStore.getState().layers.map(geoLayerSnapshot),
       camera: cameraState,
       datetime,
       pickMode,
+      viewMode,
     });
 
     try {
@@ -573,6 +592,11 @@ export function App({
         }
 
         const viewState = restoreSnapshot(snapshot);
+        // BEFORE the layers and the camera. Entering a mode flies the camera,
+        // and the viewport suppresses that flight for a mode that is already
+        // set when it mounts — which is exactly this case. Setting it after
+        // the restored camera had landed would fly away from it instead.
+        useViewModeStore.getState().setViewMode(viewState.viewMode ?? "3d");
 
         // Remove all existing layers — the streaming ones first, so their
         // workers and cell meshes die with them rather than outliving the
@@ -580,6 +604,17 @@ export function App({
         closeAllStreamingLayers(getStreamPlugin());
         useLayerStore.getState().removeAllLayers();
         setUnavailableLayers([]);
+
+        // The geospatial layers, which need no engine and no parsing: the
+        // viewport's own effect adds a source+layer pair for each one as soon
+        // as it is up. A GeoJSON layer that was loaded from a file comes back
+        // with an empty config — `normalizeGeoLayers` keeps the row precisely
+        // so its name, visibility and opacity are not lost — and the panel
+        // offers to re-link it, exactly as the city-model prompt below does.
+        useGeoLayerStore.getState().removeAllGeoLayers();
+        for (const geoLayer of normalizeGeoLayers(snapshot.geoLayers)) {
+          useGeoLayerStore.getState().addGeoLayer(geoLayer);
+        }
 
         // Restore layers from snapshot. A v1 single-model save (`modelRef`
         // at the top level, no `layers`) is not handled here: it is a v1
@@ -619,6 +654,8 @@ export function App({
             const lodMode =
               (sl.lodMode as "auto" | "manual" | undefined) ?? "auto";
             const selectedLod = (sl.selectedLod as string | null) ?? null;
+            // Already defaulted to [] by `normalizeLayers`.
+            const hiddenTypes = sl.hiddenTypes;
 
             if (modelRef.type === "file" || sl.unavailable) {
               const fileName =
@@ -632,6 +669,7 @@ export function App({
                 visible,
                 lodMode,
                 selectedLod,
+                hiddenTypes,
               });
               continue;
             }
@@ -649,6 +687,7 @@ export function App({
                   rules,
                   rulesEnabled,
                   visible,
+                  hiddenTypes,
                 }),
               );
             } else {
@@ -660,6 +699,7 @@ export function App({
                 visible,
                 rules,
                 rulesEnabled,
+                hiddenTypes,
               });
             }
             if (lodMode === "manual") {
@@ -901,21 +941,21 @@ export function App({
     // viewport is the boot gate rather than a re-run on some readiness state.
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      const file = e.dataTransfer.files[0];
-      if (file) void handleFile(file);
+  /** The landing page's picker and the Add Layer dialog both hand a plain
+   *  `File`/`string` back; the promise is fire-and-forget either way, exactly
+   *  as it was when these were inline handlers (errors land in `loadError`). */
+  const handlePickedFile = useCallback(
+    (file: File) => {
+      void handleFile(file);
     },
     [handleFile],
   );
 
-  const handleInputChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) void handleFile(file);
+  const handlePickedUrl = useCallback(
+    (url: string) => {
+      void handleUrl(url);
     },
-    [handleFile],
+    [handleUrl],
   );
 
   const handleClose = useCallback(() => {
@@ -953,6 +993,7 @@ export function App({
                 visible: entry.visible,
                 lodMode: entry.lodMode,
                 selectedLod: entry.selectedLod,
+                hiddenTypes: entry.hiddenTypes,
               }
             : undefined,
         ),
@@ -968,6 +1009,16 @@ export function App({
   const handleFitAll = useCallback(() => {
     sceneRef.current?.fitAll();
   }, []);
+
+  /** The address search's one effect on the scene, reaching the viewport the
+   *  same way "Zoom to fit" reaches `fitAll`. The ORIENTATION is not ours to
+   *  pass: the viewport applies the active view mode's. */
+  const handleFlyTo = useCallback(
+    (target: FlyToTarget, durationMs?: number) => {
+      sceneRef.current?.flyTo(target, durationMs);
+    },
+    [],
+  );
 
   /** A layer the engine refused (the CRS gate — no reference system, or a
    *  non-metric one). Stable identity on purpose: `NavaraViewport`'s layer-sync
@@ -985,10 +1036,14 @@ export function App({
 
   // Resolve selected objects for attribute panel
   const selectedObjects: CityObject[] = [];
+  /** The selected layer's object map, so the attribute panel can resolve the
+   *  attributes a picked BuildingPart inherits from its parent Building. */
+  let selectedObjectsById: Readonly<Record<string, CityObject>> = {};
   if (selections.length > 0) {
     const sel0 = selections[0]!;
     const layer = layers.find((l) => l.id === sel0.layerId);
     if (layer) {
+      selectedObjectsById = layer.model.objects;
       for (const sel of selections) {
         const obj = layer.model.objects[sel.objectId];
         if (obj) selectedObjects.push(obj);
@@ -1032,6 +1087,7 @@ export function App({
           onToggleInspector={() => setInspectorOpen((o) => !o)}
           onToggleLeftSidebar={() => setLeftSidebarCollapsed((o) => !o)}
           onFitAll={handleFitAll}
+          onFlyTo={handleFlyTo}
           onSave={handleSave}
           onShare={handleShare}
           canShare={hasUrlLayers}
@@ -1045,8 +1101,8 @@ export function App({
           width={leftSidebarWidth}
           onWidthChange={setLeftSidebarWidth}
           collapsed={leftSidebarCollapsed}
-          onAddFile={handleFile}
-          onAddUrl={handleUrl}
+          onAddFile={handlePickedFile}
+          onAddUrl={handlePickedUrl}
           loading={loading}
           onFlyToLayer={(id) => sceneRef.current?.fitLayer(id)}
         />
@@ -1060,7 +1116,10 @@ export function App({
             onLayerError={handleLayerError}
           />
           <LegendOverlay />
-          <AttributePanel objects={selectedObjects} />
+          <AttributePanel
+            objects={selectedObjects}
+            objectsById={selectedObjectsById}
+          />
           {advancedSettingsOpen && (
             <AdvancedSettingsPanel
               onClose={() => setAdvancedSettingsOpen(false)}
@@ -1135,25 +1194,16 @@ export function App({
         />
       )}
 
-      <div
-        className="drop-zone"
-        onDrop={handleDrop}
-        onDragOver={(e) => e.preventDefault()}
-      >
-        <p>Drop a CityJSON, CityJSONSeq, FlatCityBuf, or CityGML file here</p>
-        <p className="drop-or">or</p>
-        <label className="file-label">
-          Browse files
-          <input
-            type="file"
-            accept=".json,.city.json,.jsonl,.city.jsonl,.fcb,.gml,.citygml"
-            onChange={handleInputChange}
-            hidden
-          />
-        </label>
-      </div>
-
-      <UrlInput onLoad={handleUrl} loading={loading} />
+      {/* The same component the sidebar's Add Layer dialog renders — one
+          drop zone, one URL field, one set of words for both entry points. */}
+      <SourcePicker
+        variant="hero"
+        onFile={handlePickedFile}
+        onUrl={handlePickedUrl}
+        loading={loading}
+        // The summary paragraph above already lists the extensions.
+        showFormatHint={false}
+      />
 
       <div className="sample-data-section">
         <button
@@ -1202,49 +1252,6 @@ export function App({
           messages was raised into a component that was not on screen. */}
       {toast && <div className="toast">{toast}</div>}
     </main>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// URL input component
-// ---------------------------------------------------------------------------
-
-function UrlInput({
-  onLoad,
-  loading,
-}: {
-  readonly onLoad: (url: string) => void;
-  readonly loading: boolean;
-}) {
-  const [url, setUrl] = useState("");
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = url.trim();
-    if (trimmed) onLoad(trimmed);
-  };
-
-  return (
-    <form className="fcb-url-form" onSubmit={handleSubmit}>
-      <label className="fcb-url-label">Or load from URL:</label>
-      <div className="fcb-url-row">
-        <input
-          type="url"
-          className="fcb-url-input"
-          placeholder="https://example.com/model.city.json"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          disabled={loading}
-        />
-        <button
-          type="submit"
-          className="fcb-url-btn"
-          disabled={loading || !url.trim()}
-        >
-          {loading ? "Loading\u2026" : "Load"}
-        </button>
-      </div>
-    </form>
   );
 }
 

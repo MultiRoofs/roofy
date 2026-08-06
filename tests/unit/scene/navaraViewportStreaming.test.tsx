@@ -71,6 +71,9 @@ const atmosphere = {
   off: vi.fn(),
 };
 const viewInstances: Array<Record<string, unknown>> = [];
+/** Every `view.addMesh` call, in order, with a flag the handle's `delete()`
+ *  sets — the fetch-box diagnostic's only engine surface. */
+const addedMeshes: Array<{ config: unknown; deleted: boolean }> = [];
 
 vi.mock("@navaramap/three", () => ({
   default: vi.fn(function (_options: unknown) {
@@ -84,6 +87,10 @@ vi.mock("@navaramap/three", () => ({
         raw: {},
         positionGeographic: { lng: 4.35, lat: 52, height: 500 },
         orientation: { heading: 0, pitch: -60, roll: 0 },
+        // The compass overlay subscribes to `movestart`/`move`/`moveend`,
+        // which live on the CAMERA rather than the view (Task B1 finding 6).
+        on: vi.fn(),
+        off: vi.fn(),
       },
       setCamera,
       flyTo,
@@ -91,6 +98,18 @@ vi.mock("@navaramap/three", () => ({
       screenSize: { x: 800, y: 600 },
       pixelRatio: 1,
       pickDepthPosition: vi.fn(() => null as unknown),
+      // The streaming fetch-box diagnostic draws through this. Every added
+      // mesh records its config and its deletion, so a test can assert both
+      // what was drawn and that it was taken away again.
+      addMesh: vi.fn((config: unknown) => {
+        const record = { config, deleted: false };
+        addedMeshes.push(record);
+        return {
+          delete: () => {
+            record.deleted = true;
+          },
+        };
+      }),
     };
     viewInstances.push(view);
     return view;
@@ -157,11 +176,32 @@ import {
   type StreamState,
 } from "../../../src/features/streaming/streamStore";
 import { getStreamPlugin } from "../../../src/features/streaming/streamPlugin";
+import { useQueryRegionStore } from "../../../src/features/streaming/queryRegionStore";
+import { useRenderDebugStore } from "../../../src/features/debug/renderDebugStore";
+import type { QueryRegion } from "@cityjson/navara-flatcitybuf";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 import type { Rule } from "../../../src/features/rules/types";
 import type { Selection } from "../../../src/domain/selection/types";
 
 const CRS_URI = "https://www.opengis.net/def/crs/EPSG/0/7415";
+
+/** A query region as `FcbStreamLayerHandle.onQueryRegion` publishes it: the
+ *  source-CRS bbox its `fetch` carried, plus the same rectangle as a lng/lat
+ *  ring for the renderer. Four corners is enough here — the densification is
+ *  the plugin's `queryRegion.ts` and is tested there. */
+const REGION: QueryRegion = {
+  layerId: "S1",
+  bbox: [85000, 445000, 87000, 446500],
+  epsg: 7415,
+  span: 2000,
+  heightM: 43.2,
+  ring: [
+    [4.35, 52.0],
+    [4.36, 52.0],
+    [4.36, 52.01],
+    [4.35, 52.01],
+  ],
+};
 
 function makeModel(): CityModel {
   return {
@@ -223,9 +263,11 @@ function makeFakeStreamHandle(
     id?: string;
     triangles?: number;
     pick?: Selection | null;
+    queryRegion?: QueryRegion | null;
   } = {},
 ) {
   const commitListeners = new Set<(version: number) => void>();
+  const queryRegionListeners = new Set<(r: QueryRegion | null) => void>();
   const handle = {
     id: options.id ?? "S1",
     triangles: options.triangles ?? 0,
@@ -275,6 +317,25 @@ function makeFakeStreamHandle(
       });
     },
     commitListenerCount: () => commitListeners.size,
+    /** The region the last dispatched fetch queried — the diagnostic seam.
+     *  Mutable so a test can seed a region BEFORE the viewport subscribes,
+     *  which is the "switch the toggle on mid-session" case. */
+    queryRegion: options.queryRegion ?? null,
+    lastQueryRegion: vi.fn(() => handle.queryRegion),
+    onQueryRegion: vi.fn((cb: (r: QueryRegion | null) => void) => {
+      queryRegionListeners.add(cb);
+      return () => {
+        queryRegionListeners.delete(cb);
+      };
+    }),
+    /** Announce a new (or cleared) query region, as a settle would. */
+    emitQueryRegion(region: QueryRegion | null) {
+      handle.queryRegion = region;
+      act(() => {
+        for (const cb of Array.from(queryRegionListeners)) cb(region);
+      });
+    },
+    queryRegionListenerCount: () => queryRegionListeners.size,
   };
   // The stream handle answers a raycast with the same Selection it would
   // resolve, so a pick routed to it lands in the selection store.
@@ -305,6 +366,8 @@ function registerStreamingLayer(
     level: null,
     ladder: [],
     ladderVersion: 0,
+    types: [],
+    typesVersion: 0,
     status: "idle",
     message: null,
     version: 0,
@@ -324,6 +387,7 @@ describe("NavaraViewport streaming wiring", () => {
     listeners.clear();
     getPickRay.mockClear();
     viewInstances.length = 0;
+    addedMeshes.length = 0;
     flatPluginOptions.length = 0;
     flatPluginThrows = null;
     FlatCityBufPluginMock.mockClear();
@@ -339,6 +403,10 @@ describe("NavaraViewport streaming wiring", () => {
     );
     useLayerStore.setState({ layers: [], activeLayerId: null });
     useStreamStore.setState({ streams: {} });
+    useQueryRegionStore.setState({ regions: {} });
+    // The fetch-box diagnostic is OFF by default; the cases that need it turn
+    // it on explicitly, which is also what proves the gate works.
+    useRenderDebugStore.getState().setStreamQueryBoxEnabled(false);
     useSelectionStore.setState({
       mode: "object",
       toolMode: "select",
@@ -353,6 +421,8 @@ describe("NavaraViewport streaming wiring", () => {
     cleanup();
     useLayerStore.setState({ layers: [], activeLayerId: null });
     useStreamStore.setState({ streams: {} });
+    useQueryRegionStore.setState({ regions: {} });
+    useRenderDebugStore.getState().setStreamQueryBoxEnabled(false);
   });
 
   // -------------------------------------------------------------------------
@@ -675,7 +745,13 @@ describe("NavaraViewport streaming wiring", () => {
     registerStreamingLayer("S1", streamHandle);
     const ref = createRef<CitySceneHandle>();
     render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
-    await waitFor(() => expect(init).toHaveBeenCalled());
+    // Wait for the handle to be IN the interaction registry, not merely for
+    // `init()` to have been called. `init` resolving is several microtasks
+    // short of the reconciliation effect that registers a streaming handle,
+    // so waiting on it raced the thing this test is about: any change to the
+    // work between the two — even synchronous work — flipped it.
+    // `onCommit` is subscribed by that effect, so it IS the registration.
+    await waitFor(() => expect(streamHandle.onCommit).toHaveBeenCalled());
     flyTo.mockClear();
     act(() => ref.current!.fitAll());
     expect(streamHandle.getBoundsGeodetic).toHaveBeenCalled();
@@ -792,6 +868,113 @@ describe("NavaraViewport streaming wiring", () => {
       }));
     });
     await waitFor(() => expect(streamHandle.setLod).not.toHaveBeenCalled());
+  });
+
+  // -------------------------------------------------------------------------
+  // The streaming fetch-box diagnostic
+  // -------------------------------------------------------------------------
+
+  it("draws NOTHING and subscribes to nothing while the diagnostic is off", async () => {
+    const streamHandle = makeFakeStreamHandle({ queryRegion: REGION });
+    registerStreamingLayer("S1", streamHandle);
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(init).toHaveBeenCalled());
+
+    expect(addedMeshes).toEqual([]);
+    expect(streamHandle.queryRegionListenerCount()).toBe(0);
+    expect(useQueryRegionStore.getState().regions).toEqual({});
+  });
+
+  it("draws the region already known when the diagnostic is switched on mid-session", async () => {
+    const streamHandle = makeFakeStreamHandle({ queryRegion: REGION });
+    registerStreamingLayer("S1", streamHandle);
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(init).toHaveBeenCalled());
+
+    act(() => useRenderDebugStore.getState().setStreamQueryBoxEnabled(true));
+
+    // The CURRENT box, not a blank overlay waiting for the next camera move.
+    await waitFor(() => expect(addedMeshes).toHaveLength(1));
+    const config = addedMeshes[0]!.config as {
+      smoothLines: {
+        closed: boolean;
+        tension: number;
+        points: Array<{ lng: number; lat: number; height: number }>;
+      };
+    };
+    expect(config.smoothLines.closed).toBe(true);
+    // Straight edges, not a spline bulging out at every corner.
+    expect(config.smoothLines.tension).toBe(0);
+    expect(config.smoothLines.points).toHaveLength(REGION.ring.length);
+    expect(config.smoothLines.points[0]).toEqual({
+      lng: REGION.ring[0]![0],
+      lat: REGION.ring[0]![1],
+      // The layer's own ground plane, lifted clear of the terrain it
+      // z-fights with.
+      height: REGION.heightM + 2,
+    });
+    expect(useQueryRegionStore.getState().regions.S1).toBe(REGION);
+  });
+
+  it("replaces the outline on every new query region the handle announces", async () => {
+    const streamHandle = makeFakeStreamHandle({ queryRegion: REGION });
+    registerStreamingLayer("S1", streamHandle);
+    useRenderDebugStore.getState().setStreamQueryBoxEnabled(true);
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(addedMeshes).toHaveLength(1));
+
+    const moved: QueryRegion = { ...REGION, bbox: [100, 200, 400, 600] };
+    streamHandle.emitQueryRegion(moved);
+
+    await waitFor(() => expect(addedMeshes).toHaveLength(2));
+    // The previous box is GONE, not stacked under the new one — otherwise a
+    // pan leaves a trail of every viewport the user has visited.
+    expect(addedMeshes[0]!.deleted).toBe(true);
+    expect(addedMeshes[1]!.deleted).toBe(false);
+    expect(useQueryRegionStore.getState().regions.S1).toBe(moved);
+  });
+
+  it("takes the outline and the readout away when the handle reports no region", async () => {
+    const streamHandle = makeFakeStreamHandle({ queryRegion: REGION });
+    registerStreamingLayer("S1", streamHandle);
+    useRenderDebugStore.getState().setStreamQueryBoxEnabled(true);
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(addedMeshes).toHaveLength(1));
+
+    // What `FcbStreamLayerHandle.delete()` announces.
+    streamHandle.emitQueryRegion(null);
+
+    await waitFor(() => expect(addedMeshes[0]!.deleted).toBe(true));
+    expect(addedMeshes).toHaveLength(1);
+    expect(useQueryRegionStore.getState().regions).toEqual({});
+  });
+
+  it("removes the outline, unsubscribes and clears the readout when the toggle goes off", async () => {
+    const streamHandle = makeFakeStreamHandle({ queryRegion: REGION });
+    registerStreamingLayer("S1", streamHandle);
+    useRenderDebugStore.getState().setStreamQueryBoxEnabled(true);
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(addedMeshes).toHaveLength(1));
+    expect(streamHandle.queryRegionListenerCount()).toBe(1);
+
+    act(() => useRenderDebugStore.getState().setStreamQueryBoxEnabled(false));
+
+    await waitFor(() => expect(addedMeshes[0]!.deleted).toBe(true));
+    expect(streamHandle.queryRegionListenerCount()).toBe(0);
+    expect(useQueryRegionStore.getState().regions).toEqual({});
+  });
+
+  it("removes the outline when the streaming layer leaves the store", async () => {
+    const streamHandle = makeFakeStreamHandle({ queryRegion: REGION });
+    registerStreamingLayer("S1", streamHandle);
+    useRenderDebugStore.getState().setStreamQueryBoxEnabled(true);
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(addedMeshes).toHaveLength(1));
+
+    act(() => useLayerStore.getState().removeLayer("S1"));
+
+    await waitFor(() => expect(addedMeshes[0]!.deleted).toBe(true));
+    expect(useQueryRegionStore.getState().regions).toEqual({});
   });
 
   // -------------------------------------------------------------------------

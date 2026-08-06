@@ -41,6 +41,8 @@ function makeStreamState(overrides: Partial<StreamState> = {}): StreamState {
     level: null,
     ladder: [],
     ladderVersion: 0,
+    types: [],
+    typesVersion: 0,
     status: "idle",
     message: null,
     version: 0,
@@ -150,6 +152,23 @@ describe("streamStore", () => {
       "2.2",
     ]);
     expect(useStreamStore.getState().streams["A"]!.ladderVersion).toBe(1);
+  });
+
+  it("setTypes replaces the discovered object types and bumps its own version", () => {
+    useStreamStore.getState().register("A", makeStreamState());
+    useStreamStore.getState().setTypes("A", ["Building", "Road"]);
+    expect(useStreamStore.getState().streams["A"]!.types).toEqual([
+      "Building",
+      "Road",
+    ]);
+    expect(useStreamStore.getState().streams["A"]!.typesVersion).toBe(1);
+  });
+
+  it("setTypes on an unregistered layer id is a harmless no-op", () => {
+    expect(() =>
+      useStreamStore.getState().setTypes("nope", ["Building"]),
+    ).not.toThrow();
+    expect(useStreamStore.getState().streams).toEqual({});
   });
 
   it("setLevel mirrors the handle's committed level", () => {
