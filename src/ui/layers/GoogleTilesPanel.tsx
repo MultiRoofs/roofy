@@ -7,6 +7,11 @@
  */
 
 import { useTilesStore } from "../../features/tiles/tilesStore";
+import { useSceneThemeStore } from "../../features/sceneTheme/sceneThemeStore";
+import {
+  areGoogleTilesOverridden,
+  THEME_OVERRIDE_HINT,
+} from "../../scene/sceneThemePolicy";
 
 const HAS_API_KEY = !!import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
@@ -15,6 +20,11 @@ export function GoogleTilesPanel() {
   // must read "off" rather than showing an open eye over an empty backdrop.
   const enabled = useTilesStore((s) => s.enabled) && HAS_API_KEY;
   const setEnabled = useTilesStore((s) => s.setEnabled);
+  // A theme can suppress the tiles without writing the toggle — same treatment
+  // as the basemap picker: the row keeps the user's own value and says so.
+  const overridden = useSceneThemeStore((s) =>
+    areGoogleTilesOverridden(s.theme),
+  );
 
   return (
     <div className="attr-section">
@@ -54,6 +64,9 @@ export function GoogleTilesPanel() {
         <span className="layer-name">Google 3D Tiles</span>
         <span className="layer-meta">background</span>
       </div>
+      {overridden && (
+        <div className="theme-override-hint">{THEME_OVERRIDE_HINT}</div>
+      )}
     </div>
   );
 }

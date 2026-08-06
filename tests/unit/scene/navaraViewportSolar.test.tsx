@@ -209,6 +209,9 @@ function makeHandle(id: string) {
     setVisible: vi.fn(),
     setLod: vi.fn(),
     setStyle: vi.fn(),
+    // The real `CityModelHandle` gained this with the scene themes; the
+    // viewport pushes the active theme's style on the same beat as LoD.
+    setThemeStyle: vi.fn(),
     setHighlight: vi.fn(),
     resolvePick: vi.fn(),
     resolveRaycast: vi.fn(() => null as unknown),

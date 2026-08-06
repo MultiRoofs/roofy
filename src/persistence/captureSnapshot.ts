@@ -15,6 +15,7 @@ import type {
 } from "./types";
 import { SNAPSHOT_VERSION } from "./types";
 import type { ViewMode } from "../features/viewMode/viewModeStore";
+import type { SceneTheme } from "../features/sceneTheme/sceneThemeStore";
 
 export interface CaptureInput {
   readonly label: string;
@@ -30,6 +31,9 @@ export interface CaptureInput {
   /** The camera policy in force. Written only when it is not the default —
    *  see {@link ViewState.viewMode}. */
   readonly viewMode?: ViewMode;
+  /** The scene theme in force. Written only when it is not the default — see
+   *  {@link ViewState.sceneTheme}. */
+  readonly sceneTheme?: SceneTheme;
 }
 
 export function captureSnapshot(input: CaptureInput): ProjectSnapshot {
@@ -40,6 +44,10 @@ export function captureSnapshot(input: CaptureInput): ProjectSnapshot {
     // a 3D workspace writes nothing rather than writing the default down.
     ...(input.viewMode !== undefined && input.viewMode !== "3d"
       ? { viewMode: input.viewMode }
+      : {}),
+    // Same rule for the theme: photoreal is "no theme", so it writes nothing.
+    ...(input.sceneTheme !== undefined && input.sceneTheme !== "photoreal"
+      ? { sceneTheme: input.sceneTheme }
       : {}),
   };
 

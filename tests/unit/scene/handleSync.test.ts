@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Selection } from "@cityjson/navara-cityjson";
+import type { Selection, ThemeStyle } from "@cityjson/navara-cityjson";
 import type { Layer } from "../../../src/features/layers/layerStore";
 import type { Rule } from "../../../src/features/rules/types";
 import type { Surface } from "../../../src/domain/citymodel/types";
@@ -952,5 +952,136 @@ describe("syncStreamState", () => {
     expect(second.setRules).toHaveBeenCalledTimes(1);
     expect(second.setLod).toHaveBeenCalledTimes(1);
     expect(second.setVisible).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scene themes
+//
+// A theme's mesh style reaches BOTH layer kinds through the same two sync
+// functions the rest of the layer state does, and for the same reason: a layer
+// added (or a stream opened) while a theme is active must come up themed, not
+// photoreal-then-themed a frame later.
+//
+// Pushing is not cheap — `setThemeStyle` re-extracts every structural edge of
+// every mesh — so the tests below are mostly about NOT pushing.
+// ---------------------------------------------------------------------------
+
+describe("theme styles", () => {
+  const CARTOON: ThemeStyle = Object.freeze({
+    fill: "vertex",
+    edges: Object.freeze({ color: 0x1a1a1a }),
+  });
+  const CYBER: ThemeStyle = Object.freeze({
+    fill: "tint",
+    tintRGB: [0.06, 0.07, 0.12] as const,
+    edges: Object.freeze({ color: 0x33e0ff }),
+  });
+
+  function themedHandle(id: string) {
+    return { ...fakeHandle(id), setThemeStyle: vi.fn() };
+  }
+
+  function themedStreamHandle(id = "S1") {
+    return {
+      id,
+      setHighlight: vi.fn(),
+      resolvePick: vi.fn(),
+      resolveRaycast: vi.fn(),
+      getBoundsGeodetic: vi.fn(),
+      triangleCount: () => 0,
+      onCommit: vi.fn(() => () => undefined),
+      setRules: vi.fn(),
+      setLod: vi.fn(),
+      setVisible: vi.fn(),
+      setCameraSync: vi.fn(),
+      setHiddenTypes: vi.fn(),
+      setThemeStyle: vi.fn(),
+    };
+  }
+
+  it("styles a newly added static layer with the active theme", () => {
+    const handle = themedHandle("L1");
+    const registry = { get: () => undefined, add: vi.fn(() => handle) };
+    const live = new Map<string, LiveLayer>();
+
+    syncLayers(
+      registry as never,
+      [layer({ id: "L1" })],
+      live,
+      () => {},
+      CARTOON,
+    );
+
+    expect(handle.setThemeStyle).toHaveBeenCalledWith(CARTOON);
+  });
+
+  it("re-styles a live static layer when the theme changes, once", () => {
+    const handle = themedHandle("L1");
+    const registry = { get: () => undefined, add: vi.fn(() => handle) };
+    const live = new Map<string, LiveLayer>();
+    const layers = [layer({ id: "L1" })];
+
+    syncLayers(registry as never, layers, live, () => {}, CARTOON);
+    handle.setThemeStyle.mockClear();
+
+    // Same theme, another store change (a rename, another layer's toggle):
+    // pushing again would rebuild the edge geometry for nothing.
+    syncLayers(registry as never, layers, live, () => {}, CARTOON);
+    expect(handle.setThemeStyle).not.toHaveBeenCalled();
+
+    syncLayers(registry as never, layers, live, () => {}, CYBER);
+    expect(handle.setThemeStyle).toHaveBeenCalledTimes(1);
+    expect(handle.setThemeStyle).toHaveBeenCalledWith(CYBER);
+  });
+
+  it("pushes nothing to a static layer when no theme is supplied", () => {
+    const handle = themedHandle("L1");
+    const registry = { get: () => undefined, add: vi.fn(() => handle) };
+    const live = new Map<string, LiveLayer>();
+    syncLayers(registry as never, [layer({ id: "L1" })], live, () => {});
+    expect(handle.setThemeStyle).not.toHaveBeenCalled();
+  });
+
+  it("styles a streaming layer with the active theme, on change only", () => {
+    const handle = themedStreamHandle();
+    const memos = new Map<string, StreamSyncMemo>();
+    const l = layer({ id: "S1", isStreaming: true });
+
+    syncStreamState(l, handle as never, memos, CARTOON);
+    expect(handle.setThemeStyle).toHaveBeenCalledWith(CARTOON);
+
+    handle.setThemeStyle.mockClear();
+    syncStreamState({ ...l }, handle as never, memos, CARTOON);
+    expect(handle.setThemeStyle).not.toHaveBeenCalled();
+
+    syncStreamState(l, handle as never, memos, CYBER);
+    expect(handle.setThemeStyle).toHaveBeenCalledTimes(1);
+    expect(handle.setThemeStyle).toHaveBeenCalledWith(CYBER);
+  });
+
+  it("re-styles a REPLACED streaming handle for the same layer id", () => {
+    // A stream closed and re-opened gets a brand new handle whose cells are
+    // unthemed; a memo that survived the swap would leave them photoreal in a
+    // themed scene.
+    const memos = new Map<string, StreamSyncMemo>();
+    const l = layer({ id: "S1", isStreaming: true });
+    const first = themedStreamHandle();
+    syncStreamState(l, first as never, memos, CYBER);
+
+    const second = themedStreamHandle();
+    syncStreamState(l, second as never, memos, CYBER);
+    expect(second.setThemeStyle).toHaveBeenCalledWith(CYBER);
+  });
+
+  it("pushes nothing to a streaming layer when no theme is supplied", () => {
+    const handle = themedStreamHandle();
+    const memos = new Map<string, StreamSyncMemo>();
+    syncStreamState(
+      layer({ id: "S1", isStreaming: true }),
+      handle as never,
+      memos,
+    );
+    expect(handle.setThemeStyle).not.toHaveBeenCalled();
   });
 });

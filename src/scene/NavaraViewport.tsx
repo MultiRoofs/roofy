@@ -47,6 +47,12 @@ import ThreeView, {
 } from "@navaramap/three";
 import { DefaultPlugin } from "@navaramap/three-default-plugin";
 import { Vector2 } from "three";
+// The tone-curve enum, from `postprocessing` DIRECTLY rather than through
+// `@navaramap/three-default-descs` (which re-exports it): that package imports
+// `@navaramap/three` at module scope, and this file is unit-tested under Node
+// with the engine mocked (NODE_IMPORT_SAFE = false). `postprocessing` is a
+// pinned direct dependency and imports cleanly.
+import { ToneMappingMode } from "postprocessing";
 // The engine-bound subpaths, NOT the package barrels: the barrels must stay
 // importable from Node (Global Constraints -> NODE_IMPORT_SAFE = false).
 import { CityJSONPlugin } from "@cityjson/navara-cityjson/plugin";
@@ -138,6 +144,8 @@ import {
   viewModePolicy,
 } from "./viewModePolicy";
 import { googleTilesConfig } from "./googleTiles";
+import { useSceneThemeStore } from "../features/sceneTheme/sceneThemeStore";
+import { sceneThemePolicy, type ThemeEnvironment } from "./sceneThemePolicy";
 import { basemapById, type BasemapOption } from "./basemaps";
 import { TERRAIN, TERRAIN_ATTRIBUTION } from "./terrain";
 import { isAutoFitSuppressed } from "./autoFitSuppression";
@@ -342,14 +350,18 @@ function disposeCloudsPass(handle: CloudsHandle): void {
  */
 interface PhotorealScene {
   readonly sky?: VisibilityHandle;
-  readonly stars?: VisibilityHandle;
-  readonly skyLightProbe?: VisibilityHandle;
-  readonly sun?: VisibilityHandle & { update: (updates: unknown) => void };
-  readonly aerialPerspective?: VisibilityHandle & {
-    update: (updates: unknown) => void;
-  };
+  /** `update` too, since Task M9: a theme with the physical sky switched off
+   *  turns the star field up to carry the backdrop. */
+  readonly stars?: UpdatableHandle;
+  /** Likewise — the probe's intensity is the ambient half of how a dark theme
+   *  gets dark WITHOUT going near `atmosphere.date`. */
+  readonly skyLightProbe?: UpdatableHandle;
+  readonly sun?: UpdatableHandle;
+  readonly aerialPerspective?: UpdatableHandle;
   readonly lensFlare?: VisibilityHandle;
-  readonly toneMapping?: VisibilityHandle;
+  /** `update` carries the tone-curve mode (`{ toneMapping: { mode } }`), which
+   *  a flat look swaps from AgX to LINEAR. */
+  readonly toneMapping?: UpdatableHandle;
   readonly antialiasing?: VisibilityHandle;
 }
 
@@ -357,6 +369,15 @@ interface PhotorealScene {
  *  inherits (`@navaramap/three` `BaseHandle`). */
 interface VisibilityHandle {
   visible: boolean;
+}
+
+/** The handles the theme layer CONFIGURES rather than merely shows and hides.
+ *  `update` is typed `unknown` for the same reason the rest of this block is
+ *  structural: the engine's own update types are generic in their descriptor
+ *  class and would drag `@navaramap/three-default-descs` into a file that must
+ *  stay importable from Node. */
+interface UpdatableHandle extends VisibilityHandle {
+  update: (updates: unknown) => void;
 }
 
 /**
@@ -422,6 +443,287 @@ function enableAtmosphericLighting(scene: PhotorealScene | undefined): void {
       aerialPerspective: { irradiance: true, useNormalBuffer: true },
     }),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Scene themes: the environment half
+//
+// `sceneThemePolicy.ts` says WHAT a theme wants of the sky, the globe and the
+// post chain; everything below is the engine seam that pushes it. Two rules
+// run through all of it:
+//
+//   * a theme NEVER writes a user store, and never touches `atmosphere.date`
+//     (solar time — see the spec's solar-hygiene note). It darkens a scene with
+//     exposure, albedo scale, probe intensity and sky visibility, all of which
+//     are presentation;
+//   * leaving a theme RESTORES, and restores to the engine's own defaults —
+//     which is why the four constants below are values read out of the 0.0.5
+//     bundle rather than numbers invented here.
+// ---------------------------------------------------------------------------
+
+/** `DEFAULT_STARS_OPTIONS` in `@navaramap/three-default-descs` 0.0.5. Copied
+ *  rather than imported: that package pulls `@navaramap/three` in at module
+ *  scope, which cannot be loaded under Node. */
+const PHOTOREAL_STARS = { pointSize: 1, intensity: 10 } as const;
+
+/** `LightProbe`'s own default in three r183 — `SkyLightProbeDesc` passes the
+ *  option straight through and adds no default of its own. */
+const PHOTOREAL_SKY_LIGHT_PROBE_INTENSITY = 1;
+
+/** `AerialPerspectiveEffect`'s default: full albedo through the atmosphere. */
+const PHOTOREAL_AP_ALBEDO_SCALE = 1;
+
+/** `DEFAULT_TONE_MAPPING_OPTIONS.mode` in the same bundle. */
+const PHOTOREAL_TONE_MAPPING_MODE = ToneMappingMode.AGX;
+
+/** The policy's tone-curve names, as the enum the pass actually takes. */
+const TONE_MAPPING_MODES: Record<
+  NonNullable<ThemeEnvironment["toneMappingMode"]>,
+  ToneMappingMode
+> = {
+  AGX: ToneMappingMode.AGX,
+  LINEAR: ToneMappingMode.LINEAR,
+};
+
+/** A mesh a theme owns: added on first need, then shown/hidden and updated. */
+interface ThemeMesh {
+  visible: boolean;
+  update: (updates: unknown) => void;
+  delete: () => void;
+}
+
+/**
+ * What the theme layer has to REMEMBER between switches.
+ *
+ * Two meshes that the default photoreal scene does not create at all (the flat
+ * sky box and the Fresnel halo), plus the globe colour as it was before any
+ * theme touched it — and one flag saying whether anything has been overridden,
+ * which is what makes photoreal a genuine no-op on a viewer that has never
+ * left it.
+ */
+interface ThemeEnvironmentState {
+  skyBox: ThemeMesh | null;
+  glowGlobe: ThemeMesh | null;
+  /** Captured once, immediately before the first override. */
+  priorGlobeColor: number | undefined;
+  /** True while a non-photoreal environment is in force. */
+  applied: boolean;
+}
+
+function createThemeEnvironmentState(): ThemeEnvironmentState {
+  return {
+    skyBox: null,
+    glowGlobe: null,
+    priorGlobeColor: undefined,
+    applied: false,
+  };
+}
+
+/**
+ * Add a theme-owned mesh ONCE, then toggle and update it.
+ *
+ * Never added and deleted per switch, for the reason CLAUDE.md's Known Issue
+ * (f) records for effects and which applies just as well here: a create/destroy
+ * cycle per theme change is a cost (and a potential leak) paid every time the
+ * user tries the menu, where `visible` is a flag flip.
+ *
+ * @param desc the engine mesh description, or `null` to hide what exists.
+ */
+function syncThemeMesh(
+  view: ViewInstance,
+  state: ThemeEnvironmentState,
+  slot: "skyBox" | "glowGlobe",
+  desc: object | null,
+): void {
+  const existing = state[slot];
+  if (desc === null) {
+    if (existing === null) return;
+    applyToEngine(`the theme's ${slot} visibility`, () => {
+      existing.visible = false;
+    });
+    return;
+  }
+  if (existing === null) {
+    try {
+      state[slot] = view.addMesh(desc as never) as unknown as ThemeMesh;
+    } catch (error) {
+      // A backdrop, like the clouds and the basemap: a descriptor this engine
+      // build refuses must leave the theme partly applied, not the viewer dead.
+      console.error(
+        `NavaraViewport: the theme's ${slot} mesh could not be added; the theme renders without it.`,
+        error,
+      );
+    }
+    return;
+  }
+  applyToEngine(`the theme's ${slot}`, () => {
+    existing.update(desc);
+    existing.visible = true;
+  });
+}
+
+/**
+ * Push the globe's base colour, capturing the engine's own on the way in.
+ *
+ * Nothing at all happens while no theme has ever asked for a colour — which is
+ * what keeps a photoreal session from writing a value it would then have to
+ * remember.
+ *
+ * The colour is built by CLONING the one the globe already holds. The setter
+ * calls `toHex()` on whatever it is given (verified in the 0.0.5 bundle:
+ * `setColor: (c) => core.setGlobeColor(c.toHex())`), so a bare number is not
+ * accepted — and cloning the engine's own instance gets a `Color` without
+ * importing the class into a file whose unit tests mock the engine wholesale.
+ */
+function syncThemeGlobeColor(
+  view: ViewInstance,
+  wanted: number | null,
+  state: ThemeEnvironmentState,
+): void {
+  if (wanted === null && state.priorGlobeColor === undefined) return;
+  applyToEngine("the theme's globe colour", () => {
+    const current = view.globe.color;
+    // `Color | undefined` — undefined before the WASM core is up, in which case
+    // there is nothing to capture and nothing safe to build from.
+    if (current === undefined) return;
+    if (state.priorGlobeColor === undefined) {
+      state.priorGlobeColor = current.toHex();
+    }
+    view.globe.color = current.clone().setHex(wanted ?? state.priorGlobeColor);
+  });
+}
+
+/**
+ * Apply one theme's environment block to the live engine.
+ *
+ * Every branch reads `value ?? photorealDefault`, so the SAME code path both
+ * enters a theme and leaves one: there is no separate "restore" routine that
+ * could fall out of step with the one that applied it.
+ *
+ * Deliberately NOT here: the clouds and the lens flare. Both already have an
+ * effect of their own driven by the user's atmosphere/debug settings, so the
+ * theme's `cloudsOff`/`lensFlareOff` are composed into those gates instead —
+ * one owner per engine object, which is what makes "restore the user's setting"
+ * automatic rather than something this function has to reproduce.
+ */
+function applyThemeEnvironment(
+  view: ViewInstance,
+  scene: PhotorealScene | null,
+  env: ThemeEnvironment,
+  state: ThemeEnvironmentState,
+): void {
+  const sky = scene?.sky;
+  if (sky) {
+    applyToEngine("the theme's sky visibility", () => {
+      sky.visible = env.skyVisible ?? true;
+    });
+  }
+
+  const stars = scene?.stars;
+  if (stars) {
+    const { pointSize, intensity } = env.starsBoost ?? PHOTOREAL_STARS;
+    applyToEngine("the theme's star field", () =>
+      stars.update({ stars: { pointSize, intensity } }),
+    );
+  }
+
+  // The flat two-colour sky (cartoon) and the cyan Fresnel rim (cyber). Neither
+  // is part of `addDefaultPhotorealScene()`, which is why they are meshes this
+  // file creates rather than handles it was handed.
+  //
+  // Colours must be ENGINE Color INSTANCES, not hex numbers: the skyBox and
+  // glowGlobe descs call `.toArray()` on them at createMesh time, and a bare
+  // number made addMesh throw (the theme then rendered without its sky).
+  // Cloning the globe's own colour manufactures an instance without importing
+  // the engine's class into a file whose tests mock the engine wholesale —
+  // the same trick `syncThemeGlobeColor` documents for `toHex()`.
+  // The globe's colour is typed optional; without an instance to clone there
+  // is no way to manufacture the engine's Color class, so the two theme
+  // meshes are skipped with the same "renders without it" grace as a failed
+  // add. Never observed in practice — the globe always has a colour by the
+  // time a theme can be chosen.
+  const globeColor = view.globe.color;
+  const themeColor =
+    globeColor === undefined
+      ? null
+      : (hex: number) => globeColor.clone().setHex(hex);
+  syncThemeMesh(
+    view,
+    state,
+    "skyBox",
+    env.skyBoxColors === null || themeColor === null
+      ? null
+      : {
+          skyBox: {
+            dayColor: themeColor(env.skyBoxColors.dayColor),
+            nightColor: themeColor(env.skyBoxColors.nightColor),
+            sunColor: themeColor(env.skyBoxColors.sunColor),
+          },
+        },
+  );
+  syncThemeMesh(
+    view,
+    state,
+    "glowGlobe",
+    env.glowGlobe === null || themeColor === null
+      ? null
+      : {
+          glowGlobe: {
+            glowColor: themeColor(env.glowGlobe.glowColor),
+            opacity: env.glowGlobe.opacity,
+          },
+        },
+  );
+
+  applyToEngine("the theme's globe wireframe", () => {
+    view.globe.wireframe = env.globeWireframe ?? false;
+  });
+  syncThemeGlobeColor(view, env.globeColor, state);
+
+  const toneMapping = scene?.toneMapping;
+  if (toneMapping) {
+    const mode =
+      env.toneMappingMode === null
+        ? PHOTOREAL_TONE_MAPPING_MODE
+        : TONE_MAPPING_MODES[env.toneMappingMode];
+    applyToEngine("the theme's tone-mapping mode", () =>
+      toneMapping.update({ toneMapping: { mode } }),
+    );
+  }
+
+  const aerialPerspective = scene?.aerialPerspective;
+  if (aerialPerspective) {
+    // The FULL calibration every time, never `albedoScale` alone. The live
+    // pass applies updates per-field, but `onUpdateConfig` also does
+    // `Object.assign(this.config, e)` — REPLACING the whole
+    // `aerialPerspective` key in the stored config — and any later internal
+    // pass rebuild reconstructs from that config. An albedoScale-only write
+    // therefore stripped `irradiance`/`useNormalBuffer` from the config, and
+    // the first rebuild after a theme switch reconstructed the pass without
+    // the irradiance term: every albedo pixel black at any exposure, with
+    // only HDR edge lines surviving (browser-diagnosed, 2026-08-06).
+    applyToEngine("the theme's aerial-perspective albedo scale", () =>
+      aerialPerspective.update({
+        aerialPerspective: {
+          irradiance: true,
+          useNormalBuffer: true,
+          albedoScale: env.apAlbedoScale ?? PHOTOREAL_AP_ALBEDO_SCALE,
+        },
+      }),
+    );
+  }
+
+  const skyLightProbe = scene?.skyLightProbe;
+  if (skyLightProbe) {
+    applyToEngine("the theme's sky-light probe intensity", () =>
+      skyLightProbe.update({
+        skyLightProbe: {
+          intensity:
+            env.skyLightProbeIntensity ?? PHOTOREAL_SKY_LIGHT_PROBE_INTENSITY,
+        },
+      }),
+    );
+  }
 }
 
 /**
@@ -644,6 +946,26 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     const tilesWanted = useTilesStore((s) => s.enabled);
     /** Which basemap the user picked. */
     const basemapId = useBasemapStore((s) => s.basemapId);
+    /** Photoreal / cartoon / cyber / wireframe. What it MEANS is
+     *  `sceneThemePolicy.ts`; this component only applies it. */
+    const sceneTheme = useSceneThemeStore((s) => s.theme);
+    const themePolicy = sceneThemePolicy(sceneTheme);
+    /**
+     * The basemap actually draped, and whether Google's tiles are actually
+     * asked for — DERIVED, never written back.
+     *
+     * A theme is a presentation overlay: the picker keeps showing the user's
+     * own choice (and says, in one line, that the theme has taken it over), and
+     * switching back to photoreal restores it because nothing was ever
+     * mutated. The attribution overlay follows automatically, since it credits
+     * the option that is on screen.
+     */
+    const effectiveBasemapId = themePolicy.basemapOverride ?? basemapId;
+    const effectiveTilesWanted = tilesWanted && !themePolicy.googleTilesOff;
+    /** Pulled out as scalars so the clouds and post-chain effects can depend on
+     *  them without depending on the whole policy object. */
+    const themeCloudsOff = themePolicy.environment.cloudsOff;
+    const themeLensFlareOff = themePolicy.environment.lensFlareOff;
     /** The user's own GeoJSON / XYZ / 3D-Tiles layers. Reconciled into engine
      *  source+layer pairs by `geoLayerSync.ts`. */
     const geoLayers = useGeoLayerStore((s) => s.layers);
@@ -670,6 +992,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     );
     const sunShadowsEnabled = useRenderDebugStore((s) => s.sunShadowsEnabled);
     const exposure = useRenderDebugStore((s) => s.exposure);
+    /** The exposure actually written to the engine: the theme's, or — when the
+     *  theme names none — the user's Advanced Settings slider. The store is
+     *  never written, so the slider keeps its own value throughout. */
+    const effectiveExposure = themePolicy.environment.exposure ?? exposure;
     /** Whether to outline each streaming layer's camera-derived fetch bbox. */
     const queryBoxEnabled = useRenderDebugStore((s) => s.streamQueryBoxEnabled);
     const cloudCoverage = useAtmosphereStore((s) => s.cloudCoverage);
@@ -681,6 +1007,12 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     /** The live clouds effect handle, so coverage can be pushed to the pass
      *  instead of rebuilding it. */
     const cloudsHandleRef = useRef<CloudsHandle | null>(null);
+    /** What the theme layer remembers between switches — the two meshes it
+     *  owns, the globe colour it found, and whether anything is overridden.
+     *  See {@link ThemeEnvironmentState}. */
+    const themeEnvRef = useRef<ThemeEnvironmentState>(
+      createThemeEnvironmentState(),
+    );
     /** The coverage the pass should be BORN with. A ref, so the add effect
      *  below can read the current value without depending on it. */
     const cloudCoverageRef = useRef(cloudCoverage);
@@ -937,6 +1269,12 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         // stops the settings effects below from pushing `visible` through a
         // descriptor whose scene has been disposed on the next store change.
         photorealRef.current = null;
+        // The theme's own meshes (the flat sky box, the Fresnel halo) died with
+        // the view too, and so did the globe colour it captured. Forgetting all
+        // of it means the next mount re-adds them from the active theme rather
+        // than toggling `visible` on a mesh whose scene is gone — and re-reads
+        // the globe's real colour instead of restoring a stale one.
+        themeEnvRef.current = createThemeEnvironmentState();
         // Streaming state dies with the engine, and it has to be TOLD to: the
         // plugin's `dispose()` deletes every handle, but `streamStore` holds
         // the only other reference to them, so leaving its entries behind
@@ -1040,7 +1378,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     // alive that guard passes and the toggle really does remove the layer.
     useEffect(() => {
       const view = viewRef.current;
-      if (!engineReady || view === null || !tilesWanted) return;
+      // `effectiveTilesWanted`, not the store's flag: a scene theme can
+      // suppress the tiles without writing the toggle, so leaving the theme
+      // brings them straight back.
+      if (!engineReady || view === null || !effectiveTilesWanted) return;
       const handles = addGoogleTiles(view);
       // `null` = no key, or the engine refused: nothing was added, so there is
       // nothing to credit and nothing to take away.
@@ -1050,7 +1391,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         setTilesEnabled(false);
         if (viewRef.current === view) removeGoogleTiles(handles);
       };
-    }, [engineReady, tilesWanted]);
+    }, [engineReady, effectiveTilesWanted]);
 
     // --- The raster basemap, following the picker ---
     //
@@ -1062,7 +1403,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     useEffect(() => {
       const view = viewRef.current;
       if (!engineReady || view === null) return;
-      const option = basemapById(basemapId);
+      // The theme's override wins over the picker while it is in force, and
+      // the picker wins again the moment it is not.
+      const option = basemapById(effectiveBasemapId);
       const handles = addBasemap(view, option);
       // "None", or the engine refused: nothing is draped, so nobody is credited.
       if (handles === null) return;
@@ -1071,7 +1414,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         setActiveBasemap(null);
         if (viewRef.current === view) removeBasemap(handles);
       };
-    }, [engineReady, basemapId]);
+    }, [engineReady, effectiveBasemapId]);
 
     // --- The user's geospatial layers (GeoJSON / XYZ raster / 3D Tiles) ---
     //
@@ -1103,7 +1446,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     useEffect(() => {
       const view = viewRef.current;
       if (!engineReady || view === null) return;
-      if (!postProcessingEnabled || !cloudsWanted) return;
+      // The theme's `cloudsOff` is COMPOSED with the user's toggle rather than
+      // written to it, so leaving the theme restores whatever the advanced
+      // settings say without this effect having to remember it.
+      if (!postProcessingEnabled || !cloudsWanted || themeCloudsOff) return;
       let handle: CloudsHandle | null = null;
       try {
         handle = view.addEffect({
@@ -1140,7 +1486,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       // `cloudCoverage` is deliberately NOT a dependency: dragging the slider
       // would tear the pass down and rebuild it (and re-load its 3D textures)
       // per pointer move. The separate effect below pushes it instead.
-    }, [engineReady, postProcessingEnabled, cloudsWanted]);
+    }, [engineReady, postProcessingEnabled, cloudsWanted, themeCloudsOff]);
 
     // Coverage -> the live pass, without rebuilding it.
     useEffect(() => {
@@ -1175,9 +1521,12 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       const view = viewRef.current;
       if (!engineReady || view === null) return;
       applyToEngine("the tone-mapping exposure", () => {
-        view.toneMappingExposure = exposure;
+        // The theme's exposure wins while it is in force, and the slider takes
+        // over again the instant it is not — one write site, so the two can
+        // never both be pushing.
+        view.toneMappingExposure = effectiveExposure;
       });
-    }, [engineReady, exposure]);
+    }, [engineReady, effectiveExposure]);
 
     // NO ambient fill light. The app used to add one
     // (`view.addLight({ ambient })`, default intensity 0.6) on top of the
@@ -1219,7 +1568,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       setVisible(
         "the lens flare toggle",
         scene.lensFlare,
-        postProcessingEnabled && lensFlareEnabled,
+        // The theme's veto is COMPOSED with the user's switch, never written
+        // to it — same rule as the clouds, and what makes leaving the theme
+        // restore the atmosphere panel's own setting for free.
+        postProcessingEnabled && lensFlareEnabled && !themeLensFlareOff,
       );
       setVisible(
         "the antialiasing toggle",
@@ -1231,7 +1583,52 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       postProcessingEnabled,
       aerialPerspectiveEnabled,
       lensFlareEnabled,
+      themeLensFlareOff,
     ]);
+
+    // --- The scene theme's environment ---
+    //
+    // One effect for the sky, the stars, the two theme-owned meshes, the globe,
+    // the tone curve, the aerial-perspective albedo and the sky-light probe —
+    // everything `sceneThemePolicy.ts` puts in the `environment` block. The
+    // exposure, the basemap, the Google tiles, the clouds and the lens flare
+    // are deliberately NOT here: each already has one owner, and the theme is
+    // composed into that owner instead of contending with it.
+    //
+    // While the viewer has never left photoreal this does NOTHING AT ALL — not
+    // "writes the defaults", nothing — which is what makes the theme system a
+    // provable no-op for a user who never opens the menu. Once a theme has been
+    // applied, going back to photoreal runs the same code with every value
+    // resolved to the engine's own default, so restore cannot drift from apply.
+    useEffect(() => {
+      const view = viewRef.current;
+      if (!engineReady || view === null) return;
+      const state = themeEnvRef.current;
+      const photoreal = sceneTheme === "photoreal";
+      if (photoreal && !state.applied) return;
+      // A theme-to-theme switch goes THROUGH the photoreal restore: write
+      // every lever back to its default, then apply the target. Browser-found:
+      // jumping straight from one non-photoreal environment to another left
+      // the 0.0.5 engine holding a mix of both (wireframe -> cartoon kept the
+      // dark frame), while X -> photoreal and photoreal -> Y are the two edges
+      // verified against the real engine — so every transition is composed of
+      // exactly those, and no lever's latch can survive a switch.
+      if (!photoreal && state.applied) {
+        applyThemeEnvironment(
+          view,
+          photorealRef.current,
+          sceneThemePolicy("photoreal").environment,
+          state,
+        );
+      }
+      applyThemeEnvironment(
+        view,
+        photorealRef.current,
+        themePolicy.environment,
+        state,
+      );
+      state.applied = !photoreal;
+    }, [engineReady, sceneTheme, themePolicy]);
 
     // --- Sun shadows ---
     //
@@ -1580,6 +1977,11 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
             layerId,
             error instanceof Error ? error.message : String(error),
           ),
+        // The active theme's mesh style, on the same beat as visibility and
+        // LoD: a layer added while a theme is on must come up themed rather
+        // than photoreal for a frame. One frozen object per theme, so this is
+        // an identity check inside `syncLayers`, not a re-style per render.
+        themePolicy.meshStyle,
       );
       // Rule colors, after the handles exist so a newly added layer is styled
       // on the same pass it appears (Task B14). Memoised inside — a rule edit
@@ -1591,7 +1993,15 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       // Only a NEW layer earns a camera move: a visibility toggle, a LoD
       // change or a rule edit must not yank the camera out from under the user.
       if (liveRef.current.size > before) setFitToken((t) => t + 1);
-    }, [engineReady, layers, onTriangleCount, onLayerError]);
+      // `themePolicy.meshStyle` is a dependency, not a ref read: a theme change
+      // has to bring this effect back so the live handles are re-styled.
+    }, [
+      engineReady,
+      layers,
+      onTriangleCount,
+      onLayerError,
+      themePolicy.meshStyle,
+    ]);
 
     // Fit once whenever a layer is newly added. Separate from the sync effect
     // so the fit runs after the handles exist and `boundsOf` can see them.
@@ -1647,7 +2057,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         streams.set(layer.id, handle);
         // Rules, LoD and visibility — the streaming replacement for
         // `syncLayers` + `syncStyles`, memoised per layer (`handleSync.ts`).
-        syncStreamState(layer, handle, memos);
+        syncStreamState(layer, handle, memos, themePolicy.meshStyle);
         // Cells arrive asynchronously, LONG after any store change, so the
         // triangle readout and the highlight have to be refreshed on every
         // commit — otherwise an FCB-only workspace reports its first commit's
@@ -1697,7 +2107,13 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       return () => {
         for (const off of unsubscribes) off();
       };
-    }, [engineReady, layers, streamIds, onTriangleCount]);
+    }, [
+      engineReady,
+      layers,
+      streamIds,
+      onTriangleCount,
+      themePolicy.meshStyle,
+    ]);
 
     // --- streaming fetch bbox -> a ground outline + a readout (diagnostic) ---
     //

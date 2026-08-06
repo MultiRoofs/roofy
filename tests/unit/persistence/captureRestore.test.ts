@@ -310,3 +310,49 @@ describe("view mode round trip", () => {
     expect(restoreSnapshot(snapshot).viewMode).toBe("2.5d");
   });
 });
+
+describe("scene theme round trip", () => {
+  const base = {
+    label: "L",
+    layers: [],
+    camera: CAM,
+    datetime: new Date(Date.UTC(2025, 5, 21, 12, 0, 0)),
+    pickMode: "object",
+  } as const;
+
+  it("captures the scene theme into the snapshot's view state", () => {
+    const snapshot = captureSnapshot({ ...base, sceneTheme: "cyber" });
+    expect(snapshot.viewState.sceneTheme).toBe("cyber");
+  });
+
+  it("omits the field entirely when the viewer is in the default theme", () => {
+    // Exactly the `viewMode` convention: absent means "the default", so a
+    // photoreal workspace writes no extra bytes.
+    const snapshot = captureSnapshot({ ...base, sceneTheme: "photoreal" });
+    expect(snapshot.viewState.sceneTheme).toBeUndefined();
+  });
+
+  it("hands the saved theme back to the caller on restore", () => {
+    const snapshot = captureSnapshot({ ...base, sceneTheme: "wireframe" });
+    expect(restoreSnapshot(snapshot).sceneTheme).toBe("wireframe");
+  });
+
+  it("reads a snapshot written before themes existed as photoreal", () => {
+    const snapshot = captureSnapshot(base);
+    expect(snapshot.viewState.sceneTheme).toBeUndefined();
+    expect(restoreSnapshot(snapshot).sceneTheme).toBe("photoreal");
+  });
+
+  it("reads a hand-edited or truncated theme as photoreal", () => {
+    // The value drives the RENDERER — an unknown theme would have no policy
+    // entry to look up, so `sceneThemePolicy` would hand back `undefined` and
+    // every environment push would throw. Unknown reads as the default, which
+    // is always safe.
+    const snapshot = captureSnapshot({ ...base, sceneTheme: "cyber" });
+    const tampered = {
+      ...snapshot,
+      viewState: { ...snapshot.viewState, sceneTheme: "neon-dreams" },
+    };
+    expect(restoreSnapshot(tampered as never).sceneTheme).toBe("photoreal");
+  });
+});

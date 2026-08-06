@@ -9,6 +9,7 @@
 import type { Rule } from "../features/rules/types";
 import type { PickMode } from "../domain/selection/types";
 import type { ViewMode } from "../features/viewMode/viewModeStore";
+import type { SceneTheme } from "../features/sceneTheme/sceneThemeStore";
 import type {
   GeoLayer,
   GeoLayerInput,
@@ -294,6 +295,16 @@ export interface ViewState {
    * Type-only import: persistence takes no runtime dependency on the store.
    */
   readonly viewMode?: ViewMode;
+  /**
+   * The scene theme the workspace was saved in ("photoreal" | "cartoon" |
+   * "cyber" | "wireframe").
+   *
+   * OPTIONAL on exactly the same terms as {@link viewMode} above: absent means
+   * the default, so a snapshot written before themes existed restores as
+   * photoreal — which is the rendering it was saved from — and no migration is
+   * needed. Type-only import, like the mode's.
+   */
+  readonly sceneTheme?: SceneTheme;
 }
 
 /**
@@ -306,6 +317,22 @@ export interface ViewState {
  */
 export function normalizeViewMode(mode: ViewMode | undefined): ViewMode {
   return mode === "2d" || mode === "2.5d" || mode === "3d" ? mode : "3d";
+}
+
+/**
+ * A saved scene theme, defaulted and validated — the twin of
+ * {@link normalizeViewMode}, and validated for the same kind of reason: this
+ * value drives the RENDERER, and an unknown theme has no `sceneThemePolicy`
+ * entry, so every environment push would dereference `undefined`. Unknown
+ * reads as photoreal, which is the one theme that changes nothing.
+ */
+export function normalizeSceneTheme(theme: SceneTheme | undefined): SceneTheme {
+  return theme === "photoreal" ||
+    theme === "cartoon" ||
+    theme === "cyber" ||
+    theme === "wireframe"
+    ? theme
+    : "photoreal";
 }
 
 // ---------------------------------------------------------------------------

@@ -9,14 +9,26 @@
  * Writes `basemapStore`; `NavaraViewport` turns the selection into an engine
  * `raster-tile` source + `raster` layer, and the active option's attribution
  * into overlay credit lines.
+ *
+ * A scene theme can OVERRIDE the choice without writing it (cartoon demands a
+ * pastel sheet, the two dark themes demand none), which is why the picker keeps
+ * showing the user's own selection and says, in one muted line, that something
+ * else is on screen. A control that has silently stopped mattering reads as
+ * broken; one that explains itself reads as deliberate.
  */
 
 import { useBasemapStore } from "../../features/basemap/basemapStore";
+import { useSceneThemeStore } from "../../features/sceneTheme/sceneThemeStore";
+import {
+  isBasemapOverridden,
+  THEME_OVERRIDE_HINT,
+} from "../../scene/sceneThemePolicy";
 import { BASEMAPS, type BasemapId } from "../../scene/basemaps";
 
 export function BasemapPanel() {
   const basemapId = useBasemapStore((s) => s.basemapId);
   const setBasemapId = useBasemapStore((s) => s.setBasemapId);
+  const overridden = useSceneThemeStore((s) => isBasemapOverridden(s.theme));
 
   return (
     <div className="attr-section">
@@ -34,6 +46,9 @@ export function BasemapPanel() {
           </option>
         ))}
       </select>
+      {overridden && (
+        <div className="theme-override-hint">{THEME_OVERRIDE_HINT}</div>
+      )}
     </div>
   );
 }

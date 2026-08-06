@@ -1789,6 +1789,86 @@ body {
   }
 }
 
+/* ── Scene theme picker ─────────────────────────────────────────────────────
+   Same anchoring as the sun popover (it reuses `.toolbar-solar-popover` for
+   exactly that), but a wider card: each option carries a name AND the sentence
+   that makes the name mean something. Everything below is drawn from the theme
+   variables, so light mode follows without a second rule set. */
+.toolbar-theme-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.scene-theme-popover {
+  width: 270px;
+  padding: 0.25rem 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-lg, 0.75rem);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  z-index: 30;
+}
+
+.scene-theme-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.scene-theme-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius, 0.5rem);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.scene-theme-option:hover {
+  background: var(--bg-panel-hover);
+}
+
+.scene-theme-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.scene-theme-option-active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.scene-theme-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.scene-theme-option-active .scene-theme-name {
+  color: var(--accent-text);
+}
+
+.scene-theme-desc {
+  font-size: 0.68rem;
+  line-height: 1.3;
+  color: var(--fg-muted);
+}
+
+/* The one line the basemap and Google-tiles panels show while a theme has
+   taken their choice over — muted, because it explains a control rather than
+   being one. */
+.theme-override-hint {
+  margin-top: 0.3rem;
+  font-size: 0.66rem;
+  line-height: 1.3;
+  color: var(--fg-muted);
+}
+
 /* Tighten inspector tabs when 5+ tabs */
 .inspector-tabs:has(button:nth-child(5)) .inspector-tab {
   padding: 0.5rem 0.35rem;

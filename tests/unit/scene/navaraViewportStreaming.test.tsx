@@ -236,6 +236,9 @@ function makeStaticHandle(id: string, triangles = 10) {
     setVisible: vi.fn(),
     setLod: vi.fn(),
     setStyle: vi.fn(),
+    // The real `CityModelHandle` gained this with the scene themes; the
+    // viewport pushes the active theme's style on the same beat as LoD.
+    setThemeStyle: vi.fn(),
     setHighlight: vi.fn(),
     resolvePick: vi.fn(() => null as unknown),
     resolveRaycast: vi.fn(() => null as unknown),
@@ -301,6 +304,9 @@ function makeFakeStreamHandle(
     setRules: vi.fn(),
     setLod: vi.fn(),
     setVisible: vi.fn(),
+    // The real `FcbStreamLayerHandle` gained this with the scene themes: the
+    // viewport pushes the active theme's mesh style on the same beat as rules.
+    setThemeStyle: vi.fn(),
     delete: vi.fn(),
     onStatus: vi.fn(() => () => undefined),
     onLadder: vi.fn(() => () => undefined),
