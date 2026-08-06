@@ -80,6 +80,27 @@ describe("loadFromUrl (gzip)", () => {
     expect(model.sourceEncoding).toBe("cityjsonseq");
     expect(Object.keys(model.objects).length).toBeGreaterThan(0);
   });
+
+  it("reports a friendly error for a corrupt/truncated gzip body", async () => {
+    // Gzip magic bytes, garbage after: what a truncated transfer or a
+    // double-gzipped Content-Encoding body looks like. DecompressionStream
+    // rejects with a raw "Decompression failed" TypeError; loadFromUrl must
+    // translate it like every other failure path in the function.
+    const corrupt = new Uint8Array([0x1f, 0x8b, 0x08, 0x00, 0x99, 0x42, 0x07]);
+    const err = await loadFromUrl(
+      "https://example.com/tile.city.json.gz",
+      okBytes(corrupt),
+    ).then(
+      () => {
+        throw new Error("expected loadFromUrl to reject");
+      },
+      (e: unknown) => e as Error,
+    );
+    expect(err.message).toMatch(/corrupt or truncated compressed data/i);
+    expect(err.message).toContain("tile.city.json.gz");
+    expect(err.message).not.toMatch(/decompression failed/i);
+    expect(err.cause).toBeDefined();
+  });
 });
 
 describe("decodeModelBytes", () => {
