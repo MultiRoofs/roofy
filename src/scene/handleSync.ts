@@ -25,6 +25,7 @@ import type {
   RaycastHit,
   ScreenPoint,
   Selection,
+  ThemeStyle,
 } from "@cityjson/navara-cityjson";
 import type { QueryRegion } from "@cityjson/navara-flatcitybuf";
 import type { Rule } from "../features/rules/types";
@@ -47,6 +48,13 @@ export interface LiveLayer {
   styledRules?: ReadonlyArray<Rule>;
   /** The `rulesEnabled` flag that went with {@link styledRules}. */
   styledRulesEnabled?: boolean;
+  /** The scene theme's `ThemeStyle` last pushed, by IDENTITY —
+   *  `sceneThemePolicy` hands out one frozen object per theme, so reference
+   *  equality is an exact "did the theme change?" test. `undefined` means this
+   *  handle has never been themed, which is also the mesh's own initial state
+   *  (`DEFAULT_THEME_STYLE`). Pushing is NOT cheap: `setThemeStyle` re-extracts
+   *  every structural edge of the layer. */
+  themeStyle?: ThemeStyle;
 }
 
 /**
@@ -74,13 +82,23 @@ export interface CityModelRegistry {
  * - visibility, LoD and hidden object types are pushed only when they actually
  *   changed. A LoD or hidden-types change is `handle.setLod`/`setHiddenTypes`,
  *   which rebuilds the geometry in place — the handle (and therefore its mesh
- *   registration, style and highlight) is never recreated.
+ *   registration, style and highlight) is never recreated;
+ * - the active scene theme's mesh style is pushed on the same beat, so a layer
+ *   added while a theme is on comes up themed rather than photoreal for a
+ *   frame. See {@link LiveLayer.themeStyle} for why it is compared by identity.
+ *
+ * `themeStyle` is optional and `undefined` means "this caller has no theme to
+ * push" — which is what photoreal amounts to for a handle that has never been
+ * themed, and what keeps a caller that does not care about themes (a test, a
+ * one-shot resync) from having to invent one. `NavaraViewport` always passes
+ * the active policy's style.
  */
 export function syncLayers(
   registry: CityModelRegistry,
   layers: readonly Layer[],
   live: Map<string, LiveLayer>,
   onError: (layerId: string, error: unknown) => void,
+  themeStyle?: ThemeStyle,
 ): void {
   const wanted = new Set(layers.filter((l) => !l.isStreaming).map((l) => l.id));
 
@@ -122,6 +140,10 @@ export function syncLayers(
     if (entry.hiddenTypes !== layer.hiddenTypes) {
       entry.hiddenTypes = layer.hiddenTypes;
       entry.handle.setHiddenTypes(layer.hiddenTypes);
+    }
+    if (themeStyle !== undefined && entry.themeStyle !== themeStyle) {
+      entry.themeStyle = themeStyle;
+      entry.handle.setThemeStyle(themeStyle);
     }
   }
 }
@@ -223,6 +245,10 @@ export interface StreamInteractionHandle extends InteractionHandle {
   /** Whether the layer re-queries its source as the camera settles. See
    *  `Layer.cameraSync`. */
   setCameraSync(enabled: boolean): void;
+  /** The scene theme's presentation style. Stored by the handle and applied to
+   *  every resident cell AND to each cell installed later, which is what makes
+   *  a stream that keeps arriving stay in the theme it was opened in. */
+  setThemeStyle(style: ThemeStyle): void;
   /** First-level object groups to stream without geometry. Forces a commit,
    *  so every affected cell is refetched — the same cost as a LoD change. */
   setHiddenTypes(types: ReadonlyArray<string>): void;
@@ -260,6 +286,9 @@ export interface StreamSyncMemo {
   selectedLod?: string | null;
   cameraSync?: boolean;
   hiddenTypes?: ReadonlyArray<string>;
+  /** The scene theme's style last pushed, by identity — see
+   *  {@link LiveLayer.themeStyle}. */
+  themeStyle?: ThemeStyle;
 }
 
 /**
@@ -291,6 +320,7 @@ export function syncStreamState(
   layer: Layer,
   handle: StreamInteractionHandle,
   memos: Map<string, StreamSyncMemo>,
+  themeStyle?: ThemeStyle,
 ): void {
   let memo = memos.get(layer.id);
   if (!memo || memo.handle !== handle) {
@@ -322,6 +352,12 @@ export function syncStreamState(
   if (memo.hiddenTypes !== layer.hiddenTypes) {
     memo.hiddenTypes = layer.hiddenTypes;
     handle.setHiddenTypes(layer.hiddenTypes);
+  }
+  // Same optional-means-"no theme to push" contract as `syncLayers`, and the
+  // same identity comparison: one frozen style object per theme.
+  if (themeStyle !== undefined && memo.themeStyle !== themeStyle) {
+    memo.themeStyle = themeStyle;
+    handle.setThemeStyle(themeStyle);
   }
 }
 

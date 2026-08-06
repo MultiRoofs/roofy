@@ -10,6 +10,7 @@ import { useSolarStore } from "../../features/solar/solarStore";
 import { SolarMenu } from "./SolarMenu";
 import { AddressSearch } from "./AddressSearch";
 import { ViewModeToggle } from "./ViewModeToggle";
+import { SceneThemeMenu } from "./SceneThemeMenu";
 import { extractCrsCode } from "./crsCode";
 import type { FlyToTarget } from "../../scene/geographicCamera";
 
@@ -192,6 +193,9 @@ export function ViewerToolbar({
           answer the same question. */}
       <AddressSearch onFlyTo={onFlyTo} />
       <ViewModeToggle />
+      {/* Next to the view-mode segments because the two answer neighbouring
+          questions — how the scene is FRAMED, and how it is DRAWN. */}
+      <SceneThemeMenu />
 
       <div className="toolbar-sep" />
 

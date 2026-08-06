@@ -39,6 +39,7 @@ import { NavaraViewport } from "../scene/NavaraViewport";
 import type { CitySceneHandle } from "../scene/NavaraViewport";
 import type { FlyToTarget } from "../scene/geographicCamera";
 import { useViewModeStore } from "../features/viewMode/viewModeStore";
+import { useSceneThemeStore } from "../features/sceneTheme/sceneThemeStore";
 import { suppressAutoFit } from "../scene/autoFitSuppression";
 import { useSelectionStore } from "../features/selection/selectionStore";
 import { useLayerStore } from "../features/layers/layerStore";
@@ -538,6 +539,7 @@ export function App({
     const { layers: allLayers } = useLayerStore.getState();
     const { mode: pickMode } = useSelectionStore.getState();
     const { mode: viewMode } = useViewModeStore.getState();
+    const { theme: sceneTheme } = useSceneThemeStore.getState();
 
     const activeLayer =
       allLayers.find((l) => l.id === activeLayerId) ?? allLayers[0];
@@ -563,6 +565,7 @@ export function App({
       datetime,
       pickMode,
       viewMode,
+      sceneTheme,
     });
 
     try {
@@ -597,6 +600,12 @@ export function App({
         // set when it mounts — which is exactly this case. Setting it after
         // the restored camera had landed would fly away from it instead.
         useViewModeStore.getState().setViewMode(viewState.viewMode ?? "3d");
+        // The theme moves no camera, so it has no ordering constraint of its
+        // own — it rides with the mode so both are in place before the layers
+        // arrive and come up already themed.
+        useSceneThemeStore
+          .getState()
+          .setSceneTheme(viewState.sceneTheme ?? "photoreal");
 
         // Remove all existing layers — the streaming ones first, so their
         // workers and cell meshes die with them rather than outliving the
