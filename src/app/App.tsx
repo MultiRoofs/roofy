@@ -37,7 +37,6 @@ import { browserPlatform } from "../platform/browser";
 import type { PlatformServices } from "../platform/types";
 import { NavaraViewport } from "../scene/NavaraViewport";
 import type { CitySceneHandle } from "../scene/NavaraViewport";
-import type { FlyToTarget } from "../scene/geographicCamera";
 import { useViewModeStore } from "../features/viewMode/viewModeStore";
 import { useSceneThemeStore } from "../features/sceneTheme/sceneThemeStore";
 import { suppressAutoFit } from "../scene/autoFitSuppression";
@@ -1019,16 +1018,6 @@ export function App({
     sceneRef.current?.fitAll();
   }, []);
 
-  /** The address search's one effect on the scene, reaching the viewport the
-   *  same way "Zoom to fit" reaches `fitAll`. The ORIENTATION is not ours to
-   *  pass: the viewport applies the active view mode's. */
-  const handleFlyTo = useCallback(
-    (target: FlyToTarget, durationMs?: number) => {
-      sceneRef.current?.flyTo(target, durationMs);
-    },
-    [],
-  );
-
   /** A layer the engine refused (the CRS gate — no reference system, or a
    *  non-metric one). Stable identity on purpose: `NavaraViewport`'s layer-sync
    *  effect lists it as a dependency. */
@@ -1096,7 +1085,6 @@ export function App({
           onToggleInspector={() => setInspectorOpen((o) => !o)}
           onToggleLeftSidebar={() => setLeftSidebarCollapsed((o) => !o)}
           onFitAll={handleFitAll}
-          onFlyTo={handleFlyTo}
           onSave={handleSave}
           onShare={handleShare}
           canShare={hasUrlLayers}

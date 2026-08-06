@@ -79,10 +79,15 @@ export interface ThemeEnvironment {
   readonly apAlbedoScale: number | null;
   /** The sky light probe's intensity — the ambient half of the same. */
   readonly skyLightProbeIntensity: number | null;
-  /** Suppress the volumetric clouds whatever the user's advanced-settings
-   *  toggle says. Composed with it, never written to it. */
-  readonly cloudsOff: boolean;
-  /** Suppress the lens flare, likewise. */
+  /** Suppress the lens flare whatever the user's atmosphere setting says.
+   *  Composed with it, never written to it.
+   *
+   *  There is deliberately NO `cloudsOff` beside it. A theme used to kill the
+   *  clouds (all three did), which meant switching look silently threw away
+   *  weather the user had turned on and only the flare came back. The clouds
+   *  follow the user's toggle in EVERY theme now; they composite through the
+   *  aerial-perspective pass, so a theme's exposure and albedo restyle them
+   *  the way they restyle everything else — stylised, on purpose. */
   readonly lensFlareOff: boolean;
 }
 
@@ -115,7 +120,6 @@ const NO_ENVIRONMENT: ThemeEnvironment = {
   exposure: null,
   apAlbedoScale: null,
   skyLightProbeIntensity: null,
-  cloudsOff: false,
   lensFlareOff: false,
 };
 
@@ -203,7 +207,6 @@ const POLICIES: Record<SceneTheme, SceneThemePolicy> = {
       exposure: 1.4,
       apAlbedoScale: 1.5,
       skyLightProbeIntensity: 1.4,
-      cloudsOff: true,
       lensFlareOff: true,
     }),
   }),
@@ -235,14 +238,13 @@ const POLICIES: Record<SceneTheme, SceneThemePolicy> = {
       exposure: 3,
       apAlbedoScale: 0.15,
       skyLightProbeIntensity: 0.05,
-      cloudsOff: true,
       lensFlareOff: true,
     }),
   }),
 
   // Hidden-line. Everything that is not an edge goes: no imagery, no sky, no
-  // weather, no flare — and the globe itself becomes its own wireframe so the
-  // ground reads as a drawing rather than as a surface.
+  // flare. The clouds are the one exception, and a deliberate one — they are
+  // the user's weather, not the theme's (see `lensFlareOff`).
   wireframe: Object.freeze({
     meshStyle: WIREFRAME_STYLE,
     basemapOverride: "none",
@@ -260,7 +262,6 @@ const POLICIES: Record<SceneTheme, SceneThemePolicy> = {
       exposure: 1,
       apAlbedoScale: 0.05,
       skyLightProbeIntensity: 0,
-      cloudsOff: true,
       lensFlareOff: true,
     }),
   }),

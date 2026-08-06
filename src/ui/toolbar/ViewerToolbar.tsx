@@ -8,11 +8,9 @@ import { useLayerStore } from "../../features/layers/layerStore";
 import { useTotalObjectCount } from "../../features/streaming/useTotalObjectCount";
 import { useSolarStore } from "../../features/solar/solarStore";
 import { SolarMenu } from "./SolarMenu";
-import { AddressSearch } from "./AddressSearch";
 import { ViewModeToggle } from "./ViewModeToggle";
 import { SceneThemeMenu } from "./SceneThemeMenu";
 import { extractCrsCode } from "./crsCode";
-import type { FlyToTarget } from "../../scene/geographicCamera";
 
 /**
  * Tooltip suffix for the tools the Navara viewport does not implement yet.
@@ -41,10 +39,6 @@ interface ViewerToolbarProps {
   readonly onToggleInspector: () => void;
   readonly onToggleLeftSidebar: () => void;
   readonly onFitAll: () => void;
-  /** Fly the camera to a searched place — the same route to the scene handle
-   *  `onFitAll` takes to `fitAll`. Optional: the toolbar renders before a
-   *  viewport exists. */
-  readonly onFlyTo?: (target: FlyToTarget, durationMs?: number) => void;
   readonly onSave?: () => void;
   readonly onShare?: () => void;
   readonly canShare?: boolean;
@@ -65,7 +59,6 @@ export function ViewerToolbar({
   onToggleInspector,
   onToggleLeftSidebar,
   onFitAll,
-  onFlyTo,
   onSave,
   onShare,
   canShare,
@@ -188,10 +181,9 @@ export function ViewerToolbar({
         </svg>
       </button>
 
-      {/* Where the camera can go: search somewhere, or change the camera
-          policy it goes there under. Next to "Zoom to fit" because all three
-          answer the same question. */}
-      <AddressSearch onFlyTo={onFlyTo} />
+      {/* The camera policy "Zoom to fit" flies under. The place SEARCH used to
+          sit here too; it is a scene overlay now (top-left of the canvas), so
+          the toolbar keeps only what is not about a point on the map. */}
       <ViewModeToggle />
       {/* Next to the view-mode segments because the two answer neighbouring
           questions — how the scene is FRAMED, and how it is DRAWN. */}

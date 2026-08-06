@@ -45,7 +45,6 @@ describe("sceneThemePolicy", () => {
     expect(env.exposure).toBeNull();
     expect(env.apAlbedoScale).toBeNull();
     expect(env.skyLightProbeIntensity).toBeNull();
-    expect(env.cloudsOff).toBe(false);
     expect(env.lensFlareOff).toBe(false);
   });
 
@@ -135,13 +134,24 @@ describe("sceneThemePolicy", () => {
     expect(sceneThemePolicy("wireframe").environment.skyBoxColors).toBeNull();
   });
 
-  it("switches the weather and the lens flare off in every themed look", () => {
+  it("switches the lens flare off in every themed look", () => {
     for (const theme of ["cartoon", "cyber", "wireframe"] as const) {
       const env = sceneThemePolicy(theme).environment;
-      expect(env.cloudsOff).toBe(true);
       expect(env.lensFlareOff).toBe(true);
       // Every themed look replaces the physical sky with its own backdrop.
       expect(env.skyVisible).toBe(false);
+    }
+  });
+
+  it("gives NO theme a way to suppress the clouds", () => {
+    // All three themed looks used to carry `cloudsOff: true`, so changing the
+    // look silently threw away weather the user had switched on. The lever is
+    // gone, not merely set to false: the clouds have exactly one owner, the
+    // user's toggle.
+    for (const theme of SCENE_THEMES) {
+      expect(sceneThemePolicy(theme).environment).not.toHaveProperty(
+        "cloudsOff",
+      );
     }
   });
 

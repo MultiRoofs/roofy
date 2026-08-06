@@ -3514,24 +3514,70 @@ button.file-label:disabled {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   ADDRESS SEARCH (toolbar)
+   ADDRESS SEARCH (scene overlay, top-left)
    ═══════════════════════════════════════════════════════════════ */
 
-/* Collapsed it is one toolbar button; expanded it is an input with a dropdown
-   anchored under it, so the popover needs this to be the positioned parent. */
+/* Top-left of the CANVAS, not the toolbar: the align cluster owns top-right,
+   the legend and scale bottom-left, the compass bottom-right. Also the
+   positioned parent the dropdown anchors under. z-index one above the other
+   overlays (all at 10) so a long result list is never drawn behind the
+   legend it hangs over. */
 .address-search {
-  position: relative;
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 11;
   display: inline-flex;
   align-items: center;
 }
 
+/* Collapsed: the same translucent-plus-blur chip every other scene overlay
+   uses, because this one sits on imagery rather than on chrome. */
+.address-search-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  background: rgba(12, 14, 20, 0.85);
+  backdrop-filter: blur(12px);
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+
+.address-search-toggle svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.address-search-toggle:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Expanded: an opaque-enough panel, not the toolbar's `--bg-input`. Over
+   bright satellite imagery a translucent field loses its own text. */
 .address-search-open {
   gap: 0.35rem;
   height: 2rem;
   padding: 0 0.4rem;
   border: 1px solid var(--border-accent);
   border-radius: var(--radius-sm);
-  background: var(--bg-input);
+  background: rgba(12, 14, 20, 0.9);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 30%);
 }
 
 .address-search-icon {
@@ -3710,4 +3756,12 @@ button.file-label:disabled {
 
 [data-theme="light"] .address-search-list {
   box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+}
+
+/* The chip and the field carry the scene's own contrast, not the panel's: in
+   light chrome the near-black overlay would swallow the dark text the theme
+   pairs with it (the same flip `.view-align-btn` and `.scale-bar` make). */
+[data-theme="light"] .address-search-toggle,
+[data-theme="light"] .address-search-open {
+  background: rgba(255, 255, 255, 0.9);
 }
