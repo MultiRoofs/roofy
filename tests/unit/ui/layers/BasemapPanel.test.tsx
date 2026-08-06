@@ -20,10 +20,10 @@ describe("BasemapPanel", () => {
     render(<BasemapPanel />);
     const select = screen.getByLabelText("Basemap") as HTMLSelectElement;
     expect([...select.options].map((o) => o.value)).toEqual(
-      BASEMAPS.map((b) => b.id),
+      BASEMAPS.filter((b) => !b.hidden).map((b) => b.id),
     );
     expect([...select.options].map((o) => o.textContent)).toEqual(
-      BASEMAPS.map((b) => b.label),
+      BASEMAPS.filter((b) => !b.hidden).map((b) => b.label),
     );
     expect(select.value).toBe(DEFAULT_BASEMAP_ID);
   });
