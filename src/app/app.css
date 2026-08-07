@@ -2722,8 +2722,15 @@ body {
    SAMPLE DATA BUTTON (landing page)
    ═══════════════════════════════════════════════════════════════ */
 
+/* Flex rather than `text-align: center`: the section holds TWO buttons (load
+   the sample, browse the catalog) and adjacent JSX siblings produce no
+   whitespace text node to space them apart. Wraps, because the two together
+   are wider than a narrow window. */
 .sample-data-section {
-  text-align: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
   margin-top: 0.5rem;
 }
 

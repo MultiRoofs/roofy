@@ -63,6 +63,7 @@ import { InspectorPanel } from "../ui/inspector/InspectorPanel";
 import { ViewerToolbar } from "../ui/toolbar/ViewerToolbar";
 import { LeftSidebar } from "../ui/sidebar/LeftSidebar";
 import { SourcePicker } from "../ui/layers/SourcePicker";
+import { StacBrowserDialog } from "../ui/stac/StacBrowserDialog";
 import { StatusBar } from "../ui/StatusBar";
 import { LegendOverlay } from "../ui/viewport/LegendOverlay";
 import { AttributePanel } from "../ui/viewport/AttributePanel";
@@ -150,6 +151,10 @@ export function App({
   const [tableHeight, setTableHeight] = useState(250);
   const [toast, setToast] = useState<string | null>(null);
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
+  /** The LANDING page's catalog dialog. The viewer shell reaches the same
+   *  browser through the Add Layer dialog's "Catalog" tab, so this flag is
+   *  only ever true while there is nothing loaded. */
+  const [catalogOpen, setCatalogOpen] = useState(false);
   const [fps, setFps] = useState<number | undefined>(undefined);
   const [cursorPosition, setCursorPosition] = useState<
     readonly [number, number, number] | null
@@ -1222,6 +1227,27 @@ export function App({
           </svg>
           {loading ? "Loading\u2026" : "Load Delft sample"}
         </button>
+        {/* The third way in, for a visitor with neither a file nor a URL:
+            browse the published catalog and pick a tile out of it. */}
+        <button
+          type="button"
+          className="sample-data-btn"
+          onClick={() => setCatalogOpen(true)}
+          disabled={loading}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <line x1="16.5" y1="16.5" x2="21" y2="21" />
+          </svg>
+          Browse catalog
+        </button>
       </div>
 
       {savedSnapshots.length > 0 && (
@@ -1248,6 +1274,17 @@ export function App({
           slot existed only in the viewer shell, so every one of those
           messages was raised into a component that was not on screen. */}
       {toast && <div className="toast">{toast}</div>}
+
+      {/* Adding does not close it, deliberately: the user queues several tiles
+          and watches them arrive. Nothing has to close it either — once the
+          first layer lands, `hasLayers` flips and this whole branch (dialog
+          included) is replaced by the viewer shell. */}
+      {catalogOpen && (
+        <StacBrowserDialog
+          onClose={() => setCatalogOpen(false)}
+          onAddUrl={handlePickedUrl}
+        />
+      )}
     </main>
   );
 }

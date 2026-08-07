@@ -9,6 +9,21 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+
+const CATALOG_URL = "https://catalog.test/tile.city.json";
+
+/** The catalog browser pulls in MapLibre and the STAC store; neither belongs
+ *  in a test about the dialog that HOSTS it, and jsdom cannot run the first.
+ *  A one-button stub is enough to check the wiring — that the tabpanel gets
+ *  the RAW `onAddUrl`, so adding does not close the dialog. */
+vi.mock("../../../../src/ui/stac/StacBrowser", () => ({
+  StacBrowser: (props: { onAddUrl: (url: string) => void }) => (
+    <button type="button" onClick={() => props.onAddUrl(CATALOG_URL)}>
+      stub catalog add
+    </button>
+  ),
+}));
+
 import { LayerPanel } from "../../../../src/ui/layers/LayerPanel";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 
@@ -169,6 +184,33 @@ describe("AddLayerDialog — loading a source", () => {
     expect(
       screen.getByText(".city.json · .city.jsonl · .fcb · .gml"),
     ).toBeTruthy();
+  });
+
+  it("offers the catalog as a third tab, wide, and adding from it keeps the dialog open", () => {
+    const onAddUrl = vi.fn();
+    renderPanel({ onAddUrl });
+    const dialog = openDialog();
+
+    // Three source families; the city model is still the default.
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([
+      "City model",
+      "Geospatial",
+      "Catalog",
+    ]);
+    expect(dialog.className).not.toContain("modal-wide");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Catalog" }));
+
+    expect(screen.getByText("stub catalog add")).toBeTruthy();
+    // Without the wide variant the collection grid collapses to one column.
+    expect(screen.getByRole("dialog").className).toContain("modal-wide");
+
+    fireEvent.click(screen.getByRole("button", { name: "stub catalog add" }));
+
+    expect(onAddUrl.mock.calls).toEqual([[CATALOG_URL]]);
+    // MULTI-ADD: the catalog panel gets the raw handler, not the closing
+    // wrapper the URL field uses, so the user can queue several tiles.
+    expect(screen.queryByRole("dialog")).not.toBeNull();
   });
 
   it("disables both affordances while a load is in flight", () => {
