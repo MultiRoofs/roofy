@@ -97,6 +97,20 @@ describe("detectEncoding", () => {
     expect(detectEncoding("model.gml.gz")).toBe("citygml");
   });
 
+  // CityParquet
+  it("detects .parquet as cityparquet", () => {
+    expect(detectEncoding("model.parquet")).toBe("cityparquet");
+    expect(detectEncoding("https://x/y/building.parquet")).toBe("cityparquet");
+    expect(detectEncoding("Building.PARQUET")).toBe("cityparquet");
+  });
+
+  // The `.gz` strip runs first, so this routes to the CityParquet reader and
+  // then fails there on the missing PAR1 magic — the honest outcome for a
+  // gzipped parquet file, which the format does not define.
+  it("routes .parquet.gz to cityparquet too", () => {
+    expect(detectEncoding("model.parquet.gz")).toBe("cityparquet");
+  });
+
   it("ignores extensions in query strings — only pathname matters", () => {
     expect(
       detectEncoding("https://example.com/data?file=model.city.jsonl"),
