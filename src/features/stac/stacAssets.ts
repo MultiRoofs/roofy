@@ -12,8 +12,8 @@
  * Add button that hands a GML document to the JSON parser.
  *
  * ONE EXCEPTION, in the safe direction: a collection's stac-geoparquet items
- * MIRROR has a `.parquet` href and is never a city model, so it is excluded by
- * asset key/role — see {@link MIRROR_ASSET_KEY}.
+ * MIRROR is a `.parquet` file and is never a city model, so it is excluded from
+ * `loadable` BY DEFAULT — see {@link MIRROR_FILENAME}.
  *
  * A media type is therefore used for the LABEL only. `application/gml+xml`
  * behind a `?download=` endpoint, or on an `.xml` file, names the format
@@ -50,16 +50,25 @@ const MODEL_EXTENSIONS = [
 ] as const;
 
 /**
- * The asset key, and the role, of a collection's stac-geoparquet items mirror.
+ * How a collection's stac-geoparquet items mirror is recognised.
  *
- * The mirror is a `.parquet` file and would otherwise become loadable the
- * moment `.parquet` joined {@link MODEL_EXTENSIONS} — but it is the collection's
- * item INDEX (one row per item, with hrefs and bboxes), not a city model, so
- * offering an Add button for it would hand the CityParquet reader a table with
- * no city geometry in it. Both signals are checked for the same reason
- * `stacNormalize` matches on either: the key is `items-geoparquet` in most
- * collections of this catalog, but not in all of them.
+ * The mirror is the collection's item INDEX — one row per item, carrying hrefs
+ * and bboxes — not a city model, so handing it to the CityParquet reader would
+ * produce a table with no city geometry in it. It became a candidate for the
+ * Add button the moment `.parquet` joined {@link MODEL_EXTENSIONS}, so it is
+ * excluded here.
+ *
+ * THE DEFAULT RULE IS THE FILE NAME, deliberately, because it is the only
+ * signal every call site already has. This catalog writes every mirror as
+ * `…/<collection>/items.parquet` (see `stacNormalize`'s `itemsParquetHrefFrom`
+ * and the fixtures in its tests); the asset KEY (`items-geoparquet`) and ROLE
+ * (`collection-mirror`) are richer signals but reach this function only when a
+ * caller passes them, and a guard that has to be remembered is not a guard. The
+ * cost of the file-name rule is a genuine city model that happens to be called
+ * `items.parquet` becoming a download link instead of an Add button — a
+ * false negative, which is the safe direction for this decision.
  */
+const MIRROR_FILENAME = "items.parquet";
 const MIRROR_ASSET_KEY = "items-geoparquet";
 const MIRROR_ASSET_ROLE = "collection-mirror";
 
@@ -70,8 +79,12 @@ export interface StacAssetContext {
   readonly roles?: readonly string[] | null;
 }
 
-/** True for the collection's own items mirror, in either spelling. */
-function isItemsMirror(context: StacAssetContext | undefined): boolean {
+/** True for the collection's own items mirror, by name or by declaration. */
+function isItemsMirror(
+  path: string,
+  context: StacAssetContext | undefined,
+): boolean {
+  if (path.split("/").at(-1) === MIRROR_FILENAME) return true;
   if (context === undefined) return false;
   return (
     context.key === MIRROR_ASSET_KEY ||
@@ -120,6 +133,12 @@ function normalizeMediaType(mediaType: string): string {
   return (mediaType.split(";")[0] ?? "").trim().toLowerCase();
 }
 
+/** The kind a media type names, or null when it names none this app knows. */
+function kindFromMediaType(mediaType: string | null): StacAssetKind | null {
+  if (mediaType === null) return null;
+  return MEDIA_TYPE_KINDS[normalizeMediaType(mediaType)] ?? null;
+}
+
 /** Classify a STAC asset for display and for the Add button. */
 export function classifyStacAsset(
   href: string | null,
@@ -136,10 +155,11 @@ export function classifyStacAsset(
     return info("archive", false);
   }
 
-  // The items mirror is labelled honestly (it IS a CityParquet-media-type
-  // file) but never offered as a layer.
-  if (isItemsMirror(context)) {
-    return info(detectEncoding(path), false);
+  // The items mirror is labelled honestly — by its media type first, since a
+  // mirror behind an extensionless endpoint would otherwise read as the
+  // `detectEncoding` default, "CityJSON" — but never offered as a layer.
+  if (isItemsMirror(path, context)) {
+    return info(kindFromMediaType(mediaType) ?? detectEncoding(path), false);
   }
 
   if (MODEL_EXTENSIONS.some((ext) => path.endsWith(ext))) {
@@ -147,9 +167,5 @@ export function classifyStacAsset(
     return info(detectEncoding(path), true);
   }
 
-  if (mediaType === null) return info("unknown", false);
-  return info(
-    MEDIA_TYPE_KINDS[normalizeMediaType(mediaType)] ?? "unknown",
-    false,
-  );
+  return info(kindFromMediaType(mediaType) ?? "unknown", false);
 }

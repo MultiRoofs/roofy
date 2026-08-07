@@ -310,7 +310,87 @@ describe("loadCityParquetFromUrl", () => {
       loadCityParquetFromUrl("gs://bkt/tiles/*/building.parquet", http),
     ).rejects.toThrow(/404/);
   });
+
+  // `Promise.all` rejects on the first failure but stops nothing: without the
+  // pool's shared failed-flag the other workers keep draining the cursor and
+  // issue every remaining request of a load that has already failed.
+  it("stops fetching after the first failure", async () => {
+    const parquet = await readFile(`${FIX}/building.parquet`);
+    const names = Array.from(
+      { length: 40 },
+      (_, i) => `tiles/${String(i).padStart(2, "0")}/building.parquet`,
+    );
+    const fetched: string[] = [];
+    const http: HttpClient = {
+      async fetchText(url) {
+        if (url.includes("/storage/v1/b/"))
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            text: JSON.stringify({ items: names.map((name) => ({ name })) }),
+          };
+        return notFoundText();
+      },
+      async fetchBytes(url) {
+        fetched.push(url);
+        // A real macrotask of latency, so the pool's later waves have room to
+        // run after the rejection if nothing stops them — counting
+        // synchronously would pass either way.
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        // ONLY the first tile fails: every other worker succeeds and would
+        // happily drain the remaining 34 targets on its own.
+        if (url.endsWith("tiles/00/building.parquet")) return notFoundBytes();
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          bytes: new Uint8Array(parquet),
+        };
+      },
+    };
+    await expect(
+      loadCityParquetFromUrl("gs://bkt/tiles/*/building.parquet", http),
+    ).rejects.toThrow(/404/);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    // Only the requests already in flight when the first failed: the six the
+    // pool opens at once, never all 40.
+    expect(fetched.length).toBeGreaterThan(0);
+    expect(fetched.length).toBeLessThanOrEqual(6);
+  });
 });
+
+/**
+ * A `File` as a folder picker hands it over: `webkitRelativePath` carries the
+ * path INSIDE the chosen folder, and the constructor cannot set it.
+ */
+function pickedFile(content: BlobPart, relativePath: string): File {
+  const name = relativePath.split("/").at(-1) ?? relativePath;
+  const file = new File([content], name);
+  Object.defineProperty(file, "webkitRelativePath", { value: relativePath });
+  return file;
+}
+
+/** A manifest for a two-tile package, both tables in subfolders. */
+function tiledManifest(): string {
+  return JSON.stringify({
+    type: "Feature",
+    stac_version: "1.1.0",
+    id: "tiled",
+    assets: {
+      a: {
+        href: "./a/building.parquet",
+        type: "application/vnd.apache.parquet",
+        roles: ["data", "cityparquet-objects"],
+      },
+      b: {
+        href: "./b/building.parquet",
+        type: "application/vnd.apache.parquet",
+        roles: ["data", "cityparquet-objects"],
+      },
+    },
+  });
+}
 
 describe("loadCityParquetFromFiles", () => {
   it("assembles a picked folder", async () => {
@@ -332,6 +412,51 @@ describe("loadCityParquetFromFiles", () => {
       new File(["x"], "readme.txt"),
     ]);
     expect(Object.keys(model.objects).length).toBe(3);
+  });
+
+  it("resolves manifest hrefs inside the picked folder", async () => {
+    const parquet = await readFile(`${FIX}/building.parquet`);
+    const meta = await readFile(`${FIX}/metadata.json`);
+    // A folder picker prefixes every path with the folder the user chose; the
+    // manifest's "building.parquet" must still resolve through it.
+    const model = await loadCityParquetFromFiles([
+      pickedFile(parquet, "delft/building.parquet"),
+      pickedFile(meta, "delft/metadata.json"),
+    ]);
+    expect(Object.keys(model.objects).length).toBe(3);
+  });
+
+  it("loads a nested (tiled) package by path, not by base name", async () => {
+    const parquet = await readFile(`${FIX}/building.parquet`);
+    const model = await loadCityParquetFromFiles([
+      pickedFile(parquet, "tiled/a/building.parquet"),
+      pickedFile(parquet, "tiled/b/building.parquet"),
+      pickedFile(tiledManifest(), "tiled/metadata.json"),
+    ]);
+    expect(Object.keys(model.objects).length).toBe(3);
+  });
+
+  // The sharp end of the same bug: keying by base name kept only the LAST
+  // "building.parquet" and read it twice, so a broken first tile loaded
+  // silently and the model was built from the wrong data.
+  it("reads every tile, so a broken one is not skipped", async () => {
+    const parquet = await readFile(`${FIX}/building.parquet`);
+    await expect(
+      loadCityParquetFromFiles([
+        pickedFile(new Uint8Array([1, 2, 3, 4]), "tiled/a/building.parquet"),
+        pickedFile(parquet, "tiled/b/building.parquet"),
+        pickedFile(tiledManifest(), "tiled/metadata.json"),
+      ]),
+    ).rejects.toThrow(/Parquet/i);
+  });
+
+  it("refuses a selection with two files at the same path", async () => {
+    await expect(
+      loadCityParquetFromFiles([
+        new File(["a"], "building.parquet"),
+        new File(["b"], "building.parquet"),
+      ]),
+    ).rejects.toThrow(/two files/i);
   });
 
   it("rejects a folder with no tables", async () => {
