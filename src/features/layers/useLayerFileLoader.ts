@@ -12,6 +12,7 @@ import {
   parseText,
   loadFromUrl,
   fileNameFromUrl,
+  decodeModelBytes,
 } from "../../domain/citymodel/loadCityModel";
 import { useLayerStore } from "./layerStore";
 import { openStreamingLayer } from "../streaming/openStreamingLayer";
@@ -119,7 +120,14 @@ export function useLayerFileLoader(
             hiddenTypes: overrides?.hiddenTypes,
           });
         } else {
-          const text = await file.text();
+          // Bytes, not `file.text()`: a dropped `.city.json.gz` — the form 3D
+          // BAG ships in, and therefore the form a user saves off the catalog
+          // — would otherwise reach the parser as mojibake. `decodeModelBytes`
+          // decides on the MAGIC BYTES, so an uncompressed file still takes the
+          // plain UTF-8 path.
+          const text = await decodeModelBytes(
+            new Uint8Array(await file.arrayBuffer()),
+          );
           const parsed: CityModel = parseText(file.name, text);
           layerId = useLayerStore.getState().addLayer({
             name: file.name,

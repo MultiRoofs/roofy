@@ -1309,7 +1309,7 @@ No explicit close-on-add: when the first layer finishes loading, `hasLayers` fli
 
 ## Decisions log (for the user's morning read)
 
-1. Catalog root hardcoded to the GCS URL (`catalog.open3d.city` is a marketing page); overridable via `VITE_STAC_CATALOG_URL`.
+1. Catalog root hardcoded to the GCS URL (`catalog.open3d.city` is a marketing page). Deliberately not configurable — see Global Constraints.
 2. Items come exclusively from the `items-geoparquet` asset read by the already-shipped DuckDB-wasm (buffer registration, ≤2.24 MB files — no httpfs/range reads); collections without it (22/53) are shown but marked "No items indexed".
 3. New dependency `maplibre-gl` for the mini-map (imperative, CARTO raster tiles keyed to app theme, attribution control on-map). The alternative — hand-rolling a slippy map — was rejected.
 4. `application/zip` assets (5,624 items, CityGML archives) are download-only links; CityJSON/CityJSONSeq/CityGML/FlatCityBuf assets get "Add to scene" through the existing URL loader.

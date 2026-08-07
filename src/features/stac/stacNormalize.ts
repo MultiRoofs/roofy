@@ -164,7 +164,7 @@ const PARQUET_ROLE = "collection-mirror";
  * The absolute href of a collection's items parquet mirror, or null.
  *
  * Matched by media type OR role rather than by asset key: the key is
- * `items-geoparquet` in most collections but not all, and only about 22 of 53
+ * `items-geoparquet` in most collections but not all, and only 31 of 53
  * collections have a mirror at all, so "not found" is an ordinary outcome.
  */
 function itemsParquetHrefFrom(

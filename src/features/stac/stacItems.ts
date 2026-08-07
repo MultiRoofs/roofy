@@ -26,7 +26,11 @@
  * returning plain records.
  */
 
-import { initDuckDB, queryParquetBuffer } from "../../analytics/duckdb";
+import {
+  getDuckDBStatus,
+  initDuckDB,
+  queryParquetBuffer,
+} from "../../analytics/duckdb";
 import { validBbox2d } from "./stacNormalize";
 import type { StacCollectionCard, StacItemRecord } from "./stacTypes";
 
@@ -124,11 +128,40 @@ function splitList(value: unknown): readonly string[] {
   return value.split(LIST_SEPARATOR).filter((part) => part !== "");
 }
 
+/**
+ * An item's data-asset href, made absolute and restricted to http(s).
+ *
+ * RESOLVED, because a STAC asset href is allowed to be relative and several of
+ * these mirrors write one: the parquet's own URL is the only base the item was
+ * ever described against, so `tiles/x.city.json` becomes a real URL instead of
+ * being handed to `fetch` as a path relative to the APP.
+ *
+ * SCHEME-GUARDED, because this string ends up in `<a href>` and in the URL
+ * loader, and the catalog is a third party's file: `javascript:` and `data:`
+ * are not sources, they are ways of running something. Anything that is not
+ * http(s) becomes null, which the UI already renders as "No data asset".
+ */
+function assetHrefFrom(value: unknown, base: string): string | null {
+  const text = textOrNull(value);
+  if (text === null) return null;
+  let url: URL;
+  try {
+    url = new URL(text, base);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  return url.href;
+}
+
 /** One projected row as a record, or null when it has no usable id — an item
  *  that cannot be identified cannot be selected, shared or loaded. */
 function recordFromRow(
   row: Record<string, unknown>,
   collectionId: string,
+  /** The mirror's own URL — the base every relative asset href resolves
+   *  against. */
+  parquetHref: string,
 ): StacItemRecord | null {
   const rawId = row.id;
   if (rawId === null || rawId === undefined) return null;
@@ -148,7 +181,7 @@ function recordFromRow(
     id,
     collectionId,
     bbox2d,
-    assetHref: textOrNull(row.href),
+    assetHref: assetHrefFrom(row.href, parquetHref),
     assetType: textOrNull(row.media_type),
     lods: splitList(row.lods),
     coTypes: splitList(row.co_types),
@@ -162,9 +195,9 @@ function recordFromRow(
  *
  * THROWS rather than returning an empty list on failure: an empty table and "we
  * could not read the table" look identical in a UI, and only one of them is
- * worth a retry. The three messages distinguish "this collection never had a
- * mirror" (an ordinary outcome — only ~22 of 53 do), "the download failed" and
- * "the database could not read it".
+ * worth a retry. The four messages distinguish "this collection never had a
+ * mirror" (an ordinary outcome — only 31 of 53 do), "the analytics engine never
+ * started", "the download failed" and "the database could not read it".
  */
 export async function fetchCollectionItems(
   card: StacCollectionCard,
@@ -175,6 +208,16 @@ export async function fetchCollectionItems(
   }
 
   await initDuckDB();
+  // `initDuckDB` RESOLVES on failure — it records the failure in the status and
+  // leaves the query functions returning null. Without this check a browser
+  // that could not start WebAssembly at all would blame the catalog's index
+  // ("could not read"), which is neither true nor actionable, and would spend a
+  // multi-megabyte download finding it out.
+  if (getDuckDBStatus().state !== "ready") {
+    throw new Error(
+      "The analytics engine could not start, so item indexes cannot be read.",
+    );
+  }
 
   let buffer: Uint8Array;
   try {
@@ -211,7 +254,7 @@ export async function fetchCollectionItems(
 
   const items: StacItemRecord[] = [];
   for (const row of result.rows) {
-    const record = recordFromRow(row, card.id);
+    const record = recordFromRow(row, card.id, href);
     if (record !== null) items.push(record);
   }
 

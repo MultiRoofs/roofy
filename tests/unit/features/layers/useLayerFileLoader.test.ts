@@ -7,6 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import { gzipSync } from "node:zlib";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import { useLayerFileLoader } from "../../../../src/features/layers/useLayerFileLoader";
@@ -214,6 +215,26 @@ describe("useLayerFileLoader — addLayerFromFile overrides", () => {
     const layer = useLayerStore.getState().layers[0]!;
     expect(layer.availableLods).toEqual([]);
     expect(layer.selectedLod).toBeNull(); // NOT forced to "2.2"
+  });
+
+  it("gunzips a dropped .city.json.gz instead of parsing its compressed bytes", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    // The real gunzip runs — nothing here is stubbed, so feeding the parser
+    // raw deflate output (what `file.text()` used to do) fails the test.
+    const gz = new Uint8Array(gzipSync(Buffer.from(MINIMAL_CITYJSON)));
+    const file = new File(
+      [gz as unknown as BlobPart],
+      "compressed.city.json.gz",
+    );
+
+    await act(async () => {
+      await result.current.addLayerFromFile(file);
+    });
+
+    expect(result.current.error).toBeNull();
+    const layers = useLayerStore.getState().layers;
+    expect(layers).toHaveLength(1);
+    expect(layers[0]!.name).toBe("compressed.city.json.gz");
   });
 
   it("with no overrides, behaves exactly as before (fresh-layer defaults)", async () => {

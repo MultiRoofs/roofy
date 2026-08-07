@@ -15,10 +15,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../../src/analytics/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
+  // Defaults to READY, because that is the state every other test in this
+  // file assumes; the one test that cares overrides it per call.
+  getDuckDBStatus: vi.fn(() => ({ state: "ready", extensionLoaded: true })),
   queryParquetBuffer: vi.fn(),
 }));
 
 import {
+  getDuckDBStatus,
   initDuckDB,
   queryParquetBuffer,
 } from "../../../../src/analytics/duckdb";
@@ -165,6 +169,65 @@ describe("fetchCollectionItems", () => {
     // The registered file name is derived from the id, never the raw id.
     expect(calls[0]![0]).toBe(calls[1]![0]);
     expect(calls[0]![0]).toMatch(/^stac-items-[\w-]+\.parquet$/);
+  });
+
+  it("resolves a relative asset href against the parquet's own URL", async () => {
+    stubParquetFetch();
+    vi.mocked(queryParquetBuffer).mockResolvedValue({
+      columns: [],
+      rows: [{ id: "rel", href: "tiles/rel.city.json" }],
+    });
+
+    const items = await fetchCollectionItems(card);
+
+    expect(items[0]!.assetHref).toBe(
+      "https://storage.googleapis.com/city3d-stac/netherlands-3d-bag/tiles/rel.city.json",
+    );
+  });
+
+  it("drops a non-http(s) asset href instead of handing it to the loader", async () => {
+    stubParquetFetch();
+    vi.mocked(queryParquetBuffer).mockResolvedValue({
+      columns: [],
+      rows: [
+        { id: "hostile", href: "javascript:alert(1)" },
+        { id: "ftp", href: "ftp://example.test/x.city.json" },
+      ],
+    });
+
+    const items = await fetchCollectionItems(card);
+
+    // Null is what the UI renders as "No data asset" — no Add button, no link.
+    expect(items.map((i) => i.assetHref)).toEqual([null, null]);
+  });
+
+  it("leaves an absolute https href exactly as it was", async () => {
+    stubParquetFetch();
+    vi.mocked(queryParquetBuffer).mockResolvedValue({
+      columns: [],
+      rows: [{ id: "abs", href: "https://data.3dbag.nl/abs.city.json.gz" }],
+    });
+
+    const items = await fetchCollectionItems(card);
+
+    expect(items[0]!.assetHref).toBe("https://data.3dbag.nl/abs.city.json.gz");
+  });
+
+  it("says the analytics engine never started, rather than blaming the index", async () => {
+    stubParquetFetch();
+    // Once, not for good: `clearAllMocks` does not restore an implementation,
+    // so a sticky failure here would leak into every test below.
+    vi.mocked(getDuckDBStatus).mockReturnValueOnce({
+      state: "failed",
+      error: "wasm blocked",
+    });
+
+    await expect(fetchCollectionItems(card)).rejects.toThrow(
+      /analytics engine could not start/i,
+    );
+    // …and nothing was downloaded: a database that cannot read the file makes
+    // fetching it pure waste.
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("sanitizes a hostile collection id out of the SQL", async () => {

@@ -68,10 +68,11 @@ export interface StacBrowserProps {
 /**
  * How many item rows are ever in the DOM at once.
  *
- * The largest collection in this catalog indexes tens of thousands of items and
- * every row is a real button; rendering all of them locks the main thread for
- * seconds inside a modal. The cap is paired with a visible note rather than
- * silent truncation, and the filter above it is the way past it — which is also
+ * The largest collection in this catalog indexes ~8,900 items (~14.8k across
+ * the whole catalog) and every row is a real button; rendering thousands of
+ * them janks the main thread inside a modal for no benefit — nobody reads past
+ * the first screen. The cap is paired with a visible note rather than silent
+ * truncation, and the filter above it is the way past it — which is also
  * why it is a cap and not a virtual list: the user is looking for ONE tile, and
  * "type three characters" gets there faster than any amount of scrolling.
  */
@@ -428,6 +429,17 @@ export function StacBrowser(props: StacBrowserProps): ReactElement {
               );
             })}
           </div>
+
+          {/* An empty list with a non-empty index is the user's own doing —
+              a filter string, or a map panned away from every footprint —
+              and saying nothing makes it read as a broken collection. */}
+          {rows.length === 0 &&
+            entry?.status === "ready" &&
+            allItems.length > 0 && (
+              <p className="stac-status">
+                No items match the filter or the current map view.
+              </p>
+            )}
 
           {total > rows.length && (
             <p className="stac-cap-note">

@@ -402,4 +402,30 @@ describe("StacBrowser — viewport filter", () => {
 
     expect(rows()).toHaveLength(3);
   });
+
+  it("explains an empty list that the collection's own index is not empty", async () => {
+    collectionsMock.mockResolvedValue([card()]);
+    // Every item has a footprint, so a viewport that intersects none of them
+    // empties the list entirely — which without a word looks exactly like a
+    // collection that has no items at all.
+    itemsMock.mockResolvedValue([inView, outOfView]);
+    render(<StacBrowser onAddUrl={vi.fn(async () => true)} />);
+    await openCollection();
+
+    act(() => {
+      mapSpy.props?.onViewBounds?.([
+        [20, 20],
+        [21, 21],
+      ]);
+    });
+
+    await waitFor(() => {
+      expect(rows()).toHaveLength(0);
+    });
+    expect(
+      screen.getByText("No items match the filter or the current map view."),
+    ).toBeTruthy();
+    // NOT the "this collection has no index" line — the index is fine.
+    expect(screen.queryByText(/No items in this collection/)).toBeNull();
+  });
 });
