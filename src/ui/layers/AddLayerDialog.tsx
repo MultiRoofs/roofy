@@ -32,6 +32,7 @@ import { createPortal } from "react-dom";
 import { useModalChrome } from "../useModalChrome";
 import { SourcePicker } from "./SourcePicker";
 import { GeospatialSourceForm } from "./GeospatialSourceForm";
+import { StacBrowser } from "../stac/StacBrowser";
 
 interface AddLayerDialogProps {
   readonly onClose: () => void;
@@ -41,9 +42,10 @@ interface AddLayerDialogProps {
 }
 
 /** Which family of source the dialog is offering. The city model is the
- *  DEFAULT and stays it: it is what this viewer is for, and a geospatial
- *  overlay is context around it. */
-type SourceTab = "city" | "geo";
+ *  DEFAULT and stays it: it is what this viewer is for, a geospatial overlay
+ *  is context around it, and the catalog is a place to go looking when the
+ *  user has no URL of their own yet. */
+type SourceTab = "city" | "geo" | "stac";
 
 export function AddLayerDialog({
   onClose,
@@ -107,7 +109,10 @@ export function AddLayerDialog({
     >
       <div
         ref={dialogRef}
-        className="modal add-layer-dialog"
+        // The catalog is a card grid and a map, not a form: inside `.modal`'s
+        // 30 rem the grid collapses to a single column. Same widening the
+        // standalone `StacBrowserDialog` wears.
+        className={`modal add-layer-dialog${tab === "stac" ? " modal-wide" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-layer-dialog-title"
@@ -127,9 +132,9 @@ export function AddLayerDialog({
             ×
           </button>
         </div>
-        {/* Two source families, one dialog. A tablist rather than two buttons
-            so the keyboard and a screen reader get the relationship between
-            the choice and the panel it changes. */}
+        {/* Three source families, one dialog. A tablist rather than three
+            buttons so the keyboard and a screen reader get the relationship
+            between the choice and the panel it changes. */}
         <div className="modal-tabs" role="tablist" aria-label="Source type">
           <button
             type="button"
@@ -153,9 +158,32 @@ export function AddLayerDialog({
           >
             Geospatial
           </button>
+          <button
+            type="button"
+            role="tab"
+            id={`${tabIdPrefix}-stac-tab`}
+            aria-selected={tab === "stac"}
+            aria-controls={`${tabIdPrefix}-stac-panel`}
+            className={`modal-tab ${tab === "stac" ? "is-active" : ""}`}
+            onClick={() => setTab("stac")}
+          >
+            Catalog
+          </button>
         </div>
         <div className="modal-body">
-          {tab === "city" ? (
+          {tab === "stac" ? (
+            <div
+              role="tabpanel"
+              id={`${tabIdPrefix}-stac-panel`}
+              aria-labelledby={`${tabIdPrefix}-stac-tab`}
+            >
+              {/* `onAddUrl`, NOT `handleUrl`: adding from the catalog must not
+                  close the dialog. Picking several tiles out of one collection
+                  is the normal case, and a dialog that shut after the first
+                  would make the second a five-click round trip. */}
+              <StacBrowser onAddUrl={onAddUrl} />
+            </div>
+          ) : tab === "city" ? (
             <div
               role="tabpanel"
               id={`${tabIdPrefix}-city-panel`}
