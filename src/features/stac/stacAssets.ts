@@ -11,6 +11,10 @@
  * out of agreement with the router, and the failure mode of that drift is an
  * Add button that hands a GML document to the JSON parser.
  *
+ * ONE EXCEPTION, in the safe direction: a collection's stac-geoparquet items
+ * MIRROR has a `.parquet` href and is never a city model, so it is excluded by
+ * asset key/role — see {@link MIRROR_ASSET_KEY}.
+ *
  * A media type is therefore used for the LABEL only. `application/gml+xml`
  * behind a `?download=` endpoint, or on an `.xml` file, names the format
  * honestly and still cannot be loaded, so the UI shows it as a download link.
@@ -42,7 +46,38 @@ const MODEL_EXTENSIONS = [
   ".json",
   ".citygml",
   ".gml",
+  ".parquet",
 ] as const;
+
+/**
+ * The asset key, and the role, of a collection's stac-geoparquet items mirror.
+ *
+ * The mirror is a `.parquet` file and would otherwise become loadable the
+ * moment `.parquet` joined {@link MODEL_EXTENSIONS} — but it is the collection's
+ * item INDEX (one row per item, with hrefs and bboxes), not a city model, so
+ * offering an Add button for it would hand the CityParquet reader a table with
+ * no city geometry in it. Both signals are checked for the same reason
+ * `stacNormalize` matches on either: the key is `items-geoparquet` in most
+ * collections of this catalog, but not in all of them.
+ */
+const MIRROR_ASSET_KEY = "items-geoparquet";
+const MIRROR_ASSET_ROLE = "collection-mirror";
+
+/** What the catalog said about an asset besides its href and media type. */
+export interface StacAssetContext {
+  /** The asset's key in the `assets` object, when the caller knows it. */
+  readonly key?: string | null;
+  readonly roles?: readonly string[] | null;
+}
+
+/** True for the collection's own items mirror, in either spelling. */
+function isItemsMirror(context: StacAssetContext | undefined): boolean {
+  if (context === undefined) return false;
+  return (
+    context.key === MIRROR_ASSET_KEY ||
+    (context.roles ?? []).includes(MIRROR_ASSET_ROLE)
+  );
+}
 
 /** Container formats: recognisable, never directly loadable. */
 const ARCHIVE_EXTENSIONS = [".zip", ".7z", ".tar"] as const;
@@ -56,6 +91,7 @@ const MEDIA_TYPE_KINDS: Record<string, StacAssetKind> = {
   "application/gml+xml": "citygml",
   "application/citygml+xml": "citygml",
   "application/vnd.citygml+xml": "citygml",
+  "application/vnd.apache.parquet": "cityparquet",
   "application/zip": "archive",
 };
 
@@ -88,6 +124,7 @@ function normalizeMediaType(mediaType: string): string {
 export function classifyStacAsset(
   href: string | null,
   mediaType: string | null,
+  context?: StacAssetContext,
 ): StacAssetInfo {
   if (href === null) return info("unknown", false);
 
@@ -97,6 +134,12 @@ export function classifyStacAsset(
   // type in this catalog, and it is the container that decides.
   if (ARCHIVE_EXTENSIONS.some((ext) => path.endsWith(ext))) {
     return info("archive", false);
+  }
+
+  // The items mirror is labelled honestly (it IS a CityParquet-media-type
+  // file) but never offered as a layer.
+  if (isItemsMirror(context)) {
+    return info(detectEncoding(path), false);
   }
 
   if (MODEL_EXTENSIONS.some((ext) => path.endsWith(ext))) {

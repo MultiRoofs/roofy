@@ -86,4 +86,30 @@ describe("classifyStacAsset", () => {
     ).toBe("cityjson"));
   it("survives an unparseable href", () =>
     expect(classifyStacAsset("not a url at all", null).loadable).toBe(false));
+
+  it("offers a data-role .parquet asset as loadable (cityparquet)", () =>
+    expect(
+      classifyStacAsset(
+        "https://x/delft/building.parquet",
+        "application/vnd.apache.parquet",
+        { key: "data", roles: ["data"] },
+      ),
+    ).toEqual({ kind: "cityparquet", loadable: true, label: "CityParquet" }));
+
+  // The mirror is the collection's own item INDEX, not a city model: loading it
+  // would hand the CityParquet reader a table with no city geometry in it.
+  it("does not offer the items-geoparquet mirror as a loadable layer", () => {
+    const byKey = classifyStacAsset(
+      "https://x/c/items.parquet",
+      "application/vnd.apache.parquet",
+      { key: "items-geoparquet", roles: [] },
+    );
+    expect(byKey.loadable).toBe(false);
+    const byRole = classifyStacAsset(
+      "https://x/c/items.parquet",
+      "application/vnd.apache.parquet",
+      { key: "mirror", roles: ["collection-mirror"] },
+    );
+    expect(byRole.loadable).toBe(false);
+  });
 });
