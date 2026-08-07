@@ -13,6 +13,7 @@ MultiRoof Viewer is a browser-based 3D city model viewer and rooftop analysis to
 - **Geospatial**: proj4 (CRS), WGS84 ENU frames + EGM2008 geoid sampling from `@cityjson/navara-core`
 - **State**: Zustand stores (layerStore, selectionStore, solarStore, streamStore, tilesStore, atmosphereStore, renderDebugStore)
 - **Analytics**: DuckDB-wasm with cityjson extension
+- **Catalog mini-map**: `maplibre-gl@^6` — driven imperatively (no React wrapper), raster CARTO tiles keyed to the app theme, used only by the STAC browser's footprint map. It is _not_ a singleton-registry library, so it is deliberately **not** in `resolve.dedupe`.
 - **Testing**: Vitest + @testing-library/react
 
 ## Project Structure
@@ -34,6 +35,10 @@ src/
     rules/      # Rule presets + types.ts (re-export of core's rule schema)
     streaming/  # FCB streaming STORE + open wrapper + React hooks only —
                 #   the streaming engine lives in @cityjson/navara-flatcitybuf
+    stac/       # Open3D City STAC catalog: stacClient (root crawl),
+                #   stacNormalize, stacAssets (classification delegates to
+                #   detectEncoding), stacItems (items.parquet via DuckDB),
+                #   stacGeo (footprints/bounds), stacStore (session cache)
     tiles/      # Google Photorealistic 3D Tiles store
     atmosphere/ # Atmosphere/sky settings store
     debug/      # Render debug store
@@ -57,9 +62,13 @@ src/
     inspector/  # InspectorPanel + tabs (Analysis, RuleBuilder, Stats)
     layers/     # LayerPanel, AddLayerDialog, SourcePicker,
                 #   StreamingLodControl, GoogleTilesPanel
+    stac/       # StacBrowser, CollectionCard, StacItemMap (maplibre-gl),
+                #   StacBrowserDialog
     table/      # TablePanel
     viewport/   # LegendOverlay, AttributionOverlay, AttributePanel,
                 #   AdvancedSettingsPanel, CameraControls
+    useModalChrome.ts   # Focus trap / Escape / scroll lock shared by every
+                        #   portal modal (AddLayerDialog, StacBrowserDialog)
     StatusBar.tsx, ErrorBoundary.tsx
   persistence/  # Save/restore/share (localStorage, URL hash) — schema v3
   analytics/    # DuckDB-wasm, stats computation
@@ -96,6 +105,8 @@ docs/           # roadmap.md + superpowers/{specs,plans,research}
 - **One viewport per process**: `@navaramap/three` keeps its tile worker pool in a module-level singleton, so a second `view.init()` before the first `dispose()` throws. `NavaraViewport` serialises engine lifetimes through a module-level slot (StrictMode-safe) and enforces at most one mounted viewport.
 - **CitySceneHandle**: `fitAll`, `fitLayer`, `alignView`, `getCameraState`, `setCameraState` — camera state is geographic `{lng, lat, height, heading, pitch, roll}` — plus a `ready` promise that resolves after `view.init()` and a `getStreamingPlugin()` promise so early `.fcb` opens queue instead of dereferencing null.
 - **Persistence**: snapshot/share version 3. Older snapshots and share links are rejected with an explanatory message; there is no migration shim.
+- **The STAC catalog browser reads a bucket, not an API.** `STAC_CATALOG_URL` is hardcoded to `https://storage.googleapis.com/city3d-stac/catalog.json` — a public static file with no per-deployment variation, and deliberately **no `VITE_` override**, because `.env` is dotenvx-encrypted and a build-time var here would inline ciphertext (the Maps-key footgun). The root is a link document carrying none of the metadata a card shows, so `stacClient` crawls one `collection.json` per `rel:"child"` at concurrency 6; a per-collection failure is logged and skipped, only an unreachable root is fatal. **Items never come from the catalog's own `rel:"item"` links — those 404** — and there is no `/search` endpoint: the only source is the collection's stac-geoparquet mirror (`items-geoparquet`, matched by media type or `collection-mirror` role, present on ~31 of the 53 collections; the rest are listed and marked "No items indexed"). That file is ≤ ~2.24 MB, so it is fetched WHOLE and handed to the app's existing DuckDB-wasm via `queryParquetBuffer` — no httpfs, no range reads — with the SELECT list built per file from a `DESCRIBE` probe, since the mirrors are independently generated and one missing column must not cost a whole collection. Loadability is decided by calling `detectEncoding` itself (`stacAssets`), never a parallel media-type table, so the Add button cannot drift out of agreement with what `addLayerFromUrl` will actually do; `application/zip` CityGML archives are download links only. Entry points are the landing "Browse catalog" button and the Add Layer dialog's "Catalog" tab (which widens the modal via `.modal-wide`); `onAddUrl` is `(url) => Promise<boolean>` all the way down the layer-add chain so the browser can report a failed add inline (`role="alert"`) and stay open for the next one.
+- **STAC-sourced `.city.json.gz` layers take the in-memory analytics path.** Remote loading is gzip-aware — `HttpClient.fetchBytes` returns the same envelope as `fetchText` (so every friendly HTTP-error branch survives), `decodeModelBytes` gunzips on magic bytes rather than on the extension, and `detectEncoding` strips one trailing `.gz` — because 3D BAG, the largest CORS-clean collection, serves `.city.json.gz`. DuckDB's `read_cityjson` cannot read a gzipped remote URL, so for those layers `loadModelIntoDuckDB` simply returns false and `App`'s existing fallback loads the parsed model with `loadCityModelFromMemory`. Nothing special-cases `.gz` in `shouldUseSourceUrlPath`: the extension attempt is made and does not stick, which is the intended behaviour, not a bug to route around.
 
 ## Commands
 
