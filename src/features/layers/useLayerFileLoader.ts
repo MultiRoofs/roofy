@@ -14,6 +14,12 @@ import {
   fileNameFromUrl,
   decodeModelBytes,
 } from "../../domain/citymodel/loadCityModel";
+import {
+  cityParquetLayerNameFromUrl,
+  loadCityParquetFromFiles,
+  loadCityParquetFromUrl,
+} from "../cityparquet/loadCityParquet";
+import { isCityParquetUrl } from "../cityparquet/sourceClassify";
 import { useLayerStore } from "./layerStore";
 import { openStreamingLayer } from "../streaming/openStreamingLayer";
 import {
@@ -57,9 +63,35 @@ function applyPostCreateOverrides(
   }
 }
 
+/**
+ * The layer name for a picked CityParquet package.
+ *
+ * A folder picker sets `webkitRelativePath` to "<folder>/…", so the first
+ * segment is the folder the user chose — the name they will recognise. A
+ * drag-and-drop selection carries no relative path at all, and there the first
+ * file's own name is the only thing to go on.
+ */
+function packageNameFromFiles(files: ReadonlyArray<File>): string {
+  const first = files[0];
+  if (first === undefined) return "CityParquet package";
+  const relative =
+    typeof first.webkitRelativePath === "string"
+      ? first.webkitRelativePath
+      : "";
+  return relative.split("/").filter((s) => s !== "")[0] ?? first.name;
+}
+
 export interface LayerFileLoader {
   addLayerFromFile: (
     file: File,
+    overrides?: LayerOverrides,
+  ) => Promise<string | null>;
+  /**
+   * Load SEVERAL picked files as ONE layer — a CityParquet package, whose
+   * object tables are separate files but one model in one frame.
+   */
+  addLayerFromFiles: (
+    files: ReadonlyArray<File>,
     overrides?: LayerOverrides,
   ) => Promise<string | null>;
   addLayerFromUrl: (url: string) => Promise<string | null>;
@@ -105,7 +137,8 @@ export function useLayerFileLoader(
       setLoading(true);
       try {
         let layerId: string;
-        if (detectEncoding(file.name) === "flatcitybuf") {
+        const encoding = detectEncoding(file.name);
+        if (encoding === "flatcitybuf") {
           // A `File` IS a `Blob` — passed straight through, never read into
           // an ArrayBuffer first (see openStreamingLayer.ts's doc comment
           // on why fromBytes' copy would OOM a multi-GB local file).
@@ -117,6 +150,19 @@ export function useLayerFileLoader(
             rules: overrides?.rules,
             rulesEnabled: overrides?.rulesEnabled,
             visible: overrides?.visible,
+            hiddenTypes: overrides?.hiddenTypes,
+          });
+        } else if (encoding === "cityparquet") {
+          // A lone `.parquet` drop is a one-table package — the same loader as
+          // a picked folder, given a selection of one.
+          const model = await loadCityParquetFromFiles([file]);
+          layerId = useLayerStore.getState().addLayer({
+            name: file.name,
+            model,
+            modelRef: { type: "file", fileName: file.name },
+            visible: overrides?.visible ?? true,
+            rules: overrides?.rules ?? [],
+            rulesEnabled: overrides?.rulesEnabled ?? true,
             hiddenTypes: overrides?.hiddenTypes,
           });
         } else {
@@ -151,6 +197,41 @@ export function useLayerFileLoader(
     [],
   );
 
+  const addLayerFromFiles = useCallback(
+    async (
+      files: ReadonlyArray<File>,
+      overrides?: LayerOverrides,
+    ): Promise<string | null> => {
+      setError(null);
+      setLoading(true);
+      try {
+        const name = packageNameFromFiles(files);
+        const model = await loadCityParquetFromFiles(files);
+        const layerId = useLayerStore.getState().addLayer({
+          name,
+          model,
+          // The FOLDER is the source, so that is what a snapshot records as
+          // needing re-selection — no single file could re-link this layer.
+          modelRef: { type: "file", fileName: name },
+          visible: overrides?.visible ?? true,
+          rules: overrides?.rules ?? [],
+          rulesEnabled: overrides?.rulesEnabled ?? true,
+          hiddenTypes: overrides?.hiddenTypes,
+        });
+        applyPostCreateOverrides(layerId, overrides);
+        return layerId;
+      } catch (e) {
+        setError(
+          e instanceof Error ? e.message : "Failed to load the picked files.",
+        );
+        return null;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
+
   const addLayerFromUrl = useCallback(
     async (url: string): Promise<string | null> => {
       setError(null);
@@ -162,6 +243,23 @@ export function useLayerFileLoader(
             source: { url },
             name: fileNameFromUrl(url),
             modelRef: { type: "url", url },
+          });
+        }
+
+        // `isCityParquetUrl`, not `detectEncoding`: a bucket pattern or a
+        // package directory has no extension to detect. The predicate is TOTAL
+        // and answers true for an unlistable https wildcard as well, so the
+        // classifier's explanation of why it cannot be served is thrown from
+        // the load below and lands in `error` — which is the point.
+        if (isCityParquetUrl(url)) {
+          const model = await loadCityParquetFromUrl(url);
+          return useLayerStore.getState().addLayer({
+            name: cityParquetLayerNameFromUrl(url),
+            model,
+            modelRef: { type: "url", url },
+            visible: true,
+            rules: [],
+            rulesEnabled: true,
           });
         }
 
@@ -188,5 +286,12 @@ export function useLayerFileLoader(
 
   const clearError = useCallback(() => setError(null), []);
 
-  return { addLayerFromFile, addLayerFromUrl, loading, error, clearError };
+  return {
+    addLayerFromFile,
+    addLayerFromFiles,
+    addLayerFromUrl,
+    loading,
+    error,
+    clearError,
+  };
 }

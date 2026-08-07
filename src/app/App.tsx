@@ -44,6 +44,8 @@ import { useSelectionStore } from "../features/selection/selectionStore";
 import { useLayerStore } from "../features/layers/layerStore";
 import { useGeoLayerStore } from "../features/geoLayers/geoLayerStore";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
+import { loadCityParquetFromUrl } from "../features/cityparquet/loadCityParquet";
+import { isCityParquetUrl } from "../features/cityparquet/sourceClassify";
 import { useFileDropGuard } from "../features/layers/useFileDropGuard";
 import { useStreamStore } from "../features/streaming/streamStore";
 import { useTotalObjectCount } from "../features/streaming/useTotalObjectCount";
@@ -739,6 +741,22 @@ export function App({
                   hiddenTypes,
                 }),
               );
+            } else if (isCityParquetUrl(modelRef.url)) {
+              // Mirrors `useLayerFileLoader.addLayerFromUrl` — and by
+              // `isCityParquetUrl`, not `detectEncoding`, because a saved
+              // `gs://` bucket or package directory has no extension. Any
+              // throw (including the unlistable-wildcard explanation) is
+              // caught by this loop's per-layer `catch` and counted.
+              const parsed = await loadCityParquetFromUrl(modelRef.url);
+              layerId = useLayerStore.getState().addLayer({
+                name,
+                model: parsed,
+                modelRef,
+                visible,
+                rules,
+                rulesEnabled,
+                hiddenTypes,
+              });
             } else {
               const parsed = await loadFromUrl(modelRef.url);
               layerId = useLayerStore.getState().addLayer({
@@ -930,6 +948,19 @@ export function App({
                 visible,
               }),
             );
+          } else if (isCityParquetUrl(sl.modelUrl)) {
+            // Same arm as the snapshot restore above and the loader hook: a
+            // shared CityParquet link would otherwise hand parquet bytes to
+            // `JSON.parse`. Failures are counted by this loop's `catch`.
+            const parsed = await loadCityParquetFromUrl(sl.modelUrl);
+            useLayerStore.getState().addLayer({
+              name,
+              model: parsed,
+              modelRef: { type: "url", url: sl.modelUrl },
+              visible,
+              rules,
+              rulesEnabled,
+            });
           } else {
             const parsed = await loadFromUrl(sl.modelUrl);
             useLayerStore.getState().addLayer({
