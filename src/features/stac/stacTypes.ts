@@ -53,6 +53,7 @@ export type StacAssetKind =
   | "cityjsonseq"
   | "flatcitybuf"
   | "citygml"
+  | "cityparquet"
   | "archive"
   | "unknown";
 
