@@ -97,19 +97,43 @@ describe("classifyStacAsset", () => {
     ).toEqual({ kind: "cityparquet", loadable: true, label: "CityParquet" }));
 
   // The mirror is the collection's own item INDEX, not a city model: loading it
-  // would hand the CityParquet reader a table with no city geometry in it.
+  // would hand the CityParquet reader a table with no city geometry in it. The
+  // DEFAULT call — the one every current caller makes — must already refuse it;
+  // the key/role signals are an extra, not the guard.
   it("does not offer the items-geoparquet mirror as a loadable layer", () => {
+    const byName = classifyStacAsset(
+      "https://storage.googleapis.com/city3d-stac/netherlands-3d-bag/items.parquet",
+      "application/vnd.apache.parquet",
+    );
+    expect(byName).toEqual({
+      kind: "cityparquet",
+      loadable: false,
+      label: "CityParquet",
+    });
     const byKey = classifyStacAsset(
-      "https://x/c/items.parquet",
+      "https://x/c/collection-items.parquet",
       "application/vnd.apache.parquet",
       { key: "items-geoparquet", roles: [] },
     );
     expect(byKey.loadable).toBe(false);
     const byRole = classifyStacAsset(
-      "https://x/c/items.parquet",
+      "https://x/c/collection-items.parquet",
       "application/vnd.apache.parquet",
       { key: "mirror", roles: ["collection-mirror"] },
     );
     expect(byRole.loadable).toBe(false);
+  });
+
+  it("labels an extensionless mirror by its media type, not the default", () => {
+    const info = classifyStacAsset(
+      "https://x/c/mirror?download=1",
+      "application/vnd.apache.parquet",
+      { roles: ["collection-mirror"] },
+    );
+    expect(info).toEqual({
+      kind: "cityparquet",
+      loadable: false,
+      label: "CityParquet",
+    });
   });
 });

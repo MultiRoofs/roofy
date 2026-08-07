@@ -20,6 +20,7 @@
 
 import {
   CITYPARQUET_SIDECAR_NAMES,
+  CityParquetError,
   assembleCityParquetModel,
   parseCityParquetManifest,
 } from "@cityjson/navara-cityparquet";
@@ -145,6 +146,12 @@ async function fetchManifest(url: string, http: HttpClient): Promise<unknown> {
  * imported because that one is a private detail of the STAC feature. Results
  * are written back by index so the assembled model's table order is the
  * manifest's (or the listing's), not the network's.
+ *
+ * THE POOL STOPS ON THE FIRST FAILURE. `Promise.all` rejects immediately but
+ * does not stop anything, so without the shared flag the other five workers
+ * keep draining the cursor and issue every remaining request of a 64-file glob
+ * for a load that has already failed. The flag is checked before each new
+ * target, so at most the requests already in flight complete.
  */
 async function fetchAll(
   targets: ReadonlyArray<{ url: string; name: string }>,
@@ -154,12 +161,19 @@ async function fetchAll(
   // order however the responses interleave.
   const results: FetchedTable[] = [];
   let cursor = 0;
+  let failed = false;
   const worker = async (): Promise<void> => {
     for (;;) {
+      if (failed) return;
       const index = cursor++;
       const target = targets[index];
       if (target === undefined) return;
-      results[index] = await fetchTable(target.url, target.name, http);
+      try {
+        results[index] = await fetchTable(target.url, target.name, http);
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
     }
   };
   await Promise.all(
@@ -385,29 +399,80 @@ export async function loadCityParquetFromUrl(
 }
 
 /**
+ * A picked file's path RELATIVE to the folder the user chose.
+ *
+ * A folder picker sets `webkitRelativePath` to "<folder>/a/building.parquet";
+ * the first segment is the folder the user chose (the package root), so it is
+ * dropped and what remains is exactly what a manifest href says. Base name is
+ * the fallback for a drag-and-drop multi-file selection, where the browser sets
+ * no relative path at all.
+ *
+ * KEYING BY BASE NAME ALONE IS WRONG for a tiled package: "a/building.parquet"
+ * and "b/building.parquet" would collapse onto one entry, and the model would
+ * silently be built from ONE tile read twice (the assembler's first-wins merge
+ * hides it behind a duplicate-id warning).
+ */
+function pickedPath(file: File): string {
+  // Read defensively: the attribute is absent on a `File` constructed by hand
+  // (tests, and some non-browser hosts), where the spec's "" is not there to
+  // read either.
+  const relative =
+    typeof file.webkitRelativePath === "string" ? file.webkitRelativePath : "";
+  if (relative === "") return baseName(file.name);
+  const segments = relative.split("/").filter((s) => s !== "");
+  return segments.slice(1).join("/") || baseName(file.name);
+}
+
+/**
+ * The picked file for one manifest href.
+ *
+ * Exact relative path first; a bare base name is accepted only when it is
+ * UNAMBIGUOUS, which is what makes a drag-and-drop selection (no relative
+ * paths) of a flat package work without letting a tiled one guess.
+ */
+function fileForHref(
+  href: string,
+  byPath: ReadonlyMap<string, File>,
+): File | undefined {
+  const exact = byPath.get(href);
+  if (exact !== undefined) return exact;
+  const wanted = baseName(href);
+  const matches = [...byPath.entries()].filter(
+    ([path]) => baseName(path) === wanted,
+  );
+  return matches.length === 1 ? matches[0]?.[1] : undefined;
+}
+
+/**
  * Load a CityParquet package the user picked off disk.
  *
- * Files arrive flat from a folder picker, so selection is by BASE name: a
- * manifest picks the tables when there is one, and the parquet files minus the
- * known sidecars do when there is not — the same two-step
- * `parseCityParquetManifest` applies to a fetched package.
+ * Files are keyed by their path within the picked folder (see
+ * {@link pickedPath}): a manifest picks the tables when there is one, and the
+ * parquet files minus the known sidecars do when there is not — the same
+ * two-step `parseCityParquetManifest` applies to a fetched package.
  */
 export async function loadCityParquetFromFiles(
   files: ReadonlyArray<File>,
 ): Promise<CityModel> {
-  const byName = new Map<string, File>();
+  const byPath = new Map<string, File>();
   for (const file of files) {
-    // Last wins is arbitrary but total: a folder cannot hold two files with
-    // the same base name unless they are in different subfolders, and a
-    // package is flat.
-    byName.set(baseName(file.name), file);
+    const path = pickedPath(file);
+    if (byPath.has(path)) {
+      // Two files cannot share a path within one folder, so this is a
+      // selection spanning several — silently keeping one of them would build
+      // a model out of the wrong tiles.
+      throw new CityParquetError(
+        `The selection contains two files called "${path}". Pick one package folder at a time.`,
+      );
+    }
+    byPath.set(path, file);
   }
 
-  const manifestFile = byName.get(MANIFEST_FILENAME);
+  const manifestFile = byPath.get(MANIFEST_FILENAME);
   let names: string[];
   if (manifestFile === undefined) {
     names = dropSidecars(
-      [...byName.keys()].filter((name) => name.endsWith(".parquet")),
+      [...byPath.keys()].filter((path) => path.endsWith(".parquet")),
     );
   } else {
     let manifest: unknown;
@@ -419,7 +484,7 @@ export async function loadCityParquetFromFiles(
         { cause: error },
       );
     }
-    names = parseCityParquetManifest(manifest).objectTables.map(baseName);
+    names = parseCityParquetManifest(manifest).objectTables;
   }
 
   if (names.length === 0) {
@@ -430,7 +495,7 @@ export async function loadCityParquetFromFiles(
 
   const tables: FetchedTable[] = [];
   for (const name of names) {
-    const file = byName.get(name);
+    const file = fileForHref(name, byPath);
     if (file === undefined) {
       throw new Error(
         `The folder is missing "${name}", which its ${MANIFEST_FILENAME} declares as an object table.`,
