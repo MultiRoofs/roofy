@@ -222,6 +222,15 @@ body {
   color: #829ab1;
 }
 
+/* Browse files + Choose folder sit side by side: two ways in, one row.
+   Wraps rather than overflowing — the panel variant is only ~30 rem wide. */
+.file-label-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
 .file-label {
   display: inline-block;
   padding: 0.5rem 1.25rem;
@@ -3069,6 +3078,16 @@ button.file-label {
 button.file-label:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* A gesture the picker cannot honour (dropping a folder), explained where it
+   was attempted. Same red as `.error-message`, quieter, and inside the zone. */
+.source-picker-hint {
+  margin: 0.15rem 0 0;
+  max-width: 32rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: #c53030;
 }
 
 .source-picker-formats {

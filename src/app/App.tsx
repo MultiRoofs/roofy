@@ -433,6 +433,7 @@ export function App({
   // File loading
   const {
     addLayerFromFile,
+    addLayerFromFiles,
     addLayerFromUrl,
     loading,
     error: loadError,
@@ -555,6 +556,21 @@ export function App({
       await withEngineBooting(file.name, () => addLayerFromFile(file));
     },
     [addLayerFromFile, clearError, withEngineBooting],
+  );
+
+  /**
+   * Several picked files as ONE layer — a CityParquet package folder.
+   *
+   * No `withEngineBooting` hold: `.fcb` is the only source that needs the
+   * engine before its layer can exist, and it is never a group. Errors land in
+   * `loadError`, exactly as for {@link handleFile}.
+   */
+  const handleFiles = useCallback(
+    async (files: File[]) => {
+      clearError();
+      await addLayerFromFiles(files);
+    },
+    [addLayerFromFiles, clearError],
   );
 
   /**
@@ -1043,6 +1059,13 @@ export function App({
     [handleFile],
   );
 
+  const handlePickedFiles = useCallback(
+    (files: File[]) => {
+      void handleFiles(files);
+    },
+    [handleFiles],
+  );
+
   const handlePickedUrl = useCallback(
     (url: string) => {
       void handleUrl(url);
@@ -1194,6 +1217,7 @@ export function App({
           onWidthChange={setLeftSidebarWidth}
           collapsed={leftSidebarCollapsed}
           onAddFile={handlePickedFile}
+          onAddFiles={handlePickedFiles}
           onAddUrl={handleAddUrl}
           loading={loading}
           onFlyToLayer={(id) => sceneRef.current?.fitLayer(id)}
@@ -1273,8 +1297,8 @@ export function App({
         <h1>Rooftop analysis starts here.</h1>
         <p className="summary">
           Drop a file or load from a URL. Supports <code>.city.json</code>,{" "}
-          <code>.city.jsonl</code>, <code>.fcb</code>, and <code>.gml</code>{" "}
-          (CityGML).
+          <code>.city.jsonl</code>, <code>.fcb</code>, <code>.gml</code>{" "}
+          (CityGML), and <code>.parquet</code> (CityParquet).
         </p>
       </div>
 
@@ -1291,6 +1315,7 @@ export function App({
       <SourcePicker
         variant="hero"
         onFile={handlePickedFile}
+        onFiles={handlePickedFiles}
         onUrl={handlePickedUrl}
         loading={loading}
         // The summary paragraph above already lists the extensions.

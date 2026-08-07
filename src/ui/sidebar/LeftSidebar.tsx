@@ -18,6 +18,8 @@ interface LeftSidebarProps {
   readonly onWidthChange: (width: number) => void;
   readonly collapsed: boolean;
   readonly onAddFile: (file: File) => void;
+  /** Several picked files as ONE layer — see {@link AddLayerDialog}. */
+  readonly onAddFiles: (files: File[]) => void;
   /** Resolves TRUE once a layer has landed — see {@link AddLayerDialog}. */
   readonly onAddUrl: (url: string) => Promise<boolean>;
   readonly loading: boolean;
@@ -29,6 +31,7 @@ export function LeftSidebar({
   onWidthChange,
   collapsed,
   onAddFile,
+  onAddFiles,
   onAddUrl,
   loading,
   onFlyToLayer,
@@ -91,6 +94,7 @@ export function LeftSidebar({
         <GoogleTilesPanel />
         <LayerPanel
           onAddFile={onAddFile}
+          onAddFiles={onAddFiles}
           onAddUrl={onAddUrl}
           loading={loading}
           onFlyToLayer={onFlyToLayer}

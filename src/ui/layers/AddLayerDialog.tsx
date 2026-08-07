@@ -37,6 +37,9 @@ import { StacBrowser } from "../stac/StacBrowser";
 interface AddLayerDialogProps {
   readonly onClose: () => void;
   readonly onAddFile: (file: File) => void;
+  /** Several files as ONE layer — a CityParquet package folder, or a
+   *  multi-file drop. Closes the dialog exactly like `onAddFile`. */
+  readonly onAddFiles: (files: File[]) => void;
   /** Resolves TRUE once a layer has landed. The URL field ignores the answer
    *  (it closes the dialog either way, and the app reports the failure); the
    *  catalog tab needs it to roll a failed "Added ✓" back. */
@@ -53,6 +56,7 @@ type SourceTab = "city" | "geo" | "stac";
 export function AddLayerDialog({
   onClose,
   onAddFile,
+  onAddFiles,
   onAddUrl,
   loading,
 }: AddLayerDialogProps) {
@@ -92,6 +96,14 @@ export function AddLayerDialog({
       onClose();
     },
     [onAddFile, onClose],
+  );
+
+  const handleFiles = useCallback(
+    (files: File[]) => {
+      onAddFiles(files);
+      onClose();
+    },
+    [onAddFiles, onClose],
   );
 
   const handleUrl = useCallback(
@@ -198,6 +210,7 @@ export function AddLayerDialog({
               <SourcePicker
                 variant="panel"
                 onFile={handleFile}
+                onFiles={handleFiles}
                 onUrl={handleUrl}
                 loading={loading}
               />
