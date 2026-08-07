@@ -36,6 +36,8 @@ import { VisibilityIcon } from "./VisibilityIcon";
 
 interface LayerPanelProps {
   readonly onAddFile: (file: File) => void;
+  /** Several picked files as ONE layer — see {@link AddLayerDialog}. */
+  readonly onAddFiles: (files: File[]) => void;
   /** Resolves TRUE once a layer has landed — see {@link AddLayerDialog}. */
   readonly onAddUrl: (url: string) => Promise<boolean>;
   readonly loading: boolean;
@@ -44,6 +46,7 @@ interface LayerPanelProps {
 
 export function LayerPanel({
   onAddFile,
+  onAddFiles,
   onAddUrl,
   loading,
   onFlyToLayer,
@@ -257,6 +260,7 @@ export function LayerPanel({
         <AddLayerDialog
           onClose={() => setAddDialogOpen(false)}
           onAddFile={onAddFile}
+          onAddFiles={onAddFiles}
           onAddUrl={onAddUrl}
           loading={loading}
         />

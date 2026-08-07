@@ -34,7 +34,12 @@ const noopUrl = async () => true;
 
 function renderPanel() {
   return render(
-    <LayerPanel onAddFile={noop} onAddUrl={noopUrl} loading={false} />,
+    <LayerPanel
+      onAddFile={noop}
+      onAddFiles={noop}
+      onAddUrl={noopUrl}
+      loading={false}
+    />,
   );
 }
 

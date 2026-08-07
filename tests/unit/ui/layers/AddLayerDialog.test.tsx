@@ -39,6 +39,7 @@ const noopUrl = async () => true;
 function renderPanel(
   overrides: {
     onAddFile?: (file: File) => void;
+    onAddFiles?: (files: File[]) => void;
     onAddUrl?: (url: string) => Promise<boolean>;
     loading?: boolean;
   } = {},
@@ -46,6 +47,7 @@ function renderPanel(
   return render(
     <LayerPanel
       onAddFile={overrides.onAddFile ?? noop}
+      onAddFiles={overrides.onAddFiles ?? noop}
       onAddUrl={overrides.onAddUrl ?? noopUrl}
       loading={overrides.loading ?? false}
     />,
@@ -165,6 +167,23 @@ describe("AddLayerDialog — loading a source", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("passes a multi-file drop to onAddFiles as one group and closes", () => {
+    const onAddFile = vi.fn();
+    const onAddFiles = vi.fn();
+    renderPanel({ onAddFile, onAddFiles });
+    openDialog();
+
+    const table = new File(["{}"], "building.parquet");
+    const meta = new File(["{}"], "metadata.json");
+    fireEvent.drop(screen.getByTestId("source-picker-drop-zone"), {
+      dataTransfer: { files: [table, meta], types: ["Files"], dropEffect: "" },
+    });
+
+    expect(onAddFiles.mock.calls).toEqual([[[table, meta]]]);
+    expect(onAddFile).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("highlights the drop zone while a file is dragged over it", () => {
     renderPanel();
     openDialog();
@@ -184,7 +203,7 @@ describe("AddLayerDialog — loading a source", () => {
     renderPanel();
     openDialog();
     expect(
-      screen.getByText(".city.json · .city.jsonl · .fcb · .gml"),
+      screen.getByText(".city.json · .city.jsonl · .fcb · .gml · .parquet"),
     ).toBeTruthy();
   });
 

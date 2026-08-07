@@ -32,7 +32,12 @@ const noopUrl = async () => true;
 
 function renderPanel(onAddUrl: (url: string) => Promise<boolean> = noopUrl) {
   return render(
-    <LayerPanel onAddFile={noop} onAddUrl={onAddUrl} loading={false} />,
+    <LayerPanel
+      onAddFile={noop}
+      onAddFiles={noop}
+      onAddUrl={onAddUrl}
+      loading={false}
+    />,
   );
 }
 
