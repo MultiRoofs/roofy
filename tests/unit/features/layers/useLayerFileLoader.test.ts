@@ -8,6 +8,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { gzipSync } from "node:zlib";
+import type { CityModel } from "../../../../src/domain/citymodel/types";
+import { classifyCityParquetUrl } from "../../../../src/features/cityparquet/sourceClassify";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import { useLayerFileLoader } from "../../../../src/features/layers/useLayerFileLoader";
@@ -15,6 +17,34 @@ import { setStreamPlugin } from "../../../../src/features/streaming/streamPlugin
 import type { StreamPlugin } from "../../../../src/features/streaming/streamPlugin";
 import type { FcbStreamLayerHandle } from "@cityjson/navara-flatcitybuf";
 import type { FcbHeaderModel } from "@cityjson/navara-flatcitybuf";
+
+/** The CityParquet READER is faked, its ROUTING is not: `sourceClassify` and
+ *  `cityParquetLayerNameFromUrl` stay real (that is what decides which arm a
+ *  URL takes and what the layer is called), while the two I/O entry points are
+ *  replaced — parsing real parquet bytes is `navara-cityparquet`'s own test. */
+const cityparquet = vi.hoisted(() => ({
+  loadCityParquetFromUrl: vi.fn(),
+  loadCityParquetFromFiles: vi.fn(),
+}));
+
+vi.mock(
+  "../../../../src/features/cityparquet/loadCityParquet",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("../../../../src/features/cityparquet/loadCityParquet")
+    >()),
+    loadCityParquetFromUrl: cityparquet.loadCityParquetFromUrl,
+    loadCityParquetFromFiles: cityparquet.loadCityParquetFromFiles,
+  }),
+);
+
+const PARQUET_MODEL: CityModel = {
+  sourceEncoding: "cityparquet",
+  metadata: { referenceSystem: "https://www.opengis.net/def/crs/EPSG/0/28992" },
+  bbox: null,
+  objects: {},
+  vertexCount: 0,
+};
 
 const HEADER: FcbHeaderModel = {
   version: "1.0",
@@ -250,5 +280,140 @@ describe("useLayerFileLoader — addLayerFromFile overrides", () => {
     expect(layer.rulesEnabled).toBe(true);
     expect(layer.visible).toBe(true);
     expect(layer.lodMode).toBe("auto");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CityParquet routing. The arm is chosen by `isCityParquetUrl`, NOT by
+// `detectEncoding`: a `gs://` bucket or a package directory has no extension
+// to detect, and handing either to the CityJSON path would parse a listing —
+// or parquet bytes — as JSON.
+// ---------------------------------------------------------------------------
+
+/** A picked file, with the relative path a folder picker would have set. */
+function pickedFile(relativePath: string): File {
+  const name = relativePath.split("/").at(-1) ?? relativePath;
+  const file = new File(["PAR1"], name);
+  // Not assignable: `webkitRelativePath` is a read-only accessor on File.
+  Object.defineProperty(file, "webkitRelativePath", { value: relativePath });
+  return file;
+}
+
+describe("useLayerFileLoader — CityParquet routing", () => {
+  beforeEach(() => {
+    cityparquet.loadCityParquetFromUrl.mockReset();
+    cityparquet.loadCityParquetFromFiles.mockReset();
+    cityparquet.loadCityParquetFromUrl.mockResolvedValue(PARQUET_MODEL);
+    cityparquet.loadCityParquetFromFiles.mockResolvedValue(PARQUET_MODEL);
+  });
+
+  it("addLayerFromFile routes a .parquet File through loadCityParquetFromFiles", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    const file = new File(["PAR1"], "building.parquet");
+
+    await act(async () => {
+      await result.current.addLayerFromFile(file);
+    });
+
+    expect(cityparquet.loadCityParquetFromFiles).toHaveBeenCalledWith([file]);
+    expect(openStream).not.toHaveBeenCalled();
+    const layer = useLayerStore.getState().layers[0]!;
+    expect(layer.model.sourceEncoding).toBe("cityparquet");
+    expect(layer.modelRef).toEqual({
+      type: "file",
+      fileName: "building.parquet",
+    });
+    expect(result.current.error).toBeNull();
+  });
+
+  it("addLayerFromUrl routes a .parquet URL through loadCityParquetFromUrl, naming the layer after the table", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    const url = "https://x/delft/building.parquet";
+
+    await act(async () => {
+      await result.current.addLayerFromUrl(url);
+    });
+
+    expect(cityparquet.loadCityParquetFromUrl).toHaveBeenCalledWith(url);
+    const layer = useLayerStore.getState().layers[0]!;
+    expect(layer.model.sourceEncoding).toBe("cityparquet");
+    expect(layer.name).toBe("building");
+    expect(layer.modelRef).toEqual({ type: "url", url });
+  });
+
+  it("addLayerFromUrl routes an extension-less gs:// package directory too", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("gs://bucket/delft/");
+    });
+
+    expect(cityparquet.loadCityParquetFromUrl).toHaveBeenCalledWith(
+      "gs://bucket/delft/",
+    );
+    expect(useLayerStore.getState().layers[0]!.name).toBe("delft");
+  });
+
+  it("addLayerFromFiles loads a picked folder as one layer, named after the folder", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    const files = [
+      pickedFile("delft/a/building.parquet"),
+      pickedFile("delft/b/building.parquet"),
+    ];
+
+    await act(async () => {
+      await result.current.addLayerFromFiles(files);
+    });
+
+    expect(cityparquet.loadCityParquetFromFiles).toHaveBeenCalledWith(files);
+    const layers = useLayerStore.getState().layers;
+    expect(layers).toHaveLength(1);
+    expect(layers[0]!.name).toBe("delft");
+    expect(layers[0]!.modelRef).toEqual({ type: "file", fileName: "delft" });
+    expect(layers[0]!.model.sourceEncoding).toBe("cityparquet");
+  });
+
+  it("addLayerFromFiles applies overrides like the single-file path", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+
+    await act(async () => {
+      await result.current.addLayerFromFiles(
+        [pickedFile("delft/building.parquet")],
+        { rulesEnabled: false, visible: false },
+      );
+    });
+
+    const layer = useLayerStore.getState().layers[0]!;
+    expect(layer.rulesEnabled).toBe(false);
+    expect(layer.visible).toBe(false);
+  });
+
+  it("surfaces the unlistable-wildcard explanation, and adds no layer", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    // The real classifier is what refuses this shape; the mock only stands in
+    // for the fetching that would follow if it did not.
+    cityparquet.loadCityParquetFromUrl.mockImplementation((url: string) => {
+      classifyCityParquetUrl(url);
+      return Promise.resolve(PARQUET_MODEL);
+    });
+
+    await act(async () => {
+      await result.current.addLayerFromUrl(
+        "https://x/tiles/*/building.parquet",
+      );
+    });
+
+    expect(useLayerStore.getState().layers).toHaveLength(0);
+    expect(result.current.error).toMatch(/cannot be listed/);
+  });
+
+  it("leaves a .city.json URL on the CityJSON path", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/model.city.json");
+    });
+
+    expect(cityparquet.loadCityParquetFromUrl).not.toHaveBeenCalled();
   });
 });

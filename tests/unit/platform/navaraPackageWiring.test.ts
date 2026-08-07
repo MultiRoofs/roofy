@@ -5,7 +5,7 @@ import {
   CITYJSON_PLUGIN_PLACEHOLDER,
 } from "@cityjson/navara-cityjson";
 import { FLATCITYBUF_PLUGIN_PLACEHOLDER } from "@cityjson/navara-flatcitybuf";
-import { CITYPARQUET_PLUGIN_PLACEHOLDER } from "@cityjson/navara-cityparquet";
+import { assembleCityParquetModel } from "@cityjson/navara-cityparquet";
 // Type-only on purpose: it pins the "@cityjson/navara-cityjson/plugin" tsconfig
 // path (Task B8's import) without evaluating the engine at test time — a
 // type-only import is erased before this file ever runs.
@@ -36,8 +36,8 @@ describe("@cityjson/navara-* package wiring", () => {
     expect(FLATCITYBUF_PLUGIN_PLACEHOLDER).toContain(
       "@cityjson/navara-flatcitybuf",
     );
-    expect(CITYPARQUET_PLUGIN_PLACEHOLDER).toContain(
-      "@cityjson/navara-cityparquet",
-    );
+    // navara-cityparquet has a real barrel now, so its wiring is pinned by the
+    // reader the app actually calls rather than by a placeholder string.
+    expect(typeof assembleCityParquetModel).toBe("function");
   });
 });
