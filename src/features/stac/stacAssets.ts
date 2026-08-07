@@ -24,6 +24,7 @@ const LABELS: Record<StacAssetKind, string> = {
   cityjsonseq: "CityJSONSeq",
   flatcitybuf: "FlatCityBuf",
   citygml: "CityGML",
+  cityparquet: "CityParquet",
   archive: "ZIP archive",
   unknown: "Unknown format",
 };

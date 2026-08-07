@@ -494,7 +494,9 @@ export function App({
           Object.values(resident.objects),
         );
       } else {
-        // Try extension reader for URL models (CityGML not supported by DuckDB extension)
+        // Try extension reader for URL models. CityGML and CityParquet are not
+        // readable by the DuckDB cityjson extension, so they skip straight to
+        // the in-memory fallback below.
         if (
           shouldUseSourceUrlPath(
             activeLayer.modelRef,
@@ -503,7 +505,7 @@ export function App({
           extensionLoaded
         ) {
           const encoding = detectEncoding(activeLayer.modelRef.url);
-          if (encoding !== "citygml") {
+          if (encoding !== "citygml" && encoding !== "cityparquet") {
             loaded = await loadModelIntoDuckDB(
               activeLayer.modelRef.url,
               encoding,
