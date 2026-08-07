@@ -507,7 +507,19 @@ export function App({
           extensionLoaded
         ) {
           const encoding = detectEncoding(activeLayer.modelRef.url);
-          if (encoding !== "citygml" && encoding !== "cityparquet") {
+          // The MODEL is the authority on a CityParquet layer, not its URL: a
+          // `gs://` bucket or an https package directory has no extension, so
+          // `detectEncoding` calls it "cityjson" and `read_cityjson` would be
+          // handed a URL it can never open — a wasted query and a console
+          // error on every selection. `sourceEncoding` cannot drift from
+          // whatever the URL classifier decided at load time. The extension
+          // tests stay because they are what NARROWS `encoding` to the union
+          // `loadModelIntoDuckDB` accepts.
+          if (
+            activeLayer.model.sourceEncoding !== "cityparquet" &&
+            encoding !== "citygml" &&
+            encoding !== "cityparquet"
+          ) {
             loaded = await loadModelIntoDuckDB(
               activeLayer.modelRef.url,
               encoding,
