@@ -151,9 +151,15 @@ export function App({
   const [tableHeight, setTableHeight] = useState(250);
   const [toast, setToast] = useState<string | null>(null);
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
-  /** The LANDING page's catalog dialog. The viewer shell reaches the same
-   *  browser through the Add Layer dialog's "Catalog" tab, so this flag is
-   *  only ever true while there is nothing loaded. */
+  /**
+   * The LANDING page's catalog dialog — the viewer shell reaches the same
+   * browser through the Add Layer dialog's "Catalog" tab instead.
+   *
+   * INVARIANT, enforced by an effect below rather than by this declaration:
+   * false whenever the viewer shell is up. `App` is not remounted across the
+   * two branches, so nothing about the flag's lifetime is implied by the
+   * branch that renders it — it is plain state that outlives its own UI.
+   */
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [fps, setFps] = useState<number | undefined>(undefined);
   const [cursorPosition, setCursorPosition] = useState<
@@ -217,6 +223,25 @@ export function App({
   const layers = useLayerStore((s) => s.layers);
   const activeLayerId = useLayerStore((s) => s.activeLayerId);
   const hasLayers = layers.length > 0;
+
+  /**
+   * Close the catalog on ANY transition into the viewer shell — the one place
+   * that enforces "`catalogOpen` is false whenever the shell is up".
+   *
+   * Resetting on the way OUT instead does not work: there is more than one way
+   * back to the landing page (the toolbar's Close file, and removing the last
+   * layer from the sidebar, which calls `removeLayer` directly), and fixing
+   * them one at a time is how the second one got missed. This condition is the
+   * same one the render branch below uses, `engineBooting` included, so a
+   * `.fcb` open that boots the shell and then FAILS also returns to a landing
+   * page with no modal over it.
+   *
+   * Nothing user-visible changes: the landing branch — dialog and all — is
+   * already unmounted by the time this runs.
+   */
+  useEffect(() => {
+    if (hasLayers || engineBooting) setCatalogOpen(false);
+  }, [hasLayers, engineBooting]);
 
   // Active layer's streaming state, if any. Selected as individual
   // primitive fields (not the whole `StreamState` object) so this component
@@ -990,12 +1015,10 @@ export function App({
   const handleClose = useCallback(() => {
     closeAllStreamingLayers(getStreamPlugin());
     useLayerStore.getState().removeAllLayers();
-    // `App` is never remounted across the landing/viewer switch, so this flag
-    // outlives the branch that owns it: a user who opened the catalog, added a
-    // tile and later closed the workspace would land back on a landing page
-    // with the catalog modal already open over it (page scroll locked, hero
-    // hidden) having asked for nothing.
-    setCatalogOpen(false);
+    // No `setCatalogOpen(false)` here: the effect above already guarantees the
+    // flag is false for as long as the shell is up, and this is only one of
+    // the exits back to the landing page. Two half-rules for one invariant is
+    // what let the sidebar's remove-last-layer path slip through.
     setTriangleCount(0);
     setDuckdbModelLoaded(false);
     setDuckdbTableLoaded(false);
