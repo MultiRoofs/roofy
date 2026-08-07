@@ -209,6 +209,31 @@ describe("App landing page — catalog entry point", () => {
     expect(useLayerStore.getState().layers).toHaveLength(1);
   });
 
+  it("does not re-open the catalog when the LAST layer is removed from the sidebar", async () => {
+    // The other way back to the landing page, and the one a close-time reset
+    // missed entirely: `LayerPanel`'s per-layer "del" calls `removeLayer`
+    // directly, so `hasLayers` flips false without `handleClose` ever running.
+    // Driven through the REAL sidebar button, not the store.
+    loadFromUrl.mockResolvedValue(model);
+    render(<App persistenceStore={emptyStore} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Browse catalog" }));
+    fireEvent.click(screen.getByRole("button", { name: "stub catalog add" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle("Remove layer"));
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Browse catalog" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("stac-dialog-stub")).toBeNull();
+  });
+
   it("does not re-open the catalog over the landing page after a workspace close", async () => {
     // The regression: `App` is NOT remounted when `hasLayers` flips, so
     // `catalogOpen` survives the round trip to the viewer and back. A user who
