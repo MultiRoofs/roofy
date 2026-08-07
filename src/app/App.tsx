@@ -516,10 +516,19 @@ export function App({
     [addLayerFromFile, clearError, withEngineBooting],
   );
 
+  /**
+   * Load a URL, and say whether a layer LANDED.
+   *
+   * `addLayerFromUrl` reports a failure by resolving `null` (the message goes
+   * to `loadError`), so the boolean costs nothing to produce — and the STAC
+   * browser cannot be honest without it: it is mounted inside the viewer's Add
+   * Layer dialog, where `loadError` is rendered nowhere at all.
+   */
   const handleUrl = useCallback(
-    async (url: string) => {
+    async (url: string): Promise<boolean> => {
       clearError();
-      await withEngineBooting(url, () => addLayerFromUrl(url));
+      const layerId = await withEngineBooting(url, () => addLayerFromUrl(url));
+      return layerId !== null;
     },
     [addLayerFromUrl, clearError, withEngineBooting],
   );
@@ -971,9 +980,22 @@ export function App({
     [handleUrl],
   );
 
+  /** The catalog's version of the same path: the caller WANTS the outcome, so
+   *  the promise is handed over rather than dropped. */
+  const handleAddUrl = useCallback(
+    (url: string): Promise<boolean> => handleUrl(url),
+    [handleUrl],
+  );
+
   const handleClose = useCallback(() => {
     closeAllStreamingLayers(getStreamPlugin());
     useLayerStore.getState().removeAllLayers();
+    // `App` is never remounted across the landing/viewer switch, so this flag
+    // outlives the branch that owns it: a user who opened the catalog, added a
+    // tile and later closed the workspace would land back on a landing page
+    // with the catalog modal already open over it (page scroll locked, hero
+    // hidden) having asked for nothing.
+    setCatalogOpen(false);
     setTriangleCount(0);
     setDuckdbModelLoaded(false);
     setDuckdbTableLoaded(false);
@@ -1104,7 +1126,7 @@ export function App({
           onWidthChange={setLeftSidebarWidth}
           collapsed={leftSidebarCollapsed}
           onAddFile={handlePickedFile}
-          onAddUrl={handlePickedUrl}
+          onAddUrl={handleAddUrl}
           loading={loading}
           onFlyToLayer={(id) => sceneRef.current?.fitLayer(id)}
         />
@@ -1282,7 +1304,7 @@ export function App({
       {catalogOpen && (
         <StacBrowserDialog
           onClose={() => setCatalogOpen(false)}
-          onAddUrl={handlePickedUrl}
+          onAddUrl={handleAddUrl}
         />
       )}
     </main>

@@ -25,6 +25,15 @@
  * several tiles out of one collection is the normal case, not the exception.
  * Whether the surrounding dialog closes is the dialog's business, not this
  * component's.
+ *
+ * AN ADD IS NOT DONE WHEN IT IS CLICKED. `onAddUrl` resolves TRUE only once a
+ * layer has actually landed, and this component waits for that answer:
+ * "Adding…" while it is in flight, "Added ✓" on true, and on false or a
+ * rejection the button goes back to being clickable and an error line appears.
+ * Marking an item added the moment it was clicked used to be a lie the user
+ * could not retry past — the button was already disabled, and the app's load
+ * error is rendered on the landing page only, so a failed add inside the
+ * viewer's Add Layer dialog was silent AND permanent.
  */
 
 import {
@@ -46,8 +55,14 @@ import { CollectionCard } from "./CollectionCard";
 import { StacItemMap } from "./StacItemMap";
 
 export interface StacBrowserProps {
-  /** Funnel into the app's URL loading path (App.handleUrl / dialog onAddUrl). */
-  readonly onAddUrl: (url: string) => void;
+  /**
+   * Funnel into the app's URL loading path (App.handleUrl / dialog onAddUrl),
+   * resolving TRUE once a layer has landed and FALSE if the load failed.
+   *
+   * The boolean is not decoration: this component is the only place a catalog
+   * add is visible from, so it is the only place that can report one failing.
+   */
+  readonly onAddUrl: (url: string) => Promise<boolean>;
 }
 
 /**
@@ -74,6 +89,24 @@ interface RenderRow {
   readonly info: StacAssetInfo;
 }
 
+/** Copy-on-write set helpers — the add lifecycle moves an href between three
+ *  sets, and React state must never be mutated in place. */
+function withHref(set: ReadonlySet<string>, href: string): ReadonlySet<string> {
+  const next = new Set(set);
+  next.add(href);
+  return next;
+}
+
+function withoutHref(
+  set: ReadonlySet<string>,
+  href: string,
+): ReadonlySet<string> {
+  if (!set.has(href)) return set;
+  const next = new Set(set);
+  next.delete(href);
+  return next;
+}
+
 export function StacBrowser(props: StacBrowserProps): ReactElement {
   const { onAddUrl } = props;
 
@@ -94,7 +127,16 @@ export function StacBrowser(props: StacBrowserProps): ReactElement {
   // set it repaints is memoised below and does NOT depend on hover, so a
   // mousemove re-renders rows without re-filtering or re-classifying them.
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  // Three states, not one flag: an add that is still in flight must not be
+  // clickable again, and an add that FAILED must be, which a single
+  // "added" set cannot express.
   const [addedHrefs, setAddedHrefs] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+  const [pendingHrefs, setPendingHrefs] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+  const [failedHrefs, setFailedHrefs] = useState<ReadonlySet<string>>(
     () => new Set<string>(),
   );
   const [viewportOnly, setViewportOnly] = useState(true);
@@ -134,17 +176,36 @@ export function StacBrowser(props: StacBrowserProps): ReactElement {
 
   const addHref = useCallback(
     (href: string): void => {
-      // Guarded as well as disabled: the button below cannot be clicked twice,
-      // but "already added" is a fact about the session, not about one button.
-      if (addedHrefs.has(href)) return;
-      setAddedHrefs((prev) => {
-        const next = new Set(prev);
-        next.add(href);
-        return next;
-      });
-      onAddUrl(href);
+      // Guarded as well as disabled: the buttons below cannot be clicked while
+      // added or pending, but both are facts about the session, not about one
+      // button — the same href can be reachable from a row AND the detail
+      // strip at the same time.
+      if (addedHrefs.has(href) || pendingHrefs.has(href)) return;
+      setPendingHrefs((prev) => withHref(prev, href));
+      // A retry clears the previous complaint about this item immediately,
+      // rather than leaving a stale error next to a button that is visibly
+      // trying again.
+      setFailedHrefs((prev) => withoutHref(prev, href));
+
+      void (async () => {
+        let landed = false;
+        try {
+          landed = await onAddUrl(href);
+        } catch {
+          // The loading path reports failures by RESOLVING false; a rejection
+          // means something upstream of it broke. Either way the user's item
+          // did not arrive, which is the only thing this component can say.
+          landed = false;
+        }
+        setPendingHrefs((prev) => withoutHref(prev, href));
+        if (landed) {
+          setAddedHrefs((prev) => withHref(prev, href));
+        } else {
+          setFailedHrefs((prev) => withHref(prev, href));
+        }
+      })();
     },
-    [addedHrefs, onAddUrl],
+    [addedHrefs, pendingHrefs, onAddUrl],
   );
 
   // ---- collections view -----------------------------------------------------
@@ -194,6 +255,16 @@ export function StacBrowser(props: StacBrowserProps): ReactElement {
       total: matched.length,
     };
   }, [allItems, itemFilter, viewportOnly, viewBounds]);
+
+  /** The items whose add failed, by the id the user actually reads. Derived
+   *  from the full list, not from `rows`: an item can fail and then be
+   *  filtered out of view, and the complaint must survive that. */
+  const failedIds = useMemo((): readonly string[] => {
+    if (failedHrefs.size === 0) return [];
+    return allItems
+      .filter((it) => it.assetHref !== null && failedHrefs.has(it.assetHref))
+      .map((it) => it.id);
+  }, [allItems, failedHrefs]);
 
   const selected = useMemo((): RenderRow | null => {
     if (selectedId === null) return null;
@@ -294,6 +365,7 @@ export function StacBrowser(props: StacBrowserProps): ReactElement {
             {rows.map(({ item, info }) => {
               const href = item.assetHref;
               const added = href !== null && addedHrefs.has(href);
+              const pending = href !== null && pendingHrefs.has(href);
               const isSelected = item.id === selectedId;
               const className = [
                 "stac-item-row",
@@ -336,16 +408,20 @@ export function StacBrowser(props: StacBrowserProps): ReactElement {
                     <button
                       type="button"
                       className="stac-add-btn stac-add-btn--inline"
-                      disabled={added}
+                      disabled={added || pending}
                       // The visible word is "Add"; the item it adds is only
                       // clear from the row beside it, which a screen reader
                       // does not read as one unit. The label supplies it.
                       aria-label={
-                        added ? `Added ${item.id}` : `Add ${item.id} to scene`
+                        added
+                          ? `Added ${item.id}`
+                          : pending
+                            ? `Adding ${item.id}`
+                            : `Add ${item.id} to scene`
                       }
                       onClick={() => addHref(href)}
                     >
-                      {added ? "Added ✓" : "Add"}
+                      {added ? "Added ✓" : pending ? "Adding…" : "Add"}
                     </button>
                   )}
                 </div>
@@ -360,6 +436,17 @@ export function StacBrowser(props: StacBrowserProps): ReactElement {
             </p>
           )}
 
+          {/* The failure lives HERE, beside the buttons that raised it, and not
+              in a toast or the app's load-error slot: this browser is mounted
+              in two places, and only one of them (the landing page) renders
+              that slot at all. */}
+          {failedIds.length > 0 && (
+            <p className="stac-status stac-add-error" role="alert">
+              Could not load {failedIds.join(", ")} — the source may be
+              unreachable or unsupported. Try again.
+            </p>
+          )}
+
           {selected !== null && (
             <div className="stac-item-detail">
               <span className="stac-item-id">{selected.item.id}</span>
@@ -370,7 +457,10 @@ export function StacBrowser(props: StacBrowserProps): ReactElement {
                 <button
                   type="button"
                   className="stac-add-btn"
-                  disabled={addedHrefs.has(selected.item.assetHref)}
+                  disabled={
+                    addedHrefs.has(selected.item.assetHref) ||
+                    pendingHrefs.has(selected.item.assetHref)
+                  }
                   onClick={() => {
                     if (selected.item.assetHref !== null) {
                       addHref(selected.item.assetHref);
@@ -379,7 +469,9 @@ export function StacBrowser(props: StacBrowserProps): ReactElement {
                 >
                   {addedHrefs.has(selected.item.assetHref)
                     ? "Added ✓"
-                    : "Add to scene"}
+                    : pendingHrefs.has(selected.item.assetHref)
+                      ? "Adding…"
+                      : "Add to scene"}
                 </button>
               ) : (
                 <a

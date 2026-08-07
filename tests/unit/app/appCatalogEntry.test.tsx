@@ -15,6 +15,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -71,16 +72,28 @@ vi.mock("../../../src/features/streaming/openStreamingLayer", () => ({
   closeAllStreamingLayers: vi.fn(),
 }));
 
+/** What the real browser needs back from `onAddUrl`: did a layer land? The
+ *  stub records every answer so a test can pin the app's side of that
+ *  contract without rendering maplibre. */
+const addOutcomes: boolean[] = [];
+
 /** The dialog stub: a marker (was it mounted?), a close button (does the
  *  landing page own the open state?) and an add button (does its URL reach
- *  the app's ONE loading path?). */
+ *  the app's ONE loading path, and what does that path report back?). */
 vi.mock("../../../src/ui/stac/StacBrowserDialog", () => ({
   StacBrowserDialog: (props: {
     onClose: () => void;
-    onAddUrl: (url: string) => void;
+    onAddUrl: (url: string) => Promise<boolean>;
   }) => (
     <div data-testid="stac-dialog-stub">
-      <button type="button" onClick={() => props.onAddUrl(CATALOG_URL)}>
+      <button
+        type="button"
+        onClick={() => {
+          void props.onAddUrl(CATALOG_URL).then((ok) => {
+            addOutcomes.push(ok);
+          });
+        }}
+      >
         stub catalog add
       </button>
       <button type="button" onClick={props.onClose}>
@@ -113,8 +126,19 @@ const emptyStore: ProjectStateStore = {
   remove: async () => {},
 };
 
+/** The parsed model a successful `loadFromUrl` resolves — enough shape for
+ *  `addLayer` and the viewer shell, nothing more. */
+const model = {
+  sourceEncoding: "cityjson" as const,
+  metadata: { referenceSystem: "EPSG:7415" },
+  bbox: null,
+  objects: {},
+  vertexCount: 0,
+};
+
 describe("App landing page — catalog entry point", () => {
   beforeEach(() => {
+    addOutcomes.length = 0;
     loadFromUrl.mockReset();
     // Never resolves: the landing page has to stay mounted for the assertion
     // that follows the add, and a resolved model would swap in the shell.
@@ -158,5 +182,60 @@ describe("App landing page — catalog entry point", () => {
     // collection is the normal case. (The landing branch — dialog included —
     // unmounts on its own once the first layer lands.)
     expect(screen.getByTestId("stac-dialog-stub")).toBeInTheDocument();
+  });
+
+  it("tells the catalog an add FAILED, so it can roll its mark back", async () => {
+    // `addLayerFromUrl` reports a failure by resolving null, never by
+    // throwing — the boolean the browser waits on has to survive that.
+    loadFromUrl.mockRejectedValue(new Error("404 Not Found"));
+    render(<App persistenceStore={emptyStore} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Browse catalog" }));
+    fireEvent.click(screen.getByRole("button", { name: "stub catalog add" }));
+
+    await waitFor(() => expect(addOutcomes).toEqual([false]));
+    // Still open, still on the landing page: nothing landed.
+    expect(screen.getByTestId("stac-dialog-stub")).toBeInTheDocument();
+  });
+
+  it("resolves TRUE once the layer has actually landed", async () => {
+    loadFromUrl.mockResolvedValue(model);
+    render(<App persistenceStore={emptyStore} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Browse catalog" }));
+    fireEvent.click(screen.getByRole("button", { name: "stub catalog add" }));
+
+    await waitFor(() => expect(addOutcomes).toEqual([true]));
+    expect(useLayerStore.getState().layers).toHaveLength(1);
+  });
+
+  it("does not re-open the catalog over the landing page after a workspace close", async () => {
+    // The regression: `App` is NOT remounted when `hasLayers` flips, so
+    // `catalogOpen` survives the round trip to the viewer and back. A user who
+    // browsed, added a tile, then hit Close would find the modal open over the
+    // landing page — scroll locked, hero hidden — having asked for nothing.
+    loadFromUrl.mockResolvedValue(model);
+    render(<App persistenceStore={emptyStore} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Browse catalog" }));
+    fireEvent.click(screen.getByRole("button", { name: "stub catalog add" }));
+
+    // The layer lands, the viewer shell replaces the landing branch, and the
+    // dialog goes with it (accepted behaviour — the branch owns it).
+    await waitFor(() =>
+      expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId("stac-dialog-stub")).toBeNull();
+
+    // "Close file" in the toolbar — the seam that hands the user back to the
+    // landing page.
+    await act(async () => {
+      fireEvent.click(screen.getByTitle("Close file"));
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Browse catalog" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("stac-dialog-stub")).toBeNull();
   });
 });

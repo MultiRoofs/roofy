@@ -92,6 +92,8 @@ function residentEntry(ids: string[]) {
 }
 
 const noop = () => {};
+/** The URL path now reports whether a layer landed; these suites never look. */
+const noopUrl = async () => true;
 
 describe("LayerPanel — static layer", () => {
   it("shows a plain object count with no streaming badge", () => {
@@ -105,7 +107,7 @@ describe("LayerPanel — static layer", () => {
     });
 
     const { container } = render(
-      <LayerPanel onAddFile={noop} onAddUrl={noop} loading={false} />,
+      <LayerPanel onAddFile={noop} onAddUrl={noopUrl} loading={false} />,
     );
 
     expect(screen.getByText("2")).toBeTruthy();
@@ -137,7 +139,7 @@ describe("LayerPanel — streaming layer", () => {
       activeLayerId: "L",
     });
 
-    render(<LayerPanel onAddFile={noop} onAddUrl={noop} loading={false} />);
+    render(<LayerPanel onAddFile={noop} onAddUrl={noopUrl} loading={false} />);
 
     expect(screen.getByText("STREAM")).toBeTruthy();
     expect(screen.getByText("3 features")).toBeTruthy();
@@ -161,7 +163,7 @@ describe("LayerPanel — streaming layer", () => {
       activeLayerId: "L",
     });
 
-    render(<LayerPanel onAddFile={noop} onAddUrl={noop} loading={false} />);
+    render(<LayerPanel onAddFile={noop} onAddUrl={noopUrl} loading={false} />);
 
     const badge = screen.getByText("1 feature");
     expect(badge.title.toLowerCase()).toContain("resident cache");
@@ -185,7 +187,7 @@ describe("LayerPanel — streaming layer", () => {
       activeLayerId: "L",
     });
 
-    render(<LayerPanel onAddFile={noop} onAddUrl={noop} loading={false} />);
+    render(<LayerPanel onAddFile={noop} onAddUrl={noopUrl} loading={false} />);
     expect(screen.getByText("1 feature")).toBeTruthy();
 
     act(() => {

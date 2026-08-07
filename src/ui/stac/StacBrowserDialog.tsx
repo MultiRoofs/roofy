@@ -20,8 +20,10 @@ import { StacBrowser } from "./StacBrowser";
 
 export interface StacBrowserDialogProps {
   readonly onClose: () => void;
-  /** The app's URL loading path — the same one `AddLayerDialog` funnels into. */
-  readonly onAddUrl: (url: string) => void;
+  /** The app's URL loading path — the same one `AddLayerDialog` funnels into.
+   *  Resolves TRUE once a layer has landed; the browser needs that answer to
+   *  keep its "Added ✓" honest. */
+  readonly onAddUrl: (url: string) => Promise<boolean>;
 }
 
 export function StacBrowserDialog({

@@ -33,7 +33,8 @@ import { VisibilityIcon } from "./VisibilityIcon";
 
 interface LayerPanelProps {
   readonly onAddFile: (file: File) => void;
-  readonly onAddUrl: (url: string) => void;
+  /** Resolves TRUE once a layer has landed — see {@link AddLayerDialog}. */
+  readonly onAddUrl: (url: string) => Promise<boolean>;
   readonly loading: boolean;
   readonly onFlyToLayer?: (layerId: string) => void;
 }

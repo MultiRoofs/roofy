@@ -27,8 +27,10 @@ afterEach(() => {
 });
 
 const noop = () => {};
+/** The URL path now reports whether a layer landed; this suite never looks. */
+const noopUrl = async () => true;
 
-function renderPanel(onAddUrl: (url: string) => void = noop) {
+function renderPanel(onAddUrl: (url: string) => Promise<boolean> = noopUrl) {
   return render(
     <LayerPanel onAddFile={noop} onAddUrl={onAddUrl} loading={false} />,
   );
@@ -51,7 +53,7 @@ function geoFile(name: string, body: unknown): File {
 
 describe("AddLayerDialog — tabs", () => {
   it("opens on the city-model tab, whose loader is untouched", () => {
-    const onAddUrl = vi.fn();
+    const onAddUrl = vi.fn(async () => true);
     renderPanel(onAddUrl);
     openDialog();
 
