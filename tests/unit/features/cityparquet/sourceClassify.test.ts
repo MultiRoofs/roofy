@@ -61,6 +61,47 @@ describe("classifyCityParquetUrl", () => {
       prefix: "",
     });
   });
+  it("strips metadata.json only on a path boundary", () => {
+    // The manifest, in both spellings: listing takes the parent directory.
+    expect(classifyCityParquetUrl("gs://b/pkg/metadata.json")).toEqual({
+      kind: "storage-dir",
+      store: { provider: "gcs", bucket: "b" },
+      prefix: "pkg/",
+    });
+    expect(classifyCityParquetUrl("gs://b/metadata.json")).toEqual({
+      kind: "storage-dir",
+      store: { provider: "gcs", bucket: "b" },
+      prefix: "",
+    });
+    // NOT the manifest: an object whose name merely ends in it. Read as a
+    // directory prefix of its own — never as "pkg/".
+    expect(classifyCityParquetUrl("gs://b/pkgmetadata.json")).toEqual({
+      kind: "storage-dir",
+      store: { provider: "gcs", bucket: "b" },
+      prefix: "pkgmetadata.json/",
+    });
+    expect(classifyCityParquetUrl("s3://b/pkgmetadata.json")).toEqual({
+      kind: "storage-dir",
+      store: { provider: "s3", bucket: "b" },
+      prefix: "pkgmetadata.json/",
+    });
+    // Same boundary in the https-GCS crossover gate: only a real manifest
+    // crosses over, so this stays a plain https URL of no known format.
+    expect(
+      classifyCityParquetUrl(
+        "https://storage.googleapis.com/b/pkgmetadata.json",
+      ),
+    ).toBeNull();
+    expect(
+      classifyCityParquetUrl(
+        "https://storage.googleapis.com/b/pkg/metadata.json",
+      ),
+    ).toEqual({
+      kind: "storage-dir",
+      store: { provider: "gcs", bucket: "b" },
+      prefix: "pkg/",
+    });
+  });
   it("rejects malformed and non-http schemes", () => {
     expect(classifyCityParquetUrl("ftp://host/x.parquet")).toBeNull();
     expect(classifyCityParquetUrl("./local/building.parquet")).toBeNull();

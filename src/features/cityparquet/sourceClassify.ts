@@ -80,6 +80,18 @@ function hasWildcard(text: string): boolean {
 }
 
 /**
+ * True if `rest` names the package manifest ITSELF.
+ *
+ * The boundary is a "/" or the start of the name — `pkgmetadata.json` is an
+ * object called "pkgmetadata.json", not a manifest inside "pkg". One predicate
+ * shared by the strip below and by the https-GCS crossover gate, so a bare
+ * `endsWith` cannot creep back into one of them.
+ */
+function isManifestPath(rest: string): boolean {
+  return rest === MANIFEST_FILENAME || rest.endsWith(`/${MANIFEST_FILENAME}`);
+}
+
+/**
  * Percent-decode a path, segment by segment.
  *
  * Per segment so an encoded "%2F" cannot silently become a separator, and
@@ -117,7 +129,12 @@ function classifyStorageRest(
     return { kind: "storage-table", store, objectName: rest };
   }
   // A directory: the manifest names the package, but listing takes its parent.
-  const withoutManifest = rest.endsWith(MANIFEST_FILENAME)
+  // Any OTHER non-parquet name is read as a directory the user forgot to
+  // "/"-terminate — including something like "pkgmetadata.json", which is
+  // listed as a prefix of its own rather than mistaken for a manifest. Listing
+  // a prefix that turns out to be empty is a clear, recoverable outcome;
+  // silently loading a different directory than the one typed is not.
+  const withoutManifest = isManifestPath(rest)
     ? rest.slice(0, rest.length - MANIFEST_FILENAME.length)
     : rest;
   const prefix =
@@ -179,8 +196,7 @@ export function classifyCityParquetUrl(raw: string): CityParquetSource | null {
       (hasWildcard(split.rest) ||
         split.rest.endsWith(".parquet") ||
         split.rest.endsWith("/") ||
-        split.rest.endsWith(`/${MANIFEST_FILENAME}`) ||
-        split.rest === MANIFEST_FILENAME)
+        isManifestPath(split.rest))
     ) {
       return classifyStorageRest(
         { provider: "gcs", bucket: split.bucket },
