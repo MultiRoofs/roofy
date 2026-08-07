@@ -3600,6 +3600,13 @@ button.file-label:disabled {
   color: var(--fg-dim);
 }
 
+/* A failed add, reported where the add was clicked. Louder than
+   `.stac-status`'s muted grey, which is the colour of "loading" — this one is
+   the user's item not arriving. */
+.stac-add-error {
+  color: #c53030; /* the same red as `.error-message` on the landing page */
+}
+
 /* ═══════════════════════════════════════════════════════════════
    CAMERA CONTROLS — compass + zoom/tilt cluster (viewport overlay)
    ═══════════════════════════════════════════════════════════════ */

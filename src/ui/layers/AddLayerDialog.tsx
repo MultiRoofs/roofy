@@ -37,7 +37,10 @@ import { StacBrowser } from "../stac/StacBrowser";
 interface AddLayerDialogProps {
   readonly onClose: () => void;
   readonly onAddFile: (file: File) => void;
-  readonly onAddUrl: (url: string) => void;
+  /** Resolves TRUE once a layer has landed. The URL field ignores the answer
+   *  (it closes the dialog either way, and the app reports the failure); the
+   *  catalog tab needs it to roll a failed "Added ✓" back. */
+  readonly onAddUrl: (url: string) => Promise<boolean>;
   readonly loading: boolean;
 }
 
@@ -93,7 +96,10 @@ export function AddLayerDialog({
 
   const handleUrl = useCallback(
     (url: string) => {
-      onAddUrl(url);
+      // Fire-and-forget on purpose: this affordance closes the dialog
+      // immediately, so there is nothing left on screen to report the outcome
+      // to. The app's own error state has it.
+      void onAddUrl(url);
       onClose();
     },
     [onAddUrl, onClose],

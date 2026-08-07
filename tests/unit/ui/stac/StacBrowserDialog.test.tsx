@@ -13,7 +13,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 const ADDED_URL = "https://x/a.city.json";
 
 vi.mock("../../../../src/ui/stac/StacBrowser", () => ({
-  StacBrowser: (props: { onAddUrl: (url: string) => void }) => (
+  StacBrowser: (props: { onAddUrl: (url: string) => Promise<boolean> }) => (
     <button type="button" onClick={() => props.onAddUrl(ADDED_URL)}>
       stub add
     </button>
@@ -25,17 +25,18 @@ import { StacBrowserDialog } from "../../../../src/ui/stac/StacBrowserDialog";
 afterEach(cleanup);
 
 const noop = () => {};
+const noopUrl = async () => true;
 
 function renderDialog(
   overrides: {
     onClose?: () => void;
-    onAddUrl?: (url: string) => void;
+    onAddUrl?: (url: string) => Promise<boolean>;
   } = {},
 ) {
   return render(
     <StacBrowserDialog
       onClose={overrides.onClose ?? noop}
-      onAddUrl={overrides.onAddUrl ?? noop}
+      onAddUrl={overrides.onAddUrl ?? noopUrl}
     />,
   );
 }
@@ -86,7 +87,7 @@ describe("StacBrowserDialog", () => {
 
   it("forwards an added URL and stays open — the catalog is multi-add", () => {
     const onClose = vi.fn();
-    const onAddUrl = vi.fn();
+    const onAddUrl = vi.fn(async () => true);
     renderDialog({ onClose, onAddUrl });
 
     fireEvent.click(screen.getByRole("button", { name: "stub add" }));

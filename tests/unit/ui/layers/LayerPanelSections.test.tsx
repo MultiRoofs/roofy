@@ -29,10 +29,12 @@ afterEach(() => {
 });
 
 const noop = () => {};
+/** The URL path now reports whether a layer landed; these suites never look. */
+const noopUrl = async () => true;
 
 function renderPanel() {
   return render(
-    <LayerPanel onAddFile={noop} onAddUrl={noop} loading={false} />,
+    <LayerPanel onAddFile={noop} onAddUrl={noopUrl} loading={false} />,
   );
 }
 

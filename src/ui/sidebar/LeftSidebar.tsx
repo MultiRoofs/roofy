@@ -18,7 +18,8 @@ interface LeftSidebarProps {
   readonly onWidthChange: (width: number) => void;
   readonly collapsed: boolean;
   readonly onAddFile: (file: File) => void;
-  readonly onAddUrl: (url: string) => void;
+  /** Resolves TRUE once a layer has landed — see {@link AddLayerDialog}. */
+  readonly onAddUrl: (url: string) => Promise<boolean>;
   readonly loading: boolean;
   readonly onFlyToLayer?: (layerId: string) => void;
 }
