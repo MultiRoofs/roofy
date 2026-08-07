@@ -11,9 +11,12 @@
  *    Tiles). No model, no rules, no LoD, nothing to pick: the row carries
  *    visibility, a name, its kind and — for raster — an opacity.
  *
- * One shared "+ Add Layer" button opens the {@link AddLayerDialog}, whose two
- * tabs mirror the two sections. The city-model path is unchanged: file drop,
- * browse or remote URL through the same handlers the landing page uses.
+ * One shared "+ Add Layer" button opens the {@link AddLayerDialog}, whose three
+ * tabs are NOT a mirror of these two sections: "City model" and "Geospatial"
+ * are, and "Catalog" is a third way INTO the first — it browses the STAC
+ * catalog and funnels whatever is picked through the same city-model path. The
+ * city-model path itself is unchanged: file drop, browse or remote URL through
+ * the same handlers the landing page uses.
  */
 
 import { useState } from "react";

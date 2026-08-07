@@ -313,10 +313,13 @@ export function StacItemMap(props: StacItemMapProps): ReactElement {
   }, []);
 
   // ---- data: setData on every items change, and NEVER a refit ---------------
-  // The parent recomputes its filtered `items` array on hover, so refitting on
-  // array identity would snap the camera back under the user's cursor and make
-  // panning impossible. The refit lives in the effect below, keyed on the
-  // collection.
+  // As shipped, `StacBrowser` hands this component the store's UNFILTERED item
+  // array, whose identity only changes when the collection's entry does — so
+  // this effect is cheap in practice. Refitting here anyway would be wrong for
+  // any caller that is less careful: a parent that passed a hover- or
+  // filter-derived array would get a camera that snapped back on every
+  // mousemove. The refit therefore lives in the effect below, keyed on the
+  // collection rather than on this array's identity.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !loadedRef.current) return;
@@ -334,12 +337,14 @@ export function StacItemMap(props: StacItemMapProps): ReactElement {
 
   // ---- refit: only when the item set's collection actually changes ----------
   // `items[0]?.collectionId` is the collection, but it is NOT enough on its
-  // own as an effect key: a filtered array going empty and non-empty again
-  // reads as null → "cityjson-nl" and would refit though the collection never
-  // changed — typing a no-match filter and deleting one character would snap
-  // the camera out from under the user, and Task 7's viewport filter empties
-  // this array routinely. So nulls are ignored outright and the last fitted
-  // collection is remembered.
+  // own as an effect key, because it OSCILLATES: any empty → non-empty
+  // transition reads as null → "cityjson-nl" and would refit though the
+  // collection never changed. The current parent passes the store's unfiltered
+  // array, which still empties whenever a collection's entry is refetched or
+  // replaced — and a parent that passed a filtered array (typing a no-match
+  // filter, then deleting one character) would snap the camera out from under
+  // the user. So nulls are ignored outright and the last fitted collection is
+  // remembered.
   const collectionId = items[0]?.collectionId ?? null;
   useEffect(() => {
     const map = mapRef.current;

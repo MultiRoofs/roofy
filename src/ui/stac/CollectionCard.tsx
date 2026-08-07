@@ -30,7 +30,7 @@ const MAX_CO_TYPE_BADGES = 5;
 export function CollectionCard(props: CollectionCardProps): ReactElement {
   const { card, onOpen } = props;
   // The items index IS the browsability: without a parquet mirror there is no
-  // item list to open, and 31 of the catalog's 53 collections are in that state.
+  // item list to open, and 22 of the catalog's 53 collections are in that state.
   const browsable = card.itemsParquetHref !== null;
   const shownCoTypes = card.coTypes.slice(0, MAX_CO_TYPE_BADGES);
   const hiddenCoTypes = card.coTypes.length - shownCoTypes.length;
