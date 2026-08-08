@@ -20,6 +20,7 @@ import {
   loadCityParquetFromUrl,
 } from "../cityparquet/loadCityParquet";
 import { isCityParquetUrl } from "../cityparquet/sourceClassify";
+import { ensureModelCrsLoadable } from "./ensureCrs";
 import { useLayerStore } from "./layerStore";
 import { openStreamingLayer } from "../streaming/openStreamingLayer";
 import {
@@ -97,6 +98,22 @@ export interface LayerFileLoader {
   addLayerFromUrl: (url: string) => Promise<string | null>;
   loading: boolean;
   error: string | null;
+  /**
+   * The message behind the most recent failure, readable SYNCHRONOUSLY after
+   * an add resolves null. `error` is React state, so a caller that just
+   * awaited `addLayerFromUrl` cannot read the fresh value from its own
+   * closure — and the catalog browser needs the sentence, not a boolean, to
+   * tell the user WHY an item did not land ("Unsupported CityJSON version
+   * …" reads very differently from "unreachable"). Cleared whenever a new
+   * load starts.
+   *
+   * KEYED by the source (the url or file name the add was asked for): the
+   * catalog fires several adds concurrently, and a single shared slot would
+   * let item A's line quote item B's reason when both fail in the same
+   * drain. Passing a `source` returns the message only if the last failure
+   * was for THAT source; passing none returns whatever failed last.
+   */
+  lastError: (source?: string) => string | null;
   clearError: () => void;
 }
 
@@ -121,7 +138,28 @@ export function useLayerFileLoader(
   options: LayerFileLoaderOptions = {},
 ): LayerFileLoader {
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorState] = useState<string | null>(null);
+  // A per-source MAP, not a mirror of the single error state: the catalog
+  // fires several adds concurrently, and with one shared slot either add B's
+  // failure overwrites add A's sentence (mis-attribution) or add B's opening
+  // `clearError` erases it before A's caller reads it (a race the await
+  // interleaving genuinely allows). Entries are only ever READ for a source
+  // that just failed, so successes never consult a stale one; `clearError`
+  // clears the visible state but deliberately leaves the map alone.
+  const errorBySourceRef = useRef(new Map<string, string>());
+  const setError = useCallback(
+    (message: string | null, source?: string): void => {
+      if (message !== null && source !== undefined) {
+        // Delete-then-set so a RETRY moves its entry to the end — a re-`set`
+        // alone keeps the key's original position, and the no-source read
+        // below takes "last inserted" as "most recent".
+        errorBySourceRef.current.delete(source);
+        errorBySourceRef.current.set(source, message);
+      }
+      setErrorState(message);
+    },
+    [],
+  );
   // Through a ref, so an inline `resolveStreamPlugin={() => …}` cannot change
   // the identity of the two loaders below — `App.tsx` lists them in dependency
   // arrays, and a new function per render would re-run those effects.
@@ -156,6 +194,7 @@ export function useLayerFileLoader(
           // A lone `.parquet` drop is a one-table package — the same loader as
           // a picked folder, given a selection of one.
           const model = await loadCityParquetFromFiles([file]);
+          await ensureModelCrsLoadable(model);
           layerId = useLayerStore.getState().addLayer({
             name: file.name,
             model,
@@ -175,6 +214,9 @@ export function useLayerFileLoader(
             new Uint8Array(await file.arrayBuffer()),
           );
           const parsed: CityModel = parseText(file.name, text);
+          // Fetch-and-gate the CRS while we are still async — a refusal here
+          // reads as a load error instead of a dead layer in the scene sync.
+          await ensureModelCrsLoadable(parsed);
           layerId = useLayerStore.getState().addLayer({
             name: file.name,
             model: parsed,
@@ -188,13 +230,16 @@ export function useLayerFileLoader(
         applyPostCreateOverrides(layerId, overrides);
         return layerId;
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to parse file.");
+        setError(
+          e instanceof Error ? e.message : "Failed to parse file.",
+          file.name,
+        );
         return null;
       } finally {
         setLoading(false);
       }
     },
-    [],
+    [setError],
   );
 
   const addLayerFromFiles = useCallback(
@@ -207,6 +252,7 @@ export function useLayerFileLoader(
       try {
         const name = packageNameFromFiles(files);
         const model = await loadCityParquetFromFiles(files);
+        await ensureModelCrsLoadable(model);
         const layerId = useLayerStore.getState().addLayer({
           name,
           model,
@@ -223,13 +269,14 @@ export function useLayerFileLoader(
       } catch (e) {
         setError(
           e instanceof Error ? e.message : "Failed to load the picked files.",
+          packageNameFromFiles(files),
         );
         return null;
       } finally {
         setLoading(false);
       }
     },
-    [],
+    [setError],
   );
 
   const addLayerFromUrl = useCallback(
@@ -253,6 +300,7 @@ export function useLayerFileLoader(
         // the load below and lands in `error` — which is the point.
         if (isCityParquetUrl(url)) {
           const model = await loadCityParquetFromUrl(url);
+          await ensureModelCrsLoadable(model);
           return useLayerStore.getState().addLayer({
             name: cityParquetLayerNameFromUrl(url),
             model,
@@ -264,6 +312,7 @@ export function useLayerFileLoader(
         }
 
         const parsed = await loadFromUrl(url);
+        await ensureModelCrsLoadable(parsed);
         return useLayerStore.getState().addLayer({
           name: fileNameFromUrl(url),
           model: parsed,
@@ -275,16 +324,27 @@ export function useLayerFileLoader(
       } catch (e) {
         setError(
           e instanceof Error ? e.message : "Failed to load remote file.",
+          url,
         );
         return null;
       } finally {
         setLoading(false);
       }
     },
-    [],
+    [setError],
   );
 
-  const clearError = useCallback(() => setError(null), []);
+  const clearError = useCallback(() => setError(null), [setError]);
+  const lastError = useCallback((source?: string): string | null => {
+    if (source !== undefined) {
+      return errorBySourceRef.current.get(source) ?? null;
+    }
+    // No source: the most recent failure of any kind, straight off the map's
+    // insertion order (a Map iterates oldest-first).
+    let latest: string | null = null;
+    for (const message of errorBySourceRef.current.values()) latest = message;
+    return latest;
+  }, []);
 
   return {
     addLayerFromFile,
@@ -292,6 +352,7 @@ export function useLayerFileLoader(
     addLayerFromUrl,
     loading,
     error,
+    lastError,
     clearError,
   };
 }

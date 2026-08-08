@@ -44,6 +44,7 @@ import { useSelectionStore } from "../features/selection/selectionStore";
 import { useLayerStore } from "../features/layers/layerStore";
 import { useGeoLayerStore } from "../features/geoLayers/geoLayerStore";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
+import { ensureModelCrsLoadable } from "../features/layers/ensureCrs";
 import { loadCityParquetFromUrl } from "../features/cityparquet/loadCityParquet";
 import { isCityParquetUrl } from "../features/cityparquet/sourceClassify";
 import { useFileDropGuard } from "../features/layers/useFileDropGuard";
@@ -66,6 +67,7 @@ import { ViewerToolbar } from "../ui/toolbar/ViewerToolbar";
 import { LeftSidebar } from "../ui/sidebar/LeftSidebar";
 import { SourcePicker } from "../ui/layers/SourcePicker";
 import { StacBrowserDialog } from "../ui/stac/StacBrowserDialog";
+import type { AddUrlResult } from "../ui/stac/StacBrowser";
 import { StatusBar } from "../ui/StatusBar";
 import { LegendOverlay } from "../ui/viewport/LegendOverlay";
 import { AttributePanel } from "../ui/viewport/AttributePanel";
@@ -437,6 +439,7 @@ export function App({
     addLayerFromUrl,
     loading,
     error: loadError,
+    lastError,
     clearError,
   } = useLayerFileLoader({ resolveStreamPlugin });
 
@@ -806,6 +809,7 @@ export function App({
               // throw (including the unlistable-wildcard explanation) is
               // caught by this loop's per-layer `catch` and counted.
               const parsed = await loadCityParquetFromUrl(modelRef.url);
+              await ensureModelCrsLoadable(parsed);
               layerId = useLayerStore.getState().addLayer({
                 name,
                 model: parsed,
@@ -817,6 +821,7 @@ export function App({
               });
             } else {
               const parsed = await loadFromUrl(modelRef.url);
+              await ensureModelCrsLoadable(parsed);
               layerId = useLayerStore.getState().addLayer({
                 name,
                 model: parsed,
@@ -1011,6 +1016,7 @@ export function App({
             // shared CityParquet link would otherwise hand parquet bytes to
             // `JSON.parse`. Failures are counted by this loop's `catch`.
             const parsed = await loadCityParquetFromUrl(sl.modelUrl);
+            await ensureModelCrsLoadable(parsed);
             useLayerStore.getState().addLayer({
               name,
               model: parsed,
@@ -1021,6 +1027,7 @@ export function App({
             });
           } else {
             const parsed = await loadFromUrl(sl.modelUrl);
+            await ensureModelCrsLoadable(parsed);
             useLayerStore.getState().addLayer({
               name,
               model: parsed,
@@ -1103,11 +1110,20 @@ export function App({
     [handleUrl],
   );
 
-  /** The catalog's version of the same path: the caller WANTS the outcome, so
-   *  the promise is handed over rather than dropped. */
+  /** The catalog's version of the same path: the caller WANTS the outcome —
+   *  including the loader's failure sentence, which is why this reads
+   *  `lastError()` the moment the add resolves rather than the (async) error
+   *  state. */
   const handleAddUrl = useCallback(
-    (url: string): Promise<boolean> => handleUrl(url),
-    [handleUrl],
+    async (url: string): Promise<AddUrlResult> => {
+      const landed = await handleUrl(url);
+      if (landed) return { ok: true };
+      return {
+        ok: false,
+        message: lastError(url) ?? "Could not load this source.",
+      };
+    },
+    [handleUrl, lastError],
   );
 
   const handleClose = useCallback(() => {

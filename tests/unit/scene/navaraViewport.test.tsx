@@ -377,9 +377,9 @@ function makeModel(referenceSystem?: string): CityModel {
   } as unknown as CityModel;
 }
 
-/** CityJSON spells its CRS as an OGC URI, and that is the only form
- *  `parseEpsgCode` accepts — a bare "EPSG:7415" would be refused by the CRS
- *  gate, so the fixture must not use one. */
+/** The OGC URI spelling, as CityJSON 1.1+ writes it. `parseEpsgCode` now also
+ *  accepts the v1.0 URN and a bare "EPSG:7415"; this fixture keeps the
+ *  spec-recommended form. */
 const CRS_URI = "https://www.opengis.net/def/crs/EPSG/0/7415";
 
 function makeLayer(patch: Partial<Layer> & { id: string }): Layer {
