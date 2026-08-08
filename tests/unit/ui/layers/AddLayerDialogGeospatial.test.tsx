@@ -9,6 +9,7 @@
  * worth catching, since this viewer's own format is JSON too).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AddUrlResult } from "../../../../src/ui/stac/StacBrowser";
 import {
   cleanup,
   fireEvent,
@@ -28,9 +29,11 @@ afterEach(() => {
 
 const noop = () => {};
 /** The URL path now reports whether a layer landed; this suite never looks. */
-const noopUrl = async () => true;
+const noopUrl = async () => ({ ok: true }) as const;
 
-function renderPanel(onAddUrl: (url: string) => Promise<boolean> = noopUrl) {
+function renderPanel(
+  onAddUrl: (url: string) => Promise<AddUrlResult> = noopUrl,
+) {
   return render(
     <LayerPanel
       onAddFile={noop}
@@ -58,7 +61,7 @@ function geoFile(name: string, body: unknown): File {
 
 describe("AddLayerDialog — tabs", () => {
   it("opens on the city-model tab, whose loader is untouched", () => {
-    const onAddUrl = vi.fn(async () => true);
+    const onAddUrl = vi.fn(async () => ({ ok: true }) as const);
     renderPanel(onAddUrl);
     openDialog();
 

@@ -93,7 +93,7 @@ function residentEntry(ids: string[]) {
 
 const noop = () => {};
 /** The URL path now reports whether a layer landed; these suites never look. */
-const noopUrl = async () => true;
+const noopUrl = async () => ({ ok: true }) as const;
 
 describe("LayerPanel — static layer", () => {
   it("shows a plain object count with no streaming badge", () => {

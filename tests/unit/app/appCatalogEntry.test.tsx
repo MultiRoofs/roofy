@@ -14,6 +14,7 @@
  * Node.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AddUrlResult } from "../../../src/ui/stac/StacBrowser";
 import {
   act,
   cleanup,
@@ -76,6 +77,9 @@ vi.mock("../../../src/features/streaming/openStreamingLayer", () => ({
  *  stub records every answer so a test can pin the app's side of that
  *  contract without rendering maplibre. */
 const addOutcomes: boolean[] = [];
+/** The failure sentences the stub saw — the one new seam in App is
+ *  `handleAddUrl` reading the loader's message via `lastError(url)`. */
+const addMessages: (string | null)[] = [];
 
 /** The dialog stub: a marker (was it mounted?), a close button (does the
  *  landing page own the open state?) and an add button (does its URL reach
@@ -83,14 +87,15 @@ const addOutcomes: boolean[] = [];
 vi.mock("../../../src/ui/stac/StacBrowserDialog", () => ({
   StacBrowserDialog: (props: {
     onClose: () => void;
-    onAddUrl: (url: string) => Promise<boolean>;
+    onAddUrl: (url: string) => Promise<AddUrlResult>;
   }) => (
     <div data-testid="stac-dialog-stub">
       <button
         type="button"
         onClick={() => {
-          void props.onAddUrl(CATALOG_URL).then((ok) => {
-            addOutcomes.push(ok);
+          void props.onAddUrl(CATALOG_URL).then((result) => {
+            addOutcomes.push(result.ok);
+            addMessages.push(result.ok ? null : result.message);
           });
         }}
       >
@@ -139,6 +144,7 @@ const model = {
 describe("App landing page — catalog entry point", () => {
   beforeEach(() => {
     addOutcomes.length = 0;
+    addMessages.length = 0;
     loadFromUrl.mockReset();
     // Never resolves: the landing page has to stay mounted for the assertion
     // that follows the add, and a resolved model would swap in the shell.
@@ -194,6 +200,9 @@ describe("App landing page — catalog entry point", () => {
     fireEvent.click(screen.getByRole("button", { name: "stub catalog add" }));
 
     await waitFor(() => expect(addOutcomes).toEqual([false]));
+    // The loader's sentence made it through `handleAddUrl` — not a canned
+    // fallback: the catalog renders exactly this next to the item.
+    expect(addMessages).toEqual(["404 Not Found"]);
     // Still open, still on the landing page: nothing landed.
     expect(screen.getByTestId("stac-dialog-stub")).toBeInTheDocument();
   });

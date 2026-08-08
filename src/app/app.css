@@ -3637,6 +3637,15 @@ button.file-label:disabled {
    the user's item not arriving. */
 .stac-add-error {
   color: #c53030; /* the same red as `.error-message` on the landing page */
+  font-size: 0.75rem;
+}
+
+/* One line per failed item: the id in the row's own weight, then the loader's
+   sentence. Long sentences (a CRS refusal names the EPSG code and the reason)
+   wrap inside the column rather than widening it. */
+.stac-add-error-line {
+  margin: 0 0 0.25rem;
+  overflow-wrap: anywhere;
 }
 
 /* ═══════════════════════════════════════════════════════════════

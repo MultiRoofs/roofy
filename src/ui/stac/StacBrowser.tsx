@@ -26,14 +26,15 @@
  * Whether the surrounding dialog closes is the dialog's business, not this
  * component's.
  *
- * AN ADD IS NOT DONE WHEN IT IS CLICKED. `onAddUrl` resolves TRUE only once a
- * layer has actually landed, and this component waits for that answer:
- * "Adding…" while it is in flight, "Added ✓" on true, and on false or a
- * rejection the button goes back to being clickable and an error line appears.
- * Marking an item added the moment it was clicked used to be a lie the user
- * could not retry past — the button was already disabled, and the app's load
- * error is rendered on the landing page only, so a failed add inside the
- * viewer's Add Layer dialog was silent AND permanent.
+ * AN ADD IS NOT DONE WHEN IT IS CLICKED. `onAddUrl` resolves `{ok: true}`
+ * only once a layer has actually landed, and this component waits for that
+ * answer: "Adding…" while it is in flight, "Added ✓" on success, and on
+ * `{ok: false}` or a rejection the button goes back to being clickable and an
+ * error line appears carrying the loader's own sentence. Marking an item
+ * added the moment it was clicked used to be a lie the user could not retry
+ * past — the button was already disabled, and the app's load error is
+ * rendered on the landing page only, so a failed add inside the viewer's Add
+ * Layer dialog was silent AND permanent.
  */
 
 import {
@@ -54,15 +55,32 @@ import type {
 import { CollectionCard } from "./CollectionCard";
 import { StacItemMap } from "./StacItemMap";
 
+/**
+ * What became of one URL handed to the app's loading path.
+ *
+ * A RESULT OBJECT, not a boolean, because the failure SENTENCE is the point:
+ * "Unsupported CityJSON version 1.0" and "the host does not allow browser
+ * access" call for entirely different next moves by the user, and a `false`
+ * collapses both into "try again", which is advice that cannot work for
+ * either. The loader already writes these sentences — this type is how they
+ * reach the one component that can show them next to the button that was
+ * clicked.
+ */
+export type AddUrlResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly message: string };
+
 export interface StacBrowserProps {
   /**
-   * Funnel into the app's URL loading path (App.handleUrl / dialog onAddUrl),
-   * resolving TRUE once a layer has landed and FALSE if the load failed.
+   * Funnel into the app's URL loading path (App.handleAddUrl), resolving
+   * `{ok: true}` once a layer has landed and `{ok: false, message}` — the
+   * loader's own sentence — when it failed.
    *
-   * The boolean is not decoration: this component is the only place a catalog
-   * add is visible from, so it is the only place that can report one failing.
+   * The result is not decoration: this component is the only place a catalog
+   * add is visible from, so it is the only place that can report one failing,
+   * and the message is the only thing that makes the report actionable.
    */
-  readonly onAddUrl: (url: string) => Promise<boolean>;
+  readonly onAddUrl: (url: string) => Promise<AddUrlResult>;
 }
 
 /**
@@ -90,8 +108,8 @@ interface RenderRow {
   readonly info: StacAssetInfo;
 }
 
-/** Copy-on-write set helpers — the add lifecycle moves an href between three
- *  sets, and React state must never be mutated in place. */
+/** Copy-on-write set/map helpers — the add lifecycle moves an href between
+ *  three collections, and React state must never be mutated in place. */
 function withHref(set: ReadonlySet<string>, href: string): ReadonlySet<string> {
   const next = new Set(set);
   next.add(href);
@@ -104,6 +122,26 @@ function withoutHref(
 ): ReadonlySet<string> {
   if (!set.has(href)) return set;
   const next = new Set(set);
+  next.delete(href);
+  return next;
+}
+
+function withFailure(
+  map: ReadonlyMap<string, string>,
+  href: string,
+  message: string,
+): ReadonlyMap<string, string> {
+  const next = new Map(map);
+  next.set(href, message);
+  return next;
+}
+
+function withoutFailure(
+  map: ReadonlyMap<string, string>,
+  href: string,
+): ReadonlyMap<string, string> {
+  if (!map.has(href)) return map;
+  const next = new Map(map);
   next.delete(href);
   return next;
 }
@@ -130,15 +168,15 @@ export function StacBrowser(props: StacBrowserProps): ReactElement {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   // Three states, not one flag: an add that is still in flight must not be
   // clickable again, and an add that FAILED must be, which a single
-  // "added" set cannot express.
+  // "added" set cannot express. Failures carry the loader's sentence.
   const [addedHrefs, setAddedHrefs] = useState<ReadonlySet<string>>(
     () => new Set<string>(),
   );
   const [pendingHrefs, setPendingHrefs] = useState<ReadonlySet<string>>(
     () => new Set<string>(),
   );
-  const [failedHrefs, setFailedHrefs] = useState<ReadonlySet<string>>(
-    () => new Set<string>(),
+  const [failedHrefs, setFailedHrefs] = useState<ReadonlyMap<string, string>>(
+    () => new Map<string, string>(),
   );
   const [viewportOnly, setViewportOnly] = useState(true);
   const [viewBounds, setViewBounds] = useState<ViewBounds | null>(null);
@@ -186,23 +224,27 @@ export function StacBrowser(props: StacBrowserProps): ReactElement {
       // A retry clears the previous complaint about this item immediately,
       // rather than leaving a stale error next to a button that is visibly
       // trying again.
-      setFailedHrefs((prev) => withoutHref(prev, href));
+      setFailedHrefs((prev) => withoutFailure(prev, href));
 
       void (async () => {
-        let landed = false;
+        let result: AddUrlResult;
         try {
-          landed = await onAddUrl(href);
+          result = await onAddUrl(href);
         } catch {
-          // The loading path reports failures by RESOLVING false; a rejection
-          // means something upstream of it broke. Either way the user's item
-          // did not arrive, which is the only thing this component can say.
-          landed = false;
+          // The loading path reports failures by RESOLVING {ok: false}; a
+          // rejection means something upstream of it broke, so there is no
+          // loader sentence to relay — only the fact that nothing arrived.
+          result = {
+            ok: false,
+            message: "The app's loading path failed unexpectedly.",
+          };
         }
         setPendingHrefs((prev) => withoutHref(prev, href));
-        if (landed) {
+        if (result.ok) {
           setAddedHrefs((prev) => withHref(prev, href));
         } else {
-          setFailedHrefs((prev) => withHref(prev, href));
+          const message = result.message;
+          setFailedHrefs((prev) => withFailure(prev, href, message));
         }
       })();
     },
@@ -257,14 +299,22 @@ export function StacBrowser(props: StacBrowserProps): ReactElement {
     };
   }, [allItems, itemFilter, viewportOnly, viewBounds]);
 
-  /** The items whose add failed, by the id the user actually reads. Derived
-   *  from the full list, not from `rows`: an item can fail and then be
-   *  filtered out of view, and the complaint must survive that. */
-  const failedIds = useMemo((): readonly string[] => {
+  /** The items whose add failed — the id the user actually reads, paired
+   *  with the loader's sentence for that href. Derived from the full list,
+   *  not from `rows`: an item can fail and then be filtered out of view, and
+   *  the complaint must survive that. */
+  const failures = useMemo((): ReadonlyArray<{
+    readonly id: string;
+    readonly message: string;
+  }> => {
     if (failedHrefs.size === 0) return [];
-    return allItems
-      .filter((it) => it.assetHref !== null && failedHrefs.has(it.assetHref))
-      .map((it) => it.id);
+    const out: Array<{ id: string; message: string }> = [];
+    for (const it of allItems) {
+      if (it.assetHref === null) continue;
+      const message = failedHrefs.get(it.assetHref);
+      if (message !== undefined) out.push({ id: it.id, message });
+    }
+    return out;
   }, [allItems, failedHrefs]);
 
   const selected = useMemo((): RenderRow | null => {
@@ -451,12 +501,17 @@ export function StacBrowser(props: StacBrowserProps): ReactElement {
           {/* The failure lives HERE, beside the buttons that raised it, and not
               in a toast or the app's load-error slot: this browser is mounted
               in two places, and only one of them (the landing page) renders
-              that slot at all. */}
-          {failedIds.length > 0 && (
-            <p className="stac-status stac-add-error" role="alert">
-              Could not load {failedIds.join(", ")} — the source may be
-              unreachable or unsupported. Try again.
-            </p>
+              that slot at all. Each line carries the loader's own sentence —
+              "Unsupported CityJSON version 1.0" and a blocked host need
+              different next moves, and a shared "try again" serves neither. */}
+          {failures.length > 0 && (
+            <div className="stac-status stac-add-error" role="alert">
+              {failures.map((f) => (
+                <p key={f.id} className="stac-add-error-line">
+                  <strong>{f.id}</strong>: {f.message}
+                </p>
+              ))}
+            </div>
           )}
 
           {selected !== null && (

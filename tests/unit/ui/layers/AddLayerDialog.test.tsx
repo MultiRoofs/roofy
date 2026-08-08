@@ -8,6 +8,7 @@
  * handlers the landing page uses.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AddUrlResult } from "../../../../src/ui/stac/StacBrowser";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 const CATALOG_URL = "https://catalog.test/tile.city.json";
@@ -17,7 +18,9 @@ const CATALOG_URL = "https://catalog.test/tile.city.json";
  *  A one-button stub is enough to check the wiring — that the tabpanel gets
  *  the RAW `onAddUrl`, so adding does not close the dialog. */
 vi.mock("../../../../src/ui/stac/StacBrowser", () => ({
-  StacBrowser: (props: { onAddUrl: (url: string) => Promise<boolean> }) => (
+  StacBrowser: (props: {
+    onAddUrl: (url: string) => Promise<AddUrlResult>;
+  }) => (
     <button type="button" onClick={() => props.onAddUrl(CATALOG_URL)}>
       stub catalog add
     </button>
@@ -34,13 +37,13 @@ afterEach(() => {
 
 const noop = () => {};
 /** The URL path now reports whether a layer landed. */
-const noopUrl = async () => true;
+const noopUrl = async () => ({ ok: true }) as const;
 
 function renderPanel(
   overrides: {
     onAddFile?: (file: File) => void;
     onAddFiles?: (files: File[]) => void;
-    onAddUrl?: (url: string) => Promise<boolean>;
+    onAddUrl?: (url: string) => Promise<AddUrlResult>;
     loading?: boolean;
   } = {},
 ) {
@@ -122,7 +125,7 @@ describe("AddLayerDialog — opening and closing", () => {
 
 describe("AddLayerDialog — loading a source", () => {
   it("submits a pasted URL to onAddUrl and closes", () => {
-    const onAddUrl = vi.fn(async () => true);
+    const onAddUrl = vi.fn(async () => ({ ok: true }) as const);
     renderPanel({ onAddUrl });
     openDialog();
 
@@ -139,7 +142,7 @@ describe("AddLayerDialog — loading a source", () => {
   });
 
   it("ignores an empty URL — the Load button is disabled", () => {
-    const onAddUrl = vi.fn(async () => true);
+    const onAddUrl = vi.fn(async () => ({ ok: true }) as const);
     renderPanel({ onAddUrl });
     openDialog();
 
@@ -208,7 +211,7 @@ describe("AddLayerDialog — loading a source", () => {
   });
 
   it("offers the catalog as a third tab, wide, and adding from it keeps the dialog open", () => {
-    const onAddUrl = vi.fn(async () => true);
+    const onAddUrl = vi.fn(async () => ({ ok: true }) as const);
     renderPanel({ onAddUrl });
     const dialog = openDialog();
 

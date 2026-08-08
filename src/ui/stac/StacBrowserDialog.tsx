@@ -16,14 +16,15 @@
 import { useCallback, useRef, type ReactElement } from "react";
 import { createPortal } from "react-dom";
 import { useModalChrome } from "../useModalChrome";
-import { StacBrowser } from "./StacBrowser";
+import { StacBrowser, type AddUrlResult } from "./StacBrowser";
 
 export interface StacBrowserDialogProps {
   readonly onClose: () => void;
   /** The app's URL loading path — the same one `AddLayerDialog` funnels into.
-   *  Resolves TRUE once a layer has landed; the browser needs that answer to
-   *  keep its "Added ✓" honest. */
-  readonly onAddUrl: (url: string) => Promise<boolean>;
+   *  Resolves `{ok: true}` once a layer has landed, or the loader's failure
+   *  sentence; the browser needs that answer to keep its "Added ✓" honest
+   *  and its error lines actionable. */
+  readonly onAddUrl: (url: string) => Promise<AddUrlResult>;
 }
 
 export function StacBrowserDialog({
