@@ -128,6 +128,31 @@ describe("classifyCityParquetUrl", () => {
       classifyCityParquetUrl("https://x.org/file.parquet?sig=a?b"),
     ).toEqual({ kind: "table", url: "https://x.org/file.parquet?sig=a?b" });
   });
+  /**
+   * `.parquet.gz` is not a shape the format defines, and the only honest report
+   * is the READER's ("could not be read as Parquet"). That report is only
+   * reachable if the URL enters the CityParquet arm at all: classified as
+   * anything else, `isCityParquetUrl` is false, the CityJSON loader takes it
+   * and the user is told their gzipped parquet is bad JSON.
+   */
+  it("classifies a .parquet.gz as a table, so the reader is what refuses it", () => {
+    expect(
+      classifyCityParquetUrl("https://x.org/d/building.parquet.gz"),
+    ).toEqual({ kind: "table", url: "https://x.org/d/building.parquet.gz" });
+    expect(isCityParquetUrl("https://x.org/d/building.parquet.gz")).toBe(true);
+    // Same in a bucket, where the alternative was worse still: an object name
+    // read as a DIRECTORY prefix, listed, and reported as an empty folder.
+    expect(classifyCityParquetUrl("gs://b/delft/building.parquet.gz")).toEqual({
+      kind: "storage-table",
+      store: { provider: "gcs", bucket: "b" },
+      objectName: "delft/building.parquet.gz",
+    });
+    // One `.gz` only — `.parquet.gz.gz` is not a table name anyone wrote.
+    expect(
+      classifyCityParquetUrl("https://x.org/d/b.parquet.gz.gz"),
+    ).toBeNull();
+  });
+
   it("throws on unlistable https wildcards, while the predicate stays total and true", () => {
     expect(() =>
       classifyCityParquetUrl("https://x.org/tiles/*/building.parquet"),

@@ -407,6 +407,34 @@ describe("useLayerFileLoader — CityParquet routing", () => {
     expect(result.current.error).toMatch(/cannot be listed/);
   });
 
+  /**
+   * A `.parquet.gz` URL must enter THIS arm, so the failure the user reads is
+   * the reader's. Routed by extension alone it would have gone to the CityJSON
+   * loader and been reported as malformed JSON — a message about the wrong
+   * format entirely, for a file whose only real problem is that CityParquet
+   * defines no gzipped spelling.
+   */
+  it("routes a .parquet.gz URL here, and surfaces the reader's refusal", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    cityparquet.loadCityParquetFromUrl.mockRejectedValue(
+      new Error(
+        "This file could not be read as Parquet while reading its footer. It may be truncated or corrupt, or use a Parquet feature this reader does not support.",
+      ),
+    );
+
+    await act(async () => {
+      await result.current.addLayerFromUrl(
+        "https://x/delft/building.parquet.gz",
+      );
+    });
+
+    expect(cityparquet.loadCityParquetFromUrl).toHaveBeenCalledWith(
+      "https://x/delft/building.parquet.gz",
+    );
+    expect(useLayerStore.getState().layers).toHaveLength(0);
+    expect(result.current.error).toMatch(/could not be read as Parquet/);
+  });
+
   it("leaves a .city.json URL on the CityJSON path", async () => {
     const { result } = renderHook(() => useLayerFileLoader());
 

@@ -80,6 +80,21 @@ function hasWildcard(text: string): boolean {
 }
 
 /**
+ * True if a path names ONE object table.
+ *
+ * `.parquet.gz` counts, even though CityParquet defines no gzipped spelling —
+ * BECAUSE it defines none. Classified as anything else, the URL leaves this arm
+ * entirely: `isCityParquetUrl` answers false, the CityJSON loader takes it, and
+ * the user is told their gzipped parquet is malformed JSON (or, in a bucket,
+ * that the "folder" they named holds no tables). Owning it here routes the
+ * bytes to the reader, whose "could not be read as Parquet" is the one honest
+ * report available — the component that actually looked at them.
+ */
+function isTablePath(path: string): boolean {
+  return path.endsWith(".parquet") || path.endsWith(".parquet.gz");
+}
+
+/**
  * True if `rest` names the package manifest ITSELF.
  *
  * The boundary is a "/" or the start of the name — `pkgmetadata.json` is an
@@ -125,7 +140,7 @@ function classifyStorageRest(
   if (hasWildcard(rest)) {
     return { kind: "storage-glob", store, pattern: rest };
   }
-  if (rest.endsWith(".parquet")) {
+  if (isTablePath(rest)) {
     return { kind: "storage-table", store, objectName: rest };
   }
   // A directory: the manifest names the package, but listing takes its parent.
@@ -194,7 +209,7 @@ export function classifyCityParquetUrl(raw: string): CityParquetSource | null {
     if (
       split &&
       (hasWildcard(split.rest) ||
-        split.rest.endsWith(".parquet") ||
+        isTablePath(split.rest) ||
         split.rest.endsWith("/") ||
         isManifestPath(split.rest))
     ) {
@@ -210,7 +225,7 @@ export function classifyCityParquetUrl(raw: string): CityParquetSource | null {
       "Plain https URLs cannot be listed — use gs:// or s3://, or point at the package's metadata.json.",
     );
   }
-  if (pathname.endsWith(".parquet")) {
+  if (isTablePath(pathname)) {
     return { kind: "table", url: trimmed };
   }
   if (pathname.endsWith(`/${MANIFEST_FILENAME}`) || pathname.endsWith("/")) {
