@@ -102,6 +102,25 @@ async function bucketHttp(
   return { http, fetched };
 }
 
+/** A manifest declaring `count` object tables, each in its own subfolder. */
+function manifestOf(count: number): string {
+  return JSON.stringify({
+    type: "Feature",
+    stac_version: "1.1.0",
+    id: "many",
+    assets: Object.fromEntries(
+      Array.from({ length: count }, (_, i) => [
+        `t${String(i)}`,
+        {
+          href: `./t${String(i)}/building.parquet`,
+          type: "application/vnd.apache.parquet",
+          roles: ["data", "cityparquet-objects"],
+        },
+      ]),
+    ),
+  });
+}
+
 describe("loadCityParquetFromUrl", () => {
   it("loads a single table url", async () => {
     const model = await loadCityParquetFromUrl(
@@ -152,9 +171,10 @@ describe("loadCityParquetFromUrl", () => {
     ).rejects.toThrow(/CityParquet/i);
   });
 
-  // `detectEncoding` strips one ".gz" and calls this cityparquet, so the loader
-  // must at least TRY it — the reader's "not a Parquet file" is the honest
-  // report, and a "never was CityParquet" here would contradict the router.
+  // A `.parquet.gz` classifies as a single table, so it is FETCHED and the
+  // reader's "could not be read as Parquet" is what the user sees. The format
+  // defines no gzipped spelling; being told so by the component that actually
+  // looked at the bytes beats any guess made from the name.
   it("fetches a .parquet.gz and fails in the reader, not the classifier", async () => {
     await expect(
       loadCityParquetFromUrl("https://x.org/p/building.parquet.gz", {
@@ -275,6 +295,99 @@ describe("loadCityParquetFromUrl", () => {
     ).rejects.toThrow(
       `The wildcard matches ${String(MAX_CITYPARQUET_FILES + 1)} files; the viewer loads at most ${String(MAX_CITYPARQUET_FILES)} at once — narrow the pattern.`,
     );
+  });
+
+  // The cap is a WHOLE-LOAD memory bound (spec D5), so it cannot be a property
+  // of the listing arms alone: a manifest is a list of hrefs someone else
+  // wrote, and 3D BAG's root package declares up to a thousand of them. Before
+  // this, one pasted package URL — or a share link carrying one — fetched every
+  // single one.
+  it("refuses a package manifest that declares more tables than the cap", async () => {
+    const fetched: string[] = [];
+    const http: HttpClient = {
+      async fetchText(url) {
+        if (url.endsWith("metadata.json"))
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            text: manifestOf(MAX_CITYPARQUET_FILES + 1),
+          };
+        return notFoundText();
+      },
+      async fetchBytes(url) {
+        fetched.push(url);
+        return notFoundBytes();
+      },
+    };
+    await expect(
+      loadCityParquetFromUrl("https://x.org/p/", http),
+    ).rejects.toThrow(
+      `This package declares ${String(MAX_CITYPARQUET_FILES + 1)} object tables; the viewer loads at most ${String(MAX_CITYPARQUET_FILES)} at once.`,
+    );
+    // Refused UP FRONT: not one table was requested.
+    expect(fetched).toEqual([]);
+  });
+
+  it("refuses an over-cap manifest found by listing a bucket prefix too", async () => {
+    const fetched: string[] = [];
+    const http: HttpClient = {
+      async fetchText(url) {
+        if (url.includes("/storage/v1/b/"))
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            text: JSON.stringify({ items: [{ name: "delft/metadata.json" }] }),
+          };
+        if (url.endsWith("metadata.json"))
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            text: manifestOf(MAX_CITYPARQUET_FILES + 1),
+          };
+        return notFoundText();
+      },
+      async fetchBytes(url) {
+        fetched.push(url);
+        return notFoundBytes();
+      },
+    };
+    await expect(
+      loadCityParquetFromUrl("gs://bkt/delft/", http),
+    ).rejects.toThrow(
+      `This package declares ${String(MAX_CITYPARQUET_FILES + 1)} object tables; the viewer loads at most ${String(MAX_CITYPARQUET_FILES)} at once.`,
+    );
+    expect(fetched).toEqual([]);
+  });
+
+  it("loads a manifest exactly at the cap", async () => {
+    const parquet = await readFile(`${FIX}/building.parquet`);
+    const fetched: string[] = [];
+    const http: HttpClient = {
+      async fetchText(url) {
+        if (url.endsWith("metadata.json"))
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            text: manifestOf(MAX_CITYPARQUET_FILES),
+          };
+        return notFoundText();
+      },
+      async fetchBytes(url) {
+        fetched.push(url);
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          bytes: new Uint8Array(parquet),
+        };
+      },
+    };
+    await loadCityParquetFromUrl("https://x.org/p/", http);
+    expect(fetched).toHaveLength(MAX_CITYPARQUET_FILES);
   });
 
   it("fails the whole load when one file of a set is missing", async () => {
@@ -459,10 +572,34 @@ describe("loadCityParquetFromFiles", () => {
     ).rejects.toThrow(/two files/i);
   });
 
-  it("rejects a folder with no tables", async () => {
+  it("rejects a selection with no tables, without calling it a folder", async () => {
+    // A single dropped file is a "selection", not a "folder" — the same loader
+    // serves both, and the message has to be true of the smaller one.
     await expect(
       loadCityParquetFromFiles([new File(["x"], "readme.txt")]),
-    ).rejects.toThrow(/no CityParquet object tables/i);
+    ).rejects.toThrow(
+      "The selection contains no CityParquet object tables (*.parquet).",
+    );
+  });
+
+  // The cap bounds the whole load, not the fetching: reading 1000 local tables
+  // into memory to assemble one model ends the same way a remote one does.
+  it("refuses a picked package whose manifest is over the cap", async () => {
+    const files = [
+      pickedFile(manifestOf(MAX_CITYPARQUET_FILES + 1), "big/metadata.json"),
+    ];
+    await expect(loadCityParquetFromFiles(files)).rejects.toThrow(
+      `This package declares ${String(MAX_CITYPARQUET_FILES + 1)} object tables; the viewer loads at most ${String(MAX_CITYPARQUET_FILES)} at once.`,
+    );
+  });
+
+  it("refuses a manifest-less selection of more tables than the cap", async () => {
+    const files = Array.from({ length: MAX_CITYPARQUET_FILES + 1 }, (_, i) =>
+      pickedFile("PAR1", `big/t${String(i)}/building.parquet`),
+    );
+    await expect(loadCityParquetFromFiles(files)).rejects.toThrow(
+      `The selection contains ${String(MAX_CITYPARQUET_FILES + 1)} object tables; the viewer loads at most ${String(MAX_CITYPARQUET_FILES)} at once.`,
+    );
   });
 
   it("names the file a manifest declares but the folder lacks", async () => {

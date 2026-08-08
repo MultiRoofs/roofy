@@ -12,10 +12,13 @@
  * missing is worse than an error naming the file that could not be read, and
  * unlike a streaming layer there is no later commit to repair it.
  *
- * EXPANSION IS CAPPED, fetching is not throttled beyond a small pool. A glob
- * over a tiled dataset can name thousands of objects; {@link MAX_CITYPARQUET_FILES}
- * is refused up front with the count, rather than a slice of it being loaded
- * silently.
+ * EXPANSION IS CAPPED ON EVERY ARM, fetching is not throttled beyond a small
+ * pool. {@link MAX_CITYPARQUET_FILES} is a whole-LOAD memory bound (spec D5),
+ * so it applies to a glob, to a listing, to a manifest's declared hrefs and to
+ * a picked folder alike — a manifest is a list someone else wrote (3D BAG's
+ * root package declares up to a thousand tables), reachable from one pasted URL
+ * or share link. Refused up front with the count, rather than a slice of it
+ * being loaded silently.
  */
 
 import {
@@ -288,15 +291,31 @@ function resolveHref(href: string, baseUrl: string): string {
   }
 }
 
-/** The tables a fetched manifest declares, as fetch targets. */
+/**
+ * The tables a fetched manifest declares, as fetch targets.
+ *
+ * CAPPED like every other expansion: the hrefs are a list the PACKAGE wrote,
+ * not one the user typed, and the largest real packages declare hundreds of
+ * them. The count is refused before the first byte is requested — there is no
+ * "narrow the pattern" advice to give here, because there is no pattern.
+ */
 function manifestTargets(
   manifest: unknown,
   baseUrl: string,
 ): { url: string; name: string }[] {
-  return parseCityParquetManifest(manifest).objectTables.map((href) => ({
+  const hrefs = parseCityParquetManifest(manifest).objectTables;
+  if (overCap(hrefs)) {
+    throw new Error(declaredOverCap(hrefs.length));
+  }
+  return hrefs.map((href) => ({
     url: resolveHref(href, baseUrl),
     name: href,
   }));
+}
+
+/** The sentence for a manifest that declares more tables than the cap. */
+function declaredOverCap(count: number): string {
+  return `This package declares ${String(count)} object tables; the viewer loads at most ${String(MAX_CITYPARQUET_FILES)} at once.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -379,12 +398,14 @@ export async function loadCityParquetFromUrl(
 ): Promise<CityModel> {
   const source = classifyCityParquetUrl(rawUrl);
   if (source === null) {
-    // `detectEncoding` routes anything ending in `.parquet` here, INCLUDING a
-    // `.parquet.gz` (it strips one `.gz` first) that `classifyCityParquetUrl`
-    // does not recognise. Fetching it as a single table keeps the router and
-    // this loader in agreement, and the reader then says what is actually
-    // wrong — "not a Parquet file" — instead of this function claiming the URL
-    // was never CityParquet at all.
+    // `detectEncoding` matches on a name, `classifyCityParquetUrl` on a URL, so
+    // a `.parquet` string that is not a parsable http(s)/gs/s3 URL at all (a
+    // bare relative path, another scheme) is CityParquet to the router and
+    // nothing to the classifier. Fetching it as a single table keeps the two in
+    // agreement, and the reader then says what is actually wrong — "could not
+    // be read as Parquet" — instead of this function claiming the URL was never
+    // CityParquet at all. (A `.parquet.gz` no longer lands here: the classifier
+    // owns it as a table, for the same reason.)
     if (detectEncoding(rawUrl) === "cityparquet") {
       return assembleCityParquetModel([
         await fetchTable(rawUrl, baseName(rawUrl), http),
@@ -488,8 +509,20 @@ export async function loadCityParquetFromFiles(
   }
 
   if (names.length === 0) {
+    // "Selection", not "folder": the same loader serves a picked folder, a
+    // multi-file drop and a single dropped file, and one dropped `.parquet.gz`
+    // reaches exactly this line.
     throw new Error(
-      "The folder contains no CityParquet object tables (*.parquet).",
+      "The selection contains no CityParquet object tables (*.parquet).",
+    );
+  }
+  // The cap bounds the whole LOAD, so reading local files is not exempt: 1000
+  // tables assembled into one model end in the same place however they arrived.
+  if (overCap(names)) {
+    throw new Error(
+      manifestFile === undefined
+        ? `The selection contains ${String(names.length)} object tables; the viewer loads at most ${String(MAX_CITYPARQUET_FILES)} at once.`
+        : declaredOverCap(names.length),
     );
   }
 
@@ -541,9 +574,10 @@ function lastSegment(path: string): string {
   return decodeSegment(segments.at(-1) ?? "");
 }
 
-/** Drop a trailing ".parquet" from a file name. */
+/** Drop a trailing ".parquet" (or ".parquet.gz") from a file name. */
 function withoutParquet(name: string): string {
-  return name.endsWith(".parquet") ? name.slice(0, -".parquet".length) : name;
+  const base = name.endsWith(".gz") ? name.slice(0, -".gz".length) : name;
+  return base.endsWith(".parquet") ? base.slice(0, -".parquet".length) : base;
 }
 
 function layerNameForSource(source: CityParquetSource): string {
