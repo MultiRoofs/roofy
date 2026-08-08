@@ -27,10 +27,23 @@ import {
   GeoJSONSource,
   GPUInitializationError,
   MapLibreMap,
+  setWorkerUrl,
   type MapLayerMouseEvent,
   type StyleSpecification,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+// maplibre 6 locates its worker as `new URL("./maplibre-gl-worker.mjs",
+// import.meta.url)` — a DYNAMIC pattern no bundler rewrites. Vite's dep
+// optimizer rebases `import.meta.url` into `.vite/deps/`, where that file does
+// not exist, so the worker fetch 404s, the GeoJSON source never indexes, and
+// the map renders its basemap with NO footprints and `loaded()` stuck false —
+// with nothing but a one-line "Failed to fetch" warning to show for it. A
+// production build breaks the same way for the same reason (the asset is
+// never emitted). `?url` makes Vite itself serve/emit the real file, and
+// `setWorkerUrl` is maplibre's supported override for exactly this.
+import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
+
+setWorkerUrl(maplibreWorkerUrl);
 import {
   combinedBounds,
   extentToBounds,
