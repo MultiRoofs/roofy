@@ -380,6 +380,49 @@ Status: Implementation complete through phase M7.7. **The final review has not r
 plan's last task (C26, a whole-branch review) is outstanding, so no reviewer has yet looked at
 the migration as a single diff. Per-task reviews were run and closed throughout.
 
+## Milestone 9: CityParquet Loading (Complete)
+
+Goal: load CityParquet packages as ordinary static city-model layers, from a URL, from an
+object-storage bucket, or from local files.
+
+Spec: `docs/superpowers/specs/2026-08-07-cityparquet-loading-design.md`.
+Plan: `docs/superpowers/plans/2026-08-07-cityparquet-loading.md`.
+
+Deliverables:
+
+- Engine-free reader in `@cityjson/navara-cityparquet` — footer `city` metadata, table
+  decode, WKB geometry, STAC-Item package assembly — producing the same normalised
+  `CityModel` the CityJSON path produces ✓
+- Vendored, patched hyparquet 1.28.1 (`DELTA_BYTE_ARRAY` in DataPage V1; geoparquet
+  auto-conversion disabled from outside via a complete `parsers` override). See
+  `src/vendor/hyparquet/VENDORED.md` ✓
+- URL sourcing in `src/features/cityparquet/` — single `.parquet` table, https package
+  directory, and `gs://`/`s3://` wildcard or prefix expanded by anonymous bucket listing
+  (capped at 64 tables); plain-https wildcards rejected with an explanation ✓
+- Local `.parquet` file drop, multi-file drop, and folder picking (`webkitdirectory`) ✓
+- `.parquet` data assets offered by the STAC catalog browser ✓
+- Errors surface inline on the landing page and as toasts in the viewer shell ✓
+- CRS from the footer's `city.crs` PROJJSON, EPSG authority only — the existing CRS gate
+  rejects anything else ✓
+- Analytics via the existing in-memory path (`loadCityModelFromMemory`); decoding never
+  depends on DuckDB ✓
+
+Out of scope in v1, deliberately: appearance (materials/textures), geometry templates, the
+experimental `CityParquetArrowNative-v1` encoding, partial/streaming reads, authenticated
+buckets.
+
+Status: Complete. Browser-smoked 2026-08-08 against the fixture package served over http —
+package-directory URL and single-`.parquet` URL both add as layers and render georeferenced
+on the globe, picking resolves objects with inherited attributes labelled by source, the LoD
+selector offers the package's `2.2` and `0`, a 404 URL surfaces a toast, and a saved
+workspace restores both URL layers. Verification green: `npx tsc -b --noEmit`, app 105 files
+/ 1295 tests, submodule typecheck + 52 files / 719 tests + `pnpm build`.
+
+Known limitation, not a defect: `gs://` against the public `cityparquet` bucket maps to the
+right https URL and issues the request, but the bucket serves no `Access-Control-Allow-Origin`
+header, so the browser blocks it and the app reports the CORS-aware network error. Object
+storage support is only as usable as the bucket's CORS configuration.
+
 ## Cross-Cutting Workstreams
 
 - Data quality and semantic assumptions
