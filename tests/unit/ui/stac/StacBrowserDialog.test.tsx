@@ -8,12 +8,15 @@
  * dialog would only re-test the crawl mock.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AddUrlResult } from "../../../../src/ui/stac/StacBrowser";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 const ADDED_URL = "https://x/a.city.json";
 
 vi.mock("../../../../src/ui/stac/StacBrowser", () => ({
-  StacBrowser: (props: { onAddUrl: (url: string) => Promise<boolean> }) => (
+  StacBrowser: (props: {
+    onAddUrl: (url: string) => Promise<AddUrlResult>;
+  }) => (
     <button type="button" onClick={() => props.onAddUrl(ADDED_URL)}>
       stub add
     </button>
@@ -25,12 +28,12 @@ import { StacBrowserDialog } from "../../../../src/ui/stac/StacBrowserDialog";
 afterEach(cleanup);
 
 const noop = () => {};
-const noopUrl = async () => true;
+const noopUrl = async () => ({ ok: true }) as const;
 
 function renderDialog(
   overrides: {
     onClose?: () => void;
-    onAddUrl?: (url: string) => Promise<boolean>;
+    onAddUrl?: (url: string) => Promise<AddUrlResult>;
   } = {},
 ) {
   return render(
@@ -87,7 +90,7 @@ describe("StacBrowserDialog", () => {
 
   it("forwards an added URL and stays open — the catalog is multi-add", () => {
     const onClose = vi.fn();
-    const onAddUrl = vi.fn(async () => true);
+    const onAddUrl = vi.fn(async () => ({ ok: true }) as const);
     renderDialog({ onClose, onAddUrl });
 
     fireEvent.click(screen.getByRole("button", { name: "stub add" }));

@@ -58,10 +58,16 @@ import type {
 import {
   ITEM_LIST_RENDER_CAP,
   StacBrowser,
+  type AddUrlResult,
 } from "../../../../src/ui/stac/StacBrowser";
 
 const collectionsMock = vi.mocked(fetchStacCollections);
 const itemsMock = vi.mocked(fetchCollectionItems);
+
+const OK: AddUrlResult = { ok: true };
+function FAIL(message: string): AddUrlResult {
+  return { ok: false, message };
+}
 
 function card(overrides: Partial<StacCollectionCard> = {}): StacCollectionCard {
   const id = overrides.id ?? "3dbag";
@@ -134,7 +140,7 @@ describe("StacBrowser — collections view", () => {
       card(),
       card({ id: "tudelft", title: "TU Delft campus" }),
     ]);
-    render(<StacBrowser onAddUrl={vi.fn(async () => true)} />);
+    render(<StacBrowser onAddUrl={vi.fn(async () => OK)} />);
 
     expect(screen.getByText("Loading catalog…")).toBeTruthy();
 
@@ -158,7 +164,7 @@ describe("StacBrowser — collections view", () => {
         description: "Finnish capital city model.",
       }),
     ]);
-    render(<StacBrowser onAddUrl={vi.fn(async () => true)} />);
+    render(<StacBrowser onAddUrl={vi.fn(async () => OK)} />);
     await screen.findByRole("button", { name: /3D BAG/ });
 
     fireEvent.change(screen.getByLabelText("Filter collections"), {
@@ -173,7 +179,7 @@ describe("StacBrowser — collections view", () => {
     collectionsMock.mockResolvedValue([
       card({ id: "no-index", title: "No Index", itemsParquetHref: null }),
     ]);
-    render(<StacBrowser onAddUrl={vi.fn(async () => true)} />);
+    render(<StacBrowser onAddUrl={vi.fn(async () => OK)} />);
 
     const button = await screen.findByRole("button", { name: /No Index/ });
     expect(button).toBeDisabled();
@@ -193,7 +199,7 @@ describe("StacBrowser — items view", () => {
       item({ id: "delft-0002" }),
       item({ id: "rotterdam-0003" }),
     ]);
-    render(<StacBrowser onAddUrl={vi.fn(async () => true)} />);
+    render(<StacBrowser onAddUrl={vi.fn(async () => OK)} />);
     await openCollection();
 
     expect(itemsMock).toHaveBeenCalledTimes(1);
@@ -213,7 +219,7 @@ describe("StacBrowser — items view", () => {
     );
     collectionsMock.mockResolvedValue([card()]);
     itemsMock.mockResolvedValue(many);
-    render(<StacBrowser onAddUrl={vi.fn(async () => true)} />);
+    render(<StacBrowser onAddUrl={vi.fn(async () => OK)} />);
     await openCollection();
 
     expect(rows()).toHaveLength(ITEM_LIST_RENDER_CAP);
@@ -232,7 +238,7 @@ describe("StacBrowser — items view", () => {
   });
 
   it("adds a loadable item once and remembers it", async () => {
-    const onAddUrl = vi.fn(async () => true);
+    const onAddUrl = vi.fn(async () => OK);
     collectionsMock.mockResolvedValue([card()]);
     itemsMock.mockResolvedValue([item()]);
     render(<StacBrowser onAddUrl={onAddUrl} />);
@@ -254,10 +260,10 @@ describe("StacBrowser — items view", () => {
   });
 
   it("marks an add in flight and refuses to fire it twice", async () => {
-    let settle!: (landed: boolean) => void;
+    let settle!: (result: AddUrlResult) => void;
     const onAddUrl = vi.fn(
       () =>
-        new Promise<boolean>((res) => {
+        new Promise<AddUrlResult>((res) => {
           settle = res;
         }),
     );
@@ -277,13 +283,17 @@ describe("StacBrowser — items view", () => {
     expect(onAddUrl).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      settle(true);
+      settle(OK);
     });
     expect(screen.getByRole("button", { name: "Added ✓" })).toBeTruthy();
   });
 
   it("rolls a failed add back to a clickable button and says so inline", async () => {
-    const onAddUrl = vi.fn(async () => false);
+    const onAddUrl = vi.fn(async () =>
+      FAIL(
+        'Unsupported CityJSON version "1.0". Only v1.x and v2.x are supported.',
+      ),
+    );
     collectionsMock.mockResolvedValue([card()]);
     itemsMock.mockResolvedValue([item()]);
     render(<StacBrowser onAddUrl={onAddUrl} />);
@@ -296,7 +306,10 @@ describe("StacBrowser — items view", () => {
     // the landing page, and this component is also mounted inside the viewer's
     // Add Layer dialog, where nothing would have shown the failure at all.
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("Could not load delft-0001");
+    // The loader's own sentence, not a canned "try again": the reason is the
+    // only thing that tells the user what their next move is.
+    expect(alert.textContent).toContain("delft-0001");
+    expect(alert.textContent).toContain('Unsupported CityJSON version "1.0"');
 
     // ...and the add is retryable, which an optimistic "Added ✓" was not.
     const retry = screen.getByRole("button", { name: "Add to scene" });
@@ -319,8 +332,12 @@ describe("StacBrowser — items view", () => {
     fireEvent.click(rows()[0]!);
     fireEvent.click(screen.getByRole("button", { name: "Add to scene" }));
 
-    expect((await screen.findByRole("alert")).textContent).toContain(
-      "Could not load delft-0001",
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("delft-0001");
+    // A rejection has no loader sentence to relay, so the component supplies
+    // its own — pinned here so the fallback cannot silently vanish.
+    expect(alert.textContent).toContain(
+      "The app's loading path failed unexpectedly.",
     );
     expect(screen.getByRole("button", { name: "Add to scene" })).toBeEnabled();
   });
@@ -334,7 +351,7 @@ describe("StacBrowser — items view", () => {
         assetType: "application/zip",
       }),
     ]);
-    render(<StacBrowser onAddUrl={vi.fn(async () => true)} />);
+    render(<StacBrowser onAddUrl={vi.fn(async () => OK)} />);
     await openCollection();
 
     fireEvent.click(rows()[0]!);
@@ -350,7 +367,7 @@ describe("StacBrowser — items view", () => {
   it("returns to the collections view", async () => {
     collectionsMock.mockResolvedValue([card()]);
     itemsMock.mockResolvedValue([item()]);
-    render(<StacBrowser onAddUrl={vi.fn(async () => true)} />);
+    render(<StacBrowser onAddUrl={vi.fn(async () => OK)} />);
     await openCollection();
 
     fireEvent.click(screen.getByRole("button", { name: "← Collections" }));
@@ -368,7 +385,7 @@ describe("StacBrowser — viewport filter", () => {
   async function openWithBounds(): Promise<void> {
     collectionsMock.mockResolvedValue([card()]);
     itemsMock.mockResolvedValue([inView, outOfView, noFootprint]);
-    render(<StacBrowser onAddUrl={vi.fn(async () => true)} />);
+    render(<StacBrowser onAddUrl={vi.fn(async () => OK)} />);
     await openCollection();
 
     act(() => {
@@ -409,7 +426,7 @@ describe("StacBrowser — viewport filter", () => {
     // empties the list entirely — which without a word looks exactly like a
     // collection that has no items at all.
     itemsMock.mockResolvedValue([inView, outOfView]);
-    render(<StacBrowser onAddUrl={vi.fn(async () => true)} />);
+    render(<StacBrowser onAddUrl={vi.fn(async () => OK)} />);
     await openCollection();
 
     act(() => {

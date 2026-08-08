@@ -32,7 +32,7 @@ import { createPortal } from "react-dom";
 import { useModalChrome } from "../useModalChrome";
 import { SourcePicker } from "./SourcePicker";
 import { GeospatialSourceForm } from "./GeospatialSourceForm";
-import { StacBrowser } from "../stac/StacBrowser";
+import { StacBrowser, type AddUrlResult } from "../stac/StacBrowser";
 
 interface AddLayerDialogProps {
   readonly onClose: () => void;
@@ -40,10 +40,11 @@ interface AddLayerDialogProps {
   /** Several files as ONE layer — a CityParquet package folder, or a
    *  multi-file drop. Closes the dialog exactly like `onAddFile`. */
   readonly onAddFiles: (files: File[]) => void;
-  /** Resolves TRUE once a layer has landed. The URL field ignores the answer
-   *  (it closes the dialog either way, and the app reports the failure); the
-   *  catalog tab needs it to roll a failed "Added ✓" back. */
-  readonly onAddUrl: (url: string) => Promise<boolean>;
+  /** Resolves `{ok: true}` once a layer has landed. The URL field ignores the
+   *  answer (it closes the dialog either way, and the app reports the
+   *  failure); the catalog tab needs it to roll a failed "Added ✓" back and
+   *  to show the loader's sentence beside the item. */
+  readonly onAddUrl: (url: string) => Promise<AddUrlResult>;
   readonly loading: boolean;
 }
 

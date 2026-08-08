@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import { LayerPanel } from "../layers/LayerPanel";
+import type { AddUrlResult } from "../stac/StacBrowser";
 import { GoogleTilesPanel } from "../layers/GoogleTilesPanel";
 import { BasemapPanel } from "../layers/BasemapPanel";
 
@@ -20,8 +21,8 @@ interface LeftSidebarProps {
   readonly onAddFile: (file: File) => void;
   /** Several picked files as ONE layer — see {@link AddLayerDialog}. */
   readonly onAddFiles: (files: File[]) => void;
-  /** Resolves TRUE once a layer has landed — see {@link AddLayerDialog}. */
-  readonly onAddUrl: (url: string) => Promise<boolean>;
+  /** Resolves `{ok: true}` once a layer has landed — see {@link AddLayerDialog}. */
+  readonly onAddUrl: (url: string) => Promise<AddUrlResult>;
   readonly loading: boolean;
   readonly onFlyToLayer?: (layerId: string) => void;
 }

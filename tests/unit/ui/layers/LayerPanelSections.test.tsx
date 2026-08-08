@@ -30,7 +30,7 @@ afterEach(() => {
 
 const noop = () => {};
 /** The URL path now reports whether a layer landed; these suites never look. */
-const noopUrl = async () => true;
+const noopUrl = async () => ({ ok: true }) as const;
 
 function renderPanel() {
   return render(
