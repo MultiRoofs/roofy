@@ -440,6 +440,36 @@ export function App({
     clearError,
   } = useLayerFileLoader({ resolveStreamPlugin });
 
+  /** The message already put on screen, so a re-render cannot raise the same
+   *  toast twice — and so a REPEAT of the same failure still does (every entry
+   *  point calls `clearError()` first, which resets this through the `null`
+   *  branch below). */
+  const toastedLoadErrorRef = useRef<string | null>(null);
+
+  /**
+   * A failed load has ONE surface, and the viewer shell is not the landing
+   * page.
+   *
+   * `loadError` is rendered inline as `.error-message` — in the landing
+   * branch only. Once the shell is up, an add that fails has nowhere to be
+   * seen: the Add Layer dialog closes on the way out and takes the only
+   * remaining surface with it, so a folder with no CityParquet object tables,
+   * or a 404, simply did nothing. Toast it there, exactly as a layer the
+   * ENGINE refuses already is (`handleLayerError`), and leave the landing
+   * page's inline paragraph as the only report on that side — two reports of
+   * one failure is its own bug.
+   */
+  useEffect(() => {
+    if (loadError === null) {
+      toastedLoadErrorRef.current = null;
+      return;
+    }
+    if (!hasLayers && !engineBooting) return;
+    if (toastedLoadErrorRef.current === loadError) return;
+    toastedLoadErrorRef.current = loadError;
+    showToast(loadError, EXPLANATION_TOAST_MS);
+  }, [loadError, hasLayers, engineBooting, showToast]);
+
   const selections = useSelectionStore((s) => s.selections);
   const mode = useSelectionStore((s) => s.mode);
   const toolMode = useSelectionStore((s) => s.toolMode);

@@ -3081,13 +3081,26 @@ button.file-label:disabled {
 }
 
 /* A gesture the picker cannot honour (dropping a folder), explained where it
-   was attempted. Same red as `.error-message`, quieter, and inside the zone. */
-.source-picker-hint {
+   was attempted. Same red as `.error-message`, quieter, and inside the zone.
+
+   The `p.` is load-bearing: `.drop-zone p` (and, in the dialog, the still more
+   specific `.source-picker-panel .drop-zone p`) sets a muted colour on every
+   paragraph in the zone, so a bare `.source-picker-hint` class LOSES and the
+   warning renders in exactly the grey of the instructions it has to stand out
+   from. */
+.drop-zone p.source-picker-hint {
   margin: 0.15rem 0 0;
   max-width: 32rem;
   font-size: 0.78rem;
   line-height: 1.4;
   color: #c53030;
+}
+
+/* The same red the dialog's other inline errors use — legible on both themes'
+   panel background, where the landing page's darker #c53030 is not. */
+.source-picker-panel .drop-zone p.source-picker-hint {
+  color: #f87171;
+  font-size: 0.72rem;
 }
 
 .source-picker-formats {

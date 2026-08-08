@@ -130,22 +130,26 @@ export function SourcePicker({
   }, []);
 
   /**
-   * Hand a picked GROUP over, whatever produced it.
+   * Hand a picked selection over.
    *
-   * One file is one file even when it arrived through the folder button — a
-   * single `.parquet` is a valid one-table package and the caller's per-file
-   * path already routes it. Only a genuine group needs `onFiles`, and without
-   * that prop the first file is better than nothing at all.
+   * `alwaysGroup` is what a FOLDER pick sets, and it matters for a package of
+   * exactly ONE table: the group path names the layer from
+   * `webkitRelativePath` (its folder), while the per-file path names it after
+   * the file — so a folder holding a single `building.parquet` would arrive
+   * as the layer "building.parquet" instead of "delft". A DROP has no folder
+   * to be named after, so a single dropped file still takes `onFile`.
+   *
+   * Without `onFiles` the first file is handed over anyway: better the old
+   * behaviour than a selection that vanishes.
    */
   const emitFiles = useCallback(
-    (files: File[]) => {
+    (files: File[], alwaysGroup = false) => {
       if (files.length === 0) return;
-      if (files.length === 1) {
-        onFile(files[0]!);
+      if (onFiles && (alwaysGroup || files.length > 1)) {
+        onFiles(files);
         return;
       }
-      if (onFiles) onFiles(files);
-      else onFile(files[0]!);
+      onFile(files[0]!);
     },
     [onFile, onFiles],
   );
@@ -180,7 +184,7 @@ export function SourcePicker({
   const handleFolderChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       setDropHint(null);
-      emitFiles(Array.from(e.target.files ?? []));
+      emitFiles(Array.from(e.target.files ?? []), true);
       // Cleared so re-picking the SAME folder fires `change` again.
       e.target.value = "";
     },
