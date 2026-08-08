@@ -257,7 +257,9 @@ describe("fcb streaming pipeline (delft.fcb, real file)", () => {
       ) as unknown as CityJSONFeature;
       const realVertices = dequantizeAll(
         cjFeature.vertices,
-        cjHeader.transform,
+        // `transform` is optional on CityJSONRoot only because CityJSON v1.0
+        // may omit it; a FlatCityBuf header always carries one.
+        cjHeader.transform!,
       );
       const objects: Record<string, CityObject> = {};
       let modelBBox: BBox3 | null = null;
