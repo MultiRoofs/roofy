@@ -87,6 +87,33 @@ describe("SourcePicker — folder picking", () => {
     expect(clicked).toEqual([folderInput()]);
   });
 
+  it("keeps a ONE-table folder a group, so the layer is named after the folder", () => {
+    const onFile = vi.fn();
+    const onFiles = vi.fn();
+    render(
+      <SourcePicker
+        onFile={onFile}
+        onFiles={onFiles}
+        onUrl={vi.fn()}
+        loading={false}
+      />,
+    );
+
+    // A package can be a single table with no `metadata.json`. Only the group
+    // path reads `webkitRelativePath`, which is where the name "delft" is —
+    // `onFile` would name the layer "building.parquet".
+    const only = new File(["a"], "building.parquet");
+    Object.defineProperty(only, "webkitRelativePath", {
+      value: "delft/building.parquet",
+    });
+    const input = folderInput();
+    Object.defineProperty(input, "files", { value: [only] });
+    fireEvent.change(input);
+
+    expect(onFiles).toHaveBeenCalledWith([only]);
+    expect(onFile).not.toHaveBeenCalled();
+  });
+
   it("ignores an empty folder selection", () => {
     const onFiles = vi.fn();
     const onFile = vi.fn();

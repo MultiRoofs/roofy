@@ -149,6 +149,7 @@ vi.mock(
 /** Only the I/O is replaced; `cityParquetLayerNameFromUrl` and the classifier
  *  stay real, because the routing is the thing being tested. */
 const loadCityParquetFromUrl = vi.fn();
+const loadCityParquetFromFiles = vi.fn();
 vi.mock(
   "../../../src/features/cityparquet/loadCityParquet",
   async (importOriginal) => ({
@@ -156,6 +157,8 @@ vi.mock(
       typeof import("../../../src/features/cityparquet/loadCityParquet")
     >()),
     loadCityParquetFromUrl: (url: string) => loadCityParquetFromUrl(url),
+    loadCityParquetFromFiles: (files: ReadonlyArray<File>) =>
+      loadCityParquetFromFiles(files),
   }),
 );
 
@@ -226,6 +229,8 @@ beforeEach(() => {
   loadFromUrl.mockResolvedValue(jsonModel);
   loadCityParquetFromUrl.mockReset();
   loadCityParquetFromUrl.mockResolvedValue(parquetModel);
+  loadCityParquetFromFiles.mockReset();
+  loadCityParquetFromFiles.mockResolvedValue(parquetModel);
   useLayerStore.setState({ layers: [], activeLayerId: null });
   location.hash = "";
 });
@@ -408,5 +413,73 @@ describe("App DuckDB load — CityParquet layers", () => {
     await waitFor(() =>
       expect(loadModelIntoDuckDB).toHaveBeenCalledWith(JSON_URL, "cityjson"),
     );
+  });
+});
+
+/**
+ * A failed GROUP add has to be visible from wherever it was attempted.
+ *
+ * `loadError` is rendered inline — in the LANDING branch only. Inside the
+ * viewer shell the Add Layer dialog closes on the way out, so before this the
+ * "no CityParquet object tables" sentence went nowhere at all and dropping two
+ * wrong files simply did nothing.
+ */
+describe("App — a failed group add is reported", () => {
+  const NO_TABLES = "No CityParquet object tables in the selection.";
+
+  /** Two files, the way a browser delivers a multi-file drop. jsdom has no
+   *  real `DataTransfer`, so the shape the handler reads is supplied. */
+  function dropTwoFiles(): void {
+    fireEvent.drop(screen.getByTestId("source-picker-drop-zone"), {
+      dataTransfer: {
+        files: [new File(["a"], "a.city.json"), new File(["b"], "b.city.json")],
+        types: ["Files"],
+        dropEffect: "",
+      },
+    });
+  }
+
+  it("toasts the loader's message inside the viewer shell", async () => {
+    loadCityParquetFromFiles.mockRejectedValue(new Error(NO_TABLES));
+    render(<App persistenceStore={storeWith(null)} />);
+    // A layer, so the shell is up and the landing page's inline error slot is
+    // not on screen.
+    useLayerStore.getState().addLayer({
+      id: "layer-1",
+      name: "delft",
+      model: jsonModel,
+      modelRef: { type: "url", url: JSON_URL },
+      visible: true,
+      rules: [],
+      rulesEnabled: true,
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add Layer" }));
+    dropTwoFiles();
+
+    await waitFor(() =>
+      expect(loadCityParquetFromFiles).toHaveBeenCalledTimes(1),
+    );
+    const toast = await waitFor(() => {
+      const el = document.querySelector(".toast");
+      if (el === null) throw new Error("no toast yet");
+      return el;
+    });
+    expect(toast.textContent).toBe(NO_TABLES);
+    // The dialog closed on the way out, as it does for a single file.
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("reports it ONCE on the landing page — inline, with no toast", async () => {
+    loadCityParquetFromFiles.mockRejectedValue(new Error(NO_TABLES));
+    render(<App persistenceStore={storeWith(null)} />);
+
+    dropTwoFiles();
+
+    expect(await screen.findByText(NO_TABLES)).toBeTruthy();
+    expect(document.querySelector(".error-message")?.textContent).toBe(
+      NO_TABLES,
+    );
+    expect(document.querySelector(".toast")).toBeNull();
   });
 });
