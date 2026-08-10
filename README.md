@@ -1,5 +1,7 @@
 # MultiRoof Viewer
 
+Use a deployed app at **[https://viewer.open3d.city](https://viewer.open3d.city)**
+
 MultiRoof Viewer is a planned web application for exploring and analyzing 3D city models in support of the MultiRoofs project. The product focus is rooftop-centric urban planning: visualization, rooftop suitability analysis, solar and shading exploration, and browser-based statistics for planners and researchers.
 
 ## Current Status
