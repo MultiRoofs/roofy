@@ -2569,6 +2569,69 @@ body {
   cursor: pointer;
 }
 
+/* Wrapped under the row, like the object-type list: four controls inline would
+   treble the height of every row in a 240 px panel, so they live behind a
+   disclosure that costs one line closed. */
+.geo-style {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.geo-style-summary {
+  color: var(--fg-dim);
+  font-size: 0.62rem;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  user-select: none;
+}
+
+.geo-style-summary:hover {
+  color: var(--accent);
+}
+
+.geo-style-fields {
+  display: grid;
+  /* Label left, control right — the labels are short and the controls are all
+     narrow, so one column reads faster than a wrapped flex row. */
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.25rem 0.4rem;
+  padding: 0.3rem 0 0.1rem;
+}
+
+.geo-style-field {
+  display: contents;
+  color: var(--fg-muted);
+  font-size: 0.62rem;
+}
+
+.geo-style-color {
+  width: 2rem;
+  height: 1.1rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+
+.geo-style-number {
+  width: 3.5rem;
+  padding: 0.05rem 0.2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 0.62rem;
+}
+
+.geo-style-slider {
+  width: 3.5rem;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 /* Wrapped under the row (the flex line breaks before it), like the city rows'
    object-type list. */
 .geo-layer-relink {

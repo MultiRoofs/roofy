@@ -85,8 +85,20 @@ function addRaster(name = "OSM"): string {
   });
 }
 
+function addGeoJson(name = "roads"): string {
+  return geoStore().addGeoLayer({
+    name,
+    kind: "geojson",
+    config: { url: "https://x/roads.geojson" },
+  });
+}
+
 function geoRows(): HTMLElement[] {
   return screen.queryAllByTestId("geo-layer-row");
+}
+
+function geoLayer(id: string) {
+  return geoStore().layers.find((l) => l.id === id)!;
 }
 
 describe("LayerPanel — two sections", () => {
@@ -198,17 +210,6 @@ describe("LayerPanel — a geospatial row", () => {
     );
   });
 
-  it("offers NO opacity slider for a GeoJSON layer", () => {
-    geoStore().addGeoLayer({
-      name: "roads",
-      kind: "geojson",
-      config: { url: "https://x/roads.geojson" },
-    });
-    renderPanel();
-
-    expect(within(geoRows()[0]!).queryByLabelText(/opacity/i)).toBeNull();
-  });
-
   it("removes the layer", () => {
     addRaster();
     renderPanel();
@@ -218,6 +219,108 @@ describe("LayerPanel — a geospatial row", () => {
     );
 
     expect(geoStore().layers).toHaveLength(0);
+  });
+});
+
+describe("LayerPanel — a vector row's style controls", () => {
+  it("offers colour, point size, line width and fill opacity", () => {
+    addGeoJson();
+    renderPanel();
+
+    const row = within(geoRows()[0]!);
+    const color = row.getByLabelText("Layer color") as HTMLInputElement;
+    expect(color.type).toBe("color");
+    expect(row.getByLabelText("Point size")).toBeTruthy();
+    expect(row.getByLabelText("Line width")).toBeTruthy();
+    expect(row.getByLabelText("Fill opacity")).toBeTruthy();
+  });
+
+  it("fades a vector layer through the general opacity slider too", () => {
+    const id = addGeoJson();
+    renderPanel();
+
+    const slider = within(geoRows()[0]!).getByLabelText(
+      "Opacity",
+    ) as HTMLInputElement;
+    fireEvent.change(slider, { target: { value: "0.3" } });
+
+    expect(geoLayer(id).opacity).toBeCloseTo(0.3);
+  });
+
+  it("writes a colour edit through as a FRESH style object", () => {
+    const id = addGeoJson();
+    renderPanel();
+
+    const before = geoLayer(id).style;
+    fireEvent.change(within(geoRows()[0]!).getByLabelText("Layer color"), {
+      target: { value: "#00ff00" },
+    });
+
+    const after = geoLayer(id).style;
+    expect(after.color).toBe("#00ff00");
+    // Identity moves on every style edit — the reconciler re-describes on it.
+    expect(after).not.toBe(before);
+    // …and the fields the user did not touch come along unchanged.
+    expect(after.pointSizePx).toBe(before.pointSizePx);
+    expect(after.lineWidthPx).toBe(before.lineWidthPx);
+  });
+
+  it("commits point size and line width as numbers", () => {
+    const id = addGeoJson();
+    renderPanel();
+
+    const row = within(geoRows()[0]!);
+    fireEvent.change(row.getByLabelText("Point size"), {
+      target: { value: "8" },
+    });
+    fireEvent.change(row.getByLabelText("Line width"), {
+      target: { value: "5" },
+    });
+
+    expect(geoLayer(id).style.pointSizePx).toBe(8);
+    expect(geoLayer(id).style.lineWidthPx).toBe(5);
+  });
+
+  it("leaves the size alone while its box is empty mid-edit", () => {
+    const id = addGeoJson();
+    renderPanel();
+
+    const row = within(geoRows()[0]!);
+    fireEvent.change(row.getByLabelText("Point size"), {
+      target: { value: "8" },
+    });
+    // Clearing the box to retype it must not read as "0" and snap the layer
+    // back to the app default through the store's normalization.
+    fireEvent.change(row.getByLabelText("Point size"), {
+      target: { value: "" },
+    });
+
+    expect(geoLayer(id).style.pointSizePx).toBe(8);
+  });
+
+  it("commits fill opacity from its own slider", () => {
+    const id = addGeoJson();
+    renderPanel();
+
+    fireEvent.change(within(geoRows()[0]!).getByLabelText("Fill opacity"), {
+      target: { value: "0.25" },
+    });
+
+    expect(geoLayer(id).style.fillOpacity).toBeCloseTo(0.25);
+    // The general opacity is a different value and stays where it was.
+    expect(geoLayer(id).opacity).toBe(1);
+  });
+
+  it("gives a raster row the opacity slider and NO style controls", () => {
+    addRaster();
+    renderPanel();
+
+    const row = within(geoRows()[0]!);
+    expect(row.getByLabelText("Opacity")).toBeTruthy();
+    expect(row.queryByLabelText("Layer color")).toBeNull();
+    expect(row.queryByLabelText("Point size")).toBeNull();
+    expect(row.queryByLabelText("Line width")).toBeNull();
+    expect(row.queryByLabelText("Fill opacity")).toBeNull();
   });
 });
 
