@@ -15,6 +15,32 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "jsx": "react-jsx",
+    // No `baseUrl`: TypeScript 6 deprecates it, and since TS 4.4 `paths`
+    // entries resolve relative to this file's directory on their own.
+    "paths": {
+      "@cityjson/navara-core": [
+        "./packages/cityjson-navara-plugins/packages/navara-core/src/index.ts"
+      ],
+      "@cityjson/navara-cityjson": [
+        "./packages/cityjson-navara-plugins/packages/navara-cityjson/src/index.ts"
+      ],
+      // The engine-bound entry point: everything reachable from it imports
+      // @navaramap/three, so it is deliberately NOT part of the main barrel.
+      "@cityjson/navara-cityjson/plugin": [
+        "./packages/cityjson-navara-plugins/packages/navara-cityjson/src/plugin.ts"
+      ],
+      "@cityjson/navara-flatcitybuf": [
+        "./packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/index.ts"
+      ],
+      // Likewise engine-bound: `FlatCityBufPlugin` plus the `getPickRay`
+      // binding (Task C11).
+      "@cityjson/navara-flatcitybuf/plugin": [
+        "./packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/plugin.ts"
+      ],
+      "@cityjson/navara-cityparquet": [
+        "./packages/cityjson-navara-plugins/packages/navara-cityparquet/src/index.ts"
+      ]
+    },
     "types": [
       "vite/client",
       "vitest/globals",
@@ -22,5 +48,5 @@
       "node"
     ]
   },
-  "include": ["src"]
+  "include": ["src", "tests", "vitest.setup.ts"]
 }

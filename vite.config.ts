@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { defineConfig } from "vite-plus";
 import react from "@vitejs/plugin-react";
 
@@ -14,7 +15,7 @@ export default defineConfig({
     env: {
       builtin: true,
     },
-    ignorePatterns: ["coverage", "dist", "node_modules"],
+    ignorePatterns: ["coverage", "dist", "node_modules", "packages"],
     overrides: [
       {
         files: ["**/*.{ts,tsx}"],
@@ -129,7 +130,7 @@ export default defineConfig({
     trailingComma: "all",
     printWidth: 80,
     sortPackageJson: false,
-    ignorePatterns: ["dist", "coverage", "node_modules"],
+    ignorePatterns: ["dist", "coverage", "node_modules", "packages"],
   },
   plugins: [
     react(),
@@ -154,5 +155,70 @@ export default defineConfig({
   ],
   optimizeDeps: {
     exclude: ["@cityjson/flatcitybuf", "@duckdb/duckdb-wasm"],
+  },
+  // No `build.rollupOptions.input`: the app is back to Vite's default single
+  // `index.html` entry. The extra `spike.html` / `navara.html` inputs existed
+  // only for the Task B1 MRT spike and the Task B11a `NavaraViewport` harness,
+  // both deleted in Task C21 now that `App.tsx` renders the viewport directly.
+  resolve: {
+    // The aliases below pull the submodule packages in as *source*, so their
+    // own `import proj4 from "proj4"` / `import … from "three"` would
+    // otherwise resolve against the submodule's pnpm store and load a SECOND
+    // copy of each library. proj4 keeps its EPSG definitions in module-level
+    // state, so two copies mean `ensureProjDef` registers RD New in a
+    // registry the app never reads. Both are declared `peerDependencies` of
+    // the packages precisely so the host supplies one instance; deduping here
+    // is what makes that true for the aliased-source path.
+    // `@navaramap/*` joins the list for the same reason, and with sharper
+    // consequences: from Task B7 the aliased plugin sources import the engine
+    // directly (`CityJSONPlugin`, `CityModelMeshDesc`, `CityMeshArraysDesc`),
+    // and a second engine copy would break `instanceof` and give the app a
+    // descriptor registry the plugin never registered into. The plugin packages
+    // declare the engine as a `peerDependency` precisely so the host supplies
+    // one instance; deduping here is what makes that true for the
+    // aliased-source path.
+    dedupe: [
+      "proj4",
+      "three",
+      "@navaramap/three",
+      "@navaramap/three-default-plugin",
+    ],
+    alias: {
+      // Dev HMR: resolve the submodule packages to their TypeScript sources so
+      // editing a plugin file hot-reloads the app instead of requiring a
+      // `pnpm -r build` round trip. Production builds go through the same
+      // alias; the packages' own `dist/` output is what external consumers use.
+      "@cityjson/navara-core": resolve(
+        import.meta.dirname,
+        "packages/cityjson-navara-plugins/packages/navara-core/src/index.ts",
+      ),
+      // MUST precede the bare "@cityjson/navara-cityjson" entry: Vite matches
+      // string aliases by prefix, in order, so the bare key would otherwise
+      // swallow this subpath. It is the package's engine-bound entry point —
+      // the main barrel stays free of @navaramap so it loads under Node.
+      "@cityjson/navara-cityjson/plugin": resolve(
+        import.meta.dirname,
+        "packages/cityjson-navara-plugins/packages/navara-cityjson/src/plugin.ts",
+      ),
+      "@cityjson/navara-cityjson": resolve(
+        import.meta.dirname,
+        "packages/cityjson-navara-plugins/packages/navara-cityjson/src/index.ts",
+      ),
+      // Same ordering rule as the CityJSON pair above: the subpath entry must
+      // precede the bare key. This one carries `FlatCityBufPlugin` and the
+      // `getPickRay` binding (Task C11).
+      "@cityjson/navara-flatcitybuf/plugin": resolve(
+        import.meta.dirname,
+        "packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/plugin.ts",
+      ),
+      "@cityjson/navara-flatcitybuf": resolve(
+        import.meta.dirname,
+        "packages/cityjson-navara-plugins/packages/navara-flatcitybuf/src/index.ts",
+      ),
+      "@cityjson/navara-cityparquet": resolve(
+        import.meta.dirname,
+        "packages/cityjson-navara-plugins/packages/navara-cityparquet/src/index.ts",
+      ),
+    },
   },
 });

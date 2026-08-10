@@ -6,12 +6,13 @@
  * tested at a higher level.
  */
 
-import { describe, it, expect } from "vite-plus/test";
+import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   parseText,
   fileNameFromUrl,
+  loadFromUrl,
 } from "../../../../src/domain/citymodel/loadCityModel";
 
 // ---------------------------------------------------------------------------
@@ -92,6 +93,39 @@ describe("parseText", () => {
     expect(() => parseText("model.city.json", noVertices)).toThrow(
       /missing or invalid "vertices"/,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loadFromUrl
+// ---------------------------------------------------------------------------
+
+describe("loadFromUrl", () => {
+  it("throws a clear, honest error for .fcb instead of attempting a whole-file read", async () => {
+    // Checked before any fetch, so no HttpClient/network mocking is needed
+    // here — the rejection happens purely from encoding detection.
+    await expect(loadFromUrl("https://example.com/delft.fcb")).rejects.toThrow(
+      /viewport streaming/,
+    );
+  });
+
+  it("keeps the friendly 404 message on the bytes path", async () => {
+    // Envelope fake mirrors the real fetchBytes contract: never throws on
+    // non-2xx, returns { ok, status, statusText, bytes }.
+    const http = {
+      fetchText: async () => {
+        throw new Error("unused");
+      },
+      fetchBytes: async () => ({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        bytes: new Uint8Array(),
+      }),
+    };
+    await expect(
+      loadFromUrl("https://example.com/gone.city.json", http),
+    ).rejects.toThrow(/not found \(404\)/i);
   });
 });
 

@@ -5,7 +5,7 @@
  * to route to the correct parser.
  */
 
-import type { CityModelEncoding } from "./supportedEncodings";
+import type { CityModelEncoding } from "@cityjson/navara-core";
 
 /**
  * Strip query string and fragment from a URL path for extension matching.
@@ -21,11 +21,23 @@ function cleanPath(nameOrUrl: string): string {
 /**
  * Detect the encoding from a file name or URL.
  * Returns the encoding type, defaulting to "cityjson" for unknown extensions.
+ *
+ * A trailing `.gz` is stripped before matching, so `tile.city.jsonl.gz`
+ * detects as CityJSONSeq. This only decides which *parser* to use; whether a
+ * body actually needs gunzipping is decided from its magic bytes, never from
+ * the extension (see decodeModelBytes in loadCityModel.ts).
  */
 export function detectEncoding(nameOrUrl: string): CityModelEncoding {
-  const p = cleanPath(nameOrUrl);
+  let p = cleanPath(nameOrUrl);
+  if (p.endsWith(".gz")) p = p.slice(0, -3);
   if (p.endsWith(".city.jsonl") || p.endsWith(".jsonl")) return "cityjsonseq";
   if (p.endsWith(".fcb")) return "flatcitybuf";
   if (p.endsWith(".gml") || p.endsWith(".citygml")) return "citygml";
+  // Before the CityJSON fallback: a `.parquet` file is read by the CityParquet
+  // path. A `.parquet.gz` lands here too (the `.gz` strip above runs first),
+  // and `classifyCityParquetUrl` agrees, so the bytes reach the reader and fail
+  // there on the missing PAR1 magic — the honest outcome, since the format
+  // defines no gzipped spelling.
+  if (p.endsWith(".parquet")) return "cityparquet";
   return "cityjson";
 }

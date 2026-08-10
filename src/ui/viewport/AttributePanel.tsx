@@ -7,14 +7,26 @@
 
 import { useState } from "react";
 import type { CityObject } from "../../domain/citymodel/types";
+import { resolveInheritedAttributes } from "../../domain/citymodel/inheritedAttributes";
 
 type AggMode = "sum" | "avg" | "min" | "max";
 
 interface AttributePanelProps {
   readonly objects: ReadonlyArray<CityObject>;
+  /**
+   * The layer's whole object map, so a selected child can show the attributes
+   * it inherits. Picking is geometric and lands on a `BuildingPart`, which in
+   * CityJSON carries the geometry and none of the semantics — without this the
+   * panel read "No attributes" for every building in the Delft dataset. See
+   * `domain/citymodel/inheritedAttributes.ts`.
+   */
+  readonly objectsById?: Readonly<Record<string, CityObject>>;
 }
 
-export function AttributePanel({ objects }: AttributePanelProps) {
+export function AttributePanel({
+  objects,
+  objectsById = {},
+}: AttributePanelProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [aggMode, setAggMode] = useState<AggMode>("avg");
 
@@ -68,9 +80,13 @@ export function AttributePanel({ objects }: AttributePanelProps) {
             </div>
           )}
           {isMulti ? (
-            <MultiAttributes objects={objects} aggMode={aggMode} />
+            <MultiAttributes
+              objects={objects}
+              objectsById={objectsById}
+              aggMode={aggMode}
+            />
           ) : (
-            <SingleAttributes object={objects[0]!} />
+            <SingleAttributes object={objects[0]!} objectsById={objectsById} />
           )}
         </div>
       )}
@@ -78,36 +94,109 @@ export function AttributePanel({ objects }: AttributePanelProps) {
   );
 }
 
-function SingleAttributes({ object }: { object: CityObject }) {
-  const entries = Object.entries(object.attributes);
+interface AttrTableRow {
+  readonly key: string;
+  readonly value: string;
+  /** Renders muted: the selection disagrees, so no single value is the truth. */
+  readonly mixed?: boolean;
+}
+
+/**
+ * The one table both the single- and multi-select bodies render, so the two
+ * cannot drift apart in markup or styling.
+ */
+function AttributeTable({
+  rows,
+  valueHeader,
+  inheritedFrom = null,
+}: {
+  rows: ReadonlyArray<AttrTableRow>;
+  valueHeader: string;
+  inheritedFrom?: string | null;
+}) {
+  return (
+    <table className="attr-table">
+      {inheritedFrom !== null && (
+        <caption className="attr-table-caption" title={inheritedFrom}>
+          Inherited from {inheritedFrom}
+        </caption>
+      )}
+      <thead>
+        <tr>
+          <th scope="col">Attribute</th>
+          <th scope="col" className="attr-table-value-col">
+            {valueHeader}
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(({ key, value, mixed }) => (
+          <tr key={key}>
+            <th scope="row" title={key}>
+              {key}
+            </th>
+            <td
+              className={
+                mixed
+                  ? "attr-table-value-col attr-table-mixed"
+                  : "attr-table-value-col"
+              }
+              title={value}
+            >
+              {value}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function SingleAttributes({
+  object,
+  objectsById,
+}: {
+  object: CityObject;
+  objectsById: Readonly<Record<string, CityObject>>;
+}) {
+  const { attributes, inheritedFrom } = resolveInheritedAttributes(
+    objectsById,
+    object,
+  );
+  const entries = Object.entries(attributes);
   if (entries.length === 0) {
     return <div className="attr-panel-empty">No attributes</div>;
   }
   return (
-    <div className="attr-panel-list">
-      {entries.map(([key, value]) => (
-        <div key={key} className="attr-row">
-          <span className="attr-key">{key}</span>
-          <span className="attr-value" title={formatValue(value)}>
-            {formatValue(value)}
-          </span>
-        </div>
-      ))}
-    </div>
+    <AttributeTable
+      rows={entries.map(([key, value]) => ({
+        key,
+        value: formatValue(value),
+      }))}
+      valueHeader="Value"
+      inheritedFrom={inheritedFrom}
+    />
   );
 }
 
 function MultiAttributes({
   objects,
+  objectsById,
   aggMode,
 }: {
   objects: ReadonlyArray<CityObject>;
+  objectsById: Readonly<Record<string, CityObject>>;
   aggMode: AggMode;
 }) {
-  // Collect all attribute keys across all objects
+  // Resolved ONCE per object: every read below (key collection and the
+  // per-key value lookup) must see the same inherited values, and resolving
+  // inside the loops would repeat the ancestor walk per key.
+  const resolved = objects.map(
+    (obj) => resolveInheritedAttributes(objectsById, obj).attributes,
+  );
   const allKeys = new Set<string>();
-  for (const obj of objects) {
-    for (const key of Object.keys(obj.attributes)) {
+  for (const attrs of resolved) {
+    for (const key of Object.keys(attrs)) {
       allKeys.add(key);
     }
   }
@@ -117,7 +206,7 @@ function MultiAttributes({
   }
 
   const rows = [...allKeys].map((key) => {
-    const values = objects.map((obj) => obj.attributes[key]);
+    const values = resolved.map((attrs) => attrs[key]);
     const numericValues = values.filter(
       (v): v is number => typeof v === "number",
     );
@@ -145,19 +234,14 @@ function MultiAttributes({
   });
 
   return (
-    <div className="attr-panel-list">
-      {rows.map(({ key, value }) => (
-        <div key={key} className="attr-row">
-          <span className="attr-key">{key}</span>
-          <span
-            className={`attr-value ${value === "mixed" ? "attr-mixed" : ""}`}
-            title={value}
-          >
-            {value}
-          </span>
-        </div>
-      ))}
-    </div>
+    <AttributeTable
+      rows={rows.map(({ key, value }) => ({
+        key,
+        value,
+        mixed: value === "mixed",
+      }))}
+      valueHeader={`Value (${aggMode})`}
+    />
   );
 }
 

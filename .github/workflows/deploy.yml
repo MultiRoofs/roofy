@@ -1,49 +1,72 @@
-name: Deploy to GitHub Pages
+# Build and deploy the viewer to Cloudflare Workers (static assets).
+#
+# Modeled on cityjson/flatcitybuf's deploy-web-demo.yml, adapted for this
+# repo's three particulars:
+#
+#  1. SUBMODULE — packages/cityjson-navara-plugins is a public repo fetched
+#     over https by a plain `git submodule update`; no key needed.
+#  2. TWO PACKAGE MANAGERS — npm at the root, pnpm (pinned via packageManager
+#     + corepack) inside the submodule. The pnpm install must run AFTER the
+#     root npm ci, in the submodule directory (never `pnpm -C` from the
+#     root — corepack refuses to cross the pin).
+#  3. ENCRYPTED .env — `npm run build` runs through dotenvx. DOTENV_PRIVATE_KEY
+#     (from the gitignored .env.keys) decrypts VITE_GOOGLE_MAPS_API_KEY at
+#     build time. Without it the build still succeeds and the app runs; only
+#     Google Photorealistic 3D Tiles are unavailable (the app detects the
+#     still-encrypted key and warns instead of sending ciphertext to Google).
+#
+# Required repository secrets:
+#   CLOUDFLARE_API_TOKEN   — API token with Workers Scripts:Edit
+#   CLOUDFLARE_ACCOUNT_ID  — the target Cloudflare account
+#   DOTENV_PRIVATE_KEY     — optional; enables the Google Tiles key
+
+name: Deploy to Cloudflare Workers
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
 concurrency:
-  group: pages
+  group: deploy-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  build:
+  deploy:
+    name: Build and deploy
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Fetch plugin submodule
+        run: git submodule update --init --recursive
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
-      - run: npm ci
+      - name: Install app dependencies
+        run: npm ci
+
+      # AFTER npm ci, always: npm rewrites the linked packages' node_modules
+      # and destroys pnpm's workspace links (CLAUDE.md).
+      - name: Install plugin workspace dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+        working-directory: packages/cityjson-navara-plugins
 
       - name: Build
         run: npm run build
         env:
-          BASE_PATH: /multiroof-viewer/
+          DOTENV_PRIVATE_KEY: ${{ secrets.DOTENV_PRIVATE_KEY }}
 
-      - uses: actions/configure-pages@v5
-
-      - uses: actions/upload-pages-artifact@v3
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v4
         with:
-          path: dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy

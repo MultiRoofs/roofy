@@ -1,9 +1,9 @@
-import { describe, it, expect } from "vite-plus/test";
+import { describe, it, expect } from "vitest";
 import {
   computeAverageAzimuth,
   aggregateRoofMetrics,
 } from "../../../../src/domain/roofMetrics/aggregate";
-import type { RoofMetrics } from "../../../../src/domain/roofMetrics/types";
+import type { RoofMetrics } from "@cityjson/navara-core";
 
 // ---------------------------------------------------------------------------
 // computeAverageAzimuth

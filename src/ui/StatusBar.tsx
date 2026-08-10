@@ -1,8 +1,13 @@
 /**
- * Bottom status bar showing model statistics, FPS, cursor position, and selection state.
+ * Bottom status bar showing model statistics, FPS, cursor position, CRS and
+ * selection state — the facts row, in the GIS convention the toolbar shed its
+ * information pills for.
  */
 
 import type { DuckDBStatus } from "../analytics/duckdb";
+import type { StreamStatus } from "../features/streaming/streamStore";
+import { useLayerStore } from "../features/layers/layerStore";
+import { extractCrsCode } from "./toolbar/crsCode";
 
 interface StatusBarProps {
   readonly objectCount: number;
@@ -13,6 +18,16 @@ interface StatusBarProps {
   readonly cursorPosition?: readonly [number, number, number] | null;
   readonly tableOpen?: boolean;
   readonly onToggleTable?: () => void;
+  /** The active layer's viewport-streaming status, or `null`/`undefined`
+   *  when the active layer isn't streaming. `"idle"` (nothing pending) is
+   *  deliberately not surfaced — there's nothing notable to tell the user
+   *  about that state, unlike probing/fetching/too-far/error. */
+  readonly streamStatus?: StreamStatus | null;
+  /** The worker/driver's own message for the current `streamStatus` (e.g.
+   *  an error's detail text). Ignored for `"too-far"`, which always shows
+   *  the fixed, user-facing "Zoom in to load features" instead of the
+   *  internal reason-coded message (`"Zoom in (feature-budget)"` etc.). */
+  readonly streamMessage?: string | null;
 }
 
 export function StatusBar({
@@ -24,7 +39,19 @@ export function StatusBar({
   cursorPosition,
   tableOpen,
   onToggleTable,
+  streamStatus,
+  streamMessage,
 }: StatusBarProps) {
+  // Read straight from the store rather than through a prop: the CRS is a
+  // property of the active layer, not of anything `App` already computes, and
+  // threading it would put a fact nobody else needs through the shell.
+  const layers = useLayerStore((s) => s.layers);
+  const activeLayerId = useLayerStore((s) => s.activeLayerId);
+  const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
+  const crs = activeLayer
+    ? extractCrsCode(activeLayer.model.metadata.referenceSystem)
+    : null;
+
   return (
     <footer className="statusbar">
       <div className="status-item">
@@ -67,6 +94,16 @@ export function StatusBar({
 
       <div className="toolbar-spacer" />
 
+      {streamStatus && streamStatus !== "idle" && (
+        <div className="status-item">
+          <span className={`status-dot ${streamDotClass(streamStatus)}`} />
+          <span className="status-label">Stream</span>
+          <span className="status-value">
+            {streamStatusLabel(streamStatus, streamMessage ?? null)}
+          </span>
+        </div>
+      )}
+
       {duckdbStatus && duckdbStatus.state !== "uninitialized" && (
         <div className="status-item">
           <span className={`status-dot ${duckdbDotClass(duckdbStatus)}`} />
@@ -88,8 +125,52 @@ export function StatusBar({
         <span className="status-label">Triangles</span>
         <span className="status-value">{formatCount(triangleCount)}</span>
       </div>
+      {/* Last, i.e. bottom-right: where QGIS puts the EPSG code. */}
+      {crs && (
+        <div className="status-item">
+          <span className="status-label">CRS</span>
+          <span className="status-value status-value-mono">EPSG:{crs}</span>
+        </div>
+      )}
     </footer>
   );
+}
+
+/** `status` is already checked `!== "idle"` at the call site — the `"idle"`
+ *  branch here only exists so the function type-checks against the full
+ *  `StreamStatus` union without an unsafe cast. */
+function streamDotClass(status: StreamStatus): string {
+  switch (status) {
+    case "probing":
+    case "fetching":
+      return "dot-loading";
+    case "too-far":
+      return "dot-partial";
+    case "error":
+      return "dot-error";
+    case "idle":
+      return "dot-ready";
+  }
+}
+
+function streamStatusLabel(
+  status: StreamStatus,
+  message: string | null,
+): string {
+  switch (status) {
+    case "probing":
+      return "Probing…";
+    case "fetching":
+      return "Loading features…";
+    case "too-far":
+      // Fixed, user-facing text — NOT the driver's internal reason-coded
+      // message (e.g. "Zoom in (feature-budget)"), which is debug detail.
+      return "Zoom in to load features";
+    case "error":
+      return message ?? "Streaming error";
+    case "idle":
+      return "Streaming";
+  }
 }
 
 function duckdbDotClass(status: DuckDBStatus): string {

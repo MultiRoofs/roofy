@@ -1,15 +1,39 @@
 /**
- * Viewer toolbar with metadata pills, pick mode, tool mode, and action buttons.
+ * Viewer toolbar: pick mode, tool mode, and action buttons — CONTROLS ONLY.
+ *
+ * Facts about the scene belong in the status bar, the GIS convention (QGIS,
+ * ArcGIS, Cesium): the file name, object/layer counts, LoD and rule count each
+ * duplicated a surface that already showed them (the sidebar, `StatusBar`, the
+ * legend), and the CRS moved to `StatusBar`'s right cluster, where QGIS puts
+ * EPSG. The sun's datetime is not gone either — it is the LABEL of the sun
+ * button now, one control for one subject. This component therefore reads no
+ * store at all.
  */
 
 import type { PickMode, ToolMode } from "../../domain/selection/types";
 import type { Theme } from "../../features/theme/useTheme";
-import { useLayerStore } from "../../features/layers/layerStore";
-import { useSolarStore } from "../../features/solar/solarStore";
+import { SolarMenu } from "./SolarMenu";
+import { WeatherMenu } from "./WeatherMenu";
+import { ViewModeToggle } from "./ViewModeToggle";
+import { SceneThemeMenu } from "./SceneThemeMenu";
+
+/**
+ * Tooltip suffix for the tools the Navara viewport does not implement yet.
+ *
+ * `NavaraViewport` gates pointer events on `toolMode` (`acceptsPointer` in
+ * `pickEventHandlers.ts`), so selecting "box-select" or "measure" only ever
+ * turns picking OFF — nothing draws a rubber band or a measurement, because
+ * the R3F components that used to do it are no longer rendered (Task B11b).
+ * A button whose only effect is to break selection is worse than one that is
+ * visibly unavailable, so both are disabled until their Navara equivalents
+ * land. `toolMode` itself is untouched — the store and `acceptsPointer` keep
+ * their behaviour, and re-enabling is deleting `disabled` here — and the
+ * toolbar is the only way into either mode (there are no key bindings).
+ */
+const NAVARA_DEAD_TOOL_TITLE =
+  "temporarily unavailable during the Navara migration";
 
 interface ViewerToolbarProps {
-  readonly fileName: string | null;
-  readonly layerCount: number;
   readonly pickMode: PickMode;
   readonly toolMode: ToolMode;
   readonly onSetPickMode: (mode: PickMode) => void;
@@ -28,8 +52,6 @@ interface ViewerToolbarProps {
 }
 
 export function ViewerToolbar({
-  fileName,
-  layerCount,
   pickMode,
   toolMode,
   onSetPickMode,
@@ -46,26 +68,6 @@ export function ViewerToolbar({
   advancedSettingsOpen,
   onToggleAdvancedSettings,
 }: ViewerToolbarProps) {
-  const layers = useLayerStore((s) => s.layers);
-  const activeLayerId = useLayerStore((s) => s.activeLayerId);
-  const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
-
-  const totalObjects = layers.reduce(
-    (sum, l) => sum + Object.keys(l.model.objects).length,
-    0,
-  );
-  const crs = activeLayer
-    ? extractCrsCode(activeLayer.model.metadata.referenceSystem)
-    : null;
-  const lod = activeLayer ? findPrimaryLod(activeLayer.model) : null;
-
-  const ruleCount = activeLayer
-    ? activeLayer.rules.filter((r) => r.enabled).length
-    : 0;
-
-  const datetime = useSolarStore((s) => s.datetime);
-  const sunPosition = useSolarStore((s) => s.sunPosition);
-
   return (
     <header className="toolbar">
       <span className="toolbar-brand">MultiRoof</span>
@@ -73,7 +75,8 @@ export function ViewerToolbar({
       {/* Left sidebar toggle */}
       <button
         className="tb-btn"
-        title="Toggle layers panel"
+        aria-label="Toggle layers panel"
+        data-tooltip="Toggle layers panel"
         onClick={onToggleLeftSidebar}
       >
         <svg viewBox="0 0 24 24">
@@ -88,7 +91,8 @@ export function ViewerToolbar({
       <div className="toolbar-btn-group">
         <button
           className={`tb-btn ${pickMode === "object" && toolMode === "select" ? "tb-btn-active" : ""}`}
-          title="Select objects (V)"
+          aria-label="Select objects (V)"
+          data-tooltip="Select objects (V)"
           aria-pressed={pickMode === "object" && toolMode === "select"}
           onClick={() => {
             onSetPickMode("object");
@@ -101,7 +105,8 @@ export function ViewerToolbar({
         </button>
         <button
           className={`tb-btn ${pickMode === "surface" && toolMode === "select" ? "tb-btn-active" : ""}`}
-          title="Select surfaces (S)"
+          aria-label="Select surfaces (S)"
+          data-tooltip="Select surfaces (S)"
           aria-pressed={pickMode === "surface" && toolMode === "select"}
           onClick={() => {
             onSetPickMode("surface");
@@ -116,16 +121,13 @@ export function ViewerToolbar({
 
         <div className="toolbar-sep-inline" />
 
-        {/* Box select — only works in object mode */}
+        {/* Box select — DEAD under NavaraViewport (see NAVARA_DEAD_TOOL_TITLE). */}
         <button
           className={`tb-btn ${toolMode === "box-select" ? "tb-btn-active" : ""}`}
-          title={
-            pickMode === "surface"
-              ? "Box select (object mode only)"
-              : "Box select (B)"
-          }
+          aria-label={`Box select — ${NAVARA_DEAD_TOOL_TITLE}`}
+          data-tooltip={`Box select — ${NAVARA_DEAD_TOOL_TITLE}`}
           aria-pressed={toolMode === "box-select"}
-          disabled={pickMode === "surface"}
+          disabled
           onClick={() => onSetToolMode("box-select")}
         >
           <svg viewBox="0 0 24 24">
@@ -141,11 +143,13 @@ export function ViewerToolbar({
           </svg>
         </button>
 
-        {/* Measure */}
+        {/* Measure — DEAD under NavaraViewport (see NAVARA_DEAD_TOOL_TITLE). */}
         <button
           className={`tb-btn ${toolMode === "measure" ? "tb-btn-active" : ""}`}
-          title="Measure distance (M)"
+          aria-label={`Measure distance — ${NAVARA_DEAD_TOOL_TITLE}`}
+          data-tooltip={`Measure distance — ${NAVARA_DEAD_TOOL_TITLE}`}
           aria-pressed={toolMode === "measure"}
+          disabled
           onClick={() => onSetToolMode("measure")}
         >
           <svg viewBox="0 0 24 24">
@@ -158,63 +162,46 @@ export function ViewerToolbar({
       </div>
 
       {/* Fit all */}
-      <button className="tb-btn" title="Zoom to fit (F)" onClick={onFitAll}>
+      <button
+        className="tb-btn"
+        aria-label="Zoom to fit (F)"
+        data-tooltip="Zoom to fit (F)"
+        onClick={onFitAll}
+      >
         <svg viewBox="0 0 24 24">
           <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3M3 16v3a2 2 0 002 2h3m8 0h3a2 2 0 002-2v-3" />
         </svg>
       </button>
 
+      {/* The camera policy "Zoom to fit" flies under. The place SEARCH used to
+          sit here too; it is a scene overlay now (top-left of the canvas), so
+          the toolbar keeps only what is not about a point on the map. */}
+      <ViewModeToggle />
+      {/* Next to the view-mode segments because the two answer neighbouring
+          questions — how the scene is FRAMED, and how it is DRAWN. */}
+      <SceneThemeMenu />
+
       <div className="toolbar-sep" />
 
-      {fileName && <span className="toolbar-file">{fileName}</span>}
-
-      <div className="meta-pills">
-        {crs && (
-          <div className="pill">
-            CRS <span className="value">EPSG:{crs}</span>
-          </div>
-        )}
-        <div className="pill">
-          Objects <span className="value">{totalObjects}</span>
-        </div>
-        {layerCount > 1 && (
-          <div className="pill">
-            Layers <span className="value">{layerCount}</span>
-          </div>
-        )}
-        {lod && (
-          <div className="pill">
-            LoD <span className="value">{lod}</span>
-          </div>
-        )}
-      </div>
-
-      {sunPosition && (
-        <>
-          <div className="toolbar-sep" />
-          <div
-            className={`pill sun-pill ${sunPosition.altitudeDeg > 0 ? "sun-pill-up" : ""}`}
-          >
-            Sun <span className="value">{formatDatetimePill(datetime)}</span>
-          </div>
-        </>
-      )}
-
-      {ruleCount > 0 && (
-        <>
-          <div className="toolbar-sep" />
-          <div className="pill rule-pill rule-pill-active">
-            Rules <span className="value">{ruleCount} active</span>
-          </div>
-        </>
-      )}
+      {/* One button, one popover, for everything about the sun: the sliders
+          that sweep it, the presets that jump it, and the altitude/azimuth the
+          engine reports back — with the scene's time on its own face, so it is
+          readable without opening anything. */}
+      <SolarMenu />
+      {/* Immediately after the sun, because both are controls for the SKY:
+          where the light comes from, and what is in the way of it. Weather was
+          a section of the Rendering panel until this pass — behind a gear, two
+          clicks from a scene you are looking at while adjusting it. */}
+      <WeatherMenu />
 
       <div className="toolbar-spacer" />
 
       {onToggleAdvancedSettings && (
         <button
           className={`tb-btn ${advancedSettingsOpen ? "tb-btn-active" : ""}`}
-          title="Advanced settings"
+          aria-label="Rendering settings"
+          data-tooltip="Rendering settings"
+          data-tooltip-align="end"
           onClick={onToggleAdvancedSettings}
         >
           <svg viewBox="0 0 24 24">
@@ -226,7 +213,9 @@ export function ViewerToolbar({
 
       <button
         className="theme-toggle-btn"
-        title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+        aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+        data-tooltip={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+        data-tooltip-align="end"
         onClick={onToggleTheme}
       >
         {theme === "dark" ? (
@@ -267,7 +256,13 @@ export function ViewerToolbar({
       </button>
 
       {onSave && (
-        <button className="tb-btn" title="Save workspace" onClick={onSave}>
+        <button
+          className="tb-btn"
+          aria-label="Save workspace"
+          data-tooltip="Save workspace"
+          data-tooltip-align="end"
+          onClick={onSave}
+        >
           <svg viewBox="0 0 24 24">
             <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
             <path d="M17 21v-8H7v8M7 3v5h8" />
@@ -275,7 +270,13 @@ export function ViewerToolbar({
         </button>
       )}
       {onShare && canShare && (
-        <button className="tb-btn" title="Copy share link" onClick={onShare}>
+        <button
+          className="tb-btn"
+          aria-label="Copy share link"
+          data-tooltip="Copy share link"
+          data-tooltip-align="end"
+          onClick={onShare}
+        >
           <svg viewBox="0 0 24 24">
             <path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8" />
             <polyline points="16 6 12 2 8 6" />
@@ -285,7 +286,9 @@ export function ViewerToolbar({
       )}
       <button
         className="tb-btn"
-        title="Toggle inspector"
+        aria-label="Toggle inspector"
+        data-tooltip="Toggle inspector"
+        data-tooltip-align="end"
         onClick={onToggleInspector}
       >
         <svg viewBox="0 0 24 24">
@@ -293,35 +296,17 @@ export function ViewerToolbar({
           <path d="M15 3v18" />
         </svg>
       </button>
-      <button className="tb-btn" title="Close file" onClick={onClose}>
+      <button
+        className="tb-btn"
+        aria-label="Close file"
+        data-tooltip="Close file"
+        data-tooltip-align="end"
+        onClick={onClose}
+      >
         <svg viewBox="0 0 24 24">
           <path d="M18 6L6 18M6 6l12 12" />
         </svg>
       </button>
     </header>
   );
-}
-
-function extractCrsCode(referenceSystem: string | undefined): string | null {
-  if (!referenceSystem) return null;
-  const parts = referenceSystem.split("/");
-  return parts.at(-1) ?? null;
-}
-
-function formatDatetimePill(dt: Date): string {
-  return dt.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function findPrimaryLod(model: {
-  objects: Record<string, { lod: string | null }>;
-}): string | null {
-  for (const obj of Object.values(model.objects)) {
-    if (obj?.lod) return obj.lod;
-  }
-  return null;
 }

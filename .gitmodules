@@ -1,0 +1,4 @@
+[submodule "packages/cityjson-navara-plugins"]
+	path = packages/cityjson-navara-plugins
+	url = https://github.com/HideBa/cityjson-navara-plugins.git
+	branch = main

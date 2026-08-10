@@ -7,7 +7,9 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import { LayerPanel } from "../layers/LayerPanel";
+import type { AddUrlResult } from "../stac/StacBrowser";
 import { GoogleTilesPanel } from "../layers/GoogleTilesPanel";
+import { BasemapPanel } from "../layers/BasemapPanel";
 
 const MIN_WIDTH = 180;
 const MAX_WIDTH = 480;
@@ -17,7 +19,10 @@ interface LeftSidebarProps {
   readonly onWidthChange: (width: number) => void;
   readonly collapsed: boolean;
   readonly onAddFile: (file: File) => void;
-  readonly onAddUrl: (url: string) => void;
+  /** Several picked files as ONE layer — see {@link AddLayerDialog}. */
+  readonly onAddFiles: (files: File[]) => void;
+  /** Resolves `{ok: true}` once a layer has landed — see {@link AddLayerDialog}. */
+  readonly onAddUrl: (url: string) => Promise<AddUrlResult>;
   readonly loading: boolean;
   readonly onFlyToLayer?: (layerId: string) => void;
 }
@@ -27,6 +32,7 @@ export function LeftSidebar({
   onWidthChange,
   collapsed,
   onAddFile,
+  onAddFiles,
   onAddUrl,
   loading,
   onFlyToLayer,
@@ -85,9 +91,11 @@ export function LeftSidebar({
   return (
     <aside className="left-sidebar" style={{ width }}>
       <div className="left-sidebar-content">
+        <BasemapPanel />
         <GoogleTilesPanel />
         <LayerPanel
           onAddFile={onAddFile}
+          onAddFiles={onAddFiles}
           onAddUrl={onAddUrl}
           loading={loading}
           onFlyToLayer={onFlyToLayer}

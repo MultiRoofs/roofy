@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
     branches: [main]
 
@@ -16,30 +16,59 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The plugin submodule is public; plain recursive checkout suffices.
+      - name: Fetch plugin submodule
+        run: git submodule update --init --recursive
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - run: npm ci
 
+      # AFTER npm ci, always: npm rewrites the linked packages' node_modules
+      # and destroys pnpm's workspace links (CLAUDE.md).
+      - name: Install plugin workspace dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+        working-directory: packages/cityjson-navara-plugins
+
+      # -b, not plain --noEmit: the root tsconfig has no files, only project
+      # references, so plain tsc --noEmit checks nothing (CLAUDE.md).
       - name: Type check
-        run: npx tsc --noEmit
+        run: npx tsc -b --noEmit
 
       - name: Build
         run: npm run build
 
-  # test:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #
-  #     - uses: actions/setup-node@v4
-  #       with:
-  #         node-version: 22
-  #         cache: npm
-  #
-  #     - run: npm ci
-  #
-  #     - name: Test
-  #       run: npm test
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same sequence as `check`, and for a second reason here: the CityParquet
+      # loader tests read a real fixture package out of the submodule's own
+      # tests/fixtures, so without it they fail with ENOENT rather than skip.
+      - name: Fetch plugin submodule
+        run: git submodule update --init --recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install plugin workspace dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+        working-directory: packages/cityjson-navara-plugins
+
+      # `npx vitest run`, never `npm test`: the vite-plus runner has a bug that
+      # breaks `describe` for this suite, and every test file imports from
+      # "vitest" for that reason (CLAUDE.md, Known Issues).
+      - name: Test
+        run: npx vitest run

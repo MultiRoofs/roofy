@@ -18,6 +18,19 @@ const browserHttp: HttpClient = {
       text,
     };
   },
+
+  async fetchBytes(url: string) {
+    const response = await fetch(url);
+    const bytes = response.ok
+      ? new Uint8Array(await response.arrayBuffer())
+      : new Uint8Array();
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      bytes,
+    };
+  },
 };
 
 const browserClipboard: ClipboardService = {

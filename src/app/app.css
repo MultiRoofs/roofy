@@ -93,10 +93,6 @@
   color: var(--fg);
 }
 
-[data-theme="light"] .solar-input {
-  color-scheme: light;
-}
-
 [data-theme="light"] .layer-item {
   border-color: var(--border);
 }
@@ -107,11 +103,6 @@
 
 [data-theme="light"] .layer-vis-btn svg {
   stroke: var(--fg-muted);
-}
-
-[data-theme="light"] .layer-drop-zone {
-  border-color: var(--border-accent);
-  color: var(--fg-muted);
 }
 
 [data-theme="light"] .theme-toggle-btn {
@@ -192,11 +183,121 @@ body {
   color: #243b53;
 }
 
-.summary code {
-  background: rgba(16, 42, 67, 0.07);
-  padding: 0.15em 0.4em;
-  border-radius: 0.3em;
-  font-size: 0.95em;
+/* ---- the two entry paths: own data | published catalog ---- */
+
+/* The two doors plus the sample footnote are ONE choice, so they share a
+   container with a gap of their own — the shell's 2rem grid gap would read as
+   three unrelated blocks with the footnote as a peer of the cards. */
+.entry-section {
+  display: grid;
+  gap: 0.9rem;
+}
+
+/* `auto-fit` rather than the file's usual fixed breakpoint: between 640px and
+   ~900px the shell is still wide enough to look like it holds two columns, but
+   two of them are unusably narrow. The track minimum stacks them there. */
+.entry-paths {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+  gap: 1.5rem;
+}
+
+/* The 34rem cap is the picker's own (`.source-picker-hero`), restated so the
+   catalog card stops at the same edge once the two stack. */
+.entry-path {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+  max-width: 34rem;
+}
+
+.entry-path-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #243b53;
+}
+
+/* Equal weight to the drop zone beside it: same radius, same padding, same
+   translucent parchment — but a solid border, because nothing is dropped here.
+   `flex: 1` is what makes the two columns end level. */
+.catalog-entry {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 3rem 2rem;
+  border: 2px solid rgba(16, 42, 67, 0.14);
+  border-radius: 1.25rem;
+  background: rgba(255, 255, 255, 0.5);
+  text-align: center;
+  color: #486581;
+  transition:
+    border-color 0.2s,
+    background 0.2s;
+}
+
+.catalog-entry:hover {
+  border-color: rgba(16, 42, 67, 0.3);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.catalog-entry p {
+  margin: 0;
+  max-width: 22rem;
+}
+
+.catalog-entry-btn {
+  padding: 0.5rem 1.25rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: #102a43;
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.catalog-entry-btn:hover:not(:disabled) {
+  background: #243b53;
+}
+
+.catalog-entry-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* The sample is a demo convenience, not a third door: footnote type, and a
+   button worn as a link so the keyboard still reaches it. */
+.sample-footnote {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #829ab1;
+}
+
+.sample-link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: #486581;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+}
+
+.sample-link:hover:not(:disabled) {
+  color: #102a43;
+}
+
+.sample-link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .drop-zone {
@@ -229,6 +330,15 @@ body {
 .drop-or {
   font-size: 0.85rem;
   color: #829ab1;
+}
+
+/* Browse files + Choose folder sit side by side: two ways in, one row.
+   Wraps rather than overflowing — the panel variant is only ~30 rem wide. */
+.file-label-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
 }
 
 .file-label {
@@ -446,39 +556,10 @@ body {
   color: var(--fg-label);
 }
 
-.toolbar-file {
-  font-size: 0.82rem;
-  color: var(--fg-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .toolbar-sep {
   width: 1px;
   height: 1.25rem;
   background: var(--border-accent);
-}
-
-.meta-pills {
-  display: flex;
-  gap: 0.4rem;
-}
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.15rem 0.5rem;
-  background: var(--bg-muted);
-  border-radius: var(--radius-sm);
-  font-size: 0.7rem;
-  color: var(--fg-label);
-}
-
-.pill .value {
-  color: var(--fg);
-  font-family: "Geist Mono", monospace;
 }
 
 .toolbar-spacer {
@@ -501,9 +582,14 @@ body {
     color 0.15s;
 }
 
-.tb-btn:hover {
+.tb-btn:hover:not(:disabled) {
   background: var(--bg-panel-hover);
   color: var(--fg);
+}
+
+.tb-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .tb-btn.tb-btn-active {
@@ -575,6 +661,79 @@ body {
   position: relative;
   overflow: hidden;
   background: var(--bg-viewport);
+  /* Belt to the viewport's `preventDefault` braces: a gesture the 3D view
+     consumes must not chain out into a page scroll or a rubber-band
+     overscroll. Scoped HERE and not to the body on purpose — the landing page
+     is an ordinary document, and pull-to-refresh has to keep working on it. */
+  overscroll-behavior: contain;
+}
+
+/* Basemap picker in the left sidebar. */
+.basemap-select {
+  width: 100%;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg);
+  font-size: 0.75rem;
+}
+
+/* Navara viewport (Task B11a). Fills whatever positioned box it is dropped
+   into — `.viewport` in the app shell, the page body in the harness. */
+.navara-viewport {
+  position: absolute;
+  inset: 0;
+}
+
+/* The engine appends its own canvas here; React keeps this node empty. */
+.navara-viewport__canvas {
+  position: absolute;
+  inset: 0;
+  /* The engine owns every gesture over the canvas (orbit, pan, pinch-zoom);
+     letting the browser also scroll or zoom the page fights it. Scoped to the
+     canvas host, NOT `.viewport`, so the overlays stacked on top of it — the
+     legend, the attribute panel, advanced settings — still scroll on touch. */
+  touch-action: none;
+}
+
+.navara-viewport__error {
+  position: absolute;
+  inset-inline: 1rem;
+  top: 1rem;
+  z-index: 20;
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(197, 48, 48, 0.4);
+  border-radius: var(--radius, 0.5rem);
+  background: rgba(90, 29, 29, 0.92);
+  color: #ffdede;
+  font-size: 0.8rem;
+  backdrop-filter: blur(8px);
+}
+
+/* Data attributions (Task C17). A licence obligation, so it is always on top
+   of the canvas and always clickable — never `pointer-events: none`. */
+.attribution-overlay {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 45%);
+  color: #f0f0f0;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  pointer-events: auto;
+}
+
+.attribution-overlay a {
+  color: inherit;
+  text-decoration: underline;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -609,6 +768,111 @@ body {
   color: var(--fg-muted);
   font-family: "Geist Mono", monospace;
   font-size: 0.7rem;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   HOVER TOOLTIPS — icon-only buttons
+   ═══════════════════════════════════════════════════════════════
+
+   A native `title` takes ~1s to appear and is easy to miss, which on a
+   toolbar of unlabelled glyphs means the labels effectively do not exist.
+   This is the replacement: one CSS-only bubble, no dependency and no JS
+   portal, driven by `data-tooltip` on the trigger itself.
+
+   THREE RULES for every site that uses it:
+
+   1. `data-tooltip` REPLACES `title` — never both, or the browser draws the
+      native tip on top of this one.
+   2. The trigger MUST also carry an `aria-label`. This is structural, not
+      politeness: `content: attr(data-tooltip)` participates in the
+      accessible-name computation (accname step 2F), so without an
+      `aria-label` to take precedence the bubble text becomes the button's
+      name — which is fine when they agree and wrong the moment they do not
+      (the sun trigger's tip is a live altitude readout). The `title` this
+      pattern removes was the accessible name before; `aria-label` is what
+      keeps it.
+   3. Placement is the caller's problem, because the bubble is a normal
+      absolutely-positioned box and IS clipped by an ancestor's overflow.
+      `data-tooltip-pos="top"` flips it above the trigger (default: below,
+      which is what the top-edge toolbar wants); `data-tooltip-align`
+      pins the bubble's start or end edge to the trigger's instead of
+      centring it, which is how a 240px sidebar row and the toolbar's
+      right cluster stay inside their container rather than provoking a
+      horizontal scrollbar.
+
+   The palette is tokens only — no `[data-theme="light"]` override is needed
+   or wanted, unlike `.pick-tooltip`'s translucent-dark look. */
+
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 200;
+  top: calc(100% + 0.35rem);
+  left: 50%;
+  transform: translateX(-50%);
+  /* `max-content` up to a cap, NOT `nowrap`: the disabled tools carry a whole
+     sentence ("Box select — temporarily unavailable during the Navara
+     migration") that would otherwise be one 400px line. */
+  width: max-content;
+  max-width: 16rem;
+  padding: 0.3rem 0.5rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
+  color: var(--fg);
+  font-size: 0.7rem;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: normal;
+  text-align: center;
+  text-transform: none;
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  /* Never captures the cursor — a bubble under the pointer would flicker
+     against its own `:hover`. */
+  pointer-events: none;
+  transition:
+    opacity 0.1s,
+    visibility 0.1s;
+}
+
+/* Delay on APPEAR only (the base rule's delay is 0), so sweeping across a
+   button group does not strobe, but leaving one hides it at once. */
+[data-tooltip]:hover::after,
+[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 300ms;
+}
+
+[data-tooltip][data-tooltip-pos="top"]::after {
+  top: auto;
+  bottom: calc(100% + 0.35rem);
+}
+
+[data-tooltip][data-tooltip-align="start"]::after {
+  left: 0;
+  right: auto;
+  transform: none;
+}
+
+[data-tooltip][data-tooltip-align="end"]::after {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+/* These popovers open exactly where their trigger's tooltip would sit, so the
+   tip stands down while the panel it describes is open. */
+.sun-trigger[aria-expanded="true"]::after,
+.weather-trigger[aria-expanded="true"]::after {
+  content: none;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -668,53 +932,185 @@ body {
   font-size: 0.74rem;
 }
 
-.advanced-settings-actions {
+.advanced-slider-row {
+  display: flex;
+  align-items: center;
+  padding: 0 0.75rem 0.35rem;
+}
+
+.advanced-slider {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.advanced-slider:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Panel-wide action row, outside the scrolling body so it cannot read as part
+   of the last section. */
+.advanced-settings-footer {
   display: flex;
   justify-content: flex-end;
-  padding: 0.35rem 0.75rem 0.15rem;
+  padding: 0.45rem 0.75rem;
+  border-top: 1px solid var(--border);
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   VIEW ALIGN BUTTONS
+   SOLAR SCRUBBER
    ═══════════════════════════════════════════════════════════════ */
 
-.view-align-buttons {
+/* Bottom-LEFT: the attribution strip owns the bottom edge and the panels that
+   open over the scene own the top-right, so this is the one corner a persistent
+   panel can hold without covering something that is also always on screen. */
+.solar-scrubber {
   position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 2px;
-  z-index: 10;
+  bottom: 3.25rem;
+  left: 0.5rem;
+  width: 250px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-lg, 0.75rem);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  z-index: 20;
+  overflow: hidden;
 }
 
-.view-align-btn {
+.solar-scrubber-header {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 1.6rem;
-  height: 1.6rem;
+  gap: 0.5rem;
+  padding: 0.3rem 0.4rem 0.3rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+/* The live clock, sitting in the "Time" section header so the reading and the
+   sliders that change it are never apart. */
+.solar-menu-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--fg-muted);
+  font-family: "Geist Mono", monospace;
+  font-size: 0.62rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.solar-scrubber-title {
+  color: var(--fg);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+/* Pushed hard against the close button so the reading sits with the controls
+   it belongs to rather than floating in the middle of the header. */
+.solar-scrubber-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+  color: var(--fg-muted);
+  font-family: "Geist Mono", monospace;
+  font-size: 0.68rem;
+}
+
+/* Sun above or below the horizon, from the altitude the ENGINE reported — the
+   one piece of state here that is measured rather than set, so it is the only
+   thing in the panel that carries colour on its own. */
+.solar-scrubber-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--fg-dim);
+}
+
+.solar-scrubber-dot.is-up {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+
+.solar-scrubber-body {
+  padding: 0.45rem 0.6rem 0.55rem;
+}
+
+.solar-scrubber-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.16rem 0;
+}
+
+.solar-scrubber-label {
+  width: 2.6rem;
+  flex: none;
+  color: var(--fg-label);
+  font-size: 0.7rem;
+}
+
+.solar-scrubber-slider {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+/* Fixed width and tabular figures: the readout changes on every frame of a
+   drag, and a column that resizes under the cursor is unreadable. */
+.solar-scrubber-value {
+  width: 3.9rem;
+  flex: none;
+  color: var(--fg);
+  font-family: "Geist Mono", monospace;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.solar-scrubber-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+}
+
+.solar-scrubber-animate {
+  flex: 1;
+  padding: 0.32rem 0.5rem;
   border: 1px solid var(--border-accent);
   border-radius: var(--radius-sm);
-  background: rgba(12, 14, 20, 0.7);
-  backdrop-filter: blur(8px);
-  color: var(--fg-muted);
-  font-size: 0.6rem;
+  background: var(--bg-input);
+  color: var(--fg);
+  font-size: 0.72rem;
   font-weight: 600;
   cursor: pointer;
   transition:
     background 0.15s,
-    color 0.15s;
+    color 0.15s,
+    border-color 0.15s;
 }
 
-.view-align-btn:hover {
-  background: var(--accent-soft);
-  color: var(--accent);
+.solar-scrubber-animate:hover {
+  background: var(--bg-panel-hover);
+}
+
+.solar-scrubber-animate.is-running {
   border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 
-[data-theme="light"] .view-align-btn {
-  background: rgba(255, 255, 255, 0.8);
+.solar-scrubber-date {
+  flex: none;
+  width: 7.4rem;
+  padding: 0.28rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  font-family: "Geist Mono", monospace;
+  font-size: 0.66rem;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -804,6 +1200,12 @@ body {
 }
 
 .attr-section-title {
+  /* Flex so a section title can carry a live readout on its right (the solar
+     menu's clock); a bare block would stack it underneath. */
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
   font-size: 0.65rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -881,7 +1283,10 @@ body {
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 0 0.75rem;
+  /* Right padding clears the engine's fixed-position attribution toggle
+     (24px badge at right:8px on document.body), which would otherwise sit
+     over the last segment — the CRS readout. */
+  padding: 0 2.5rem 0 0.75rem;
   background: var(--bg-toolbar);
   border-top: 1px solid var(--border);
   font-size: 0.7rem;
@@ -928,6 +1333,10 @@ body {
 
 .status-dot.dot-failed {
   background: #6b7280;
+}
+
+.status-dot.dot-error {
+  background: #f87171;
 }
 
 @keyframes pulse-dot {
@@ -1300,25 +1709,6 @@ body {
   cursor: not-allowed;
 }
 
-/* Rule pill in toolbar */
-.rule-pill {
-  cursor: pointer;
-  transition: opacity 0.15s;
-}
-
-.rule-pill-active {
-  background: var(--accent-soft);
-  border: 1px solid rgba(232, 151, 63, 0.2);
-}
-
-.rule-pill-active .value {
-  color: var(--accent-text);
-}
-
-.rule-pill:not(.rule-pill-active) {
-  opacity: 0.5;
-}
-
 /* ═══════════════════════════════════════════════════════════════
    M2: LEGEND OVERLAY
    ═══════════════════════════════════════════════════════════════ */
@@ -1387,45 +1777,8 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   M3: SOLAR TAB
+   SOLAR PRESETS (toolbar popover)
    ═══════════════════════════════════════════════════════════════ */
-
-.solar-control-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-bottom: 0.35rem;
-}
-
-.solar-input {
-  width: 100%;
-  padding: 0.3rem 0.4rem;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--fg);
-  font-size: 0.72rem;
-  font-family: inherit;
-  color-scheme: dark;
-}
-
-.solar-input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
-.solar-slider {
-  flex: 1;
-  accent-color: var(--accent);
-}
-
-.solar-time-label {
-  font-size: 0.7rem;
-  font-family: "Geist Mono", monospace;
-  color: var(--fg-muted);
-  min-width: 3rem;
-  text-align: right;
-}
 
 .solar-presets {
   display: grid;
@@ -1476,14 +1829,163 @@ body {
   justify-content: center;
 }
 
-/* Sun pill in toolbar */
-.sun-pill-up {
-  background: var(--accent-soft);
-  border: 1px solid rgba(232, 151, 63, 0.2);
+/* ═══════════════════════════════════════════════════════════════
+   TOOLBAR SOLAR CLUSTER
+   The scene clock is global configuration, so it sits in the header
+   rather than inside the selection inspector — on the sun button
+   itself, which reads the time it also sets.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* The trigger wears the clock and the sun-up dot, so it is sized to its own
+   content instead of `.tb-btn`'s 2rem icon square. Colour comes from `.tb-btn`
+   (and `.tb-btn-active` while the popover is open); the only state this adds
+   is the dot, which carries the accent the old `.sun-pill-up` did. */
+.sun-trigger {
+  width: auto;
+  gap: 0.3rem;
+  padding: 0 0.45rem;
+  flex-shrink: 0;
 }
 
-.sun-pill-up .value {
+.sun-trigger-label {
+  font-family: "Geist Mono", monospace;
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+/* The anchor for a popover hanging off a toolbar button. Grouped rather than
+   duplicated: the weather popover sits beside the sun's and must hang the same
+   way, and a second identical block would be two rules to keep in step. */
+.toolbar-solar-menu,
+.toolbar-weather-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.toolbar-solar-popover {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  width: 230px;
+}
+
+/* Wider than the presets-only popover it replaces: it now carries the three
+   slider rows, each of which needs a label, a draggable track and a
+   fixed-width readout side by side. */
+.solar-menu-popover {
+  width: 290px;
+  padding: 0.25rem 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-lg, 0.75rem);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  z-index: 30;
+}
+
+/* ── Weather popover ────────────────────────────────────────────────────────
+   Same anchoring and chrome as the sun's (it reuses `.toolbar-solar-popover`),
+   sized to the Rendering panel it moved out of — the same rows, at the same
+   width, so nothing about the controls looks different for having moved. All
+   colours come from the theme variables, so light mode follows. */
+.weather-menu-popover {
+  width: 260px;
+  padding: 0.25rem 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-lg, 0.75rem);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  z-index: 30;
+}
+
+/* The line that explains a popover of dead controls: the switch that killed
+   them is on another surface. Muted, because it states a fact rather than
+   being a control. */
+.weather-menu-hint {
+  margin: 0.4rem 0 0;
+  font-size: 0.66rem;
+  line-height: 1.3;
+  color: var(--fg-muted);
+}
+
+/* ── Scene theme picker ─────────────────────────────────────────────────────
+   Same anchoring as the sun popover (it reuses `.toolbar-solar-popover` for
+   exactly that), but a wider card: each option carries a name AND the sentence
+   that makes the name mean something. Everything below is drawn from the theme
+   variables, so light mode follows without a second rule set. */
+.toolbar-theme-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.scene-theme-popover {
+  width: 270px;
+  padding: 0.25rem 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-lg, 0.75rem);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  z-index: 30;
+}
+
+.scene-theme-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.scene-theme-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius, 0.5rem);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.scene-theme-option:hover {
+  background: var(--bg-panel-hover);
+}
+
+.scene-theme-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.scene-theme-option-active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.scene-theme-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.scene-theme-option-active .scene-theme-name {
   color: var(--accent-text);
+}
+
+.scene-theme-desc {
+  font-size: 0.68rem;
+  line-height: 1.3;
+  color: var(--fg-muted);
+}
+
+/* The one line the basemap and Google-tiles panels show while a theme has
+   taken their choice over — muted, because it explains a control rather than
+   being one. */
+.theme-override-hint {
+  margin-top: 0.3rem;
+  font-size: 0.66rem;
+  line-height: 1.3;
+  color: var(--fg-muted);
 }
 
 /* Tighten inspector tabs when 5+ tabs */
@@ -1664,12 +2166,75 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   M5b: UNAVAILABLE LAYERS (restored-from-snapshot, file-backed —
+   persistent prompt, deliberately NOT a self-dismissing toast)
+   ═══════════════════════════════════════════════════════════════ */
+
+.unavailable-layers {
+  position: fixed;
+  bottom: 3rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(90vw, 28rem);
+  padding: 0.75rem 1rem;
+  background: rgba(12, 14, 20, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-accent, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius, 0.5rem);
+  color: var(--fg, #e8eaf0);
+  font-size: 0.8rem;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.unavailable-layers-title {
+  font-weight: 600;
+  color: var(--fg-label, #8b92a0);
+}
+
+.unavailable-layer-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.unavailable-layer-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unavailable-layer-choose {
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--border-accent, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-sm, 0.375rem);
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.unavailable-layer-dismiss {
+  background: none;
+  border: none;
+  color: var(--fg-muted, #6b7280);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 0.25rem;
+}
+
+/* ═══════════════════════════════════════════════════════════════
    LAYER PANEL
    ═══════════════════════════════════════════════════════════════ */
 
 .layer-item {
   display: flex;
   align-items: center;
+  /* Wraps so the object-type list (`.layer-types-list`, the last child) can be
+     a full-width block under the row rather than a column squeezed into it. */
+  flex-wrap: wrap;
   gap: 0.5rem;
   padding: 0.35rem 0.5rem;
   border: 1px solid var(--border);
@@ -1727,7 +2292,11 @@ body {
 
 .layer-name {
   flex: 1;
-  min-width: 0;
+  /* A FLOOR, not 0: the streaming row also carries a STREAM badge, a resident
+     count and the camera-sync toggle, and with `min-width: 0` the name — the
+     one thing identifying which layer this is — was the first thing to shrink
+     away to nothing. It ellipsises instead. */
+  min-width: 4rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1757,6 +2326,72 @@ body {
   flex-shrink: 0;
 }
 
+/* Allowed to SHRINK, unlike the static count: the row also carries a STREAM
+   badge and the camera-sync toggle, and in a 240 px sidebar a non-shrinking
+   count pushed the toggle out of the panel entirely. */
+.layer-meta-streaming {
+  min-width: 0;
+  /* Shrinks FASTER than the name (which has a floor): of the two, the count
+     is the one you can lose and still know what you are looking at. */
+  flex-shrink: 4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-badge-streaming {
+  flex-shrink: 0;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.55rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+
+.lod-selector-streaming {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.lod-readout {
+  font-size: 0.6rem;
+  color: var(--fg-dim);
+  cursor: default;
+}
+
+.lod-readout-value {
+  color: var(--fg-muted);
+}
+
+.lod-readout-cellsize {
+  color: var(--fg-dim);
+}
+
+.lod-readout-cellsize::before {
+  content: "\00b7";
+  margin-right: 0.25rem;
+}
+
+.lod-mode-btn {
+  padding: 0.1rem 0.3rem;
+  font-size: 0.6rem;
+  background: transparent;
+  color: var(--fg-dim);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.lod-mode-btn:hover {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
 .lod-select {
   padding: 0.1rem 0.25rem;
   font-size: 0.65rem;
@@ -1779,6 +2414,192 @@ body {
   flex-shrink: 0;
 }
 
+/* Per-layer object-type visibility. The caret sits inline at the end of the
+   row; the list it opens is a full-width block on the row's next flex line. */
+.layer-types-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    color 0.15s,
+    transform 0.15s;
+}
+
+.layer-types-btn:hover {
+  color: var(--fg);
+}
+
+.layer-types-btn.is-open {
+  color: var(--accent);
+  transform: rotate(180deg);
+}
+
+.layer-types-btn svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.layer-types-list {
+  flex: 0 0 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.3rem 0.1rem 0.1rem;
+  border-top: 1px solid var(--border);
+  cursor: default;
+}
+
+.layer-types-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--fg-label);
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.layer-types-item input {
+  width: 0.7rem;
+  height: 0.7rem;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.layer-types-empty {
+  color: var(--fg-dim);
+  font-size: 0.62rem;
+  font-style: italic;
+}
+
+/* ── Geospatial layers section ───────────────────────────────── */
+
+/* The second section inside the same panel: a rule above it, so the two
+   headings read as siblings rather than as one list with a subtitle. */
+.geo-section-title {
+  margin-top: 0.7rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+}
+
+.layer-section-empty {
+  margin: 0 0 0.3rem;
+  color: var(--fg-dim);
+  font-size: 0.65rem;
+  font-style: italic;
+  line-height: 1.4;
+}
+
+/* Not clickable as a whole, unlike a city-model row: there is no "active"
+   geospatial layer for the inspector to follow. */
+.geo-layer-item {
+  cursor: default;
+}
+
+.layer-badge-geo {
+  flex-shrink: 0;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.55rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* Narrow on purpose: it shares a 240 px row with a name, a badge and the
+   delete button, and it is the one control there that can be read at a glance
+   from its handle position alone. */
+.geo-opacity-slider {
+  flex-shrink: 0;
+  width: 3.5rem;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Wrapped under the row (the flex line breaks before it), like the city rows'
+   object-type list. */
+.geo-layer-relink {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  padding-top: 0.3rem;
+  border-top: 1px dashed var(--border);
+}
+
+.geo-layer-relink-note {
+  color: var(--fg-dim);
+  font-size: 0.62rem;
+  line-height: 1.3;
+}
+
+.geo-layer-relink-btn {
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: inherit;
+  font-size: 0.62rem;
+  cursor: pointer;
+}
+
+.geo-layer-relink-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.geo-layer-error,
+.geo-source-error {
+  width: 100%;
+  margin: 0;
+  /* The same red the status bar's error dot uses — legible on both themes'
+     panel background, where the landing page's darker #c53030 is not. */
+  color: #f87171;
+  font-size: 0.65rem;
+  line-height: 1.4;
+}
+
+/* ── Geospatial tab of the Add Layer dialog ──────────────────── */
+
+.geo-source-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.geo-kind-select {
+  flex: 1;
+  padding: 0.3rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 0.72rem;
+}
+
+.geo-source-hint {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: 0.62rem;
+  line-height: 1.4;
+}
+
 .layer-add-btn {
   display: block;
   width: 100%;
@@ -1796,37 +2617,6 @@ body {
 }
 
 .layer-add-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.layer-add-form {
-  padding: 0.5rem;
-  border: 1px solid var(--border-accent);
-  border-radius: var(--radius-sm);
-  background: var(--bg-muted);
-  margin-top: 0.35rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.layer-drop-zone {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-  border: 1px dashed var(--border-accent);
-  border-radius: var(--radius-sm);
-  font-size: 0.7rem;
-  color: var(--fg-dim);
-  cursor: pointer;
-  transition:
-    border-color 0.15s,
-    color 0.15s;
-}
-
-.layer-drop-zone:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -1922,7 +2712,9 @@ body {
   position: absolute;
   top: 0.5rem;
   right: 0.5rem;
-  width: 260px;
+  /* Two real columns: a 3D BAG key ("oorspronkelijkbouwjaar") crushes the
+     value column at the old 260px. */
+  width: 300px;
   max-height: calc(100% - 1rem);
   background: var(--bg-panel);
   border: 1px solid var(--border);
@@ -1975,12 +2767,11 @@ body {
 
 .attribute-panel-body {
   overflow-y: auto;
-  padding: 0.3rem 0;
+  /* No vertical padding: the sticky `.attr-table` header sticks to the
+     scrollport edge, so a padded strip above it would show rows scrolling
+     past uncovered. Every child brings its own padding. */
+  padding: 0;
   max-height: 400px;
-}
-
-.attribute-panel-body .attr-row {
-  padding: 0.15rem 0.6rem;
 }
 
 .attr-panel-empty {
@@ -1990,11 +2781,94 @@ body {
   font-style: italic;
 }
 
-.attr-panel-list {
+/* ── Attribute table ────────────────────────────────────────────
+   Scoped to `.attr-table`. The `.attr-row`/`.attr-key`/`.attr-value`
+   rules above are SHARED with SolarMenu, RenderingPanel and the inspector
+   tabs — this panel must not restyle them. */
+
+.attr-table {
+  width: 100%;
+  /* `separate` rather than `collapse`: a collapsed border on a `position:
+     sticky` header is not painted while stuck. */
+  border-collapse: separate;
+  border-spacing: 0;
+  /* Fixed so a long value truncates instead of stretching the key column. */
+  table-layout: fixed;
   font-size: 0.7rem;
 }
 
-.attr-mixed {
+/* Says the values below belong to a PARENT object, not the picked one — a
+   CityJSON BuildingPart holds the geometry and the Building holds the
+   semantics, so without this note the panel would quietly attribute the
+   parent's data to the part. */
+.attr-table-caption {
+  caption-side: top;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  color: var(--fg-dim);
+  font-size: 0.62rem;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attr-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.3rem 0.5rem;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-accent);
+  color: var(--fg-label);
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.attr-table tbody tr:hover {
+  background: var(--bg-panel-hover);
+}
+
+.attr-table tbody th,
+.attr-table tbody td {
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attr-table tbody tr:last-child th,
+.attr-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.attr-table tbody th {
+  color: var(--fg-label);
+  font-weight: 400;
+  text-align: left;
+}
+
+/* `table-layout: fixed` reads its column widths from the FIRST row, which is
+   the header — sizing the body cells here would do nothing. */
+.attr-table thead th:first-child {
+  width: 48%;
+}
+
+.attr-table .attr-table-value-col {
+  text-align: right;
+}
+
+.attr-table tbody .attr-table-value-col {
+  color: var(--fg);
+  font-family: "Geist Mono", monospace;
+}
+
+.attr-table .attr-table-mixed {
   color: var(--fg-dim);
   font-style: italic;
 }
@@ -2031,43 +2905,6 @@ body {
 .agg-mode-compact {
   padding: 0.25rem 0.6rem;
   border-bottom: 1px solid var(--border);
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   SAMPLE DATA BUTTON (landing page)
-   ═══════════════════════════════════════════════════════════════ */
-
-.sample-data-section {
-  text-align: center;
-  margin-top: 0.5rem;
-}
-
-.sample-data-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.5rem 1.25rem;
-  background: var(--bg-muted);
-  border: 1px solid var(--border-accent);
-  border-radius: var(--radius);
-  color: var(--fg-muted);
-  font-size: 0.8rem;
-  cursor: pointer;
-  transition:
-    background 0.15s,
-    color 0.15s,
-    border-color 0.15s;
-}
-
-.sample-data-btn:hover {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.sample-data-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 [data-theme="light"] .attribute-panel {
@@ -2251,8 +3088,1179 @@ body {
   gap: 0.25rem;
   font-size: 0.65rem;
   color: var(--fg-muted);
+  /* Sized to its own content, overriding `.tb-btn`'s 2rem × 2rem toolbar
+     square. That square is 4px TALLER than the `--statusbar-h` (1.75rem) row
+     it sits in, and the row centres it, so it hung 2px below the shell — which
+     is the bottom of the page. `.statusbar` does not clip, so those 2px made
+     the whole document scrollable. */
+  width: auto;
+  height: auto;
+  padding: 0.25rem 0.375rem;
 }
 
 .table-toggle-btn.active {
   color: var(--accent);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   STREAMING FETCH-BBOX READOUT
+   The numbers behind the blue ground outline the streaming diagnostic
+   draws. Top-LEFT: the align buttons own top-right, the solar scrubber
+   bottom-left and the attribution strip bottom-right, so this is the one
+   corner a diagnostic can take without covering something permanent.
+   ═══════════════════════════════════════════════════════════════ */
+
+.query-box-overlay {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-width: 15rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius);
+  background: rgb(12 14 20 / 82%);
+  color: var(--fg-muted);
+  font-size: 0.65rem;
+  line-height: 1.5;
+  /* Diagnostic chrome must never eat a drag that was meant for the globe. */
+  pointer-events: none;
+}
+
+.query-box-overlay__title {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.query-box-overlay__swatch {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 2px;
+}
+
+.query-box-overlay__layer {
+  display: flex;
+  flex-direction: column;
+}
+
+.query-box-overlay__name {
+  overflow: hidden;
+  color: var(--fg-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-box-overlay__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SOURCE PICKER  (shared: landing hero + Add Layer dialog)
+
+   One component, two skins. `.source-picker-hero` keeps the landing
+   page's parchment palette — that page predates the design tokens and
+   is deliberately light in both themes — while `.source-picker-panel`
+   re-skins the SAME markup in the tokens, so the dialog is right in
+   dark and light chrome alike. The base `.drop-zone` / `.file-label` /
+   `.fcb-url-*` rules further up the file still do the layout; these
+   only override colour, scale and the drag state.
+   ═══════════════════════════════════════════════════════════════ */
+
+.source-picker {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The hero used to be two separate grid children of `.app-shell` (2rem gap,
+   plus the URL form's own 1rem top margin). Wrapping them costs the grid gap,
+   so the picker restates it and cancels the margin — the landing page must
+   look exactly as it did. */
+.source-picker-hero {
+  width: min(100%, 34rem);
+  gap: 1rem;
+}
+
+.source-picker .fcb-url-form {
+  width: 100%;
+  margin-top: 0;
+}
+
+/* Dragging a file over the zone. The copy inside changes too ("Release to
+   load this file"), so the highlight is a confirmation of a state the user
+   can already read, not the only signal. */
+.drop-zone.is-dragging {
+  border-color: rgba(16, 42, 67, 0.55);
+  background: rgba(255, 255, 255, 0.85);
+}
+
+/* `.file-label` was a <label>; it is a <button> now (a hidden file input is
+   not focusable, so the label pattern put Browse out of the keyboard's
+   reach). Buttons bring their own border, font and centring. */
+button.file-label {
+  border: none;
+  font-family: inherit;
+  line-height: 1.4;
+}
+
+button.file-label:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* A gesture the picker cannot honour (dropping a folder), explained where it
+   was attempted. Same red as `.error-message`, quieter, and inside the zone.
+
+   The `p.` is load-bearing: `.drop-zone p` (and, in the dialog, the still more
+   specific `.source-picker-panel .drop-zone p`) sets a muted colour on every
+   paragraph in the zone, so a bare `.source-picker-hint` class LOSES and the
+   warning renders in exactly the grey of the instructions it has to stand out
+   from. */
+.drop-zone p.source-picker-hint {
+  margin: 0.15rem 0 0;
+  max-width: 32rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: #c53030;
+}
+
+/* The same red the dialog's other inline errors use — legible on both themes'
+   panel background, where the landing page's darker #c53030 is not. */
+.source-picker-panel .drop-zone p.source-picker-hint {
+  color: #f87171;
+  font-size: 0.72rem;
+}
+
+.source-picker-formats {
+  margin: 0.15rem 0 0;
+  font-family: "Geist Mono", monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  color: #829ab1;
+}
+
+/* ---- panel skin (Add Layer dialog) ---- */
+
+.source-picker-panel {
+  gap: 0.85rem;
+}
+
+.source-picker-panel .drop-zone {
+  gap: 0.4rem;
+  width: 100%;
+  padding: 1.75rem 1rem;
+  border: 1px dashed var(--border-accent);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+}
+
+.source-picker-panel .drop-zone:hover {
+  border-color: var(--fg-muted);
+  background: var(--bg-panel-hover);
+}
+
+.source-picker-panel .drop-zone.is-dragging {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.source-picker-panel .drop-zone p {
+  max-width: 22rem;
+  color: var(--fg-muted);
+  font-size: 0.8rem;
+}
+
+.source-picker-panel .drop-or {
+  color: var(--fg-dim);
+  font-size: 0.72rem;
+}
+
+.source-picker-panel .source-picker-formats {
+  color: var(--fg-dim);
+}
+
+.source-picker-panel button.file-label {
+  padding: 0.35rem 0.95rem;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--fg);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.source-picker-panel button.file-label:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.source-picker-panel .fcb-url-label {
+  margin-bottom: 0.35rem;
+  color: var(--fg-label);
+  font-size: 0.72rem;
+}
+
+.source-picker-panel .fcb-url-input {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg);
+  font-size: 0.78rem;
+}
+
+.source-picker-panel .fcb-url-input::placeholder {
+  color: var(--fg-dim);
+}
+
+.source-picker-panel .fcb-url-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.source-picker-panel .fcb-url-btn {
+  padding: 0.4rem 0.95rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--bg-panel);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.source-picker-panel .fcb-url-btn:hover:not(:disabled) {
+  background: var(--accent-text);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MODAL  (Add Layer dialog)
+
+   Portalled to <body>, so it sits outside the shell's grid and above
+   every positioned panel in it. The backdrop is the click target that
+   closes it AND the surface that swallows a drag which missed the drop
+   zone, so a stray drop can neither navigate the browser nor reach the
+   3D viewport underneath.
+   ═══════════════════════════════════════════════════════════════ */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgb(6 8 12 / 62%);
+  backdrop-filter: blur(2px);
+}
+
+[data-theme="light"] .modal-backdrop {
+  background: rgb(26 29 36 / 38%);
+}
+
+.modal {
+  width: min(100%, 30rem);
+  max-height: calc(100vh - 3rem);
+  overflow: hidden auto;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
+}
+
+/* A browsing modal, not a form one: the catalog's collection grid collapses to
+   a single column inside `.modal`'s 30rem. Must stay AFTER `.modal` — same
+   specificity, so source order is what makes this width win. */
+.modal-wide {
+  width: min(100%, 58rem);
+}
+
+/* The dialog takes focus on open so its name and role are announced before
+   the user starts tabbing — but it is not itself a control, so it must not
+   wear a focus ring. Every control inside keeps its own. */
+.modal:focus {
+  outline: none;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.6rem 0.5rem 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-title {
+  margin: 0;
+  color: var(--fg);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.modal-close:hover {
+  background: var(--bg-panel-hover);
+  color: var(--fg);
+}
+
+.modal-body {
+  padding: 0.9rem;
+}
+
+/* The Add Layer dialog's two source families. A tab strip rather than two
+   plain buttons: the panel below it swaps wholesale, and the underline is what
+   says which of the two the body belongs to. */
+.modal-tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-tab {
+  padding: 0.45rem 0.6rem;
+  border: none;
+  /* The active marker sits ON the container's border, so it reads as the panel
+     below being attached to this tab rather than as a floating underline. */
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
+}
+
+.modal-tab:hover {
+  color: var(--fg);
+}
+
+.modal-tab.is-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   STAC CATALOG BROWSER  (inside the Add Layer modal)
+
+   Two views in one box: a card grid of collections, then a list +
+   mini-map picker for one collection's items. Everything is sized in
+   rem against the modal's own max-height, because the whole panel
+   lives inside a sheet that is already `overflow: hidden auto` — a
+   scroll container in here MUST cap its own height or the modal
+   scrolls instead of it, and the search field scrolls off the top.
+   ═══════════════════════════════════════════════════════════════ */
+
+.stac-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 24rem;
+}
+
+.stac-search {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg);
+  font-size: 0.8rem;
+}
+
+/* The max-height is load-bearing, not decoration: without it the grid grows to
+   its content and `overflow-y` never engages, so 53 cards push the modal into
+   its own scrollbar and the filter field above them out of view. */
+.stac-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.6rem;
+  max-height: 26rem;
+  overflow-y: auto;
+}
+
+.stac-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.7rem;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-muted);
+  color: var(--fg);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.stac-card:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--bg-panel-hover);
+}
+
+.stac-card:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.stac-card-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.stac-card-desc {
+  font-size: 0.68rem;
+  color: var(--fg-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.stac-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.stac-badge {
+  font-size: 0.6rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+
+.stac-badge-lod {
+  color: var(--accent);
+  border-color: var(--accent-soft);
+}
+
+.stac-badge-feature {
+  color: var(--teal);
+  border-color: var(--teal-soft);
+}
+
+/* `margin-top: auto` pins the footer to the bottom of whichever card is
+   tallest, so "Browse items →" lines up across a row of uneven cards. */
+.stac-card-footer {
+  margin-top: auto;
+  font-size: 0.65rem;
+  color: var(--fg-dim);
+}
+
+.stac-items-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.stac-items-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.stac-items {
+  display: grid;
+  grid-template-columns: minmax(16rem, 22rem) 1fr;
+  gap: 0.75rem;
+  min-height: 24rem;
+}
+
+.stac-item-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  /* Grid items float to `min-content` by default; without this the list's own
+     overflow is defeated by the column stretching to fit its rows. */
+  min-width: 0;
+}
+
+.stac-item-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  overflow-y: auto;
+  max-height: 26rem;
+}
+
+/* A row is a DIV wrapping two buttons (the row itself and its Add), because a
+   button inside a button is invalid HTML. The border and hover live out here so
+   the whole strip reacts, not just the part the pointer is over. */
+.stac-item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-muted);
+  color: var(--fg);
+  font-size: 0.7rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.stac-item-row:hover,
+.stac-item-row.is-hovered {
+  border-color: var(--accent);
+}
+
+.stac-item-row.is-selected {
+  border-color: var(--accent);
+  background: var(--bg-panel-hover);
+}
+
+.stac-item-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stac-item-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stac-item-meta {
+  font-size: 0.62rem;
+  color: var(--fg-muted);
+}
+
+.stac-viewport-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.65rem;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.stac-item-detail {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem 0.55rem;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-hover);
+  font-size: 0.7rem;
+  color: var(--fg);
+}
+
+.stac-item-map {
+  min-height: 24rem;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+/* The map's degraded state (no second WebGL context). Same frame as the live
+   map so the layout does not jump, but visibly a message rather than a blank
+   rectangle — which would read as "this collection has no footprints". */
+.stac-item-map--failed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 1rem;
+  font-size: 0.7rem;
+  color: var(--fg-muted);
+}
+
+.stac-add-btn {
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-family: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.stac-add-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.stac-add-btn--inline {
+  flex: 0 0 auto;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.62rem;
+}
+
+.stac-download-link {
+  font-size: 0.7rem;
+  color: var(--teal);
+}
+
+.stac-status {
+  font-size: 0.75rem;
+  color: var(--fg-muted);
+}
+
+.stac-retry {
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  padding: 0.1rem 0.45rem;
+  background: var(--bg-muted);
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.stac-back {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0.2rem 0;
+}
+
+.stac-cap-note {
+  font-size: 0.65rem;
+  color: var(--fg-dim);
+}
+
+/* A failed add, reported where the add was clicked. Louder than
+   `.stac-status`'s muted grey, which is the colour of "loading" — this one is
+   the user's item not arriving. */
+.stac-add-error {
+  color: #c53030; /* the same red as `.error-message` on the landing page */
+  font-size: 0.75rem;
+}
+
+/* One line per failed item: the id in the row's own weight, then the loader's
+   sentence. Long sentences (a CRS refusal names the EPSG code and the reason)
+   wrap inside the column rather than widening it. */
+.stac-add-error-line {
+  margin: 0 0 0.25rem;
+  overflow-wrap: anywhere;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CAMERA CONTROLS — compass + zoom/tilt cluster (viewport overlay)
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Bottom-RIGHT, clear of the attribution strip below it. The top-right belongs
+   to every panel that opens over the scene (rendering settings, the attribute
+   panel), the bottom-left to the legend and the sun scrubber, and the bottom
+   centre to the pick tooltip — this is the one corner
+   left, and it is where a map's zoom cluster is expected anyway. Above the
+   attribution's z-index 2 but below the panels' 20, so a panel the user opened
+   deliberately still wins. */
+.camera-controls {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 3.75rem;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* No camera yet (or none any more): the cluster holds its place and fades,
+   rather than appearing and disappearing under the cursor. */
+.camera-controls.is-idle {
+  opacity: 0.5;
+}
+
+/* The compass is one big button — clicking anywhere on the dial faces north. */
+.camera-compass {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1rem;
+  width: 3rem;
+  height: 3rem;
+  padding: 0;
+  border: 1px solid var(--border-accent);
+  border-radius: 50%;
+  background: rgba(12, 14, 20, 0.7);
+  backdrop-filter: blur(8px);
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.camera-compass:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.camera-compass:disabled {
+  cursor: default;
+}
+
+/* The dial turns; everything else in the button stays put, so the needle is
+   read against a fixed frame. `transform` is set inline from the heading. */
+.camera-compass-dial {
+  position: absolute;
+  top: 0.15rem;
+  left: 50%;
+  margin-left: -17px;
+  transition: transform 0.12s linear;
+}
+
+.camera-compass-north {
+  fill: var(--accent);
+}
+
+.camera-compass-south {
+  fill: var(--fg-dim);
+}
+
+/* The readout sits in the lower third of the dial, on its own plate so the
+   needle behind it cannot make the digits unreadable. */
+.camera-compass-readout {
+  position: absolute;
+  bottom: 0.15rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 0.15rem;
+  padding: 0 0.2rem;
+  border-radius: 3px;
+  background: rgba(12, 14, 20, 0.82);
+  font-family: "Geist Mono", monospace;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  pointer-events: none;
+}
+
+.camera-compass-cardinal {
+  color: var(--accent-text);
+  font-size: 0.56rem;
+  font-weight: 700;
+}
+
+.camera-compass-bearing {
+  color: var(--fg);
+  font-size: 0.56rem;
+}
+
+.camera-controls-cluster {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+}
+
+/* The scene-overlay button treatment — translucent dark chip, blurred backdrop,
+   accent on hover — one step larger than a chrome button, because these are
+   pressed repeatedly and aimed at while the camera is moving. */
+.camera-ctl-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  background: rgba(12, 14, 20, 0.7);
+  backdrop-filter: blur(8px);
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+
+.camera-ctl-btn svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.camera-ctl-btn:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.camera-ctl-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* Tilt in whole degrees below the horizon — which of the two tilt buttons to
+   press, without guessing. */
+.camera-ctl-readout {
+  padding-top: 0.1rem;
+  color: var(--fg-muted);
+  font-family: "Geist Mono", monospace;
+  font-size: 0.56rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/* Light theme: the same translucent-plate trick the align buttons use, so the
+   controls stay legible over bright imagery. */
+[data-theme="light"] .camera-compass,
+[data-theme="light"] .camera-ctl-btn {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+[data-theme="light"] .camera-compass-readout {
+  background: rgba(255, 255, 255, 0.85);
+}
+
+[data-theme="light"] .camera-compass-south {
+  fill: var(--fg-dim);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   STREAMING LAYER CONTROLS
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Global, not per-layer: a streaming layer's LoD ladder is discovered from
+   the cells the worker decodes, so there is nothing to populate a per-layer
+   dropdown with at load time. See `StreamingLodControl`. */
+.streaming-lod-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--fg-label);
+  font-size: 0.7rem;
+}
+
+/* The one streaming choice that IS per-layer: whether this extract keeps
+   following the camera. Reads as a state badge rather than a switch, because
+   what the user needs at a glance is which layers are still fetching. */
+.layer-sync-btn {
+  flex: none;
+  padding: 0.1rem 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  font-family: "Geist Mono", monospace;
+  font-size: 0.55rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+
+.layer-sync-btn.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ADDRESS SEARCH (scene overlay, top-left)
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Top-left of the CANVAS, not the toolbar: the align cluster owns top-right,
+   the legend and scale bottom-left, the compass bottom-right. Also the
+   positioned parent the dropdown anchors under. z-index one above the other
+   overlays (all at 10) so a long result list is never drawn behind the
+   legend it hangs over. */
+.address-search {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 11;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Collapsed: the same translucent-plus-blur chip every other scene overlay
+   uses, because this one sits on imagery rather than on chrome. */
+.address-search-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  background: rgba(12, 14, 20, 0.85);
+  backdrop-filter: blur(12px);
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+
+.address-search-toggle svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.address-search-toggle:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Expanded: an opaque-enough panel, not the toolbar's `--bg-input`. Over
+   bright satellite imagery a translucent field loses its own text. */
+.address-search-open {
+  gap: 0.35rem;
+  height: 2rem;
+  padding: 0 0.4rem;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  background: rgba(12, 14, 20, 0.9);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 30%);
+}
+
+.address-search-icon {
+  width: 0.85rem;
+  height: 0.85rem;
+  flex: none;
+  fill: none;
+  stroke: var(--fg-muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.address-search-input {
+  width: 12rem;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 0.75rem;
+  outline: none;
+}
+
+.address-search-input::placeholder {
+  color: var(--fg-dim);
+}
+
+.address-search-clear {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.address-search-clear:hover {
+  color: var(--fg);
+}
+
+/* The dropdown. z-index above the viewport overlays (the compass cluster sits
+   at 10) so a result is never drawn behind the globe's furniture. */
+.address-search-list {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  z-index: 30;
+  min-width: 16rem;
+  max-width: 22rem;
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+}
+
+.address-search-option {
+  padding: 0.35rem 0.5rem;
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font-size: 0.75rem;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Keyboard and pointer share ONE highlight: `aria-activedescendant` and the
+   mouse both drive `is-active`, so the row Enter would take is always the row
+   that looks chosen. */
+.address-search-option.is-active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.address-search-note {
+  padding: 0.35rem 0.5rem;
+  color: var(--fg-muted);
+  font-size: 0.72rem;
+}
+
+/* A licence obligation, kept inside the search UI: Photon's data is consulted
+   while typing and never drawn on the globe, so it does not belong in the
+   map's attribution overlay. */
+.address-search-credit {
+  margin-top: 0.15rem;
+  padding: 0.3rem 0.5rem 0.15rem;
+  border-top: 1px solid var(--border);
+  color: var(--fg-dim);
+  font-size: 0.62rem;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   VIEW MODE TOGGLE (toolbar)
+   ═══════════════════════════════════════════════════════════════ */
+
+.view-mode-toggle {
+  display: inline-flex;
+  align-items: stretch;
+  height: 2rem;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-muted);
+}
+
+.view-mode-btn {
+  padding: 0 0.45rem;
+  border: none;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.view-mode-btn:hover:not(.view-mode-btn-active) {
+  color: var(--fg);
+}
+
+.view-mode-btn-active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SCALE BAR (viewport overlay)
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Bottom-LEFT, clear of the attribution strip: bottom-right is the compass and
+   the zoom cluster, top-right the align buttons and the panels that open over
+   them, bottom centre the pick tooltip. Offset past the legend's 1.75rem
+   toggle (which sits at left 0.75rem and expands UPWARDS into its card), so
+   the two share the corner instead of stacking on each other.
+   Non-interactive — it is a readout, and it must never swallow a drag meant
+   for the globe. */
+.scale-bar {
+  position: absolute;
+  left: 3rem;
+  bottom: 0.6rem;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 45%);
+  color: #f0f0f0;
+  font-family: "Geist Mono", monospace;
+  font-size: 0.65rem;
+  line-height: 1.2;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* The bar itself: a rule with end ticks, the classic map form. Its WIDTH is
+   set inline from the scale — that is the whole measurement. */
+.scale-bar-track {
+  height: 0.35rem;
+  border: 1px solid currentColor;
+  border-top: none;
+}
+
+[data-theme="light"] .scale-bar {
+  background: rgb(255 255 255 / 80%);
+  color: #1a1d24;
+}
+
+[data-theme="light"] .address-search-list {
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+}
+
+/* The chip and the field carry the scene's own contrast, not the panel's: in
+   light chrome the near-black overlay would swallow the dark text the theme
+   pairs with it (the same flip `.camera-ctl-btn` and `.scale-bar` make). */
+[data-theme="light"] .address-search-toggle,
+[data-theme="light"] .address-search-open {
+  background: rgba(255, 255, 255, 0.9);
 }

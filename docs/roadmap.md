@@ -1,6 +1,8 @@
 # Roadmap
 
-Status: Draft v0.1
+Status: Living document — last revised 2026-08-03, after Milestone 8 (Navara engine
+migration). Milestones 0–6 and 8 are delivered; Milestone 7 (CityGML) is partially
+delivered (M7.1 only). Per-milestone status is recorded in each section below.
 
 ## Delivery Strategy
 
@@ -32,7 +34,7 @@ Goal: open a city model and provide a usable 3D exploration workflow.
 Deliverables:
 
 - Vite and React application shell
-- Three.js scene bootstrap
+- Three.js scene bootstrap (superseded by Milestone 8: Navara)
 - City model ingestion starting with CityJSON
 - Camera controls, selection, and inspection panel
 - Basic city-model metadata display
@@ -216,7 +218,7 @@ Deferred:
 
 - @takram/three-atmosphere and @takram/three-clouds integration. Packages are installed but EastNorthUpFrame places meshes at ECEF coordinates (millions of meters from origin) which breaks the local-origin camera/controls model. A future approach should either: (a) implement a globe-scale view mode where OrbitControls target is in ECEF space, or (b) use the atmosphere shaders without ENU framing by passing sun direction directly.
 
-Status: Complete (R3F migration). Atmosphere/clouds deferred.
+Status: Complete (R3F migration). Atmosphere/clouds deferred. Superseded by Milestone 8: the R3F scene was replaced by the Navara engine, which provides the atmosphere natively.
 
 ### M6.2: View Alignment Buttons and Per-Layer Fly-To
 
@@ -236,7 +238,7 @@ Exit criteria:
 
 - A user can manage layers in a left sidebar, select LoD per layer, and navigate views via alignment buttons ✓
 - A user can fly to any layer by clicking the crosshair icon ✓
-- Scene rendering uses R3F with proper lighting and shadows ✓
+- Scene rendering uses R3F with proper lighting and shadows ✓ (superseded by Milestone 8: Navara)
 
 ## Milestone 7: CityGML 2.0/3.0 Support
 
@@ -282,6 +284,145 @@ Deliverables:
 - Progress reporting during parse
 - Memory-efficient incremental object emission
 
+## Milestone 8: Navara Engine Migration (plan phases M7.1–M7.7)
+
+Goal: replace the bespoke React Three Fiber scene with the Navara engine, moving all
+format-agnostic CityJSON domain code into a reusable plugin monorepo consumed as a git
+submodule (`packages/cityjson-navara-plugins`).
+
+Tracked in detail in `docs/superpowers/plans/2026-08-01-navara-migration.md`. That plan
+numbers its own phases M7.1–M7.7; those labels belong to the plan's internal numbering and
+are unrelated to Milestone 7 (CityGML) above. Phase status:
+
+- M7.1 (plugin monorepo scaffold + submodule + app wiring): Complete
+- M7.2 (format-agnostic domain moved into @cityjson/navara-core; app re-exports at the old
+  paths): Complete — the re-export shims were themselves deleted in M7.7, except two kept
+  deliberately as app vocabulary (`domain/citymodel/types.ts`, `features/rules/types.ts`)
+- M7.3 (plugin + viewport rendering a static CityJSON layer): Complete
+- M7.4 (picking, cursor readout, rules, highlight, LoD): Complete — verified end-to-end
+  in the browser on the real engine; log in
+  `docs/superpowers/research/2026-08-01-navara-spike-findings.md` §10
+- M7.5 (@cityjson/navara-flatcitybuf streaming plugin): Complete — browser-proven against
+  a real remote `.fcb` (range requests, resident-cell counts, level swaps)
+- M7.6 (solar, Google 3D Tiles, geographic persistence): Complete
+- M7.7 (teardown, dependency pinning, docs): Complete
+
+Delivered:
+
+- `cityjson-navara-plugins` monorepo (git submodule at `packages/cityjson-navara-plugins`):
+  `@cityjson/navara-core`, `@cityjson/navara-cityjson`, `@cityjson/navara-flatcitybuf`, and
+  `@cityjson/navara-cityparquet` (scaffold only — see Dropped)
+- `NavaraViewport` replacing `CitySceneR3F`, behind the same `CitySceneHandle` contract
+- Real ENU georeferencing per layer: an exact per-vertex source-CRS→ENU transform plus
+  EGM2008 geoid-sampled vertical placement, with a CRS gate that refuses non-metric or
+  unrecognised CRS at load
+- Picking, per-surface rule colouring, highlight and LoD selection on the plugin handles
+  (`PickStrategy = "own-raycast"` — the engine's `PickableMeshWrapper` carries a per-mesh
+  uniform id and cannot express per-surface granularity)
+- FlatCityBuf viewport streaming driven by Navara camera events, with the B1–B5 race fixes
+  (stale-commit ordering, rule-change recolour, worker eviction, budget/hole handling,
+  fetch rollback) carried over as tests
+- Engine-native atmosphere, sun and shadows; Google Photorealistic 3D Tiles as a native
+  `3d-tiles` layer, with mandatory attribution for both Google and the geoid service
+- Geographic camera persistence: snapshot/share v3 stores `{lng, lat, height, heading,
+pitch, roll}`; v1/v2 snapshots are rejected outright (pre-v3 share links decode to null)
+- R3F, `@takram/*`, `@takram/3d-tiles-renderer` and `suncalc` removed; `three@0.183.2` and
+  `postprocessing@6.39.0` pinned exactly
+
+Dropped in this migration (spec §9 non-goals):
+
+- Measure tool and box-select. `ViewerToolbar` still offers the modes and `pickEventHandlers`
+  still routes them (picking turns off), but nothing draws a rubber band or a measurement —
+  they are disabled, not implemented, pending re-implementation against Navara.
+- Vignette and lens-flare parity with the old post-processing stack
+- Non-georeferenced ("local") viewing mode — every layer must georeference or it is refused
+- CityParquet implementation: `@cityjson/navara-cityparquet` stays a scaffold
+- A 3D-Tiles-conversion plugin
+- Backward-compatible snapshots and share links (project philosophy: breaking changes are fine)
+- A React wrapper for Navara — `NavaraViewport` stays a thin imperative host
+
+Deferred during execution (known, non-blocking; recorded here so they are not lost):
+
+- The Advanced Settings panel's rendering/debug toggles — post-processing, clouds, aerial
+  perspective, lens flare, sun shadows, city shadows, double-sided, city material mode — are
+  still unwired under `NavaraViewport`: `renderDebugStore` and `atmosphereStore` have no
+  reader outside the panel itself. Wire them to the engine or delete them. (The Google 3D
+  Tiles toggle in the same panel _is_ wired.)
+- ~~`LEVEL_SWAP_TIMEOUT_MS = 1500` wants a GPU-backed measurement~~ — **removed**
+  2026-08-05. On any host where a full-cover swap exceeded 1.5 s it stalled the layer
+  permanently (uxfix report § Wave 3). Cancelling work the user has moved on from is
+  `abortInFlight()` plus the worker epoch, not a timer.
+- **The streaming fetch bound wants the same real-hardware measurement the old one did.**
+  `COMMIT_FETCH_TIMEOUT_MS = 30_000` replaced it as a _liveness_ bound, sized at ~3x the
+  slowest healthy commit seen on a GPU-less host. Residual caveats, all needing a run on
+  real hardware and a large dataset: (a) 30 s may be too tight for a genuinely huge first
+  cover on a slow connection — expiry there would loop retry-and-stall rather than stall
+  outright; (b) it bounds the fetch only, not the probe, so a stuck `probe` still hangs a
+  commit; (c) it does not abort the HTTP request, only stops waiting on it, so a stalled
+  connection is left to the browser.
+- A layer still fetches its first cover TWICE: commit 1 has no LoD ladder (the FCB header
+  carries none), so it pulls every LoD, and commit 2 swaps to the resolved label. Seeding
+  the ladder from a cheap first probe would remove both the wasted fetch and the
+  stacked-LoD first frame.
+- Hover raycasting is now nearest-hit across all handles per mousemove, on a plain
+  `Raycaster.intersectObject` with no BVH. Acceptable today; if it bites with several large
+  layers, the candidates are a BVH in the plugin or throttling hover picks.
+
+Exit criteria:
+
+- A user can load CityJSON, CityJSONSeq and streaming FlatCityBuf layers onto the globe, pick
+  and recolour them, animate the sun, and save/restore/share a viewpoint ✓
+- `npx tsc -b --noEmit`, `npx vitest run`, `pnpm vitest run` (submodule) and `npm run build`
+  are all green ✓ — re-verified 2026-08-03 at `ccaf2ce`: tsc clean, app 53 files / 618 tests,
+  plugins 42 files / 572 tests, build succeeds
+
+Status: Implementation complete through phase M7.7. **The final review has not run yet** — the
+plan's last task (C26, a whole-branch review) is outstanding, so no reviewer has yet looked at
+the migration as a single diff. Per-task reviews were run and closed throughout.
+
+## Milestone 9: CityParquet Loading (Complete)
+
+Goal: load CityParquet packages as ordinary static city-model layers, from a URL, from an
+object-storage bucket, or from local files.
+
+Spec: `docs/superpowers/specs/2026-08-07-cityparquet-loading-design.md`.
+Plan: `docs/superpowers/plans/2026-08-07-cityparquet-loading.md`.
+
+Deliverables:
+
+- Engine-free reader in `@cityjson/navara-cityparquet` — footer `city` metadata, table
+  decode, WKB geometry, STAC-Item package assembly — producing the same normalised
+  `CityModel` the CityJSON path produces ✓
+- Vendored, patched hyparquet 1.28.1 (`DELTA_BYTE_ARRAY` in DataPage V1; geoparquet
+  auto-conversion disabled from outside via a complete `parsers` override). See
+  `src/vendor/hyparquet/VENDORED.md` ✓
+- URL sourcing in `src/features/cityparquet/` — single `.parquet` table, https package
+  directory, and `gs://`/`s3://` wildcard or prefix expanded by anonymous bucket listing
+  (capped at 64 tables); plain-https wildcards rejected with an explanation ✓
+- Local `.parquet` file drop, multi-file drop, and folder picking (`webkitdirectory`) ✓
+- `.parquet` data assets offered by the STAC catalog browser ✓
+- Errors surface inline on the landing page and as toasts in the viewer shell ✓
+- CRS from the footer's `city.crs` PROJJSON, EPSG authority only — the existing CRS gate
+  rejects anything else ✓
+- Analytics via the existing in-memory path (`loadCityModelFromMemory`); decoding never
+  depends on DuckDB ✓
+
+Out of scope in v1, deliberately: appearance (materials/textures), geometry templates, the
+experimental `CityParquetArrowNative-v1` encoding, partial/streaming reads, authenticated
+buckets.
+
+Status: Complete. Browser-smoked 2026-08-08 against the fixture package served over http —
+package-directory URL and single-`.parquet` URL both add as layers and render georeferenced
+on the globe, picking resolves objects with inherited attributes labelled by source, the LoD
+selector offers the package's `2.2` and `0`, a 404 URL surfaces a toast, and a saved
+workspace restores both URL layers. Verification green: `npx tsc -b --noEmit`, app 105 files
+/ 1295 tests, submodule typecheck + 52 files / 719 tests + `pnpm build`.
+
+Known limitation, not a defect: `gs://` against the public `cityparquet` bucket maps to the
+right https URL and issues the request, but the bucket serves no `Access-Control-Allow-Origin`
+header, so the browser blocks it and the app reports the CORS-aware network error. Object
+storage support is only as usable as the bucket's CORS configuration.
+
 ## Cross-Cutting Workstreams
 
 - Data quality and semantic assumptions
@@ -298,9 +439,16 @@ Deliverables:
 
 ## Recommended Immediate Next Step
 
-Start Milestone 1 with a minimal but disciplined shell:
+Milestone 8 (Navara) is implemented through phase M7.7 and the verification bar is green.
+The next steps, in order:
 
-1. Lock the repository structure and core module boundaries.
-2. Scaffold the viewer shell with Vite, React, and Three.js.
-3. Introduce the persistence interfaces before the first feature state is implemented.
-4. Use a small representative CityJSON sample as the first end-to-end target, with CityJSONSeq close behind for analytics-oriented flows.
+1. Land the Navara migration: run the outstanding whole-branch review over
+   `git diff main...HEAD` plus the submodule log, address any critical findings, then merge
+   `develop` and push the pinned submodule pointer.
+2. Close Milestone 8's deferred items (listed in that section): wire or delete the Advanced
+   Settings rendering/debug toggles, and seed a streaming layer's LoD ladder before its
+   first commit.
+3. Decide whether to restore the two features dropped in the migration — the measure tool and
+   box-select — against Navara, or remove their `ViewerToolbar` entries.
+4. Resume Milestone 7 (CityGML) at M7.2 (non-building city object types), then M7.3
+   (SAX streaming parser for files >100 MB).

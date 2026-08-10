@@ -6,12 +6,14 @@
  */
 
 import type { CityModel } from "./types";
-import type { CityJSONRoot } from "./cityjson/types";
 import type { HttpClient } from "../../platform/types";
-import { parseCityJSON } from "./cityjson/parseCityJSON";
-import { parseCityJSONSeq } from "./cityjsonseq/parseCityJSONSeq";
-import { loadFlatCityBuf } from "./flatcitybuf/loadFlatCityBuf";
+import {
+  parseCityJSON,
+  parseCityJSONSeq,
+  type CityJSONRoot,
+} from "@cityjson/navara-core";
 import { parseCityGML } from "./citygml/parseCityGML";
+import { isZipBytes, parseCityGmlArchive } from "./cityGmlArchive";
 import { detectEncoding } from "./detectEncoding";
 
 /**
@@ -62,13 +64,62 @@ const defaultHttp: HttpClient = {
       text,
     };
   },
+
+  async fetchBytes(url: string) {
+    const response = await fetch(url);
+    const bytes = response.ok
+      ? new Uint8Array(await response.arrayBuffer())
+      : new Uint8Array();
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      bytes,
+    };
+  },
 };
+
+const GZIP_MAGIC_0 = 0x1f;
+const GZIP_MAGIC_1 = 0x8b;
+
+/**
+ * Gunzip when the payload carries gzip magic bytes (server sent the .gz file
+ * verbatim); pass through otherwise (server already decompressed via
+ * Content-Encoding, or the file was never gzipped).
+ */
+export async function decodeModelBytes(bytes: Uint8Array): Promise<string> {
+  if (
+    bytes.length > 2 &&
+    bytes[0] === GZIP_MAGIC_0 &&
+    bytes[1] === GZIP_MAGIC_1
+  ) {
+    // Response (not Blob) as the byte source: in tests the Response and
+    // DecompressionStream globals come from the same (Node) realm, whereas
+    // jsdom's Blob.stream() would brand-check-fail against Node's streams.
+    const body = new Response(bytes as BodyInit).body;
+    if (!body) return new TextDecoder().decode(bytes);
+    return await new Response(
+      body.pipeThrough(new DecompressionStream("gzip")),
+    ).text();
+  }
+  return new TextDecoder().decode(bytes);
+}
 
 /**
  * Load a city model from a remote URL.
- *  - .fcb → FlatCityBuf (WASM HTTP range-request reader)
+ *  - .fcb → NOT loaded here. FlatCityBuf files are streamed by viewport
+ *    rather than loaded whole; this function throws a clear error instead
+ *    of attempting a whole-file read. (The whole-file WASM reader this
+ *    branch used to call has been removed; viewport streaming is not yet
+ *    wired up to this entry point.)
  *  - .city.jsonl / .jsonl → CityJSONSeq (fetch + parse)
+ *  - a body with ZIP magic → unzipped and parsed as CityGML, whatever the
+ *    extension said (see cityGmlArchive.ts)
  *  - everything else → CityJSON (fetch + parse)
+ *
+ * The body is fetched as bytes and gunzipped when it carries gzip magic
+ * bytes, so `*.city.json.gz` assets work whether the server hands back the
+ * compressed file verbatim or already decompressed it via Content-Encoding.
  *
  * Accepts an optional HttpClient for platform abstraction (Tauri, testing).
  */
@@ -79,17 +130,19 @@ export async function loadFromUrl(
   const encoding = detectEncoding(url);
 
   if (encoding === "flatcitybuf") {
-    return loadFlatCityBuf(url);
+    throw new Error(
+      `FlatCityBuf (.fcb) files are loaded by viewport streaming, not as a single whole-file read, and that path is not wired up yet. Could not load "${fileNameFromUrl(url)}".`,
+    );
   }
 
   let response: {
     ok: boolean;
     status: number;
     statusText: string;
-    text: string;
+    bytes: Uint8Array;
   };
   try {
-    response = await http.fetchText(url);
+    response = await http.fetchBytes(url);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
@@ -111,7 +164,26 @@ export async function loadFromUrl(
       `Failed to fetch: ${response.status} ${response.statusText}`,
     );
   }
-  const text = response.text;
+
+  // BEFORE `decodeModelBytes` and before the encoding switch: a ZIP is a
+  // CONTAINER, and only its bytes say so. Its magic is not gzip's, so
+  // `decodeModelBytes` would TextDecode the archive into mojibake and hand
+  // that to whichever parser the extension guessed — for `.zip` that is the
+  // `detectEncoding` default, JSON. Everything above this point (the CORS
+  // sentence, the 404 branch) is inherited unchanged.
+  if (isZipBytes(response.bytes)) {
+    return parseCityGmlArchive(response.bytes, fileNameFromUrl(url));
+  }
+
+  let text: string;
+  try {
+    text = await decodeModelBytes(response.bytes);
+  } catch (err) {
+    throw new Error(
+      `Corrupt or truncated compressed data for "${fileNameFromUrl(url)}". The gzipped body could not be decompressed.`,
+      { cause: err },
+    );
+  }
 
   if (encoding === "cityjsonseq") {
     return parseCityJSONSeq(text);

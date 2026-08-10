@@ -3,35 +3,121 @@
  *
  * Shows details about the selected CityObject(s) or surface.
  * Supports multi-select with statistical aggregation.
- * Tabs: Object, Surfaces, Analysis, Rules, Solar, Stats.
+ * Tabs: Object, Surfaces, Analysis, Rules, Stats.
+ *
+ * There is no Solar tab: the scene clock, the seasonal presets and the sun
+ * readout are all scene-wide configuration, so they live outside this panel —
+ * all of it in `ui/toolbar/SolarMenu.tsx`, one popover off the header. This
+ * panel is about the current selection.
  */
 
 import { useState } from "react";
 import type {
-  CityObject,
+  BBox3,
   BuildingSurfaceType,
+  CityObject,
+  Surface,
 } from "../../domain/citymodel/types";
 import type { Selection } from "../../domain/selection/types";
-import { SURFACE_COLOR_HEX } from "../../shared/surfaceColorMap";
+import { SURFACE_COLOR_HEX, computeFootprintArea } from "@cityjson/navara-core";
 import { useLayerStore } from "../../features/layers/layerStore";
+import { resolveInheritedAttributes } from "../../domain/citymodel/inheritedAttributes";
+import { useStreamStore } from "../../features/streaming/streamStore";
+import { getResidentModel } from "../../features/streaming/residentModel";
+import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
+import {
+  useObjectSurfaces,
+  type SurfacesFetchState,
+} from "../../features/streaming/useResidentSurfaces";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { AnalysisTab } from "./AnalysisTab";
 import { RuleBuilderTab } from "./RuleBuilderTab";
-import { SolarTab } from "./SolarTab";
 import { StatsTab } from "./StatsTab";
 import {
-  computeFootprintArea,
   computeTotalRoofArea,
   computeVolume,
 } from "../../domain/geometry/derived";
 
-type Tab = "object" | "surfaces" | "analysis" | "rules" | "solar" | "stats";
+type Tab = "object" | "surfaces" | "analysis" | "rules" | "stats";
 type AggMode = "sum" | "avg" | "min" | "max";
 
 interface InspectorPanelProps {
   readonly selections: ReadonlyArray<Selection>;
   readonly onClose: () => void;
   readonly duckdbModelLoaded?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Object display data — normalizes a static CityObject or a streaming
+// ResidentObjectRecord into the shape the Object/Analysis-summary views
+// need, so those views don't have to branch on which kind of layer they're
+// looking at. A ResidentObjectRecord carries no ring geometry, so its
+// footprint/roof-area/volume are read from precomputed fields instead of
+// being derived from Surface.rings — see `@cityjson/navara-flatcitybuf`'s
+// workerProtocol.ts, which declares ResidentObjectRecord, for why.
+// ---------------------------------------------------------------------------
+
+interface ObjectDisplayData {
+  readonly id: string;
+  readonly objectType: string;
+  readonly lod: string | null;
+  readonly attributes: Readonly<Record<string, unknown>>;
+  readonly children: ReadonlyArray<string>;
+  readonly parents: ReadonlyArray<string>;
+  readonly surfaceCount: number;
+  readonly bbox: BBox3 | null;
+  readonly footprintAreaSqM: number | null;
+  readonly roofAreaSqM: number;
+  readonly volumeCuM: number | null;
+}
+
+/**
+ * @param objects the layer's whole object map, so a child can inherit its
+ * parent's attributes. In CityJSON the geometry and the semantics are usually
+ * on DIFFERENT objects — a picked `BuildingPart` has none of its own — so
+ * without this every building in the Delft dataset read as attribute-less.
+ * See `domain/citymodel/inheritedAttributes.ts`.
+ */
+function displayDataFromObject(
+  object: CityObject,
+  objects: Readonly<Record<string, CityObject>>,
+): ObjectDisplayData {
+  return {
+    id: object.id,
+    objectType: object.objectType,
+    lod: object.lod,
+    attributes: resolveInheritedAttributes(objects, object).attributes,
+    children: object.children,
+    parents: object.parents,
+    surfaceCount: object.surfaces.length,
+    bbox: object.bbox,
+    footprintAreaSqM: computeFootprintArea(object),
+    roofAreaSqM: computeTotalRoofArea(object),
+    volumeCuM: computeVolume(object),
+  };
+}
+
+function displayDataFromRecord(
+  record: ResidentObjectRecord,
+  records: Readonly<Record<string, ResidentObjectRecord>>,
+): ObjectDisplayData {
+  return {
+    id: record.id,
+    objectType: record.objectType,
+    lod: record.lod,
+    // Streaming splits Building/BuildingPart exactly as the static path does,
+    // so it needs the same inheritance — see displayDataFromObject.
+    attributes: resolveInheritedAttributes(records, record).attributes,
+    children: record.children,
+    parents: record.parents,
+    surfaceCount: record.surfaceCount,
+    bbox: record.bbox,
+    footprintAreaSqM: record.footprintAreaSqM,
+    // roofMetrics already carries each RoofSurface's area (computed by the
+    // worker when the cell was decoded) — no rings needed to sum it.
+    roofAreaSqM: record.roofMetrics.reduce((sum, m) => sum + m.areaSqM, 0),
+    volumeCuM: record.volumeCuM,
+  };
 }
 
 export function InspectorPanel({
@@ -54,18 +140,113 @@ export function InspectorPanel({
   const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
   const displayLayer = selectedLayer ?? activeLayer;
   const model = displayLayer?.model;
+  const isStreaming = displayLayer?.isStreaming ?? false;
 
-  const selectedObject: CityObject | undefined =
-    selection && model ? model.objects[selection.objectId] : undefined;
+  // Only meaningful for a streaming displayLayer; unused (and effectively
+  // constant) otherwise, but always subscribed so hook order stays stable.
+  const streamVersion = useStreamStore((s) =>
+    displayLayer ? s.streams[displayLayer.id]?.version : undefined,
+  );
+  const streamHandle = useStreamStore((s) =>
+    displayLayer ? s.streams[displayLayer.id]?.handle : undefined,
+  );
 
-  // Resolve all selected objects for multi-select
-  const selectedObjects: CityObject[] = [];
-  if (model && selections.length > 0) {
-    for (const sel of selections) {
-      const obj = model.objects[sel.objectId];
-      if (obj) selectedObjects.push(obj);
+  const residentModel =
+    isStreaming && displayLayer
+      ? getResidentModel(displayLayer.id, streamVersion ?? 0)
+      : null;
+
+  // Resolve the display data for single- and multi-select from whichever
+  // source this layer actually has resident: `model.objects` (static) or
+  // the merged resident model (streaming). A streaming layer's `model` is
+  // not a source of truth for objects — see residentModel.ts.
+  const selectedObjectsData: ObjectDisplayData[] = [];
+  let singleSelectedId: string | null = null;
+  if (isStreaming) {
+    if (residentModel && selections.length > 0) {
+      for (const sel of selections) {
+        const record = residentModel.objects[sel.objectId];
+        if (record) {
+          selectedObjectsData.push(
+            displayDataFromRecord(record, residentModel.objects),
+          );
+        }
+      }
+    }
+    if (!isMultiSelect && selection && residentModel) {
+      singleSelectedId = residentModel.objects[selection.objectId]
+        ? selection.objectId
+        : null;
+    }
+  } else {
+    if (model && selections.length > 0) {
+      for (const sel of selections) {
+        const obj = model.objects[sel.objectId];
+        if (obj) {
+          selectedObjectsData.push(displayDataFromObject(obj, model.objects));
+        }
+      }
+    }
+    if (!isMultiSelect && selection && model) {
+      singleSelectedId = model.objects[selection.objectId]
+        ? selection.objectId
+        : null;
     }
   }
+
+  const selectedSurfaceIndex =
+    selection?.kind === "surface" ? selection.surfaceIndex : null;
+
+  // The one CityObject needed for the static (non-streaming) single-select
+  // Surfaces/Analysis tabs, which read `.surfaces` synchronously — no
+  // change from before streaming existed.
+  const selectedObject: CityObject | undefined =
+    !isStreaming && singleSelectedId && model
+      ? model.objects[singleSelectedId]
+      : undefined;
+
+  // Streaming single-select surfaces fetch — gated on the Surfaces/Analysis
+  // tab actually being the one showing, not on "an object is selected".
+  // Rings are the one thing a ResidentObjectRecord can't provide (see its
+  // doc comment), and the Object tab needs none of them (footprint/roof
+  // area/volume all come from precomputed record fields) — so fetching
+  // eagerly on every selection would cost a worker round trip the user may
+  // never need. Always called (Rules of Hooks); stays "empty" and does
+  // nothing when not streaming, nothing selected, or a tab that doesn't
+  // need rings is showing.
+  const needsSurfaces = activeTab === "surfaces" || activeTab === "analysis";
+  const surfacesFetch = useObjectSurfaces(
+    isStreaming && needsSurfaces ? (streamHandle ?? null) : null,
+    isStreaming && needsSurfaces ? singleSelectedId : null,
+  );
+
+  // Static multi-select "surfaces" breakdown needs full per-type surface
+  // lists across every selected object — for a streaming layer that would
+  // mean an on-demand ring fetch per selected object, which is out of
+  // scope here (the async fetch this task adds is for exactly one selected
+  // object, per the design's own framing). `null` means "unavailable",
+  // rendered as an explicit message rather than a silently empty table.
+  const multiSelectSurfaceBreakdown: Array<{
+    type: BuildingSurfaceType;
+    count: number;
+  }> | null = isStreaming
+    ? null
+    : (() => {
+        const counts = new Map<BuildingSurfaceType, number>();
+        if (model) {
+          for (const sel of selections) {
+            const obj = model.objects[sel.objectId];
+            if (!obj) continue;
+            for (const s of obj.surfaces) {
+              counts.set(s.type, (counts.get(s.type) ?? 0) + 1);
+            }
+          }
+        }
+        return [...counts.entries()].map(([type, count]) => ({
+          type,
+          count,
+        }));
+      })();
 
   return (
     <aside className="inspector">
@@ -104,12 +285,6 @@ export function InspectorPanel({
           Rules
         </button>
         <button
-          className={`inspector-tab ${activeTab === "solar" ? "active" : ""}`}
-          onClick={() => setActiveTab("solar")}
-        >
-          Solar
-        </button>
-        <button
           className={`inspector-tab ${activeTab === "stats" ? "active" : ""}`}
           onClick={() => setActiveTab("stats")}
         >
@@ -127,8 +302,6 @@ export function InspectorPanel({
             ) : (
               <div className="inspector-placeholder">No layer selected</div>
             )
-          ) : activeTab === "solar" ? (
-            <SolarTab />
           ) : activeTab === "stats" ? (
             model ? (
               <StatsTab
@@ -139,27 +312,49 @@ export function InspectorPanel({
             ) : (
               <div className="inspector-placeholder">No layer selected</div>
             )
-          ) : selectedObjects.length === 0 ? (
+          ) : selectedObjectsData.length === 0 ? (
             <div className="inspector-placeholder">
               Select an object to inspect
             </div>
           ) : isMultiSelect ? (
-            <MultiSelectView objects={selectedObjects} activeTab={activeTab} />
+            <MultiSelectView
+              data={selectedObjectsData}
+              activeTab={activeTab}
+              surfaceBreakdown={multiSelectSurfaceBreakdown}
+            />
           ) : activeTab === "object" ? (
-            <ObjectTab object={selectedObject!} />
+            <ObjectTab data={selectedObjectsData[0]!} />
           ) : activeTab === "surfaces" ? (
-            <SurfacesTab
-              object={selectedObject!}
-              selectedSurfaceIndex={
-                selection?.kind === "surface" ? selection.surfaceIndex : null
-              }
+            isStreaming ? (
+              <SurfacesFetchGate
+                fetch={surfacesFetch}
+                render={(surfaces) => (
+                  <SurfacesTab
+                    surfaces={surfaces}
+                    selectedSurfaceIndex={selectedSurfaceIndex}
+                  />
+                )}
+              />
+            ) : (
+              <SurfacesTab
+                surfaces={selectedObject!.surfaces}
+                selectedSurfaceIndex={selectedSurfaceIndex}
+              />
+            )
+          ) : isStreaming ? (
+            <SurfacesFetchGate
+              fetch={surfacesFetch}
+              render={(surfaces) => (
+                <AnalysisTab
+                  surfaces={surfaces}
+                  selectedSurfaceIndex={selectedSurfaceIndex}
+                />
+              )}
             />
           ) : (
             <AnalysisTab
-              object={selectedObject!}
-              selectedSurfaceIndex={
-                selection?.kind === "surface" ? selection.surfaceIndex : null
-              }
+              surfaces={selectedObject!.surfaces}
+              selectedSurfaceIndex={selectedSurfaceIndex}
             />
           )}
         </ErrorBoundary>
@@ -169,33 +364,61 @@ export function InspectorPanel({
 }
 
 // ---------------------------------------------------------------------------
+// Streaming surfaces-fetch gate — shared loading/error/ready rendering for
+// the Surfaces and Analysis tabs when the displayed layer is streaming.
+// ---------------------------------------------------------------------------
+
+function SurfacesFetchGate({
+  fetch,
+  render,
+}: {
+  readonly fetch: SurfacesFetchState;
+  readonly render: (surfaces: ReadonlyArray<Surface>) => React.ReactNode;
+}) {
+  if (fetch.status === "ready") return <>{render(fetch.surfaces)}</>;
+  if (fetch.status === "error") {
+    return (
+      <div className="inspector-placeholder">
+        Failed to load surfaces: {fetch.message}
+      </div>
+    );
+  }
+  return (
+    <div className="inspector-placeholder">{"Loading surfaces\u2026"}</div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Multi-select statistics view
 // ---------------------------------------------------------------------------
 
 function MultiSelectView({
-  objects,
+  data,
   activeTab,
+  surfaceBreakdown,
 }: {
-  objects: CityObject[];
+  data: ObjectDisplayData[];
   activeTab: Tab;
+  surfaceBreakdown: Array<{ type: BuildingSurfaceType; count: number }> | null;
 }) {
   const [aggMode, setAggMode] = useState<AggMode>("sum");
 
   if (activeTab === "surfaces") {
-    // Show aggregate surface counts
-    const counts = new Map<BuildingSurfaceType, number>();
-    for (const obj of objects) {
-      for (const s of obj.surfaces) {
-        counts.set(s.type, (counts.get(s.type) ?? 0) + 1);
-      }
+    if (!surfaceBreakdown) {
+      return (
+        <div className="inspector-placeholder">
+          Surface breakdown isn&apos;t available for streaming layers in
+          multi-select. Select a single object for surface details.
+        </div>
+      );
     }
 
     return (
       <div className="attr-section">
         <div className="attr-section-title">
-          Surface Breakdown ({objects.length} objects)
+          Surface Breakdown ({data.length} objects)
         </div>
-        {[...counts.entries()].map(([type, count]) => (
+        {surfaceBreakdown.map(({ type, count }) => (
           <div key={type} className="surface-item">
             <div
               className="surface-dot"
@@ -210,15 +433,15 @@ function MultiSelectView({
   }
 
   // Object tab with aggregated geometry metrics
-  const footprintAreas = objects.map(computeFootprintArea);
-  const roofAreas = objects.map(computeTotalRoofArea);
-  const volumes = objects.map(computeVolume);
+  const footprintAreas = data.map((d) => d.footprintAreaSqM);
+  const roofAreas = data.map((d) => d.roofAreaSqM);
+  const volumes = data.map((d) => d.volumeCuM);
 
   return (
     <>
       <div className="attr-section">
         <div className="attr-section-title">
-          Selection ({objects.length} objects)
+          Selection ({data.length} objects)
         </div>
         <div className="agg-mode-select">
           <label>Aggregation:</label>
@@ -243,7 +466,7 @@ function MultiSelectView({
         <AttrRow label="Roof area" value={formatAgg(roofAreas, aggMode)} />
         <AttrRow
           label="Volume"
-          value={formatAgg(volumes, aggMode, "m\u00B3")}
+          value={formatAggNullable(volumes, aggMode, "m\u00B3")}
         />
       </div>
     </>
@@ -269,44 +492,44 @@ function formatAgg(values: number[], mode: AggMode, unit = "m\u00B2"): string {
   return `${v.toFixed(1)} ${unit}`;
 }
 
-function formatAggNullable(values: (number | null)[], mode: AggMode): string {
+function formatAggNullable(
+  values: (number | null)[],
+  mode: AggMode,
+  unit = "m\u00B2",
+): string {
   const valid = values.filter((v): v is number => v !== null);
   if (valid.length === 0) return "N/A";
   const v = aggregate(valid, mode);
-  return `${v.toFixed(1)} m\u00B2`;
+  return `${v.toFixed(1)} ${unit}`;
 }
 
 // ---------------------------------------------------------------------------
 // Object Tab
 // ---------------------------------------------------------------------------
 
-function ObjectTab({ object }: { object: CityObject }) {
-  const footprintArea = computeFootprintArea(object);
-  const roofArea = computeTotalRoofArea(object);
-  const volume = computeVolume(object);
-
+function ObjectTab({ data }: { data: ObjectDisplayData }) {
   return (
     <>
       <div className="attr-section">
         <div className="attr-section-title">Identity</div>
-        <AttrRow label="ID" value={object.id} />
-        <AttrRow label="Type" value={object.objectType} />
-        {object.lod && <AttrRow label="LoD" value={object.lod} />}
-        {object.children.length > 0 && (
+        <AttrRow label="ID" value={data.id} />
+        <AttrRow label="Type" value={data.objectType} />
+        {data.lod && <AttrRow label="LoD" value={data.lod} />}
+        {data.children.length > 0 && (
           <AttrRow
             label="Children"
-            value={`${object.children.length} part${object.children.length !== 1 ? "s" : ""}`}
+            value={`${data.children.length} part${data.children.length !== 1 ? "s" : ""}`}
           />
         )}
-        {object.parents.length > 0 && (
-          <AttrRow label="Parent" value={object.parents.join(", ")} />
+        {data.parents.length > 0 && (
+          <AttrRow label="Parent" value={data.parents.join(", ")} />
         )}
       </div>
 
-      {Object.keys(object.attributes).length > 0 && (
+      {Object.keys(data.attributes).length > 0 && (
         <div className="attr-section">
           <div className="attr-section-title">Attributes</div>
-          {Object.entries(object.attributes).map(([key, value]) => (
+          {Object.entries(data.attributes).map(([key, value]) => (
             <AttrRow key={key} label={key} value={formatValue(value)} />
           ))}
         </div>
@@ -314,30 +537,40 @@ function ObjectTab({ object }: { object: CityObject }) {
 
       <div className="attr-section">
         <div className="attr-section-title">Geometry</div>
-        <AttrRow label="Surfaces" value={String(object.surfaces.length)} />
+        <AttrRow label="Surfaces" value={String(data.surfaceCount)} />
         <AttrRow
           label="Footprint area"
           value={
-            footprintArea !== null
-              ? `${footprintArea.toFixed(1)} m\u00B2`
+            data.footprintAreaSqM !== null
+              ? `${data.footprintAreaSqM.toFixed(1)} m\u00B2`
               : "N/A"
           }
         />
-        <AttrRow label="Roof area" value={`${roofArea.toFixed(1)} m\u00B2`} />
-        <AttrRow label="Volume" value={`\u2248 ${volume.toFixed(1)} m\u00B3`} />
-        {object.bbox && (
+        <AttrRow
+          label="Roof area"
+          value={`${data.roofAreaSqM.toFixed(1)} m\u00B2`}
+        />
+        <AttrRow
+          label="Volume"
+          value={
+            data.volumeCuM !== null
+              ? `\u2248 ${data.volumeCuM.toFixed(1)} m\u00B3`
+              : "N/A"
+          }
+        />
+        {data.bbox && (
           <>
             <AttrRow
               label="Extent X"
-              value={`${(object.bbox[3] - object.bbox[0]).toFixed(1)} m`}
+              value={`${(data.bbox[3] - data.bbox[0]).toFixed(1)} m`}
             />
             <AttrRow
               label="Extent Y"
-              value={`${(object.bbox[4] - object.bbox[1]).toFixed(1)} m`}
+              value={`${(data.bbox[4] - data.bbox[1]).toFixed(1)} m`}
             />
             <AttrRow
               label="Height"
-              value={`${(object.bbox[5] - object.bbox[2]).toFixed(1)} m`}
+              value={`${(data.bbox[5] - data.bbox[2]).toFixed(1)} m`}
             />
           </>
         )}
@@ -351,17 +584,17 @@ function ObjectTab({ object }: { object: CityObject }) {
 // ---------------------------------------------------------------------------
 
 function SurfacesTab({
-  object,
+  surfaces,
   selectedSurfaceIndex,
 }: {
-  object: CityObject;
+  surfaces: ReadonlyArray<Surface>;
   selectedSurfaceIndex: number | null;
 }) {
   const counts = new Map<BuildingSurfaceType, number>();
   const indexByType = new Map<BuildingSurfaceType, number[]>();
 
-  for (let i = 0; i < object.surfaces.length; i++) {
-    const s = object.surfaces[i]!;
+  for (let i = 0; i < surfaces.length; i++) {
+    const s = surfaces[i]!;
     counts.set(s.type, (counts.get(s.type) ?? 0) + 1);
     const indices = indexByType.get(s.type) ?? [];
     indices.push(i);

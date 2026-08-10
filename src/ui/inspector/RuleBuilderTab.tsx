@@ -1,13 +1,19 @@
 /**
  * Rule builder tab for creating and managing per-layer colorization rules.
  *
- * Rules are stored in the layer store and applied to the mesh
- * via applyRuleColors in CityScene.
+ * Rules are stored in the layer store; `handleSync` compiles them
+ * (`compileRuleEvaluator`) and pushes the result into
+ * `CityModelHandle.setStyle`.
  */
 
 import { useCallback, useRef, useState } from "react";
 import type { CityModel } from "../../domain/citymodel/types";
 import { useLayerStore } from "../../features/layers/layerStore";
+import { useStreamStore } from "../../features/streaming/streamStore";
+import {
+  getResidentModel,
+  type ResidentModel,
+} from "../../features/streaming/residentModel";
 import type {
   Condition,
   ConditionOperator,
@@ -35,6 +41,11 @@ export function RuleBuilderTab({ model, layerId }: RuleBuilderTabProps) {
   const layer = useLayerStore((s) => s.layers.find((l) => l.id === layerId));
   const rules = layer?.rules ?? [];
   const enabled = layer?.rulesEnabled ?? true;
+  const isStreaming = layer?.isStreaming ?? false;
+
+  // Only subscribed for a streaming layer's re-render trigger; for a static
+  // layer this is always undefined and unused below.
+  const streamVersion = useStreamStore((s) => s.streams[layerId]?.version);
 
   const addRule = useLayerStore((s) => s.addRule);
   const updateRule = useLayerStore((s) => s.updateRule);
@@ -45,8 +56,17 @@ export function RuleBuilderTab({ model, layerId }: RuleBuilderTabProps) {
   const [showForm, setShowForm] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
 
-  // Collect attribute fields from all objects for the field dropdown
-  const attributeFields = collectAttributeFields(model);
+  // Collect attribute fields from all objects for the field dropdown. A
+  // streaming layer has no complete `CityModel` to walk — only whatever
+  // cells are currently resident — so its fields come from the merged
+  // resident model instead: object attribute keys collected from the
+  // records themselves, unioned with `surfaceAttrKeys` (already unioned
+  // and sorted per cell by the worker — see residentModel.ts).
+  const attributeFields = isStreaming
+    ? collectAttributeFieldsFromResidentModel(
+        getResidentModel(layerId, streamVersion ?? 0),
+      )
+    : collectAttributeFields(model);
   const allFields = [...METRIC_FIELDS, ...attributeFields];
 
   const handleExport = useCallback(() => {
@@ -408,6 +428,23 @@ function collectAttributeFields(model: CityModel): string[] {
       for (const key of Object.keys(surface.attributes)) {
         fields.add(key);
       }
+    }
+  }
+  return [...fields].sort();
+}
+
+/** Streaming counterpart of `collectAttributeFields`: object attribute keys
+ *  come from the resident `ResidentObjectRecord`s directly (no rings
+ *  needed), and surface attribute keys are already unioned by the worker
+ *  per cell (`CellEntry.surfaceAttrKeys`) and merged across cells by
+ *  `getResidentModel` — nothing here walks `Surface.rings`. */
+function collectAttributeFieldsFromResidentModel(
+  model: ResidentModel,
+): string[] {
+  const fields = new Set<string>(model.surfaceAttrKeys);
+  for (const record of Object.values(model.objects)) {
+    for (const key of Object.keys(record.attributes)) {
+      fields.add(key);
     }
   }
   return [...fields].sort();

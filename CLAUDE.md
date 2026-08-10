@@ -2,70 +2,149 @@
 
 ## Project Overview
 
-MultiRoof Viewer is a browser-based 3D city model viewer and rooftop analysis tool for the MultiRoofs European project. It visualizes CityJSON/CityJSONSeq/FlatCityBuf data with rule-based colorization, solar/shading analysis, and layer management.
+MultiRoof Viewer is a browser-based 3D city model viewer and rooftop analysis tool for the MultiRoofs European project. It visualizes CityJSON/CityJSONSeq/FlatCityBuf data with rule-based colorization, solar/shading analysis, and layer management, rendered on a real globe with photorealistic terrain.
 
 ## Tech Stack
 
 - **Build**: Vite (via vite-plus) + React 19 + TypeScript
-- **3D**: React Three Fiber + Three.js + @react-three/drei
-- **Geospatial**: @takram/three-geospatial (core), @takram/three-atmosphere, @takram/three-clouds
-- **State**: Zustand stores (layerStore, selectionStore, solarStore)
+- **3D**: Navara — `@navaramap/three` (`ThreeView`), `@navaramap/three-default-plugin`, `@navaramap/three-default-descs`, all pinned **exactly** at `0.0.5`. No React Three Fiber, no drei, no `@takram/*`, no `3d-tiles-renderer`.
+- **Three.js backend**: `three@0.183.2` + `postprocessing@6.39.0` + `@types/three@0.183.1`, all pinned exactly to satisfy Navara's peer ranges deterministically.
+- **CityJSON plugins**: `@cityjson/navara-core`, `@cityjson/navara-cityjson`, `@cityjson/navara-flatcitybuf`, `@cityjson/navara-cityparquet` — a **git submodule** at `packages/cityjson-navara-plugins` (public: `https://github.com/HideBa/cityjson-navara-plugins.git` — made public 2026-08-10, so CI fetches it with a plain recursive checkout, no deploy key). pnpm workspace, consumed by the app via `file:` deps plus a Vite alias + tsconfig `paths` pointing at the packages' `src/` (so editing a plugin hot-reloads the app).
+- **Geospatial**: proj4 (CRS), WGS84 ENU frames + EGM2008 geoid sampling from `@cityjson/navara-core`
+- **State**: Zustand stores (layerStore, selectionStore, solarStore, streamStore, tilesStore, atmosphereStore, renderDebugStore)
 - **Analytics**: DuckDB-wasm with cityjson extension
+- **Catalog mini-map**: `maplibre-gl@^6` — driven imperatively (no React wrapper), raster CARTO tiles keyed to the app theme, used only by the STAC browser's footprint map. It is _not_ a singleton-registry library, so it is deliberately **not** in `resolve.dedupe`. Its WORKER is pinned by hand: maplibre locates it via `new URL("./maplibre-gl-worker.mjs", import.meta.url)`, a dynamic pattern neither Vite's dep optimizer (dev) nor the build rewrites, so the fetch 404s and every GeoJSON source silently never indexes — basemap tiles render, footprints don't, `loaded()` sticks false. `StacItemMap.tsx` therefore imports the worker with `?url` and calls `setWorkerUrl` at module scope; do not remove it when upgrading maplibre without re-verifying footprints in a real browser.
 - **Testing**: Vitest + @testing-library/react
 
 ## Project Structure
 
 ```
 src/
-  app/          # App shell, CSS, entry point
-  domain/       # Format-agnostic domain types and parsers
-    citymodel/  # CityJSON/CityJSONSeq/FlatCityBuf parsers
-    selection/  # Selection types (object/surface)
-    roofMetrics/# Roof area, slope, azimuth computation
+  app/          # App shell, CSS (App.tsx owns the viewport ref + toasts)
+  main.tsx      # Entry point
+  domain/       # Format-agnostic domain types
+    citymodel/  # types.ts (re-export of core's vocabulary), detectEncoding,
+                #   loadCityModel, cityGmlArchive (ZIP-of-CityGML), citygml/ parser
+    selection/  # Selection types (object/surface, ToolMode)
+    geometry/   # derived.ts
+    roofMetrics/# aggregate.ts (the metric maths lives in navara-core)
   features/     # Zustand stores and feature hooks
-    layers/     # Layer store (multi-layer, per-layer rules, LoD)
+    layers/     # Layer store (multi-layer, per-layer rules, LoD) + file loader
     selection/  # Selection store
-    solar/      # Solar position (suncalc + proj4)
-    rules/      # Rule types, presets, evaluation
+    solar/      # Solar position store
+    rules/      # Rule presets + types.ts (re-export of core's rule schema)
+    streaming/  # FCB streaming STORE + open wrapper + React hooks only —
+                #   the streaming engine lives in @cityjson/navara-flatcitybuf
+    stac/       # Open3D City STAC catalog: stacClient (root crawl),
+                #   stacNormalize, stacAssets (classification delegates to
+                #   detectEncoding), stacItems (items.parquet via DuckDB),
+                #   stacGeo (footprints/bounds), stacStore (session cache)
+    cityparquet/# CityParquet SOURCING only: sourceClassify (what a URL means),
+                #   objectStorage (anonymous GCS/S3 listing + glob),
+                #   loadCityParquet (fetch orchestration) — the PARSER lives in
+                #   @cityjson/navara-cityparquet
+    tiles/      # Google Photorealistic 3D Tiles store
+    atmosphere/ # Atmosphere/sky settings store
+    debug/      # Render debug store
     theme/      # Dark/light theme toggle
-  scene/        # React Three Fiber scene components
-    CitySceneR3F.tsx  # Main R3F scene (Canvas, lighting, mesh management)
-    buildCityMesh.ts  # CityModel → BufferGeometry (two-pass, LoD filtering)
-    highlightMesh.ts  # Selection/hover highlight
-    applyRuleColors.ts# Rule-based vertex coloring
+  scene/        # Navara viewport and its supporting modules (no JSX scene graph)
+    NavaraViewport.tsx  # Imperative ThreeView host: engine lifecycle, plugins,
+                        #   events, CitySceneHandle
+    handleSync.ts       # Zustand store -> plugin handle reconciliation
+    navaraSession.ts    # Engine session/lifetime helpers
+    geographicCamera.ts # {lng,lat,height,heading,pitch,roll} camera maths
+    pickEventHandlers.ts# Pointer routing (tool modes, drag gate, sky moves)
+    cursorCrsReadout.ts # ECEF -> source CRS readout under the cursor
+    googleTiles.ts      # Google Photorealistic 3D Tiles layer
+    sunWriter.ts        # Solar state -> engine sun/atmosphere
+    timeAnimation.ts    # Time-of-day animation loop
+    bloomEffect.ts      # cityBloom EffectDesc (cyber theme; see Known Issue (l))
+    sceneThemePolicy.ts # Engine-free theme table (mesh style, environment, bloom)
   ui/           # React UI components
-    sidebar/    # Left sidebar (LeftSidebar, LodSelector)
-    toolbar/    # ViewerToolbar
-    inspector/  # Right panel (InspectorPanel, tabs)
-    layers/     # LayerPanel
-    viewport/   # LegendOverlay
-  persistence/  # Save/restore/share (localStorage, URL hash)
+    sidebar/    # LeftSidebar, LodSelector (static layers only)
+    toolbar/    # ViewerToolbar, SolarMenu (ALL sun UI — sliders, presets and
+                #   the altitude/azimuth readout, in one popover)
+    inspector/  # InspectorPanel + tabs (Analysis, RuleBuilder, Stats)
+    layers/     # LayerPanel, AddLayerDialog, SourcePicker,
+                #   StreamingLodControl, GoogleTilesPanel
+    stac/       # StacBrowser, CollectionCard, StacItemMap (maplibre-gl),
+                #   StacBrowserDialog
+    table/      # TablePanel
+    viewport/   # LegendOverlay, AttributionOverlay, AttributePanel,
+                #   AdvancedSettingsPanel, CameraControls
+    useModalChrome.ts   # Focus trap / Escape / scroll lock shared by every
+                        #   portal modal (AddLayerDialog, StacBrowserDialog)
+    StatusBar.tsx, ErrorBoundary.tsx
+  persistence/  # Save/restore/share (localStorage, URL hash) — schema v3
   analytics/    # DuckDB-wasm, stats computation
   platform/     # Browser/Tauri adapter interfaces
+packages/
+  cityjson-navara-plugins/      # git submodule, pnpm workspace
+    packages/navara-core/       # Engine-free: domain types, CityJSON parsers,
+                                #   ENU frames, geoid, rules, styling, metrics
+    packages/navara-cityjson/   # Static CityJSON layers (CityJSONPlugin)
+    packages/navara-flatcitybuf/# Streaming FCB layers + worker
+    packages/navara-cityparquet/# Engine-free CityParquet reader: footer `city`
+                                #   metadata, table decode, WKB, package
+                                #   assembly, vendored patched hyparquet
 tests/
   unit/         # Unit tests (mirrors src/ structure)
   integration/  # End-to-end pipeline tests
-fixtures/       # Test data (two-buildings.city.json/jsonl)
-docs/           # Design doc, roadmap, plans
+fixtures/       # Test data (two-buildings.city.json/jsonl, delft.fcb)
+docs/           # roadmap.md + superpowers/{specs,plans,research}
 ```
 
 ## Key Architecture Decisions
 
-- **Meshes at origin**: City model vertices are origin-offset (bbox center subtracted) for float precision. Camera/controls operate near origin. `fitCamera` uses extents only, not absolute coords.
-- **Per-layer rules**: Each layer has its own colorization rules. The old global ruleStore was deleted.
-- **LoD per surface**: Each `Surface` is tagged with its source geometry's LoD string. `buildCityMesh` filters by `selectedLod`.
-- **R3F scene**: CityScene uses React Three Fiber with drei OrbitControls. Picking uses R3F pointer events on a `<group>`, not manual canvas listeners.
-- **CitySceneHandle**: Imperative API (fitAll, fitLayer, alignView, getCameraState, setCameraState) exposed via forwardRef for App.tsx to call.
+- **Real georeferencing**: every layer (and every streaming cell) gets its own ENU frame at its centre (`makeEnuFrame`), and **every vertex is transformed exactly** — source (x, y, z) → proj4 → lng/lat → + `heightOffset` → geodetic-to-ECEF → inverse ENU frame — by `projectPositionsToEnu` in `@cityjson/navara-core`. Source-CRS deltas are _not_ ENU metres (projection scale factor + grid convergence), so treating them as such would mis-place and slightly rotate anything more than a few hundred metres from the origin. ENU is x=east/y=north/z=up, identical to CityJSON, so there is no axis swap and no shared scene origin; the old origin-offset + `-π/2` rotation + `sceneTransform` sign convention are gone. The per-vertex cost is paid once per geometry build (LoD change, or a worker decoding a cell), never per frame. A mesh's ENU→ECEF frame is passed as `matrixWorld` in the engine's `addMesh` config; local vertices stay small.
+- **CRS gate**: a layer whose CRS cannot be resolved to a proj4 def is rejected at load, and there is no planar/local viewing mode — but resolution is WORLDWIDE, not list-bound: the bundled list carries only the Dutch grids (28992/7415), and `ensureProjDefAsync` (navara-core) fetches any other EPSG code's def from epsg.io at load time (best-effort service, like the geoid; offline the fixed list is all there is). The async fetch happens in `ensureModelCrsLoadable` (`src/features/layers/ensureCrs.ts`), called on every static-model load path BEFORE the model reaches the layer store, so a refusal is a load error with a sentence, not a dead layer in the scene sync; the engine's sync gate (`resolveMetricEpsg`) is unchanged and still the authority. The METRIC gate is unchanged too: epsg.io extends coverage, not permission — a degree-based CRS is still refused. `parseEpsgCode` accepts the OGC URL form, the v1.0 URN form (`urn:ogc:def:crs:EPSG::3414`) and bare `EPSG:NNNN`. CityJSON **1.x and 2.x** both parse — the catalog is full of v1.0-era files (Singapore hdb.json) and rejecting them bought nothing. The two v1.0 differences are both normalised at the parser boundary: `transform` may be absent (identity is assumed, vertices are real floats) and `lod` is a bare NUMBER (stringified on parse — passed through raw it survives the first render, then the first LoD-dropdown pick compares `2 !== "2"` and silently blanks the layer). One deliberate exception to the worldwide resolution: **FCB streaming admission still uses the sync fixed-list gate** — the worker owns its own proj4 registry in its own realm, so extending it means shipping the resolved def string in the `open` message, not just fetching it main-thread; until then a non-Dutch `.fcb` fails closed with the same sentence as before.
+- **Vertical datum**: source z is an orthometric height above a local datum (NAP for EPSG:7415), not an ellipsoidal height, so `heightOffset` metres are added during the ENU transform. It is sampled from a real geoid model — `geoidHeightAt(lng, lat)` in `@cityjson/navara-core` reads EGM2008 undulation from the Re:Earth Terrain service (global, keyless, Terrain-RGB tiles) — because `ellipsoidal = orthometric + undulation`. Static layers render at 0 and are re-placed when the sample resolves (`CityModelMesh.setHeightOffset`); streaming layers await the sample in `openStream` before the first cell, so the worker bakes every cell in the right frame. `addCityModel`/`openStream` accept an explicit `heightOffset` that wins outright. See Known Issues.
+- **Attribution is a licence obligation.** `src/ui/viewport/AttributionOverlay.tsx` renders `GEOID_ATTRIBUTION` from `@cityjson/navara-core` **unconditionally** (the geoid is sampled for every georeferenced layer): CC BY 4.0 Mapterhorn, ODbL OpenStreetMap, and the Re:Earth/NGA credit. Only the Google Tiles credit is conditional. Never drop or gate the geoid lines.
+- **The basemap catalogue is DATA, and stays engine-free.** `src/scene/basemaps.ts` is unit-tested under Node, where `@navaramap/three` cannot be imported at all, so an entry that needs an engine VALUE names it as a marker string and `NavaraViewport.addBasemap` — the engine-binding site — resolves it. The one such entry today is `elevation-heatmap`: a `raster-dem` source carrying `elevationDecoder: "terrarium"` (resolved to `TERRARIUM_ELEVATION_DECODER()`) plus an optional `layer` block (`elevationHeatmap`: min/max height, log ramp) that `addBasemap` merges into the `raster` layer descriptor. Its DEM is the same Re:Earth service the terrain mesh and the geoid already use, read as data rather than drawn as imagery; it renders on the engine's default (blue) ramp — see Known Issue (i) for why no colormap is written.
+- **Picking is our own raycast**: `PickStrategy = "own-raycast"` (`@cityjson/navara-cityjson/src/pickStrategy.ts`, `DEFAULT_PICK_STRATEGY`). Navara's `PickableMeshWrapper` carries one uniform batch id per mesh and cannot express per-surface ids, so the plugins raycast the engine's pick ray (`getPickRay`, ECEF) against their own geometry to resolve object **and** surface.
+- **Engine-binding isolation**: `@navaramap/*` imports live **only** in named engine-binding modules — `navara-cityjson/src/{CityJSONPlugin,CityModelMeshDesc,CityMeshArraysDesc,plugin}.ts` and `navara-flatcitybuf/src/{FlatCityBufPlugin,engineRays,plugin}.ts`. Everything else takes descriptors, pick rays and mesh factories as injected seams. This is structural, not stylistic: `NODE_IMPORT_SAFE=false` — importing `@navaramap/three` under Node crashes at module scope. Plugin tests import the specific engine-free module, never the package barrel. The engine-bound entry points are the `/plugin` subpath exports, kept out of the main barrels.
+- **One lighting calibration: the physical atmosphere, at exposure 10.** `NavaraViewport` puts the aerial-perspective pass into irradiance mode right after `addDefaultPhotorealScene()` (`enableAtmosphericLighting`), so the atmosphere's own sun+sky irradiance shades the g-buffer **albedo**. Every city surface therefore reaches that pass as **unlit albedo** — both mesh classes in `navara-cityjson` use `MeshBasicMaterial({ vertexColors: true })`, not a lit material — and the app adds **no** scene lights of its own (the old ambient fill and its slider are gone). Mixing the two calibrations (lit materials under `SunLightDesc` + `skyLightProbe`, then this pass, at exposure 10) is what clipped the scene to white. The default basemap is Esri World Imagery for the same reason: OSM's near-white sheet reads as blown paper here. The pass runs with `useNormalBuffer: true`, which **depends on the terrain layer** for its normals — see Known Issue (e). See `docs/superpowers/research/2026-08-04-overbright-scene-diagnosis.md` and Known Issues.
+- **Attributes are INHERITED for display.** CityJSON splits a building in two: the `Building` carries the semantics and no geometry, the `BuildingPart` carries the geometry and no attributes (measured on the Delft sample: 66 Buildings all with attributes, 66 BuildingParts all without). Picking is geometric, so a click always lands on the part — reading attributes off the picked object alone showed "No attributes" for every building in the dataset. `src/domain/citymodel/inheritedAttributes.ts` fills the gaps from the nearest ancestor (own values win, cycle-safe) and names the source so the UI can say where a value came from. Presentation ONLY: the parsed model, rules, DuckDB and the table still read the real thing. Used by the attribute overlay and the inspector, on both the static and streaming paths — a FlatCityBuf `ResidentObjectRecord` splits the same way, hence the structural `AttributeCarrier` parameter.
+- **Streaming LoD is GLOBAL, camera-sync is PER-LAYER.** A streaming layer's LoD ladder is discovered from the cells the worker decodes (`onLadder`), so it is empty at load time and a per-layer dropdown would be empty exactly when first looked at — `StreamingLodControl` offers the union of discovered LoDs plus `Auto` and applies to every streaming layer; `LodSelector` now renders only for static layers. `Layer.cameraSync` is per-layer instead, because freezing one extract while panning another is the point of having it; it reaches `FcbStreamLayerHandle.setCameraSync` through `syncStreamState`'s memo.
+- **City meshes render DOUBLE-SIDED, deliberately.** Front-face culling deletes real geometry from real CityJSON: the spec asks for outward-facing exterior shells but files vary, and `orientExteriorRing` (navara-core's `buildCityMeshArrays`) makes it worse on the shapes that matter — it decides orientation by whether a face's normal points away from the object's bbox CENTRE, which is right for a convex block and wrong for every concave one (an L-shape's inner walls, a courtyard, anything under an overhang legitimately face their own centroid, so the heuristic reverses them). Measured on the Delft sample at a fixed camera with the backdrop off: ~1.1% of the viewport was building pixels that only appear double-sided (3400 px, against 56 the other way). Both mesh classes in `navara-cityjson` must agree, or a building renders differently as a file than as a stream. Fixing the winding properly needs solid-orientation analysis (ray parity per shell), not a centroid guess — and even then a viewer of third-party data would not be safe to cull.
+- **Per-layer rules**: unchanged. Static layers compile to a `SurfaceStyleEvaluator` (`handle.setStyle`); streaming layers send rules to the worker (`handle.setRules`), which bakes vertex colours per cell.
+- **Streaming**: camera-driven commits are triggered by Navara `movestart`/`move`/`moveend` on `view.camera` (never a render-loop timer). The settle controller commits on **`moveend`**, not `idle` — `idle` also fires for non-camera changes and would flush a debounce a `moveend` already armed. Each resident cell is its own mesh in its own ENU frame.
+- **One viewport per process**: `@navaramap/three` keeps its tile worker pool in a module-level singleton, so a second `view.init()` before the first `dispose()` throws. `NavaraViewport` serialises engine lifetimes through a module-level slot (StrictMode-safe) and enforces at most one mounted viewport.
+- **CitySceneHandle**: `fitAll`, `fitLayer`, `alignView`, `getCameraState`, `setCameraState` — camera state is geographic `{lng, lat, height, heading, pitch, roll}` — plus a `ready` promise that resolves after `view.init()` and a `getStreamingPlugin()` promise so early `.fcb` opens queue instead of dereferencing null.
+- **Persistence**: snapshot/share version 3. Older snapshots and share links are rejected with an explanatory message; there is no migration shim.
+- **The STAC catalog browser reads a bucket, not an API.** `STAC_CATALOG_URL` is hardcoded to `https://storage.googleapis.com/city3d-stac/catalog.json` — a public static file with no per-deployment variation, and deliberately **no `VITE_` override**, because `.env` is dotenvx-encrypted and a build-time var here would inline ciphertext (the Maps-key footgun). The root is a link document carrying none of the metadata a card shows, so `stacClient` crawls one `collection.json` per `rel:"child"` at concurrency 6; a per-collection failure is logged and skipped, only an unreachable root is fatal. **Items never come from the catalog's own `rel:"item"` links — those 404** — and there is no `/search` endpoint: the only source is the collection's stac-geoparquet mirror (`items-geoparquet`, matched by media type or `collection-mirror` role, present on ~31 of the 53 collections; the rest are listed and marked "No items indexed"). That file is ≤ ~2.24 MB, so it is fetched WHOLE and handed to the app's existing DuckDB-wasm via `queryParquetBuffer` — no httpfs, no range reads — with the SELECT list built per file from a `DESCRIBE` probe, since the mirrors are independently generated and one missing column must not cost a whole collection. Loadability is decided by calling `detectEncoding` itself (`stacAssets`), never a parallel media-type table, so the Add button cannot drift out of agreement with what `addLayerFromUrl` will actually do; `.zip` CityGML archives are the one deliberate exception (loadable — see the ZIP bullet below), while `.7z`/`.tar` stay download-only. Entry points are the landing "Browse catalog" button and the Add Layer dialog's "Catalog" tab (which widens the modal via `.modal-wide`); `onAddUrl` is `(url) => Promise<AddUrlResult>` (`{ok:true} | {ok:false, message}`) all the way down the layer-add chain so the browser can report a failed add inline (`role="alert"`) — with the LOADER'S OWN SENTENCE per item, because "Unsupported CityJSON version 1.0" and "the host blocks browser access" demand different next moves and a canned "try again" serves neither — and stay open for the next one. The sentence is read synchronously via the loader hook's `lastError()` (a ref mirror of its error state), since the caller that just awaited the add cannot see the fresh state value from its closure.
+- **STAC-sourced `.city.json.gz` layers take the in-memory analytics path.** Remote loading is gzip-aware — `HttpClient.fetchBytes` returns the same envelope as `fetchText` (so every friendly HTTP-error branch survives), `decodeModelBytes` gunzips on magic bytes rather than on the extension, and `detectEncoding` strips one trailing `.gz` — because 3D BAG, the largest CORS-clean collection, serves `.city.json.gz`. DuckDB's `read_cityjson` cannot read a gzipped remote URL, so for those layers `loadModelIntoDuckDB` simply returns false and `App`'s existing fallback loads the parsed model with `loadCityModelFromMemory`. Nothing special-cases `.gz` in `shouldUseSourceUrlPath`: the extension attempt is made and does not stick, which is the intended behaviour, not a bug to route around.
+- **CityParquet is a STATIC whole-load layer, decoded by an engine-free parser in the plugin package.** Fetched bytes become the same normalised `CityModel` the CityJSON path produces (`parseCityParquetManifest` → `assembleCityParquetModel`), so rendering, LoD switching, rules, picking, persistence and the inspector's attribute inheritance all arrive for free through `CityJSONPlugin.addCityModel` — nothing about CityParquet reaches the engine. Decoding deliberately does **not** go through DuckDB: rendering must not depend on DuckDB init state (today an optional analytics component that can fail gracefully), and a DuckDB decoder would be untestable under Node. Analytics therefore take the in-memory path — `App`'s DuckDB effect **never calls** `loadModelIntoDuckDB` for such a layer (it is gated out by `activeLayer.model.sourceEncoding === "cityparquet"`, the **model** being the authority, not the URL, since a `gs://` bucket or a package directory has no extension to detect) and the existing `loadCityModelFromMemory` fallback runs instead — the same destination as `.city.json.gz`, reached by a different route: that one is skipped because `read_cityjson` returns false on a gzipped remote URL. A large multi-file load decodes **sequentially on the UI thread** (fetching is pooled, decoding is not), which is the same character the static CityJSON path already has; a worker or a streaming CityParquet layer is future work, and `MAX_CITYPARQUET_FILES` is what keeps that pause bounded.
+- **hyparquet 1.28.1 is VENDORED into `navara-cityparquet/src/vendor/hyparquet/`, patched.** Upstream implements `DELTA_BYTE_ARRAY` only in the DataPage **V2** reader, and `cityparquet-rs` writes through arrow-rs, which emits **V1** pages with `DELTA_BYTE_ARRAY` string columns — so an unpatched reader throws on every real file. A package-manager patch would have to be declared and kept in sync across the repo's npm/pnpm split (app root vs submodule) and fails as a runtime decode error, not an install error; one vendored copy is the same bytes for every consumer. Two upstream quirks are worked around from the OUTSIDE, not by editing the vendor: a partial `parsers` option silently drops the parsers it does not name (so `tableReader.ts` spreads `DEFAULT_PARSERS` and passes a COMPLETE object), and that complete override is also what disables hyparquet's geoparquet auto-conversion, which would otherwise hand back the LoD0 footprint column as GeoJSON instead of WKB. `src/vendor/hyparquet/VENDORED.md` carries the exact diff, the un-vendor condition and the re-vendoring procedure — read it before touching that directory.
+- **What a CityParquet URL MEANS is decided by one pure function.** `src/features/cityparquet/sourceClassify.ts` maps a string to a source with no I/O, so the loader, the Add-Layer dialog's enable logic and the tests cannot disagree: a single `.parquet` table; an https **package directory** (a `metadata.json` STAC Item whose `cityparquet-objects` assets are the authoritative inventory); or, on `gs://`/`s3://` only, a glob or a prefix expanded by the bucket's ANONYMOUS listing API. Plain-https wildcards are **rejected with a sentence** rather than silently unsupported — the shape is recognisably CityParquet, the host just exposes no listing API — which is why the classifier throws and `isCityParquetUrl` is the total wrapper that still routes such a URL into the CityParquet arm so the user sees that message. Expansion is capped at **64 object tables** (`MAX_CITYPARQUET_FILES`) on **every** arm — glob, listing, a manifest's declared hrefs and a picked folder alike, because the cap is a whole-LOAD memory bound and a manifest is a list someone else wrote (3D BAG's root package declares up to a thousand); a full tiled dataset is a streaming problem, not a whole-load one, and the cap is reported, never silently applied. A `.parquet.gz` classifies as a **table** even though the format defines no gzipped spelling — precisely because it defines none: owning it here sends the bytes to the reader, whose "could not be read as Parquet" is the honest report, instead of leaking the URL to the CityJSON loader to be called bad JSON. CRS comes from the footer's `city.crs` PROJJSON and only when its authority is **EPSG** — anything else fails the existing CRS gate. Out of scope in v1, deliberately: appearance (materials/textures), geometry templates, the experimental `CityParquetArrowNative-v1` encoding (rejected by name, never guessed from Arrow shape), partial reads and authenticated buckets.
+- **A `.zip` of CityGML is loadable, decided by MAGIC BYTES, and one zip is one layer.** The STAC browser's Add button and the URL/file loaders agree because both changed together: `stacAssets` marks `.zip` loadable (label "CityGML archive (ZIP)"), and `loadFromUrl`/`addLayerFromFile` sniff `PK\x03\x04` on the fetched bytes (never the extension) before the encoding switch, so every friendly HTTP/CORS/404 sentence survives. `src/domain/citymodel/cityGmlArchive.ts` (fflate, a direct dep) reads the archive in TWO passes — list entries inflating nothing, then inflate only the selection — because a real PLATEAU archive is 251 entries / 4.4 GB uncompressed; entries are capped at 32 (reported, never silent), `.gml`/`.citygml` are content and `.xml` is a fallback only when no `.gml` exists (PLATEAU ships 33 `.xml` sidecars beside its 251 `.gml`), and several entries merge into one `CityModel` only when CRS agrees and no id collides — otherwise a sentence names the reason. `.7z`/`.tar` stay download-only (no decompressor). Coverage honesty: most catalog zip items still fail for PRE-EXISTING reasons (the American host sends no CORS, PLATEAU's EPSG:6697 is degree-based and refused by the metric gate, Montreal's mirror carries stale signed URLs); the German Länder items work end-to-end because `normalizeSrsName` now maps AdV `ETRS89_UTM32/33` URNs to EPSG:25832/25833 (horizontal only — the `*…` suffix names the vertical datum, which the geoid path already owns).
 
 ## Commands
 
 ```bash
-npm run dev          # Start dev server
+npm run dev          # Start dev server (via dotenvx — see below)
 npm run build        # TypeScript check + Vite build
 npm run test         # Run vitest
-npx tsc --noEmit     # Type check only
-npx vitest run       # Run tests once
+npx tsc -b --noEmit  # Type check only (plain `tsc --noEmit` is a no-op: root tsconfig has no files, only project references)
+npx vitest run       # Run app tests once
 ```
+
+**`.env` is dotenvx-ENCRYPTED, so `dev`/`build`/`preview` run through `dotenvx run`** (the private key is `.env.keys`, gitignored). Plain `vite`/`vp dev` reads `.env` verbatim and inlines the `encrypted:…` CIPHERTEXT as the value — which is how `VITE_GOOGLE_MAPS_API_KEY` reached Google as a nonsense key and every Photorealistic-3D-Tiles request 400'd, silently, for months. `googleTilesConfig` now rejects a still-encrypted key with one console warning rather than pointing the engine at a URL that cannot work. Never bypass the wrapper to "simplify" a script.
+
+Plugin submodule (pnpm — Corepack refuses to run pnpm from the app root, which pins npm, so **always `cd` into the submodule**; never `pnpm -C` from the root):
+
+```bash
+cd packages/cityjson-navara-plugins
+pnpm install         # required again after ANY app-side `npm install`
+pnpm typecheck       # tsc -b
+pnpm vitest run      # plugin tests (run a subset by path, not --project)
+pnpm build           # pnpm -r build — always topological, never a bare --filter
+```
+
+- After **any** app-side `npm install`, re-run `pnpm install` inside the submodule: npm rewrites the linked packages' `node_modules` and destroys pnpm's workspace links.
+- The submodule's root `vitest.config.ts` is load-bearing (it blocks vitest's findUp inheritance of the app config) — never delete it.
+- Every plugin package depending on `@cityjson/navara-core` must carry `"three": "0.183.2"` in devDependencies, or pnpm degrades the workspace link to a packed `file:` snapshot.
+- Singleton-registry libraries (`proj4`, `three`, `@navaramap/*`) are in the app's `resolve.dedupe`; core declares them as peerDependencies. Any new such library gets the same treatment.
 
 ## Browser Automation
 
@@ -78,6 +157,8 @@ Core workflow:
 3. `agent-browser click @e1` / `fill @e2 "text"` - Interact using refs
 4. Re-snapshot after page changes
 
+Navara needs real WebGL + WASM, so end-to-end checks are browser smokes, not jsdom tests. On a headless host without a GPU (SwiftShader, ~2–3 fps) event _shapes_ are reliable but frame counts are not; a bare no-button mousemove over the canvas moves the camera, so dispatch pressed/released events only.
+
 ## Code Review Process
 
 When completing a major feature or milestone, use the `feature-dev:code-reviewer` agent with high effort to review changes. Run the review BEFORE committing. Address critical issues before pushing.
@@ -86,9 +167,11 @@ When completing a major feature or milestone, use the `feature-dev:code-reviewer
 
 - Use small, incremental commits (one feature/fix per commit)
 - Prefix: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`
-- Include `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>`
-- Run `npx tsc --noEmit` before committing to catch type errors
-- The pre-commit hook runs `vp check --fix` (lint + format)
+- Include `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`
+- Run `npx tsc -b --noEmit` before committing to catch type errors (plain `tsc --noEmit` is a no-op here)
+- The pre-commit hook runs `vp check --fix` (lint + format) — parent repo only; the submodule has no hooks, so run its lint/typecheck by hand.
+- **Submodule-first protocol**: commit inside `packages/cityjson-navara-plugins` first, push it (`git -C packages/cityjson-navara-plugins push origin main`), then stage the submodule pointer bump plus any app-side files in the parent repo and commit that.
+- Never `git mv` across the app/submodule boundary — it deletes the parent's gitlink. Use plain `mv` plus per-repo `git add`/`git rm`.
 
 ## Project Philosophy
 
@@ -96,9 +179,12 @@ When completing a major feature or milestone, use the `feature-dev:code-reviewer
 
 ## Known Issues
 
-- 21 test files fail due to vite-plus vitest runner bug (imports from `"vite-plus/test"` break `describe`). Tests importing from `"vitest"` work fine.
-- `three: "latest"` and `@takram/three-geospatial: "latest"` in package.json are unpinned — should pin to compatible versions.
-- @takram/three-atmosphere is integrated using a synthetic `worldToECEFMatrix` (built from site lat/lon) that maps local-origin camera coordinates to ECEF for the atmosphere shader, without moving meshes. Sky, Stars, SunLight, Clouds, and AerialPerspective only render when a valid CRS/lat-lon is available. Post-processing uses EffectComposer with SMAA (Canvas antialias is disabled). Future: may consider mixed lighting via LightingMask (option C) for more physically correct results.
+- **Navara is alpha** (`@navaramap/* 0.0.5`, no public changelog). `three` and `postprocessing` are pinned exactly (0.183.2 / 6.39.0) to satisfy its peer ranges; bump them only together with a Navara upgrade. Upstream bugs found during the migration, all worked around locally and worth reporting: (a) the engine inlines a **second** copy of three r185 via `@navaramap/font` and its worker chunk — unfixable by dedupe, so never rely on `instanceof` across the font/label subsystem and treat `window.__THREE__` as unreliable; (b) `view.registerMesh()` throws if called before `await view.init()` (`addPlugin()` must still come before init); (c) the engine emits no pointer events for a cursor over the sky, so `NavaraViewport` also listens on the DOM container to clear hover/cursor state; (d) the tile worker pool is a module-level singleton, so at most one viewport can exist per page; (e) the globe contributes NO normals to the MRT normal attachment unless a terrain (or hillshade) layer supplies them, and the `useNormal` view option that would is absent from 0.0.5's `Options`. Without one, a **raster basemap** on the globe made every texel of that attachment read back as half-float NaN (`0x7e00`) — `packNormalToVec2` divides by the L1 norm, so one zero normal poisons the shared buffer — which made the aerial-perspective pass's irradiance term NaN and the whole frame black. FIXED by adding the terrain layer (`terrain.ts`, `requestVertexNormals: true`), which is why `useNormalBuffer: true` is safe now and why removing terrain would re-break the lighting; (f) `EffectDesc.onDestroy()` removes a pass from the composer without disposing it, and the clouds composite through the aerial-perspective pass's `atmosphere.overlay` — so `handle.delete()` alone leaves the clouds frozen in the sky. `disposeCloudsPass` calls `Clouds.dispose()` first; (g) the `ThreeView` constructor branches on `canvas` ALONE, so a view built with `container` but no `canvas` appends its own `<div id="navara-root" style="width:100vw;height:100vh">` to `document.body`, re-parents the canvas out of it during init, and leaves the empty div there until `dispose()` — a second full viewport of document height that made the whole PAGE scroll. `NavaraViewport` therefore creates the canvas itself and passes both `canvas` and `container`; (k) **a raster basemap re-added a SECOND time through the theme path renders nothing** — `addSource`/`addLayer` both succeed (fresh source and layer ids, no console error, frame alive at 60 fps) but the globe shows bare terrain. Browser-reproduced 2026-08-06 on UNMODIFIED `develop` with photoreal→cartoon→photoreal→cartoon: the first Positron entry drapes correctly, the second leaves a featureless globe. It is NOT the number of swaps — the basemap PICKER swaps rasters repeatedly in one session without a hitch (osm→dark→positron→dark all verified) — so the trigger is something the theme commit does alongside the swap. This is why the cyber theme's new `carto-dark` sheet is intermittent on a second entry; the theme is otherwise correct and a reload restores it. Not diagnosed further — and note it did NOT reproduce on 2026-08-06 with the elevation-heatmap basemap picked: photoreal→cyber→photoreal→cyber→photoreal drew CARTO's dark sheet on both cyber entries and restored the heatmap both times, so the trigger remains unidentified rather than universal; (h) a `geojson` source with `tiled: true` (the documented GeoJSON-VT index for large files) renders **nothing** — no error, no features (browser-verified). `geoLayerDescriptions.ts` emits only the bare `{ type: "geojson", url | data }` form, the one the engine's own examples use; re-test before reintroducing `tiled`; (i) writing the globe's live setters (`view.globe.color`, `view.globe.wireframe`) kills the frame — and colours passed to `skyBox`/`glowGlobe` mesh descs must be engine `Color` INSTANCES (they call `.toArray()`; a bare hex makes `addMesh` throw and the half-registered desc can freeze frame presentation). The scene themes therefore never touch the globe setters (`sceneThemePolicy` pins this with a test) and manufacture colours by cloning `view.globe.color`. **`wireframe` was RETESTED on 2026-08-06** against current code (the two frame-killers it was first convicted alongside — bare-hex mesh colours and the albedoScale-only AP update, (j) — are both fixed), twice and in isolation: through the wireframe theme's entry path, and as a bare `view.globe.wireframe = true` with nothing else changed. **Verdict: still poisoned, and the failure mode is worse than "black"** — frame PRESENTATION freezes on the spot (the canvas keeps showing the last frame while the app's own render loop still reports 60 fps, so hiding a layer or flying the camera changes nothing on screen), no exception and no console error, writing `false` back does NOT recover it, and only a reload does. The globe cannot join the hidden-line drawing on 0.0.5; the wireframe theme buys its ground back with exposure/albedo instead. `view.globe.color` was NOT re-probed and stays banned on the earlier evidence. `view.globe.elevationColormap` (same family) WAS probed the same way and is **clean** — a hand-built `ColorMap` applied with the frame presenting and the irradiance intact — but `TURBO_COLOR_MAP` is **not exported** by `@navaramap/three@0.0.5` (only `ColorMap`, `TERRARIUM_/MAPBOX_/JAPAN_GSI_ELEVATION_DECODER`), so the elevation-heatmap basemap ships on the engine's default ramp and writes no globe setter at all; (j) an effect update's `onUpdateConfig` does `Object.assign(this.config, e)` — top-level keys are REPLACED in the stored config even when the live instance applies per-field, and an internal pass rebuild reconstructs from that config. Any `aerialPerspective.update` must therefore carry the FULL `{ irradiance, useNormalBuffer, albedoScale }` calibration, never `albedoScale` alone; (l) the engine INLINES its own copy of `postprocessing` (6.39.3) into its bundle — the peer dep is declared but never imported — and `EffectDesc.insertPass` picks the pass to hand the composer with `instanceof` against the engine's own Pass classes, so a pass built from the app's `postprocessing` import matches nothing and `addEffect` SUCCEEDS while inserting nothing: a silent no-op with no error anywhere. A custom effect must therefore wrap the app-built effect in the ENGINE'S exported `Effect` class (verified structural-only, no instanceof inside it) — see `src/scene/bloomEffect.ts` (`cityBloom`, the cyber theme's halo), and re-verify the halo renders on any Navara or `postprocessing` bump.
+- **Vertical placement depends on a third-party service, and is EGM2008-accurate, not NAP-exact.** `geoidHeightAt()` fetches from `terrain.reearth.land`, which is **best effort with no SLA**. On any failure (offline dev, service down, unexpected tile encoding) it resolves `0` with one `console.warn` per layer and the model renders at its old, geoid-separation-low position — visibly sunk against photoreal terrain, not missing. Even on success the GEOID residual is decimetre-level (EGM2008 vs the national datum, and Terrain-RGB quantises to 0.1 m) — verified end-to-end 2026-08-06: the browser decodes N = 43.90 m at Delft byte-identically to ground truth, and building shells wrap Google's independently-georeferenced photogrammetry to ~1 m. But building bases can still visibly float or sink a few metres against the **quantized-mesh terrain skin**, because Mapterhorn derives from a ~30 m global DSM that averages streets, canal walls and vegetation in cities (the z12 tile over Delft spans 36.5–57.3 m ellipsoidal where street level is ~44 m). That is the terrain data's urban accuracy, not a bug in the height pipeline; do not "fix" the offset to make bases touch this terrain, and do not treat placed heights as survey-grade.
+- Vertex normals are computed in source-CRS space by `buildCityMeshArrays` and are **not** recomputed after the ENU projection, so shading carries a slight distortion from the projection's scale factor and convergence. Shared by the static and streaming paths; visually negligible at city scale, but it is a known limitation, not an oversight.
+- **A streaming commit is bounded for LIVENESS, never for performance.** `LEVEL_SWAP_TIMEOUT_MS = 1500` was a performance deadline and was removed on 2026-08-05: a layer's SECOND commit is always a LoD swap (the first runs with an unlearned ladder, so it resolves to `all`), and on any host where that full-cover swap exceeded 1.5 s the timeout path returned _before_ recording `_lastLod`/`_level` — so the next settle recomputed the same equally-slow plan. Once triggered it was permanent: nothing loaded on camera movement again. The replacement is `COMMIT_FETCH_TIMEOUT_MS = 30_000`, ~3x the slowest healthy commit measured, which exists only so a silent range read cannot leave the status on "fetching" forever; it records nothing, so the next settle retries in full. Cancelling work the user has moved on from is `abortInFlight()` + the worker epoch, not a timer. See `docs/superpowers/reviews/2026-08-03-uxfix-report.md` § Wave 3.
+- Measure and box-select are **disabled**, not implemented: `ViewerToolbar` still offers the modes and `pickEventHandlers` still routes them (picking turns off), but nothing draws a rubber band or a measurement. Pending re-implementation against Navara.
+- The vite-plus test runner has a bug that breaks `describe` for files importing from `"vite-plus/test"`; all test files were migrated to import from `"vitest"` instead (2026-07-28) and `npx vitest run` is green (0 failed files). Do not reintroduce `"vite-plus/test"` imports in new test files.
 
 ## Milestones
 
@@ -106,7 +192,7 @@ See `docs/roadmap.md` for full milestone tracking. Current state:
 
 - M1-M5: Complete
 - M5b (multi-layer + per-layer rules): Complete
-- M6.4 (left sidebar + toolbar pick mode): Complete
-- M6.3 (per-layer LoD selection): Complete
-- M6.1 (R3F migration): Complete. Atmosphere sky/sun/clouds/aerial-perspective integrated with EffectComposer + SMAA.
-- M6.2 (view alignment + fly-to): Complete
+- M6.1-M6.4 (scene quality, LoD, sidebar/toolbar, view alignment): Complete
+- M7.1 (CityGML parser — buildings): Complete
+- **Milestone 8 (Navara engine migration): complete through its internal phases M7.1–M7.7, pending final review.** That phase numbering belongs to `docs/superpowers/plans/2026-08-01-navara-migration.md` and is unrelated to Milestone 7 (CityGML).
+- Milestone 9 (CityParquet loading): Complete
