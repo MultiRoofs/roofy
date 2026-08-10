@@ -34,6 +34,7 @@ import { StreamingLodControl } from "./StreamingLodControl";
 import { LayerTypeToggles } from "./LayerTypeToggles";
 import { GeoLayerRow } from "./GeoLayerRow";
 import { VisibilityIcon } from "./VisibilityIcon";
+import { TrashIcon } from "./TrashIcon";
 
 interface LayerPanelProps {
   readonly onAddFile: (file: File) => void;
@@ -173,12 +174,14 @@ export function LayerPanel({
               {onFlyToLayer && (
                 <button
                   className="rule-action-btn"
-                  title="Fly to layer"
+                  title="Zoom to layer"
                   onClick={(e) => {
                     e.stopPropagation();
                     onFlyToLayer(layer.id);
                   }}
                 >
+                  {/* Locate/crosshair, not the old circle-plus-four-lines: that
+                      glyph read as a compass rose (a bearing, not a target). */}
                   <svg
                     viewBox="0 0 24 24"
                     width="12"
@@ -189,11 +192,18 @@ export function LayerPanel({
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   >
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="22" y1="12" x2="18" y2="12" />
-                    <line x1="6" y1="12" x2="2" y2="12" />
-                    <line x1="12" y1="6" x2="12" y2="2" />
-                    <line x1="12" y1="22" x2="12" y2="18" />
+                    <circle cx="12" cy="12" r="7" />
+                    <circle
+                      cx="12"
+                      cy="12"
+                      r="1.5"
+                      fill="currentColor"
+                      stroke="none"
+                    />
+                    <line x1="12" y1="2" x2="12" y2="5" />
+                    <line x1="12" y1="19" x2="12" y2="22" />
+                    <line x1="2" y1="12" x2="5" y2="12" />
+                    <line x1="19" y1="12" x2="22" y2="12" />
                   </svg>
                 </button>
               )}
@@ -210,7 +220,7 @@ export function LayerPanel({
                   removeLayer(layer.id);
                 }}
               >
-                del
+                <TrashIcon />
               </button>
             </div>
 

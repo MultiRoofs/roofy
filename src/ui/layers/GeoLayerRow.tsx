@@ -20,6 +20,7 @@ import {
 } from "../../features/geoLayers/geoLayerStore";
 import { parseGeoJsonText } from "../../features/geoLayers/classifyGeoSource";
 import { VisibilityIcon } from "./VisibilityIcon";
+import { TrashIcon } from "./TrashIcon";
 
 /** Short, uppercase, and the words a user of these formats would use — the
  *  row is 240 px wide, so "Cesium 3D Tiles tileset" is not an option. */
@@ -148,7 +149,7 @@ export function GeoLayerRow({ layer }: { readonly layer: GeoLayer }) {
           title="Remove layer"
           onClick={() => removeGeoLayer(layer.id)}
         >
-          del
+          <TrashIcon />
         </button>
       </div>
 

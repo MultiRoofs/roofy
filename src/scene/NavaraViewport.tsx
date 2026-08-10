@@ -1952,7 +1952,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     /**
      * `cameraForBounds`, seen the way the active MODE demands: the fit frames
      * the bounds, but the mode owns the angle. Without this, an auto-fit (or
-     * "Fly to layer") in 2D flies to the -60° framing pitch while the mode's
+     * "Zoom to layer") in 2D flies to the -60° framing pitch while the mode's
      * controller flags and disabled tilt buttons stay 2D — an oblique view
      * with no control left that could tilt back out of it. Read imperatively
      * from the store so `fitAll`'s identity stays stable across mode changes
