@@ -455,6 +455,9 @@ describe("App — a failed group add is reported", () => {
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Add Layer" }));
+    // The dialog opens on the geospatial tab; the city-model drop zone is the
+    // one this group add goes through.
+    fireEvent.click(screen.getByRole("tab", { name: /city model/i }));
     dropTwoFiles();
 
     await waitFor(() =>

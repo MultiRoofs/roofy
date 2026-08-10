@@ -8,15 +8,20 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-  GEO_ACCENT_COLOR,
-  GEOJSON_POINT_SIZE_PX,
   TILES3D_MAX_SSE,
   geoLayerDescription,
   geoSourceDescription,
 } from "../../../src/scene/geoLayerDescriptions";
+import {
+  DEFAULT_GEO_LAYER_STYLE,
+  hexColorToNumber,
+} from "../../../src/features/geoLayers/geoLayerStyle";
 import type { GeoLayer } from "../../../src/features/geoLayers/geoLayerStore";
 
 const SOURCE = { id: "src-1" };
+
+/** The accent the app shipped with, now reached through the style record. */
+const DEFAULT_ACCENT = hexColorToNumber(DEFAULT_GEO_LAYER_STYLE.color);
 
 function geojson(config: GeoLayer["config"], patch: Partial<GeoLayer> = {}) {
   return {
@@ -25,6 +30,7 @@ function geojson(config: GeoLayer["config"], patch: Partial<GeoLayer> = {}) {
     kind: "geojson",
     visible: true,
     opacity: 1,
+    style: DEFAULT_GEO_LAYER_STYLE,
     config,
     ...patch,
   } as GeoLayer;
@@ -65,6 +71,7 @@ describe("geoSourceDescription", () => {
       kind: "raster-xyz",
       visible: true,
       opacity: 1,
+      style: DEFAULT_GEO_LAYER_STYLE,
       config: { urlTemplate: "https://t/{z}/{x}/{y}.png" },
     } as GeoLayer;
 
@@ -81,6 +88,7 @@ describe("geoSourceDescription", () => {
       kind: "raster-xyz",
       visible: true,
       opacity: 1,
+      style: DEFAULT_GEO_LAYER_STYLE,
       config: {
         urlTemplate: "https://t/{z}/{x}/{y}.png",
         minZoom: 2,
@@ -105,6 +113,7 @@ describe("geoSourceDescription", () => {
       kind: "3d-tiles",
       visible: true,
       opacity: 1,
+      style: DEFAULT_GEO_LAYER_STYLE,
       config: { url: "https://x/tileset.json" },
     } as GeoLayer;
 
@@ -116,7 +125,7 @@ describe("geoSourceDescription", () => {
 });
 
 describe("geoLayerDescription", () => {
-  it("styles GeoJSON with one theme-agnostic accent, clamped to the ground", () => {
+  it("styles a default-styled GeoJSON exactly as the old constants did", () => {
     const desc = geoLayerDescription(
       geojson({ url: "https://x/a.geojson" }),
       SOURCE,
@@ -124,9 +133,12 @@ describe("geoLayerDescription", () => {
 
     expect(desc.type).toBe("vector");
     expect(desc.source).toBe(SOURCE);
+    // The literal numbers, not just `DEFAULT_GEO_LAYER_STYLE` echoed back:
+    // making the style editable must not have restyled anybody's workspace.
+    expect(DEFAULT_ACCENT).toBe(0xff5a3c);
     expect(desc.point).toEqual({
-      color: GEO_ACCENT_COLOR,
-      size: GEOJSON_POINT_SIZE_PX,
+      color: 0xff5a3c,
+      size: 24,
       // PIXELS. In metres a 24 unit sprite is invisible from a city-wide
       // camera and a blot from a rooftop one.
       sizeInMeters: false,
@@ -135,15 +147,85 @@ describe("geoLayerDescription", () => {
       opacity: 1,
     });
     expect(desc.polyline).toMatchObject({
-      color: GEO_ACCENT_COLOR,
+      color: 0xff5a3c,
+      width: 2,
       clampToGround: true,
       show: true,
     });
     expect(desc.polygon).toMatchObject({
-      color: GEO_ACCENT_COLOR,
+      color: 0xff5a3c,
       clampToGround: true,
       show: true,
+      opacity: 1,
+      transparent: false,
     });
+  });
+
+  it("draws GeoJSON with the layer's OWN style, not the default", () => {
+    const desc = geoLayerDescription(
+      geojson(
+        { url: "https://x/a.geojson" },
+        {
+          style: {
+            color: "#00ff00",
+            pointSizePx: 10,
+            lineWidthPx: 5,
+            fillOpacity: 0.5,
+          },
+        },
+      ),
+      SOURCE,
+    );
+
+    expect(desc.point).toMatchObject({ color: 0x00ff00, size: 10 });
+    expect(desc.polyline).toMatchObject({ color: 0x00ff00, width: 5 });
+    // Point and polyline carry the LAYER's opacity; only the fill is scaled.
+    expect(desc.point).toMatchObject({ opacity: 1 });
+    expect(desc.polyline).toMatchObject({ opacity: 1 });
+    expect(desc.polygon).toMatchObject({
+      color: 0x00ff00,
+      opacity: 0.5,
+      transparent: true,
+    });
+  });
+
+  it("falls back to the default accent for an unparsable stored colour", () => {
+    // A hand-edited share link or snapshot document: the store normalises, but
+    // the description must not hand the engine a NaN colour if one slips past.
+    const desc = geoLayerDescription(
+      geojson(
+        { url: "https://x/a.geojson" },
+        {
+          style: {
+            ...DEFAULT_GEO_LAYER_STYLE,
+            color: "rebeccapurple",
+          },
+        },
+      ),
+      SOURCE,
+    );
+
+    expect(desc.point).toMatchObject({ color: 0xff5a3c });
+    expect(desc.polyline).toMatchObject({ color: 0xff5a3c });
+    expect(desc.polygon).toMatchObject({ color: 0xff5a3c });
+  });
+
+  it("multiplies the fill opacity by the layer's own opacity", () => {
+    const desc = geoLayerDescription(
+      geojson(
+        { url: "https://x/a.geojson" },
+        {
+          opacity: 0.5,
+          style: { ...DEFAULT_GEO_LAYER_STYLE, fillOpacity: 0.5 },
+        },
+      ),
+      SOURCE,
+    );
+
+    expect(desc.polygon).toMatchObject({ opacity: 0.25, transparent: true });
+    // The layer opacity alone reaches the point and line passes.
+    expect(desc.point).toMatchObject({ opacity: 0.5 });
+    expect(desc.polyline).toMatchObject({ opacity: 0.5 });
   });
 
   it("hides every geometry class of an invisible GeoJSON layer", () => {
@@ -173,6 +255,7 @@ describe("geoLayerDescription", () => {
       kind: "raster-xyz",
       visible: false,
       opacity: 0.5,
+      style: DEFAULT_GEO_LAYER_STYLE,
       config: { urlTemplate: "https://t/{z}/{x}/{y}.png" },
     } as GeoLayer;
 
@@ -190,6 +273,7 @@ describe("geoLayerDescription", () => {
       kind: "3d-tiles",
       visible: true,
       opacity: 1,
+      style: DEFAULT_GEO_LAYER_STYLE,
       config: { url: "https://x/tileset.json" },
     } as GeoLayer;
 

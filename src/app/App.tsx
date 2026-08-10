@@ -479,6 +479,41 @@ export function App({
   const setMode = useSelectionStore((s) => s.setMode);
   const setToolMode = useSelectionStore((s) => s.setToolMode);
   const clearSelection = useSelectionStore((s) => s.clear);
+  const geoSelection = useSelectionStore((s) => s.geoSelection);
+  const selectGeoFeature = useSelectionStore((s) => s.selectGeoFeature);
+  const geoLayers = useGeoLayerStore((s) => s.layers);
+
+  /** The `config` the selected geo layer had when the feature was picked.
+   *  Captured rather than derived because the comparison below has to be
+   *  against the state at SELECTION time, not the current one. */
+  const geoSelectionConfigRef = useRef<unknown>(null);
+  useEffect(() => {
+    geoSelectionConfigRef.current =
+      geoSelection === null
+        ? null
+        : (useGeoLayerStore
+            .getState()
+            .layers.find((l) => l.id === geoSelection.geoLayerId)?.config ??
+          null);
+  }, [geoSelection]);
+
+  /**
+   * Drop a geo selection whose subject can no longer be trusted.
+   *
+   * Two ways that happens: the layer is REMOVED, or its `config` identity
+   * changed (a re-link or any source replacement). The second matters because
+   * `geoLayerSync` rebuilds the engine pair on config identity and batch ids
+   * are minted globally — the retained `batchId` would then name a different
+   * feature entirely, and the panel would show one feature's properties under
+   * another's highlight.
+   */
+  useEffect(() => {
+    if (geoSelection === null) return;
+    const layer = geoLayers.find((l) => l.id === geoSelection.geoLayerId);
+    if (layer === undefined || layer.config !== geoSelectionConfigRef.current) {
+      selectGeoFeature(null);
+    }
+  }, [geoLayers, geoSelection, selectGeoFeature]);
 
   const refreshSnapshots = useCallback(async () => {
     const list = await persistenceStore.list();
@@ -1213,6 +1248,22 @@ export function App({
     }
   }
 
+  /** The picked geo feature, joined with its layer for the panel's title. A
+   *  selection whose layer has vanished resolves to null — the invalidation
+   *  effect clears the store right behind it, but the render in between must
+   *  not name a layer that is gone. */
+  const selectedGeoLayer =
+    geoSelection === null
+      ? undefined
+      : geoLayers.find((l) => l.id === geoSelection.geoLayerId);
+  const geoFeature =
+    geoSelection !== null && selectedGeoLayer !== undefined
+      ? {
+          layerName: selectedGeoLayer.name,
+          properties: geoSelection.properties,
+        }
+      : null;
+
   // Viewer state. `engineBooting` puts the shell up with ZERO layers for the
   // duration of a `.fcb` open — the engine has to be running before a
   // streaming layer can exist at all, so this is the only way a `.fcb` can be
@@ -1279,6 +1330,7 @@ export function App({
           <AttributePanel
             objects={selectedObjects}
             objectsById={selectedObjectsById}
+            geoFeature={geoFeature}
           />
           {advancedSettingsOpen && (
             <RenderingPanel onClose={() => setAdvancedSettingsOpen(false)} />

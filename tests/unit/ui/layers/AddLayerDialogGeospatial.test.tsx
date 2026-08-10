@@ -1,14 +1,14 @@
 /**
- * The Add Layer dialog's second tab: geospatial sources.
+ * The Add Layer dialog's geospatial tab.
  *
- * The city-model tab stays the default and stays untouched — that is asserted
- * first, because the one thing this feature must not do is make the app's
- * primary format harder to load. The rest is the geospatial tab's contract:
+ * That tab is now the one the dialog OPENS on (2026-08-10 spec), so the first
+ * test pins the default and the second pins the `initialTab` prop that lets a
+ * caller ask for a different one. The rest is the geospatial tab's contract:
  * a URL is classified by shape but overridable, and a dropped file is
  * validated before it becomes a layer (a CityJSON file being the mistake most
  * worth catching, since this viewer's own format is JSON too).
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { AddUrlResult } from "../../../../src/ui/stac/StacBrowser";
 import {
   cleanup,
@@ -17,6 +17,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { AddLayerDialog } from "../../../../src/ui/layers/AddLayerDialog";
 import { LayerPanel } from "../../../../src/ui/layers/LayerPanel";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import { useGeoLayerStore } from "../../../../src/features/geoLayers/geoLayerStore";
@@ -60,25 +61,33 @@ function geoFile(name: string, body: unknown): File {
 }
 
 describe("AddLayerDialog — tabs", () => {
-  it("opens on the city-model tab, whose loader is untouched", () => {
-    const onAddUrl = vi.fn(async () => ({ ok: true }) as const);
-    renderPanel(onAddUrl);
+  it("opens on the geospatial tab", () => {
+    renderPanel();
     openDialog();
 
-    expect(
-      screen
-        .getByRole("tab", { name: /city model/i })
-        .getAttribute("aria-selected"),
-    ).toBe("true");
-    fireEvent.change(screen.getByLabelText("Or load from URL:"), {
-      target: { value: "https://example.com/model.city.json" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Load" }));
-
-    expect(onAddUrl).toHaveBeenCalledWith(
-      "https://example.com/model.city.json",
+    expect(screen.getByRole("tab", { name: /geospatial/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
     );
-    expect(geoLayers()).toHaveLength(0);
+    expect(screen.getByTestId("geo-drop-zone")).toBeInTheDocument();
+  });
+
+  it("opens on the tab named by initialTab", () => {
+    render(
+      <AddLayerDialog
+        initialTab="city"
+        onClose={() => {}}
+        onAddFile={() => {}}
+        onAddFiles={() => {}}
+        onAddUrl={async () => ({ ok: true as const })}
+        loading={false}
+      />,
+    );
+
+    expect(screen.getByRole("tab", { name: /city model/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 
   it("switches to the geospatial tab and back", () => {

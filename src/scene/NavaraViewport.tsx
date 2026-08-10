@@ -39,12 +39,14 @@ import {
   useState,
 } from "react";
 import ThreeView, {
+  Color,
   degreeToRadian,
   geodeticToVector3,
   getPickRay,
   radianToDegree,
   TERRARIUM_ELEVATION_DECODER,
   vector3ToGeodetic,
+  type PickedFeature,
 } from "@navaramap/three";
 import { DefaultPlugin } from "@navaramap/three-default-plugin";
 import { Vector2 } from "three";
@@ -99,10 +101,12 @@ import {
   applyPickIntent,
   canvasPointOf,
   createClickGate,
+  geoSelectionFromStash,
   narrowToMode,
   pickIntentFor,
   resolveNearestHit,
   sameSelection,
+  type EnginePickStash,
 } from "./pickEventHandlers";
 import {
   createThrottle,
@@ -133,7 +137,9 @@ import {
   ZOOM_OUT_FACTOR,
 } from "./cameraControls";
 import {
+  geoLayerIdForEngineLayerId,
   removeAllGeoLayerHandles,
+  syncGeoHighlight,
   syncGeoLayers,
   type LiveGeoLayer,
 } from "./geoLayerSync";
@@ -157,6 +163,23 @@ import { AttributionOverlay } from "../ui/viewport/AttributionOverlay";
 import { CameraControls } from "../ui/viewport/CameraControls";
 import { ScaleBar } from "../ui/viewport/ScaleBar";
 import { StreamQueryBoxOverlay } from "../ui/viewport/StreamQueryBoxOverlay";
+
+/**
+ * The engine `Color` factory `geoLayerSync` takes as a seam.
+ *
+ * `.setHex()` rather than a constructor argument: the engine's `Color`
+ * declares NO constructor parameters, and the documented forms are
+ * `new Color().setHex(...)` / `.setStyle(...)` — the same class every mesh desc
+ * insists on (CLAUDE.md, Known Issue (i): a bare hex makes `addMesh` throw).
+ *
+ * A module-level BINDING but not a module-level INSTANCE: the six viewport test
+ * suites mock `@navaramap/three`, and a `new Color()` evaluated at import time
+ * would call `undefined` as a constructor before the mock's factory has linked.
+ * One shared identity matters — `geoLayerSync` stores the factory on each live
+ * entry so the `featureCreated` subscription can re-apply a highlight on its
+ * own, so both call sites below must hand it the SAME function.
+ */
+const makeEngineColor = (hex: number): unknown => new Color().setHex(hex);
 
 export interface CitySceneHandle {
   fitAll: () => void;
@@ -1119,6 +1142,16 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
      *  id. A ref for the same reason `liveRef` is one: the engine owns them,
      *  and re-rendering on a handle change would buy nothing. */
     const geoLiveRef = useRef(new Map<string, LiveGeoLayer>());
+    /**
+     * The last engine `pick`, waiting for the `click` that commits it.
+     *
+     * A REF rather than a variable local to the pointer effect below: that
+     * effect's deps include `layers`, so it tears down and re-subscribes on
+     * every city-layer edit — a LoD change, a rule edit, a load finishing —
+     * and an effect-local stash would be thrown away mid-gesture, between the
+     * pick and the click that reads it.
+     */
+    const geoPickStashRef = useRef<EnginePickStash | null>(null);
     const [engineReady, setEngineReady] = useState(false);
     const [initError, setInitError] = useState<string | null>(null);
     /** Whether Google's photorealistic tiles are actually IN the scene — set
@@ -1622,6 +1655,17 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       const view = viewRef.current;
       if (!engineReady || view === null) return;
       syncGeoLayers(view, geoLayers, geoLiveRef.current);
+      // A pair REBUILT by the pass above (a new document, a new URL) comes back
+      // with no highlight and no colour factory of its own, so a selection that
+      // outlived the rebuild would silently stop being drawn. Read from
+      // `getState()` rather than subscribed: the selection is not a reason to
+      // reconcile the layers, and putting it in this effect's deps would
+      // re-run `syncGeoLayers` on every click.
+      syncGeoHighlight(
+        useSelectionStore.getState().geoSelection,
+        geoLiveRef.current,
+        makeEngineColor,
+      );
     }, [engineReady, geoLayers]);
 
     // --- Volumetric clouds ---
@@ -2742,6 +2786,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     // select — has to repaint too, not just one made by a click in here.
     const selections = useSelectionStore((s) => s.selections);
     const hovered = useSelectionStore((s) => s.hovered);
+    /** The geo half of the same subscription. Mutually exclusive with
+     *  `selections` in the store, so at most one of the two repaints. */
+    const geoSelection = useSelectionStore((s) => s.geoSelection);
     /** What each live handle was last told. Keyed by handle identity, so a
      *  deleted layer's entry disappears with it and a re-added layer's fresh
      *  handle is always pushed to. */
@@ -2759,11 +2806,17 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         // every hover step.
         highlightMemoRef.current,
       );
+      // The geospatial half. Its own memo lives on each live entry
+      // (`highlightedBatchId`), so an unchanged layer costs one comparison and
+      // no engine call — and the SAME factory identity is handed over as the
+      // geo sync effect uses, because `geoLayerSync` keeps it on the entry to
+      // re-apply through when the engine recreates a feature set.
+      syncGeoHighlight(geoSelection, geoLiveRef.current, makeEngineColor);
       // `streamIds`: a handle that joins the registry AFTER its layer appeared
       // (the open resolves a tick later) must be told the current selection,
       // not only whatever arrives next. The memo is keyed by handle identity,
       // so this costs one push per newly opened stream and nothing else.
-    }, [engineReady, layers, streamIds, selections, hovered]);
+    }, [engineReady, layers, streamIds, selections, hovered, geoSelection]);
 
     // --- engine pointer events -> pick intents + the cursor readout ---
     useEffect(() => {
@@ -2872,7 +2925,36 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         onCursorPosition?.(null);
       };
 
-      const onMouseDown = (e: MouseEvent) => clickGate.down(canvasPointOf(e));
+      /**
+       * The engine's own pick pass — the ONLY way a geospatial feature can be
+       * hit, because those layers are drawn by the engine and the app has no
+       * geometry of its own to raycast.
+       *
+       * Stashed rather than acted on: `pick` carries no gesture and the engine
+       * emits it for everything it draws (terrain and basemap tiles included),
+       * so what it means is decided on the `click` that follows, against the
+       * live geo registry. `null` from the engine means "nothing was hit",
+       * which is a stash worth keeping as `null` — the click then falls
+       * through to the ordinary clear.
+       */
+      const onEnginePick = (info: PickedFeature | null | undefined) => {
+        geoPickStashRef.current =
+          info === null ||
+          info === undefined ||
+          typeof info.batchId !== "number"
+            ? null
+            : {
+                engineLayerId: info.layerId,
+                batchId: info.batchId,
+                properties: info.properties,
+              };
+      };
+
+      const onMouseDown = (e: MouseEvent) => {
+        // A new gesture: whatever the last one picked is no longer the answer.
+        geoPickStashRef.current = null;
+        clickGate.down(canvasPointOf(e));
+      };
 
       const onMouseMove = (e: MouseEvent) => {
         lastEngineMove = e;
@@ -2906,6 +2988,28 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         // selection on mouseup.
         if (!clickGate.isClean()) return;
         const hit = narrowToMode(pickAt(canvasPointOf(e)), store.mode);
+        // CONSUMED, whatever happens next: one engine pick belongs to one
+        // gesture, and leaving it behind would let the click after it re-select
+        // a feature the pointer has long moved off.
+        const stash = geoPickStashRef.current;
+        geoPickStashRef.current = null;
+        // A city hit WINS: it comes from our own raycast against real geometry
+        // at the exact click point, while the engine's pick is a colour read
+        // that also fires for the ground under it. The store's own invariant
+        // then clears any geo selection, so nothing here has to.
+        //
+        // No shift-toggle for a geo feature: geo selection is single, so a
+        // shift+click falls through to the ordinary intent (a clear) rather
+        // than pretending to extend something that cannot be extended.
+        if (hit === null && e.shiftKey !== true) {
+          const geo = geoSelectionFromStash(stash, (engineLayerId) =>
+            geoLayerIdForEngineLayerId(geoLiveRef.current, engineLayerId),
+          );
+          if (geo !== null) {
+            store.selectGeoFeature(geo);
+            return;
+          }
+        }
         applyPickIntent(
           pickIntentFor({ type: "click", shiftKey: e.shiftKey === true }, hit),
           store,
@@ -2934,18 +3038,32 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         if (lastEngineMove === e) return;
         clearCursorState();
       };
-      const onDomMouseDown = (e: MouseEvent) =>
+      const onDomMouseDown = (e: MouseEvent) => {
+        geoPickStashRef.current = null;
         clickGate.down(canvasPointOf(e));
+      };
       // Leaving the canvas: unconditional, and the one case the engine's own
       // `mouseleave` cannot be trusted for.
       const onDomMouseLeave = () => clearCursorState();
 
-      // No `view.on("pick", ...)`: PICK_PATH is "own-raycast" (Task B1).
-      // `PickableMeshWrapper` allocates ONE batch id per mesh, so an engine
-      // pick could only ever name a layer, and it would fire alongside `click`
-      // — committing a second, coarser selection over the right one.
-      // `handleSync.resolvePickedFeature` stands ready for the day that
-      // changes.
+      // The two pick paths are COMPLEMENTARY, and each covers what the other
+      // cannot.
+      //
+      // City meshes stay on the own-raycast path (PICK_PATH = "own-raycast",
+      // Task B1): `PickableMeshWrapper` allocates ONE batch id per mesh, so the
+      // engine's pick could only ever name a layer, never the surface inside
+      // it. Geospatial layers are the mirror image — the engine draws them, the
+      // app has no geometry to raycast, and the engine's per-feature batch id
+      // is exactly the granularity they need. So `pick` is subscribed, but only
+      // ever STASHED: the click below decides, and a city hit wins outright.
+      //
+      // Known, accepted asymmetry: the engine skips its pick pass on ANY
+      // mousemove between mousedown and mouseup (zero tolerance), while
+      // `createClickGate` allows CLICK_DRAG_TOLERANCE_PX. A click with a 1 px
+      // jitter therefore still selects a city object but CLEARS instead of
+      // selecting a geo feature. That threshold is the engine's, not ours, and
+      // 0.0.5 exposes no way to widen it.
+      view.on("pick", onEnginePick);
       view.on("mousedown", onMouseDown);
       view.on("mousemove", onMouseMove);
       view.on("click", onClick);
@@ -2956,6 +3074,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       host?.addEventListener("mouseleave", onDomMouseLeave);
 
       return () => {
+        // `pick` included: this effect re-runs on every city-layer edit, and a
+        // handler left behind would accumulate one per edit.
+        view.off("pick", onEnginePick);
         view.off("mousedown", onMouseDown);
         view.off("mousemove", onMouseMove);
         view.off("click", onClick);

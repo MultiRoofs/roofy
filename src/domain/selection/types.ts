@@ -22,3 +22,20 @@ export interface SurfaceSelection {
 }
 
 export type Selection = ObjectSelection | SurfaceSelection;
+
+/**
+ * A picked feature of a GeoJSON (GIS) layer.
+ *
+ * Deliberately NOT part of the `Selection` union: geo features have no
+ * city-object identity (no objectId, no surface index), and widening the
+ * union would ripple through every consumer that narrows on `kind`. The
+ * selection store carries it in a parallel field instead, mutually
+ * exclusive with the city-object selections.
+ */
+export interface GeoFeatureSelection {
+  /** Layer id in the geo layer store. */
+  readonly geoLayerId: string;
+  /** Engine per-feature batch id. */
+  readonly batchId: number;
+  readonly properties: Readonly<Record<string, unknown>>;
+}

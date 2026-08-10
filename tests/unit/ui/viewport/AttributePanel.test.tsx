@@ -137,4 +137,59 @@ describe("AttributePanel", () => {
     fireEvent.click(screen.getByTitle("Expand"));
     expect(screen.queryByRole("table")).not.toBeNull();
   });
+
+  describe("a picked geo feature", () => {
+    it("titles the panel with the layer name and lists the flat properties", () => {
+      render(
+        <AttributePanel
+          objects={[]}
+          geoFeature={{
+            layerName: "Parks",
+            properties: { name: "Park", area: 12 },
+          }}
+        />,
+      );
+
+      expect(screen.getByText("Parks")).not.toBeNull();
+      expect(
+        screen.getAllByRole("columnheader").map((th) => th.textContent),
+      ).toEqual(["Attribute", "Value"]);
+      expect(bodyRows()).toEqual([
+        ["name", "Park"],
+        ["area", "12"],
+      ]);
+      // Nothing is inherited on the geo path — no caption to claim otherwise.
+      expect(screen.getByRole("table").querySelector("caption")).toBeNull();
+    });
+
+    it("says so when the feature carries no properties", () => {
+      render(
+        <AttributePanel
+          objects={[]}
+          geoFeature={{ layerName: "Parks", properties: {} }}
+        />,
+      );
+      expect(screen.getByText("No attributes")).not.toBeNull();
+      expect(screen.queryByRole("table")).toBeNull();
+    });
+
+    it("renders nothing when there is neither a city selection nor a feature", () => {
+      const { container } = render(
+        <AttributePanel objects={[]} geoFeature={null} />,
+      );
+      expect(container.firstChild).toBeNull();
+    });
+
+    it("lets a city selection win over a stale feature", () => {
+      render(
+        <AttributePanel
+          objects={[obj({ id: "b1", attributes: { b3_dak_type: "slanted" } })]}
+          geoFeature={{ layerName: "Parks", properties: { name: "Park" } }}
+        />,
+      );
+      expect(screen.getByText("Attributes")).not.toBeNull();
+      expect(screen.queryByText("Parks")).toBeNull();
+      expect(bodyRows()).toEqual([["b3_dak_type", "slanted"]]);
+    });
+  });
 });

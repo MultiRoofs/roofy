@@ -15,6 +15,10 @@ import type {
   GeoLayerInput,
   GeoLayerKind,
 } from "../features/geoLayers/geoLayerStore";
+import {
+  normalizeGeoLayerStyle,
+  type GeoLayerStyle,
+} from "../features/geoLayers/geoLayerStyle";
 
 // ---------------------------------------------------------------------------
 // Model reference — how a snapshot refers to the loaded city model
@@ -145,6 +149,19 @@ export interface GeoLayerSnapshot {
   readonly kind: GeoLayerKind;
   readonly visible: boolean;
   readonly opacity: number;
+  /**
+   * How the layer is drawn — a user choice like the name and the opacity, and
+   * persisted for the same reason.
+   *
+   * OPTIONAL here although it is REQUIRED on the store's record, and the
+   * snapshot version stayed `"3"` because of it: the field is purely additive,
+   * so a v3 document written before styles existed is still a valid v3
+   * document and restores at `DEFAULT_GEO_LAYER_STYLE` — the values that
+   * were hardcoded when it was saved, which is exactly the rendering it was
+   * saved from. `normalizeGeoLayers` is what makes that true, so no reader
+   * downstream ever sees the absence.
+   */
+  readonly style?: GeoLayerStyle;
   /** The store's config MINUS any inline document. A GeoJSON layer loaded
    *  from a file therefore saves as `{}` and restores as a re-linkable row —
    *  the same treatment a file-backed city model gets (see `normalizeLayers`'
@@ -159,6 +176,9 @@ export function geoLayerSnapshot(layer: GeoLayer): GeoLayerSnapshot {
     kind: layer.kind,
     visible: layer.visible,
     opacity: layer.opacity,
+    // Copied rather than aliased, like `config` below: a snapshot is a value
+    // document that outlives the store record it was read from.
+    style: { ...layer.style },
   };
   if (layer.kind !== "geojson") return { ...base, config: { ...layer.config } };
   // The URL costs nothing and restores completely; the document is dropped.
@@ -206,6 +226,12 @@ export function normalizeGeoLayers(
 
     const visible = entry.visible === undefined ? true : entry.visible === true;
     const opacity = optionalNumber(entry.opacity) ?? 1;
+    // TOTAL and per-field, so an absent style (a v3 document saved before
+    // styles existed) and a hand-edited one both come back complete, and the
+    // one bad field costs only itself. Applied here rather than left to the
+    // store's own normalisation so this function's output is already the whole
+    // truth about a restored layer.
+    const style = normalizeGeoLayerStyle(entry.style);
 
     if (kind === "raster-xyz") {
       const urlTemplate = config.urlTemplate;
@@ -215,6 +241,7 @@ export function normalizeGeoLayers(
         kind,
         visible,
         opacity,
+        style,
         config: {
           urlTemplate,
           // Written only when present, so an absent bound stays absent all the
@@ -234,7 +261,7 @@ export function normalizeGeoLayers(
     if (kind === "3d-tiles") {
       const url = config.url;
       if (typeof url !== "string" || url === "") continue;
-      out.push({ name, kind, visible, opacity, config: { url } });
+      out.push({ name, kind, visible, opacity, style, config: { url } });
       continue;
     }
     const url = typeof config.url === "string" ? config.url : undefined;
@@ -243,6 +270,7 @@ export function normalizeGeoLayers(
       kind: "geojson",
       visible,
       opacity,
+      style,
       config: url === undefined ? {} : { url },
     });
   }
