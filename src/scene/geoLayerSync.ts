@@ -27,6 +27,10 @@
  * registry, no throw). One bad URL must not take the viewport down, and
  * leaving the entry absent means the next pass retries it.
  */
+import {
+  DEFAULT_GEO_LAYER_STYLE,
+  hexColorToNumber,
+} from "../features/geoLayers/geoLayerStyle";
 import type { GeoLayer } from "../features/geoLayers/geoLayerStore";
 import {
   geoLayerDescription,
@@ -40,10 +44,72 @@ export interface GeoSourceHandle {
   delete(): unknown;
 }
 
+/**
+ * The half of the engine's `FeatureEvaluator` this module uses.
+ *
+ * The contract that shapes every call below (`@navaramap/three` 0.0.5's d.ts,
+ * `FeatureEvaluator.evaluate`): the callback runs per feature batch and the
+ * fields it returns OVERRIDE the layer's own defaults. Crucially an OMITTED
+ * field does NOT reset a previous override — the d.ts spells it out for
+ * `image` ("omit the key to leave it unchanged") and the same applies to every
+ * key — so clearing a highlight means returning the layer's own colour
+ * explicitly, never `{}`.
+ */
+export interface GeoFeatureEvaluator {
+  evaluate(
+    cb: (info: { readonly batchId: number }) => Record<string, unknown>,
+  ): void;
+}
+
 /** The half of `Layer` this module uses. */
 export interface GeoLayerHandle {
   update(description: Record<string, unknown>): void;
   delete(): void;
+  /** The engine layer id (`Layer.id`), which a pick result carries and
+   *  {@link geoLayerIdForEngineLayerId} maps back to a store record. Optional
+   *  because nothing here needs it to run. */
+  readonly id?: unknown;
+  /** Engine `Layer.on`. A vector layer creates one feature set PER MATERIAL
+   *  (point / polyline / polygon), each with its own evaluator and
+   *  `featureSetId`, so a mixed-geometry GeoJSON fires this several times —
+   *  and features are (re)created on `update()` too, which is why the
+   *  subscription lives on the handle and is installed once, in `addPair`. */
+  on?(
+    type: "featureCreated" | "featureUpdated",
+    cb: (params: {
+      readonly featureSetId?: unknown;
+      readonly evaluator: GeoFeatureEvaluator;
+    }) => void,
+  ): void;
+  /** Engine `Layer.forceUpdate` — asks for one re-evaluation pass. */
+  forceUpdate?(): void;
+}
+
+/**
+ * The accent a picked geospatial feature is drawn in — the SAME orange the
+ * city meshes highlight a selected surface with
+ * (`HIGHLIGHT_COLOR_HEX` in `navara-cityjson/src/surfaceColorLayers.ts`).
+ * Deliberately shared: a user selects a building and a GeoJSON polygon in the
+ * same viewport, and two different "this is selected" colours would read as two
+ * different states.
+ */
+export const GEO_HIGHLIGHT_COLOR_HEX = 0xe8973f;
+
+/** Engine `Color` factory. `EvaluatedValue.color` must be a `Color` INSTANCE
+ *  and this module is engine-free, so the viewport passes the constructor in
+ *  (`(hex) => new Color().setHex(hex)`). */
+type GeoColorFactory = (hex: number) => unknown;
+
+/** The layer's OWN colour as the engine number — the value a non-highlighted
+ *  feature is told explicitly. Same fallback as `geoLayerDescriptions.ts`:
+ *  `hexColorToNumber` answers `null` rather than guessing, and a `NaN` colour
+ *  draws black instead of raising. */
+function ownColorHex(style: GeoLayer["style"]): number {
+  return (
+    hexColorToNumber(style.color) ??
+    // Non-null: the default is a literal `#rrggbb`, pinned by its own test.
+    hexColorToNumber(DEFAULT_GEO_LAYER_STYLE.color)!
+  );
 }
 
 /** The half of `ThreeView` this module uses. */
@@ -70,6 +136,131 @@ export interface LiveGeoLayer {
    *  the whole style object on every edit, so one comparison answers "did any
    *  of the four fields change" without walking them. */
   style: GeoLayer["style"];
+  /** One evaluator per feature set, keyed by `featureSetId` (or by the
+   *  evaluator itself when the engine sends none) — a vector layer makes one
+   *  per material, and a highlight has to reach all of them. */
+  evaluators: Map<unknown, GeoFeatureEvaluator>;
+  /** The DESIRED highlight, kept on the entry so a feature set created later
+   *  (an `update()` recreates them) can be brought up to date immediately. */
+  highlightedBatchId: number | null;
+  /** Whether this layer ever carried an evaluated colour. A layer that never
+   *  did is never touched on a clear: an evaluated colour OVERRIDES the layer
+   *  default, so writing one would shadow every future style edit. */
+  hadHighlight: boolean;
+  /** The `Color` factory from the last {@link syncGeoHighlight} pass, kept so
+   *  the feature-set subscription can re-apply a live highlight on its own.
+   *  Per ENTRY rather than module-global: a factory belongs to a view's
+   *  lifetime, and the entries die with the view. */
+  colorFactory: GeoColorFactory | null;
+}
+
+/**
+ * Push the desired highlight into ONE evaluator.
+ *
+ * The else-branch returns the layer's own colour rather than omitting `color`,
+ * because an omitted key leaves a previous override in place — see
+ * {@link GeoFeatureEvaluator}. `entry.highlightedBatchId` is read inside the
+ * callback, not captured, so an evaluation the engine re-runs later still
+ * answers the current state.
+ */
+function evaluateHighlight(
+  entry: LiveGeoLayer,
+  evaluator: GeoFeatureEvaluator,
+  highlight: unknown,
+  base: unknown,
+): void {
+  evaluator.evaluate((info) => ({
+    color: info.batchId === entry.highlightedBatchId ? highlight : base,
+  }));
+}
+
+/**
+ * Re-evaluate every feature set of one layer against `entry.highlightedBatchId`
+ * and ask for one update.
+ *
+ * Skipped entirely for a layer that is not highlighted and never was — see
+ * `hadHighlight`. Reported and swallowed like every other engine call here.
+ */
+function applyHighlight(
+  entry: LiveGeoLayer,
+  name: string,
+  makeColor: GeoColorFactory,
+  highlight: () => unknown,
+): void {
+  if (entry.highlightedBatchId === null && !entry.hadHighlight) return;
+  if (entry.highlightedBatchId !== null) entry.hadHighlight = true;
+  try {
+    const base = makeColor(ownColorHex(entry.style));
+    const accent = highlight();
+    for (const evaluator of entry.evaluators.values()) {
+      evaluateHighlight(entry, evaluator, accent, base);
+    }
+    entry.layer.forceUpdate?.();
+  } catch (error) {
+    console.error(
+      `NavaraViewport: the geospatial layer "${name}" could not be highlighted.`,
+      error,
+    );
+  }
+}
+
+/**
+ * Which store record a picked engine layer belongs to, or `null`.
+ *
+ * `===` against the handle's own `id`; a handle that carries none never
+ * matches, not even an `undefined` argument — "no id" is not an identity.
+ */
+export function geoLayerIdForEngineLayerId(
+  live: Map<string, LiveGeoLayer>,
+  engineLayerId: unknown,
+): string | null {
+  // The one comparison `===` gets wrong for this purpose: a handle carrying no
+  // id would match an argument that is equally absent.
+  if (engineLayerId === undefined) return null;
+  for (const [id, entry] of live) {
+    if (entry.layer.id === engineLayerId) return id;
+  }
+  return null;
+}
+
+/**
+ * Reconcile the picked feature against the live pairs: at most one layer holds
+ * a highlight, and the rest are cleared back to their own colour.
+ *
+ * An entry whose desired state already matches costs no engine call — which is
+ * what keeps a re-render, or a selection in another layer, from re-evaluating
+ * every feature in the scene.
+ */
+export function syncGeoHighlight(
+  selection: { readonly geoLayerId: string; readonly batchId: number } | null,
+  live: Map<string, LiveGeoLayer>,
+  makeColor: GeoColorFactory,
+): void {
+  // Made at most once per pass, and only if something really changed: the
+  // factory belongs to the view, the VALUE does not outlive this call.
+  let highlight: unknown;
+  let made = false;
+  const highlightColor = (): unknown => {
+    if (!made) {
+      highlight = makeColor(GEO_HIGHLIGHT_COLOR_HEX);
+      made = true;
+    }
+    return highlight;
+  };
+
+  for (const [id, entry] of live) {
+    // Kept current even for an entry nothing changed about: the feature-set
+    // subscription re-applies through it, whenever the engine gets round to
+    // recreating features.
+    entry.colorFactory = makeColor;
+    const desired =
+      selection !== null && selection.geoLayerId === id
+        ? selection.batchId
+        : null;
+    if (desired === entry.highlightedBatchId) continue;
+    entry.highlightedBatchId = desired;
+    applyHighlight(entry, id, makeColor, highlightColor);
+  }
 }
 
 /** Take a pair back out, LAYER FIRST — see fact 3 above. Reported and
@@ -103,7 +294,7 @@ function addPair(view: GeoLayerView, layer: GeoLayer): LiveGeoLayer | null {
   try {
     source = view.addSource(sourceDesc);
     const handle = view.addLayer(geoLayerDescription(layer, source));
-    return {
+    const entry: LiveGeoLayer = {
       source,
       layer: handle,
       config: layer.config,
@@ -111,7 +302,47 @@ function addPair(view: GeoLayerView, layer: GeoLayer): LiveGeoLayer | null {
       visible: layer.visible,
       opacity: layer.opacity,
       style: layer.style,
+      evaluators: new Map(),
+      highlightedBatchId: null,
+      hadHighlight: false,
+      colorFactory: null,
     };
+
+    // One subscription per PAIR, for the lifetime of the pair: the engine
+    // creates a feature set per material and recreates them on `update()`, so
+    // this fires several times and again after every re-describe. A fresh
+    // feature set carries no stale override, so a live highlight is pushed
+    // into it and nothing needs clearing.
+    const remember = (params: {
+      readonly featureSetId?: unknown;
+      readonly evaluator: GeoFeatureEvaluator;
+    }): void => {
+      const { evaluator } = params;
+      if (evaluator === undefined || evaluator === null) return;
+      entry.evaluators.set(params.featureSetId ?? evaluator, evaluator);
+      if (entry.highlightedBatchId === null || entry.colorFactory === null) {
+        return;
+      }
+      const makeColor = entry.colorFactory;
+      try {
+        evaluateHighlight(
+          entry,
+          evaluator,
+          makeColor(GEO_HIGHLIGHT_COLOR_HEX),
+          makeColor(ownColorHex(entry.style)),
+        );
+        entry.layer.forceUpdate?.();
+      } catch (error) {
+        console.error(
+          `NavaraViewport: the geospatial layer "${layer.name}" could not be highlighted.`,
+          error,
+        );
+      }
+    };
+    handle.on?.("featureCreated", remember);
+    handle.on?.("featureUpdated", remember);
+
+    return entry;
   } catch (error) {
     console.error(
       `NavaraViewport: the geospatial layer "${layer.name}" could not be added; ` +
