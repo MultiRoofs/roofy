@@ -16,15 +16,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The plugin submodule is private and SSH-only; without it the app's
+      # file: dependencies cannot resolve and nothing below works.
+      - name: Load submodule deploy key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SUBMODULE_DEPLOY_KEY }}
+
+      - name: Fetch plugin submodule
+        run: git submodule update --init --recursive
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - run: npm ci
 
+      # AFTER npm ci, always: npm rewrites the linked packages' node_modules
+      # and destroys pnpm's workspace links (CLAUDE.md).
+      - name: Install plugin workspace dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+        working-directory: packages/cityjson-navara-plugins
+
+      # -b, not plain --noEmit: the root tsconfig has no files, only project
+      # references, so plain tsc --noEmit checks nothing (CLAUDE.md).
       - name: Type check
-        run: npx tsc --noEmit
+        run: npx tsc -b --noEmit
 
       - name: Build
         run: npm run build
