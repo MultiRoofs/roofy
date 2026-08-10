@@ -94,6 +94,64 @@ export function AttributePanel({
   );
 }
 
+interface AttrTableRow {
+  readonly key: string;
+  readonly value: string;
+  /** Renders muted: the selection disagrees, so no single value is the truth. */
+  readonly mixed?: boolean;
+}
+
+/**
+ * The one table both the single- and multi-select bodies render, so the two
+ * cannot drift apart in markup or styling.
+ */
+function AttributeTable({
+  rows,
+  valueHeader,
+  inheritedFrom = null,
+}: {
+  rows: ReadonlyArray<AttrTableRow>;
+  valueHeader: string;
+  inheritedFrom?: string | null;
+}) {
+  return (
+    <table className="attr-table">
+      {inheritedFrom !== null && (
+        <caption className="attr-table-caption" title={inheritedFrom}>
+          Inherited from {inheritedFrom}
+        </caption>
+      )}
+      <thead>
+        <tr>
+          <th scope="col">Attribute</th>
+          <th scope="col" className="attr-table-value-col">
+            {valueHeader}
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(({ key, value, mixed }) => (
+          <tr key={key}>
+            <th scope="row" title={key}>
+              {key}
+            </th>
+            <td
+              className={
+                mixed
+                  ? "attr-table-value-col attr-table-mixed"
+                  : "attr-table-value-col"
+              }
+              title={value}
+            >
+              {value}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 function SingleAttributes({
   object,
   objectsById,
@@ -110,21 +168,14 @@ function SingleAttributes({
     return <div className="attr-panel-empty">No attributes</div>;
   }
   return (
-    <div className="attr-panel-list">
-      {inheritedFrom !== null && (
-        <div className="attr-panel-inherited" title={inheritedFrom}>
-          Inherited from {inheritedFrom}
-        </div>
-      )}
-      {entries.map(([key, value]) => (
-        <div key={key} className="attr-row">
-          <span className="attr-key">{key}</span>
-          <span className="attr-value" title={formatValue(value)}>
-            {formatValue(value)}
-          </span>
-        </div>
-      ))}
-    </div>
+    <AttributeTable
+      rows={entries.map(([key, value]) => ({
+        key,
+        value: formatValue(value),
+      }))}
+      valueHeader="Value"
+      inheritedFrom={inheritedFrom}
+    />
   );
 }
 
@@ -183,19 +234,14 @@ function MultiAttributes({
   });
 
   return (
-    <div className="attr-panel-list">
-      {rows.map(({ key, value }) => (
-        <div key={key} className="attr-row">
-          <span className="attr-key">{key}</span>
-          <span
-            className={`attr-value ${value === "mixed" ? "attr-mixed" : ""}`}
-            title={value}
-          >
-            {value}
-          </span>
-        </div>
-      ))}
-    </div>
+    <AttributeTable
+      rows={rows.map(({ key, value }) => ({
+        key,
+        value,
+        mixed: value === "mixed",
+      }))}
+      valueHeader={`Value (${aggMode})`}
+    />
   );
 }
 
