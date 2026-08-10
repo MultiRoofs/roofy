@@ -140,14 +140,37 @@
    centred, so on any wider window the body IS the landing page's margins.
    White gutters beside a near-black shell were invisible while that page had
    a light palette of its own; on the tokens they are the first thing you see.
-   The viewer covers the viewport and is unaffected either way. */
+   The viewer covers the viewport and is unaffected either way.
+
+   The ambient wash lives HERE rather than on `.app-shell` for the same reason:
+   the shell's own radial stopped dead at the 960px column edge, so a wide
+   window showed a lit column on a flat black frame. Two large, low-opacity
+   ellipses on the shared tokens — warm `--accent-soft` from the top left, cool
+   `--teal-soft` from the bottom right — read as one surface across gutters and
+   column. They are ambience, not a spotlight: both are ~1000px across with a
+   long fade, so nothing reaches the hero's text contrast (`--accent-soft` is
+   12% of the accent, `--teal-soft` 10% of the teal). Both themes share them;
+   on the light sheet the same tokens land as a faint warm/cool tint. The teal
+   here is the UI data token, not the logo — the brand kit's "no teal" rule is
+   about the mark, not the page. */
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   line-height: 1.5;
-  background: var(--bg-root);
+  background:
+    radial-gradient(
+      1100px 800px at 10% -5%,
+      var(--accent-soft),
+      transparent 60%
+    ),
+    radial-gradient(
+      1000px 750px at 95% 105%,
+      var(--teal-soft),
+      transparent 55%
+    ),
+    var(--bg-root);
 }
 
 #root {
@@ -158,6 +181,8 @@ body {
    LANDING PAGE — same token palette as the viewer, both themes
    ═══════════════════════════════════════════════════════════════ */
 
+/* No background of its own — the ambient wash is painted on `body` so it spans
+   the gutters too (see the comment there). */
 .app-shell {
   display: grid;
   gap: 2rem;
@@ -165,9 +190,6 @@ body {
   margin: 0 auto;
   padding: 4rem 1.5rem 5rem;
   color: var(--fg);
-  background:
-    radial-gradient(circle at top left, var(--accent-soft), transparent 40%),
-    var(--bg-root);
   min-height: 100vh;
 }
 
