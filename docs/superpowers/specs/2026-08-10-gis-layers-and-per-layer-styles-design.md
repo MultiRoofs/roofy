@@ -49,7 +49,7 @@ Store needs no changes. UI changes:
     fillOpacity: number; // 0..1, geojson polygons (raster keeps the existing `opacity` field)
   };
   ```
-  Defaults come from today's constants in `geoLayerDescriptions.ts` (which stay as the single source of the default values).
+  The default VALUES are today's constants from `geoLayerDescriptions.ts`, but they MOVE (with their rationale comments) to a new `src/features/geoLayers/geoLayerStyle.ts`, which becomes the single source of defaults; the descriptor module reads the record's style and keeps no color/size constants of its own.
 - `updateGeoLayer` accepts `style` in its patch; every action **replaces** the style object (identity-compare convention, same as `config`).
 - `geoLayerDescriptions.geoLayerDescription` reads the record's style instead of module constants (constants become defaults only). Hex→number conversion lives in the descriptor module (engine accepts `number` for color fields on layer descs).
 - `geoLayerSync`: `style` joins the `LiveGeoLayer` memo and the change test; a style change triggers `Layer.update()` with a full rebuilt description (existing full-replacement discipline).
