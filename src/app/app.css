@@ -113,6 +113,19 @@
   color: var(--fg);
 }
 
+/* Error red, theme-aware. These three sit on the landing page, whose ground is
+   `--bg-root`: #c53030 is ~5.5:1 on the light sheet but only ~3.3:1 on the dark
+   one, under AA. The base rules therefore carry the lighter #f87171 for the
+   dark theme and this block restores #c53030 where it is the stronger colour.
+   Position matters: kept up here with the other light overrides so the hint's
+   override cannot outrank `.source-picker-panel .drop-zone p.source-picker-hint`
+   (equal specificity, later in the file) and change the dialog. */
+[data-theme="light"] .error-message,
+[data-theme="light"] .drop-zone p.source-picker-hint,
+[data-theme="light"] .snapshot-btn-delete:hover:not(:disabled) {
+  color: #c53030;
+}
+
 /* ═══════════════════════════════════════════════════════════════
    RESET & BASE
    ═══════════════════════════════════════════════════════════════ */
@@ -484,12 +497,15 @@ body {
 
 .snapshot-btn-delete:hover:not(:disabled) {
   background: rgba(197, 48, 48, 0.08);
-  color: #c53030;
+  color: #f87171;
   border-color: rgba(197, 48, 48, 0.2);
 }
 
+/* The red TEXT is theme-aware (see the `[data-theme="light"]` block near the
+   top of the file); the soft rgba(197, 48, 48, …) wash and border read
+   correctly on both grounds and stay unconditional. */
 .error-message {
-  color: #c53030;
+  color: #f87171;
   background: rgba(197, 48, 48, 0.08);
   padding: 0.75rem 1rem;
   border-radius: 0.5rem;
@@ -3243,11 +3259,13 @@ button.file-label:disabled {
   max-width: 32rem;
   font-size: 0.78rem;
   line-height: 1.4;
-  color: #c53030;
+  color: #f87171;
 }
 
-/* The same red the dialog's other inline errors use — legible on both themes'
-   panel background, where the landing page's darker #c53030 is not. */
+/* The same red the dialog's other inline errors use. Unconditional, unlike the
+   base rule above, which now swaps with the theme — matching the dialog's
+   siblings is worth more here than the contrast it loses on the light panel.
+   That light-theme weakness is known and deliberately parked. */
 .source-picker-panel .drop-zone p.source-picker-hint {
   color: #f87171;
   font-size: 0.72rem;
