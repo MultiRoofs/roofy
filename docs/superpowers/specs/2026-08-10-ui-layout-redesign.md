@@ -78,6 +78,29 @@ entry cards**:
 Delft sample"), styled like a footnote, not a peer action. Saved workspaces
 list unchanged below.
 
+### E. Attribute panel becomes a table (second wave, same session)
+
+The floating `AttributePanel` renders attribute key/values as a stacked div
+list — it reads as a popup, not a data surface. It becomes a semantic
+`<table>` with the shadcn Table _look_ built on the app's existing tokens
+(decided with the user: no Tailwind/shadcn install — the app is one
+hand-rolled CSS system and stays that way): muted `<thead>` (Attribute /
+Value), hairline row dividers, row hover, compact padding, monospace values,
+sticky header when the body scrolls. New `.attr-table*` classes — the
+existing `.attr-row`/`.attr-key`/`.attr-value` classes are SHARED with
+SolarMenu, RenderingPanel and the inspector and must not be restyled.
+Every behavior stays: collapse, agg-mode select (the Value header names the
+mode, e.g. "Value (avg)"), inherited-from note, value tooltips, `.attr-mixed`,
+empty state.
+
+### F. View-align cluster removed (second wave, same session)
+
+The T/F/R/Bo/Bk/L overlay goes — component, render site, test, CSS (incl.
+the light-theme override). `CitySceneHandle.alignView` stays: it is
+documented public API, and the UI's removal is not an API break. The
+`ViewDirection` type moves with the handle if it lived in the deleted file.
+`CameraControls` (zoom/compass) is untouched.
+
 ## Non-goals / guard rails
 
 - **No re-theme.** This is an IA/usability restructure; keep the existing

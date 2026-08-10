@@ -5,8 +5,12 @@
  * orthographic camera and no pitch clamp — it is this table: which controller
  * gestures stay live, where the app's own tilt clamp sits, and where the camera
  * flies when the mode is entered. Keeping it here, engine-free, is what lets
- * both the viewport and the UI (tilt buttons, view-align buttons) read the SAME
- * source of truth instead of each hard-coding "in 2D you cannot...".
+ * both the viewport and the UI (the compass cluster's tilt buttons) read the
+ * SAME source of truth instead of each hard-coding "in 2D you cannot...".
+ *
+ * `isAlignDirectionAllowed` has no caller in `src/` since the T/F/R align
+ * overlay was removed (2026-08-10) — these cases are now the only thing holding
+ * that rule, which is why they stay.
  */
 import { describe, expect, it } from "vitest";
 import {

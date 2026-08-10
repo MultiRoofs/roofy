@@ -4,8 +4,8 @@
  *
  * A store rather than a prop, for the same reason `tilesStore` is one: the mode
  * is set from the toolbar, read by the viewport (to drive the engine's
- * controller flags and the entry flight) and read again by two overlays (the
- * tilt buttons, the view-align cluster) that are nowhere near either. What a
+ * controller flags and the entry flight) and read again by the compass
+ * overlay's tilt buttons, which are nowhere near either. What a
  * mode MEANS is not here but in `scene/viewModePolicy.ts` — engine-free, so the
  * viewport and the UI share one table instead of each re-deciding what "2D"
  * forbids.

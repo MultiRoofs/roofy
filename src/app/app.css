@@ -856,9 +856,9 @@ body {
    SOLAR SCRUBBER
    ═══════════════════════════════════════════════════════════════ */
 
-/* Bottom-LEFT: the attribution strip owns the bottom edge and the view-align
-   buttons own the top-right, so this is the one corner a persistent panel can
-   hold without covering something that is also always on screen. */
+/* Bottom-LEFT: the attribution strip owns the bottom edge and the panels that
+   open over the scene own the top-right, so this is the one corner a persistent
+   panel can hold without covering something that is also always on screen. */
 .solar-scrubber {
   position: absolute;
   bottom: 3.25rem;
@@ -1006,57 +1006,6 @@ body {
   color: var(--fg-muted);
   font-family: "Geist Mono", monospace;
   font-size: 0.66rem;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   VIEW ALIGN BUTTONS
-   ═══════════════════════════════════════════════════════════════ */
-
-.view-align-buttons {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 2px;
-  z-index: 10;
-}
-
-.view-align-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.6rem;
-  height: 1.6rem;
-  border: 1px solid var(--border-accent);
-  border-radius: var(--radius-sm);
-  background: rgba(12, 14, 20, 0.7);
-  backdrop-filter: blur(8px);
-  color: var(--fg-muted);
-  font-size: 0.6rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    background 0.15s,
-    color 0.15s;
-}
-
-.view-align-btn:hover:not(:disabled) {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-/* The view mode forbids this alignment (2D has no front or left to look
-   from). Dimmed rather than removed, so the cluster keeps its shape and the
-   title can explain. */
-.view-align-btn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
-[data-theme="light"] .view-align-btn {
-  background: rgba(255, 255, 255, 0.8);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -3707,9 +3656,9 @@ button.file-label:disabled {
    ═══════════════════════════════════════════════════════════════ */
 
 /* Bottom-RIGHT, clear of the attribution strip below it. The top-right belongs
-   to the view-align buttons and to every panel that opens over them (advanced
-   settings, the attribute panel), the bottom-left to the legend and the sun
-   scrubber, and the bottom centre to the pick tooltip — this is the one corner
+   to every panel that opens over the scene (rendering settings, the attribute
+   panel), the bottom-left to the legend and the sun scrubber, and the bottom
+   centre to the pick tooltip — this is the one corner
    left, and it is where a map's zoom cluster is expected anyway. Above the
    attribution's z-index 2 but below the panels' 20, so a panel the user opened
    deliberately still wins. */
@@ -3816,8 +3765,9 @@ button.file-label:disabled {
   gap: 2px;
 }
 
-/* Same treatment as `.view-align-btn`, one step larger: these are pressed
-   repeatedly, where an alignment is pressed once. */
+/* The scene-overlay button treatment — translucent dark chip, blurred backdrop,
+   accent on hover — one step larger than a chrome button, because these are
+   pressed repeatedly and aimed at while the camera is moving. */
 .camera-ctl-btn {
   display: flex;
   align-items: center;
@@ -4176,7 +4126,7 @@ button.file-label:disabled {
 
 /* The chip and the field carry the scene's own contrast, not the panel's: in
    light chrome the near-black overlay would swallow the dark text the theme
-   pairs with it (the same flip `.view-align-btn` and `.scale-bar` make). */
+   pairs with it (the same flip `.camera-ctl-btn` and `.scale-bar` make). */
 [data-theme="light"] .address-search-toggle,
 [data-theme="light"] .address-search-open {
   background: rgba(255, 255, 255, 0.9);

@@ -122,8 +122,8 @@ import {
   unionGeodeticBounds,
   type FlyToTarget,
   type GeographicCameraState,
+  type ViewDirection,
 } from "./geographicCamera";
-import { ViewAlignButtons, type ViewDirection } from "./ViewAlignButtons";
 import {
   northedCamera,
   tiltedCamera,
@@ -3152,17 +3152,16 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
             The 3D engine failed to start: {initError}
           </div>
         )}
-        <ViewAlignButtons onAlign={alignView} />
-        {/* Top-left, the one free corner (align buttons top-right, legend and
-            scale bottom-left, compass bottom-right) and where a map's search
+        {/* Top-left, the one free corner (legend and scale bottom-left,
+            compass bottom-right, panels top-right) and where a map's search
             belongs — on the map, not in the chrome. Takes `flyTo` directly
-            rather than through the app, exactly as the compass cluster above
+            rather than through the app, exactly as the compass cluster below
             takes `zoomIn`. */}
         <AddressSearch onFlyTo={flyTo} />
         {/* Bottom-right, above the attribution strip: the top-right is the
-            align buttons and the panels that open over them, and the bottom
-            left is the legend and the sun scrubber. Subscribes to the camera's
-            pose itself, so a moving camera never re-renders this component. */}
+            panels that open over the scene, and the bottom left is the legend
+            and the sun scrubber. Subscribes to the camera's pose itself, so a
+            moving camera never re-renders this component. */}
         <CameraControls
           onResetNorth={resetNorth}
           onZoomIn={zoomIn}

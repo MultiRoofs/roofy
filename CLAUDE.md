@@ -58,7 +58,6 @@ src/
     googleTiles.ts      # Google Photorealistic 3D Tiles layer
     sunWriter.ts        # Solar state -> engine sun/atmosphere
     timeAnimation.ts    # Time-of-day animation loop
-    ViewAlignButtons.tsx
   ui/           # React UI components
     sidebar/    # LeftSidebar, LodSelector (static layers only)
     toolbar/    # ViewerToolbar, SolarMenu (ALL sun UI — sliders, presets and

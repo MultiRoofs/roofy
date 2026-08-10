@@ -2,8 +2,8 @@
  * The map scale bar.
  *
  * Bottom-LEFT, above the attribution strip: the bottom-right is the compass and
- * the map-control cluster, the top-right the view-align buttons and the panels
- * that open over them, and the bottom centre the pick tooltip. It is also the
+ * the map-control cluster, the top-right the panels that open over the scene,
+ * and the bottom centre the pick tooltip. It is also the
  * corner every web map puts a scale in.
  *
  * Subscribes to `cameraPose.ts` itself rather than taking the pose as a prop —

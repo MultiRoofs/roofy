@@ -932,7 +932,7 @@ describe("NavaraViewport lifecycle", () => {
     expect(handleA.getBoundsGeodetic).toHaveBeenCalled();
     expect(handleB.getBoundsGeodetic).toHaveBeenCalled();
 
-    // alignView reads the same union, so the align buttons work on real bounds.
+    // alignView reads the same union, so it aligns against real bounds too.
     ref.current!.alignView("top");
     expect(setCamera).toHaveBeenCalledTimes(1);
   });
