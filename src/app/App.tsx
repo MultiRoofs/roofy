@@ -69,6 +69,7 @@ import { LeftSidebar } from "../ui/sidebar/LeftSidebar";
 import { SourcePicker } from "../ui/layers/SourcePicker";
 import { StacBrowserDialog } from "../ui/stac/StacBrowserDialog";
 import type { AddUrlResult } from "../ui/stac/StacBrowser";
+import { ShareDialog } from "../ui/ShareDialog";
 import { StatusBar } from "../ui/StatusBar";
 import { ThemeToggleButton } from "../ui/ThemeToggleButton";
 import { LegendOverlay } from "../ui/viewport/LegendOverlay";
@@ -167,6 +168,11 @@ export function App({
    * branch that renders it — it is plain state that outlives its own UI.
    */
   const [catalogOpen, setCatalogOpen] = useState(false);
+  /** The minted share link currently on display, or null. Non-null IS the
+   *  dialog's open state: the URL is a snapshot of the view at the moment
+   *  Share was clicked, so a new click mints a new one rather than reopening
+   *  a stale link. Only reachable from the viewer shell (the toolbar). */
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [fps, setFps] = useState<number | undefined>(undefined);
   const [cursorPosition, setCursorPosition] = useState<
     readonly [number, number, number] | null
@@ -945,6 +951,15 @@ export function App({
     [persistenceStore, refreshSnapshots],
   );
 
+  /** The dialog's clipboard seam. Wrapped in a stable callback rather than
+   *  passed as `platform.clipboard.writeText` directly, so the dialog's
+   *  auto-copy effect cannot re-fire on an unrelated re-render — and so the
+   *  method keeps its `this`. */
+  const copyShareText = useCallback(
+    (text: string) => platform.clipboard.writeText(text),
+    [platform],
+  );
+
   const handleShare = useCallback(() => {
     const cameraState = sceneRef.current?.getCameraState();
     // See handleSave: no camera yet is a real, transient state (Task B11a),
@@ -977,18 +992,12 @@ export function App({
       pm: pickMode,
     };
 
-    const url = buildShareUrl(state);
-    void platform.clipboard.writeText(url).then((ok) => {
-      if (ok) {
-        showToast("Share link copied to clipboard", 2500);
-      } else {
-        showToast(
-          "Failed to copy link \u2014 check clipboard permissions",
-          STATUS_TOAST_MS,
-        );
-      }
-    });
-  }, [platform, showToast]);
+    // The link is SHOWN, not just posted to a clipboard the user cannot see:
+    // the dialog copies it on mount and reports the result inline, and the
+    // field it renders is the fallback when the clipboard refuses. That
+    // replaces the pair of toasts this used to raise \u2014 see `ShareDialog`.
+    setShareUrl(buildShareUrl(state));
+  }, [showToast]);
 
   // On mount: check URL hash for a share token
   useEffect(() => {
@@ -1377,6 +1386,18 @@ export function App({
             layers={unavailableLayers}
             onResolve={handleResolveUnavailableLayer}
             onDismiss={handleDismissUnavailableLayer}
+          />
+        )}
+
+        {/* Keyed on the URL so a second Share click while the dialog is open
+            remounts it — the auto-copy effect must run again for the NEW
+            link, not leave the old one on screen reporting an old result. */}
+        {shareUrl !== null && (
+          <ShareDialog
+            key={shareUrl}
+            url={shareUrl}
+            onClose={() => setShareUrl(null)}
+            copyToClipboard={copyShareText}
           />
         )}
 

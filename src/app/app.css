@@ -3650,6 +3650,86 @@ button.file-label:disabled {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   SHARE DIALOG
+
+   Only what is share-specific: the link row and the inline copy
+   status. The sheet, header, title, close button and body padding
+   are the shared `.modal-*` set above.
+   ═══════════════════════════════════════════════════════════════ */
+
+.share-hint {
+  margin: 0 0 0.7rem;
+  color: var(--fg-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.share-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+/* A share URL is a few hundred characters of base64 that nobody reads, so the
+   field is sized for RECOGNITION and selection, not for reading: monospace,
+   one line, scrolled rather than wrapped. */
+.share-url {
+  flex: 1;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+}
+
+.share-url:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.share-copy-btn {
+  flex: none;
+  padding: 0.4rem 0.95rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--bg-panel);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.share-copy-btn:hover {
+  background: var(--accent-text);
+}
+
+/* Always in the DOM (the live region has to exist before the answer lands in
+   it), so it reserves its own line and the row above does not jump when the
+   message appears. */
+.share-status {
+  min-height: 1.1rem;
+  margin: 0.55rem 0 0;
+  color: var(--fg-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+/* The same red the landing page's `.error-message` wears. */
+.share-status.is-error {
+  color: #f87171;
+}
+
+[data-theme="light"] .share-status.is-error {
+  color: #c53030;
+}
+
+/* ═══════════════════════════════════════════════════════════════
    STAC CATALOG BROWSER  (inside the Add Layer modal)
 
    Two views in one box: a card grid of collections, then a list +

@@ -547,6 +547,74 @@ describe("App save with a camera that is not readable yet", () => {
   });
 });
 
+describe("App share", () => {
+  it("opens a dialog showing the link, and copies it on open", async () => {
+    const writeText = vi.fn(async () => true);
+    render(
+      <App
+        persistenceStore={storeWith(null)}
+        platform={{ clipboard: { writeText } } as unknown as PlatformServices}
+      />,
+    );
+    await mountShellWithLayer();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy share link" }));
+
+    // The link is on screen — the whole point: a 2.5 s toast was evidence
+    // that had usually vanished before the user looked for it.
+    const dialog = await screen.findByRole("dialog");
+    const field = screen.getByLabelText("Share link") as HTMLInputElement;
+    expect(dialog).toContainElement(field);
+    expect(field.value).toContain("#share=");
+
+    // ...and it still reached the clipboard without a second click.
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText).toHaveBeenCalledWith(field.value);
+    expect((await screen.findByRole("status")).textContent).toMatch(/copied/i);
+  });
+
+  it("says so in the dialog when the clipboard refuses, instead of leaving no link", async () => {
+    const writeText = vi.fn(async () => false);
+    render(
+      <App
+        persistenceStore={storeWith(null)}
+        platform={{ clipboard: { writeText } } as unknown as PlatformServices}
+      />,
+    );
+    await mountShellWithLayer();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy share link" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toMatch(/couldn't copy/i),
+    );
+    expect(
+      (screen.getByLabelText("Share link") as HTMLInputElement).value,
+    ).toContain("#share=");
+  });
+
+  it("closes on Escape", async () => {
+    render(
+      <App
+        persistenceStore={storeWith(null)}
+        platform={
+          {
+            clipboard: { writeText: vi.fn(async () => true) },
+          } as unknown as PlatformServices
+        }
+      />,
+    );
+    await mountShellWithLayer();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy share link" }));
+    await screen.findByRole("dialog");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+});
+
 describe("App toast timers", () => {
   afterEach(() => vi.useRealTimers());
 
