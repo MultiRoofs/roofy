@@ -183,11 +183,121 @@ body {
   color: #243b53;
 }
 
-.summary code {
-  background: rgba(16, 42, 67, 0.07);
-  padding: 0.15em 0.4em;
-  border-radius: 0.3em;
-  font-size: 0.95em;
+/* ---- the two entry paths: own data | published catalog ---- */
+
+/* The two doors plus the sample footnote are ONE choice, so they share a
+   container with a gap of their own — the shell's 2rem grid gap would read as
+   three unrelated blocks with the footnote as a peer of the cards. */
+.entry-section {
+  display: grid;
+  gap: 0.9rem;
+}
+
+/* `auto-fit` rather than the file's usual fixed breakpoint: between 640px and
+   ~900px the shell is still wide enough to look like it holds two columns, but
+   two of them are unusably narrow. The track minimum stacks them there. */
+.entry-paths {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+  gap: 1.5rem;
+}
+
+/* The 34rem cap is the picker's own (`.source-picker-hero`), restated so the
+   catalog card stops at the same edge once the two stack. */
+.entry-path {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+  max-width: 34rem;
+}
+
+.entry-path-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #243b53;
+}
+
+/* Equal weight to the drop zone beside it: same radius, same padding, same
+   translucent parchment — but a solid border, because nothing is dropped here.
+   `flex: 1` is what makes the two columns end level. */
+.catalog-entry {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 3rem 2rem;
+  border: 2px solid rgba(16, 42, 67, 0.14);
+  border-radius: 1.25rem;
+  background: rgba(255, 255, 255, 0.5);
+  text-align: center;
+  color: #486581;
+  transition:
+    border-color 0.2s,
+    background 0.2s;
+}
+
+.catalog-entry:hover {
+  border-color: rgba(16, 42, 67, 0.3);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.catalog-entry p {
+  margin: 0;
+  max-width: 22rem;
+}
+
+.catalog-entry-btn {
+  padding: 0.5rem 1.25rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: #102a43;
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.catalog-entry-btn:hover:not(:disabled) {
+  background: #243b53;
+}
+
+.catalog-entry-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* The sample is a demo convenience, not a third door: footnote type, and a
+   button worn as a link so the keyboard still reaches it. */
+.sample-footnote {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #829ab1;
+}
+
+.sample-link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: #486581;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+}
+
+.sample-link:hover:not(:disabled) {
+  color: #102a43;
+}
+
+.sample-link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .drop-zone {
@@ -446,39 +556,10 @@ body {
   color: var(--fg-label);
 }
 
-.toolbar-file {
-  font-size: 0.82rem;
-  color: var(--fg-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .toolbar-sep {
   width: 1px;
   height: 1.25rem;
   background: var(--border-accent);
-}
-
-.meta-pills {
-  display: flex;
-  gap: 0.4rem;
-}
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.15rem 0.5rem;
-  background: var(--bg-muted);
-  border-radius: var(--radius-sm);
-  font-size: 0.7rem;
-  color: var(--fg-label);
-}
-
-.pill .value {
-  color: var(--fg);
-  font-family: "Geist Mono", monospace;
 }
 
 .toolbar-spacer {
@@ -1148,7 +1229,10 @@ body {
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 0 0.75rem;
+  /* Right padding clears the engine's fixed-position attribution toggle
+     (24px badge at right:8px on document.body), which would otherwise sit
+     over the last segment — the CRS readout. */
+  padding: 0 2.5rem 0 0.75rem;
   background: var(--bg-toolbar);
   border-top: 1px solid var(--border);
   font-size: 0.7rem;
@@ -1571,25 +1655,6 @@ body {
   cursor: not-allowed;
 }
 
-/* Rule pill in toolbar */
-.rule-pill {
-  cursor: pointer;
-  transition: opacity 0.15s;
-}
-
-.rule-pill-active {
-  background: var(--accent-soft);
-  border: 1px solid rgba(232, 151, 63, 0.2);
-}
-
-.rule-pill-active .value {
-  color: var(--accent-text);
-}
-
-.rule-pill:not(.rule-pill-active) {
-  opacity: 0.5;
-}
-
 /* ═══════════════════════════════════════════════════════════════
    M2: LEGEND OVERLAY
    ═══════════════════════════════════════════════════════════════ */
@@ -1710,56 +1775,28 @@ body {
   justify-content: center;
 }
 
-/* Sun pill in toolbar */
-.sun-pill-up {
-  background: var(--accent-soft);
-  border: 1px solid rgba(232, 151, 63, 0.2);
-}
-
-.sun-pill-up .value {
-  color: var(--accent-text);
-}
-
 /* ═══════════════════════════════════════════════════════════════
    TOOLBAR SOLAR CLUSTER
    The scene clock is global configuration, so it sits in the header
-   beside the sun pill rather than inside the selection inspector.
+   rather than inside the selection inspector — on the sun button
+   itself, which reads the time it also sets.
    ═══════════════════════════════════════════════════════════════ */
 
-.toolbar-solar {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
+/* The trigger wears the clock and the sun-up dot, so it is sized to its own
+   content instead of `.tb-btn`'s 2rem icon square. Colour comes from `.tb-btn`
+   (and `.tb-btn-active` while the popover is open); the only state this adds
+   is the dot, which carries the accent the old `.sun-pill-up` did. */
+.sun-trigger {
+  width: auto;
+  gap: 0.3rem;
+  padding: 0 0.45rem;
   flex-shrink: 0;
 }
 
-.toolbar-solar-input {
-  height: 1.65rem;
-  padding: 0 0.3rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-input);
-  color: var(--fg);
-  font-size: 0.72rem;
-  font-family: inherit;
-}
-
-.toolbar-solar-input:focus-visible {
-  outline: 1px solid var(--accent);
-}
-
-/* The native date/time pickers render their own indicator; in the dark theme
-   it is black-on-dark without this. */
-[data-theme="dark"] .toolbar-solar-input::-webkit-calendar-picker-indicator {
-  filter: invert(0.8);
-}
-
-.toolbar-solar-time {
-  width: 5.4rem;
-}
-
-.toolbar-solar-speed {
-  width: 5rem;
+.sun-trigger-label {
+  font-family: "Geist Mono", monospace;
+  font-size: 0.68rem;
+  white-space: nowrap;
 }
 
 /* The presets/sun-position popover, anchored to its button in the cluster. */
@@ -1787,15 +1824,6 @@ body {
   border-radius: var(--radius-lg, 0.75rem);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   z-index: 30;
-}
-
-/* The toolbar is one flex row; below this width the clock would push the
-   right-hand action buttons off the edge, so the two widest fields go. */
-@media (max-width: 1100px) {
-  .toolbar-solar-input[type="date"],
-  .toolbar-solar-speed {
-    display: none;
-  }
 }
 
 /* ── Scene theme picker ─────────────────────────────────────────────────────
@@ -2725,50 +2753,6 @@ body {
 .agg-mode-compact {
   padding: 0.25rem 0.6rem;
   border-bottom: 1px solid var(--border);
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   SAMPLE DATA BUTTON (landing page)
-   ═══════════════════════════════════════════════════════════════ */
-
-/* Flex rather than `text-align: center`: the section holds TWO buttons (load
-   the sample, browse the catalog) and adjacent JSX siblings produce no
-   whitespace text node to space them apart. Wraps, because the two together
-   are wider than a narrow window. */
-.sample-data-section {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  justify-content: center;
-  margin-top: 0.5rem;
-}
-
-.sample-data-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.5rem 1.25rem;
-  background: var(--bg-muted);
-  border: 1px solid var(--border-accent);
-  border-radius: var(--radius);
-  color: var(--fg-muted);
-  font-size: 0.8rem;
-  cursor: pointer;
-  transition:
-    background 0.15s,
-    color 0.15s,
-    border-color 0.15s;
-}
-
-.sample-data-btn:hover {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.sample-data-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 [data-theme="light"] .attribute-panel {

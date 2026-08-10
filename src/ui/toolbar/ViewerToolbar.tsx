@@ -1,16 +1,20 @@
 /**
- * Viewer toolbar with metadata pills, pick mode, tool mode, and action buttons.
+ * Viewer toolbar: pick mode, tool mode, and action buttons — CONTROLS ONLY.
+ *
+ * Facts about the scene belong in the status bar, the GIS convention (QGIS,
+ * ArcGIS, Cesium): the file name, object/layer counts, LoD and rule count each
+ * duplicated a surface that already showed them (the sidebar, `StatusBar`, the
+ * legend), and the CRS moved to `StatusBar`'s right cluster, where QGIS puts
+ * EPSG. The sun's datetime is not gone either — it is the LABEL of the sun
+ * button now, one control for one subject. This component therefore reads no
+ * store at all.
  */
 
 import type { PickMode, ToolMode } from "../../domain/selection/types";
 import type { Theme } from "../../features/theme/useTheme";
-import { useLayerStore } from "../../features/layers/layerStore";
-import { useTotalObjectCount } from "../../features/streaming/useTotalObjectCount";
-import { useSolarStore } from "../../features/solar/solarStore";
 import { SolarMenu } from "./SolarMenu";
 import { ViewModeToggle } from "./ViewModeToggle";
 import { SceneThemeMenu } from "./SceneThemeMenu";
-import { extractCrsCode } from "./crsCode";
 
 /**
  * Tooltip suffix for the tools the Navara viewport does not implement yet.
@@ -29,8 +33,6 @@ const NAVARA_DEAD_TOOL_TITLE =
   "temporarily unavailable during the Navara migration";
 
 interface ViewerToolbarProps {
-  readonly fileName: string | null;
-  readonly layerCount: number;
   readonly pickMode: PickMode;
   readonly toolMode: ToolMode;
   readonly onSetPickMode: (mode: PickMode) => void;
@@ -49,8 +51,6 @@ interface ViewerToolbarProps {
 }
 
 export function ViewerToolbar({
-  fileName,
-  layerCount,
   pickMode,
   toolMode,
   onSetPickMode,
@@ -67,25 +67,6 @@ export function ViewerToolbar({
   advancedSettingsOpen,
   onToggleAdvancedSettings,
 }: ViewerToolbarProps) {
-  const layers = useLayerStore((s) => s.layers);
-  const activeLayerId = useLayerStore((s) => s.activeLayerId);
-  const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
-
-  // NOT `layers.reduce(... model.objects ...)`: a streaming layer's model is
-  // a stub with no objects, so that undercounts it to zero (Task C14).
-  const totalObjects = useTotalObjectCount();
-  const crs = activeLayer
-    ? extractCrsCode(activeLayer.model.metadata.referenceSystem)
-    : null;
-  const lod = activeLayer ? findPrimaryLod(activeLayer.model) : null;
-
-  const ruleCount = activeLayer
-    ? activeLayer.rules.filter((r) => r.enabled).length
-    : 0;
-
-  const datetime = useSolarStore((s) => s.datetime);
-  const sunPosition = useSolarStore((s) => s.sunPosition);
-
   return (
     <header className="toolbar">
       <span className="toolbar-brand">MultiRoof</span>
@@ -191,59 +172,18 @@ export function ViewerToolbar({
 
       <div className="toolbar-sep" />
 
-      {fileName && <span className="toolbar-file">{fileName}</span>}
-
-      <div className="meta-pills">
-        {crs && (
-          <div className="pill">
-            CRS <span className="value">EPSG:{crs}</span>
-          </div>
-        )}
-        <div className="pill">
-          Objects <span className="value">{totalObjects}</span>
-        </div>
-        {layerCount > 1 && (
-          <div className="pill">
-            Layers <span className="value">{layerCount}</span>
-          </div>
-        )}
-        {lod && (
-          <div className="pill">
-            LoD <span className="value">{lod}</span>
-          </div>
-        )}
-      </div>
-
       {/* One button, one popover, for everything about the sun: the sliders
           that sweep it, the presets that jump it, and the altitude/azimuth the
-          engine reports back. The pill beside it is the read-only summary, so
-          the scene's time is on screen without opening anything. */}
-      <div className="toolbar-sep" />
-      {sunPosition && (
-        <div
-          className={`pill sun-pill ${sunPosition.altitudeDeg > 0 ? "sun-pill-up" : ""}`}
-          title={`Sun ${sunPosition.altitudeDeg.toFixed(1)}° above horizon`}
-        >
-          Sun <span className="value">{formatDatetimePill(datetime)}</span>
-        </div>
-      )}
+          engine reports back — with the scene's time on its own face, so it is
+          readable without opening anything. */}
       <SolarMenu />
-
-      {ruleCount > 0 && (
-        <>
-          <div className="toolbar-sep" />
-          <div className="pill rule-pill rule-pill-active">
-            Rules <span className="value">{ruleCount} active</span>
-          </div>
-        </>
-      )}
 
       <div className="toolbar-spacer" />
 
       {onToggleAdvancedSettings && (
         <button
           className={`tb-btn ${advancedSettingsOpen ? "tb-btn-active" : ""}`}
-          title="Advanced settings"
+          title="Rendering settings"
           onClick={onToggleAdvancedSettings}
         >
           <svg viewBox="0 0 24 24">
@@ -329,22 +269,4 @@ export function ViewerToolbar({
       </button>
     </header>
   );
-}
-
-function formatDatetimePill(dt: Date): string {
-  return dt.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function findPrimaryLod(model: {
-  objects: Record<string, { lod: string | null }>;
-}): string | null {
-  for (const obj of Object.values(model.objects)) {
-    if (obj?.lod) return obj.lod;
-  }
-  return null;
 }

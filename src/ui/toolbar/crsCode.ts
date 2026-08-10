@@ -4,9 +4,11 @@
  * Its own module rather than a second export from `ViewerToolbar.tsx`, because
  * a file that exports both a component and a helper loses fast refresh (and
  * the linter says so). It is also genuinely not toolbar-specific: it is a
- * property of the two loaders' spellings.
+ * property of the two loaders' spellings — and the one caller is `StatusBar`
+ * now, the toolbar having shed its information pills. The path stays put
+ * because the helper is not status-bar-specific either.
  *
- * The pill prepends "EPSG:" itself, so this has to strip any authority the
+ * The caller prepends "EPSG:" itself, so this has to strip any authority the
  * source already carries or it reads "EPSG:EPSG:7415" — which is exactly what
  * a `.fcb` rendered until this existed:
  *

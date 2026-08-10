@@ -1,46 +1,46 @@
 /**
- * Advanced rendering settings panel.
+ * Rendering panel — how the scene is DRAWN: lighting, post processing and the
+ * viewer's own diagnostics.
  *
  * Floating overlay at top-right of the viewport, toggled from the toolbar gear
  * button.
  *
+ * The BACKDROP — basemap and Google 3D Tiles — is deliberately not here: it is
+ * a choice of what to look AT, and its one home is the top of the left sidebar
+ * (`BasemapPanel`, `GoogleTilesPanel`).
+ *
  * EVERY control here drives live engine state — a `DefaultPlugin`
- * photoreal-scene handle, a `view.addEffect` pass,
- * `view.toneMappingExposure`, or a source/layer pair. That is the whole point
+ * photoreal-scene handle, a `view.addEffect` pass, or
+ * `view.toneMappingExposure`. That is the whole point
  * of this file's second pass: it previously carried "City Shadows", "Double
  * Sided" and "City Material", none of which was read by anything, so a third
  * of the panel was decorative. They are gone rather than wired — their real
  * counterpart is the city mesh's three.js material, which lives in
  * `@cityjson/navara-cityjson`, not in the app (see `renderDebugStore.ts`).
+ *
+ * The `advanced-*` class names are historical and kept as they are.
  */
 
 import {
   useAtmosphereStore,
   type Precipitation,
 } from "../../features/atmosphere/atmosphereStore";
-import { useTilesStore } from "../../features/tiles/tilesStore";
-import { useBasemapStore } from "../../features/basemap/basemapStore";
-import { BASEMAPS, type BasemapId } from "../../scene/basemaps";
 import {
   EXPOSURE_RANGE,
   useRenderDebugStore,
 } from "../../features/debug/renderDebugStore";
 
-interface AdvancedSettingsPanelProps {
+interface RenderingPanelProps {
   readonly onClose: () => void;
 }
 
-export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
+export function RenderingPanel({ onClose }: RenderingPanelProps) {
   const cloudCoverage = useAtmosphereStore((s) => s.cloudCoverage);
   const setCoverage = useAtmosphereStore((s) => s.setCoverage);
   const lensFlareEnabled = useAtmosphereStore((s) => s.lensFlareEnabled);
   const setLensFlareEnabled = useAtmosphereStore((s) => s.setLensFlareEnabled);
   const precipitation = useAtmosphereStore((s) => s.precipitation);
   const setPrecipitation = useAtmosphereStore((s) => s.setPrecipitation);
-  const tilesEnabled = useTilesStore((s) => s.enabled);
-  const setTilesEnabled = useTilesStore((s) => s.setEnabled);
-  const basemapId = useBasemapStore((s) => s.basemapId);
-  const setBasemapId = useBasemapStore((s) => s.setBasemapId);
   const postProcessingEnabled = useRenderDebugStore(
     (s) => s.postProcessingEnabled,
   );
@@ -75,15 +75,11 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
    *
    * Both stores, because the split between them is historical and invisible
    * here: lens flare and cloud coverage live in `atmosphereStore`, the rest in
-   * `renderDebugStore`, and a reset that silently skipped two of the sliders it
-   * sits under would be exactly the incoherence this button used to have when
-   * it was tucked inside the Backdrop section resetting neither of the two
-   * controls above it.
+   * `renderDebugStore`, and a reset bound to one store alone would silently
+   * leave two of the controls it sits under untouched.
    *
-   * Deliberately NOT the backdrop: the basemap and the Google tileset are
-   * choices of what to look AT, not of how it is rendered, and silently
-   * swapping the user's imagery is not what "reset render settings" promises.
-   * The button's title says so out loud.
+   * It must never reach the backdrop stores either: swapping the user's
+   * imagery is not what "reset render settings" promises.
    */
   const resetRenderSettings = () => {
     resetRenderDebug();
@@ -93,7 +89,7 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
   return (
     <div className="advanced-settings-panel">
       <div className="advanced-settings-header">
-        <span>Advanced Settings</span>
+        <span>Rendering</span>
         <button className="tb-btn" title="Close" onClick={onClose}>
           <svg viewBox="0 0 24 24" width="14" height="14">
             <path d="M18 6L6 18M6 6l12 12" />
@@ -218,35 +214,6 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
           </div>
         </div>
 
-        {/* Backdrop */}
-        <div className="attr-section">
-          <div className="attr-section-title">Backdrop</div>
-          <div className="advanced-toggle-row">
-            <span>Google 3D Tiles</span>
-            <input
-              type="checkbox"
-              aria-label="Google 3D Tiles"
-              checked={tilesEnabled}
-              onChange={(e) => setTilesEnabled(e.target.checked)}
-            />
-          </div>
-          <div className="advanced-toggle-row advanced-select-row">
-            <label htmlFor="advanced-basemap">Basemap</label>
-            <select
-              id="advanced-basemap"
-              className="advanced-select"
-              value={basemapId}
-              onChange={(e) => setBasemapId(e.target.value as BasemapId)}
-            >
-              {BASEMAPS.filter((b) => !b.hidden).map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
         {/* Diagnostics — switches that reveal how the viewer WORKS rather than
             changing how the scene looks. Their own section so they do not read
             as scene furniture sitting among the render settings. They are part
@@ -274,7 +241,7 @@ export function AdvancedSettingsPanel({ onClose }: AdvancedSettingsPanelProps) {
       <div className="advanced-settings-footer">
         <button
           className="rule-cancel-btn"
-          title="Restore the default lighting and post-processing settings. The basemap and Google 3D Tiles choices are left alone."
+          title="Restore the default lighting and post-processing settings."
           onClick={resetRenderSettings}
         >
           Reset render settings

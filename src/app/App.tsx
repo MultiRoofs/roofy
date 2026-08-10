@@ -71,7 +71,7 @@ import type { AddUrlResult } from "../ui/stac/StacBrowser";
 import { StatusBar } from "../ui/StatusBar";
 import { LegendOverlay } from "../ui/viewport/LegendOverlay";
 import { AttributePanel } from "../ui/viewport/AttributePanel";
-import { AdvancedSettingsPanel } from "../ui/viewport/AdvancedSettingsPanel";
+import { RenderingPanel } from "../ui/viewport/RenderingPanel";
 import { TablePanel } from "../ui/table/TablePanel";
 import type { CityObject } from "../domain/citymodel/types";
 import type { Rule } from "../features/rules/types";
@@ -1239,8 +1239,6 @@ export function App({
     return (
       <div className={shellClasses} style={gridStyle}>
         <ViewerToolbar
-          fileName={activeLayer?.name ?? null}
-          layerCount={layers.length}
           pickMode={mode}
           toolMode={toolMode}
           onSetPickMode={setMode}
@@ -1283,9 +1281,7 @@ export function App({
             objectsById={selectedObjectsById}
           />
           {advancedSettingsOpen && (
-            <AdvancedSettingsPanel
-              onClose={() => setAdvancedSettingsOpen(false)}
-            />
+            <RenderingPanel onClose={() => setAdvancedSettingsOpen(false)} />
           )}
         </div>
 
@@ -1342,9 +1338,7 @@ export function App({
         <p className="eyebrow">MultiRoof Viewer</p>
         <h1>Rooftop analysis starts here.</h1>
         <p className="summary">
-          Drop a file or load from a URL. Supports <code>.city.json</code>,{" "}
-          <code>.city.jsonl</code>, <code>.fcb</code>, <code>.gml</code>{" "}
-          (CityGML), and <code>.parquet</code> (CityParquet).
+          Drop a city model or pick one from the open catalog.
         </p>
       </div>
 
@@ -1356,59 +1350,67 @@ export function App({
         />
       )}
 
-      {/* The same component the sidebar's Add Layer dialog renders — one
-          drop zone, one URL field, one set of words for both entry points. */}
-      <SourcePicker
-        variant="hero"
-        onFile={handlePickedFile}
-        onFiles={handlePickedFiles}
-        onUrl={handlePickedUrl}
-        loading={loading}
-        // The summary paragraph above already lists the extensions.
-        showFormatHint={false}
-      />
+      {/* The page's one fork: bring your own data, or take one out of the
+          published catalog. Two doors, equal weight. */}
+      <div className="entry-section">
+        <div className="entry-paths">
+          <section className="entry-path">
+            <h2 className="entry-path-title">Open your data</h2>
+            {/* The same component the sidebar's Add Layer dialog renders — one
+                drop zone, one URL field, one set of words for both entry
+                points. Its format hint is the page's ONLY list of extensions,
+                so it stays on. */}
+            <SourcePicker
+              variant="hero"
+              onFile={handlePickedFile}
+              onFiles={handlePickedFiles}
+              onUrl={handlePickedUrl}
+              loading={loading}
+            />
+          </section>
 
-      <div className="sample-data-section">
-        <button
-          className="sample-data-btn"
-          onClick={handleLoadSample}
-          disabled={loading}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            width="16"
-            height="16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
+          <section className="entry-path">
+            <h2 className="entry-path-title">Browse the catalog</h2>
+            <div className="catalog-entry">
+              <svg
+                viewBox="0 0 24 24"
+                width="24"
+                height="24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
+              >
+                <circle cx="11" cy="11" r="7" />
+                <line x1="16.5" y1="16.5" x2="21" y2="21" />
+              </svg>
+              <p>Pick a city model from the Open3D City catalog.</p>
+              <button
+                type="button"
+                className="catalog-entry-btn"
+                onClick={() => setCatalogOpen(true)}
+                disabled={loading}
+              >
+                Browse catalog
+              </button>
+            </div>
+          </section>
+        </div>
+
+        {/* The sample is a demo convenience, not a third door. Its label does
+            not change while loading: `disabled` and the loading indicator
+            below already say so. */}
+        <p className="sample-footnote">
+          or{" "}
+          <button
+            type="button"
+            className="sample-link"
+            onClick={handleLoadSample}
+            disabled={loading}
           >
-            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-          {loading ? "Loading\u2026" : "Load Delft sample"}
-        </button>
-        {/* The third way in, for a visitor with neither a file nor a URL:
-            browse the published catalog and pick a tile out of it. */}
-        <button
-          type="button"
-          className="sample-data-btn"
-          onClick={() => setCatalogOpen(true)}
-          disabled={loading}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            width="16"
-            height="16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <circle cx="11" cy="11" r="7" />
-            <line x1="16.5" y1="16.5" x2="21" y2="21" />
-          </svg>
-          Browse catalog
-        </button>
+            try the Delft sample
+          </button>
+        </p>
       </div>
 
       {savedSnapshots.length > 0 && (

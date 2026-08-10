@@ -1,9 +1,13 @@
 /**
- * Bottom status bar showing model statistics, FPS, cursor position, and selection state.
+ * Bottom status bar showing model statistics, FPS, cursor position, CRS and
+ * selection state — the facts row, in the GIS convention the toolbar shed its
+ * information pills for.
  */
 
 import type { DuckDBStatus } from "../analytics/duckdb";
 import type { StreamStatus } from "../features/streaming/streamStore";
+import { useLayerStore } from "../features/layers/layerStore";
+import { extractCrsCode } from "./toolbar/crsCode";
 
 interface StatusBarProps {
   readonly objectCount: number;
@@ -38,6 +42,16 @@ export function StatusBar({
   streamStatus,
   streamMessage,
 }: StatusBarProps) {
+  // Read straight from the store rather than through a prop: the CRS is a
+  // property of the active layer, not of anything `App` already computes, and
+  // threading it would put a fact nobody else needs through the shell.
+  const layers = useLayerStore((s) => s.layers);
+  const activeLayerId = useLayerStore((s) => s.activeLayerId);
+  const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
+  const crs = activeLayer
+    ? extractCrsCode(activeLayer.model.metadata.referenceSystem)
+    : null;
+
   return (
     <footer className="statusbar">
       <div className="status-item">
@@ -111,6 +125,13 @@ export function StatusBar({
         <span className="status-label">Triangles</span>
         <span className="status-value">{formatCount(triangleCount)}</span>
       </div>
+      {/* Last, i.e. bottom-right: where QGIS puts the EPSG code. */}
+      {crs && (
+        <div className="status-item">
+          <span className="status-label">CRS</span>
+          <span className="status-value status-value-mono">EPSG:{crs}</span>
+        </div>
+      )}
     </footer>
   );
 }

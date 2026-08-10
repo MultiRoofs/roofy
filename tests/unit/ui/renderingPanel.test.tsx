@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { AdvancedSettingsPanel } from "../../../src/ui/viewport/AdvancedSettingsPanel";
+import { RenderingPanel } from "../../../src/ui/viewport/RenderingPanel";
 import {
   DEFAULT_ATMOSPHERE_STATE,
   useAtmosphereStore,
@@ -12,7 +12,7 @@ import {
 } from "../../../src/features/debug/renderDebugStore";
 import { useBasemapStore } from "../../../src/features/basemap/basemapStore";
 
-describe("AdvancedSettingsPanel", () => {
+describe("RenderingPanel", () => {
   afterEach(() => {
     cleanup();
   });
@@ -31,7 +31,7 @@ describe("AdvancedSettingsPanel", () => {
   });
 
   it("picks precipitation, which is one choice rather than two switches", () => {
-    render(<AdvancedSettingsPanel onClose={() => {}} />);
+    render(<RenderingPanel onClose={() => {}} />);
     const picker = screen.getByLabelText("Precipitation");
     expect((picker as HTMLSelectElement).value).toBe("none");
     fireEvent.change(picker, { target: { value: "rain" } });
@@ -45,7 +45,7 @@ describe("AdvancedSettingsPanel", () => {
   });
 
   it("updates the render stores from the panel controls", () => {
-    render(<AdvancedSettingsPanel onClose={() => {}} />);
+    render(<RenderingPanel onClose={() => {}} />);
 
     fireEvent.click(screen.getByLabelText("Clouds"));
     fireEvent.click(screen.getByLabelText("Aerial Perspective"));
@@ -56,7 +56,6 @@ describe("AdvancedSettingsPanel", () => {
     });
     // Last, because it disables the three post-processing checkboxes above.
     fireEvent.click(screen.getByLabelText("Post Processing"));
-    fireEvent.click(screen.getByLabelText("Google 3D Tiles"));
 
     expect(useRenderDebugStore.getState()).toMatchObject({
       postProcessingEnabled: false,
@@ -68,11 +67,10 @@ describe("AdvancedSettingsPanel", () => {
       exposure: 14,
     });
     expect(useAtmosphereStore.getState().lensFlareEnabled).toBe(false);
-    expect(useTilesStore.getState().enabled).toBe(true);
   });
 
   it("toggles the streaming fetch-box diagnostic, which starts off", () => {
-    render(<AdvancedSettingsPanel onClose={() => {}} />);
+    render(<RenderingPanel onClose={() => {}} />);
     const toggle = screen.getByLabelText("Streaming Fetch Box");
     expect(toggle).not.toBeChecked();
     // Independent of the post chain: the outline is a mesh, not a pass.
@@ -85,7 +83,7 @@ describe("AdvancedSettingsPanel", () => {
   });
 
   it("offers no control without an engine counterpart", () => {
-    render(<AdvancedSettingsPanel onClose={() => {}} />);
+    render(<RenderingPanel onClose={() => {}} />);
 
     // The three that were pure state until this pass. They are gone rather
     // than wired: their counterpart is the city mesh's three.js material,
@@ -108,7 +106,7 @@ describe("AdvancedSettingsPanel", () => {
 
   it("disables the post-processing controls when the chain is off", () => {
     useRenderDebugStore.setState({ postProcessingEnabled: false });
-    render(<AdvancedSettingsPanel onClose={() => {}} />);
+    render(<RenderingPanel onClose={() => {}} />);
 
     expect(screen.getByLabelText("Clouds")).toBeDisabled();
     expect(screen.getByLabelText("Aerial Perspective")).toBeDisabled();
@@ -137,7 +135,7 @@ describe("AdvancedSettingsPanel", () => {
       exposure: 1,
     });
 
-    render(<AdvancedSettingsPanel onClose={() => {}} />);
+    render(<RenderingPanel onClose={() => {}} />);
 
     fireEvent.click(screen.getByText("Reset render settings"));
 
@@ -149,18 +147,20 @@ describe("AdvancedSettingsPanel", () => {
     );
   });
 
-  // The other half of the coherence fix: the backdrop is a choice of what to
-  // look AT, not of how it is rendered, so the reset must not silently swap the
-  // user's imagery — and the button says so.
-  it("leaves the backdrop choices alone, and says so", () => {
+  // The backdrop is a choice of what to look AT, not of how the scene is
+  // rendered: its one home is the left sidebar (`BasemapPanel`,
+  // `GoogleTilesPanel`). The reset must not reach those stores either.
+  it("hosts no backdrop control, and leaves the backdrop stores alone", () => {
     useTilesStore.setState({ enabled: true });
     useBasemapStore.setState({ basemapId: "esri-imagery" });
-    render(<AdvancedSettingsPanel onClose={() => {}} />);
+    render(<RenderingPanel onClose={() => {}} />);
 
-    const reset = screen.getByText("Reset render settings");
-    expect(reset.getAttribute("title")).toContain("left alone");
+    expect(screen.getByText("Rendering")).toBeTruthy();
+    expect(screen.queryByText("Backdrop")).toBeNull();
+    expect(screen.queryByLabelText("Google 3D Tiles")).toBeNull();
+    expect(screen.queryByLabelText("Basemap")).toBeNull();
 
-    fireEvent.click(reset);
+    fireEvent.click(screen.getByText("Reset render settings"));
 
     expect(useTilesStore.getState().enabled).toBe(true);
     expect(useBasemapStore.getState().basemapId).toBe("esri-imagery");

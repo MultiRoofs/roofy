@@ -1,5 +1,9 @@
 /**
- * Everything about the sun, in one popover hanging off one toolbar button.
+ * Everything about the sun, in one popover hanging off one toolbar button —
+ * which carries the scene's clock as its own label, so the time is legible
+ * with the popover shut. That label was a separate `.sun-pill` in the toolbar
+ * until the header shed its information pills: a read-only pill sitting beside
+ * the button that sets the very thing it reads is two widgets for one subject.
  *
  * This is the merge of what used to be two separate controls: the scrubber
  * (day / time / speed sliders + play), which floated over the bottom-left of
@@ -133,17 +137,31 @@ export function SolarMenu() {
     <div className="toolbar-solar-menu" ref={rootRef}>
       <button
         ref={triggerRef}
-        className={`tb-btn ${open ? "tb-btn-active" : ""}`}
+        className={`tb-btn sun-trigger ${open ? "tb-btn-active" : ""}`}
+        // The visible label is a datetime, not a name, so the accessible name
+        // stays on the aria-label.
         aria-label="Sun position"
         aria-expanded={open}
         aria-haspopup="dialog"
-        title="Sun position"
+        title={
+          sunPosition
+            ? // Magnitude, not the signed value: "-8.4° below horizon" states
+              // the sign twice.
+              `Sun ${Math.abs(sunPosition.altitudeDeg).toFixed(1)}° ${sunIsUp ? "above" : "below"} horizon`
+            : "Sun position"
+        }
         onClick={() => setOpen((v) => !v)}
       >
         <svg viewBox="0 0 24 24">
           <circle cx="12" cy="12" r="4" />
           <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4" />
         </svg>
+        <span className="sun-trigger-label">
+          {formatDatetimePill(datetime)}
+        </span>
+        {/* Same dot as the popover's own header, so the shut trigger and the
+            open panel report the measured sun-up state identically. */}
+        <span className={`solar-scrubber-dot ${sunIsUp ? "is-up" : ""}`} />
       </button>
 
       {open && (
@@ -326,6 +344,16 @@ export function SolarMenu() {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** The trigger's compact clock: month, day and time, in LOCAL time. */
+function formatDatetimePill(dt: Date): string {
+  return dt.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 function cardinalFromDeg(deg: number): string {
   if (deg >= 337.5 || deg < 22.5) return "N";

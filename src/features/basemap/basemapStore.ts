@@ -2,8 +2,9 @@
  * Zustand store for the selected basemap.
  *
  * Deliberately shaped like `tilesStore`: one piece of state that
- * `NavaraViewport` mirrors into an engine source + layer pair, and two UIs
- * (the sidebar picker and the advanced-settings panel) that write it.
+ * `NavaraViewport` mirrors into an engine source + layer pair, written by the
+ * sidebar's basemap picker (its one UI since the Rendering panel shed its
+ * Backdrop section).
  *
  * Defaults to `DEFAULT_BASEMAP_ID` (OpenStreetMap) rather than `"none"`,
  * because Navara's default photoreal scene adds no imagery of its own — see

@@ -20,6 +20,18 @@ import { useSolarStore } from "../../../../src/features/solar/solarStore";
 
 const BASE = new Date(2026, 5, 21, 13, 45, 0, 0);
 
+/** What the trigger's compact clock must read for {@link BASE}. Derived rather
+ *  than hardcoded because `formatDatetimePill` formats in the RUNNER's locale
+ *  (`toLocaleString(undefined, …)`), so a literal "Jun 21, 01:45 PM" would pin
+ *  en-US rather than the contract, which is "month, day, hour and minute of
+ *  the store's datetime". */
+const EXPECTED_TRIGGER_LABEL = BASE.toLocaleString(undefined, {
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
 afterEach(() => {
   cleanup();
   useSolarStore.setState({
@@ -130,12 +142,14 @@ describe("SolarMenu", () => {
       sunPosition: { altitudeDeg: 42, azimuthDeg: 180, direction: [0, 0, 1] },
     });
     const { container } = renderOpen();
-    // Scoped to the header: the time also appears in the slider's own readout,
-    // which is the point — the reading and its control sit together.
+    // Scoped to the header: the time also appears in the slider's own readout
+    // and on the trigger, which is the point — the reading and its control sit
+    // together. Scoping matters for the dot especially: the trigger carries one
+    // too, so a container-wide query would pass with the header's dot broken.
     const summary = container.querySelector(".solar-menu-summary");
     expect(summary?.textContent).toContain("13:45");
     expect(summary?.textContent).toContain("Jun 21");
-    expect(container.querySelector(".solar-scrubber-dot.is-up")).not.toBeNull();
+    expect(summary?.querySelector(".solar-scrubber-dot.is-up")).not.toBeNull();
   });
 
   it("dismisses on Escape and puts focus back on the trigger", () => {
@@ -159,8 +173,6 @@ describe("SolarMenu", () => {
 
 describe("ViewerToolbar solar cluster", () => {
   const baseProps = {
-    fileName: null,
-    layerCount: 1,
     pickMode: "object" as const,
     toolMode: "select" as const,
     onSetPickMode: () => undefined,
@@ -182,12 +194,40 @@ describe("ViewerToolbar solar cluster", () => {
     expect(screen.queryByLabelText("Play time")).toBeNull();
   });
 
-  it("keeps the sun pill, the only clock on screen while the popover is shut", () => {
+  it("puts the clock ON the sun button, not in a pill beside it", () => {
     useSolarStore.setState({
       datetime: BASE,
       sunPosition: { altitudeDeg: 42, azimuthDeg: 180, direction: [0, 0, 1] },
     });
     const { container } = render(<ViewerToolbar {...baseProps} />);
-    expect(container.querySelector(".sun-pill")).not.toBeNull();
+    expect(container.querySelector(".sun-pill")).toBeNull();
+    const trigger = screen.getByLabelText("Sun position");
+    expect(trigger.querySelector(".sun-trigger-label")?.textContent).toBe(
+      EXPECTED_TRIGGER_LABEL,
+    );
+    // Sun-up state travels with the label onto the same button.
+    expect(trigger.querySelector(".solar-scrubber-dot.is-up")).not.toBeNull();
+    expect(trigger.getAttribute("title")).toBe("Sun 42.0° above horizon");
+  });
+
+  it("says below-horizon in the trigger tooltip when the sun has set", () => {
+    useSolarStore.setState({
+      datetime: BASE,
+      sunPosition: { altitudeDeg: -8.4, azimuthDeg: 300, direction: [0, 0, 1] },
+    });
+    const { container } = render(<ViewerToolbar {...baseProps} />);
+    const trigger = screen.getByLabelText("Sun position");
+    expect(trigger.getAttribute("title")).toBe("Sun 8.4° below horizon");
+    expect(container.querySelector(".solar-scrubber-dot.is-up")).toBeNull();
+  });
+
+  it("still shows the clock before the engine has reported a sun position", () => {
+    useSolarStore.setState({ datetime: BASE, sunPosition: null });
+    render(<ViewerToolbar {...baseProps} />);
+    const trigger = screen.getByLabelText("Sun position");
+    expect(trigger.querySelector(".sun-trigger-label")?.textContent).toBe(
+      EXPECTED_TRIGGER_LABEL,
+    );
+    expect(trigger.getAttribute("title")).toBe("Sun position");
   });
 });
