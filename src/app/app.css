@@ -121,12 +121,18 @@
   box-sizing: border-box;
 }
 
+/* The token ground, not the UA's white: `.app-shell` is capped at 960px and
+   centred, so on any wider window the body IS the landing page's margins.
+   White gutters beside a near-black shell were invisible while that page had
+   a light palette of its own; on the tokens they are the first thing you see.
+   The viewer covers the viewport and is unaffected either way. */
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   line-height: 1.5;
+  background: var(--bg-root);
 }
 
 #root {
@@ -134,7 +140,7 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   LANDING PAGE
+   LANDING PAGE — same token palette as the viewer, both themes
    ═══════════════════════════════════════════════════════════════ */
 
 .app-shell {
@@ -143,14 +149,10 @@ body {
   max-width: 960px;
   margin: 0 auto;
   padding: 4rem 1.5rem 5rem;
-  color: #102a43;
+  color: var(--fg);
   background:
-    radial-gradient(
-      circle at top left,
-      rgba(176, 221, 196, 0.45),
-      transparent 35%
-    ),
-    linear-gradient(180deg, #f7f5ec 0%, #eef3f6 100%);
+    radial-gradient(circle at top left, var(--accent-soft), transparent 40%),
+    var(--bg-root);
   min-height: 100vh;
 }
 
@@ -165,7 +167,7 @@ body {
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #486581;
+  color: var(--accent-text);
 }
 
 .hero h1 {
@@ -173,14 +175,14 @@ body {
   max-width: 16ch;
   font-size: clamp(2.8rem, 8vw, 5rem);
   line-height: 0.95;
-  color: #102a43;
+  color: var(--fg);
 }
 
 .summary {
   margin: 0;
   max-width: 42rem;
   font-size: 1.1rem;
-  color: #243b53;
+  color: var(--fg-muted);
 }
 
 /* ---- the two entry paths: own data | published catalog ---- */
@@ -216,11 +218,11 @@ body {
   margin: 0;
   font-size: 0.95rem;
   font-weight: 600;
-  color: #243b53;
+  color: var(--fg-label);
 }
 
 /* Equal weight to the drop zone beside it: same radius, same padding, same
-   translucent parchment — but a solid border, because nothing is dropped here.
+   panel surface — but a solid border, because nothing is dropped here.
    `flex: 1` is what makes the two columns end level. */
 .catalog-entry {
   flex: 1;
@@ -230,19 +232,19 @@ body {
   justify-content: center;
   gap: 0.75rem;
   padding: 3rem 2rem;
-  border: 2px solid rgba(16, 42, 67, 0.14);
+  border: 2px solid var(--border-accent);
   border-radius: 1.25rem;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--bg-panel);
   text-align: center;
-  color: #486581;
+  color: var(--fg-muted);
   transition:
     border-color 0.2s,
     background 0.2s;
 }
 
 .catalog-entry:hover {
-  border-color: rgba(16, 42, 67, 0.3);
-  background: rgba(255, 255, 255, 0.7);
+  border-color: var(--accent);
+  background: var(--bg-panel-hover);
 }
 
 .catalog-entry p {
@@ -254,8 +256,8 @@ body {
   padding: 0.5rem 1.25rem;
   border: none;
   border-radius: 0.5rem;
-  background: #102a43;
-  color: #fff;
+  background: var(--accent);
+  color: var(--bg-panel);
   font-family: inherit;
   font-size: 0.9rem;
   font-weight: 500;
@@ -264,7 +266,7 @@ body {
 }
 
 .catalog-entry-btn:hover:not(:disabled) {
-  background: #243b53;
+  background: var(--accent-text);
 }
 
 .catalog-entry-btn:disabled {
@@ -277,7 +279,7 @@ body {
 .sample-footnote {
   margin: 0;
   font-size: 0.85rem;
-  color: #829ab1;
+  color: var(--fg-dim);
 }
 
 .sample-link {
@@ -285,14 +287,14 @@ body {
   border: none;
   background: none;
   font: inherit;
-  color: #486581;
+  color: var(--fg-muted);
   text-decoration: underline;
   text-underline-offset: 0.15em;
   cursor: pointer;
 }
 
 .sample-link:hover:not(:disabled) {
-  color: #102a43;
+  color: var(--fg);
 }
 
 .sample-link:disabled {
@@ -308,9 +310,9 @@ body {
   gap: 0.5rem;
   width: min(100%, 34rem);
   padding: 3rem 2rem;
-  border: 2px dashed rgba(16, 42, 67, 0.2);
+  border: 2px dashed var(--border-accent);
   border-radius: 1.25rem;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--bg-panel);
   text-align: center;
   transition:
     border-color 0.2s,
@@ -318,18 +320,18 @@ body {
 }
 
 .drop-zone:hover {
-  border-color: rgba(16, 42, 67, 0.4);
-  background: rgba(255, 255, 255, 0.7);
+  border-color: var(--accent);
+  background: var(--bg-panel-hover);
 }
 
 .drop-zone p {
   margin: 0;
-  color: #486581;
+  color: var(--fg-muted);
 }
 
 .drop-or {
   font-size: 0.85rem;
-  color: #829ab1;
+  color: var(--fg-dim);
 }
 
 /* Browse files + Choose folder sit side by side: two ways in, one row.
@@ -344,8 +346,8 @@ body {
 .file-label {
   display: inline-block;
   padding: 0.5rem 1.25rem;
-  background: #102a43;
-  color: #fff;
+  background: var(--accent);
+  color: var(--bg-panel);
   border-radius: 0.5rem;
   cursor: pointer;
   font-size: 0.9rem;
@@ -354,7 +356,7 @@ body {
 }
 
 .file-label:hover {
-  background: #243b53;
+  background: var(--accent-text);
 }
 
 .fcb-url-form {
@@ -365,7 +367,7 @@ body {
 .fcb-url-label {
   display: block;
   font-size: 0.85rem;
-  color: #829ab1;
+  color: var(--fg-label);
   margin-bottom: 0.4rem;
 }
 
@@ -377,21 +379,21 @@ body {
 .fcb-url-input {
   flex: 1;
   padding: 0.5rem 0.75rem;
-  border: 1px solid rgba(16, 42, 67, 0.2);
+  border: 1px solid var(--border-accent);
   border-radius: 0.5rem;
   font-size: 0.9rem;
-  background: rgba(255, 255, 255, 0.7);
-  color: #102a43;
+  background: var(--bg-input);
+  color: var(--fg);
 }
 
 .fcb-url-input::placeholder {
-  color: #9fb3c8;
+  color: var(--fg-dim);
 }
 
 .fcb-url-btn {
   padding: 0.5rem 1.25rem;
-  background: #102a43;
-  color: #fff;
+  background: var(--accent);
+  color: var(--bg-panel);
   border: none;
   border-radius: 0.5rem;
   cursor: pointer;
@@ -401,7 +403,7 @@ body {
 }
 
 .fcb-url-btn:hover:not(:disabled) {
-  background: #243b53;
+  background: var(--accent-text);
 }
 
 .fcb-url-btn:disabled {
@@ -417,7 +419,7 @@ body {
 .snapshot-list-title {
   font-size: 0.85rem;
   font-weight: 600;
-  color: #486581;
+  color: var(--fg-label);
   margin-bottom: 0.5rem;
 }
 
@@ -426,9 +428,9 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0.5rem 0.75rem;
-  border: 1px solid rgba(16, 42, 67, 0.1);
+  border: 1px solid var(--border);
   border-radius: 0.5rem;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--bg-panel);
   margin-bottom: 0.4rem;
 }
 
@@ -440,13 +442,13 @@ body {
 
 .snapshot-label {
   font-size: 0.9rem;
-  color: #102a43;
+  color: var(--fg);
   font-weight: 500;
 }
 
 .snapshot-date {
   font-size: 0.75rem;
-  color: #829ab1;
+  color: var(--fg-dim);
 }
 
 .snapshot-actions {
@@ -456,8 +458,8 @@ body {
 
 .snapshot-btn {
   padding: 0.3rem 0.75rem;
-  background: #102a43;
-  color: #fff;
+  background: var(--accent);
+  color: var(--bg-panel);
   border: none;
   border-radius: 0.35rem;
   cursor: pointer;
@@ -466,7 +468,7 @@ body {
 }
 
 .snapshot-btn:hover:not(:disabled) {
-  background: #243b53;
+  background: var(--accent-text);
 }
 
 .snapshot-btn:disabled {
@@ -476,8 +478,8 @@ body {
 
 .snapshot-btn-delete {
   background: transparent;
-  color: #829ab1;
-  border: 1px solid rgba(16, 42, 67, 0.15);
+  color: var(--fg-muted);
+  border: 1px solid var(--border-accent);
 }
 
 .snapshot-btn-delete:hover:not(:disabled) {
@@ -492,6 +494,15 @@ body {
   padding: 0.75rem 1rem;
   border-radius: 0.5rem;
   width: min(100%, 34rem);
+}
+
+/* The landing page's only chrome: the same theme toggle the toolbar renders,
+   pinned to the corner so the theme can be flipped before any data loads. */
+.landing-theme-toggle {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 20;
 }
 
 @media (max-width: 640px) {
@@ -2116,14 +2127,17 @@ body {
   gap: 0.75rem;
   padding: 1rem;
   font-size: 0.9rem;
-  color: #486581;
+  color: var(--fg-muted);
 }
 
+/* On the tokens with the rest of the landing: the old navy `border-top-color`
+   was invisible against the dark theme's near-black ground, so the spinner
+   read as a static ring. */
 .loading-spinner {
   width: 1.25rem;
   height: 1.25rem;
-  border: 2px solid rgba(16, 42, 67, 0.15);
-  border-top-color: #102a43;
+  border: 2px solid var(--border-accent);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -3166,10 +3180,10 @@ body {
 /* ═══════════════════════════════════════════════════════════════
    SOURCE PICKER  (shared: landing hero + Add Layer dialog)
 
-   One component, two skins. `.source-picker-hero` keeps the landing
-   page's parchment palette — that page predates the design tokens and
-   is deliberately light in both themes — while `.source-picker-panel`
-   re-skins the SAME markup in the tokens, so the dialog is right in
+   One component, two skins. `.source-picker-hero` inherits the landing
+   page's rules, which are on the design tokens now and follow the
+   dark/light toggle like the rest of the app, while `.source-picker-panel`
+   re-scales and re-skins the SAME markup for the dialog, so it is right in
    dark and light chrome alike. The base `.drop-zone` / `.file-label` /
    `.fcb-url-*` rules further up the file still do the layout; these
    only override colour, scale and the drag state.
@@ -3198,8 +3212,8 @@ body {
    load this file"), so the highlight is a confirmation of a state the user
    can already read, not the only signal. */
 .drop-zone.is-dragging {
-  border-color: rgba(16, 42, 67, 0.55);
-  background: rgba(255, 255, 255, 0.85);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 /* `.file-label` was a <label>; it is a <button> now (a hidden file input is
@@ -3244,7 +3258,7 @@ button.file-label:disabled {
   font-family: "Geist Mono", monospace;
   font-size: 0.68rem;
   letter-spacing: 0.02em;
-  color: #829ab1;
+  color: var(--fg-dim);
 }
 
 /* ---- panel skin (Add Layer dialog) ---- */

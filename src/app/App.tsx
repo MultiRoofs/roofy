@@ -69,6 +69,7 @@ import { SourcePicker } from "../ui/layers/SourcePicker";
 import { StacBrowserDialog } from "../ui/stac/StacBrowserDialog";
 import type { AddUrlResult } from "../ui/stac/StacBrowser";
 import { StatusBar } from "../ui/StatusBar";
+import { ThemeToggleButton } from "../ui/ThemeToggleButton";
 import { LegendOverlay } from "../ui/viewport/LegendOverlay";
 import { AttributePanel } from "../ui/viewport/AttributePanel";
 import { RenderingPanel } from "../ui/viewport/RenderingPanel";
@@ -1334,6 +1335,10 @@ export function App({
   // Landing / drop zone
   return (
     <main className="app-shell">
+      <div className="landing-theme-toggle">
+        <ThemeToggleButton theme={theme} onToggle={toggleTheme} />
+      </div>
+
       <div className="hero">
         <p className="eyebrow">Urbis</p>
         <h1>Your city, in 3D.</h1>
