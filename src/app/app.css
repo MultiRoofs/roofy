@@ -1423,6 +1423,20 @@ body {
    M2: RULE BUILDER
    ═══════════════════════════════════════════════════════════════ */
 
+.rule-target-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+
+.rule-target-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+}
+
 .rule-header {
   display: flex;
   align-items: center;
