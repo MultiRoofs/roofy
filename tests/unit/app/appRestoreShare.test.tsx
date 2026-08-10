@@ -536,7 +536,7 @@ describe("App save with a camera that is not readable yet", () => {
     await mountShellWithLayer();
 
     cameraState = null;
-    fireEvent.click(screen.getByRole("button", { name: "Copy share link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Share this view" }));
 
     await waitFor(() =>
       expect(
@@ -558,7 +558,7 @@ describe("App share", () => {
     );
     await mountShellWithLayer();
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy share link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Share this view" }));
 
     // The link is on screen — the whole point: a 2.5 s toast was evidence
     // that had usually vanished before the user looked for it.
@@ -583,7 +583,7 @@ describe("App share", () => {
     );
     await mountShellWithLayer();
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy share link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Share this view" }));
 
     await waitFor(() =>
       expect(screen.getByRole("status").textContent).toMatch(/couldn't copy/i),
@@ -606,7 +606,7 @@ describe("App share", () => {
     );
     await mountShellWithLayer();
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy share link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Share this view" }));
     await screen.findByRole("dialog");
 
     fireEvent.keyDown(document, { key: "Escape" });
@@ -653,7 +653,7 @@ describe("App toast timers", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);
     });
-    fireEvent.click(screen.getByRole("button", { name: "Copy share link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Share this view" }));
     await waitFor(() =>
       expect(screen.getByText(/try sharing again/)).toBeInTheDocument(),
     );

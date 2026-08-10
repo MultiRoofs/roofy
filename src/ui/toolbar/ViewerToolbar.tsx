@@ -251,11 +251,15 @@ export function ViewerToolbar({
           </svg>
         </button>
       )}
+      {/* Named for what it OPENS, not for what it used to do silently: the
+          click raises `ShareDialog` ("Share this view"), which shows the link
+          and copies it. "Copy share link" described the old clipboard-only
+          behaviour and now misdescribes the button. */}
       {onShare && canShare && (
         <button
           className="tb-btn"
-          aria-label="Copy share link"
-          data-tooltip="Copy share link"
+          aria-label="Share this view"
+          data-tooltip="Share this view"
           data-tooltip-align="end"
           onClick={onShare}
         >
