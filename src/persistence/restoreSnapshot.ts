@@ -23,11 +23,15 @@ export function restoreSnapshot(snapshot: ProjectSnapshot): ViewState {
     throw new UnsupportedSnapshotVersionError(snapshot.version ?? "unknown");
   }
 
-  // Restore pick mode (clear selection — it's transient)
+  // Restore pick mode (clear selection — it's transient). `geoSelection` is
+  // cleared with the rest: a restore replaces every geo layer, so a retained
+  // feature would name a layer id that no longer exists and leave a stale
+  // attribute panel over the new workspace.
   useSelectionStore.setState({
     mode: snapshot.pickMode,
     selections: [],
     hovered: null,
+    geoSelection: null,
   });
 
   // Restore datetime with validation

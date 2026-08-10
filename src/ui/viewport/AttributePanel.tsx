@@ -11,6 +11,19 @@ import { resolveInheritedAttributes } from "../../domain/citymodel/inheritedAttr
 
 type AggMode = "sum" | "avg" | "min" | "max";
 
+/**
+ * The picked GeoJSON feature, flattened for display.
+ *
+ * A geo feature has no object graph and no ancestors, so there is nothing to
+ * inherit and nothing to aggregate — its properties are exactly what the file
+ * said. The layer name stands in for the "Attributes" title because it is the
+ * only identity the feature has to show.
+ */
+export interface GeoFeatureAttributes {
+  readonly layerName: string;
+  readonly properties: Readonly<Record<string, unknown>>;
+}
+
 interface AttributePanelProps {
   readonly objects: ReadonlyArray<CityObject>;
   /**
@@ -21,16 +34,24 @@ interface AttributePanelProps {
    * `domain/citymodel/inheritedAttributes.ts`.
    */
   readonly objectsById?: Readonly<Record<string, CityObject>>;
+  /**
+   * The picked geo feature, shown only when no city object is selected. The
+   * store makes the two mutually exclusive, so the guard is belt-and-braces:
+   * if both ever arrive, the city path wins and this is ignored.
+   */
+  readonly geoFeature?: GeoFeatureAttributes | null;
 }
 
 export function AttributePanel({
   objects,
   objectsById = {},
+  geoFeature = null,
 }: AttributePanelProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [aggMode, setAggMode] = useState<AggMode>("avg");
 
-  if (objects.length === 0) return null;
+  const geoOnly = objects.length === 0 ? geoFeature : null;
+  if (objects.length === 0 && geoOnly === null) return null;
 
   const isMulti = objects.length > 1;
 
@@ -38,7 +59,9 @@ export function AttributePanel({
     <div className={`attribute-panel ${collapsed ? "collapsed" : ""}`}>
       <div className="attribute-panel-header">
         <span className="attribute-panel-title">
-          Attributes{isMulti ? ` (${objects.length})` : ""}
+          {geoOnly
+            ? geoOnly.layerName
+            : `Attributes${isMulti ? ` (${objects.length})` : ""}`}
         </span>
         <button
           className="attribute-panel-toggle"
@@ -66,27 +89,36 @@ export function AttributePanel({
       </div>
       {!collapsed && (
         <div className="attribute-panel-body">
-          {isMulti && (
-            <div className="agg-mode-select agg-mode-compact">
-              <select
-                value={aggMode}
-                onChange={(e) => setAggMode(e.target.value as AggMode)}
-              >
-                <option value="sum">Sum</option>
-                <option value="avg">Avg</option>
-                <option value="min">Min</option>
-                <option value="max">Max</option>
-              </select>
-            </div>
-          )}
-          {isMulti ? (
-            <MultiAttributes
-              objects={objects}
-              objectsById={objectsById}
-              aggMode={aggMode}
-            />
+          {geoOnly ? (
+            <GeoAttributes properties={geoOnly.properties} />
           ) : (
-            <SingleAttributes object={objects[0]!} objectsById={objectsById} />
+            <>
+              {isMulti && (
+                <div className="agg-mode-select agg-mode-compact">
+                  <select
+                    value={aggMode}
+                    onChange={(e) => setAggMode(e.target.value as AggMode)}
+                  >
+                    <option value="sum">Sum</option>
+                    <option value="avg">Avg</option>
+                    <option value="min">Min</option>
+                    <option value="max">Max</option>
+                  </select>
+                </div>
+              )}
+              {isMulti ? (
+                <MultiAttributes
+                  objects={objects}
+                  objectsById={objectsById}
+                  aggMode={aggMode}
+                />
+              ) : (
+                <SingleAttributes
+                  object={objects[0]!}
+                  objectsById={objectsById}
+                />
+              )}
+            </>
           )}
         </div>
       )}
@@ -175,6 +207,27 @@ function SingleAttributes({
       }))}
       valueHeader="Value"
       inheritedFrom={inheritedFrom}
+    />
+  );
+}
+
+/**
+ * A geo feature's properties, exactly as the source file carries them: flat,
+ * in document order, with no inheritance caption and no aggregation.
+ */
+function GeoAttributes({
+  properties,
+}: {
+  properties: Readonly<Record<string, unknown>>;
+}) {
+  const entries = Object.entries(properties);
+  if (entries.length === 0) {
+    return <div className="attr-panel-empty">No attributes</div>;
+  }
+  return (
+    <AttributeTable
+      rows={entries.map(([key, value]) => ({ key, value: formatValue(value) }))}
+      valueHeader="Value"
     />
   );
 }
