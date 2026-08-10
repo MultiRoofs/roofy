@@ -15,6 +15,7 @@ import {
   useGeoLayerStore,
   type GeoLayer,
 } from "../../../../src/features/geoLayers/geoLayerStore";
+import { DEFAULT_GEO_LAYER_STYLE } from "../../../../src/features/geoLayers/geoLayerStyle";
 
 afterEach(() => {
   useGeoLayerStore.setState({ layers: [] });
@@ -73,6 +74,48 @@ describe("addGeoLayer", () => {
     const byId = (id: string) => store().layers.find((l) => l.id === id)!;
     expect(byId(low).opacity).toBe(0);
     expect(byId(high).opacity).toBe(1);
+  });
+
+  it("gives a layer added without a style the shared default", () => {
+    addRaster("A");
+
+    expect(store().layers[0]!.style).toEqual(DEFAULT_GEO_LAYER_STYLE);
+  });
+
+  it("keeps an explicit, valid style verbatim", () => {
+    const style = {
+      color: "#00aaff",
+      pointSizePx: 8,
+      lineWidthPx: 5,
+      fillOpacity: 0.4,
+    };
+    const id = store().addGeoLayer({
+      name: "styled",
+      kind: "geojson",
+      config: { url: "https://x/a.geojson" },
+      style,
+    });
+
+    expect(store().layers.find((l) => l.id === id)!.style).toEqual(style);
+  });
+
+  it("NORMALIZES a style on add — these values reach the engine, and a restored snapshot is not the only caller", () => {
+    const id = store().addGeoLayer({
+      name: "junk",
+      kind: "geojson",
+      config: { url: "https://x/a.geojson" },
+      style: {
+        color: "nope",
+        pointSizePx: -3,
+        lineWidthPx: Number.POSITIVE_INFINITY,
+        fillOpacity: 2,
+      } as unknown as GeoLayer["style"],
+    });
+
+    expect(store().layers.find((l) => l.id === id)!.style).toEqual({
+      ...DEFAULT_GEO_LAYER_STYLE,
+      fillOpacity: 1,
+    });
   });
 });
 
@@ -151,6 +194,42 @@ describe("updateGeoLayer", () => {
 
     expect(store().layers).toBe(before);
   });
+
+  it("REPLACES the style object wholesale, normalizing it, and touches no neighbour", () => {
+    const a = addRaster("A");
+    addRaster("B");
+    const before = store().layers;
+
+    store().updateGeoLayer(a, {
+      style: {
+        color: "#00aaff",
+        pointSizePx: 8,
+        lineWidthPx: -1,
+        fillOpacity: 5,
+      } as unknown as GeoLayer["style"],
+    });
+
+    const after = store().layers;
+    expect(after[0]!.style).not.toBe(before[0]!.style);
+    expect(after[0]!.style).toEqual({
+      color: "#00aaff",
+      pointSizePx: 8,
+      lineWidthPx: DEFAULT_GEO_LAYER_STYLE.lineWidthPx,
+      fillOpacity: 1,
+    });
+    // The other layer's style object is the very one it had, so a reconciler
+    // memoised on style identity leaves it alone.
+    expect(after[1]!.style).toBe(before[1]!.style);
+  });
+
+  it("keeps the style OBJECT identical across a patch that does not mention it", () => {
+    const a = addRaster("A");
+    const styleBefore = store().layers[0]!.style;
+
+    store().updateGeoLayer(a, { visible: false });
+
+    expect(store().layers[0]!.style).toBe(styleBefore);
+  });
 });
 
 describe("relinkGeoJsonLayer", () => {
@@ -182,7 +261,13 @@ describe("relinkGeoJsonLayer", () => {
 });
 
 describe("isGeoLayerUnavailable", () => {
-  const base = { id: "g", name: "n", visible: true, opacity: 1 } as const;
+  const base = {
+    id: "g",
+    name: "n",
+    visible: true,
+    opacity: 1,
+    style: DEFAULT_GEO_LAYER_STYLE,
+  } as const;
 
   it("is true only for a GeoJSON layer with neither inline data nor a URL", () => {
     expect(

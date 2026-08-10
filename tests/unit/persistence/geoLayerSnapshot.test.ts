@@ -16,6 +16,7 @@ import {
 } from "../../../src/persistence/types";
 import { captureSnapshot } from "../../../src/persistence/captureSnapshot";
 import type { GeoLayer } from "../../../src/features/geoLayers/geoLayerStore";
+import { DEFAULT_GEO_LAYER_STYLE } from "../../../src/features/geoLayers/geoLayerStyle";
 
 const CAMERA = {
   lng: 4.35,
@@ -45,6 +46,7 @@ describe("geoLayerSnapshot", () => {
       kind: "geojson",
       visible: false,
       opacity: 0.6,
+      style: DEFAULT_GEO_LAYER_STYLE,
       config: { data: { type: "FeatureCollection", features: [] } },
     };
 
@@ -64,6 +66,7 @@ describe("geoLayerSnapshot", () => {
       kind: "geojson",
       visible: true,
       opacity: 1,
+      style: DEFAULT_GEO_LAYER_STYLE,
       config: { url: "https://x/roads.geojson" },
     };
 
@@ -79,6 +82,7 @@ describe("geoLayerSnapshot", () => {
       kind: "raster-xyz",
       visible: true,
       opacity: 0.5,
+      style: DEFAULT_GEO_LAYER_STYLE,
       config: {
         urlTemplate: "https://t/{z}/{x}/{y}.png",
         minZoom: 1,
@@ -99,6 +103,7 @@ describe("normalizeGeoLayers", () => {
       kind: "raster-xyz",
       visible: false,
       opacity: 0.25,
+      style: DEFAULT_GEO_LAYER_STYLE,
       config: { urlTemplate: "https://t/{z}/{x}/{y}.png" },
     };
 
@@ -120,6 +125,7 @@ describe("normalizeGeoLayers", () => {
       kind: "geojson",
       visible: true,
       opacity: 1,
+      style: DEFAULT_GEO_LAYER_STYLE,
       config: { data: { type: "FeatureCollection", features: [] } },
     };
 
