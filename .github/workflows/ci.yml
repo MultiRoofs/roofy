@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
     branches: [main]
 
@@ -16,13 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The plugin submodule is private and SSH-only; without it the app's
-      # file: dependencies cannot resolve and nothing below works.
-      - name: Load submodule deploy key
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.SUBMODULE_DEPLOY_KEY }}
-
+      # The plugin submodule is public; plain recursive checkout suffices.
       - name: Fetch plugin submodule
         run: git submodule update --init --recursive
 
@@ -49,17 +43,32 @@ jobs:
       - name: Build
         run: npm run build
 
-  # test:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #
-  #     - uses: actions/setup-node@v4
-  #       with:
-  #         node-version: 22
-  #         cache: npm
-  #
-  #     - run: npm ci
-  #
-  #     - name: Test
-  #       run: npm test
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same sequence as `check`, and for a second reason here: the CityParquet
+      # loader tests read a real fixture package out of the submodule's own
+      # tests/fixtures, so without it they fail with ENOENT rather than skip.
+      - name: Fetch plugin submodule
+        run: git submodule update --init --recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install plugin workspace dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+        working-directory: packages/cityjson-navara-plugins
+
+      # `npx vitest run`, never `npm test`: the vite-plus runner has a bug that
+      # breaks `describe` for this suite, and every test file imports from
+      # "vitest" for that reason (CLAUDE.md, Known Issues).
+      - name: Test
+        run: npx vitest run

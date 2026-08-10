@@ -3,11 +3,8 @@
 # Modeled on cityjson/flatcitybuf's deploy-web-demo.yml, adapted for this
 # repo's three particulars:
 #
-#  1. PRIVATE SUBMODULE — packages/cityjson-navara-plugins is SSH-only, so
-#     checkout uses the default token for the main repo and an ssh-agent
-#     loaded with SUBMODULE_DEPLOY_KEY for the `git submodule update`.
-#     The key's PUBLIC half must be registered as a read-only deploy key on
-#     github.com/HideBa/cityjson-navara-plugins.
+#  1. SUBMODULE — packages/cityjson-navara-plugins is a public repo fetched
+#     over https by a plain `git submodule update`; no key needed.
 #  2. TWO PACKAGE MANAGERS — npm at the root, pnpm (pinned via packageManager
 #     + corepack) inside the submodule. The pnpm install must run AFTER the
 #     root npm ci, in the submodule directory (never `pnpm -C` from the
@@ -21,7 +18,6 @@
 # Required repository secrets:
 #   CLOUDFLARE_API_TOKEN   — API token with Workers Scripts:Edit
 #   CLOUDFLARE_ACCOUNT_ID  — the target Cloudflare account
-#   SUBMODULE_DEPLOY_KEY   — private SSH key for the plugins submodule
 #   DOTENV_PRIVATE_KEY     — optional; enables the Google Tiles key
 
 name: Deploy to Cloudflare Workers
@@ -42,11 +38,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Load submodule deploy key
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.SUBMODULE_DEPLOY_KEY }}
 
       - name: Fetch plugin submodule
         run: git submodule update --init --recursive

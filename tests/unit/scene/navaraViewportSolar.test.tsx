@@ -72,14 +72,16 @@ const atmosphere = {
 /** Fire an engine event inside `act`, the only input surface this wiring has. */
 function fire(name: string, ...args: unknown[]): void {
   act(() => {
-    for (const fn of [...(listeners.get(name) ?? [])]) {
+    // Snapshot, not a redundant copy — see the same guard in
+    // navaraViewport.test.tsx: a handler may (un)register during dispatch.
+    for (const fn of Array.from(listeners.get(name) ?? [])) {
       (fn as (...a: unknown[]) => void)(...args);
     }
   });
 }
 function fireSunChanged(): void {
   act(() => {
-    for (const fn of [...(atmosphereListeners.get("sunChanged") ?? [])]) {
+    for (const fn of Array.from(atmosphereListeners.get("sunChanged") ?? [])) {
       (fn as (...a: unknown[]) => void)(sunDirection);
     }
   });

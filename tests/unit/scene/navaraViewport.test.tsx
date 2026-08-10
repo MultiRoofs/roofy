@@ -151,7 +151,10 @@ const off = vi.fn((name: string, fn: (...args: never[]) => void) => {
   listeners.get(name)?.delete(fn);
 });
 function fire(name: string, ...args: unknown[]): void {
-  for (const fn of [...(listeners.get(name) ?? [])]) {
+  // Snapshot, not a redundant copy: a handler may register or unregister a
+  // listener while it runs, and mutating the live Set mid-iteration would let
+  // a just-added handler receive the event it was not present for.
+  for (const fn of Array.from(listeners.get(name) ?? [])) {
     (fn as (...a: unknown[]) => void)(...args);
   }
 }

@@ -9,6 +9,7 @@
  */
 
 import { readFile } from "node:fs/promises";
+import * as path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   cityParquetLayerNameFromUrl,
@@ -18,8 +19,15 @@ import {
 import { MAX_CITYPARQUET_FILES } from "../../../../src/features/cityparquet/objectStorage";
 import type { HttpClient } from "../../../../src/platform/types";
 
-const FIX =
-  "/data2/hideba/multiroof-viewer/packages/cityjson-navara-plugins/packages/navara-cityparquet/tests/fixtures/two-buildings-cityparquet";
+/**
+ * Resolved relative to THIS file, not to an absolute machine path: the package
+ * is a git-tracked fixture inside the plugin submodule, so these tests need the
+ * submodule checked out (CI fetches it before installing anyway).
+ */
+const FIX = path.resolve(
+  import.meta.dirname!,
+  "../../../../packages/cityjson-navara-plugins/packages/navara-cityparquet/tests/fixtures/two-buildings-cityparquet",
+);
 
 function notFoundText() {
   return { ok: false, status: 404, statusText: "Not Found", text: "" };

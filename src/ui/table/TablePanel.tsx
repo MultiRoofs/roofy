@@ -32,6 +32,15 @@ export function TablePanel({
   onHeightChange,
 }: TablePanelProps) {
   const [columns, setColumns] = useState<string[]>([]);
+  /**
+   * Mirror of `columns` for `loadPage`'s SQL guard. `columns` cannot be a
+   * dependency of that callback: every load calls `setColumns` with a fresh
+   * array, which would give the callback a new identity, which the reload
+   * effect below would treat as a data-source change — an endless query loop.
+   * The ref is written at the same instant as the state, so the guard reads a
+   * value at least as fresh as a dependency would have given it.
+   */
+  const columnsRef = useRef<string[]>([]);
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [sortCol, setSortCol] = useState<string | null>(null);
@@ -68,6 +77,12 @@ export function TablePanel({
   // Generation counter to discard stale async loads
   const loadGenRef = useRef(0);
 
+  /** Every write to `columns` goes through here, so the ref cannot drift. */
+  const applyColumns = useCallback((next: string[]) => {
+    columnsRef.current = next;
+    setColumns(next);
+  }, []);
+
   const loadPage = useCallback(
     async (page: number, reset: boolean) => {
       if (reset) pageRef.current = 0;
@@ -82,7 +97,7 @@ export function TablePanel({
           // generation counter race (count was discarded if a re-render
           // triggered another loadPage before the count query finished)
           const safeCol =
-            sortCol && columns.includes(sortCol)
+            sortCol && columnsRef.current.includes(sortCol)
               ? sortCol.replace(/"/g, '""')
               : null;
           const orderClause = safeCol ? `ORDER BY "${safeCol}" ${sortDir}` : "";
@@ -97,7 +112,7 @@ export function TablePanel({
           if (gen !== loadGenRef.current) return; // stale
           if (result) {
             if (reset || page === 0) {
-              setColumns(result.columns);
+              applyColumns(result.columns);
               setRows(result.rows);
             } else {
               setRows((prev) => [...prev, ...result.rows]);
@@ -122,7 +137,7 @@ export function TablePanel({
           const allRecords = Object.values(residentModel.objects);
           if (gen !== loadGenRef.current) return; // stale
           if (page === 0) {
-            setColumns(getColumnsFromRecords(allRecords));
+            applyColumns(getColumnsFromRecords(allRecords));
             setTotalCount(allRecords.length);
           }
 
@@ -144,7 +159,7 @@ export function TablePanel({
           );
           if (gen !== loadGenRef.current) return; // stale
           if (page === 0) {
-            setColumns(getColumnsFromModel(activeLayer.model));
+            applyColumns(getColumnsFromModel(activeLayer.model));
             setTotalCount(allObjects.length);
           }
 
@@ -166,7 +181,14 @@ export function TablePanel({
         if (gen === loadGenRef.current) setLoading(false);
       }
     },
-    [duckdbTableLoaded, sortCol, sortDir, activeLayer, streamVersion],
+    [
+      duckdbTableLoaded,
+      sortCol,
+      sortDir,
+      activeLayer,
+      streamVersion,
+      applyColumns,
+    ],
   );
 
   // Reload on sort change or data source change
@@ -333,7 +355,7 @@ export function TablePanel({
           </thead>
           <tbody>
             {rows.map((row, i) => {
-              const rowId = String(row.id ?? i);
+              const rowId = stringifyValue(row.id ?? i);
               const isSelected = selectedIds.has(rowId);
               return (
                 <tr
@@ -518,12 +540,32 @@ function getRecordValue(r: ResidentObjectRecord, col: string): unknown {
   return r.attributes[col];
 }
 
+/**
+ * A cell value as text. `String(unknown)` is not good enough: an attribute
+ * value straight out of DuckDB or a CityJSON file can be a plain object, which
+ * `String` renders as the useless "[object Object]" \u2014 a row would sort and
+ * display identically for every distinct object. Every branch narrows first,
+ * so `String` only ever sees a primitive.
+ */
+function stringifyValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "bigint"
+  ) {
+    return String(value);
+  }
+  if (value === null || value === undefined) return "";
+  return JSON.stringify(value) ?? "";
+}
+
 function compareValues(a: unknown, b: unknown): number {
   if (a == null && b == null) return 0;
   if (a == null) return -1;
   if (b == null) return 1;
   if (typeof a === "number" && typeof b === "number") return a - b;
-  return String(a).localeCompare(String(b));
+  return stringifyValue(a).localeCompare(stringifyValue(b));
 }
 
 function formatCell(value: unknown): string {
@@ -531,6 +573,5 @@ function formatCell(value: unknown): string {
   if (typeof value === "number") {
     return Number.isInteger(value) ? String(value) : value.toFixed(2);
   }
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
+  return stringifyValue(value);
 }

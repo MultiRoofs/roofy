@@ -163,8 +163,18 @@ function recordFromRow(
    *  against. */
   parquetHref: string,
 ): StacItemRecord | null {
-  const rawId = row.id;
-  if (rawId === null || rawId === undefined) return null;
+  // A usable id is a scalar and nothing else: a mirror that put an object or
+  // an array in the column has no identity to offer, and `String()` would turn
+  // that into the one "[object Object]" every such row would share. `bigint` is
+  // in the list because DuckDB hands an integer column back as one.
+  const rawId: unknown = row.id;
+  if (
+    typeof rawId !== "string" &&
+    typeof rawId !== "number" &&
+    typeof rawId !== "bigint"
+  ) {
+    return null;
+  }
   const id = String(rawId);
   if (id === "") return null;
 
