@@ -118,6 +118,9 @@ lens flare — the user's grouping), **Diagnostics** (unchanged). The master
 toggle's visible label becomes "Post Processing"; wiring and the
 cross-section disabled logic are untouched.
 
+**Superseded in part by K**: the Weather section left this panel for a
+toolbar popover of its own. The panel keeps Rendering + Diagnostics.
+
 ### I. Cyber theme goes synthwave (third wave)
 
 Reference: neon wireframe city. Edges already existed (LineSegments via
@@ -142,6 +145,19 @@ EPSG:25832/25833, which is what makes the CORS-clean German items load
 end-to-end (browser-verified on Brandenburg). Most other catalog zips
 still fail for pre-existing host reasons (no CORS, degree CRS, stale
 URLs) — the failure sentence names the reason.
+
+### K. Weather becomes its own toolbar control (fourth wave)
+
+Supersedes H's Weather section. `WeatherMenu` — cloud-icon trigger plus
+popover, `SolarMenu`'s mechanics and chrome (the reuse `SceneThemeMenu`
+already established) — sits immediately after the sun button, because both
+control the SKY. The four controls (clouds, coverage, precipitation, lens
+flare) move verbatim: same stores, same aria-labels, same disabled logic,
+no behaviour change. Two consequences: the post-processing dependency now
+crosses two SURFACES, so the popover carries a muted hint naming the
+Rendering panel when the chain is off, and that panel's footer reset still
+restores BOTH stores — weather included — which its tooltip now says out
+loud.
 
 ## Non-goals / guard rails
 

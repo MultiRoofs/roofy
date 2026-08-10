@@ -868,9 +868,10 @@ body {
   transform: none;
 }
 
-/* The solar popover opens exactly where this trigger's tooltip would sit, so
-   the tip stands down while the panel it describes is open. */
-.sun-trigger[aria-expanded="true"]::after {
+/* These popovers open exactly where their trigger's tooltip would sit, so the
+   tip stands down while the panel it describes is open. */
+.sun-trigger[aria-expanded="true"]::after,
+.weather-trigger[aria-expanded="true"]::after {
   content: none;
 }
 
@@ -1852,8 +1853,11 @@ body {
   white-space: nowrap;
 }
 
-/* The presets/sun-position popover, anchored to its button in the cluster. */
-.toolbar-solar-menu {
+/* The anchor for a popover hanging off a toolbar button. Grouped rather than
+   duplicated: the weather popover sits beside the sun's and must hang the same
+   way, and a second identical block would be two rules to keep in step. */
+.toolbar-solar-menu,
+.toolbar-weather-menu {
   position: relative;
   display: flex;
   align-items: center;
@@ -1877,6 +1881,31 @@ body {
   border-radius: var(--radius-lg, 0.75rem);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   z-index: 30;
+}
+
+/* ── Weather popover ────────────────────────────────────────────────────────
+   Same anchoring and chrome as the sun's (it reuses `.toolbar-solar-popover`),
+   sized to the Rendering panel it moved out of — the same rows, at the same
+   width, so nothing about the controls looks different for having moved. All
+   colours come from the theme variables, so light mode follows. */
+.weather-menu-popover {
+  width: 260px;
+  padding: 0.25rem 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-lg, 0.75rem);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  z-index: 30;
+}
+
+/* The line that explains a popover of dead controls: the switch that killed
+   them is on another surface. Muted, because it states a fact rather than
+   being a control. */
+.weather-menu-hint {
+  margin: 0.4rem 0 0;
+  font-size: 0.66rem;
+  line-height: 1.3;
+  color: var(--fg-muted);
 }
 
 /* ── Scene theme picker ─────────────────────────────────────────────────────

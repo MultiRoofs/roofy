@@ -1,10 +1,17 @@
 /**
  * Rendering panel — how the scene is DRAWN, grouped by subject: rendering
- * (exposure, shadows, the post chain), weather (clouds, precipitation, lens
- * flare) and the viewer's own diagnostics.
+ * (exposure, shadows, the post chain) and the viewer's own diagnostics.
  *
  * Floating overlay at top-right of the viewport, toggled from the toolbar gear
  * button.
+ *
+ * WEATHER used to be a third section here and is now its own toolbar popover
+ * (`ui/toolbar/WeatherMenu.tsx`), beside the sun — clouds and rain are things
+ * that happen to the sky, and the sky's other control was already in the
+ * header. Two consequences live in this file: `Post Processing` below is still
+ * the master switch those controls depend on, so the dependency crosses two
+ * SURFACES now (the popover names this panel in a hint when it is off), and the
+ * footer's reset still restores BOTH stores, weather values included.
  *
  * The BACKDROP — basemap and Google 3D Tiles — is deliberately not here: it is
  * a choice of what to look AT, and its one home is the top of the left sidebar
@@ -22,10 +29,7 @@
  * The `advanced-*` class names are historical and kept as they are.
  */
 
-import {
-  useAtmosphereStore,
-  type Precipitation,
-} from "../../features/atmosphere/atmosphereStore";
+import { useAtmosphereStore } from "../../features/atmosphere/atmosphereStore";
 import {
   EXPOSURE_RANGE,
   useRenderDebugStore,
@@ -36,20 +40,12 @@ interface RenderingPanelProps {
 }
 
 export function RenderingPanel({ onClose }: RenderingPanelProps) {
-  const cloudCoverage = useAtmosphereStore((s) => s.cloudCoverage);
-  const setCoverage = useAtmosphereStore((s) => s.setCoverage);
-  const lensFlareEnabled = useAtmosphereStore((s) => s.lensFlareEnabled);
-  const setLensFlareEnabled = useAtmosphereStore((s) => s.setLensFlareEnabled);
-  const precipitation = useAtmosphereStore((s) => s.precipitation);
-  const setPrecipitation = useAtmosphereStore((s) => s.setPrecipitation);
   const postProcessingEnabled = useRenderDebugStore(
     (s) => s.postProcessingEnabled,
   );
   const setPostProcessingEnabled = useRenderDebugStore(
     (s) => s.setPostProcessingEnabled,
   );
-  const cloudsEnabled = useRenderDebugStore((s) => s.cloudsEnabled);
-  const setCloudsEnabled = useRenderDebugStore((s) => s.setCloudsEnabled);
   const aerialPerspectiveEnabled = useRenderDebugStore(
     (s) => s.aerialPerspectiveEnabled,
   );
@@ -79,6 +75,12 @@ export function RenderingPanel({ onClose }: RenderingPanelProps) {
    * `atmosphereStore`, the rest in `renderDebugStore`, and neither store maps
    * to a section — a reset bound to one alone would silently leave part of
    * every section untouched.
+   *
+   * That is still true now that weather is a toolbar popover: this reset
+   * reaches ACROSS to it, restoring cloud coverage, precipitation and lens
+   * flare along with everything on this panel. Deliberate — "reset render
+   * settings" promises one clean slate for how the scene is drawn, and half a
+   * slate is worse than none. The button's tooltip says so out loud.
    *
    * It must never reach the backdrop stores either: swapping the user's
    * imagery is not what "reset render settings" promises.
@@ -131,6 +133,10 @@ export function RenderingPanel({ onClose }: RenderingPanelProps) {
               onChange={(e) => setSunShadowsEnabled(e.target.checked)}
             />
           </div>
+          {/* The master switch for the whole post chain — including every
+              control in the toolbar's Weather popover, which is why that
+              popover explains itself with a hint naming this panel when this
+              is off. */}
           <div className="advanced-toggle-row">
             <span>Post Processing</span>
             <input
@@ -148,75 +154,6 @@ export function RenderingPanel({ onClose }: RenderingPanelProps) {
               checked={aerialPerspectiveEnabled}
               disabled={!postProcessingEnabled}
               onChange={(e) => setAerialPerspectiveEnabled(e.target.checked)}
-            />
-          </div>
-        </div>
-
-        {/* Weather — grouped by subject, but every control in it is a
-            post-processing pass, so the master toggle that governs them sits
-            one section up (Rendering › Post Processing) and switching it off
-            disables all of them. That dependency crosses the section boundary
-            deliberately: the user thinks in weather, the engine thinks in
-            passes. */}
-        <div className="attr-section">
-          <div className="attr-section-title">Weather</div>
-          <div className="advanced-toggle-row">
-            <span>Clouds</span>
-            <input
-              type="checkbox"
-              aria-label="Clouds"
-              checked={cloudsEnabled}
-              disabled={!postProcessingEnabled}
-              onChange={(e) => setCloudsEnabled(e.target.checked)}
-            />
-          </div>
-          <div className="attr-row">
-            <span className="attr-key">Cloud Coverage</span>
-            <span className="attr-value">
-              {(cloudCoverage * 100).toFixed(0)}%
-            </span>
-          </div>
-          <div className="advanced-slider-row">
-            <input
-              type="range"
-              className="advanced-slider"
-              aria-label="Cloud Coverage"
-              min={0}
-              max={1}
-              step={0.01}
-              disabled={!postProcessingEnabled || !cloudsEnabled}
-              value={cloudCoverage}
-              onChange={(e) => setCoverage(Number(e.target.value))}
-            />
-          </div>
-          {/* Rain and snow are alternatives, not independent switches: Navara
-              models each as its own mesh and it makes no sense to ask for
-              both, so this is one picker rather than two checkboxes. Needs a
-              placed layer to fall on — with nothing loaded it selects but
-              shows nothing. */}
-          <div className="advanced-toggle-row advanced-select-row">
-            <label htmlFor="advanced-precipitation">Precipitation</label>
-            <select
-              id="advanced-precipitation"
-              className="advanced-select"
-              value={precipitation}
-              onChange={(e) =>
-                setPrecipitation(e.target.value as Precipitation)
-              }
-            >
-              <option value="none">None</option>
-              <option value="rain">Rain</option>
-              <option value="snow">Snow</option>
-            </select>
-          </div>
-          <div className="advanced-toggle-row">
-            <span>Lens Flare</span>
-            <input
-              type="checkbox"
-              aria-label="Lens Flare"
-              checked={lensFlareEnabled}
-              disabled={!postProcessingEnabled}
-              onChange={(e) => setLensFlareEnabled(e.target.checked)}
             />
           </div>
         </div>
@@ -248,7 +185,7 @@ export function RenderingPanel({ onClose }: RenderingPanelProps) {
       <div className="advanced-settings-footer">
         <button
           className="rule-cancel-btn"
-          title="Restore the default rendering, weather and diagnostic settings."
+          title="Restore the default rendering and diagnostic settings, and the weather settings in the toolbar's Weather popover."
           onClick={resetRenderSettings}
         >
           Reset render settings

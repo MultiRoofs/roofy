@@ -13,6 +13,7 @@
 import type { PickMode, ToolMode } from "../../domain/selection/types";
 import type { Theme } from "../../features/theme/useTheme";
 import { SolarMenu } from "./SolarMenu";
+import { WeatherMenu } from "./WeatherMenu";
 import { ViewModeToggle } from "./ViewModeToggle";
 import { SceneThemeMenu } from "./SceneThemeMenu";
 
@@ -187,6 +188,11 @@ export function ViewerToolbar({
           engine reports back — with the scene's time on its own face, so it is
           readable without opening anything. */}
       <SolarMenu />
+      {/* Immediately after the sun, because both are controls for the SKY:
+          where the light comes from, and what is in the way of it. Weather was
+          a section of the Rendering panel until this pass — behind a gear, two
+          clicks from a scene you are looking at while adjusting it. */}
+      <WeatherMenu />
 
       <div className="toolbar-spacer" />
 
