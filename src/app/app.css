@@ -113,14 +113,16 @@
   color: var(--fg);
 }
 
-/* Error red, theme-aware. These three sit on the landing page, whose ground is
-   `--bg-root`: #c53030 is ~5.5:1 on the light sheet but only ~3.3:1 on the dark
-   one, under AA. The base rules therefore carry the lighter #f87171 for the
-   dark theme and this block restores #c53030 where it is the stronger colour.
+/* Error red, theme-aware. These all sit on a `--bg-root`/`--bg-panel` ground
+   (the landing page, and the full-page error boundary): #c53030 is ~5.5:1 on
+   the light sheet but only ~3.3:1 on the dark one, under AA. The base rules
+   therefore carry the lighter #f87171 for the dark theme and this block
+   restores #c53030 where it is the stronger colour.
    Position matters: kept up here with the other light overrides so the hint's
    override cannot outrank `.source-picker-panel .drop-zone p.source-picker-hint`
    (equal specificity, later in the file) and change the dialog. */
 [data-theme="light"] .error-message,
+[data-theme="light"] .error-detail,
 [data-theme="light"] .drop-zone p.source-picker-hint,
 [data-theme="light"] .snapshot-btn-delete:hover:not(:disabled) {
   color: #c53030;
@@ -2065,6 +2067,12 @@ body {
    M5: ERROR BOUNDARY
    ═══════════════════════════════════════════════════════════════ */
 
+/* On the design tokens, like every other surface: the ground is `--bg-root` and
+   the card is `--bg-panel`, so the crash screen follows the theme instead of
+   staying the app's last parchment sheet. The red-tinted `rgba(197, 48, 48, …)`
+   wash and border read correctly on both grounds and stay unconditional; only
+   the message TEXT is theme-aware (see the `[data-theme="light"]` block near
+   the top of the file), on the same idiom as `.error-message`. */
 .error-fullpage {
   display: flex;
   align-items: center;
@@ -2073,32 +2081,32 @@ body {
   background:
     radial-gradient(
       circle at top left,
-      rgba(197, 48, 48, 0.08),
+      rgba(197, 48, 48, 0.12),
       transparent 35%
     ),
-    linear-gradient(180deg, #f7f5ec 0%, #eef3f6 100%);
+    var(--bg-root);
   padding: 2rem;
 }
 
 .error-card {
   max-width: 28rem;
   padding: 2rem;
-  background: rgba(255, 255, 255, 0.8);
+  background: var(--bg-panel);
   border-radius: 1rem;
-  border: 1px solid rgba(197, 48, 48, 0.15);
+  border: 1px solid rgba(197, 48, 48, 0.25);
   text-align: center;
 }
 
 .error-card h2 {
   margin: 0 0 0.75rem;
   font-size: 1.4rem;
-  color: #102a43;
+  color: var(--fg);
 }
 
 .error-detail {
   margin: 0 0 1.5rem;
   font-size: 0.9rem;
-  color: #486581;
+  color: #f87171;
   font-family: "Geist Mono", monospace;
   word-break: break-word;
 }
@@ -2121,22 +2129,23 @@ body {
 }
 
 .error-reset-btn {
-  background: #102a43;
-  color: #fff;
+  background: var(--accent);
+  color: var(--bg-panel);
 }
 
 .error-reset-btn:hover {
-  background: #243b53;
+  background: var(--accent-text);
 }
 
 .error-reload-btn {
   background: transparent;
-  color: #486581;
-  border: 1px solid rgba(16, 42, 67, 0.2);
+  color: var(--fg-muted);
+  border: 1px solid var(--border-accent);
 }
 
 .error-reload-btn:hover {
-  background: rgba(16, 42, 67, 0.04);
+  background: var(--bg-panel-hover);
+  color: var(--fg);
 }
 
 /* Inline error boundary (for inspector tabs) */
