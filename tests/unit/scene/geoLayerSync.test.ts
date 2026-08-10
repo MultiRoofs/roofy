@@ -206,6 +206,57 @@ describe("syncGeoLayers — visibility and opacity", () => {
   });
 });
 
+/** Shared for the same reason `RASTER_CONFIG` is: the store replaces a
+ *  record's `config` only when the SOURCE really changed, and a style edit
+ *  must not be mistaken for one. */
+const GEOJSON_CONFIG = { data: { type: "FeatureCollection", features: [] } };
+
+function geojson(patch: Partial<GeoLayer> = {}): GeoLayer {
+  return {
+    id: "g1",
+    name: "points",
+    kind: "geojson",
+    visible: true,
+    opacity: 1,
+    style: DEFAULT_GEO_LAYER_STYLE,
+    config: GEOJSON_CONFIG,
+    ...patch,
+  } as GeoLayer;
+}
+
+describe("syncGeoLayers — a changed style", () => {
+  it("re-describes the layer instead of rebuilding the pair", () => {
+    const { view, layers } = fakeView();
+    const live = new Map<string, LiveGeoLayer>();
+    syncGeoLayers(view, [geojson()], live);
+
+    // A style edit replaces the style object by IDENTITY, exactly as the store
+    // does — the fields could all be equal and it would still be an edit.
+    const edited = geojson({
+      style: { ...DEFAULT_GEO_LAYER_STYLE, color: "#00ff00" },
+    });
+    syncGeoLayers(view, [edited], live);
+
+    const update = layers[0]!.update;
+    expect(update).toHaveBeenCalledTimes(1);
+    const desc = update.mock.calls[0]![0] as Record<
+      string,
+      { color: number } | unknown
+    >;
+    expect((desc.point as { color: number }).color).toBe(0x00ff00);
+    expect((desc.polyline as { color: number }).color).toBe(0x00ff00);
+    expect((desc.polygon as { color: number }).color).toBe(0x00ff00);
+    // Nothing was rebuilt: the source still carries the same document.
+    expect(view.addSource).toHaveBeenCalledTimes(1);
+    expect(view.addLayer).toHaveBeenCalledTimes(1);
+
+    // and the memo holds — the same record costs no further engine call.
+    syncGeoLayers(view, [edited], live);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(view.addSource).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("syncGeoLayers — a changed config", () => {
   it("rebuilds the pair, layer before source", () => {
     const { view, calls } = fakeView();

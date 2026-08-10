@@ -9,9 +9,10 @@
  * Three engine facts shape everything below (all audited against
  * `@navaramap/three` 0.0.5):
  *
- *  1. `Layer.update()` REPLACES the whole description. A visibility or opacity
- *     change therefore re-sends a description rebuilt from scratch out of the
- *     store record — never a patch, which would drop every field it omitted.
+ *  1. `Layer.update()` REPLACES the whole description. A visibility, opacity or
+ *     style change therefore re-sends a description rebuilt from scratch out of
+ *     the store record — never a patch, which would drop every field it
+ *     omitted.
  *  2. `Source.update()` merges, but a source is where the URL, the tile bounds
  *     and the inline document live, and changing any of them resets every
  *     layer that references it anyway. A config change is answered with an
@@ -54,7 +55,7 @@ export interface GeoLayerView {
 /**
  * One live source+layer pair, plus what the store record looked like when it
  * was built — so the next pass can tell a rebuild (config) from a re-describe
- * (visibility, opacity) from nothing at all (a rename).
+ * (visibility, opacity, style) from nothing at all (a rename).
  */
 export interface LiveGeoLayer {
   readonly source: GeoSourceHandle;
@@ -65,6 +66,10 @@ export interface LiveGeoLayer {
   kind: GeoLayer["kind"];
   visible: boolean;
   opacity: number;
+  /** By IDENTITY too, and for the same reason `config` is: the store replaces
+   *  the whole style object on every edit, so one comparison answers "did any
+   *  of the four fields change" without walking them. */
+  style: GeoLayer["style"];
 }
 
 /** Take a pair back out, LAYER FIRST — see fact 3 above. Reported and
@@ -105,6 +110,7 @@ function addPair(view: GeoLayerView, layer: GeoLayer): LiveGeoLayer | null {
       kind: layer.kind,
       visible: layer.visible,
       opacity: layer.opacity,
+      style: layer.style,
     };
   } catch (error) {
     console.error(
@@ -136,8 +142,8 @@ function addPair(view: GeoLayerView, layer: GeoLayer): LiveGeoLayer | null {
  * - records that disappeared have their pair deleted (layer, then source);
  * - a record whose `config` (or `kind`) changed has its pair REBUILT: the
  *   source carries the URL/document, and there is no honest partial update;
- * - a record whose visibility or opacity changed gets one `Layer.update()`
- *   with a freshly built FULL description;
+ * - a record whose visibility, opacity or style changed gets one
+ *   `Layer.update()` with a freshly built FULL description;
  * - anything else — a rename, another layer's edit — costs one identity
  *   comparison and no engine call.
  */
@@ -171,9 +177,14 @@ export function syncGeoLayers(
       continue;
     }
 
-    if (entry.visible !== layer.visible || entry.opacity !== layer.opacity) {
+    if (
+      entry.visible !== layer.visible ||
+      entry.opacity !== layer.opacity ||
+      entry.style !== layer.style
+    ) {
       entry.visible = layer.visible;
       entry.opacity = layer.opacity;
+      entry.style = layer.style;
       try {
         // The FULL description, rebuilt — `Layer.update()` replaces, it does
         // not merge.
