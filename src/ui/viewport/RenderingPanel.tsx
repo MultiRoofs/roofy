@@ -1,6 +1,7 @@
 /**
- * Rendering panel — how the scene is DRAWN: lighting, post processing and the
- * viewer's own diagnostics.
+ * Rendering panel — how the scene is DRAWN, grouped by subject: rendering
+ * (exposure, shadows, the post chain), weather (clouds, precipitation, lens
+ * flare) and the viewer's own diagnostics.
  *
  * Floating overlay at top-right of the viewport, toggled from the toolbar gear
  * button.
@@ -71,12 +72,13 @@ export function RenderingPanel({ onClose }: RenderingPanelProps) {
   const resetAtmosphere = useAtmosphereStore((s) => s.reset);
 
   /**
-   * Restore every LIGHTING and POST-PROCESSING default, in one action.
+   * Restore every RENDERING, WEATHER and DIAGNOSTIC default, in one action.
    *
    * Both stores, because the split between them is historical and invisible
-   * here: lens flare and cloud coverage live in `atmosphereStore`, the rest in
-   * `renderDebugStore`, and a reset bound to one store alone would silently
-   * leave two of the controls it sits under untouched.
+   * here: lens flare, cloud coverage and precipitation live in
+   * `atmosphereStore`, the rest in `renderDebugStore`, and neither store maps
+   * to a section — a reset bound to one alone would silently leave part of
+   * every section untouched.
    *
    * It must never reach the backdrop stores either: swapping the user's
    * imagery is not what "reset render settings" promises.
@@ -97,9 +99,9 @@ export function RenderingPanel({ onClose }: RenderingPanelProps) {
         </button>
       </div>
       <div className="advanced-settings-body">
-        {/* Lighting — the section that decides how bright the scene reads. */}
+        {/* Rendering — how bright the scene reads and which passes draw it. */}
         <div className="attr-section">
-          <div className="attr-section-title">Lighting</div>
+          <div className="attr-section-title">Rendering</div>
           <div className="attr-row">
             <span className="attr-key">Exposure</span>
             <span className="attr-value">{exposure.toFixed(1)}</span>
@@ -129,28 +131,13 @@ export function RenderingPanel({ onClose }: RenderingPanelProps) {
               onChange={(e) => setSunShadowsEnabled(e.target.checked)}
             />
           </div>
-        </div>
-
-        {/* Post processing */}
-        <div className="attr-section">
-          <div className="attr-section-title">Post Processing</div>
           <div className="advanced-toggle-row">
-            <span>Enabled</span>
+            <span>Post Processing</span>
             <input
               type="checkbox"
               aria-label="Post Processing"
               checked={postProcessingEnabled}
               onChange={(e) => setPostProcessingEnabled(e.target.checked)}
-            />
-          </div>
-          <div className="advanced-toggle-row">
-            <span>Clouds</span>
-            <input
-              type="checkbox"
-              aria-label="Clouds"
-              checked={cloudsEnabled}
-              disabled={!postProcessingEnabled}
-              onChange={(e) => setCloudsEnabled(e.target.checked)}
             />
           </div>
           <div className="advanced-toggle-row">
@@ -163,14 +150,24 @@ export function RenderingPanel({ onClose }: RenderingPanelProps) {
               onChange={(e) => setAerialPerspectiveEnabled(e.target.checked)}
             />
           </div>
+        </div>
+
+        {/* Weather — grouped by subject, but every control in it is a
+            post-processing pass, so the master toggle that governs them sits
+            one section up (Rendering › Post Processing) and switching it off
+            disables all of them. That dependency crosses the section boundary
+            deliberately: the user thinks in weather, the engine thinks in
+            passes. */}
+        <div className="attr-section">
+          <div className="attr-section-title">Weather</div>
           <div className="advanced-toggle-row">
-            <span>Lens Flare</span>
+            <span>Clouds</span>
             <input
               type="checkbox"
-              aria-label="Lens Flare"
-              checked={lensFlareEnabled}
+              aria-label="Clouds"
+              checked={cloudsEnabled}
               disabled={!postProcessingEnabled}
-              onChange={(e) => setLensFlareEnabled(e.target.checked)}
+              onChange={(e) => setCloudsEnabled(e.target.checked)}
             />
           </div>
           <div className="attr-row">
@@ -212,6 +209,16 @@ export function RenderingPanel({ onClose }: RenderingPanelProps) {
               <option value="snow">Snow</option>
             </select>
           </div>
+          <div className="advanced-toggle-row">
+            <span>Lens Flare</span>
+            <input
+              type="checkbox"
+              aria-label="Lens Flare"
+              checked={lensFlareEnabled}
+              disabled={!postProcessingEnabled}
+              onChange={(e) => setLensFlareEnabled(e.target.checked)}
+            />
+          </div>
         </div>
 
         {/* Diagnostics — switches that reveal how the viewer WORKS rather than
@@ -241,7 +248,7 @@ export function RenderingPanel({ onClose }: RenderingPanelProps) {
       <div className="advanced-settings-footer">
         <button
           className="rule-cancel-btn"
-          title="Restore the default lighting and post-processing settings."
+          title="Restore the default rendering, weather and diagnostic settings."
           onClick={resetRenderSettings}
         >
           Reset render settings

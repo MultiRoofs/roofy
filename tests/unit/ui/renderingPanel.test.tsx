@@ -54,7 +54,7 @@ describe("RenderingPanel", () => {
     fireEvent.change(screen.getByLabelText("Exposure"), {
       target: { value: "14" },
     });
-    // Last, because it disables the three post-processing checkboxes above.
+    // Last, because it disables the pass-backed controls in both sections.
     fireEvent.click(screen.getByLabelText("Post Processing"));
 
     expect(useRenderDebugStore.getState()).toMatchObject({
@@ -104,6 +104,9 @@ describe("RenderingPanel", () => {
     }
   });
 
+  // The whole Weather section is pass-backed, so its master toggle lives one
+  // section up in Rendering — the dependency crosses the section boundary and
+  // that is what this pins.
   it("disables the post-processing controls when the chain is off", () => {
     useRenderDebugStore.setState({ postProcessingEnabled: false });
     render(<RenderingPanel onClose={() => {}} />);
@@ -112,17 +115,50 @@ describe("RenderingPanel", () => {
     expect(screen.getByLabelText("Aerial Perspective")).toBeDisabled();
     expect(screen.getByLabelText("Lens Flare")).toBeDisabled();
     expect(screen.getByLabelText("Cloud Coverage")).toBeDisabled();
-    // Lighting is independent of the post chain.
+    // Exposure and shadows are independent of the post chain.
     expect(screen.getByLabelText("Sun Shadows")).not.toBeDisabled();
     expect(screen.getByLabelText("Exposure")).not.toBeDisabled();
   });
 
+  // Grouped by SUBJECT, not by which store or pass a control happens to come
+  // from: the panel is read top-down by someone who wants "less cloud", not by
+  // someone who knows lens flare is an effect and coverage is atmosphere state.
+  it("groups the controls into Rendering, Weather and Diagnostics", () => {
+    const { container } = render(<RenderingPanel onClose={() => {}} />);
+
+    const titles = [...container.querySelectorAll(".attr-section-title")].map(
+      (el) => el.textContent,
+    );
+    expect(titles).toEqual(["Rendering", "Weather", "Diagnostics"]);
+
+    const sections = [...container.querySelectorAll(".attr-section")];
+    const sectionAt = (index: number): Element => {
+      const section = sections[index];
+      if (!section) throw new Error(`no section at ${index}`);
+      return section;
+    };
+    const labelsIn = (index: number) =>
+      [...sectionAt(index).querySelectorAll("[aria-label]")].map((el) =>
+        el.getAttribute("aria-label"),
+      );
+    expect(labelsIn(0)).toEqual([
+      "Exposure",
+      "Sun Shadows",
+      "Post Processing",
+      "Aerial Perspective",
+    ]);
+    expect(labelsIn(1)).toEqual(["Clouds", "Cloud Coverage", "Lens Flare"]);
+    // The precipitation picker is labelled by a <label for>, not aria-label.
+    expect(sectionAt(1).querySelector("#advanced-precipitation")).toBeTruthy();
+    expect(sectionAt(2).textContent).toContain("Streaming Fetch Box");
+  });
+
   // The reset is a PANEL-WIDE footer action now, not a button tucked inside
-  // the last section resetting only one of the two stores the panel's sliders
-  // come from. Lens flare and cloud coverage live in `atmosphereStore` purely
-  // for historical reasons; a reset that skipped them would leave two of the
-  // controls it sits under untouched.
-  it("resets every lighting and post-processing control, in both stores", () => {
+  // the last section resetting only one of the two stores the panel's controls
+  // come from. Neither store maps to a section — lens flare, cloud coverage and
+  // precipitation live in `atmosphereStore` purely for historical reasons — so
+  // a reset bound to one alone would leave part of every section untouched.
+  it("resets every rendering, weather and diagnostic control, in both stores", () => {
     useAtmosphereStore.setState({
       cloudCoverage: 0.6,
       lensFlareEnabled: false,
@@ -153,9 +189,11 @@ describe("RenderingPanel", () => {
   it("hosts no backdrop control, and leaves the backdrop stores alone", () => {
     useTilesStore.setState({ enabled: true });
     useBasemapStore.setState({ basemapId: "esri-imagery" });
-    render(<RenderingPanel onClose={() => {}} />);
+    const { container } = render(<RenderingPanel onClose={() => {}} />);
 
-    expect(screen.getByText("Rendering")).toBeTruthy();
+    expect(
+      container.querySelector(".advanced-settings-header")?.textContent,
+    ).toContain("Rendering");
     expect(screen.queryByText("Backdrop")).toBeNull();
     expect(screen.queryByLabelText("Google 3D Tiles")).toBeNull();
     expect(screen.queryByLabelText("Basemap")).toBeNull();
