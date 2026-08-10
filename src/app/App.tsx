@@ -1335,8 +1335,8 @@ export function App({
   return (
     <main className="app-shell">
       <div className="hero">
-        <p className="eyebrow">MultiRoof Viewer</p>
-        <h1>Rooftop analysis starts here.</h1>
+        <p className="eyebrow">Urbis</p>
+        <h1>Your city, in 3D.</h1>
         <p className="summary">
           Drop a city model or pick one from the open catalog.
         </p>

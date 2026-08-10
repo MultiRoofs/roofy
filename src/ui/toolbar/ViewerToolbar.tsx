@@ -70,7 +70,7 @@ export function ViewerToolbar({
 }: ViewerToolbarProps) {
   return (
     <header className="toolbar">
-      <span className="toolbar-brand">MultiRoof</span>
+      <span className="toolbar-brand">Urbis</span>
 
       {/* Left sidebar toggle */}
       <button

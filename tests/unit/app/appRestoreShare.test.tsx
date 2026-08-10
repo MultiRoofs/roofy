@@ -456,9 +456,7 @@ describe("App share-hash restore", () => {
     render(<App persistenceStore={storeWith(null)} />);
 
     await waitFor(() =>
-      expect(
-        screen.getByText(/older version of MultiRoof Viewer/),
-      ).toBeInTheDocument(),
+      expect(screen.getByText(/older version of Urbis/)).toBeInTheDocument(),
     );
     // Nothing was opened from a link whose camera cannot be trusted...
     expect(loadFromUrl).not.toHaveBeenCalled();
