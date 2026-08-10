@@ -13,6 +13,7 @@ import {
   DEFAULT_GEO_LAYER_STYLE,
   hexColorToNumber,
   normalizeGeoLayerStyle,
+  styleColorNumber,
 } from "../../../../src/features/geoLayers/geoLayerStyle";
 
 describe("DEFAULT_GEO_LAYER_STYLE", () => {
@@ -44,6 +45,26 @@ describe("hexColorToNumber", () => {
     expect(hexColorToNumber("#ff5a3")).toBeNull();
     expect(hexColorToNumber("ff5a3c")).toBeNull();
     expect(hexColorToNumber("#gggggg")).toBeNull();
+  });
+});
+
+describe("styleColorNumber", () => {
+  it("converts the stored hex to the engine's 0xRRGGBB number", () => {
+    expect(
+      styleColorNumber({ ...DEFAULT_GEO_LAYER_STYLE, color: "#00aaff" }),
+    ).toBe(0x00aaff);
+    expect(styleColorNumber(DEFAULT_GEO_LAYER_STYLE)).toBe(0xff5a3c);
+  });
+
+  it("falls back to the default accent rather than handing the engine NaN", () => {
+    // Load-bearing: the engine raises nothing on a NaN/null colour — it draws
+    // the layer black or not at all, which reads as a data problem.
+    expect(
+      styleColorNumber({ ...DEFAULT_GEO_LAYER_STYLE, color: "not a colour" }),
+    ).toBe(0xff5a3c);
+    expect(styleColorNumber({ ...DEFAULT_GEO_LAYER_STYLE, color: "" })).toBe(
+      0xff5a3c,
+    );
   });
 });
 

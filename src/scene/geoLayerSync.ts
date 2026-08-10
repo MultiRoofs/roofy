@@ -27,10 +27,7 @@
  * registry, no throw). One bad URL must not take the viewport down, and
  * leaving the entry absent means the next pass retries it.
  */
-import {
-  DEFAULT_GEO_LAYER_STYLE,
-  hexColorToNumber,
-} from "../features/geoLayers/geoLayerStyle";
+import { styleColorNumber } from "../features/geoLayers/geoLayerStyle";
 import type { GeoLayer } from "../features/geoLayers/geoLayerStore";
 import {
   geoLayerDescription,
@@ -100,18 +97,6 @@ export const GEO_HIGHLIGHT_COLOR_HEX = 0xe8973f;
  *  (`(hex) => new Color().setHex(hex)`). */
 type GeoColorFactory = (hex: number) => unknown;
 
-/** The layer's OWN colour as the engine number — the value a non-highlighted
- *  feature is told explicitly. Same fallback as `geoLayerDescriptions.ts`:
- *  `hexColorToNumber` answers `null` rather than guessing, and a `NaN` colour
- *  draws black instead of raising. */
-function ownColorHex(style: GeoLayer["style"]): number {
-  return (
-    hexColorToNumber(style.color) ??
-    // Non-null: the default is a literal `#rrggbb`, pinned by its own test.
-    hexColorToNumber(DEFAULT_GEO_LAYER_STYLE.color)!
-  );
-}
-
 /** The half of `ThreeView` this module uses. */
 export interface GeoLayerView {
   addSource(description: Record<string, unknown>): GeoSourceHandle;
@@ -126,6 +111,14 @@ export interface GeoLayerView {
 export interface LiveGeoLayer {
   readonly source: GeoSourceHandle;
   readonly layer: GeoLayerHandle;
+  /** The record's human name AS IT WAS when the pair was added — what the
+   *  highlight failures are reported against. Not the store UUID: every other
+   *  engine-failure message here names the layer the user can see, and the
+   *  highlight path has no record in hand to read it from. Captured, not kept
+   *  current, exactly like the name the feature-set subscription closes over;
+   *  a rename between the add and a failure is a stale word in a console
+   *  message, not a wrong layer. */
+  readonly name: string;
   /** By IDENTITY: the store replaces this object whenever the source really
    *  changes, and never otherwise. */
   config: GeoLayer["config"];
@@ -190,7 +183,7 @@ function applyHighlight(
   if (entry.highlightedBatchId === null && !entry.hadHighlight) return;
   if (entry.highlightedBatchId !== null) entry.hadHighlight = true;
   try {
-    const base = makeColor(ownColorHex(entry.style));
+    const base = makeColor(styleColorNumber(entry.style));
     const accent = highlight();
     for (const evaluator of entry.evaluators.values()) {
       evaluateHighlight(entry, evaluator, accent, base);
@@ -259,7 +252,10 @@ export function syncGeoHighlight(
         : null;
     if (desired === entry.highlightedBatchId) continue;
     entry.highlightedBatchId = desired;
-    applyHighlight(entry, id, makeColor, highlightColor);
+    // The layer's NAME, not the store id `id`: the same identity every other
+    // engine-failure message in this module reports, and the same one the
+    // feature-set subscription's own highlight failure uses.
+    applyHighlight(entry, entry.name, makeColor, highlightColor);
   }
 }
 
@@ -297,6 +293,7 @@ function addPair(view: GeoLayerView, layer: GeoLayer): LiveGeoLayer | null {
     const entry: LiveGeoLayer = {
       source,
       layer: handle,
+      name: layer.name,
       config: layer.config,
       kind: layer.kind,
       visible: layer.visible,
@@ -329,12 +326,12 @@ function addPair(view: GeoLayerView, layer: GeoLayer): LiveGeoLayer | null {
           entry,
           evaluator,
           makeColor(GEO_HIGHLIGHT_COLOR_HEX),
-          makeColor(ownColorHex(entry.style)),
+          makeColor(styleColorNumber(entry.style)),
         );
         entry.layer.forceUpdate?.();
       } catch (error) {
         console.error(
-          `NavaraViewport: the geospatial layer "${layer.name}" could not be highlighted.`,
+          `NavaraViewport: the geospatial layer "${entry.name}" could not be highlighted.`,
           error,
         );
       }

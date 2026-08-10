@@ -88,6 +88,27 @@ export function hexColorToNumber(hex: string): number | null {
   return Number.parseInt(full, 16);
 }
 
+/**
+ * A style's colour as the `0xRRGGBB` number the engine's materials take,
+ * falling back to the default accent when the stored string is not a colour.
+ *
+ * One function rather than one per call site (the layer description and the
+ * highlight evaluator both need it) because the FALLBACK IS LOAD-BEARING and
+ * two copies could drift: {@link hexColorToNumber} answers `null` rather than
+ * guessing, and handing the engine `NaN` or `null` raises NOTHING — it draws
+ * the layer black, or not at all, which reads as a data problem rather than a
+ * style one. `normalizeGeoLayerStyle` guards the store's own doors, so an
+ * unparsable value arriving here means a record that came some other way.
+ */
+export function styleColorNumber(style: GeoLayerStyle): number {
+  return (
+    hexColorToNumber(style.color) ??
+    // Non-null: `DEFAULT_GEO_LAYER_STYLE.color` is a literal `#rrggbb`, and
+    // this module's own tests pin that it parses.
+    hexColorToNumber(DEFAULT_GEO_LAYER_STYLE.color)!
+  );
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -17,10 +17,7 @@
  * hex → `0xRRGGBB`, fill opacity → an opacity plus a `transparent` flag).
  * `features/geoLayers/geoLayerStyle.ts` owns the values and their defaults.
  */
-import {
-  DEFAULT_GEO_LAYER_STYLE,
-  hexColorToNumber,
-} from "../features/geoLayers/geoLayerStyle";
+import { styleColorNumber } from "../features/geoLayers/geoLayerStyle";
 import type { GeoLayer } from "../features/geoLayers/geoLayerStore";
 
 /**
@@ -36,26 +33,6 @@ export const TILES3D_MAX_SSE = 16;
  *  opacity below 1 on an opaque material is silently ignored. */
 function isTranslucent(opacity: number): boolean {
   return opacity < 1;
-}
-
-/**
- * The stored CSS hex as the `0xRRGGBB` number Navara's materials take, falling
- * back to the default accent when the string is not a colour.
- *
- * `normalizeGeoLayerStyle` guards the store's own doors, so an unparsable
- * value reaching here means a record that arrived some other way. The fallback
- * is not belt-and-braces: `hexColorToNumber` answers `null` rather than
- * guessing, and handing the engine `NaN` (or `null`) does not raise anything —
- * it draws the layer black or not at all, which looks like a data problem
- * rather than a style one.
- */
-function accentColor(style: GeoLayer["style"]): number {
-  return (
-    hexColorToNumber(style.color) ??
-    // Non-null: `DEFAULT_GEO_LAYER_STYLE.color` is a literal `#rrggbb`, and
-    // `geoLayerStyle`'s own tests pin that it parses.
-    hexColorToNumber(DEFAULT_GEO_LAYER_STYLE.color)!
-  );
 }
 
 /**
@@ -115,7 +92,7 @@ export function geoLayerDescription(
   const { visible: show, opacity, style } = layer;
   switch (layer.kind) {
     case "geojson": {
-      const color = accentColor(style);
+      const color = styleColorNumber(style);
       // The fill is the one pass with TWO opacities: the layer's (the whole
       // layer fading, shared with every kind) times the style's (this layer's
       // fills reading as a wash while its outlines stay solid). Multiplying

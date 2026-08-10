@@ -23,7 +23,11 @@ import {
   type LiveGeoLayer,
 } from "../../../src/scene/geoLayerSync";
 import type { GeoLayer } from "../../../src/features/geoLayers/geoLayerStore";
-import { DEFAULT_GEO_LAYER_STYLE } from "../../../src/features/geoLayers/geoLayerStyle";
+import {
+  DEFAULT_GEO_LAYER_STYLE,
+  hexColorToNumber,
+} from "../../../src/features/geoLayers/geoLayerStyle";
+import { HIGHLIGHT_COLOR_HEX } from "@cityjson/navara-cityjson";
 
 /** A feature-set listener the fake layer handle recorded, so a test can play
  *  the engine and fire `featureCreated`/`featureUpdated` itself. */
@@ -417,6 +421,18 @@ describe("geoLayerIdForEngineLayerId", () => {
  *  feature must be told explicitly, because an omitted key never resets a
  *  previously evaluated override. */
 const OWN_COLOR_HEX = 0xff5a3c;
+
+describe("GEO_HIGHLIGHT_COLOR_HEX", () => {
+  it("is the SAME accent the city meshes highlight a surface with", () => {
+    // Pinned against the submodule rather than restated as a comment: the two
+    // constants are the same UI state ("this is selected") in one viewport, and
+    // a plugin-side retune of the city accent must fail here rather than
+    // silently leave a picked GeoJSON polygon a different orange. The import is
+    // engine-free (`@cityjson/navara-cityjson`'s main barrel is Node-safe by
+    // construction), and the submodule spells the value as a CSS hex string.
+    expect(GEO_HIGHLIGHT_COLOR_HEX).toBe(hexColorToNumber(HIGHLIGHT_COLOR_HEX));
+  });
+});
 
 describe("syncGeoHighlight", () => {
   /** A layer with two feature sets registered, exactly as a mixed-geometry

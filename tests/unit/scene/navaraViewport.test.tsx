@@ -525,6 +525,9 @@ describe("NavaraViewport lifecycle", () => {
     addSource.mockClear();
     addLayer.mockClear();
     layerHandles.length = 0;
+    // Reset with them: a carried-over counter makes the minted ids depend on
+    // test ORDER.
+    nextLayerNumber = 0;
     on.mockClear();
     off.mockClear();
     listeners.clear();
@@ -1489,6 +1492,9 @@ describe("NavaraViewport Google tiles", () => {
     addSource.mockClear();
     addLayer.mockClear();
     layerHandles.length = 0;
+    // Reset with them: a carried-over counter makes the minted ids depend on
+    // test ORDER.
+    nextLayerNumber = 0;
     deleteSource.mockClear();
     deleteLayer.mockClear();
     useTilesStore.setState({ enabled: true });
@@ -1687,6 +1693,9 @@ describe("NavaraViewport basemap", () => {
     addSource.mockClear();
     addLayer.mockClear();
     layerHandles.length = 0;
+    // Reset with them: a carried-over counter makes the minted ids depend on
+    // test ORDER.
+    nextLayerNumber = 0;
     deleteSource.mockClear();
     deleteLayer.mockClear();
     init.mockClear();
@@ -2338,6 +2347,9 @@ describe("NavaraViewport geospatial layers", () => {
     addSource.mockClear();
     addLayer.mockClear();
     layerHandles.length = 0;
+    // Reset with them: a carried-over counter makes the minted ids depend on
+    // test ORDER.
+    nextLayerNumber = 0;
     deleteSource.mockClear();
     deleteLayer.mockClear();
     listeners.clear();
