@@ -1214,6 +1214,15 @@ body {
   margin-bottom: 0.4rem;
 }
 
+/* The `+` a Layers section heading carries to open the Add Layer dialog on its
+   own tab: the same quiet treatment as a row action, one size up so a single
+   glyph is still a target worth aiming at. */
+.attr-section-title .rule-action-btn {
+  padding: 0.1rem 0.35rem;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
 .attr-row {
   display: flex;
   justify-content: space-between;

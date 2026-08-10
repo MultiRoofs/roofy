@@ -62,6 +62,15 @@ function openDialog(): HTMLElement {
   return screen.getByRole("dialog");
 }
 
+/** The shared button opens the dialog on the GEOSPATIAL tab (AddLayerDialog's
+ *  `SourceTab` says why), so a test about the city-model affordances has to
+ *  ask for that tab before it can drive them. */
+function openCityTab(): HTMLElement {
+  const dialog = openDialog();
+  fireEvent.click(screen.getByRole("tab", { name: /city model/i }));
+  return dialog;
+}
+
 /** A drop event carrying a file, the way a browser delivers one. jsdom has no
  *  real `DataTransfer`, so the shape the handler reads is supplied directly. */
 function fileDrop(file: File) {
@@ -77,7 +86,9 @@ describe("AddLayerDialog — opening and closing", () => {
 
     const dialog = openDialog();
     expect(dialog.getAttribute("aria-modal")).toBe("true");
-    expect(screen.getByText("Add layer")).toBeTruthy();
+    // By ROLE: the geospatial tab it opens on has a submit button reading
+    // "Add layer" too, so a bare text query now matches two nodes.
+    expect(screen.getByRole("heading", { name: "Add layer" })).toBeTruthy();
   });
 
   it("moves focus into the dialog and restores it to the trigger on close", () => {
@@ -127,7 +138,7 @@ describe("AddLayerDialog — loading a source", () => {
   it("submits a pasted URL to onAddUrl and closes", () => {
     const onAddUrl = vi.fn(async () => ({ ok: true }) as const);
     renderPanel({ onAddUrl });
-    openDialog();
+    openCityTab();
 
     fireEvent.change(screen.getByLabelText("Or load from URL:"), {
       target: { value: "  https://example.com/model.city.json  " },
@@ -144,7 +155,7 @@ describe("AddLayerDialog — loading a source", () => {
   it("ignores an empty URL — the Load button is disabled", () => {
     const onAddUrl = vi.fn(async () => ({ ok: true }) as const);
     renderPanel({ onAddUrl });
-    openDialog();
+    openCityTab();
 
     const load = screen.getByRole("button", {
       name: "Load",
@@ -157,7 +168,7 @@ describe("AddLayerDialog — loading a source", () => {
   it("passes a dropped file to onAddFile and closes", () => {
     const onAddFile = vi.fn();
     renderPanel({ onAddFile });
-    openDialog();
+    openCityTab();
 
     const zone = screen.getByTestId("source-picker-drop-zone");
     const file = new File(["{}"], "delft.city.json", {
@@ -174,7 +185,7 @@ describe("AddLayerDialog — loading a source", () => {
     const onAddFile = vi.fn();
     const onAddFiles = vi.fn();
     renderPanel({ onAddFile, onAddFiles });
-    openDialog();
+    openCityTab();
 
     const table = new File(["{}"], "building.parquet");
     const meta = new File(["{}"], "metadata.json");
@@ -189,7 +200,7 @@ describe("AddLayerDialog — loading a source", () => {
 
   it("highlights the drop zone while a file is dragged over it", () => {
     renderPanel();
-    openDialog();
+    openCityTab();
 
     const zone = screen.getByTestId("source-picker-drop-zone");
     expect(zone.className).not.toContain("is-dragging");
@@ -204,7 +215,7 @@ describe("AddLayerDialog — loading a source", () => {
 
   it("states the supported formats", () => {
     renderPanel();
-    openDialog();
+    openCityTab();
     expect(
       screen.getByText(".city.json · .city.jsonl · .fcb · .gml · .parquet"),
     ).toBeTruthy();
@@ -215,7 +226,8 @@ describe("AddLayerDialog — loading a source", () => {
     renderPanel({ onAddUrl });
     const dialog = openDialog();
 
-    // Three source families; the city model is still the default.
+    // Three source families, in that order; the geospatial one is the tab the
+    // dialog opened on.
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([
       "City model",
       "Geospatial",
@@ -239,7 +251,7 @@ describe("AddLayerDialog — loading a source", () => {
 
   it("disables both affordances while a load is in flight", () => {
     renderPanel({ loading: true });
-    openDialog();
+    openCityTab();
 
     expect(
       (

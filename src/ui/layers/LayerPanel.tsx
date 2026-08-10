@@ -11,16 +11,18 @@
  *    Tiles). No model, no rules, no LoD, nothing to pick: the row carries
  *    visibility, a name, its kind and — for raster — an opacity.
  *
- * One shared "+ Add Layer" button opens the {@link AddLayerDialog}, whose three
- * tabs are NOT a mirror of these two sections: "City model" and "Geospatial"
- * are, and "Catalog" is a third way INTO the first — it browses the STAC
- * catalog and funnels whatever is picked through the same city-model path. The
- * city-model path itself is unchanged: file drop, browse or remote URL through
- * the same handlers the landing page uses.
+ * THREE buttons open the same {@link AddLayerDialog}, differing only in the tab
+ * it opens on: each section header carries a `+` that names its own family, and
+ * the shared "+ Add Layer" button at the foot opens the dialog's default
+ * (geospatial). The dialog's three tabs are NOT a mirror of these two sections:
+ * "City model" and "Geospatial" are, and "Catalog" is a third way INTO the
+ * first — it browses the STAC catalog and funnels whatever is picked through
+ * the same city-model path. The city-model path itself is unchanged: file drop,
+ * browse or remote URL through the same handlers the landing page uses.
  */
 
 import { useState } from "react";
-import { AddLayerDialog } from "./AddLayerDialog";
+import { AddLayerDialog, type SourceTab } from "./AddLayerDialog";
 import type { AddUrlResult } from "../stac/StacBrowser";
 import { useLayerStore } from "../../features/layers/layerStore";
 import type { Layer } from "../../features/layers/layerStore";
@@ -63,7 +65,10 @@ export function LayerPanel({
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
-  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  // The tab the dialog is open ON, `null` meaning closed: the three triggers
+  // differ only in which tab they want, so one piece of state carries both
+  // facts and they cannot disagree.
+  const [addDialogTab, setAddDialogTab] = useState<SourceTab | null>(null);
 
   const handleRenameStart = (id: string, name: string) => {
     setRenamingId(id);
@@ -79,7 +84,22 @@ export function LayerPanel({
 
   return (
     <div className="attr-section">
-      <div className="attr-section-title">3D City Models ({layers.length})</div>
+      {/* The label is its own element so the section's `+` doesn't join its
+          text — the heading is a flex row with the button on its right. */}
+      <div className="attr-section-title">
+        <span>3D City Models ({layers.length})</span>
+        <button
+          className="rule-action-btn"
+          aria-label="Add city model layer"
+          aria-haspopup="dialog"
+          data-tooltip="Add city model layer"
+          data-tooltip-pos="top"
+          data-tooltip-align="end"
+          onClick={() => setAddDialogTab("city")}
+        >
+          +
+        </button>
+      </div>
 
       {layers.map((layer) => {
         const isActive = layer.id === activeLayerId;
@@ -250,7 +270,18 @@ export function LayerPanel({
           as "this viewer cannot do that", and the empty line below points at
           the one button that fills it. */}
       <div className="attr-section-title geo-section-title">
-        Geospatial Layers ({geoLayers.length})
+        <span>Geospatial Layers ({geoLayers.length})</span>
+        <button
+          className="rule-action-btn"
+          aria-label="Add geospatial layer"
+          aria-haspopup="dialog"
+          data-tooltip="Add geospatial layer"
+          data-tooltip-pos="top"
+          data-tooltip-align="end"
+          onClick={() => setAddDialogTab("geo")}
+        >
+          +
+        </button>
       </div>
       {geoLayers.length === 0 ? (
         <p className="layer-section-empty">
@@ -270,15 +301,16 @@ export function LayerPanel({
       <button
         className="layer-add-btn"
         aria-haspopup="dialog"
-        aria-expanded={addDialogOpen}
-        onClick={() => setAddDialogOpen(true)}
+        aria-expanded={addDialogTab !== null}
+        onClick={() => setAddDialogTab("geo")}
       >
         + Add Layer
       </button>
 
-      {addDialogOpen && (
+      {addDialogTab !== null && (
         <AddLayerDialog
-          onClose={() => setAddDialogOpen(false)}
+          initialTab={addDialogTab}
+          onClose={() => setAddDialogTab(null)}
           onAddFile={onAddFile}
           onAddFiles={onAddFiles}
           onAddUrl={onAddUrl}

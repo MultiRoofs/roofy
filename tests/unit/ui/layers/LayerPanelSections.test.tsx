@@ -124,6 +124,27 @@ describe("LayerPanel — two sections", () => {
       1,
     );
   });
+
+  it("each section header opens the add dialog on its own tab", () => {
+    renderPanel();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /add city model layer/i }),
+    );
+    expect(screen.getByRole("tab", { name: /city model/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /add geospatial layer/i }),
+    );
+    expect(screen.getByRole("tab", { name: /geospatial/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
 });
 
 describe("LayerPanel — a geospatial row", () => {
