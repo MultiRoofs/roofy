@@ -15,14 +15,13 @@
  *
  * Pure and ENGINE-FREE, like every other module in this directory that is not
  * named after a binding: the viewport applies the table, the toolbar and the
- * two overlays read it to disable what the mode forbids, and the tests below
+ * compass overlay read it to disable what the mode forbids, and the tests below
  * are the specification. One table, so a mode cannot mean one thing to the
  * camera and another to the buttons.
  */
 import type { ViewMode } from "../features/viewMode/viewModeStore";
 import { MAX_PITCH_DEG, MIN_PITCH_DEG } from "./cameraControls";
-import type { GeographicCameraState } from "./geographicCamera";
-import type { ViewDirection } from "./ViewAlignButtons";
+import type { GeographicCameraState, ViewDirection } from "./geographicCamera";
 
 /**
  * The plan view's pitch — a tenth of a degree short of straight down, and
@@ -127,11 +126,16 @@ export function entryCameraFor(
 }
 
 /**
- * Whether a view-align button still means anything in this mode.
+ * Whether an alignment direction still means anything in this mode.
  *
  * 2D is a plan view by definition, so a front/left/bottom alignment would fly
  * straight out of the mode the user just chose; Top is the alignment 2D
  * already IS, so it stays as a re-centre.
+ *
+ * NO CALLER IN `src/` since the T/F/R overlay was removed (2026-08-10) — the
+ * cluster was the only place this gate was ever enforced, and
+ * `CitySceneHandle.alignView` has never consulted it. Kept (with its test) as
+ * the policy any future alignment UI, or a gated handle, should read.
  */
 export function isAlignDirectionAllowed(
   mode: ViewMode,
@@ -141,7 +145,9 @@ export function isAlignDirectionAllowed(
 }
 
 /** Why a control is unavailable, in words the tooltip can show. One place, so
- *  the tilt cluster and the align cluster explain the mode the same way. */
+ *  every control explains the mode the same way. `tilt` is read by
+ *  `CameraControls`; `align` has had no consumer since the T/F/R overlay went,
+ *  and stays paired with {@link isAlignDirectionAllowed}. */
 export const VIEW_MODE_LOCK_TITLE = {
   tilt: "Tilt is locked in 2D — switch to 2.5D or 3D to tilt the camera",
   align: "Only the top view is available in 2D",

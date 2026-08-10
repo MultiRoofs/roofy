@@ -57,8 +57,8 @@ export interface SourcePickerProps {
    * — see the CSS section of the same name.
    */
   readonly variant?: "hero" | "panel";
-  /** Show the supported-extension line. Off on the landing page, whose
-   *  summary paragraph already lists them one line above. */
+  /** Show the supported-extension line. Off where the surrounding page already
+   *  names the formats — they must be stated exactly once. */
   readonly showFormatHint?: boolean;
 }
 

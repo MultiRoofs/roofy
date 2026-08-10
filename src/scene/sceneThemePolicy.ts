@@ -90,6 +90,26 @@ export interface ThemeEnvironment {
      *  city's glow. */
     readonly heightM: number;
   } | null;
+  /** BLOOM: a full-screen threshold glow, so the theme's HDR edge lines bleed
+   *  into the air around them instead of stopping at the line.
+   *
+   *  `null` means "do not touch" like every other field here — and, unlike the
+   *  handles the rest of this block drives, the pass does not exist until a
+   *  theme asks for one (`bloomEffect.ts` registers a custom descriptor at
+   *  first need), so a `null` costs nothing at all.
+   *
+   *  TUNING, for the browser pass: `luminanceThreshold` is what the glow
+   *  SELECTS — it is compared against pre-tone-mapping radiance, so if nothing
+   *  glows, lower it (try 0.5, then 0.2); if the whole city glows, raise it.
+   *  `intensity` scales the halo, `radius` spreads it, and
+   *  `luminanceSmoothing` is the soft knee that keeps the selection from
+   *  looking cut out. */
+  readonly bloom: {
+    readonly intensity: number;
+    readonly luminanceThreshold: number;
+    readonly luminanceSmoothing: number;
+    readonly radius: number;
+  } | null;
   /** `view.globe.wireframe` — a live engine setter. */
   readonly globeWireframe: boolean | null;
   /** `view.globe.color`, as 0xRRGGBB. The viewport saves the prior colour once
@@ -120,6 +140,10 @@ export interface ThemeEnvironment {
   readonly lensFlareOff: boolean;
 }
 
+/** One theme's bloom block, named so the engine seam can take it without
+ *  importing the whole environment type. */
+export type ThemeBloom = NonNullable<ThemeEnvironment["bloom"]>;
+
 export interface SceneThemePolicy {
   /** Pushed to every static and streaming layer handle
    *  (`CityModelHandle.setThemeStyle` / `FcbStreamLayerHandle.setThemeStyle`).
@@ -144,6 +168,7 @@ const NO_ENVIRONMENT: ThemeEnvironment = {
   skyBoxColors: null,
   glowGlobe: null,
   fogLights: null,
+  bloom: null,
   globeWireframe: null,
   globeColor: null,
   toneMappingMode: null,
@@ -176,28 +201,38 @@ const CARTOON_STYLE: ThemeStyle = Object.freeze({
 });
 
 /**
- * Neon-noir, not Tron: HOT MAGENTA lines over a deep blue-violet fill.
+ * SYNTHWAVE: hot magenta wire over a city that is nearly a silhouette.
  *
- * The reference look is night PHOTOGRAPHY — pink neon signage against a blue
- * ambient, with the cyan left to the globe's Fresnel rim so the frame carries
- * a magenta/cyan tension instead of a single hue. The fill is deliberately
- * blue-VIOLET and well off zero: a near-black tint made every building read as
- * a hole cut in the sky, which is the "black void" this restyle exists to end.
+ * The reference look is a neon grid at night — the LINE carries the picture and
+ * the building surfaces are all but black, so the drawing reads as glowing wire
+ * rather than as lit blocks with an outline.
+ *
+ * The fill was once deliberately raised ([0.06, 0.08, 0.32], a deep
+ * blue-violet) because a near-black tint made every building read as a hole cut
+ * in the sky. That balance has changed and the fill comes back down: the
+ * backdrop is no longer black to be a hole IN — CARTO Dark Matter draws the
+ * streets under the city and the night-blue sky box tints the horizon — and the
+ * edges now bloom (see the environment's `bloom` block), so a building is read
+ * by its glowing wire against the basemap rather than by its face. A whisper of
+ * blue-violet is kept rather than pure zero: the faces must still OCCLUDE
+ * visibly, so that a building in front of another is a silhouette and not a gap.
  *
  * `hdr` is LINEAR and unclamped: > 1 is a genuine HDR value under the AgX
- * pipeline, which is what makes the line glow rather than merely being bright.
- * `color` is the sRGB fallback for the same hue.
+ * pipeline, which is what makes the line glow rather than merely being bright —
+ * and it is also what the bloom pass THRESHOLDS on, so these components are the
+ * reason the halo picks the edges and not the fills. `color` is the sRGB
+ * fallback for the same hue.
  */
 const CYBER_STYLE: ThemeStyle = Object.freeze({
   fill: "tint",
-  tintRGB: Object.freeze([0.06, 0.08, 0.32]) as readonly [
+  tintRGB: Object.freeze([0.015, 0.02, 0.06]) as readonly [
     number,
     number,
     number,
   ],
   edges: Object.freeze({
     color: 0xff3fb0,
-    hdr: Object.freeze([3.0, 0.45, 2.0]) as readonly [number, number, number],
+    hdr: Object.freeze([4.5, 0.7, 3.2]) as readonly [number, number, number],
   }),
 });
 
@@ -304,6 +339,21 @@ const POLICIES: Record<SceneTheme, SceneThemePolicy> = {
         fogDensity: 5,
         heightM: 25,
       }),
+      // The GLOW half of the look, and the reason the fill could come down to
+      // a near-silhouette. The threshold is set by MEASUREMENT, not from the
+      // edge HDR values: by the time the AP pass (irradiance x albedoScale)
+      // has had its say, the wire reaches the bloom pass well under 1.0 — at
+      // 1.0 nothing bloomed at all, at 0.1 the whole carto-dark ground washed
+      // out pink, and 0.3 picks the wire out cleanly while the ground stays
+      // dark (browser-bisected 2026-08-10). The halo is what makes the wire
+      // read as neon rather than as a bright hairline; diffuse on purpose
+      // (mipmap blur at a wide radius).
+      bloom: Object.freeze({
+        intensity: 3,
+        luminanceThreshold: 0.3,
+        luminanceSmoothing: 0.3,
+        radius: 0.9,
+      }),
       globeWireframe: false,
       // NO globeColor: writing `view.globe.color` (a live setter no code path
       // had ever exercised on 0.0.5) blacked out the whole frame's irradiance
@@ -317,7 +367,12 @@ const POLICIES: Record<SceneTheme, SceneThemePolicy> = {
       // three are the ambient-light budget of the look and were tuned together
       // by screenshot.
       exposure: 4.5,
-      apAlbedoScale: 0.6,
+      // 0.6 -> 0.5 alongside the near-black fill: albedoScale is what the
+      // atmosphere's irradiance LIFTS the surfaces by, so leaving it where it
+      // was would have handed back a good part of the darkness the tint just
+      // bought. Exposure stays at 4.5 — the basemap, the sky box and the fog
+      // lights are all budgeted against it.
+      apAlbedoScale: 0.5,
       skyLightProbeIntensity: 0.15,
       lensFlareOff: true,
     }),
@@ -341,6 +396,11 @@ const POLICIES: Record<SceneTheme, SceneThemePolicy> = {
       // this drawing on 0.0.5; the hidden-line look lives on the city meshes.
       globeWireframe: false,
       globeColor: null,
+      // NO bloom, deliberately, even though this theme's edges are HDR too
+      // ([1.6, 3.2, 2.0]) and would glow. A hidden-line elevation is a
+      // DRAWING: its lines have to stay crisp and the near-black fills have to
+      // read as occluding panels, and a halo softens exactly those two. The
+      // glow belongs to the neon look, not to the drawing.
       toneMappingMode: "LINEAR",
       // BRIGHTER than the first pass's 1 / 0.05 / 0. That triple was a drawing
       // on black: the fills, the terrain and the ground all reached the frame

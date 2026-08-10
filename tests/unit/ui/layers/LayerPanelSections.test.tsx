@@ -142,7 +142,9 @@ describe("LayerPanel — a geospatial row", () => {
     const id = addRaster();
     renderPanel();
 
-    fireEvent.click(within(geoRows()[0]!).getByTitle("Hide layer"));
+    fireEvent.click(
+      within(geoRows()[0]!).getByRole("button", { name: "Hide layer" }),
+    );
 
     expect(geoStore().layers.find((l) => l.id === id)!.visible).toBe(false);
   });
@@ -190,7 +192,9 @@ describe("LayerPanel — a geospatial row", () => {
     addRaster();
     renderPanel();
 
-    fireEvent.click(within(geoRows()[0]!).getByTitle("Remove layer"));
+    fireEvent.click(
+      within(geoRows()[0]!).getByRole("button", { name: "Remove layer" }),
+    );
 
     expect(geoStore().layers).toHaveLength(0);
   });

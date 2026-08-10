@@ -234,9 +234,22 @@ const BARE_EPSG_REGEX = /^EPSG:(\d+)$/i;
 const OGC_HTTP_PREFIX = "https://www.opengis.net/def/crs/";
 
 /**
+ * German AdV compound-CRS URNs, as published in every Land's open CityGML
+ * (`urn:adv:crs:ETRS89_UTM32*DE_DHHN2016_NH` and variants). The horizontal
+ * part is plain ETRS89/UTM zone 32 or 33 (EPSG:25832/25833); the `*…` suffix
+ * names the VERTICAL datum (DHHN heights), which this app treats like every
+ * other orthometric z — sampled against the geoid, not part of the planar
+ * CRS. Mapping only the horizontal part is therefore the same contract the
+ * Dutch 7415 path already has. Zone captured by one regex rather than a
+ * per-Land table: the AdV scheme varies its height suffix, not its zones.
+ */
+const ADV_URN_REGEX = /^urn:adv:crs:ETRS89_UTM(32|33)(?:\*|$)/;
+
+/**
  * Normalize an srsName string to OGC URI format.
  *   "urn:ogc:def:crs:EPSG::28992"  -> "https://www.opengis.net/def/crs/EPSG/0/28992"
  *   "EPSG:28992"                    -> "https://www.opengis.net/def/crs/EPSG/0/28992"
+ *   "urn:adv:crs:ETRS89_UTM33*…"   -> "https://www.opengis.net/def/crs/EPSG/0/25833"
  *   already OGC HTTP               -> pass through
  *   unrecognized                    -> pass through as-is
  */
@@ -251,6 +264,11 @@ export function normalizeSrsName(srsName: string): string {
   const bareMatch = BARE_EPSG_REGEX.exec(srsName);
   if (bareMatch) {
     return `${OGC_HTTP_PREFIX}EPSG/0/${bareMatch[1]}`;
+  }
+
+  const advMatch = ADV_URN_REGEX.exec(srsName);
+  if (advMatch) {
+    return `${OGC_HTTP_PREFIX}EPSG/0/258${advMatch[1]}`;
   }
 
   return srsName;

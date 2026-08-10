@@ -17,7 +17,22 @@
  * orientation that looks back at the centre.
  */
 import type { GeodeticBounds } from "@cityjson/navara-cityjson";
-import type { ViewDirection } from "./ViewAlignButtons";
+
+/**
+ * The six axis-aligned viewpoints {@link alignCameraForBounds} understands, and
+ * the argument `CitySceneHandle.alignView` takes.
+ *
+ * Lived in the viewport's T/F/R/Bo/Bk/L button cluster until that overlay was
+ * removed (2026-08-10); it belongs here now, next to the geometry that gives
+ * each name its meaning, because the handle is public API and outlived the UI.
+ */
+export type ViewDirection =
+  | "top"
+  | "bottom"
+  | "front"
+  | "back"
+  | "right"
+  | "left";
 
 export interface GeographicCameraState {
   readonly lng: number;
@@ -286,7 +301,7 @@ export function cameraForBounds(bounds: GeodeticBounds): GeographicCameraState {
  * Unit ENU offset (east, north, up) FROM the centre of the box TO the camera.
  *
  * The axes match the pre-Navara viewport's scene frame (X=east, Y=up,
- * Z=south), so the buttons keep meaning what they meant: `front` looks north
+ * Z=south), so the names keep meaning what they meant: `front` looks north
  * from the south side, and `right` shows the model's right-hand side as seen
  * from the front — the camera stands EAST and looks west.
  */

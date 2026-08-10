@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { AdvancedSettingsPanel } from "../../../src/ui/viewport/AdvancedSettingsPanel";
+import { RenderingPanel } from "../../../src/ui/viewport/RenderingPanel";
 import {
   DEFAULT_ATMOSPHERE_STATE,
   useAtmosphereStore,
@@ -12,7 +12,7 @@ import {
 } from "../../../src/features/debug/renderDebugStore";
 import { useBasemapStore } from "../../../src/features/basemap/basemapStore";
 
-describe("AdvancedSettingsPanel", () => {
+describe("RenderingPanel", () => {
   afterEach(() => {
     cleanup();
   });
@@ -30,49 +30,41 @@ describe("AdvancedSettingsPanel", () => {
     });
   });
 
-  it("picks precipitation, which is one choice rather than two switches", () => {
-    render(<AdvancedSettingsPanel onClose={() => {}} />);
-    const picker = screen.getByLabelText("Precipitation");
-    expect((picker as HTMLSelectElement).value).toBe("none");
-    fireEvent.change(picker, { target: { value: "rain" } });
-    expect(useAtmosphereStore.getState().precipitation).toBe("rain");
-    // Selecting snow REPLACES rain: Navara models them as two meshes and
-    // asking for both at once is not a state the scene can be in.
-    fireEvent.change(picker, { target: { value: "snow" } });
-    expect(useAtmosphereStore.getState().precipitation).toBe("snow");
-    fireEvent.change(picker, { target: { value: "none" } });
-    expect(useAtmosphereStore.getState().precipitation).toBe("none");
-  });
-
   it("updates the render stores from the panel controls", () => {
-    render(<AdvancedSettingsPanel onClose={() => {}} />);
+    render(<RenderingPanel onClose={() => {}} />);
 
-    fireEvent.click(screen.getByLabelText("Clouds"));
     fireEvent.click(screen.getByLabelText("Aerial Perspective"));
-    fireEvent.click(screen.getByLabelText("Lens Flare"));
     fireEvent.click(screen.getByLabelText("Sun Shadows"));
     fireEvent.change(screen.getByLabelText("Exposure"), {
       target: { value: "14" },
     });
-    // Last, because it disables the three post-processing checkboxes above.
+    // Last, because it disables the pass-backed controls here AND in the
+    // toolbar's Weather popover.
     fireEvent.click(screen.getByLabelText("Post Processing"));
-    fireEvent.click(screen.getByLabelText("Google 3D Tiles"));
 
     expect(useRenderDebugStore.getState()).toMatchObject({
       postProcessingEnabled: false,
-      // Clouds default OFF now, so the one click above turns them ON — the
-      // assertion is "the control wrote to the store", not "everything is off".
-      cloudsEnabled: true,
       aerialPerspectiveEnabled: false,
       sunShadowsEnabled: false,
       exposure: 14,
     });
-    expect(useAtmosphereStore.getState().lensFlareEnabled).toBe(false);
-    expect(useTilesStore.getState().enabled).toBe(true);
+  });
+
+  // Weather is a toolbar popover now (`ui/toolbar/WeatherMenu.tsx`), beside the
+  // sun. Its controls must not ALSO be here, or the two surfaces are two
+  // widgets for one subject again — the exact thing the move undid.
+  it("hosts no weather control, which moved to the toolbar", () => {
+    const { container } = render(<RenderingPanel onClose={() => {}} />);
+
+    for (const gone of ["Clouds", "Cloud Coverage", "Lens Flare"]) {
+      expect(screen.queryByLabelText(gone)).toBeNull();
+    }
+    expect(screen.queryByLabelText("Precipitation")).toBeNull();
+    expect(container.querySelector("#advanced-precipitation")).toBeNull();
   });
 
   it("toggles the streaming fetch-box diagnostic, which starts off", () => {
-    render(<AdvancedSettingsPanel onClose={() => {}} />);
+    render(<RenderingPanel onClose={() => {}} />);
     const toggle = screen.getByLabelText("Streaming Fetch Box");
     expect(toggle).not.toBeChecked();
     // Independent of the post chain: the outline is a mesh, not a pass.
@@ -85,7 +77,7 @@ describe("AdvancedSettingsPanel", () => {
   });
 
   it("offers no control without an engine counterpart", () => {
-    render(<AdvancedSettingsPanel onClose={() => {}} />);
+    render(<RenderingPanel onClose={() => {}} />);
 
     // The three that were pure state until this pass. They are gone rather
     // than wired: their counterpart is the city mesh's three.js material,
@@ -106,25 +98,56 @@ describe("AdvancedSettingsPanel", () => {
     }
   });
 
+  // The master toggle governs this panel's own pass-backed control and, across
+  // surfaces, every control in the toolbar's Weather popover (pinned in
+  // `toolbar/WeatherMenu.test.tsx`).
   it("disables the post-processing controls when the chain is off", () => {
     useRenderDebugStore.setState({ postProcessingEnabled: false });
-    render(<AdvancedSettingsPanel onClose={() => {}} />);
+    render(<RenderingPanel onClose={() => {}} />);
 
-    expect(screen.getByLabelText("Clouds")).toBeDisabled();
     expect(screen.getByLabelText("Aerial Perspective")).toBeDisabled();
-    expect(screen.getByLabelText("Lens Flare")).toBeDisabled();
-    expect(screen.getByLabelText("Cloud Coverage")).toBeDisabled();
-    // Lighting is independent of the post chain.
+    // Exposure and shadows are independent of the post chain.
     expect(screen.getByLabelText("Sun Shadows")).not.toBeDisabled();
     expect(screen.getByLabelText("Exposure")).not.toBeDisabled();
   });
 
-  // The reset is a PANEL-WIDE footer action now, not a button tucked inside
-  // the last section resetting only one of the two stores the panel's sliders
-  // come from. Lens flare and cloud coverage live in `atmosphereStore` purely
-  // for historical reasons; a reset that skipped them would leave two of the
-  // controls it sits under untouched.
-  it("resets every lighting and post-processing control, in both stores", () => {
+  // Grouped by SUBJECT, not by which store or pass a control happens to come
+  // from. Two sections since weather left for the toolbar: how the scene is
+  // drawn, and what the viewer will tell you about itself.
+  it("groups the controls into Rendering and Diagnostics", () => {
+    const { container } = render(<RenderingPanel onClose={() => {}} />);
+
+    const titles = [...container.querySelectorAll(".attr-section-title")].map(
+      (el) => el.textContent,
+    );
+    expect(titles).toEqual(["Rendering", "Diagnostics"]);
+
+    const sections = [...container.querySelectorAll(".attr-section")];
+    const sectionAt = (index: number): Element => {
+      const section = sections[index];
+      if (!section) throw new Error(`no section at ${index}`);
+      return section;
+    };
+    const labelsIn = (index: number) =>
+      [...sectionAt(index).querySelectorAll("[aria-label]")].map((el) =>
+        el.getAttribute("aria-label"),
+      );
+    expect(labelsIn(0)).toEqual([
+      "Exposure",
+      "Sun Shadows",
+      "Post Processing",
+      "Aerial Perspective",
+    ]);
+    expect(sectionAt(1).textContent).toContain("Streaming Fetch Box");
+  });
+
+  // The reset is a PANEL-WIDE footer action, and it reaches ACROSS SURFACES:
+  // weather now lives in the toolbar popover, but its values are still part of
+  // what "reset render settings" restores. A reset bound to `renderDebugStore`
+  // alone would leave cloud coverage, precipitation and lens flare exactly
+  // where the user left them while claiming a clean slate — which is why this
+  // test asserts BOTH stores are back at their defaults.
+  it("resets every rendering, weather and diagnostic control, in both stores", () => {
     useAtmosphereStore.setState({
       cloudCoverage: 0.6,
       lensFlareEnabled: false,
@@ -137,7 +160,7 @@ describe("AdvancedSettingsPanel", () => {
       exposure: 1,
     });
 
-    render(<AdvancedSettingsPanel onClose={() => {}} />);
+    render(<RenderingPanel onClose={() => {}} />);
 
     fireEvent.click(screen.getByText("Reset render settings"));
 
@@ -149,18 +172,22 @@ describe("AdvancedSettingsPanel", () => {
     );
   });
 
-  // The other half of the coherence fix: the backdrop is a choice of what to
-  // look AT, not of how it is rendered, so the reset must not silently swap the
-  // user's imagery — and the button says so.
-  it("leaves the backdrop choices alone, and says so", () => {
+  // The backdrop is a choice of what to look AT, not of how the scene is
+  // rendered: its one home is the left sidebar (`BasemapPanel`,
+  // `GoogleTilesPanel`). The reset must not reach those stores either.
+  it("hosts no backdrop control, and leaves the backdrop stores alone", () => {
     useTilesStore.setState({ enabled: true });
     useBasemapStore.setState({ basemapId: "esri-imagery" });
-    render(<AdvancedSettingsPanel onClose={() => {}} />);
+    const { container } = render(<RenderingPanel onClose={() => {}} />);
 
-    const reset = screen.getByText("Reset render settings");
-    expect(reset.getAttribute("title")).toContain("left alone");
+    expect(
+      container.querySelector(".advanced-settings-header")?.textContent,
+    ).toContain("Rendering");
+    expect(screen.queryByText("Backdrop")).toBeNull();
+    expect(screen.queryByLabelText("Google 3D Tiles")).toBeNull();
+    expect(screen.queryByLabelText("Basemap")).toBeNull();
 
-    fireEvent.click(reset);
+    fireEvent.click(screen.getByText("Reset render settings"));
 
     expect(useTilesStore.getState().enabled).toBe(true);
     expect(useBasemapStore.getState().basemapId).toBe("esri-imagery");

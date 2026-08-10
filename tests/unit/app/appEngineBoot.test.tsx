@@ -350,10 +350,9 @@ describe("App object count across static and streaming layers", () => {
     });
 
     render(<App persistenceStore={emptyStore} />);
-    // Both readouts — the toolbar badge and the status bar — report the
-    // resident count.
-    await waitFor(() =>
-      expect(screen.getAllByText("2123").length).toBeGreaterThanOrEqual(2),
-    );
+    // The status bar is the ONE readout now — the toolbar's Objects pill was
+    // deleted as a duplicate of it — and `getByText` throwing on a second
+    // match is what keeps it that way.
+    await waitFor(() => expect(screen.getByText("2123")).toBeTruthy());
   });
 });

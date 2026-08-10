@@ -2,9 +2,9 @@
  * The catalog's entry point on the LANDING page (Task 9).
  *
  * A first-time visitor has no file to drop and no URL to paste; "Browse
- * catalog" is what turns an empty viewer into a populated one, so it sits
- * beside "Load Delft sample" rather than behind the sidebar's Add Layer
- * dialog (which does not exist until a layer does).
+ * catalog" is what turns an empty viewer into a populated one, so it is one of
+ * the landing page's two equal entry paths rather than something behind the
+ * sidebar's Add Layer dialog (which does not exist until a layer does).
  *
  * What is pinned here is the WIRING, not the browser: `StacBrowserDialog` is
  * stubbed, because the real one mounts MapLibre and reads a Parquet index
@@ -154,14 +154,21 @@ describe("App landing page — catalog entry point", () => {
 
   afterEach(cleanup);
 
-  it("offers 'Browse catalog' beside the sample-data button", () => {
+  it("offers the catalog as one of the landing page's two entry paths", () => {
     render(<App persistenceStore={emptyStore} />);
 
+    // Two peers, one heading each; the sample is a footnote link below them.
     expect(
-      screen.getByRole("button", { name: "Load Delft sample" }),
+      screen.getByRole("heading", { name: "Open your data" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Browse the catalog" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Browse catalog" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "try the Delft sample" }),
     ).toBeInTheDocument();
     // Closed until asked for.
     expect(screen.queryByTestId("stac-dialog-stub")).toBeNull();
@@ -220,7 +227,7 @@ describe("App landing page — catalog entry point", () => {
 
   it("does not re-open the catalog when the LAST layer is removed from the sidebar", async () => {
     // The other way back to the landing page, and the one a close-time reset
-    // missed entirely: `LayerPanel`'s per-layer "del" calls `removeLayer`
+    // missed entirely: `LayerPanel`'s per-layer remove calls `removeLayer`
     // directly, so `hasLayers` flips false without `handleClose` ever running.
     // Driven through the REAL sidebar button, not the store.
     loadFromUrl.mockResolvedValue(model);
@@ -234,7 +241,7 @@ describe("App landing page — catalog entry point", () => {
     );
 
     await act(async () => {
-      fireEvent.click(screen.getByTitle("Remove layer"));
+      fireEvent.click(screen.getByRole("button", { name: "Remove layer" }));
     });
 
     expect(
@@ -264,7 +271,7 @@ describe("App landing page — catalog entry point", () => {
     // "Close file" in the toolbar — the seam that hands the user back to the
     // landing page.
     await act(async () => {
-      fireEvent.click(screen.getByTitle("Close file"));
+      fireEvent.click(screen.getByRole("button", { name: "Close file" }));
     });
 
     expect(

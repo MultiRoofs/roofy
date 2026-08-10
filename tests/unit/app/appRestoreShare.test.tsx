@@ -519,7 +519,7 @@ describe("App save with a camera that is not readable yet", () => {
     // The engine is up but has not rendered its first frame, so
     // `positionGeographic` throws and the handle answers null (Task B11a).
     cameraState = null;
-    fireEvent.click(screen.getByTitle("Save workspace"));
+    fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
 
     await waitFor(() =>
       expect(screen.getByText(/still starting/)).toBeInTheDocument(),
@@ -538,7 +538,7 @@ describe("App save with a camera that is not readable yet", () => {
     await mountShellWithLayer();
 
     cameraState = null;
-    fireEvent.click(screen.getByTitle("Copy share link"));
+    fireEvent.click(screen.getByRole("button", { name: "Copy share link" }));
 
     await waitFor(() =>
       expect(
@@ -559,7 +559,7 @@ describe("App toast timers", () => {
     cameraState = null;
 
     // A 3 s status toast...
-    fireEvent.click(screen.getByTitle("Save workspace"));
+    fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
     await waitFor(() =>
       expect(screen.getByText(/try saving again/)).toBeInTheDocument(),
     );
@@ -569,7 +569,7 @@ describe("App toast timers", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);
     });
-    fireEvent.click(screen.getByTitle("Copy share link"));
+    fireEvent.click(screen.getByRole("button", { name: "Copy share link" }));
     await waitFor(() =>
       expect(screen.getByText(/try sharing again/)).toBeInTheDocument(),
     );

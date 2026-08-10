@@ -4,8 +4,8 @@
  * Two controls, one overlay, because they are one thing to the eye: the dial
  * says where the camera is pointing and the buttons under it change where it
  * points. Placed BOTTOM-RIGHT, above the attribution strip — the top-right is
- * taken by `ViewAlignButtons` and by every panel that opens over them
- * (Advanced Settings, the attribute panel), the bottom-left by the legend and
+ * taken by every panel that opens over the scene
+ * (Rendering, the attribute panel), the bottom-left by the legend and
  * the sun scrubber, and the bottom centre by the pick tooltip. It is also where
  * a map's zoom cluster is expected to be.
  *

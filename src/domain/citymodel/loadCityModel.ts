@@ -13,6 +13,7 @@ import {
   type CityJSONRoot,
 } from "@cityjson/navara-core";
 import { parseCityGML } from "./citygml/parseCityGML";
+import { isZipBytes, parseCityGmlArchive } from "./cityGmlArchive";
 import { detectEncoding } from "./detectEncoding";
 
 /**
@@ -112,6 +113,8 @@ export async function decodeModelBytes(bytes: Uint8Array): Promise<string> {
  *    branch used to call has been removed; viewport streaming is not yet
  *    wired up to this entry point.)
  *  - .city.jsonl / .jsonl → CityJSONSeq (fetch + parse)
+ *  - a body with ZIP magic → unzipped and parsed as CityGML, whatever the
+ *    extension said (see cityGmlArchive.ts)
  *  - everything else → CityJSON (fetch + parse)
  *
  * The body is fetched as bytes and gunzipped when it carries gzip magic
@@ -161,6 +164,17 @@ export async function loadFromUrl(
       `Failed to fetch: ${response.status} ${response.statusText}`,
     );
   }
+
+  // BEFORE `decodeModelBytes` and before the encoding switch: a ZIP is a
+  // CONTAINER, and only its bytes say so. Its magic is not gzip's, so
+  // `decodeModelBytes` would TextDecode the archive into mojibake and hand
+  // that to whichever parser the extension guessed — for `.zip` that is the
+  // `detectEncoding` default, JSON. Everything above this point (the CORS
+  // sentence, the 404 branch) is inherited unchanged.
+  if (isZipBytes(response.bytes)) {
+    return parseCityGmlArchive(response.bytes, fileNameFromUrl(url));
+  }
+
   let text: string;
   try {
     text = await decodeModelBytes(response.bytes);

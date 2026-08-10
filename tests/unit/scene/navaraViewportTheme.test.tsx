@@ -44,6 +44,11 @@ const addMesh = vi.fn((_desc: unknown) => ({
   update: meshUpdate,
   delete: meshDelete,
 }));
+/** `view.registerEffect` — the seam the app's OWN effect descriptor (the
+ *  theme's bloom pass) is taught to the engine through. The real one is a
+ *  `Map.set`; what matters here is how often it is called and that a refusal
+ *  degrades. */
+const registerEffect = vi.fn((_name: string, _cls: unknown) => {});
 
 /**
  * A `Color` as the engine hands one back.
@@ -104,6 +109,14 @@ vi.mock("@navaramap/three", () => ({
   // source names it as a MARKER in `basemaps.ts` (engine-free) and the
   // viewport resolves it here, at the engine seam.
   TERRARIUM_ELEVATION_DECODER: vi.fn(() => ({ decoder: "terrarium" })),
+  // The two the bloom descriptor is built out of (`bloomEffect.ts`). Stubs,
+  // because nothing here ever runs `createPass`: the mocked `registerEffect`
+  // stores the class and the mocked `addEffect` hands back a handle without
+  // constructing anything. They exist at all because the descriptor class
+  // EXTENDS `EffectDesc`, so a missing export would be a TypeError at the
+  // moment a theme first asks for bloom.
+  EffectDesc: class {},
+  Effect: class {},
   default: vi.fn(function () {
     const view = {
       addPlugin,
@@ -126,6 +139,7 @@ vi.mock("@navaramap/three", () => ({
       addLayer,
       addEffect,
       addMesh,
+      registerEffect,
       addLight: vi.fn(() => ({ update: vi.fn(), delete: vi.fn() })),
       resize: vi.fn(),
       toneMappingExposure: 1,
@@ -209,6 +223,7 @@ import {
   type SceneTheme,
 } from "../../../src/features/sceneTheme/sceneThemeStore";
 import { sceneThemePolicy } from "../../../src/scene/sceneThemePolicy";
+import { BLOOM_EFFECT_KEY } from "../../../src/scene/bloomEffect";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 
 class ResizeObserverStub {
@@ -334,6 +349,30 @@ function fogEffects(): Array<{
   return out;
 }
 
+/** The theme's BLOOM effect handles, paired to the config they were born with.
+ *  Keyed on the very constant the descriptor is registered under, because
+ *  `addEffect` finds a descriptor by looking for a REGISTERED NAME among the
+ *  config's own keys — a config key that drifted from the registration name
+ *  would be a silent "unknown effect" throw in the browser. */
+function bloomEffects(): Array<{
+  config: Record<string, number>;
+  handle: ReturnType<typeof addEffect>;
+}> {
+  const out: Array<{
+    config: Record<string, number>;
+    handle: ReturnType<typeof addEffect>;
+  }> = [];
+  addEffect.mock.calls.forEach((call, index) => {
+    const config = (call[0] as Record<string, unknown> | undefined)?.[
+      BLOOM_EFFECT_KEY
+    ];
+    const handle = addEffect.mock.results[index]?.value;
+    if (config === undefined || handle === undefined) return;
+    out.push({ config: config as Record<string, number>, handle });
+  });
+  return out;
+}
+
 function countLayersOfType(type: string): number {
   return addLayer.mock.calls.filter(
     (c) => (c[0] as { type?: string } | undefined)?.type === type,
@@ -357,6 +396,7 @@ async function setTheme(theme: SceneTheme): Promise<void> {
 beforeEach(() => {
   vi.clearAllMocks();
   init.mockImplementation(async () => {});
+  registerEffect.mockImplementation(() => {});
   addSource.mockImplementation((_s: unknown) => ({
     id: "src-1",
     type: "raster-tile",
@@ -828,6 +868,95 @@ describe("scene theme -> the volumetric neon (fogLight)", () => {
       await setTheme(theme);
       expect(fogEffects()).toHaveLength(0);
     }
+  });
+});
+
+describe("scene theme -> the neon glow (bloom)", () => {
+  it("registers the descriptor and adds ONE pass carrying the policy's numbers", async () => {
+    await mount();
+    // Nothing at all while the viewer has never left photoreal: the custom
+    // descriptor is registered at first NEED, not at init.
+    expect(registerEffect).not.toHaveBeenCalled();
+    expect(bloomEffects()).toHaveLength(0);
+
+    await setTheme("cyber");
+    const spec = sceneThemePolicy("cyber").environment.bloom!;
+    expect(registerEffect).toHaveBeenCalledTimes(1);
+    expect(registerEffect.mock.calls[0]![0]).toBe(BLOOM_EFFECT_KEY);
+    const effects = bloomEffects();
+    expect(effects).toHaveLength(1);
+    expect(effects[0]!.config).toEqual(spec);
+  });
+
+  it("inserts the pass BEFORE the tone curve — where the values are still HDR", async () => {
+    // Downstream of tone mapping every edge line is already clamped to display
+    // range and nothing would clear the luminance threshold, so this ordering
+    // is the difference between a glow and no glow.
+    await mount();
+    await setTheme("cyber");
+    const descClass = registerEffect.mock.calls[0]![1] as {
+      key: string;
+      insertBefore: string[];
+      insertAfter?: string[];
+    };
+    expect(descClass.key).toBe(BLOOM_EFFECT_KEY);
+    expect(descClass.insertBefore[0]).toBe("toneMapping");
+    // `insertAfter` WINS over `insertBefore` when it matches anything, so the
+    // descriptor must not carry one.
+    expect(descClass.insertAfter).toBeUndefined();
+  });
+
+  it("registers once and hides the pass instead of deleting it (Known Issue (f))", async () => {
+    await mount();
+    await setTheme("cyber");
+    const effect = bloomEffects()[0]!.handle;
+    expect(effect.visible).toBe(true);
+
+    await setTheme("photoreal");
+    expect(effect.visible).toBe(false);
+    expect(effect.delete).not.toHaveBeenCalled();
+
+    await setTheme("cyber");
+    expect(bloomEffects()).toHaveLength(1);
+    expect(effect.visible).toBe(true);
+    expect(effect.delete).not.toHaveBeenCalled();
+    // And the pass is not re-configured on the way back in: one frozen block
+    // per theme, compared by identity, so its mip pyramid is built once.
+    expect(effect.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ [BLOOM_EFFECT_KEY]: expect.anything() }),
+    );
+    expect(registerEffect).toHaveBeenCalledTimes(1);
+  });
+
+  it("belongs to cyber alone", async () => {
+    await mount();
+    for (const theme of ["cartoon", "wireframe", "photoreal"] as const) {
+      await setTheme(theme);
+      expect(bloomEffects()).toHaveLength(0);
+      expect(registerEffect).not.toHaveBeenCalled();
+    }
+  });
+
+  it("degrades to NO BLOOM when the engine refuses the descriptor", async () => {
+    // A working viewer beats a themed one: the same policy as the clouds and
+    // the fog lights, and the reason registration is wrapped at all.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    registerEffect.mockImplementation(() => {
+      throw new Error("no custom effects on this backend");
+    });
+    await mount();
+    await setTheme("cyber");
+
+    expect(bloomEffects()).toHaveLength(0);
+    expect(warn).toHaveBeenCalledTimes(1);
+    // The rest of the theme still arrived.
+    expect(meshCallsFor("glowGlobe")).toHaveLength(1);
+
+    // And it is not retried on every switch: one warning per session.
+    await setTheme("photoreal");
+    await setTheme("cyber");
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 });
 

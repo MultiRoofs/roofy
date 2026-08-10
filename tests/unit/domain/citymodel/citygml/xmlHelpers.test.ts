@@ -358,6 +358,26 @@ describe("normalizeSrsName", () => {
     const custom = "urn:adv:crs:DE_DHDN_3GK4";
     expect(normalizeSrsName(custom)).toBe(custom);
   });
+
+  it("maps AdV ETRS89/UTM URNs to their horizontal EPSG code", () => {
+    // The German Länder publish CityGML with compound AdV URNs; the suffix
+    // after `*` names the vertical datum, which the app handles via the
+    // geoid, not the planar CRS.
+    expect(normalizeSrsName("urn:adv:crs:ETRS89_UTM33*DE_DHHN2016_NH")).toBe(
+      "https://www.opengis.net/def/crs/EPSG/0/25833",
+    );
+    expect(normalizeSrsName("urn:adv:crs:ETRS89_UTM32*DE_DHHN92_NH")).toBe(
+      "https://www.opengis.net/def/crs/EPSG/0/25832",
+    );
+    // Bare zone URN with no height suffix still maps.
+    expect(normalizeSrsName("urn:adv:crs:ETRS89_UTM32")).toBe(
+      "https://www.opengis.net/def/crs/EPSG/0/25832",
+    );
+    // Gauss-Krüger AdV URNs stay pass-through: no metric UTM zone to name.
+    expect(normalizeSrsName("urn:adv:crs:ETRS89_UTM31")).toBe(
+      "urn:adv:crs:ETRS89_UTM31",
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

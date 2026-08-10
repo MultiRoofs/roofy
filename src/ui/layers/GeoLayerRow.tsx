@@ -20,6 +20,7 @@ import {
 } from "../../features/geoLayers/geoLayerStore";
 import { parseGeoJsonText } from "../../features/geoLayers/classifyGeoSource";
 import { VisibilityIcon } from "./VisibilityIcon";
+import { TrashIcon } from "./TrashIcon";
 
 /** Short, uppercase, and the words a user of these formats would use — the
  *  row is 240 px wide, so "Cesium 3D Tiles tileset" is not an option. */
@@ -89,7 +90,10 @@ export function GeoLayerRow({ layer }: { readonly layer: GeoLayer }) {
     >
       <button
         className="layer-vis-btn"
-        title={layer.visible ? "Hide layer" : "Show layer"}
+        aria-label={layer.visible ? "Hide layer" : "Show layer"}
+        data-tooltip={layer.visible ? "Hide layer" : "Show layer"}
+        data-tooltip-pos="top"
+        data-tooltip-align="start"
         onClick={() => updateGeoLayer(layer.id, { visible: !layer.visible })}
       >
         <VisibilityIcon visible={layer.visible} />
@@ -145,10 +149,13 @@ export function GeoLayerRow({ layer }: { readonly layer: GeoLayer }) {
       <div className="layer-actions">
         <button
           className="rule-action-btn"
-          title="Remove layer"
+          aria-label="Remove layer"
+          data-tooltip="Remove layer"
+          data-tooltip-pos="top"
+          data-tooltip-align="end"
           onClick={() => removeGeoLayer(layer.id)}
         >
-          del
+          <TrashIcon />
         </button>
       </div>
 

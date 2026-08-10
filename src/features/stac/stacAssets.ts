@@ -11,9 +11,14 @@
  * out of agreement with the router, and the failure mode of that drift is an
  * Add button that hands a GML document to the JSON parser.
  *
- * ONE EXCEPTION, in the safe direction: a collection's stac-geoparquet items
- * MIRROR is a `.parquet` file and is never a city model, so it is excluded from
- * `loadable` BY DEFAULT — see {@link MIRROR_FILENAME}.
+ * TWO EXCEPTIONS:
+ *  - In the safe direction: a collection's stac-geoparquet items MIRROR is a
+ *    `.parquet` file and is never a city model, so it is excluded from
+ *    `loadable` BY DEFAULT — see {@link MIRROR_FILENAME}.
+ *  - `.zip` is loadable WITHOUT `detectEncoding` agreeing, because the loader
+ *    decides that one on the response's MAGIC BYTES rather than on the
+ *    extension — see {@link ZIP_EXTENSION}. The invariant is unchanged; only
+ *    the authority it defers to differs.
  *
  * A media type is therefore used for the LABEL only. `application/gml+xml`
  * behind a `?download=` endpoint, or on an `.xml` file, names the format
@@ -92,8 +97,33 @@ function isItemsMirror(
   );
 }
 
-/** Container formats: recognisable, never directly loadable. */
+/**
+ * Container formats. `.zip` IS loadable — see {@link ZIP_EXTENSION} — while
+ * `.7z` and `.tar` remain recognisable-but-not-openable download links.
+ */
 const ARCHIVE_EXTENSIONS = [".zip", ".7z", ".tar"] as const;
+
+/**
+ * The one container this app can open, and the one exception to the
+ * extension-routing rule in this file's header.
+ *
+ * `detectEncoding(".zip")` still returns its `"cityjson"` default and is
+ * deliberately not taught otherwise — the loader never asks it. `loadFromUrl`
+ * sniffs ZIP MAGIC BYTES on the fetched body before it consults the encoding
+ * at all, and unzips the CityGML inside (`cityGmlArchive.ts`). So the
+ * invariant still holds, just through a different authority: what the loader
+ * ACTUALLY does with a `.zip` href is unzip-and-parse-CityGML, and that is
+ * what `loadable: true` promises here.
+ *
+ * The archive is offered even though many catalog hosts will refuse the
+ * cross-origin read: a blocked fetch produces the loader's own CORS sentence
+ * in the browser's error strip, which tells the user something true and
+ * actionable, whereas a download-only link told them nothing at all.
+ */
+const ZIP_EXTENSION = ".zip";
+
+/** Honest about the container AND about what comes out of it. */
+const ZIP_LABEL = "CityGML archive (ZIP)";
 
 const MEDIA_TYPE_KINDS: Record<string, StacAssetKind> = {
   "application/city+json": "cityjson",
@@ -151,6 +181,9 @@ export function classifyStacAsset(
 
   // Archives first: a `.zip` of CityJSON still advertises a CityJSON media
   // type in this catalog, and it is the container that decides.
+  if (path.endsWith(ZIP_EXTENSION)) {
+    return { kind: "archive", loadable: true, label: ZIP_LABEL };
+  }
   if (ARCHIVE_EXTENSIONS.some((ext) => path.endsWith(ext))) {
     return info("archive", false);
   }

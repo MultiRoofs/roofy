@@ -2,7 +2,7 @@
  * Search for a place and fly there.
  *
  * A SCENE overlay, top-left of the canvas — where every web map puts its
- * search, and the one free corner: the view-align cluster is top-right, the
+ * search, and the one free corner: the scene panels are top-right, the
  * legend and scale bottom-left, the compass bottom-right. It was in the
  * toolbar until 2026-08-06, which put "where am I looking?" in the chrome
  * rather than on the map it answers about.
