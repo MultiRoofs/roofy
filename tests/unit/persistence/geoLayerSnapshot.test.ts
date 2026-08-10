@@ -16,7 +16,17 @@ import {
 } from "../../../src/persistence/types";
 import { captureSnapshot } from "../../../src/persistence/captureSnapshot";
 import type { GeoLayer } from "../../../src/features/geoLayers/geoLayerStore";
-import { DEFAULT_GEO_LAYER_STYLE } from "../../../src/features/geoLayers/geoLayerStyle";
+import {
+  DEFAULT_GEO_LAYER_STYLE,
+  type GeoLayerStyle,
+} from "../../../src/features/geoLayers/geoLayerStyle";
+
+const CUSTOM_STYLE: GeoLayerStyle = {
+  color: "#00c2ff",
+  pointSizePx: 8,
+  lineWidthPx: 5,
+  fillOpacity: 0.35,
+};
 
 const CAMERA = {
   lng: 4.35,
@@ -55,8 +65,23 @@ describe("geoLayerSnapshot", () => {
       kind: "geojson",
       visible: false,
       opacity: 0.6,
+      style: DEFAULT_GEO_LAYER_STYLE,
       config: {},
     });
+  });
+
+  it("writes the layer's own style, which is a user choice like any other", () => {
+    const layer: GeoLayer = {
+      id: "g1",
+      name: "parcels",
+      kind: "geojson",
+      visible: true,
+      opacity: 1,
+      style: CUSTOM_STYLE,
+      config: { url: "https://x/parcels.geojson" },
+    };
+
+    expect(geoLayerSnapshot(layer).style).toEqual(CUSTOM_STYLE);
   });
 
   it("keeps a GeoJSON URL, which costs nothing and restores completely", () => {
@@ -113,9 +138,65 @@ describe("normalizeGeoLayers", () => {
         kind: "raster-xyz",
         visible: false,
         opacity: 0.25,
+        style: DEFAULT_GEO_LAYER_STYLE,
         config: { urlTemplate: "https://t/{z}/{x}/{y}.png" },
       },
     ]);
+  });
+
+  it("carries a custom style all the way back out of the round trip", () => {
+    const layer: GeoLayer = {
+      id: "g1",
+      name: "roads",
+      kind: "geojson",
+      visible: true,
+      opacity: 1,
+      style: CUSTOM_STYLE,
+      config: { url: "https://x/roads.geojson" },
+    };
+
+    // Through JSON, the way a snapshot store actually stores it.
+    const saved = JSON.parse(
+      JSON.stringify(geoLayerSnapshot(layer)),
+    ) as unknown;
+
+    expect(normalizeGeoLayers([saved])[0]?.style).toEqual(CUSTOM_STYLE);
+  });
+
+  it("defaults the style of a snapshot saved before styles existed", () => {
+    const [restored] = normalizeGeoLayers([
+      {
+        name: "osm",
+        kind: "raster-xyz",
+        visible: true,
+        opacity: 1,
+        config: { urlTemplate: "https://t/{z}/{x}/{y}.png" },
+      },
+    ]);
+
+    expect(restored?.style).toEqual(DEFAULT_GEO_LAYER_STYLE);
+  });
+
+  it("repairs a hand-edited style per field, keeping the layer", () => {
+    const [restored] = normalizeGeoLayers([
+      {
+        name: "roads",
+        kind: "geojson",
+        visible: true,
+        opacity: 1,
+        style: { color: 5, lineWidthPx: 7 },
+        config: { url: "https://x/roads.geojson" },
+      },
+    ]);
+
+    expect(restored).toEqual({
+      name: "roads",
+      kind: "geojson",
+      visible: true,
+      opacity: 1,
+      style: { ...DEFAULT_GEO_LAYER_STYLE, lineWidthPx: 7 },
+      config: { url: "https://x/roads.geojson" },
+    });
   });
 
   it("restores a file-loaded GeoJSON layer as an empty, re-linkable record", () => {
@@ -136,6 +217,7 @@ describe("normalizeGeoLayers", () => {
       kind: "geojson",
       visible: true,
       opacity: 1,
+      style: DEFAULT_GEO_LAYER_STYLE,
       config: {},
     });
   });
