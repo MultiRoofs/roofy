@@ -190,9 +190,14 @@ body {
    one `.eyebrow` property that reaches the wordmark — it sets its own weight,
    tracking and colour but not transform — and the brand kit forbids
    re-spacing or re-weighting the wordmark, so the inherited uppercase is
-   turned off here rather than shipped as "URBIS". */
+   turned off here rather than shipped as "URBIS". The gap is re-stated in px
+   for the same reason: the kit's `0.4em` default resolves against the
+   INHERITED font size, which here is `.eyebrow`'s 0.85rem, so it would land at
+   ~5.4px — 0.19x the mark instead of the documented 0.34x, visibly tighter
+   than the toolbar's. */
 .hero .eyebrow .urbis-lockup {
   --urbis-mark-size: 28px;
+  --urbis-lockup-gap: 9.5px; /* = 0.34 x 28px */
 }
 
 .hero .eyebrow .urbis-wordmark {
