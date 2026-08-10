@@ -615,6 +615,24 @@ describe("App share", () => {
   });
 });
 
+describe("App save success", () => {
+  it("confirms the save and says where the workspace will be", async () => {
+    const save = vi.fn(async () => "snap-2");
+    render(<App persistenceStore={{ ...storeWith(null), save }} />);
+    await mountShellWithLayer();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    // Silence used to be the only signal that a save had worked.
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Workspace saved.*next time you open Urbis/),
+      ).toBeInTheDocument(),
+    );
+  });
+});
+
 describe("App toast timers", () => {
   afterEach(() => vi.useRealTimers());
 

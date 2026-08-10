@@ -717,6 +717,15 @@ export function App({
     try {
       await persistenceStore.save(snapshot);
       await refreshSnapshots();
+      // Success used to be silent, which is indistinguishable from a button
+      // that does nothing. The message also has a fact to teach — saved
+      // workspaces are listed on the landing page on the next visit, and
+      // nobody discovers that by guessing — so it gets the explanatory
+      // duration, not the 3 s status one.
+      showToast(
+        "Workspace saved — you'll find it here next time you open Urbis.",
+        EXPLANATION_TOAST_MS,
+      );
     } catch (e) {
       showToast(
         e instanceof Error ? e.message : "Failed to save workspace.",
