@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { gzipSync } from "node:zlib";
+import { zipSync, strToU8 } from "fflate";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 import { classifyCityParquetUrl } from "../../../../src/features/cityparquet/sourceClassify";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
@@ -443,5 +444,72 @@ describe("useLayerFileLoader — CityParquet routing", () => {
     });
 
     expect(cityparquet.loadCityParquetFromUrl).not.toHaveBeenCalled();
+  });
+});
+
+describe("useLayerFileLoader — CityGML ZIP routing", () => {
+  /** A real archive holding one minimal CityGML document. */
+  function zipBytes(): Uint8Array {
+    return zipSync({
+      "city.gml": strToU8(
+        `<?xml version="1.0"?>
+<core:CityModel xmlns:core="http://www.opengis.net/citygml/2.0"
+  xmlns:bldg="http://www.opengis.net/citygml/building/2.0"
+  xmlns:gml="http://www.opengis.net/gml">
+  <gml:boundedBy><gml:Envelope srsName="EPSG:28992">
+    <gml:lowerCorner>0 0 0</gml:lowerCorner>
+    <gml:upperCorner>10 10 5</gml:upperCorner>
+  </gml:Envelope></gml:boundedBy>
+  <core:cityObjectMember><bldg:Building gml:id="zipped-b1">
+    <bldg:lod2MultiSurface><gml:MultiSurface><gml:surfaceMember><gml:Polygon>
+      <gml:exterior><gml:LinearRing>
+        <gml:posList>0 0 5 10 0 5 10 10 5 0 10 5 0 0 5</gml:posList>
+      </gml:LinearRing></gml:exterior>
+    </gml:Polygon></gml:surfaceMember></gml:MultiSurface></bldg:lod2MultiSurface>
+  </bldg:Building></core:cityObjectMember>
+</core:CityModel>`,
+      ),
+    });
+  }
+
+  it("addLayerFromFile unzips a dropped .zip into a CityGML layer", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    const file = new File([zipBytes() as BlobPart], "lod2.zip");
+
+    await act(async () => {
+      await result.current.addLayerFromFile(file);
+    });
+
+    expect(result.current.error).toBeNull();
+    const layer = useLayerStore.getState().layers[0]!;
+    expect(layer.model.sourceEncoding).toBe("citygml");
+    expect(Object.keys(layer.model.objects)).toEqual(["zipped-b1"]);
+    expect(layer.modelRef).toEqual({ type: "file", fileName: "lod2.zip" });
+    // Never the streaming or CityParquet arm.
+    expect(openStream).not.toHaveBeenCalled();
+    expect(cityparquet.loadCityParquetFromFiles).not.toHaveBeenCalled();
+  });
+
+  it("a .zip URL is not claimed by the CityParquet arm", () => {
+    // Pins the routing that lets `loadFromUrl`'s magic-byte sniff see the
+    // bytes at all — `classifyCityParquetUrl` must not answer for a `.zip`.
+    expect(classifyCityParquetUrl("https://example.test/lod2.zip")).toBeNull();
+  });
+
+  it("addLayerFromFile reports the archive's own sentence when it holds no GML", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    const file = new File(
+      [zipSync({ "readme.txt": strToU8("nothing") }) as BlobPart],
+      "empty.zip",
+    );
+
+    await act(async () => {
+      await result.current.addLayerFromFile(file);
+    });
+
+    expect(result.current.error).toContain(
+      "The archive contains no CityGML (.gml) file.",
+    );
+    expect(useLayerStore.getState().layers).toHaveLength(0);
   });
 });

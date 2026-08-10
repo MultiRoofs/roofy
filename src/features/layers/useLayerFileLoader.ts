@@ -19,6 +19,10 @@ import {
   loadCityParquetFromFiles,
   loadCityParquetFromUrl,
 } from "../cityparquet/loadCityParquet";
+import {
+  isZipBytes,
+  parseCityGmlArchive,
+} from "../../domain/citymodel/cityGmlArchive";
 import { isCityParquetUrl } from "../cityparquet/sourceClassify";
 import { ensureModelCrsLoadable } from "./ensureCrs";
 import { useLayerStore } from "./layerStore";
@@ -210,10 +214,13 @@ export function useLayerFileLoader(
           // — would otherwise reach the parser as mojibake. `decodeModelBytes`
           // decides on the MAGIC BYTES, so an uncompressed file still takes the
           // plain UTF-8 path.
-          const text = await decodeModelBytes(
-            new Uint8Array(await file.arrayBuffer()),
-          );
-          const parsed: CityModel = parseText(file.name, text);
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          // A dropped ZIP of CityGML takes the same container path as a
+          // catalog `application/zip` asset, decided the same way — on the
+          // magic bytes, since this path already holds them.
+          const parsed: CityModel = isZipBytes(bytes)
+            ? parseCityGmlArchive(bytes, file.name)
+            : parseText(file.name, await decodeModelBytes(bytes));
           // Fetch-and-gate the CRS while we are still async — a refusal here
           // reads as a load error instead of a dead layer in the scene sync.
           await ensureModelCrsLoadable(parsed);

@@ -31,8 +31,24 @@ describe("classifyStacAsset", () => {
         label: "CityGML",
       },
     ));
-  it("zip → archive, NOT loadable", () =>
+  it("zip → archive, loadable (unzipped to CityGML by the loader)", () =>
     expect(classifyStacAsset("https://x/a.zip", "application/zip")).toEqual({
+      kind: "archive",
+      loadable: true,
+      label: "CityGML archive (ZIP)",
+    }));
+
+  it("a zip is loadable however its media type is spelled", () => {
+    // The container decides, and `loadFromUrl` sniffs magic bytes — so a zip
+    // advertised as CityJSON is still an unzip-and-parse-CityGML.
+    expect(
+      classifyStacAsset("https://x/a.zip", "application/city+json").loadable,
+    ).toBe(true);
+    expect(classifyStacAsset("https://x/a.zip", null).loadable).toBe(true);
+  });
+
+  it("7z stays a download link — only ZIP can be unpacked", () =>
+    expect(classifyStacAsset("https://x/a.7z", "application/zip")).toEqual({
       kind: "archive",
       loadable: false,
       label: "ZIP archive",

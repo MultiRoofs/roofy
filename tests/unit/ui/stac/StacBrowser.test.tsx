@@ -342,13 +342,38 @@ describe("StacBrowser — items view", () => {
     expect(screen.getByRole("button", { name: "Add to scene" })).toBeEnabled();
   });
 
-  it("offers a download link, not an Add button, for an archive asset", async () => {
+  it("adds a ZIP archive asset to the scene rather than offering a download", async () => {
+    const onAddUrl = vi.fn(async () => OK);
     collectionsMock.mockResolvedValue([card()]);
     itemsMock.mockResolvedValue([
       item({
         id: "zipped-0001",
         assetHref: "https://example.test/3dbag/zipped-0001.zip",
         assetType: "application/zip",
+      }),
+    ]);
+    render(<StacBrowser onAddUrl={onAddUrl} />);
+    await openCollection();
+
+    fireEvent.click(rows()[0]!);
+
+    expect(screen.queryByRole("link", { name: /download/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Add to scene" }));
+
+    await waitFor(() =>
+      expect(onAddUrl).toHaveBeenCalledWith(
+        "https://example.test/3dbag/zipped-0001.zip",
+      ),
+    );
+  });
+
+  it("still offers a download link, not an Add button, for a 7z archive", async () => {
+    collectionsMock.mockResolvedValue([card()]);
+    itemsMock.mockResolvedValue([
+      item({
+        id: "packed-0001",
+        assetHref: "https://example.test/3dbag/packed-0001.7z",
+        assetType: "application/x-7z-compressed",
       }),
     ]);
     render(<StacBrowser onAddUrl={vi.fn(async () => OK)} />);
@@ -358,7 +383,7 @@ describe("StacBrowser — items view", () => {
 
     const link = screen.getByRole("link", { name: /download/i });
     expect(link.getAttribute("href")).toBe(
-      "https://example.test/3dbag/zipped-0001.zip",
+      "https://example.test/3dbag/packed-0001.7z",
     );
     expect(link.getAttribute("rel")).toBe("noopener noreferrer");
     expect(screen.queryByRole("button", { name: /^Add/ })).toBeNull();
