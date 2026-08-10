@@ -101,6 +101,48 @@ documented public API, and the UI's removal is not an API break. The
 `ViewDirection` type moves with the handle if it lived in the deleted file.
 `CameraControls` (zoom/compass) is untouched.
 
+### G. Visible tooltips on icon-only buttons (third wave)
+
+Native `title` tooltips are slow and were the only accessible name an icon
+button had. A shared CSS `[data-tooltip]` pattern (token colors, 300 ms
+appear / instant hide, `pos`/`align` variants) serves the toolbar, the sun
+trigger and the layer-row actions; every migrated button carries an
+`aria-label` because `content: attr(data-tooltip)` would otherwise become
+the accessible name. No JS, no dependency.
+
+### H. Rendering panel regroups by subject (third wave)
+
+Sections become **Rendering** (exposure, sun shadows, post-processing
+master, aerial perspective), **Weather** (clouds, coverage, precipitation,
+lens flare — the user's grouping), **Diagnostics** (unchanged). The master
+toggle's visible label becomes "Post Processing"; wiring and the
+cross-section disabled logic are untouched.
+
+### I. Cyber theme goes synthwave (third wave)
+
+Reference: neon wireframe city. Edges already existed (LineSegments via
+`ThemeStyleController`); the halo is new: a `cityBloom` EffectDesc wraps
+the app's `postprocessing` BloomEffect in the ENGINE's `Effect` class
+(Navara inlines its own postprocessing copy; a foreign pass silently
+no-ops through `insertPass`'s instanceof checks — CLAUDE.md Known Issue
+(l)), inserted before toneMapping, add-once-then-toggle. Policy stays
+engine-free: `bloom` is plain data on `ThemeEnvironment`, null everywhere
+but cyber. Fill drops to a near-silhouette, edge HDR rises; bloom numbers
+were browser-bisected (threshold 1.0 bloomed nothing, 0.1 washed the
+ground, 0.3/intensity 3 shipped). Wireframe theme deliberately gets no
+bloom (a hidden-line drawing needs crisp lines).
+
+### J. Catalog ZIP CityGML becomes addable (third wave)
+
+`.zip` assets flip to loadable; magic-byte sniff in the loaders routes the
+bytes through `cityGmlArchive.ts` (fflate two-pass read, 32-entry cap,
+`.xml` fallback only when no `.gml`, merge only on same-CRS + no id
+collision). One zip = one layer. AdV `ETRS89_UTM32/33` URNs map to
+EPSG:25832/25833, which is what makes the CORS-clean German items load
+end-to-end (browser-verified on Brandenburg). Most other catalog zips
+still fail for pre-existing host reasons (no CORS, degree CRS, stale
+URLs) — the failure sentence names the reason.
+
 ## Non-goals / guard rails
 
 - **No re-theme.** This is an IA/usability restructure; keep the existing
