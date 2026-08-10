@@ -80,6 +80,13 @@ vi.mock("@navaramap/three", () => ({
   // source names it as a MARKER in `basemaps.ts` (engine-free) and the
   // viewport resolves it here, at the engine seam.
   TERRARIUM_ELEVATION_DECODER: vi.fn(() => ({ decoder: "terrarium" })),
+  // The base classes the theme's bloom descriptor is built out of
+  // (`bloomEffect.ts`, reached through `NavaraViewport`'s import). Every named
+  // import of a mocked module has to exist or the mock refuses to link, so
+  // these are here even though nothing in this suite ever enters a themed look
+  // — the bloom behaviour itself is covered in `navaraViewportTheme.test.tsx`.
+  EffectDesc: class {},
+  Effect: class {},
   default: vi.fn(function (_options: unknown) {
     const view = {
       addPlugin,

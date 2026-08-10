@@ -147,6 +147,7 @@ import {
 import { googleTilesConfig } from "./googleTiles";
 import { useSceneThemeStore } from "../features/sceneTheme/sceneThemeStore";
 import { sceneThemePolicy, type ThemeEnvironment } from "./sceneThemePolicy";
+import { bloomEffectConfig, registerBloomEffect } from "./bloomEffect";
 import { basemapById, type BasemapOption } from "./basemaps";
 import { TERRAIN, TERRAIN_ATTRIBUTION } from "./terrain";
 import { isAutoFitSuppressed } from "./autoFitSuppression";
@@ -581,6 +582,17 @@ interface ThemeEnvironmentState {
    *  keeps an unrelated re-render from re-uploading identical lights. */
   fogLight: ThemeEffect | null;
   fogLightKey: string | null;
+  /** The threshold-bloom pass, on the same add-once-then-toggle contract.
+   *
+   *  `bloomSpec` is the policy block the live pass was built from, compared by
+   *  IDENTITY — the table hands out one frozen object per theme, so that is the
+   *  whole update gate (the same trick `handleSync` uses for `meshStyle`).
+   *  `bloomAvailable` is a tri-state: `null` = the descriptor has not been
+   *  registered yet, `false` = registration failed and must not be retried
+   *  (once per session, not once per theme switch). */
+  bloom: ThemeEffect | null;
+  bloomSpec: ThemeEnvironment["bloom"];
+  bloomAvailable: boolean | null;
   /** Captured once, immediately before the first override. */
   priorGlobeColor: number | undefined;
   /** True while a non-photoreal environment is in force. */
@@ -593,6 +605,9 @@ function createThemeEnvironmentState(): ThemeEnvironmentState {
     glowGlobe: null,
     fogLight: null,
     fogLightKey: null,
+    bloom: null,
+    bloomSpec: null,
+    bloomAvailable: null,
     priorGlobeColor: undefined,
     applied: false,
   };
@@ -670,6 +685,75 @@ function syncThemeGlobeColor(
     }
     view.globe.color = current.clone().setHex(wanted ?? state.priorGlobeColor);
   });
+}
+
+/**
+ * Add the theme's bloom pass on first need, then toggle and update it.
+ *
+ * Add-once-then-toggle for the reason Known Issue (f) records: `handle.delete()`
+ * takes a pass out of the composer WITHOUT disposing it, so a create/destroy
+ * cycle per theme switch both costs and leaks. `visible` is the composer's own
+ * enable flag.
+ *
+ * REGISTRATION happens here too, at first need rather than at init. The
+ * descriptor is ours (`bloomEffect.ts`), so the engine has to be taught about
+ * it before `addEffect` can find it — and doing that lazily is what keeps a
+ * session that never leaves photoreal from touching the engine at all, which is
+ * this module's standing invariant. It is safely after `view.init()` because
+ * every caller is behind the `engineReady` gate (Known Issue (b): registering
+ * before init is what throws).
+ *
+ * A registration or an add that fails leaves `bloomAvailable === false` and the
+ * theme renders without its glow — one warning per session, exactly like the
+ * clouds and the fog lights, never a broken viewer.
+ */
+function syncThemeBloom(
+  view: ViewInstance,
+  spec: ThemeEnvironment["bloom"],
+  state: ThemeEnvironmentState,
+): void {
+  const existing = state.bloom;
+  if (spec === null) {
+    if (existing === null) return;
+    applyToEngine("the theme's bloom", () => {
+      existing.visible = false;
+    });
+    return;
+  }
+
+  if (existing !== null) {
+    applyToEngine("the theme's bloom", () => {
+      // Identity, not equality: one frozen block per theme, so a re-render
+      // that changed nothing must not rebuild the pass's mip pyramid.
+      if (state.bloomSpec !== spec) {
+        existing.update(bloomEffectConfig(spec));
+        state.bloomSpec = spec;
+      }
+      existing.visible = true;
+    });
+    return;
+  }
+
+  if (state.bloomAvailable === null) {
+    state.bloomAvailable = registerBloomEffect(view);
+  }
+  if (!state.bloomAvailable) return;
+
+  try {
+    state.bloom = view.addEffect(
+      bloomEffectConfig(spec) as never,
+    ) as unknown as ThemeEffect;
+    state.bloomSpec = spec;
+  } catch (error) {
+    // Never retried: a descriptor the engine accepted but a pass it cannot
+    // build (a GPU that refuses the shader) would otherwise throw once per
+    // theme switch for the rest of the session.
+    state.bloomAvailable = false;
+    console.warn(
+      "NavaraViewport: the theme's bloom effect could not be added; the theme renders without its glow.",
+      error,
+    );
+  }
 }
 
 /**
@@ -804,6 +888,11 @@ function applyThemeEnvironment(
       }),
     );
   }
+
+  // Last: the bloom pass reads the frame every other lever above has shaped.
+  // Unlike the fog lights it depends on nothing but the policy, so it belongs
+  // in this function rather than in a data-dependent effect of its own.
+  syncThemeBloom(view, env.bloom, state);
 }
 
 /**

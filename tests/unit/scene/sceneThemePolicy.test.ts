@@ -40,6 +40,7 @@ describe("sceneThemePolicy", () => {
     expect(env.skyBoxColors).toBeNull();
     expect(env.glowGlobe).toBeNull();
     expect(env.fogLights).toBeNull();
+    expect(env.bloom).toBeNull();
     expect(env.globeWireframe).toBeNull();
     expect(env.globeColor).toBeNull();
     expect(env.toneMappingMode).toBeNull();
@@ -162,11 +163,11 @@ describe("sceneThemePolicy", () => {
     expect(sceneThemePolicy("wireframe").environment.skyBoxColors).toBeNull();
   });
 
-  it("paints cyber's night blue, not black — sky box and fill alike", () => {
-    // The look is neon-noir PHOTOGRAPHY: a deep blue ambient the eye reads as
-    // air. Both halves are pinned by CHANNEL DOMINANCE rather than by exact
-    // values, which are browser-tuning outcomes: blue must lead, and the fill
-    // must be far enough off zero to read as a colour rather than a hole.
+  it("keeps cyber's sky blue and its buildings a NEAR-BLACK silhouette", () => {
+    // The look is synthwave: the glowing wire carries the picture and the
+    // surfaces recede almost to nothing. Both halves are pinned by CHANNEL
+    // DOMINANCE rather than by exact values, which are browser-tuning
+    // outcomes — blue must lead in each.
     const env = sceneThemePolicy("cyber").environment;
     const sky = env.skyBoxColors!;
     for (const hex of [sky.dayColor, sky.nightColor, sky.sunColor]) {
@@ -178,7 +179,11 @@ describe("sceneThemePolicy", () => {
     const tint = sceneThemePolicy("cyber").meshStyle.tintRGB!;
     expect(tint[2]).toBeGreaterThan(tint[0]);
     expect(tint[2]).toBeGreaterThan(tint[1]);
-    expect(tint[2]).toBeGreaterThan(0.15);
+    // Dark enough to read as a silhouette against the basemap...
+    expect(tint[2]).toBeLessThan(0.15);
+    // ...but strictly off zero on EVERY channel, so a building in front of
+    // another is still a visible occluder rather than a hole in the frame.
+    for (const channel of tint) expect(channel).toBeGreaterThan(0);
   });
 
   it("gives cyber HOT MAGENTA edges against the cyan globe rim", () => {
@@ -222,6 +227,33 @@ describe("sceneThemePolicy", () => {
 
     for (const theme of ["photoreal", "cartoon", "wireframe"] as const) {
       expect(sceneThemePolicy(theme).environment.fogLights).toBeNull();
+    }
+  });
+
+  it("gives cyber a bloom block, and nobody else", () => {
+    // The GLOW half of the synthwave look, and the only reason the fills can
+    // sit at a near-silhouette: the wire has to carry the picture on its own.
+    const bloom = sceneThemePolicy("cyber").environment.bloom!;
+    expect(bloom).not.toBeNull();
+    expect(bloom.intensity).toBeGreaterThan(0);
+    expect(bloom.radius).toBeGreaterThan(0);
+    expect(bloom.luminanceSmoothing).toBeGreaterThanOrEqual(0);
+    // The threshold is what SELECTS the glow, so it has to sit above the fills
+    // and below the edges — pinned as that relationship, not as a number,
+    // since the number itself is a browser-tuning outcome.
+    const style = sceneThemePolicy("cyber").meshStyle;
+    expect(bloom.luminanceThreshold).toBeGreaterThan(
+      Math.max(...style.tintRGB!),
+    );
+    expect(bloom.luminanceThreshold).toBeLessThan(
+      Math.max(...style.edges!.hdr!),
+    );
+
+    // Photoreal and cartoon have no HDR lines to pick out at all, and the
+    // hidden-line drawing wants its edges CRISP — a halo softens exactly the
+    // two things that theme is made of.
+    for (const theme of ["photoreal", "cartoon", "wireframe"] as const) {
+      expect(sceneThemePolicy(theme).environment.bloom).toBeNull();
     }
   });
 
