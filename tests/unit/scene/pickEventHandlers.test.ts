@@ -10,6 +10,8 @@ import {
   pickIntentFor,
   resolveNearestHit,
   sameSelection,
+  geoSelectionFromStash,
+  type EnginePickStash,
   type RaycastResolver,
 } from "../../../src/scene/pickEventHandlers";
 
@@ -368,5 +370,61 @@ describe("pick pipeline (old-app parity)", () => {
     );
     expect(s.select).toHaveBeenCalledWith(null);
     expect(s.toggleSelect).not.toHaveBeenCalled();
+  });
+});
+
+describe("geoSelectionFromStash", () => {
+  const stash: EnginePickStash = {
+    engineLayerId: "engine-geo-7",
+    batchId: 12,
+    properties: { name: "Delft", pop: 100_000 },
+  };
+
+  it("returns null when there is no stash", () => {
+    const resolve = vi.fn(() => "G1");
+    expect(geoSelectionFromStash(null, resolve)).toBeNull();
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it("returns null when the resolver does not know the engine layer", () => {
+    // Basemap tiles and Google tiles pick too; they name no geo layer.
+    const resolve = vi.fn(() => null);
+    expect(geoSelectionFromStash(stash, resolve)).toBeNull();
+    expect(resolve).toHaveBeenCalledWith("engine-geo-7");
+  });
+
+  it("maps a known engine layer to a geo feature selection", () => {
+    expect(geoSelectionFromStash(stash, () => "G1")).toEqual({
+      geoLayerId: "G1",
+      batchId: 12,
+      properties: { name: "Delft", pop: 100_000 },
+    });
+  });
+
+  it("substitutes an empty object for absent properties", () => {
+    const bare: EnginePickStash = {
+      engineLayerId: "engine-geo-7",
+      batchId: 0,
+      properties: undefined,
+    };
+    expect(geoSelectionFromStash(bare, () => "G1")).toEqual({
+      geoLayerId: "G1",
+      batchId: 0,
+      properties: {},
+    });
+  });
+
+  it("still consults the resolver when the engine layer id is undefined", () => {
+    // `undefined` is a legitimate FeatureInfo.layerId; only the resolver may
+    // decide it names nothing, so this must not be short-circuited here.
+    const resolve = vi.fn(() => null);
+    const anon: EnginePickStash = {
+      engineLayerId: undefined,
+      batchId: 3,
+      properties: {},
+    };
+    expect(geoSelectionFromStash(anon, resolve)).toBeNull();
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(resolve).toHaveBeenCalledWith(undefined);
   });
 });
