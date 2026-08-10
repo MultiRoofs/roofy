@@ -15,6 +15,11 @@
  * and a needless replacement would tear a live layer down for nothing.
  */
 import { create } from "zustand";
+import {
+  DEFAULT_GEO_LAYER_STYLE,
+  normalizeGeoLayerStyle,
+  type GeoLayerStyle,
+} from "./geoLayerStyle";
 
 export type GeoLayerKind = "geojson" | "raster-xyz" | "3d-tiles";
 
@@ -62,6 +67,12 @@ interface GeoLayerBase {
    *  every record because every kind's engine description has somewhere to
    *  put it. */
   readonly opacity: number;
+  /** How the layer is drawn. REQUIRED, and always a whole record: every kind's
+   *  description reads at least one of its fields, and an optional style would
+   *  put the "or the default" branch in every one of those readers instead of
+   *  once, here. Replaced wholesale on edit — never mutated — so the reconciler
+   *  can memoise on its identity. */
+  readonly style: GeoLayerStyle;
 }
 
 /**
@@ -84,14 +95,15 @@ export type GeoLayer =
     });
 
 /** What `addGeoLayer` takes: a {@link GeoLayer} without the id the store
- *  mints, and with the two defaulted fields optional. Distributive on
+ *  mints, and with the three defaulted fields optional. Distributive on
  *  purpose — `Omit` over a union would collapse the kind/config pairing that
  *  makes the union worth having. */
 export type GeoLayerInput = GeoLayer extends infer L
   ? L extends GeoLayer
-    ? Omit<L, "id" | "visible" | "opacity"> & {
+    ? Omit<L, "id" | "visible" | "opacity" | "style"> & {
         readonly visible?: boolean;
         readonly opacity?: number;
+        readonly style?: GeoLayerStyle;
       }
     : never
   : never;
@@ -103,6 +115,12 @@ export interface GeoLayerPatch {
   readonly name?: string;
   readonly visible?: boolean;
   readonly opacity?: number;
+  /** WHOLE-OBJECT replacement, never a partial merge: the record is small, the
+   *  UI always holds the complete style it is editing, and a per-field patch
+   *  would make "unset this field" indistinguishable from "leave it". Its own
+   *  identity moves on every style edit, which is exactly what the reconciler
+   *  re-describes on. Normalized on write. */
+  readonly style?: GeoLayerStyle;
 }
 
 /** Fully opaque. A layer the user just added must be visible at the strength
@@ -184,6 +202,13 @@ export const useGeoLayerStore = create<GeoLayerStore>((set) => ({
       name: input.name,
       visible: input.visible ?? true,
       opacity: clampOpacity(input.opacity ?? DEFAULT_GEO_LAYER_OPACITY),
+      // Normalized even though the input is TYPED as a style: this store is
+      // reached from a restored snapshot and a share link as well as from the
+      // UI, and these values go on to the engine unchecked.
+      style:
+        input.style === undefined
+          ? DEFAULT_GEO_LAYER_STYLE
+          : normalizeGeoLayerStyle(input.style),
     };
     // Rebuilt per kind rather than spread, so the discriminated union survives
     // the trip through the loosely-typed input.
@@ -217,6 +242,12 @@ export const useGeoLayerStore = create<GeoLayerStore>((set) => ({
           patch.opacity === undefined
             ? layer.opacity
             : clampOpacity(patch.opacity),
+        // Identity preserved when the patch is silent about style, so a
+        // visibility toggle does not look like a restyle to the reconciler.
+        style:
+          patch.style === undefined
+            ? layer.style
+            : normalizeGeoLayerStyle(patch.style),
       })),
     })),
 

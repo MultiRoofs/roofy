@@ -423,6 +423,48 @@ right https URL and issues the request, but the bucket serves no `Access-Control
 header, so the browser blocks it and the app reports the CORS-aware network error. Object
 storage support is only as usable as the bucket's CORS configuration.
 
+## Milestone 10: GIS Layers — Styling, Selection and Attributes (Complete)
+
+Goal: make the geospatial layers the app can already draw (GeoJSON, XYZ raster tiles,
+Cesium 3D Tiles — added earlier as an unrecorded increment) into first-class, inspectable,
+styleable layers rather than write-only decoration.
+
+Spec: `docs/superpowers/specs/2026-08-10-gis-layers-and-per-layer-styles-design.md`.
+Plan: `docs/superpowers/plans/2026-08-10-gis-layers-per-layer-styles.md`.
+
+Deliverables:
+
+- Add Layer dialog opens on the **Geospatial** tab, and the layer panel's city and
+  geospatial sections each carry their own add button ✓
+- Rules tab names its target city layer and offers a picker; the legend groups its entries
+  by layer, so a multi-layer session can tell whose rule coloured what ✓
+- Per-layer geospatial style — colour, point size (pixels), line width, fill opacity —
+  normalised through one total door (`features/geoLayers/geoLayerStyle.ts`), edited in the
+  layer row's Style block, applied by rebuilding the engine description, and persisted in
+  the snapshot alongside `visible`/`opacity` ✓
+- Geo feature selection: `geoSelection` in the selection store, fed by the engine's own
+  `pick` pass (stashed on `pick`, resolved on the `click` that follows), with a city hit
+  winning outright and the store's invariant clearing the other side ✓
+- Selected feature highlighted through the engine's `FeatureEvaluator`, one evaluator per
+  feature set, clearing by restoring the layer's own colour explicitly ✓
+- Attribute overlay gains a geo mode showing the picked feature's GeoJSON `properties` ✓
+
+Status: Complete. Browser-smoked 2026-08-10 (headless Chrome over CDP, SwiftShader) against
+`us-states.json` draped over the Delft fixture session: the dialog opens on Geospatial, the
+GeoJSON drapes, a click resolves Nebraska (`density 23.97`) into the attribute panel and
+recolours only that feature, a colour edit re-renders the layer AND leaves the highlight
+standing, clicking a city building takes the selection back and clears the geo highlight,
+and reload + restore brings the layer back in its edited colour. Verification green:
+`npx tsc -b --noEmit`, app 110 files / 1443 tests.
+
+Answered by the smoke, and worth recording: the engine's `pick` pass DOES fire for a draped
+GeoJSON feature with no `pickable` flag on the descriptor — `geoLayerDescriptions.ts` sets
+none and relies on the engine default, which the review flagged as unproven under Node.
+
+Deferred, deliberately: a geospatial-only session is still impossible — the landing page
+offers no geospatial door, so the viewer shell only mounts once a city layer exists. A
+follow-up candidate, out of this plan's scope.
+
 ## Cross-Cutting Workstreams
 
 - Data quality and semantic assumptions

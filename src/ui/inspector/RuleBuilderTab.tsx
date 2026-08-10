@@ -4,6 +4,11 @@
  * Rules are stored in the layer store; `handleSync` compiles them
  * (`compileRuleEvaluator`) and pushes the result into
  * `CityModelHandle.setStyle`.
+ *
+ * Rules are per-layer, so the tab always edits exactly one layer — and says
+ * which, in a target-layer `<select>` at the top. The tab is CONTROLLED:
+ * the target lives in `InspectorPanel` (which defaults it to the selected
+ * or active layer), so picking a layer here only calls `onSelectLayer`.
  */
 
 import { useCallback, useRef, useState } from "react";
@@ -25,6 +30,8 @@ import { RULE_PRESETS } from "../../features/rules/presets";
 interface RuleBuilderTabProps {
   readonly model: CityModel;
   readonly layerId: string;
+  readonly layerOptions: ReadonlyArray<{ id: string; name: string }>;
+  readonly onSelectLayer: (id: string) => void;
 }
 
 // Metric fields always available for conditions
@@ -37,7 +44,12 @@ const METRIC_FIELDS = [
 
 const OPERATORS: ConditionOperator[] = [">", "<", "=", ">=", "<="];
 
-export function RuleBuilderTab({ model, layerId }: RuleBuilderTabProps) {
+export function RuleBuilderTab({
+  model,
+  layerId,
+  layerOptions,
+  onSelectLayer,
+}: RuleBuilderTabProps) {
   const layer = useLayerStore((s) => s.layers.find((l) => l.id === layerId));
   const rules = layer?.rules ?? [];
   const enabled = layer?.rulesEnabled ?? true;
@@ -109,6 +121,23 @@ export function RuleBuilderTab({ model, layerId }: RuleBuilderTabProps) {
   return (
     <>
       <div className="attr-section">
+        <div className="rule-target-row">
+          <span className="rule-target-label">Layer</span>
+          <select
+            id="rule-target-layer"
+            className="rule-select"
+            aria-label="Rules target layer"
+            value={layerId}
+            onChange={(e) => onSelectLayer(e.target.value)}
+          >
+            {layerOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div className="rule-header">
           <div className="attr-section-title">Colorization Rules</div>
           <label className="rule-toggle">

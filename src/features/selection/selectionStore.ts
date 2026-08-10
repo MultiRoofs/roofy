@@ -11,6 +11,7 @@ import type {
   PickMode,
   ToolMode,
   Selection,
+  GeoFeatureSelection,
 } from "../../domain/selection/types";
 
 export interface SelectionState {
@@ -18,6 +19,12 @@ export interface SelectionState {
   readonly toolMode: ToolMode;
   readonly selections: ReadonlyArray<Selection>;
   readonly hovered: Selection | null;
+  /**
+   * The picked GeoJSON feature, if any. Mutually exclusive with
+   * `selections`: selecting a city object clears it, and selecting a geo
+   * feature clears the city selections.
+   */
+  readonly geoSelection: GeoFeatureSelection | null;
 }
 
 export interface SelectionActions {
@@ -27,6 +34,8 @@ export interface SelectionActions {
   toggleSelect: (selection: Selection) => void;
   /** Replace all selections with a batch (box select). */
   selectMany: (selections: Selection[]) => void;
+  /** Replace the geo feature selection (clears city-object selections). */
+  selectGeoFeature: (selection: GeoFeatureSelection | null) => void;
   hover: (hovered: Selection | null) => void;
   setMode: (mode: PickMode) => void;
   setToolMode: (toolMode: ToolMode) => void;
@@ -49,37 +58,56 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
   toolMode: "select",
   selections: [],
   hovered: null,
+  geoSelection: null,
 
-  select: (selection) => set({ selections: selection ? [selection] : [] }),
+  // A city pick — including a miss (`null`) — always ends any geo selection.
+  select: (selection) =>
+    set({ selections: selection ? [selection] : [], geoSelection: null }),
 
   toggleSelect: (selection) => {
     const { selections } = get();
     const idx = selections.findIndex((s) => selectionEquals(s, selection));
     if (idx >= 0) {
-      set({ selections: selections.filter((_, i) => i !== idx) });
+      set({
+        selections: selections.filter((_, i) => i !== idx),
+        geoSelection: null,
+      });
     } else {
       // Only allow multi-select within the same layer
       const filtered = selections.filter(
         (s) => s.layerId === selection.layerId,
       );
-      set({ selections: [...filtered, selection] });
+      set({ selections: [...filtered, selection], geoSelection: null });
     }
   },
 
   selectMany: (selections) => {
     if (selections.length === 0) {
-      set({ selections: [] });
+      set({ selections: [], geoSelection: null });
       return;
     }
     const layerId = selections[0]!.layerId;
-    set({ selections: selections.filter((s) => s.layerId === layerId) });
+    set({
+      selections: selections.filter((s) => s.layerId === layerId),
+      geoSelection: null,
+    });
   },
+
+  // Picking a geo feature ends any city selection; clearing it (`null`)
+  // touches nothing else, so a city pick that follows one survives.
+  selectGeoFeature: (selection) =>
+    set(
+      selection
+        ? { geoSelection: selection, selections: [] }
+        : { geoSelection: null },
+    ),
 
   hover: (hovered) => set({ hovered }),
 
-  setMode: (mode) => set({ mode, selections: [], hovered: null }),
+  setMode: (mode) =>
+    set({ mode, selections: [], hovered: null, geoSelection: null }),
 
   setToolMode: (toolMode) => set({ toolMode, hovered: null }),
 
-  clear: () => set({ selections: [], hovered: null }),
+  clear: () => set({ selections: [], hovered: null, geoSelection: null }),
 }));

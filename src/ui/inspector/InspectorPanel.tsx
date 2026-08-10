@@ -11,7 +11,7 @@
  * panel is about the current selection.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   BBox3,
   BuildingSurfaceType,
@@ -139,6 +139,20 @@ export function InspectorPanel({
     : undefined;
   const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
   const displayLayer = selectedLayer ?? activeLayer;
+
+  // Rules are per-layer, but the rest of this panel follows the SELECTION —
+  // so the Rules tab lets its target be steered independently. The override
+  // is deliberately transient: it resets whenever the panel's own layer
+  // changes, so the tab's default target is always the layer being inspected.
+  const [ruleTargetOverride, setRuleTargetOverride] = useState<string | null>(
+    null,
+  );
+  useEffect(() => {
+    setRuleTargetOverride(null);
+  }, [displayLayer?.id]);
+  const ruleTargetLayer =
+    layers.find((l) => l.id === ruleTargetOverride) ?? displayLayer;
+
   const model = displayLayer?.model;
   const isStreaming = displayLayer?.isStreaming ?? false;
 
@@ -294,10 +308,12 @@ export function InspectorPanel({
       <div className="inspector-body">
         <ErrorBoundary fallback="inline" key={activeTab}>
           {activeTab === "rules" ? (
-            displayLayer ? (
+            ruleTargetLayer ? (
               <RuleBuilderTab
-                model={displayLayer.model}
-                layerId={displayLayer.id}
+                model={ruleTargetLayer.model}
+                layerId={ruleTargetLayer.id}
+                layerOptions={layers.map((l) => ({ id: l.id, name: l.name }))}
+                onSelectLayer={setRuleTargetOverride}
               />
             ) : (
               <div className="inspector-placeholder">No layer selected</div>

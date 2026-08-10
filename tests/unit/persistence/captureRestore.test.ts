@@ -129,6 +129,28 @@ describe("restoreSnapshot", () => {
     expect(viewState.camera).toEqual(CAM);
   });
 
+  it("drops a geo feature selection, whose layer the restore replaced", () => {
+    const snapshot = captureSnapshot({
+      label: "Geo selection test",
+      layers: [],
+      camera: CAM,
+      datetime: new Date(Date.UTC(2025, 5, 21, 12, 0, 0)),
+      pickMode: "object",
+    });
+
+    useSelectionStore.setState({
+      geoSelection: {
+        geoLayerId: "geo-1",
+        batchId: 7,
+        properties: { name: "Park" },
+      },
+    });
+
+    restoreSnapshot(snapshot);
+
+    expect(useSelectionStore.getState().geoSelection).toBeNull();
+  });
+
   it("restores datetime to the solar store", () => {
     const snapshot = captureSnapshot({
       label: "Datetime test",

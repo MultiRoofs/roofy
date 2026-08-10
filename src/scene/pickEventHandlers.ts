@@ -20,7 +20,12 @@
  * that question BEFORE it resolves anything, so a measure click never costs a
  * raycast.
  */
-import type { PickMode, Selection, ToolMode } from "../domain/selection/types";
+import type {
+  GeoFeatureSelection,
+  PickMode,
+  Selection,
+  ToolMode,
+} from "../domain/selection/types";
 import type {
   EcefRay,
   PickedFeatureLike,
@@ -273,4 +278,49 @@ export function applyPickIntent(
     return;
   }
   store.select(intent.selection);
+}
+
+/**
+ * What the viewport stashes from the engine's own `pick` event.
+ *
+ * Geo (GeoJSON) layers are drawn BY the engine, so their picks arrive through
+ * the engine's `pick` event — which fires only on a clean mouseup — rather than
+ * through the own-raycast path the city plugins use. The viewport cannot act on
+ * it there and then (the click that follows is what commits a selection), so it
+ * stashes this much and asks the router on the next `click`.
+ *
+ * `engineLayerId` is `unknown` on purpose: it is `FeatureInfo.layerId`, the
+ * ENGINE's id — an opaque token from an alpha engine whose type we do not
+ * control, and one this module must never compare, only hand back.
+ */
+export interface EnginePickStash {
+  readonly engineLayerId: unknown;
+  readonly batchId: number;
+  readonly properties: Readonly<Record<string, unknown>> | undefined;
+}
+
+/**
+ * Resolve a stashed engine pick to a geo selection, or `null`.
+ *
+ * The engine picks everything it draws — basemap tiles and Google's
+ * photorealistic tiles included — so a stash is not evidence that a geo layer
+ * was hit. `resolveGeoLayerId` (the viewport's engine-id -> geo-layer-id map)
+ * is the only authority on that, and it is asked for EVERY stash, including one
+ * whose `engineLayerId` is `undefined`: whether that names nothing is the map's
+ * answer to give, not a shortcut to take here.
+ */
+export function geoSelectionFromStash(
+  stash: EnginePickStash | null,
+  resolveGeoLayerId: (engineLayerId: unknown) => string | null,
+): GeoFeatureSelection | null {
+  if (stash === null) return null;
+  const geoLayerId = resolveGeoLayerId(stash.engineLayerId);
+  if (geoLayerId === null) return null;
+  // `?? {}` so a consumer can read `properties` without a guard: a feature with
+  // no properties is a real, selectable feature, not a failed pick.
+  return {
+    geoLayerId,
+    batchId: stash.batchId,
+    properties: stash.properties ?? {},
+  };
 }

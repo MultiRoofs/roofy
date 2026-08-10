@@ -14,11 +14,87 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import {
+  geoLayerIdForEngineLayerId,
+  GEO_HIGHLIGHT_COLOR_HEX,
   removeAllGeoLayerHandles,
+  syncGeoHighlight,
   syncGeoLayers,
+  type GeoFeatureEvaluator,
   type LiveGeoLayer,
 } from "../../../src/scene/geoLayerSync";
 import type { GeoLayer } from "../../../src/features/geoLayers/geoLayerStore";
+import {
+  DEFAULT_GEO_LAYER_STYLE,
+  hexColorToNumber,
+} from "../../../src/features/geoLayers/geoLayerStyle";
+import { HIGHLIGHT_COLOR_HEX } from "@cityjson/navara-cityjson";
+
+/** A feature-set listener the fake layer handle recorded, so a test can play
+ *  the engine and fire `featureCreated`/`featureUpdated` itself. */
+type FakeListener = {
+  type: "featureCreated" | "featureUpdated";
+  cb: (params: {
+    readonly featureSetId?: unknown;
+    readonly evaluator: GeoFeatureEvaluator;
+  }) => void;
+};
+
+/** One fake engine `Layer`: an id a pick can be resolved through, the feature
+ *  events the module subscribes to, and a counted `forceUpdate`. */
+function fakeLayerHandle(
+  desc: Record<string, unknown>,
+  id: string,
+  onDelete: () => void,
+) {
+  const listeners: FakeListener[] = [];
+  return {
+    desc,
+    id,
+    listeners,
+    update: vi.fn(),
+    delete: vi.fn(onDelete),
+    on: vi.fn((type: FakeListener["type"], cb: FakeListener["cb"]) => {
+      listeners.push({ type, cb });
+    }),
+    forceUpdate: vi.fn(),
+  };
+}
+
+type FakeLayerHandle = ReturnType<typeof fakeLayerHandle>;
+
+/** One engine `FeatureEvaluator`: records the last callback it was handed so a
+ *  test can run it for a given batch id and inspect what the module returns. */
+function fakeEvaluator() {
+  const evaluator = {
+    evaluate: vi.fn((cb: (info: { readonly batchId: number }) => unknown) => {
+      evaluator.lastCb = cb;
+    }),
+    lastCb: null as ((info: { readonly batchId: number }) => unknown) | null,
+    /** Run the last callback the module installed, as the engine would per
+     *  batch. */
+    run(batchId: number): Record<string, unknown> {
+      if (evaluator.lastCb === null) throw new Error("no callback installed");
+      return evaluator.lastCb({ batchId }) as Record<string, unknown>;
+    },
+  };
+  return evaluator;
+}
+
+/** Fire one feature-set event at every listener the module installed. */
+function fireFeatureEvent(
+  handle: FakeLayerHandle,
+  type: "featureCreated" | "featureUpdated",
+  evaluator: GeoFeatureEvaluator,
+  featureSetId?: unknown,
+): void {
+  for (const listener of handle.listeners) {
+    if (listener.type === type) listener.cb({ featureSetId, evaluator });
+  }
+}
+
+/** The engine `Color` factory the viewport supplies — a plain object here, so
+ *  an assertion can read the hex straight back out. */
+const makeColor = (hex: number) => ({ hex });
 
 /** Records the order of every engine call, which is what the delete-order
  *  assertion below is really about. */
@@ -26,11 +102,7 @@ function fakeView() {
   const calls: string[] = [];
   const sources: Array<{ desc: unknown; delete: ReturnType<typeof vi.fn> }> =
     [];
-  const layers: Array<{
-    desc: unknown;
-    update: ReturnType<typeof vi.fn>;
-    delete: ReturnType<typeof vi.fn>;
-  }> = [];
+  const layers: FakeLayerHandle[] = [];
 
   const view = {
     addSource: vi.fn((desc: Record<string, unknown>) => {
@@ -46,13 +118,13 @@ function fakeView() {
       return handle;
     }),
     addLayer: vi.fn((desc: Record<string, unknown>) => {
-      const handle = {
+      const handle = fakeLayerHandle(
         desc,
-        update: vi.fn(),
-        delete: vi.fn(() => {
+        `engine-layer-${layers.length + 1}`,
+        () => {
           calls.push("layer.delete");
-        }),
-      };
+        },
+      );
       layers.push(handle);
       calls.push("addLayer");
       return handle;
@@ -74,6 +146,7 @@ function raster(patch: Partial<GeoLayer> = {}): GeoLayer {
     kind: "raster-xyz",
     visible: true,
     opacity: 1,
+    style: DEFAULT_GEO_LAYER_STYLE,
     config: RASTER_CONFIG,
     ...patch,
   } as GeoLayer;
@@ -120,6 +193,7 @@ describe("syncGeoLayers — adding", () => {
       kind: "geojson",
       visible: true,
       opacity: 1,
+      style: DEFAULT_GEO_LAYER_STYLE,
       config: {},
     } as GeoLayer;
 
@@ -203,6 +277,57 @@ describe("syncGeoLayers — visibility and opacity", () => {
   });
 });
 
+/** Shared for the same reason `RASTER_CONFIG` is: the store replaces a
+ *  record's `config` only when the SOURCE really changed, and a style edit
+ *  must not be mistaken for one. */
+const GEOJSON_CONFIG = { data: { type: "FeatureCollection", features: [] } };
+
+function geojson(patch: Partial<GeoLayer> = {}): GeoLayer {
+  return {
+    id: "g1",
+    name: "points",
+    kind: "geojson",
+    visible: true,
+    opacity: 1,
+    style: DEFAULT_GEO_LAYER_STYLE,
+    config: GEOJSON_CONFIG,
+    ...patch,
+  } as GeoLayer;
+}
+
+describe("syncGeoLayers — a changed style", () => {
+  it("re-describes the layer instead of rebuilding the pair", () => {
+    const { view, layers } = fakeView();
+    const live = new Map<string, LiveGeoLayer>();
+    syncGeoLayers(view, [geojson()], live);
+
+    // A style edit replaces the style object by IDENTITY, exactly as the store
+    // does — the fields could all be equal and it would still be an edit.
+    const edited = geojson({
+      style: { ...DEFAULT_GEO_LAYER_STYLE, color: "#00ff00" },
+    });
+    syncGeoLayers(view, [edited], live);
+
+    const update = layers[0]!.update;
+    expect(update).toHaveBeenCalledTimes(1);
+    const desc = update.mock.calls[0]![0] as Record<
+      string,
+      { color: number } | unknown
+    >;
+    expect((desc.point as { color: number }).color).toBe(0x00ff00);
+    expect((desc.polyline as { color: number }).color).toBe(0x00ff00);
+    expect((desc.polygon as { color: number }).color).toBe(0x00ff00);
+    // Nothing was rebuilt: the source still carries the same document.
+    expect(view.addSource).toHaveBeenCalledTimes(1);
+    expect(view.addLayer).toHaveBeenCalledTimes(1);
+
+    // and the memo holds — the same record costs no further engine call.
+    syncGeoLayers(view, [edited], live);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(view.addSource).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("syncGeoLayers — a changed config", () => {
   it("rebuilds the pair, layer before source", () => {
     const { view, calls } = fakeView();
@@ -257,6 +382,155 @@ describe("syncGeoLayers — removal", () => {
     expect(live.size).toBe(0);
     expect(error).toHaveBeenCalled();
     error.mockRestore();
+  });
+});
+
+describe("geoLayerIdForEngineLayerId", () => {
+  it("finds the record whose handle carries the engine layer id", () => {
+    const { view, layers } = fakeView();
+    const live = new Map<string, LiveGeoLayer>();
+    syncGeoLayers(view, [geojson(), raster()], live);
+
+    expect(geoLayerIdForEngineLayerId(live, layers[0]!.id)).toBe("g1");
+    expect(geoLayerIdForEngineLayerId(live, layers[1]!.id)).toBe("r1");
+  });
+
+  it("answers null for an id nothing carries", () => {
+    const { view } = fakeView();
+    const live = new Map<string, LiveGeoLayer>();
+    syncGeoLayers(view, [geojson()], live);
+
+    expect(geoLayerIdForEngineLayerId(live, "engine-layer-99")).toBeNull();
+    expect(geoLayerIdForEngineLayerId(new Map(), "engine-layer-1")).toBeNull();
+  });
+
+  it("never matches a handle that carries no id, even against undefined", () => {
+    const view = {
+      addSource: vi.fn(() => ({ delete: vi.fn(() => true) })),
+      addLayer: vi.fn(() => ({ update: vi.fn(), delete: vi.fn() })),
+    };
+    const live = new Map<string, LiveGeoLayer>();
+    syncGeoLayers(view, [geojson()], live);
+
+    expect(live.size).toBe(1);
+    expect(geoLayerIdForEngineLayerId(live, undefined)).toBeNull();
+  });
+});
+
+/** The style's own colour, as the engine number — what a cleared or unselected
+ *  feature must be told explicitly, because an omitted key never resets a
+ *  previously evaluated override. */
+const OWN_COLOR_HEX = 0xff5a3c;
+
+describe("GEO_HIGHLIGHT_COLOR_HEX", () => {
+  it("is the SAME accent the city meshes highlight a surface with", () => {
+    // Pinned against the submodule rather than restated as a comment: the two
+    // constants are the same UI state ("this is selected") in one viewport, and
+    // a plugin-side retune of the city accent must fail here rather than
+    // silently leave a picked GeoJSON polygon a different orange. The import is
+    // engine-free (`@cityjson/navara-cityjson`'s main barrel is Node-safe by
+    // construction), and the submodule spells the value as a CSS hex string.
+    expect(GEO_HIGHLIGHT_COLOR_HEX).toBe(hexColorToNumber(HIGHLIGHT_COLOR_HEX));
+  });
+});
+
+describe("syncGeoHighlight", () => {
+  /** A layer with two feature sets registered, exactly as a mixed-geometry
+   *  GeoJSON produces: one evaluator per material. */
+  function highlightable() {
+    const { view, layers } = fakeView();
+    const live = new Map<string, LiveGeoLayer>();
+    syncGeoLayers(view, [geojson()], live);
+    const handle = layers[0]!;
+    const points = fakeEvaluator();
+    const polygons = fakeEvaluator();
+    fireFeatureEvent(handle, "featureCreated", points, 1n);
+    fireFeatureEvent(handle, "featureCreated", polygons, 2n);
+    return { view, live, layers, handle, points, polygons };
+  }
+
+  it("evaluates EVERY registered feature set and forces one update", () => {
+    const { live, handle, points, polygons } = highlightable();
+
+    syncGeoHighlight({ geoLayerId: "g1", batchId: 7 }, live, makeColor);
+
+    expect(points.evaluate).toHaveBeenCalledTimes(1);
+    expect(polygons.evaluate).toHaveBeenCalledTimes(1);
+    for (const evaluator of [points, polygons]) {
+      expect(evaluator.run(7)).toEqual({
+        color: { hex: GEO_HIGHLIGHT_COLOR_HEX },
+      });
+      // NOT `{}`: an omitted field leaves a previous override in place, so
+      // every other feature is told the layer's own colour explicitly.
+      expect(evaluator.run(8)).toEqual({ color: { hex: OWN_COLOR_HEX } });
+    }
+    expect(handle.forceUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("costs nothing when the same selection is re-applied", () => {
+    const { live, handle, points } = highlightable();
+    const selection = { geoLayerId: "g1", batchId: 7 };
+
+    syncGeoHighlight(selection, live, makeColor);
+    syncGeoHighlight({ ...selection }, live, makeColor);
+
+    expect(points.evaluate).toHaveBeenCalledTimes(1);
+    expect(handle.forceUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears back to the layer's own colour, and never touches a layer that was never highlighted", () => {
+    const { view, live, layers, handle, points, polygons } = highlightable();
+    // A second layer, with its own feature set, that is never selected.
+    syncGeoLayers(view, [geojson(), raster({ id: "r1" })], live);
+    const untouched = fakeEvaluator();
+    const untouchedHandle = layers[1]!;
+    fireFeatureEvent(untouchedHandle, "featureCreated", untouched, 1n);
+
+    syncGeoHighlight({ geoLayerId: "g1", batchId: 7 }, live, makeColor);
+    syncGeoHighlight(null, live, makeColor);
+
+    expect(points.evaluate).toHaveBeenCalledTimes(2);
+    expect(polygons.evaluate).toHaveBeenCalledTimes(2);
+    expect(points.run(7)).toEqual({ color: { hex: OWN_COLOR_HEX } });
+    expect(points.run(8)).toEqual({ color: { hex: OWN_COLOR_HEX } });
+    expect(handle.forceUpdate).toHaveBeenCalledTimes(2);
+
+    // The layer that never had an override is left alone — evaluated colours
+    // would otherwise shadow every future style edit.
+    expect(untouched.evaluate).not.toHaveBeenCalled();
+    expect(untouchedHandle.forceUpdate).not.toHaveBeenCalled();
+  });
+
+  it("applies the live highlight through a feature set created afterwards", () => {
+    const { live, handle, points } = highlightable();
+    syncGeoHighlight({ geoLayerId: "g1", batchId: 7 }, live, makeColor);
+
+    // `Layer.update()` recreates features: a fresh evaluator arrives and must
+    // carry the desired state, or the highlight silently disappears.
+    const rebuilt = fakeEvaluator();
+    fireFeatureEvent(handle, "featureCreated", rebuilt, 3n);
+
+    expect(rebuilt.evaluate).toHaveBeenCalledTimes(1);
+    expect(rebuilt.run(7)).toEqual({ color: { hex: GEO_HIGHLIGHT_COLOR_HEX } });
+    expect(rebuilt.run(8)).toEqual({ color: { hex: OWN_COLOR_HEX } });
+    expect(live.get("g1")!.evaluators.size).toBe(3);
+    expect([...live.get("g1")!.evaluators.values()]).toContain(points);
+  });
+
+  it("adds and highlights harmlessly when the handle has no feature events", () => {
+    const view = {
+      addSource: vi.fn(() => ({ delete: vi.fn(() => true) })),
+      addLayer: vi.fn(() => ({ update: vi.fn(), delete: vi.fn() })),
+    };
+    const live = new Map<string, LiveGeoLayer>();
+
+    expect(() => syncGeoLayers(view, [geojson()], live)).not.toThrow();
+    expect(live.get("g1")!.evaluators.size).toBe(0);
+
+    expect(() =>
+      syncGeoHighlight({ geoLayerId: "g1", batchId: 7 }, live, makeColor),
+    ).not.toThrow();
+    expect(live.get("g1")!.highlightedBatchId).toBe(7);
   });
 });
 

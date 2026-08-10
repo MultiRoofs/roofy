@@ -10,37 +10,15 @@
  * whole description, so {@link geoLayerDescription} always builds a COMPLETE
  * one from the store record. There is no "patch" form, deliberately — a patch
  * would silently drop every field it did not mention.
+ *
+ * A vector layer's colour, point size, line width and fill opacity are NOT
+ * decided here any more: they live on the record, as `layer.style`, and this
+ * module only converts them into the forms the engine's materials take (CSS
+ * hex → `0xRRGGBB`, fill opacity → an opacity plus a `transparent` flag).
+ * `features/geoLayers/geoLayerStyle.ts` owns the values and their defaults.
  */
+import { styleColorNumber } from "../features/geoLayers/geoLayerStyle";
 import type { GeoLayer } from "../features/geoLayers/geoLayerStore";
-
-/**
- * One accent for every user-supplied vector layer, in the `0xRRGGBB` form
- * Navara's materials take.
- *
- * THEME-AGNOSTIC on purpose. The app's own accent follows the light/dark
- * toggle, but a geospatial layer is drawn on the globe, over imagery whose
- * brightness has nothing to do with the chrome — a colour that flipped with
- * the UI theme would be legible over Esri imagery in one theme and lost in it
- * in the other. This orange-red reads against the Esri basemap, the default
- * photoreal globe and the city meshes' grey alike, and it is deliberately not
- * a hue the roof rule palettes use, so a styled roof is never mistaken for
- * imported data.
- */
-export const GEO_ACCENT_COLOR = 0xff5a3c;
-
-/**
- * Point size, in PIXELS (`sizeInMeters: false`).
- *
- * Navara's `PointMaterial` defaults `sizeInMeters` to true, which is the wrong
- * default for imported data: a 24 m sprite is a blot from a rooftop camera and
- * a sub-pixel speck from a city-wide one. In pixels a point is a map symbol —
- * the same size at every altitude, which is what a POI layer wants.
- */
-export const GEOJSON_POINT_SIZE_PX = 24;
-
-/** Line width in pixels for imported polylines. Two, so a road network reads
- *  as lines rather than as a smear at city zoom. */
-export const GEOJSON_LINE_WIDTH_PX = 2;
 
 /**
  * Screen-space error budget for an imported 3D tileset.
@@ -111,15 +89,23 @@ export function geoLayerDescription(
   layer: GeoLayer,
   source: unknown,
 ): Record<string, unknown> {
-  const { visible: show, opacity } = layer;
+  const { visible: show, opacity, style } = layer;
   switch (layer.kind) {
-    case "geojson":
+    case "geojson": {
+      const color = styleColorNumber(style);
+      // The fill is the one pass with TWO opacities: the layer's (the whole
+      // layer fading, shared with every kind) times the style's (this layer's
+      // fills reading as a wash while its outlines stay solid). Multiplying
+      // keeps them independent — halving either halves what is drawn — where
+      // letting the style's win would make the layer slider do nothing to a
+      // polygon layer.
+      const fillOpacity = opacity * style.fillOpacity;
       return {
         type: "vector",
         source,
         point: {
-          color: GEO_ACCENT_COLOR,
-          size: GEOJSON_POINT_SIZE_PX,
+          color,
+          size: style.pointSizePx,
           sizeInMeters: false,
           // Imported data rarely carries a height, and when it does it is
           // rarely an ellipsoidal one — clamping is what puts a road on the
@@ -130,20 +116,21 @@ export function geoLayerDescription(
           opacity,
         },
         polyline: {
-          color: GEO_ACCENT_COLOR,
-          width: GEOJSON_LINE_WIDTH_PX,
+          color,
+          width: style.lineWidthPx,
           clampToGround: true,
           show,
           opacity,
         },
         polygon: {
-          color: GEO_ACCENT_COLOR,
+          color,
           clampToGround: true,
           show,
-          opacity,
-          transparent: isTranslucent(opacity),
+          opacity: fillOpacity,
+          transparent: isTranslucent(fillOpacity),
         },
       };
+    }
     case "raster-xyz":
       return {
         type: "raster",

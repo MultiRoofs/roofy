@@ -117,6 +117,19 @@ vi.mock("@navaramap/three", () => ({
   // moment a theme first asks for bloom.
   EffectDesc: class {},
   Effect: class {},
+  // The engine's `Color`, which declares NO constructor parameters — the
+  // documented forms are `new Color().setHex(...)` / `.setStyle(...)`. Present
+  // in every viewport suite's mock because `NavaraViewport` imports it for the
+  // geospatial highlight, and a named import of a mocked module that the
+  // factory does not export refuses to link.
+  Color: class {
+    setHex() {
+      return this;
+    }
+    setStyle() {
+      return this;
+    }
+  },
   default: vi.fn(function () {
     const view = {
       addPlugin,

@@ -46,13 +46,21 @@ interface AddLayerDialogProps {
    *  to show the loader's sentence beside the item. */
   readonly onAddUrl: (url: string) => Promise<AddUrlResult>;
   readonly loading: boolean;
+  /** Which tab to open on. Defaults to `"geo"` — see {@link SourceTab}. */
+  readonly initialTab?: SourceTab;
 }
 
-/** Which family of source the dialog is offering. The city model is the
- *  DEFAULT and stays it: it is what this viewer is for, a geospatial overlay
- *  is context around it, and the catalog is a place to go looking when the
- *  user has no URL of their own yet. */
-type SourceTab = "city" | "geo" | "stac";
+/** Which family of source the dialog is offering.
+ *
+ *  `"geo"` is the DEFAULT as of the 2026-08-10 spec (user request): the plain
+ *  "+ Add Layer" button is reached most often to drape context — GeoJSON, XYZ
+ *  tiles, a tileset — over a city model that is already loaded, so opening on
+ *  the city tab cost a click every time. The city model is still what this
+ *  viewer is FOR, and the catalog is still a place to go looking when the user
+ *  has no URL of their own yet; both are one click away, and `LayerPanel`'s
+ *  two section headers each carry their own add button that names the tab it
+ *  wants, so neither family is buried. */
+export type SourceTab = "city" | "geo" | "stac";
 
 export function AddLayerDialog({
   onClose,
@@ -60,9 +68,10 @@ export function AddLayerDialog({
   onAddFiles,
   onAddUrl,
   loading,
+  initialTab,
 }: AddLayerDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  const [tab, setTab] = useState<SourceTab>("city");
+  const [tab, setTab] = useState<SourceTab>(initialTab ?? "geo");
   const tabIdPrefix = useId();
 
   useModalChrome(dialogRef, onClose);

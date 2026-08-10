@@ -8,8 +8,20 @@ describe("selectionStore", () => {
       toolMode: "select",
       selections: [],
       hovered: null,
+      geoSelection: null,
     });
   });
+
+  const geoSel = {
+    geoLayerId: "geo-1",
+    batchId: 7,
+    properties: { name: "Parcel A" },
+  };
+  const citySel = {
+    kind: "object",
+    layerId: "layer-1",
+    objectId: "b1",
+  } as const;
 
   describe("select", () => {
     it("sets object selection", () => {
@@ -211,6 +223,121 @@ describe("selectionStore", () => {
       useSelectionStore.getState().clear();
 
       expect(useSelectionStore.getState().mode).toBe("surface");
+    });
+  });
+
+  describe("selectGeoFeature", () => {
+    it("sets the geo selection and clears city selections", () => {
+      useSelectionStore.getState().select(citySel);
+
+      useSelectionStore.getState().selectGeoFeature(geoSel);
+
+      const state = useSelectionStore.getState();
+      expect(state.geoSelection).toEqual(geoSel);
+      expect(state.selections).toEqual([]);
+    });
+
+    it("clears only the geo selection when passed null", () => {
+      useSelectionStore.getState().selectGeoFeature(geoSel);
+      useSelectionStore.getState().selectGeoFeature(null);
+
+      expect(useSelectionStore.getState().geoSelection).toBeNull();
+    });
+
+    it("leaves a later city selection intact when cleared with null", () => {
+      useSelectionStore.getState().selectGeoFeature(geoSel);
+      useSelectionStore.getState().select(citySel);
+      useSelectionStore.getState().selectGeoFeature(null);
+
+      const state = useSelectionStore.getState();
+      expect(state.geoSelection).toBeNull();
+      expect(state.selections).toEqual([citySel]);
+    });
+
+    it("starts null", () => {
+      expect(useSelectionStore.getState().geoSelection).toBeNull();
+    });
+  });
+
+  describe("geo selection is mutually exclusive with city selection", () => {
+    it("select clears the geo selection", () => {
+      useSelectionStore.getState().selectGeoFeature(geoSel);
+      useSelectionStore.getState().select(citySel);
+
+      const state = useSelectionStore.getState();
+      expect(state.geoSelection).toBeNull();
+      expect(state.selections).toEqual([citySel]);
+    });
+
+    it("select(null) — a miss — clears the geo selection too", () => {
+      useSelectionStore.getState().selectGeoFeature(geoSel);
+      useSelectionStore.getState().select(null);
+
+      const state = useSelectionStore.getState();
+      expect(state.geoSelection).toBeNull();
+      expect(state.selections).toEqual([]);
+    });
+
+    it("toggleSelect clears the geo selection", () => {
+      useSelectionStore.getState().selectGeoFeature(geoSel);
+      useSelectionStore.getState().toggleSelect(citySel);
+
+      const state = useSelectionStore.getState();
+      expect(state.geoSelection).toBeNull();
+      expect(state.selections).toEqual([citySel]);
+    });
+
+    it("toggleSelect clears the geo selection when removing an item", () => {
+      useSelectionStore.getState().selectGeoFeature(geoSel);
+      useSelectionStore.setState({ selections: [citySel] });
+
+      useSelectionStore.getState().toggleSelect(citySel);
+
+      const state = useSelectionStore.getState();
+      expect(state.geoSelection).toBeNull();
+      expect(state.selections).toEqual([]);
+    });
+
+    it("selectMany clears the geo selection", () => {
+      useSelectionStore.getState().selectGeoFeature(geoSel);
+      useSelectionStore.getState().selectMany([citySel]);
+
+      const state = useSelectionStore.getState();
+      expect(state.geoSelection).toBeNull();
+      expect(state.selections).toEqual([citySel]);
+    });
+
+    it("selectMany with an empty batch clears the geo selection", () => {
+      useSelectionStore.getState().selectGeoFeature(geoSel);
+      useSelectionStore.getState().selectMany([]);
+
+      const state = useSelectionStore.getState();
+      expect(state.geoSelection).toBeNull();
+      expect(state.selections).toEqual([]);
+    });
+
+    it("clear clears both", () => {
+      useSelectionStore.getState().selectGeoFeature(geoSel);
+      useSelectionStore.setState({ selections: [citySel] });
+
+      useSelectionStore.getState().clear();
+
+      const state = useSelectionStore.getState();
+      expect(state.geoSelection).toBeNull();
+      expect(state.selections).toEqual([]);
+      expect(state.hovered).toBeNull();
+    });
+
+    it("setMode clears both", () => {
+      useSelectionStore.getState().selectGeoFeature(geoSel);
+      useSelectionStore.setState({ selections: [citySel] });
+
+      useSelectionStore.getState().setMode("surface");
+
+      const state = useSelectionStore.getState();
+      expect(state.mode).toBe("surface");
+      expect(state.geoSelection).toBeNull();
+      expect(state.selections).toEqual([]);
     });
   });
 });
