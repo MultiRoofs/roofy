@@ -1,25 +1,3 @@
-# Build and deploy the viewer to Cloudflare Workers (static assets).
-#
-# Modeled on cityjson/flatcitybuf's deploy-web-demo.yml, adapted for this
-# repo's three particulars:
-#
-#  1. SUBMODULE — packages/cityjson-navara-plugins is a public repo fetched
-#     over https by a plain `git submodule update`; no key needed.
-#  2. TWO PACKAGE MANAGERS — npm at the root, pnpm (pinned via packageManager
-#     + corepack) inside the submodule. The pnpm install must run AFTER the
-#     root npm ci, in the submodule directory (never `pnpm -C` from the
-#     root — corepack refuses to cross the pin).
-#  3. ENCRYPTED .env — `npm run build` runs through dotenvx. DOTENV_PRIVATE_KEY
-#     (from the gitignored .env.keys) decrypts VITE_GOOGLE_MAPS_API_KEY at
-#     build time. Without it the build still succeeds and the app runs; only
-#     Google Photorealistic 3D Tiles are unavailable (the app detects the
-#     still-encrypted key and warns instead of sending ciphertext to Google).
-#
-# Required repository secrets:
-#   CLOUDFLARE_API_TOKEN   — API token with Workers Scripts:Edit
-#   CLOUDFLARE_ACCOUNT_ID  — the target Cloudflare account
-#   DOTENV_PRIVATE_KEY     — optional; enables the Google Tiles key
-
 name: Deploy to Cloudflare Workers
 
 on:

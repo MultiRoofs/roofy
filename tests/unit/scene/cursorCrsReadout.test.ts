@@ -25,10 +25,13 @@ describe("crsFromGeodetic", () => {
   it("inverts WGS84 back into RD New metres", () => {
     // Delft, roughly: RD New eastings run 0..300000 m and northings
     // 300000..620000 m, so a result in that band proves the conversion went
-    // WGS84 -> projected metres and not the other way round.
+    // WGS84 -> projected metres and not the other way round. Expected metres
+    // are PROJ ground truth (cs2cs EPSG:4326 → EPSG:28992); the values pinned
+    // before came through a towgs84 def with half-negated rotation signs and
+    // sat ~76 m off.
     const out = crsFromGeodetic(4.348, 52.006, 14, 7415)!;
-    expect(out[0]).toBeCloseTo(83574.16, 1);
-    expect(out[1]).toBeCloseTo(446893.03, 1);
+    expect(out[0]).toBeCloseTo(83647.09, 1);
+    expect(out[1]).toBeCloseTo(446913.56, 1);
     // Height is carried through untouched — proj4 only moves the horizontal
     // pair (see HEIGHT SEMANTICS in the module doc).
     expect(out[2]).toBe(14);

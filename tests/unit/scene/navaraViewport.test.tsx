@@ -1254,9 +1254,10 @@ describe("NavaraViewport lifecycle", () => {
       number,
       number,
     ];
-    // RD New metres for Delft, and the file's own z back — NOT 57.2.
-    expect(out[0]).toBeCloseTo(83574.16, 1);
-    expect(out[1]).toBeCloseTo(446893.03, 1);
+    // RD New metres for Delft (PROJ ground truth), and the file's own z back —
+    // NOT 57.2.
+    expect(out[0]).toBeCloseTo(83647.09, 1);
+    expect(out[1]).toBeCloseTo(446913.56, 1);
     expect(out[2]).toBeCloseTo(14, 6);
   });
 
