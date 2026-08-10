@@ -19,6 +19,7 @@ import {
   type LiveGeoLayer,
 } from "../../../src/scene/geoLayerSync";
 import type { GeoLayer } from "../../../src/features/geoLayers/geoLayerStore";
+import { DEFAULT_GEO_LAYER_STYLE } from "../../../src/features/geoLayers/geoLayerStyle";
 
 /** Records the order of every engine call, which is what the delete-order
  *  assertion below is really about. */
@@ -74,6 +75,7 @@ function raster(patch: Partial<GeoLayer> = {}): GeoLayer {
     kind: "raster-xyz",
     visible: true,
     opacity: 1,
+    style: DEFAULT_GEO_LAYER_STYLE,
     config: RASTER_CONFIG,
     ...patch,
   } as GeoLayer;
@@ -120,6 +122,7 @@ describe("syncGeoLayers — adding", () => {
       kind: "geojson",
       visible: true,
       opacity: 1,
+      style: DEFAULT_GEO_LAYER_STYLE,
       config: {},
     } as GeoLayer;
 
