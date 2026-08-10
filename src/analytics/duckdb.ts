@@ -55,21 +55,25 @@ async function doInit(): Promise<void> {
   status = { state: "initializing" };
 
   try {
-    // Use MVP bundle (no SharedArrayBuffer / COOP-COEP required)
-    const bundle = await duckdb.selectBundle({
-      mvp: {
-        mainModule: new URL(
-          "@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm",
-          import.meta.url,
-        ).href,
-        mainWorker: new URL(
-          "@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js",
-          import.meta.url,
-        ).href,
-      },
-    });
+    // Bundles come from jsDelivr, not from our own dist/: the mvp wasm alone
+    // is 38 MB, which is over Cloudflare Workers' 25 MiB per-asset limit —
+    // self-hosting it made the app undeployable there. DuckDB analytics
+    // already needs the network at runtime regardless (the cityjson
+    // community extension below is fetched from DuckDB's CDN), and this
+    // whole module degrades gracefully offline, so the CDN is not a new
+    // point of failure. `selectBundle` picks eh over mvp where the browser
+    // supports wasm exceptions; neither needs COOP/COEP.
+    const bundle = await duckdb.selectBundle(duckdb.getJsDelivrBundles());
 
-    const worker = new Worker(bundle.mainWorker!);
+    // The worker script is cross-origin, which `new Worker(url)` forbids —
+    // wrap it in a same-origin blob that importScripts the real one.
+    const workerUrl = URL.createObjectURL(
+      new Blob([`importScripts("${bundle.mainWorker}");`], {
+        type: "text/javascript",
+      }),
+    );
+    const worker = new Worker(workerUrl);
+    URL.revokeObjectURL(workerUrl);
     const logger = new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING);
     const instance = new duckdb.AsyncDuckDB(logger, worker);
     await instance.instantiate(bundle.mainModule);

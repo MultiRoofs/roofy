@@ -1,0 +1,15 @@
+// Cloudflare Workers config: a static-assets Worker serving the built Vite
+// app from dist/. No Worker script — assets-only. Deployed by
+// .github/workflows/deploy.yml (push to main) or locally with
+// `npx wrangler deploy` after `npm run build`.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "multiroof-viewer",
+  "compatibility_date": "2026-08-01",
+  "assets": {
+    "directory": "./dist",
+    // The viewer is an SPA (share links live in the URL hash; there are no
+    // server routes): every non-asset path serves index.html.
+    "not_found_handling": "single-page-application",
+  },
+}
