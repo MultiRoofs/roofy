@@ -26,11 +26,67 @@ const addSource = vi.fn((_source: unknown) => ({
   type: "3d-tiles",
   delete: deleteSource,
 }));
-const defaultAddLayer = (_layer: unknown) => ({
-  id: "layer-1",
-  delete: deleteLayer,
-});
+/**
+ * One layer handle, as `view.addLayer` answers with.
+ *
+ * The id is MINTED PER CALL rather than shared. `geoLayerIdForEngineLayerId`
+ * maps an engine pick back to a store record by comparing `Layer.id`, so a
+ * mock that gave terrain, the basemap and a geo layer the same `"layer-1"`
+ * would resolve a basemap pick to the geo layer — and would invert the
+ * "unknown layer" test into a pass for the wrong reason.
+ *
+ * `update`/`forceUpdate`/`on` are the rest of the surface `geoLayerSync` uses:
+ * a re-describe, a re-evaluation pass, and the `featureCreated` subscription
+ * that carries the engine's per-material `FeatureEvaluator`.
+ */
+interface MockLayerHandle {
+  readonly id: string;
+  readonly config: unknown;
+  readonly update: ReturnType<typeof vi.fn>;
+  readonly forceUpdate: ReturnType<typeof vi.fn>;
+  readonly delete: ReturnType<typeof vi.fn>;
+  readonly on: ReturnType<typeof vi.fn>;
+  /** The callbacks `on` recorded, by event name — how a test plays the engine
+   *  and hands a layer its evaluator. */
+  readonly listeners: Map<string, Array<(params: never) => void>>;
+}
+/** Every handle minted so far, newest last. Cleared per suite alongside
+ *  `addLayer.mockClear()`. */
+const layerHandles: MockLayerHandle[] = [];
+let nextLayerNumber = 0;
+const defaultAddLayer = (layer: unknown): MockLayerHandle => {
+  nextLayerNumber += 1;
+  const listeners = new Map<string, Array<(params: never) => void>>();
+  const handle: MockLayerHandle = {
+    id: `layer-${nextLayerNumber}`,
+    config: layer,
+    update: vi.fn(),
+    forceUpdate: vi.fn(),
+    // The SHARED spy, deliberately: several suites count removals globally.
+    delete: deleteLayer,
+    on: vi.fn((name: string, cb: (params: never) => void) => {
+      const list = listeners.get(name) ?? [];
+      list.push(cb);
+      listeners.set(name, list);
+    }),
+    listeners,
+  };
+  layerHandles.push(handle);
+  return handle;
+};
 const addLayer = vi.fn(defaultAddLayer);
+
+/** The most recently minted handle for a layer description of this type — the
+ *  counterpart of {@link lastIndexOfType}, by handle rather than by call. */
+function lastHandleOfType(type: string): MockLayerHandle | undefined {
+  for (let i = layerHandles.length - 1; i >= 0; i--) {
+    const handle = layerHandles[i]!;
+    if ((handle.config as { type?: string } | undefined)?.type === type) {
+      return handle;
+    }
+  }
+  return undefined;
+}
 
 /**
  * Find a source/layer call BY TYPE rather than by call index.
@@ -202,6 +258,23 @@ vi.mock("@navaramap/three", () => ({
   // — the bloom behaviour itself is covered in `navaraViewportTheme.test.tsx`.
   EffectDesc: class {},
   Effect: class {},
+  // The engine's `Color`, which declares NO constructor parameters — the
+  // documented forms are `new Color().setHex(...)` / `.setStyle(...)`. The geo
+  // highlight passes instances of it into the engine's feature evaluators, so
+  // the mock only has to be constructible and chainable; `hex` is recorded so a
+  // test can assert WHICH colour a feature was given.
+  Color: class {
+    hex: number | undefined;
+    style: string | undefined;
+    setHex(hex: number) {
+      this.hex = hex;
+      return this;
+    }
+    setStyle(style: string) {
+      this.style = style;
+      return this;
+    }
+  },
   default: vi.fn(function (options: unknown) {
     viewOptions.push(options);
     const view = {
@@ -310,6 +383,7 @@ import {
 } from "../../../src/features/debug/renderDebugStore";
 import { useAtmosphereStore } from "../../../src/features/atmosphere/atmosphereStore";
 import { BASEMAPS } from "../../../src/scene/basemaps";
+import { GEO_HIGHLIGHT_COLOR_HEX } from "../../../src/scene/geoLayerSync";
 import { TERRAIN_ATTRIBUTION } from "../../../src/scene/terrain";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 // The licence text the attribution overlay must show whatever else is on
@@ -450,6 +524,7 @@ describe("NavaraViewport lifecycle", () => {
     flyTo.mockClear();
     addSource.mockClear();
     addLayer.mockClear();
+    layerHandles.length = 0;
     on.mockClear();
     off.mockClear();
     listeners.clear();
@@ -1344,12 +1419,22 @@ describe("NavaraViewport lifecycle", () => {
     expect(handles.a.setHighlight).toHaveBeenCalledTimes(1);
   });
 
-  it("never subscribes to the engine's pick event (PICK_PATH = own-raycast)", async () => {
+  it("never lets the engine's pick event commit a CITY selection", async () => {
     // `PickableMeshWrapper` carries one uniform batch id per MESH (Task B1), so
-    // a `pick` listener could only ever resolve a layer, not a surface — and it
-    // would fire alongside `click`, committing a second, coarser selection.
-    await mountTwoLayers({ a: null, b: null });
-    expect(on.mock.calls.some((c) => c[0] === "pick")).toBe(false);
+    // a pick could only ever resolve a layer, not a surface. The listener does
+    // exist now — geospatial layers are drawn BY the engine and have no other
+    // pick path (Task 12) — but it only stashes, and a stash that names no geo
+    // layer changes nothing about a city gesture.
+    await mountTwoLayers({ a: null, b: 12 });
+    act(() => {
+      fire("mousedown", mouse(10, 20));
+      fire("pick", { batchId: 4, properties: {}, layerId: "layer-1" });
+      fire("click", mouse(10, 20));
+    });
+    expect(useSelectionStore.getState().selections).toEqual([
+      { kind: "object", layerId: "b", objectId: "b-obj" },
+    ]);
+    expect(useSelectionStore.getState().geoSelection).toBeNull();
   });
 
   it("unsubscribes every pointer listener on unmount", async () => {
@@ -1403,6 +1488,7 @@ describe("NavaraViewport Google tiles", () => {
   beforeEach(() => {
     addSource.mockClear();
     addLayer.mockClear();
+    layerHandles.length = 0;
     deleteSource.mockClear();
     deleteLayer.mockClear();
     useTilesStore.setState({ enabled: true });
@@ -1600,6 +1686,7 @@ describe("NavaraViewport basemap", () => {
   beforeEach(() => {
     addSource.mockClear();
     addLayer.mockClear();
+    layerHandles.length = 0;
     deleteSource.mockClear();
     deleteLayer.mockClear();
     init.mockClear();
@@ -2250,19 +2337,39 @@ describe("NavaraViewport geospatial layers", () => {
   beforeEach(() => {
     addSource.mockClear();
     addLayer.mockClear();
+    layerHandles.length = 0;
     deleteSource.mockClear();
     deleteLayer.mockClear();
     listeners.clear();
+    on.mockClear();
+    off.mockClear();
     viewInstances.length = 0;
+    cityPluginInstance.addCityModel.mockReset();
+    cityPluginInstance.addCityModel.mockImplementation(
+      (_model: unknown, opts: { id: string }) => makeHandle(opts.id),
+    );
     // This suite owns `addSource`/`addLayer`: no backdrop of its own.
     useTilesStore.setState({ enabled: false });
     useLayerStore.setState({ layers: [], activeLayerId: null });
     useGeoLayerStore.setState({ layers: [] });
+    useSelectionStore.setState({
+      selections: [],
+      hovered: null,
+      geoSelection: null,
+      toolMode: "select",
+      mode: "object",
+    });
   });
 
   afterEach(() => {
     cleanup();
     useGeoLayerStore.setState({ layers: [] });
+    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useSelectionStore.setState({
+      selections: [],
+      hovered: null,
+      geoSelection: null,
+    });
     useTilesStore.setState({ enabled: true });
   });
 
@@ -2331,5 +2438,197 @@ describe("NavaraViewport geospatial layers", () => {
     // so the next mount rebuilds the pair from it.
     expect(deleteLayer).toHaveBeenCalledTimes(1);
     expect(useGeoLayerStore.getState().layers).toHaveLength(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Task 12: click-selecting a geo feature.
+  //
+  // Geo layers are drawn BY the engine, so their picks arrive through the
+  // engine's own `pick` event rather than the own-raycast path the city
+  // plugins use. The viewport stashes the pick and asks for it on the next
+  // `click`; the decisions themselves are `geoSelectionFromStash` (pure) and
+  // `geoLayerIdForEngineLayerId` (the live registry's lookup), both unit-tested
+  // elsewhere. What is checked here is the wiring.
+  // -------------------------------------------------------------------------
+
+  function addGeoJson(name = "parks"): string {
+    return useGeoLayerStore.getState().addGeoLayer({
+      name,
+      kind: "geojson",
+      config: { data: { type: "FeatureCollection", features: [] } },
+    });
+  }
+
+  /** Mount with one GeoJSON layer up, and answer with its store id plus the
+   *  engine layer handle the pair was built on. */
+  async function mountGeoJson(): Promise<{
+    geoLayerId: string;
+    handle: MockLayerHandle;
+    unmount: () => void;
+  }> {
+    const geoLayerId = addGeoJson();
+    const { unmount } = render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(countOfType(addLayer, "vector")).toBe(1));
+    return { geoLayerId, handle: lastHandleOfType("vector")!, unmount };
+  }
+
+  /** The gesture as the engine really delivers it: mousedown, then the pick
+   *  (emitted on a clean mouseup), then the DOM click. */
+  function pickThenClick(info: unknown, patch: Record<string, unknown> = {}) {
+    act(() => {
+      fire("mousedown", mouse(10, 20));
+      fire("pick", info);
+      fire("click", mouse(10, 20, patch));
+    });
+  }
+
+  it("subscribes the engine's pick event and unsubscribes it on teardown", async () => {
+    const { unmount } = await mountGeoJson();
+    const subscribed = on.mock.calls.filter((c) => c[0] === "pick");
+    // ONE handler, not one per layer edit: the hosting effect re-runs on every
+    // city-layer change, so a missing `off` would accumulate them.
+    expect(subscribed).toHaveLength(1);
+
+    unmount();
+
+    expect(off.mock.calls).toContainEqual(["pick", subscribed[0]![1]]);
+  });
+
+  it("selects the picked geo feature when the own-raycast misses", async () => {
+    const { geoLayerId, handle } = await mountGeoJson();
+
+    pickThenClick({
+      batchId: 7,
+      properties: { name: "Park" },
+      layerId: handle.id,
+    });
+
+    expect(useSelectionStore.getState().geoSelection).toEqual({
+      geoLayerId,
+      batchId: 7,
+      properties: { name: "Park" },
+    });
+  });
+
+  it("clears as before when the pick names a layer that is not the user's", async () => {
+    await mountGeoJson();
+    useSelectionStore.setState({
+      selections: [{ kind: "object", layerId: "a", objectId: "a-obj" }],
+    });
+    // The engine picks everything it DRAWS, the global terrain included.
+    const terrain = lastHandleOfType("terrain")!;
+
+    pickThenClick({ batchId: 3, properties: {}, layerId: terrain.id });
+
+    expect(useSelectionStore.getState().geoSelection).toBeNull();
+    expect(useSelectionStore.getState().selections).toEqual([]);
+  });
+
+  it("lets a city hit win over a geo pick on the same gesture", async () => {
+    useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
+    const { handle } = await mountGeoJson();
+    await waitFor(() =>
+      expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(1),
+    );
+    const cityHandle = cityPluginInstance.addCityModel.mock.results[0]!.value;
+    cityHandle.resolveRaycast.mockReturnValue({
+      objectIndex: 0,
+      surfaceIndex: 7,
+      distance: 12,
+    });
+
+    pickThenClick({
+      batchId: 7,
+      properties: { name: "Park" },
+      layerId: handle.id,
+    });
+
+    // The store's own invariant does the clearing; what matters here is that
+    // the geo arm was never reached.
+    expect(useSelectionStore.getState().selections).toEqual([
+      { kind: "object", layerId: "a", objectId: "a-obj" },
+    ]);
+    expect(useSelectionStore.getState().geoSelection).toBeNull();
+  });
+
+  it("consumes the stash, so the NEXT click clears rather than re-selects", async () => {
+    const { handle } = await mountGeoJson();
+    pickThenClick({ batchId: 7, properties: {}, layerId: handle.id });
+    expect(useSelectionStore.getState().geoSelection).not.toBeNull();
+
+    act(() => {
+      fire("mousedown", mouse(10, 20));
+      fire("click", mouse(10, 20));
+    });
+
+    expect(useSelectionStore.getState().geoSelection).toBeNull();
+  });
+
+  it("paints the picked feature through the layer's feature evaluator", async () => {
+    const { handle } = await mountGeoJson();
+    // The engine creates a feature set per material and hands its evaluator to
+    // the `featureCreated` subscription `geoLayerSync` installed on the pair.
+    const evaluate = vi.fn();
+    const created = handle.listeners.get("featureCreated") ?? [];
+    expect(created.length).toBeGreaterThan(0);
+    act(() => {
+      for (const cb of created) {
+        (cb as (p: unknown) => void)({
+          featureSetId: "fs-1",
+          evaluator: { evaluate },
+        });
+      }
+    });
+
+    pickThenClick({ batchId: 7, properties: {}, layerId: handle.id });
+
+    // The selection-store subscription is what drives this — nothing in the
+    // click path touches the engine directly.
+    await waitFor(() => expect(evaluate).toHaveBeenCalled());
+    expect(handle.forceUpdate).toHaveBeenCalled();
+    const evaluator = evaluate.mock.calls[0]![0] as (info: {
+      batchId: number;
+    }) => { color: { hex?: number } };
+    expect(evaluator({ batchId: 7 }).color.hex).toBe(GEO_HIGHLIGHT_COLOR_HEX);
+    // An omitted key would leave a previous override in place, so a feature
+    // that is NOT selected is told the layer's own colour explicitly.
+    expect(evaluator({ batchId: 8 }).color.hex).not.toBe(
+      GEO_HIGHLIGHT_COLOR_HEX,
+    );
+  });
+
+  it("re-highlights a pair REBUILT while the selection stood", async () => {
+    const { handle } = await mountGeoJson();
+    pickThenClick({ batchId: 7, properties: {}, layerId: handle.id });
+
+    // A new document replaces `config`, which rebuilds the pair — and a fresh
+    // pair starts with no highlight and no colour factory of its own.
+    act(() =>
+      useGeoLayerStore
+        .getState()
+        .relinkGeoJsonLayer(useGeoLayerStore.getState().layers[0]!.id, {
+          type: "FeatureCollection",
+          features: [],
+        }),
+    );
+    await waitFor(() => expect(countOfType(addLayer, "vector")).toBe(2));
+    const rebuilt = lastHandleOfType("vector")!;
+    expect(rebuilt).not.toBe(handle);
+
+    const evaluate = vi.fn();
+    act(() => {
+      for (const cb of rebuilt.listeners.get("featureCreated") ?? []) {
+        (cb as (p: unknown) => void)({
+          featureSetId: "fs-1",
+          evaluator: { evaluate },
+        });
+      }
+    });
+
+    expect(evaluate).toHaveBeenCalled();
+    const evaluator = evaluate.mock.calls[0]![0] as (info: {
+      batchId: number;
+    }) => { color: { hex?: number } };
+    expect(evaluator({ batchId: 7 }).color.hex).toBe(GEO_HIGHLIGHT_COLOR_HEX);
   });
 });
