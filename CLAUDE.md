@@ -30,7 +30,11 @@ src/
     roofMetrics/# aggregate.ts (the metric maths lives in navara-core)
   features/     # Zustand stores and feature hooks
     layers/     # Layer store (multi-layer, per-layer rules, LoD) + file loader
-    selection/  # Selection store
+    geoLayers/  # Geospatial (non-city) layers: geoLayerStore (GeoJSON /
+                #   raster-xyz / 3d-tiles records), geoLayerStyle (per-layer
+                #   colour, point size, line width, fill opacity — engine-free,
+                #   CSS hex), classifyGeoSource (what a URL/file is, no I/O)
+    selection/  # Selection store (city object/surface AND geo feature)
     solar/      # Solar position store
     rules/      # Rule presets + types.ts (re-export of core's rule schema)
     streaming/  # FCB streaming STORE + open wrapper + React hooks only —
@@ -53,7 +57,11 @@ src/
     handleSync.ts       # Zustand store -> plugin handle reconciliation
     navaraSession.ts    # Engine session/lifetime helpers
     geographicCamera.ts # {lng,lat,height,heading,pitch,roll} camera maths
-    pickEventHandlers.ts# Pointer routing (tool modes, drag gate, sky moves)
+    pickEventHandlers.ts# Pointer routing (tool modes, drag gate, sky moves,
+                        #   engine pick stash -> geo feature selection)
+    geoLayerDescriptions.ts # Store record -> engine source/layer descriptors
+    geoLayerSync.ts     # Geo store -> engine reconciliation + FeatureEvaluator
+                        #   highlight (the handleSync.ts of the geo side)
     cursorCrsReadout.ts # ECEF -> source CRS readout under the cursor
     googleTiles.ts      # Google Photorealistic 3D Tiles layer
     sunWriter.ts        # Solar state -> engine sun/atmosphere
@@ -65,8 +73,10 @@ src/
     toolbar/    # ViewerToolbar, SolarMenu (ALL sun UI — sliders, presets and
                 #   the altitude/azimuth readout, in one popover)
     inspector/  # InspectorPanel + tabs (Analysis, RuleBuilder, Stats)
-    layers/     # LayerPanel, AddLayerDialog, SourcePicker,
-                #   StreamingLodControl, GoogleTilesPanel
+    layers/     # LayerPanel (city + geospatial sections, each with its own
+                #   add button), AddLayerDialog, GeoLayerRow (visibility,
+                #   opacity, Style block), SourcePicker, StreamingLodControl,
+                #   GoogleTilesPanel
     stac/       # StacBrowser, CollectionCard, StacItemMap (maplibre-gl),
                 #   StacBrowserDialog
     table/      # TablePanel
@@ -102,6 +112,7 @@ docs/           # roadmap.md + superpowers/{specs,plans,research}
 - **Attribution is a licence obligation.** `src/ui/viewport/AttributionOverlay.tsx` renders `GEOID_ATTRIBUTION` from `@cityjson/navara-core` **unconditionally** (the geoid is sampled for every georeferenced layer): CC BY 4.0 Mapterhorn, ODbL OpenStreetMap, and the Re:Earth/NGA credit. Only the Google Tiles credit is conditional. Never drop or gate the geoid lines.
 - **The basemap catalogue is DATA, and stays engine-free.** `src/scene/basemaps.ts` is unit-tested under Node, where `@navaramap/three` cannot be imported at all, so an entry that needs an engine VALUE names it as a marker string and `NavaraViewport.addBasemap` — the engine-binding site — resolves it. The one such entry today is `elevation-heatmap`: a `raster-dem` source carrying `elevationDecoder: "terrarium"` (resolved to `TERRARIUM_ELEVATION_DECODER()`) plus an optional `layer` block (`elevationHeatmap`: min/max height, log ramp) that `addBasemap` merges into the `raster` layer descriptor. Its DEM is the same Re:Earth service the terrain mesh and the geoid already use, read as data rather than drawn as imagery; it renders on the engine's default (blue) ramp — see Known Issue (i) for why no colormap is written.
 - **Picking is our own raycast**: `PickStrategy = "own-raycast"` (`@cityjson/navara-cityjson/src/pickStrategy.ts`, `DEFAULT_PICK_STRATEGY`). Navara's `PickableMeshWrapper` carries one uniform batch id per mesh and cannot express per-surface ids, so the plugins raycast the engine's pick ray (`getPickRay`, ECEF) against their own geometry to resolve object **and** surface.
+- **Geospatial layers are the MIRROR IMAGE of city layers, on every axis.** They live in their own `geoLayerStore` (a geo layer has no `CityModel`, no LoD ladder, no rules, no surfaces), the ENGINE draws them, and the app owns no geometry for them — so each half of the app works the opposite way round from the city path. **Picking**: the engine's own `pick` pass is the only way to hit one, and it carries a per-feature `batchId` — exactly the granularity the city path could never get out of it (see the raycast bullet above). `NavaraViewport` therefore subscribes `pick` but only ever STASHES the result: `pick` carries no gesture and fires for terrain and basemap tiles too, so the following `click` decides, against the live geo registry, and **a city hit always wins** (our raycast is exact geometry at the exact pixel; the engine's pick is a colour read that also answers for the ground under it). Known, accepted asymmetry: the engine skips its pick pass on ANY mousemove between down and up (zero tolerance) while `createClickGate` allows `CLICK_DRAG_TOLERANCE_PX`, so a 1 px jitter still selects a city object but CLEARS a geo one — that threshold is the engine's and 0.0.5 exposes no way to widen it. **Styling**: per layer, not per rule — colour, point size (PIXELS, `sizeInMeters: false`; Navara's `PointMaterial` defaults it to true, which turns a POI into a blot or a speck depending on altitude), line width and fill opacity, normalised through the one total door in `features/geoLayers/geoLayerStyle.ts` and converted to the engine's `0xRRGGBB` only at the description boundary. The style is theme-AGNOSTIC on purpose: a geo layer is drawn on the globe over imagery whose brightness has nothing to do with the chrome. It persists in the snapshot (v3) alongside `visible`/`opacity`. **Highlight**: a selected feature is recoloured through the engine's `FeatureEvaluator` on that layer, one evaluator per feature set — and clearing means returning the layer's own colour EXPLICITLY, because an omitted key does not reset a previous override. **Reconciliation** (`geoLayerSync.ts`): `Layer.update()` REPLACES the whole description, so a visibility/opacity/style change re-sends a description rebuilt from scratch, never a patch; a `config` change is an honest rebuild of the source/layer pair; and the layer is always deleted before its source, which is reference-counted. An add the engine refuses is `console.error`'d and left absent so the next pass retries — one bad URL must not take the viewport down. **UI**: the Add Layer dialog opens on the **Geospatial** tab by default (`initialTab ?? "geo"`), the layer panel has a city section and a geospatial section each with its own add button, the Rules tab names and lets you pick its target CITY layer (rules never apply to geo layers), the legend groups its entries by layer, and the attribute overlay has a geo mode that shows the picked feature's GeoJSON `properties`. Browser-verified 2026-08-10 end to end (drape, pick, recolour, style edit, city-wins, save/restore).
 - **Engine-binding isolation**: `@navaramap/*` imports live **only** in named engine-binding modules — `navara-cityjson/src/{CityJSONPlugin,CityModelMeshDesc,CityMeshArraysDesc,plugin}.ts` and `navara-flatcitybuf/src/{FlatCityBufPlugin,engineRays,plugin}.ts`. Everything else takes descriptors, pick rays and mesh factories as injected seams. This is structural, not stylistic: `NODE_IMPORT_SAFE=false` — importing `@navaramap/three` under Node crashes at module scope. Plugin tests import the specific engine-free module, never the package barrel. The engine-bound entry points are the `/plugin` subpath exports, kept out of the main barrels.
 - **One lighting calibration: the physical atmosphere, at exposure 10.** `NavaraViewport` puts the aerial-perspective pass into irradiance mode right after `addDefaultPhotorealScene()` (`enableAtmosphericLighting`), so the atmosphere's own sun+sky irradiance shades the g-buffer **albedo**. Every city surface therefore reaches that pass as **unlit albedo** — both mesh classes in `navara-cityjson` use `MeshBasicMaterial({ vertexColors: true })`, not a lit material — and the app adds **no** scene lights of its own (the old ambient fill and its slider are gone). Mixing the two calibrations (lit materials under `SunLightDesc` + `skyLightProbe`, then this pass, at exposure 10) is what clipped the scene to white. The default basemap is Esri World Imagery for the same reason: OSM's near-white sheet reads as blown paper here. The pass runs with `useNormalBuffer: true`, which **depends on the terrain layer** for its normals — see Known Issue (e). See `docs/superpowers/research/2026-08-04-overbright-scene-diagnosis.md` and Known Issues.
 - **Attributes are INHERITED for display.** CityJSON splits a building in two: the `Building` carries the semantics and no geometry, the `BuildingPart` carries the geometry and no attributes (measured on the Delft sample: 66 Buildings all with attributes, 66 BuildingParts all without). Picking is geometric, so a click always lands on the part — reading attributes off the picked object alone showed "No attributes" for every building in the dataset. `src/domain/citymodel/inheritedAttributes.ts` fills the gaps from the nearest ancestor (own values win, cycle-safe) and names the source so the UI can say where a value came from. Presentation ONLY: the parsed model, rules, DuckDB and the table still read the real thing. Used by the attribute overlay and the inspector, on both the static and streaming paths — a FlatCityBuf `ResidentObjectRecord` splits the same way, hence the structural `AttributeCarrier` parameter.
@@ -196,3 +207,4 @@ See `docs/roadmap.md` for full milestone tracking. Current state:
 - M7.1 (CityGML parser — buildings): Complete
 - **Milestone 8 (Navara engine migration): complete through its internal phases M7.1–M7.7, pending final review.** That phase numbering belongs to `docs/superpowers/plans/2026-08-01-navara-migration.md` and is unrelated to Milestone 7 (CityGML).
 - Milestone 9 (CityParquet loading): Complete
+- Milestone 10 (GIS layers — per-layer styling, feature selection, attributes): Complete
