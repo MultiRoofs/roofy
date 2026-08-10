@@ -1784,6 +1784,23 @@ body {
   margin-bottom: 0.35rem;
 }
 
+/* One block per layer. The gap separates the groups; the first one sits
+   directly under the card title, so only later siblings get top spacing. */
+.legend-group + .legend-group {
+  margin-top: 0.4rem;
+}
+
+.legend-group-name {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--fg);
+  margin-bottom: 0.15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12rem;
+}
+
 .legend-item {
   display: flex;
   align-items: center;
