@@ -207,7 +207,9 @@ describe("ViewerToolbar solar cluster", () => {
     );
     // Sun-up state travels with the label onto the same button.
     expect(trigger.querySelector(".solar-scrubber-dot.is-up")).not.toBeNull();
-    expect(trigger.getAttribute("title")).toBe("Sun 42.0° above horizon");
+    expect(trigger.getAttribute("data-tooltip")).toBe(
+      "Sun 42.0° above horizon",
+    );
   });
 
   it("says below-horizon in the trigger tooltip when the sun has set", () => {
@@ -217,7 +219,7 @@ describe("ViewerToolbar solar cluster", () => {
     });
     const { container } = render(<ViewerToolbar {...baseProps} />);
     const trigger = screen.getByLabelText("Sun position");
-    expect(trigger.getAttribute("title")).toBe("Sun 8.4° below horizon");
+    expect(trigger.getAttribute("data-tooltip")).toBe("Sun 8.4° below horizon");
     expect(container.querySelector(".solar-scrubber-dot.is-up")).toBeNull();
   });
 
@@ -228,6 +230,6 @@ describe("ViewerToolbar solar cluster", () => {
     expect(trigger.querySelector(".sun-trigger-label")?.textContent).toBe(
       EXPECTED_TRIGGER_LABEL,
     );
-    expect(trigger.getAttribute("title")).toBe("Sun position");
+    expect(trigger.getAttribute("data-tooltip")).toBe("Sun position");
   });
 });

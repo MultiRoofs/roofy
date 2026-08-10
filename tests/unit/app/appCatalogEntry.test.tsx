@@ -241,7 +241,7 @@ describe("App landing page — catalog entry point", () => {
     );
 
     await act(async () => {
-      fireEvent.click(screen.getByTitle("Remove layer"));
+      fireEvent.click(screen.getByRole("button", { name: "Remove layer" }));
     });
 
     expect(
@@ -271,7 +271,7 @@ describe("App landing page — catalog entry point", () => {
     // "Close file" in the toolbar — the seam that hands the user back to the
     // landing page.
     await act(async () => {
-      fireEvent.click(screen.getByTitle("Close file"));
+      fireEvent.click(screen.getByRole("button", { name: "Close file" }));
     });
 
     expect(

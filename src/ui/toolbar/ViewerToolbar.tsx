@@ -74,7 +74,8 @@ export function ViewerToolbar({
       {/* Left sidebar toggle */}
       <button
         className="tb-btn"
-        title="Toggle layers panel"
+        aria-label="Toggle layers panel"
+        data-tooltip="Toggle layers panel"
         onClick={onToggleLeftSidebar}
       >
         <svg viewBox="0 0 24 24">
@@ -89,7 +90,8 @@ export function ViewerToolbar({
       <div className="toolbar-btn-group">
         <button
           className={`tb-btn ${pickMode === "object" && toolMode === "select" ? "tb-btn-active" : ""}`}
-          title="Select objects (V)"
+          aria-label="Select objects (V)"
+          data-tooltip="Select objects (V)"
           aria-pressed={pickMode === "object" && toolMode === "select"}
           onClick={() => {
             onSetPickMode("object");
@@ -102,7 +104,8 @@ export function ViewerToolbar({
         </button>
         <button
           className={`tb-btn ${pickMode === "surface" && toolMode === "select" ? "tb-btn-active" : ""}`}
-          title="Select surfaces (S)"
+          aria-label="Select surfaces (S)"
+          data-tooltip="Select surfaces (S)"
           aria-pressed={pickMode === "surface" && toolMode === "select"}
           onClick={() => {
             onSetPickMode("surface");
@@ -120,7 +123,8 @@ export function ViewerToolbar({
         {/* Box select — DEAD under NavaraViewport (see NAVARA_DEAD_TOOL_TITLE). */}
         <button
           className={`tb-btn ${toolMode === "box-select" ? "tb-btn-active" : ""}`}
-          title={`Box select — ${NAVARA_DEAD_TOOL_TITLE}`}
+          aria-label={`Box select — ${NAVARA_DEAD_TOOL_TITLE}`}
+          data-tooltip={`Box select — ${NAVARA_DEAD_TOOL_TITLE}`}
           aria-pressed={toolMode === "box-select"}
           disabled
           onClick={() => onSetToolMode("box-select")}
@@ -141,7 +145,8 @@ export function ViewerToolbar({
         {/* Measure — DEAD under NavaraViewport (see NAVARA_DEAD_TOOL_TITLE). */}
         <button
           className={`tb-btn ${toolMode === "measure" ? "tb-btn-active" : ""}`}
-          title={`Measure distance — ${NAVARA_DEAD_TOOL_TITLE}`}
+          aria-label={`Measure distance — ${NAVARA_DEAD_TOOL_TITLE}`}
+          data-tooltip={`Measure distance — ${NAVARA_DEAD_TOOL_TITLE}`}
           aria-pressed={toolMode === "measure"}
           disabled
           onClick={() => onSetToolMode("measure")}
@@ -156,7 +161,12 @@ export function ViewerToolbar({
       </div>
 
       {/* Fit all */}
-      <button className="tb-btn" title="Zoom to fit (F)" onClick={onFitAll}>
+      <button
+        className="tb-btn"
+        aria-label="Zoom to fit (F)"
+        data-tooltip="Zoom to fit (F)"
+        onClick={onFitAll}
+      >
         <svg viewBox="0 0 24 24">
           <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3M3 16v3a2 2 0 002 2h3m8 0h3a2 2 0 002-2v-3" />
         </svg>
@@ -183,7 +193,9 @@ export function ViewerToolbar({
       {onToggleAdvancedSettings && (
         <button
           className={`tb-btn ${advancedSettingsOpen ? "tb-btn-active" : ""}`}
-          title="Rendering settings"
+          aria-label="Rendering settings"
+          data-tooltip="Rendering settings"
+          data-tooltip-align="end"
           onClick={onToggleAdvancedSettings}
         >
           <svg viewBox="0 0 24 24">
@@ -195,7 +207,9 @@ export function ViewerToolbar({
 
       <button
         className="theme-toggle-btn"
-        title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+        aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+        data-tooltip={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+        data-tooltip-align="end"
         onClick={onToggleTheme}
       >
         {theme === "dark" ? (
@@ -236,7 +250,13 @@ export function ViewerToolbar({
       </button>
 
       {onSave && (
-        <button className="tb-btn" title="Save workspace" onClick={onSave}>
+        <button
+          className="tb-btn"
+          aria-label="Save workspace"
+          data-tooltip="Save workspace"
+          data-tooltip-align="end"
+          onClick={onSave}
+        >
           <svg viewBox="0 0 24 24">
             <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
             <path d="M17 21v-8H7v8M7 3v5h8" />
@@ -244,7 +264,13 @@ export function ViewerToolbar({
         </button>
       )}
       {onShare && canShare && (
-        <button className="tb-btn" title="Copy share link" onClick={onShare}>
+        <button
+          className="tb-btn"
+          aria-label="Copy share link"
+          data-tooltip="Copy share link"
+          data-tooltip-align="end"
+          onClick={onShare}
+        >
           <svg viewBox="0 0 24 24">
             <path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8" />
             <polyline points="16 6 12 2 8 6" />
@@ -254,7 +280,9 @@ export function ViewerToolbar({
       )}
       <button
         className="tb-btn"
-        title="Toggle inspector"
+        aria-label="Toggle inspector"
+        data-tooltip="Toggle inspector"
+        data-tooltip-align="end"
         onClick={onToggleInspector}
       >
         <svg viewBox="0 0 24 24">
@@ -262,7 +290,13 @@ export function ViewerToolbar({
           <path d="M15 3v18" />
         </svg>
       </button>
-      <button className="tb-btn" title="Close file" onClick={onClose}>
+      <button
+        className="tb-btn"
+        aria-label="Close file"
+        data-tooltip="Close file"
+        data-tooltip-align="end"
+        onClick={onClose}
+      >
         <svg viewBox="0 0 24 24">
           <path d="M18 6L6 18M6 6l12 12" />
         </svg>

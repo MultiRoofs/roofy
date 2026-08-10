@@ -37,12 +37,18 @@ const baseProps = {
   onToggleTheme: () => undefined,
 };
 
-/** The one button whose `title` starts with `prefix`. */
-function buttonByTitlePrefix(prefix: string): HTMLButtonElement {
+/**
+ * The one button whose tooltip starts with `prefix`.
+ *
+ * `data-tooltip`, not `title`: the toolbar's icon buttons carry the app's own
+ * CSS bubble now (a native tip took ~1s to appear), and `title` is gone from
+ * every one of them so the two can never both draw.
+ */
+function buttonByTooltipPrefix(prefix: string): HTMLButtonElement {
   const match = screen
     .getAllByRole("button")
-    .find((b) => (b.getAttribute("title") ?? "").startsWith(prefix));
-  if (!match) throw new Error(`no button titled ${prefix}…`);
+    .find((b) => (b.getAttribute("data-tooltip") ?? "").startsWith(prefix));
+  if (!match) throw new Error(`no button tooltipped ${prefix}…`);
   return match as HTMLButtonElement;
 }
 
@@ -53,24 +59,30 @@ describe("ViewerToolbar — tools with no Navara implementation", () => {
   ] as const) {
     it(`disables ${name} and says why in the tooltip`, () => {
       render(<ViewerToolbar {...baseProps} />);
-      const btn = buttonByTitlePrefix(prefix);
+      const btn = buttonByTooltipPrefix(prefix);
       expect(btn.disabled).toBe(true);
-      expect(btn.getAttribute("title")).toContain(
+      expect(btn.getAttribute("data-tooltip")).toContain(
         "temporarily unavailable during the Navara migration",
       );
+      // The tooltip is not the accessible name — `aria-label` is, and it must
+      // survive the `title` removal or the button becomes anonymous.
+      expect(btn.getAttribute("aria-label")).toContain(
+        "temporarily unavailable during the Navara migration",
+      );
+      expect(btn.getAttribute("title")).toBeNull();
     });
 
     it(`never dispatches a tool mode from the ${name} button`, () => {
       const onSetToolMode = vi.fn();
       render(<ViewerToolbar {...baseProps} onSetToolMode={onSetToolMode} />);
-      fireEvent.click(buttonByTitlePrefix(prefix));
+      fireEvent.click(buttonByTooltipPrefix(prefix));
       expect(onSetToolMode).not.toHaveBeenCalled();
     });
   }
 
   it("box select stays disabled in surface pick mode too (it is not mode-gated any more)", () => {
     render(<ViewerToolbar {...baseProps} pickMode="surface" />);
-    expect(buttonByTitlePrefix("Box select").disabled).toBe(true);
+    expect(buttonByTooltipPrefix("Box select").disabled).toBe(true);
   });
 
   it("no longer carries the place search, which is a scene overlay now", () => {
@@ -88,7 +100,7 @@ describe("ViewerToolbar — tools with no Navara implementation", () => {
         onSetToolMode={onSetToolMode}
       />,
     );
-    const surface = buttonByTitlePrefix("Select surfaces");
+    const surface = buttonByTooltipPrefix("Select surfaces");
     expect(surface.disabled).toBe(false);
     fireEvent.click(surface);
     expect(onSetPickMode).toHaveBeenCalledWith("surface");

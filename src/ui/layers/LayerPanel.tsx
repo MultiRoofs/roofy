@@ -92,7 +92,10 @@ export function LayerPanel({
           >
             <button
               className="layer-vis-btn"
-              title={layer.visible ? "Hide layer" : "Show layer"}
+              aria-label={layer.visible ? "Hide layer" : "Show layer"}
+              data-tooltip={layer.visible ? "Hide layer" : "Show layer"}
+              data-tooltip-pos="top"
+              data-tooltip-align="start"
               onClick={(e) => {
                 e.stopPropagation();
                 updateLayer(layer.id, { visible: !layer.visible });
@@ -174,7 +177,10 @@ export function LayerPanel({
               {onFlyToLayer && (
                 <button
                   className="rule-action-btn"
-                  title="Zoom to layer"
+                  aria-label="Zoom to layer"
+                  data-tooltip="Zoom to layer"
+                  data-tooltip-pos="top"
+                  data-tooltip-align="end"
                   onClick={(e) => {
                     e.stopPropagation();
                     onFlyToLayer(layer.id);
@@ -209,7 +215,10 @@ export function LayerPanel({
               )}
               <button
                 className="rule-action-btn"
-                title="Remove layer"
+                aria-label="Remove layer"
+                data-tooltip="Remove layer"
+                data-tooltip-pos="top"
+                data-tooltip-align="end"
                 onClick={(e) => {
                   e.stopPropagation();
                   // Before the store entry goes: the stream is only reachable

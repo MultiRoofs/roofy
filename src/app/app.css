@@ -771,6 +771,110 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   HOVER TOOLTIPS — icon-only buttons
+   ═══════════════════════════════════════════════════════════════
+
+   A native `title` takes ~1s to appear and is easy to miss, which on a
+   toolbar of unlabelled glyphs means the labels effectively do not exist.
+   This is the replacement: one CSS-only bubble, no dependency and no JS
+   portal, driven by `data-tooltip` on the trigger itself.
+
+   THREE RULES for every site that uses it:
+
+   1. `data-tooltip` REPLACES `title` — never both, or the browser draws the
+      native tip on top of this one.
+   2. The trigger MUST also carry an `aria-label`. This is structural, not
+      politeness: `content: attr(data-tooltip)` participates in the
+      accessible-name computation (accname step 2F), so without an
+      `aria-label` to take precedence the bubble text becomes the button's
+      name — which is fine when they agree and wrong the moment they do not
+      (the sun trigger's tip is a live altitude readout). The `title` this
+      pattern removes was the accessible name before; `aria-label` is what
+      keeps it.
+   3. Placement is the caller's problem, because the bubble is a normal
+      absolutely-positioned box and IS clipped by an ancestor's overflow.
+      `data-tooltip-pos="top"` flips it above the trigger (default: below,
+      which is what the top-edge toolbar wants); `data-tooltip-align`
+      pins the bubble's start or end edge to the trigger's instead of
+      centring it, which is how a 240px sidebar row and the toolbar's
+      right cluster stay inside their container rather than provoking a
+      horizontal scrollbar.
+
+   The palette is tokens only — no `[data-theme="light"]` override is needed
+   or wanted, unlike `.pick-tooltip`'s translucent-dark look. */
+
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 200;
+  top: calc(100% + 0.35rem);
+  left: 50%;
+  transform: translateX(-50%);
+  /* `max-content` up to a cap, NOT `nowrap`: the disabled tools carry a whole
+     sentence ("Box select — temporarily unavailable during the Navara
+     migration") that would otherwise be one 400px line. */
+  width: max-content;
+  max-width: 16rem;
+  padding: 0.3rem 0.5rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
+  color: var(--fg);
+  font-size: 0.7rem;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: normal;
+  text-align: center;
+  text-transform: none;
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  /* Never captures the cursor — a bubble under the pointer would flicker
+     against its own `:hover`. */
+  pointer-events: none;
+  transition:
+    opacity 0.1s,
+    visibility 0.1s;
+}
+
+/* Delay on APPEAR only (the base rule's delay is 0), so sweeping across a
+   button group does not strobe, but leaving one hides it at once. */
+[data-tooltip]:hover::after,
+[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 300ms;
+}
+
+[data-tooltip][data-tooltip-pos="top"]::after {
+  top: auto;
+  bottom: calc(100% + 0.35rem);
+}
+
+[data-tooltip][data-tooltip-align="start"]::after {
+  left: 0;
+  right: auto;
+  transform: none;
+}
+
+[data-tooltip][data-tooltip-align="end"]::after {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+/* The solar popover opens exactly where this trigger's tooltip would sit, so
+   the tip stands down while the panel it describes is open. */
+.sun-trigger[aria-expanded="true"]::after {
+  content: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════
    ADVANCED SETTINGS PANEL
    ═══════════════════════════════════════════════════════════════ */
 

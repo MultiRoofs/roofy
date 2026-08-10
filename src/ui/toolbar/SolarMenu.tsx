@@ -143,7 +143,7 @@ export function SolarMenu() {
         aria-label="Sun position"
         aria-expanded={open}
         aria-haspopup="dialog"
-        title={
+        data-tooltip={
           sunPosition
             ? // Magnitude, not the signed value: "-8.4° below horizon" states
               // the sign twice.
