@@ -71,7 +71,30 @@ export function ViewerToolbar({
 }: ViewerToolbarProps) {
   return (
     <header className="toolbar">
-      <span className="toolbar-brand">Urbis</span>
+      {/* The brand lockup from `public/brand/README.md`, verbatim: the mark's
+          two strokes take --urbis-ink / --urbis-accent from brand.css, which
+          re-points both under [data-theme="light"], so the logo follows the
+          theme toggle with no JS. The SVG is decorative — the wordmark beside
+          it is the accessible name. */}
+      <span className="urbis-lockup">
+        <svg className="urbis-mark" viewBox="0 0 48 48" aria-hidden="true">
+          <path
+            className="urbis-mark-u"
+            d="M14 12 V25 a10 10 0 0 0 20 0 V16"
+            fill="none"
+            strokeWidth="9"
+            strokeLinecap="round"
+          />
+          <path
+            className="urbis-mark-pitch"
+            d="M34 16 L41 9"
+            fill="none"
+            strokeWidth="9"
+            strokeLinecap="round"
+          />
+        </svg>
+        <span className="urbis-wordmark">Urbis</span>
+      </span>
 
       {/* Left sidebar toggle */}
       <button

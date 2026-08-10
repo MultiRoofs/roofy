@@ -185,6 +185,21 @@ body {
   color: var(--accent-text);
 }
 
+/* The hero wears the toolbar's lockup one size up: a 28px mark (vs 20px in the
+   toolbar) with the wordmark scaled by the same 1.4x. `text-transform` is the
+   one `.eyebrow` property that reaches the wordmark — it sets its own weight,
+   tracking and colour but not transform — and the brand kit forbids
+   re-spacing or re-weighting the wordmark, so the inherited uppercase is
+   turned off here rather than shipped as "URBIS". */
+.hero .eyebrow .urbis-lockup {
+  --urbis-mark-size: 28px;
+}
+
+.hero .eyebrow .urbis-wordmark {
+  font-size: 1.1rem;
+  text-transform: none;
+}
+
 .hero h1 {
   margin: 0;
   max-width: 16ch;
@@ -577,13 +592,8 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-.toolbar-brand {
-  font-weight: 700;
-  font-size: 0.82rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--fg-label);
-}
+/* `.toolbar-brand` (the uppercase "URBIS" text label) is gone — the toolbar now
+   renders the `.urbis-lockup` from brand.css, which carries its own type. */
 
 .toolbar-sep {
   width: 1px;

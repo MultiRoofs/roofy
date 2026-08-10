@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./app.css";
+import "./brand.css";
 import { detectEncoding } from "../domain/citymodel/detectEncoding";
 import {
   loadFromUrl,
@@ -1392,7 +1393,30 @@ export function App({
       </div>
 
       <div className="hero">
-        <p className="eyebrow">Urbis</p>
+        {/* The same lockup the toolbar wears, one size up — see the LANDING
+            section of app.css for the `--urbis-mark-size` override. The
+            `.eyebrow` wrapper stays so the hero's grid rhythm is unchanged. */}
+        <p className="eyebrow">
+          <span className="urbis-lockup">
+            <svg className="urbis-mark" viewBox="0 0 48 48" aria-hidden="true">
+              <path
+                className="urbis-mark-u"
+                d="M14 12 V25 a10 10 0 0 0 20 0 V16"
+                fill="none"
+                strokeWidth="9"
+                strokeLinecap="round"
+              />
+              <path
+                className="urbis-mark-pitch"
+                d="M34 16 L41 9"
+                fill="none"
+                strokeWidth="9"
+                strokeLinecap="round"
+              />
+            </svg>
+            <span className="urbis-wordmark">Urbis</span>
+          </span>
+        </p>
         <h1>Your city, in 3D.</h1>
         <p className="summary">
           Drop a city model or pick one from the open catalog.
