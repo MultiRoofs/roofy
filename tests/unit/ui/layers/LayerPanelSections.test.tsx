@@ -25,7 +25,7 @@ import type { CityModel } from "../../../../src/domain/citymodel/types";
 afterEach(() => {
   cleanup();
   useLayerStore.setState({ layers: [], activeLayerId: null });
-  useGeoLayerStore.setState({ layers: [] });
+  useGeoLayerStore.setState({ layers: [], activeGeoLayerId: null });
 });
 
 const noop = () => {};

@@ -152,6 +152,11 @@ export function isGeoLayerUnavailable(layer: GeoLayer): boolean {
 
 export interface GeoLayerState {
   readonly layers: readonly GeoLayer[];
+  /** The layer whose config the inspector shows — the geo mirror of
+   *  `layerStore.activeLayerId`, in its own store like everything else geo.
+   *  Null is a real state (nothing selected → the inspector shows the city
+   *  view); NOT persisted, matching the city side. */
+  readonly activeGeoLayerId: string | null;
 }
 
 export interface GeoLayerActions {
@@ -159,6 +164,7 @@ export interface GeoLayerActions {
   addGeoLayer: (input: GeoLayerInput) => string;
   removeGeoLayer: (id: string) => void;
   removeAllGeoLayers: () => void;
+  setActiveGeoLayer: (id: string | null) => void;
   updateGeoLayer: (id: string, patch: GeoLayerPatch) => void;
   /**
    * Give a GeoJSON layer a freshly read document — the re-link path for a row
@@ -194,6 +200,7 @@ function replaceLayer(
 
 export const useGeoLayerStore = create<GeoLayerStore>((set) => ({
   layers: [],
+  activeGeoLayerId: null,
 
   addGeoLayer: (input) => {
     const id = crypto.randomUUID();
@@ -225,12 +232,22 @@ export const useGeoLayerStore = create<GeoLayerStore>((set) => ({
   removeGeoLayer: (id) =>
     set((state) =>
       state.layers.some((l) => l.id === id)
-        ? { layers: state.layers.filter((l) => l.id !== id) }
+        ? {
+            layers: state.layers.filter((l) => l.id !== id),
+            activeGeoLayerId:
+              state.activeGeoLayerId === id ? null : state.activeGeoLayerId,
+          }
         : state,
     ),
 
   removeAllGeoLayers: () =>
-    set((state) => (state.layers.length === 0 ? state : { layers: [] })),
+    set((state) =>
+      state.layers.length === 0 && state.activeGeoLayerId === null
+        ? state
+        : { layers: [], activeGeoLayerId: null },
+    ),
+
+  setActiveGeoLayer: (id) => set({ activeGeoLayerId: id }),
 
   updateGeoLayer: (id, patch) =>
     set((state) => ({
