@@ -2542,10 +2542,10 @@ body {
   line-height: 1.4;
 }
 
-/* Not clickable as a whole, unlike a city-model row: there is no "active"
-   geospatial layer for the inspector to follow. */
+/* Clickable like a city-model row: the inspector follows the active
+   geospatial layer (geoLayerStore.activeGeoLayerId). */
 .geo-layer-item {
-  cursor: default;
+  cursor: pointer;
 }
 
 .layer-badge-geo {

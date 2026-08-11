@@ -380,6 +380,30 @@ describe("LayerPanel — zoom to a geospatial layer", () => {
   });
 });
 
+describe("LayerPanel — selecting a geospatial layer", () => {
+  it("activates the layer on row click and marks the row", () => {
+    const id = addGeoJson();
+    renderPanel();
+
+    fireEvent.click(geoRows()[0]!);
+
+    expect(geoStore().activeGeoLayerId).toBe(id);
+    expect(geoRows()[0]!.className).toContain("layer-active");
+  });
+
+  it("clicking a city row hands the selection back to the city side", () => {
+    addCityLayer("Delft");
+    const id = addGeoJson();
+    renderPanel();
+
+    fireEvent.click(geoRows()[0]!);
+    expect(geoStore().activeGeoLayerId).toBe(id);
+
+    fireEvent.click(screen.getByText("Delft"));
+    expect(geoStore().activeGeoLayerId).toBeNull();
+  });
+});
+
 describe("LayerPanel — a restored GeoJSON layer whose file is gone", () => {
   it("says the file is needed and offers to re-link it", () => {
     geoStore().addGeoLayer({ name: "parcels", kind: "geojson", config: {} });

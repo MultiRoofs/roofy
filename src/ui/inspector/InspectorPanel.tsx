@@ -21,6 +21,7 @@ import type {
 import type { Selection } from "../../domain/selection/types";
 import { SURFACE_COLOR_HEX, computeFootprintArea } from "@cityjson/navara-core";
 import { useLayerStore } from "../../features/layers/layerStore";
+import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
 import { resolveInheritedAttributes } from "../../domain/citymodel/inheritedAttributes";
 import { useStreamStore } from "../../features/streaming/streamStore";
 import { getResidentModel } from "../../features/streaming/residentModel";
@@ -31,6 +32,7 @@ import {
 } from "../../features/streaming/useResidentSurfaces";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { AnalysisTab } from "./AnalysisTab";
+import { GeoLayerInspector } from "./GeoLayerInspector";
 import { RuleBuilderTab } from "./RuleBuilderTab";
 import { StatsTab } from "./StatsTab";
 import {
@@ -129,6 +131,16 @@ export function InspectorPanel({
 
   const layers = useLayerStore((s) => s.layers);
   const activeLayerId = useLayerStore((s) => s.activeLayerId);
+
+  // Subscribed unconditionally, alongside the other store reads, and branched
+  // on only in the returned JSX: every hook below this point must keep running
+  // in the same order whether a geo layer is active or not. The active id is
+  // resolved through the list rather than trusted on its own, so an id left
+  // behind by a removed layer reads as "nothing active".
+  const geoLayers = useGeoLayerStore((s) => s.layers);
+  const activeGeoLayerId = useGeoLayerStore((s) => s.activeGeoLayerId);
+  const activeGeoLayer =
+    geoLayers.find((l) => l.id === activeGeoLayerId) ?? null;
 
   const selection = selections.length > 0 ? selections[0]! : null;
   const isMultiSelect = selections.length > 1;
@@ -273,108 +285,124 @@ export function InspectorPanel({
         </button>
       </div>
 
-      <div className="inspector-tabs">
-        <button
-          className={`inspector-tab ${activeTab === "object" ? "active" : ""}`}
-          onClick={() => setActiveTab("object")}
-        >
-          Object
-        </button>
-        <button
-          className={`inspector-tab ${activeTab === "surfaces" ? "active" : ""}`}
-          onClick={() => setActiveTab("surfaces")}
-        >
-          Surfaces
-        </button>
-        <button
-          className={`inspector-tab ${activeTab === "analysis" ? "active" : ""}`}
-          onClick={() => setActiveTab("analysis")}
-        >
-          Analysis
-        </button>
-        <button
-          className={`inspector-tab ${activeTab === "rules" ? "active" : ""}`}
-          onClick={() => setActiveTab("rules")}
-        >
-          Rules
-        </button>
-        <button
-          className={`inspector-tab ${activeTab === "stats" ? "active" : ""}`}
-          onClick={() => setActiveTab("stats")}
-        >
-          Stats
-        </button>
-      </div>
-      <div className="inspector-body">
-        <ErrorBoundary fallback="inline" key={activeTab}>
-          {activeTab === "rules" ? (
-            ruleTargetLayer ? (
-              <RuleBuilderTab
-                model={ruleTargetLayer.model}
-                layerId={ruleTargetLayer.id}
-                layerOptions={layers.map((l) => ({ id: l.id, name: l.name }))}
-                onSelectLayer={setRuleTargetOverride}
-              />
-            ) : (
-              <div className="inspector-placeholder">No layer selected</div>
-            )
-          ) : activeTab === "stats" ? (
-            model ? (
-              <StatsTab
-                model={model}
-                selection={selection}
-                duckdbModelLoaded={duckdbModelLoaded}
-              />
-            ) : (
-              <div className="inspector-placeholder">No layer selected</div>
-            )
-          ) : selectedObjectsData.length === 0 ? (
-            <div className="inspector-placeholder">
-              Select an object to inspect
-            </div>
-          ) : isMultiSelect ? (
-            <MultiSelectView
-              data={selectedObjectsData}
-              activeTab={activeTab}
-              surfaceBreakdown={multiSelectSurfaceBreakdown}
-            />
-          ) : activeTab === "object" ? (
-            <ObjectTab data={selectedObjectsData[0]!} />
-          ) : activeTab === "surfaces" ? (
-            isStreaming ? (
-              <SurfacesFetchGate
-                fetch={surfacesFetch}
-                render={(surfaces) => (
+      {/* A geo layer replaces the whole city view: it has no objects, no
+          surfaces and no rules, so there is nothing for the tab strip to tab
+          between. Only the RENDER branches — every hook above ran already. */}
+      {activeGeoLayer ? (
+        <div className="inspector-body">
+          <ErrorBoundary fallback="inline" key={activeGeoLayer.id}>
+            <GeoLayerInspector layer={activeGeoLayer} />
+          </ErrorBoundary>
+        </div>
+      ) : (
+        <>
+          <div className="inspector-tabs">
+            <button
+              className={`inspector-tab ${activeTab === "object" ? "active" : ""}`}
+              onClick={() => setActiveTab("object")}
+            >
+              Object
+            </button>
+            <button
+              className={`inspector-tab ${activeTab === "surfaces" ? "active" : ""}`}
+              onClick={() => setActiveTab("surfaces")}
+            >
+              Surfaces
+            </button>
+            <button
+              className={`inspector-tab ${activeTab === "analysis" ? "active" : ""}`}
+              onClick={() => setActiveTab("analysis")}
+            >
+              Analysis
+            </button>
+            <button
+              className={`inspector-tab ${activeTab === "rules" ? "active" : ""}`}
+              onClick={() => setActiveTab("rules")}
+            >
+              Rules
+            </button>
+            <button
+              className={`inspector-tab ${activeTab === "stats" ? "active" : ""}`}
+              onClick={() => setActiveTab("stats")}
+            >
+              Stats
+            </button>
+          </div>
+          <div className="inspector-body">
+            <ErrorBoundary fallback="inline" key={activeTab}>
+              {activeTab === "rules" ? (
+                ruleTargetLayer ? (
+                  <RuleBuilderTab
+                    model={ruleTargetLayer.model}
+                    layerId={ruleTargetLayer.id}
+                    layerOptions={layers.map((l) => ({
+                      id: l.id,
+                      name: l.name,
+                    }))}
+                    onSelectLayer={setRuleTargetOverride}
+                  />
+                ) : (
+                  <div className="inspector-placeholder">No layer selected</div>
+                )
+              ) : activeTab === "stats" ? (
+                model ? (
+                  <StatsTab
+                    model={model}
+                    selection={selection}
+                    duckdbModelLoaded={duckdbModelLoaded}
+                  />
+                ) : (
+                  <div className="inspector-placeholder">No layer selected</div>
+                )
+              ) : selectedObjectsData.length === 0 ? (
+                <div className="inspector-placeholder">
+                  Select an object to inspect
+                </div>
+              ) : isMultiSelect ? (
+                <MultiSelectView
+                  data={selectedObjectsData}
+                  activeTab={activeTab}
+                  surfaceBreakdown={multiSelectSurfaceBreakdown}
+                />
+              ) : activeTab === "object" ? (
+                <ObjectTab data={selectedObjectsData[0]!} />
+              ) : activeTab === "surfaces" ? (
+                isStreaming ? (
+                  <SurfacesFetchGate
+                    fetch={surfacesFetch}
+                    render={(surfaces) => (
+                      <SurfacesTab
+                        surfaces={surfaces}
+                        selectedSurfaceIndex={selectedSurfaceIndex}
+                      />
+                    )}
+                  />
+                ) : (
                   <SurfacesTab
-                    surfaces={surfaces}
+                    surfaces={selectedObject!.surfaces}
                     selectedSurfaceIndex={selectedSurfaceIndex}
                   />
-                )}
-              />
-            ) : (
-              <SurfacesTab
-                surfaces={selectedObject!.surfaces}
-                selectedSurfaceIndex={selectedSurfaceIndex}
-              />
-            )
-          ) : isStreaming ? (
-            <SurfacesFetchGate
-              fetch={surfacesFetch}
-              render={(surfaces) => (
+                )
+              ) : isStreaming ? (
+                <SurfacesFetchGate
+                  fetch={surfacesFetch}
+                  render={(surfaces) => (
+                    <AnalysisTab
+                      surfaces={surfaces}
+                      selectedSurfaceIndex={selectedSurfaceIndex}
+                    />
+                  )}
+                />
+              ) : (
                 <AnalysisTab
-                  surfaces={surfaces}
+                  surfaces={selectedObject!.surfaces}
                   selectedSurfaceIndex={selectedSurfaceIndex}
                 />
               )}
-            />
-          ) : (
-            <AnalysisTab
-              surfaces={selectedObject!.surfaces}
-              selectedSurfaceIndex={selectedSurfaceIndex}
-            />
-          )}
-        </ErrorBoundary>
-      </div>
+            </ErrorBoundary>
+          </div>
+        </>
+      )}
     </aside>
   );
 }

@@ -483,6 +483,16 @@ export function App({
   const geoSelection = useSelectionStore((s) => s.geoSelection);
   const selectGeoFeature = useSelectionStore((s) => s.selectGeoFeature);
   const geoLayers = useGeoLayerStore((s) => s.layers);
+  const setActiveGeoLayer = useGeoLayerStore((s) => s.setActiveGeoLayer);
+
+  // The inspector follows viewport picks on both sides: a picked geo feature
+  // selects its layer; a picked city object hands the panel back.
+  useEffect(() => {
+    if (geoSelection) setActiveGeoLayer(geoSelection.geoLayerId);
+  }, [geoSelection, setActiveGeoLayer]);
+  useEffect(() => {
+    if (selections.length > 0) setActiveGeoLayer(null);
+  }, [selections, setActiveGeoLayer]);
 
   /** The `config` the selected geo layer had when the feature was picked.
    *  Captured rather than derived because the comparison below has to be

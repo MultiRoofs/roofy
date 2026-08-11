@@ -65,6 +65,7 @@ export function LayerPanel({
   const removeLayer = useLayerStore((s) => s.removeLayer);
   const setCameraSync = useLayerStore((s) => s.setCameraSync);
   const geoLayers = useGeoLayerStore((s) => s.layers);
+  const setActiveGeoLayer = useGeoLayerStore((s) => s.setActiveGeoLayer);
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -111,7 +112,12 @@ export function LayerPanel({
           <div
             key={layer.id}
             className={`layer-item ${isActive ? "layer-active" : ""} ${!layer.visible ? "layer-hidden" : ""}`}
-            onClick={() => setActiveLayer(layer.id)}
+            onClick={() => {
+              setActiveLayer(layer.id);
+              // One selection across both sections: a city pick hands the
+              // inspector back to the city view.
+              setActiveGeoLayer(null);
+            }}
           >
             <button
               className="layer-vis-btn"

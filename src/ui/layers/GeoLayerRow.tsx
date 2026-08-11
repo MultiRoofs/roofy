@@ -44,6 +44,10 @@ export function GeoLayerRow({
   const updateGeoLayer = useGeoLayerStore((s) => s.updateGeoLayer);
   const removeGeoLayer = useGeoLayerStore((s) => s.removeGeoLayer);
   const relinkGeoJsonLayer = useGeoLayerStore((s) => s.relinkGeoJsonLayer);
+  const activeGeoLayerId = useGeoLayerStore((s) => s.activeGeoLayerId);
+  const setActiveGeoLayer = useGeoLayerStore((s) => s.setActiveGeoLayer);
+
+  const isActive = layer.id === activeGeoLayerId;
 
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(layer.name);
@@ -81,8 +85,9 @@ export function GeoLayerRow({
 
   return (
     <div
-      className={`layer-item geo-layer-item ${layer.visible ? "" : "layer-hidden"}`}
+      className={`layer-item geo-layer-item ${isActive ? "layer-active" : ""} ${layer.visible ? "" : "layer-hidden"}`}
       data-testid="geo-layer-row"
+      onClick={() => setActiveGeoLayer(layer.id)}
     >
       <button
         className="layer-vis-btn"
@@ -90,7 +95,10 @@ export function GeoLayerRow({
         data-tooltip={layer.visible ? "Hide layer" : "Show layer"}
         data-tooltip-pos="top"
         data-tooltip-align="start"
-        onClick={() => updateGeoLayer(layer.id, { visible: !layer.visible })}
+        onClick={(e) => {
+          e.stopPropagation();
+          updateGeoLayer(layer.id, { visible: !layer.visible });
+        }}
       >
         <VisibilityIcon visible={layer.visible} />
       </button>
@@ -106,11 +114,15 @@ export function GeoLayerRow({
             if (e.key === "Escape") setRenaming(false);
           }}
           autoFocus
+          onClick={(e) => e.stopPropagation()}
         />
       ) : (
         <span
           className="layer-name"
-          onDoubleClick={startRename}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            startRename();
+          }}
           title={`${KIND_LABEL[layer.kind]} — ${sourceOf(layer)}\nDouble-click to rename`}
         >
           {layer.name}
@@ -139,6 +151,7 @@ export function GeoLayerRow({
           value={layer.opacity}
           aria-label="Opacity"
           title={`Opacity — ${Math.round(layer.opacity * 100)}%`}
+          onClick={(e) => e.stopPropagation()}
           onChange={(e) =>
             updateGeoLayer(layer.id, { opacity: Number(e.target.value) })
           }
@@ -171,7 +184,10 @@ export function GeoLayerRow({
           data-tooltip="Remove layer"
           data-tooltip-pos="top"
           data-tooltip-align="end"
-          onClick={() => removeGeoLayer(layer.id)}
+          onClick={(e) => {
+            e.stopPropagation();
+            removeGeoLayer(layer.id);
+          }}
         >
           <TrashIcon />
         </button>
@@ -193,7 +209,12 @@ export function GeoLayerRow({
           moment its box was cleared for retyping. */}
       {layer.kind === "geojson" && (
         <details className="geo-style">
-          <summary className="geo-style-summary">Style</summary>
+          <summary
+            className="geo-style-summary"
+            onClick={(e) => e.stopPropagation()}
+          >
+            Style
+          </summary>
           <div className="geo-style-fields">
             <label className="geo-style-field">
               <span>Color</span>
