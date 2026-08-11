@@ -1,49 +1,47 @@
-# MultiRoof Viewer
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="public/brand/urbis-mark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="public/brand/urbis-mark-light.svg">
+    <img alt="" src="public/brand/urbis-mark-light.svg" width="72" height="72">
+  </picture>
+</p>
 
-Use a deployed app at **[https://viewer.open3d.city](https://viewer.open3d.city)**
+<h1 align="center">Urbis</h1>
 
-MultiRoof Viewer is a planned web application for exploring and analyzing 3D city models in support of the MultiRoofs project. The product focus is rooftop-centric urban planning: visualization, rooftop suitability analysis, solar and shading exploration, and browser-based statistics for planners and researchers.
+<p align="center"><strong>Your city, in 3D.</strong><br>
+A browser-based 3D city model viewer and analyser, rendered on a real globe with photorealistic terrain.</p>
 
-## Current Status
+<p align="center">Use the deployed app at <strong><a href="https://viewer.open3d.city">viewer.open3d.city</a></strong></p>
 
-This repository is in project-initialization mode. The current deliverables are architecture, scope, and setup documents. Application code has not been started yet.
+<!-- The lockup SVGs set the wordmark as live text in IBM Plex Sans, which GitHub's
+     sandboxed image rendering cannot load — so the README follows the brand kit's
+     rule for font-unguaranteed contexts: bare mark + real text. -->
 
-## Product Goals
+## What it does
 
-- Visualize 3D city model data, starting with CityJSON-family encodings.
-- Analyze rooftop suitability for use cases such as solar, green roofs, water retention, and other urban planning scenarios.
-- Let users colorize buildings and roofs with user-defined rules based on geometry or attributes.
-- Simulate sun and shade for a chosen date and time.
-- Run lightweight statistical analysis in the browser.
-- Save the current workspace state and share it as a URL when possible.
+- **Loads real city model data**: CityJSON (1.x and 2.x), CityJSONSeq, streaming FlatCityBuf, CityParquet, and zipped CityGML archives — from local files, URLs, cloud buckets, or the built-in [Open3D City](https://open3d.city) STAC catalog browser.
+- **Georeferences properly**: every vertex is projected from its source CRS through proj4 (worldwide EPSG resolution) onto WGS84 ENU frames, with EGM2008 geoid-corrected heights — models wrap Google's Photorealistic 3D Tiles to metre accuracy.
+- **Colours by your rules**: per-layer, attribute- or geometry-based rule styling with a legend, on static and streaming layers alike.
+- **Simulates sun and shade** for any date and time, with a time-of-day animation.
+- **Analyses in the browser**: DuckDB-wasm statistics over the loaded model — no backend, no login.
+- **Saves and shares**: workspaces persist locally and share as URLs.
 
-## Data Model Direction
+## Tech
 
-Use `citymodel` as the domain term for the conceptual 3D city model, and treat file formats as encodings of that model.
+React 19 + TypeScript + Vite · [Navara](https://github.com/reearth/navara) (`@navaramap/three`) on three.js · proj4 · DuckDB-wasm · Zustand · Vitest.
+The CityJSON/FlatCityBuf/CityParquet engine plugins live in a submodule: [`cityjson-navara-plugins`](https://github.com/HideBa/cityjson-navara-plugins).
 
-Initial encoding priority:
+## Development
 
-1. CityJSON
-2. CityJSONSeq
-3. FlatCityBuf
+```bash
+git clone --recursive git@github.com:MultiRoofs/multiroof-viewer.git
+cd multiroof-viewer
+npm install
+(cd packages/cityjson-navara-plugins && pnpm install)
+npm run dev        # via dotenvx — .env is encrypted, see CLAUDE.md
+```
 
-## Initial Technology Direction
-
-- React for the application shell and UI.
-- Three.js for 3D scene rendering.
-- `three-geospatial` for geospatial data representation and spatial reference handling.
-- DuckDB-wasm for in-browser analytical queries.
-- DuckDB `cityjson` extension as the preferred path for loading CityJSON, CityJSONSeq, and FlatCityBuf into analytical tables.
-- Vite for build, development, lint, and formatting workflows.
-- A Tauri-ready architecture so a native application can be added later without a full rewrite.
-
-## Design Principles
-
-- Browser-first for v1, with no required backend and no login.
-- Clear separation between rendering, analytics, persistence, and UI concerns.
-- Typed persistence interfaces with dependency injection, even if v1 only uses in-memory or local storage implementations.
-- Test-driven development: write a failing unit test first, implement the smallest fix, then refactor.
-- Future-friendly platform boundaries so the same core logic can later support both web and desktop shells.
+`npm run test` runs the app suite; the submodule has its own (`pnpm vitest run` inside it). See [CLAUDE.md](CLAUDE.md) for architecture notes and the full development guide.
 
 ## Documents
 
@@ -52,3 +50,9 @@ Initial encoding priority:
 - [Repository Setup](docs/repository-setup.md)
 - [Testing Strategy](docs/testing-strategy.md)
 - [Agent Guide](agents.md)
+
+## About
+
+Urbis is developed within the MultiRoofs European project at TU Delft, with a product focus on rooftop-centric urban planning — but it is a general-purpose city model viewer first.
+
+Licensed under the [MIT License](LICENSE).
