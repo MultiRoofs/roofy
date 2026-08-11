@@ -11,6 +11,7 @@
  * limitation, matching the spec.
  */
 import type { GeodeticBounds } from "@cityjson/navara-cityjson";
+import type { GeoLayer } from "./geoLayerStore";
 
 interface MutableBox {
   west: number;
@@ -174,4 +175,65 @@ export function tilesetBounds(tileset: unknown): GeodeticBounds | null {
     return boundsAroundEcef(b[0]!, b[1]!, b[2]!, radius);
   }
   return null;
+}
+
+/** URL → in-flight-or-done bounds, so a second click on the same layer (or a
+ *  second layer over the same file) costs nothing. Successes only: a null or
+ *  a rejection is evicted, so the next click retries a flaky host. */
+const boundsByUrl = new Map<string, Promise<GeodeticBounds | null>>();
+
+/** Test seam. */
+export function resetGeoLayerBoundsCache(): void {
+  boundsByUrl.clear();
+}
+
+function cachedBounds(
+  url: string,
+  fetchFn: typeof fetch,
+  toBounds: (body: unknown) => GeodeticBounds | null,
+): Promise<GeodeticBounds | null> {
+  const cached = boundsByUrl.get(url);
+  if (cached) return cached;
+  const promise = (async () => {
+    const response = await fetchFn(url);
+    if (!response.ok) {
+      throw new Error(`Fetching ${url} failed with HTTP ${response.status}`);
+    }
+    return toBounds(await response.json());
+  })();
+  boundsByUrl.set(url, promise);
+  promise.then(
+    (bounds) => {
+      if (bounds === null) boundsByUrl.delete(url);
+    },
+    () => boundsByUrl.delete(url),
+  );
+  return promise;
+}
+
+/**
+ * The extent of a geo layer, fetching the layer's source when it lives behind
+ * a URL. Resolves null when the layer HAS no extent (raster, an unlinked
+ * GeoJSON row, a document with no positions); REJECTS when the network does —
+ * the caller tells those apart to word its message.
+ */
+export function resolveGeoLayerBounds(
+  layer: GeoLayer,
+  fetchFn: typeof fetch = fetch,
+): Promise<GeodeticBounds | null> {
+  switch (layer.kind) {
+    case "geojson": {
+      if (layer.config.data !== undefined) {
+        return Promise.resolve(geoJsonBounds(layer.config.data));
+      }
+      if (layer.config.url !== undefined && layer.config.url !== "") {
+        return cachedBounds(layer.config.url, fetchFn, geoJsonBounds);
+      }
+      return Promise.resolve(null);
+    }
+    case "3d-tiles":
+      return cachedBounds(layer.config.url, fetchFn, tilesetBounds);
+    case "raster-xyz":
+      return Promise.resolve(null);
+  }
 }
