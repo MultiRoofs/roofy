@@ -5,7 +5,10 @@
  * layer's own data — Navara 0.0.5 exposes no bounds API on Layer/Source.
  */
 import { describe, expect, it } from "vitest";
-import { geoJsonBounds } from "../../../../src/features/geoLayers/geoLayerBounds";
+import {
+  geoJsonBounds,
+  tilesetBounds,
+} from "../../../../src/features/geoLayers/geoLayerBounds";
 
 describe("geoJsonBounds", () => {
   it("frames a FeatureCollection across all geometry types", () => {
@@ -122,6 +125,70 @@ describe("geoJsonBounds", () => {
     ).toBeNull();
     expect(
       geoJsonBounds({ type: "Point", coordinates: [Number.NaN, 1] }),
+    ).toBeNull();
+  });
+});
+
+describe("tilesetBounds", () => {
+  it("converts a region volume from radians to degrees, keeping heights", () => {
+    // ~lng 4.29–4.44, lat 51.98–52.03 (Delft-ish), heights 0–120 m.
+    const bounds = tilesetBounds({
+      asset: { version: "1.0" },
+      root: {
+        boundingVolume: {
+          region: [0.074875, 0.907275, 0.077493, 0.908147, 0, 120],
+        },
+      },
+    });
+    expect(bounds).not.toBeNull();
+    expect(bounds!.west).toBeCloseTo((0.074875 * 180) / Math.PI, 6);
+    expect(bounds!.east).toBeCloseTo((0.077493 * 180) / Math.PI, 6);
+    expect(bounds!.south).toBeCloseTo((0.907275 * 180) / Math.PI, 6);
+    expect(bounds!.north).toBeCloseTo((0.908147 * 180) / Math.PI, 6);
+    expect(bounds!.minHeight).toBe(0);
+    expect(bounds!.maxHeight).toBe(120);
+  });
+
+  it("frames a sphere volume around its ECEF centre", () => {
+    // ECEF (6378137, 0, 0) is lng 0, lat 0, height 0 on the WGS84 ellipsoid.
+    const bounds = tilesetBounds({
+      root: { boundingVolume: { sphere: [6378137, 0, 0, 1000] } },
+    });
+    expect(bounds).not.toBeNull();
+    expect(bounds!.west).toBeLessThan(0);
+    expect(bounds!.east).toBeGreaterThan(0);
+    expect((bounds!.west + bounds!.east) / 2).toBeCloseTo(0, 4);
+    expect((bounds!.south + bounds!.north) / 2).toBeCloseTo(0, 4);
+    // 1000 m ≈ 0.009° of latitude.
+    expect(bounds!.north - bounds!.south).toBeCloseTo((2 * 1000) / 111_320, 3);
+    expect(bounds!.maxHeight).toBeCloseTo(1000, 0);
+  });
+
+  it("frames a box volume by its half-diagonal", () => {
+    const bounds = tilesetBounds({
+      root: {
+        boundingVolume: {
+          box: [6378137, 0, 0, 300, 0, 0, 0, 400, 0, 0, 0, 0],
+        },
+      },
+    });
+    expect(bounds).not.toBeNull();
+    // hypot(300, 400) = 500 m radius.
+    expect(bounds!.north - bounds!.south).toBeCloseTo((2 * 500) / 111_320, 3);
+  });
+
+  it("answers null for junk and absent volumes", () => {
+    expect(tilesetBounds(null)).toBeNull();
+    expect(tilesetBounds({})).toBeNull();
+    expect(tilesetBounds({ root: {} })).toBeNull();
+    expect(tilesetBounds({ root: { boundingVolume: {} } })).toBeNull();
+    expect(
+      tilesetBounds({ root: { boundingVolume: { region: [0, 1] } } }),
+    ).toBeNull();
+    expect(
+      tilesetBounds({
+        root: { boundingVolume: { sphere: [Number.NaN, 0, 0, 1] } },
+      }),
     ).toBeNull();
   });
 });
