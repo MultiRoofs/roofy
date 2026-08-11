@@ -14,6 +14,7 @@ import {
 import { aggregateRoofMetrics } from "../../domain/roofMetrics/aggregate";
 import { computeSolarScore } from "../../domain/geometry/derived";
 import { useSolarStore } from "../../features/solar/solarStore";
+import { useSelectionStore } from "../../features/selection/selectionStore";
 
 /**
  * Takes `surfaces` directly rather than a `CityObject` (or
@@ -35,13 +36,28 @@ export function AnalysisTab({
   surfaces,
   selectedSurfaceIndex,
 }: AnalysisTabProps) {
-  const [scope, setScope] = useState<Scope>("building");
+  // In SURFACE pick mode the click named ONE surface, and that is what the
+  // tab should analyse — listing every roof of the parent building answered
+  // a question the user did not ask. The scope toggle still works (the
+  // building aggregate is one click away); it is the DEFAULT that follows
+  // the pick mode, via an override the user's own toggle click wins over.
+  const pickMode = useSelectionStore((s) => s.mode);
+  const pickedSurface =
+    pickMode === "surface" && selectedSurfaceIndex !== null
+      ? (surfaces[selectedSurfaceIndex] ?? null)
+      : null;
+  const [scopeOverride, setScopeOverride] = useState<Scope | null>(null);
+  const scope =
+    scopeOverride ?? (pickedSurface !== null ? "surface" : "building");
 
   const roofSurfaces = surfaces
     .map((s, i) => ({ surface: s, index: i }))
     .filter((s) => s.surface.type === "RoofSurface");
 
-  if (roofSurfaces.length === 0) {
+  // With no picked surface to show, a roofless object has nothing to analyse
+  // in either scope. With one, the surface scope still has content (a wall's
+  // area/inclination/azimuth are as real as a roof's), so keep the tab.
+  if (roofSurfaces.length === 0 && pickedSurface === null) {
     return (
       <div className="inspector-placeholder">
         No roof surfaces found on this object
@@ -55,13 +71,13 @@ export function AnalysisTab({
         <div className="analysis-scope-toggle">
           <button
             className={`scope-btn ${scope === "building" ? "active" : ""}`}
-            onClick={() => setScope("building")}
+            onClick={() => setScopeOverride("building")}
           >
             Building
           </button>
           <button
             className={`scope-btn ${scope === "surface" ? "active" : ""}`}
-            onClick={() => setScope("surface")}
+            onClick={() => setScopeOverride("surface")}
           >
             Surface
           </button>
@@ -69,7 +85,19 @@ export function AnalysisTab({
       </div>
 
       {scope === "building" ? (
-        <BuildingMetrics roofSurfaces={roofSurfaces.map((r) => r.surface)} />
+        roofSurfaces.length > 0 ? (
+          <BuildingMetrics roofSurfaces={roofSurfaces.map((r) => r.surface)} />
+        ) : (
+          <div className="inspector-placeholder">
+            No roof surfaces found on this object
+          </div>
+        )
+      ) : pickedSurface !== null ? (
+        <SurfaceMetricsCard
+          surface={pickedSurface}
+          index={selectedSurfaceIndex!}
+          isSelected
+        />
       ) : (
         <SurfaceMetricsList
           roofSurfaces={roofSurfaces}
@@ -147,64 +175,78 @@ function SurfaceMetricsList({
   roofSurfaces: { surface: Surface; index: number }[];
   selectedSurfaceIndex: number | null;
 }) {
-  const sunPosition = useSolarStore((s) => s.sunPosition);
-
   return (
     <>
-      {roofSurfaces.map(({ surface, index }) => {
-        const metrics = computeRoofMetrics(surface);
-        const isSelected = selectedSurfaceIndex === index;
-
-        const ring = surface.rings[0];
-        const normal =
-          ring && ring.length >= 3 ? computeSurfaceNormal(ring) : null;
-
-        let solarScore: number | null = null;
-        if (normal && sunPosition && sunPosition.altitudeDeg > 0) {
-          solarScore = computeSolarScore(normal, sunPosition.direction);
-        }
-
-        return (
-          <div
-            key={index}
-            className={`attr-section ${isSelected ? "section-highlight" : ""}`}
-          >
-            <div
-              className="attr-section-title"
-              style={{ color: "var(--accent-text)" }}
-            >
-              Roof Surface #{index}
-            </div>
-            <AttrRow
-              label="Area"
-              value={`${metrics.areaSqM.toFixed(1)} m\u00B2`}
-              highlight
-            />
-            <AttrRow
-              label="Inclination"
-              value={`${metrics.inclinationDeg.toFixed(1)}\u00B0`}
-            />
-            <AttrRow
-              label="Azimuth"
-              value={formatAzimuth(metrics.azimuthDeg)}
-            />
-            {normal && (
-              <AttrRow
-                label="Normal"
-                value={`(${normal[0].toFixed(3)}, ${normal[1].toFixed(3)}, ${normal[2].toFixed(3)})`}
-              />
-            )}
-            {solarScore !== null && (
-              <AttrRow
-                label="Solar score"
-                value={`${(solarScore * 100).toFixed(0)}%`}
-                highlight
-              />
-            )}
-          </div>
-        );
-      })}
+      {roofSurfaces.map(({ surface, index }) => (
+        <SurfaceMetricsCard
+          key={index}
+          surface={surface}
+          index={index}
+          isSelected={selectedSurfaceIndex === index}
+        />
+      ))}
     </>
+  );
+}
+
+/**
+ * One surface's metric card \u2014 shared by the all-roofs list and the
+ * surface-pick view, which is why the title carries the surface's REAL type:
+ * in surface pick mode the card can be a wall or a window, and "Roof Surface"
+ * over a wall's azimuth would be a lie.
+ */
+function SurfaceMetricsCard({
+  surface,
+  index,
+  isSelected,
+}: {
+  surface: Surface;
+  index: number;
+  isSelected: boolean;
+}) {
+  const sunPosition = useSolarStore((s) => s.sunPosition);
+  const metrics = computeRoofMetrics(surface);
+
+  const ring = surface.rings[0];
+  const normal = ring && ring.length >= 3 ? computeSurfaceNormal(ring) : null;
+
+  let solarScore: number | null = null;
+  if (normal && sunPosition && sunPosition.altitudeDeg > 0) {
+    solarScore = computeSolarScore(normal, sunPosition.direction);
+  }
+
+  return (
+    <div className={`attr-section ${isSelected ? "section-highlight" : ""}`}>
+      <div
+        className="attr-section-title"
+        style={{ color: "var(--accent-text)" }}
+      >
+        {formatSurfaceType(surface.type)} #{index}
+      </div>
+      <AttrRow
+        label="Area"
+        value={`${metrics.areaSqM.toFixed(1)} m\u00B2`}
+        highlight
+      />
+      <AttrRow
+        label="Inclination"
+        value={`${metrics.inclinationDeg.toFixed(1)}\u00B0`}
+      />
+      <AttrRow label="Azimuth" value={formatAzimuth(metrics.azimuthDeg)} />
+      {normal && (
+        <AttrRow
+          label="Normal"
+          value={`(${normal[0].toFixed(3)}, ${normal[1].toFixed(3)}, ${normal[2].toFixed(3)})`}
+        />
+      )}
+      {solarScore !== null && (
+        <AttrRow
+          label="Solar score"
+          value={`${(solarScore * 100).toFixed(0)}%`}
+          highlight
+        />
+      )}
+    </div>
   );
 }
 
@@ -229,6 +271,12 @@ function AttrRow({
       </span>
     </div>
   );
+}
+
+/** "RoofSurface" → "Roof Surface", "unknown" → "Surface". */
+function formatSurfaceType(type: Surface["type"]): string {
+  if (type === "unknown") return "Surface";
+  return type.replace(/(?<=[a-z])(?=[A-Z])/g, " ");
 }
 
 function formatAzimuth(deg: number): string {
