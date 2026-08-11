@@ -85,7 +85,9 @@ export interface BasemapLayerOptions {
 }
 
 export interface BasemapOption {
-  /** Kept out of the pickers (still resolvable by id). See the one user. */
+  /** Kept out of the pickers (still resolvable by id, so a persisted snapshot
+   *  keeps working). No entry sets it today; it existed for the elevation
+   *  heatmap while that option was wrongly convicted of not rendering. */
   readonly hidden?: boolean;
   readonly id: BasemapId;
   readonly label: string;
@@ -158,16 +160,20 @@ export const BASEMAPS: readonly BasemapOption[] = [
     attribution: ["© CARTO", "© OpenStreetMap contributors"],
   },
   {
-    // DOES NOT RENDER on 0.0.5 inside THIS app: the engine fetches ZERO
-    // terrarium tiles for a raster-dem source here — even the engine's own
-    // example, run verbatim through a debug handle at multiple zooms, fetches
-    // nothing, while the identical code works on the vendor's preview site.
-    // Some interaction with this app's view configuration (plugins/photoreal
-    // scene/existing raster) suppresses raster-dem fetching entirely; same
-    // renders-nothing family as Known Issue (k). Hidden from the picker until
-    // a minimal-repro bisection finds the trigger; the machinery stays so the
-    // investigation has something to re-enable.
-    hidden: true,
+    // RENDERS, and the 2026-08-06 "fetches ZERO terrarium tiles" verdict that
+    // hid this entry was a MEASUREMENT artifact, not an engine bug: in-page
+    // probes (a fetch patch, `performance.getEntriesByType("resource")`) read
+    // FALSE ZEROS for tile fetches the CDP network log shows in the hundreds —
+    // the same probe read the draped Esri basemap as 0 in the live app. Which
+    // conditions hide a fetch from in-page observation was NOT pinned down
+    // (the engine's worker pool and the resource-timing buffer cap are both
+    // candidates); judge fetching at the network layer, full stop.
+    // Re-verified 2026-08-11 at the network layer and by
+    // pixels: picking this option in the live app fetched ~100 terrarium
+    // tiles and turned the Innsbruck relief blue where "None" shows the pale
+    // bare globe. Judge this option by an A/B against "None" at the same
+    // camera — atmosphere haze over relief mimics a ramp well enough to have
+    // produced two wrong verdicts in a row.
     id: "elevation-heatmap",
     label: "Elevation heatmap",
     // NOT imagery: a DEM read as data and colourised by the engine, which is

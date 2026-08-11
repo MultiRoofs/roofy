@@ -1,0 +1,59 @@
+/* Urbis brand tokens — logo + wordmark.
+   Colour tokens here are the BRAND subset of src/app/app.css's :root, repeated
+   so the logo can be used outside the app (docs, slides, favicon). Values are
+   identical: change one, change both. */
+
+:root {
+  /* ink / accent — dark theme (default) */
+  --urbis-ink: #e8eaf0;
+  --urbis-accent: #e8973f;
+  --urbis-plate: #10131b;
+  --urbis-plate-border: rgba(255, 255, 255, 0.08);
+
+  /* wordmark type */
+  --urbis-wordmark-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --urbis-wordmark-weight: 500;
+  --urbis-wordmark-tracking: 0.11em;
+
+  /* logo geometry */
+  --urbis-mark-size: 20px; /* toolbar default */
+  --urbis-lockup-gap: 0.4em; /* = 0.34 x mark height */
+  --urbis-plate-radius: 0.22em; /* of plate size */
+}
+
+[data-theme="light"] {
+  --urbis-ink: #1a1d24;
+  --urbis-accent: #d07830;
+  --urbis-plate: #f9fafb;
+  --urbis-plate-border: rgba(0, 0, 0, 0.08);
+}
+
+/* The toolbar lockup: replaces .toolbar-brand's uppercase text label. */
+.urbis-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--urbis-lockup-gap);
+  flex-shrink: 0;
+}
+
+.urbis-mark {
+  width: var(--urbis-mark-size);
+  height: var(--urbis-mark-size);
+  flex-shrink: 0;
+}
+
+.urbis-mark .urbis-mark-u {
+  stroke: var(--urbis-ink);
+}
+.urbis-mark .urbis-mark-pitch {
+  stroke: var(--urbis-accent);
+}
+
+.urbis-wordmark {
+  font-family: var(--urbis-wordmark-family);
+  font-weight: var(--urbis-wordmark-weight);
+  font-size: 0.78rem;
+  letter-spacing: var(--urbis-wordmark-tracking);
+  color: var(--urbis-ink);
+  white-space: nowrap;
+}

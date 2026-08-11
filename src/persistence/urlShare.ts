@@ -115,8 +115,8 @@ export class UnsupportedShareLinkError extends Error {
   constructor(readonly found: number | null) {
     super(
       found !== null && found > SHARE_VERSION
-        ? `This share link was created by a newer version of MultiRoof Viewer (v${found}) than this one, so it cannot be opened here.`
-        : "This share link was created by an older version of MultiRoof Viewer and can no longer be opened. Shared cameras changed from scene coordinates to geographic coordinates; please ask for a new link.",
+        ? `This share link was created by a newer version of Urbis (v${found}) than this one, so it cannot be opened here.`
+        : "This share link was created by an older version of Urbis and can no longer be opened. Shared cameras changed from scene coordinates to geographic coordinates; please ask for a new link.",
     );
     this.name = "UnsupportedShareLinkError";
   }

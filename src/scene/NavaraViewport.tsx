@@ -40,6 +40,7 @@ import {
 } from "react";
 import ThreeView, {
   Color,
+  ColorMap,
   degreeToRadian,
   geodeticToVector3,
   getPickRay,
@@ -978,6 +979,28 @@ function resolveBasemapSource(
   return { ...rest, elevationDecoder: TERRARIUM_ELEVATION_DECODER() };
 }
 
+/**
+ * The RdYlBu ramp from Navara's own ElevationHeatmapMaterial docs, low → high.
+ *
+ * Hex strings rather than built `Color`s: `Color` comes from the engine module,
+ * which the viewport suites MOCK, so colours are constructed lazily inside
+ * {@link addBasemap} (only reached with a live engine) instead of at module
+ * scope, where the mock's stub class would be baked in at import time.
+ */
+const ELEVATION_RAMP_HEX = [
+  "#313695",
+  "#4575b4",
+  "#74add1",
+  "#abd9e9",
+  "#e0f3f8",
+  "#ffffbf",
+  "#fee090",
+  "#fdae61",
+  "#f46d43",
+  "#d73027",
+  "#a50026",
+] as const;
+
 function addBasemap(
   view: ViewInstance,
   option: BasemapOption,
@@ -990,6 +1013,23 @@ function addBasemap(
     // a `raster` layer over a `raster-dem` source draws nothing legible until
     // it is told how to colourise the heights it decodes.
     const layer = view.addLayer({ type: "raster", ...option.layer, source });
+    if (option.layer !== undefined) {
+      // The engine's default ramp is near-monochrome blue — Delft and the Alps
+      // read as the same colour. `globe.elevationColormap` is the one globe
+      // setter probed CLEAN on 0.0.5 (Known Issue (i); `color`/`wireframe`
+      // stay banned), and it is written HERE, at the basemap seam, never from
+      // theme code (`sceneThemePolicy`'s test pins that separation). It stays
+      // written after a swap away, which is inert: only a raster-dem layer
+      // reads it. Reported, not propagated — a refused ramp leaves the
+      // engine's default, not a dead viewport.
+      applyToEngine("the elevation heatmap's colour ramp", () => {
+        view.globe.elevationColormap = new ColorMap(
+          "diverging",
+          "RdYlBu",
+          ELEVATION_RAMP_HEX.map((hex) => new Color().setStyle(hex)),
+        );
+      });
+    }
     return { layer, source };
   } catch (error) {
     console.error(

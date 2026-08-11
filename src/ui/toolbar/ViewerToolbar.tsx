@@ -12,6 +12,7 @@
 
 import type { PickMode, ToolMode } from "../../domain/selection/types";
 import type { Theme } from "../../features/theme/useTheme";
+import { ThemeToggleButton } from "../ThemeToggleButton";
 import { SolarMenu } from "./SolarMenu";
 import { WeatherMenu } from "./WeatherMenu";
 import { ViewModeToggle } from "./ViewModeToggle";
@@ -70,7 +71,30 @@ export function ViewerToolbar({
 }: ViewerToolbarProps) {
   return (
     <header className="toolbar">
-      <span className="toolbar-brand">MultiRoof</span>
+      {/* The brand lockup from `public/brand/README.md`, verbatim: the mark's
+          two strokes take --urbis-ink / --urbis-accent from brand.css, which
+          re-points both under [data-theme="light"], so the logo follows the
+          theme toggle with no JS. The SVG is decorative — the wordmark beside
+          it is the accessible name. */}
+      <span className="urbis-lockup">
+        <svg className="urbis-mark" viewBox="0 0 48 48" aria-hidden="true">
+          <path
+            className="urbis-mark-u"
+            d="M14 12 V25 a10 10 0 0 0 20 0 V16"
+            fill="none"
+            strokeWidth="9"
+            strokeLinecap="round"
+          />
+          <path
+            className="urbis-mark-pitch"
+            d="M34 16 L41 9"
+            fill="none"
+            strokeWidth="9"
+            strokeLinecap="round"
+          />
+        </svg>
+        <span className="urbis-wordmark">Urbis</span>
+      </span>
 
       {/* Left sidebar toggle */}
       <button
@@ -211,49 +235,7 @@ export function ViewerToolbar({
         </button>
       )}
 
-      <button
-        className="theme-toggle-btn"
-        aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
-        data-tooltip={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
-        data-tooltip-align="end"
-        onClick={onToggleTheme}
-      >
-        {theme === "dark" ? (
-          <svg
-            viewBox="0 0 24 24"
-            width="16"
-            height="16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="12" cy="12" r="5" />
-            <line x1="12" y1="1" x2="12" y2="3" />
-            <line x1="12" y1="21" x2="12" y2="23" />
-            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-            <line x1="1" y1="12" x2="3" y2="12" />
-            <line x1="21" y1="12" x2="23" y2="12" />
-            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-          </svg>
-        ) : (
-          <svg
-            viewBox="0 0 24 24"
-            width="16"
-            height="16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
-          </svg>
-        )}
-      </button>
+      <ThemeToggleButton theme={theme} onToggle={onToggleTheme} tooltip />
 
       {onSave && (
         <button
@@ -269,11 +251,15 @@ export function ViewerToolbar({
           </svg>
         </button>
       )}
+      {/* Named for what it OPENS, not for what it used to do silently: the
+          click raises `ShareDialog` ("Share this view"), which shows the link
+          and copies it. "Copy share link" described the old clipboard-only
+          behaviour and now misdescribes the button. */}
       {onShare && canShare && (
         <button
           className="tb-btn"
-          aria-label="Copy share link"
-          data-tooltip="Copy share link"
+          aria-label="Share this view"
+          data-tooltip="Share this view"
           data-tooltip-align="end"
           onClick={onShare}
         >
