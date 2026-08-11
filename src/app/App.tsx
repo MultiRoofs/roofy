@@ -44,6 +44,7 @@ import { suppressAutoFit } from "../scene/autoFitSuppression";
 import { useSelectionStore } from "../features/selection/selectionStore";
 import { useLayerStore } from "../features/layers/layerStore";
 import { useGeoLayerStore } from "../features/geoLayers/geoLayerStore";
+import { resolveGeoLayerBounds } from "../features/geoLayers/geoLayerBounds";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
 import { ensureModelCrsLoadable } from "../features/layers/ensureCrs";
 import { loadCityParquetFromUrl } from "../features/cityparquet/loadCityParquet";
@@ -490,6 +491,16 @@ export function App({
   const geoSelection = useSelectionStore((s) => s.geoSelection);
   const selectGeoFeature = useSelectionStore((s) => s.selectGeoFeature);
   const geoLayers = useGeoLayerStore((s) => s.layers);
+  const setActiveGeoLayer = useGeoLayerStore((s) => s.setActiveGeoLayer);
+
+  // The inspector follows viewport picks on both sides: a picked geo feature
+  // selects its layer; a picked city object hands the panel back.
+  useEffect(() => {
+    if (geoSelection) setActiveGeoLayer(geoSelection.geoLayerId);
+  }, [geoSelection, setActiveGeoLayer]);
+  useEffect(() => {
+    if (selections.length > 0) setActiveGeoLayer(null);
+  }, [selections, setActiveGeoLayer]);
 
   /** The `config` the selected geo layer had when the feature was picked.
    *  Captured rather than derived because the comparison below has to be
@@ -1196,6 +1207,12 @@ export function App({
     setCursorPosition(null);
     setUnavailableLayers([]);
     clearSelection();
+    // Geo layers SURVIVE "Close file" (only city layers are removed), but the
+    // active geo layer is what the inspector shows: leaving it set means the
+    // next city model opens onto the geospatial view of a layer nobody just
+    // picked. Clearing the selection alone does not cover it — the active geo
+    // layer is also set by clicking a row, which no selection state records.
+    useGeoLayerStore.getState().setActiveGeoLayer(null);
   }, [clearSelection]);
 
   // Re-selecting a file for an "unavailable" (restored-but-file-backed)
@@ -1236,6 +1253,37 @@ export function App({
   const handleFitAll = useCallback(() => {
     sceneRef.current?.fitAll();
   }, []);
+
+  /** Zoom to a GEO layer: its extent is the app's to compute (the engine has
+   *  no bounds API for these), and may live behind a URL — hence async, with
+   *  the failure worded for the user rather than swallowed. */
+  const handleFlyToGeoLayer = useCallback(
+    (geoLayerId: string) => {
+      const layer = useGeoLayerStore
+        .getState()
+        .layers.find((l) => l.id === geoLayerId);
+      if (!layer) return;
+      void (async () => {
+        try {
+          const bounds = await resolveGeoLayerBounds(layer);
+          if (bounds) {
+            sceneRef.current?.fitBounds(bounds);
+            return;
+          }
+          showToast(
+            "Could not determine the layer's extent.",
+            EXPLANATION_TOAST_MS,
+          );
+        } catch {
+          showToast(
+            "Could not determine the layer's extent — its source did not load.",
+            EXPLANATION_TOAST_MS,
+          );
+        }
+      })();
+    },
+    [showToast],
+  );
 
   /** A layer the engine refused (the CRS gate — no reference system, or a
    *  non-metric one). Stable identity on purpose: `NavaraViewport`'s layer-sync
@@ -1336,6 +1384,7 @@ export function App({
           onAddUrl={handleAddUrl}
           loading={loading}
           onFlyToLayer={(id) => sceneRef.current?.fitLayer(id)}
+          onFlyToGeoLayer={handleFlyToGeoLayer}
         />
 
         <div className="viewport">

@@ -6,9 +6,11 @@
  * sections rather than one list with half its controls greyed out. What is
  * checked here is that the split is real (each row lands under its own
  * heading, the city rows keep every control they had) and that a geospatial
- * row's four affordances reach the store.
+ * row's own affordances — visibility, rename, zoom, remove — reach the store.
+ * Drawing config (opacity and the vector style) is NOT here: it lives in
+ * `GeoLayerInspector` and is pinned by its own suite.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
   fireEvent,
@@ -25,20 +27,21 @@ import type { CityModel } from "../../../../src/domain/citymodel/types";
 afterEach(() => {
   cleanup();
   useLayerStore.setState({ layers: [], activeLayerId: null });
-  useGeoLayerStore.setState({ layers: [] });
+  useGeoLayerStore.setState({ layers: [], activeGeoLayerId: null });
 });
 
 const noop = () => {};
 /** The URL path now reports whether a layer landed; these suites never look. */
 const noopUrl = async () => ({ ok: true }) as const;
 
-function renderPanel() {
+function renderPanel(onFlyToGeoLayer?: (id: string) => void) {
   return render(
     <LayerPanel
       onAddFile={noop}
       onAddFiles={noop}
       onAddUrl={noopUrl}
       loading={false}
+      onFlyToGeoLayer={onFlyToGeoLayer}
     />,
   );
 }
@@ -95,10 +98,6 @@ function addGeoJson(name = "roads"): string {
 
 function geoRows(): HTMLElement[] {
   return screen.queryAllByTestId("geo-layer-row");
-}
-
-function geoLayer(id: string) {
-  return geoStore().layers.find((l) => l.id === id)!;
 }
 
 describe("LayerPanel — two sections", () => {
@@ -196,18 +195,19 @@ describe("LayerPanel — a geospatial row", () => {
     );
   });
 
-  it("offers an opacity slider for a raster layer and pushes it to the store", () => {
-    const id = addRaster();
+  // Opacity and the four style fields moved to `GeoLayerInspector`, which has
+  // the width for them; the row is identity plus actions and nothing else.
+  it("keeps the row lean — no style or opacity controls inline", () => {
+    addGeoJson();
     renderPanel();
 
-    const slider = within(geoRows()[0]!).getByLabelText(
-      /opacity/i,
-    ) as HTMLInputElement;
-    fireEvent.change(slider, { target: { value: "0.4" } });
-
-    expect(geoStore().layers.find((l) => l.id === id)!.opacity).toBeCloseTo(
-      0.4,
-    );
+    const row = within(geoRows()[0]!);
+    expect(row.queryByLabelText("Opacity")).toBeNull();
+    expect(row.queryByLabelText("Layer color")).toBeNull();
+    expect(row.queryByLabelText("Point size")).toBeNull();
+    expect(row.queryByLabelText("Line width")).toBeNull();
+    expect(row.queryByLabelText("Fill opacity")).toBeNull();
+    expect(row.queryByText("Style")).toBeNull();
   });
 
   it("removes the layer", () => {
@@ -222,105 +222,82 @@ describe("LayerPanel — a geospatial row", () => {
   });
 });
 
-describe("LayerPanel — a vector row's style controls", () => {
-  it("offers colour, point size, line width and fill opacity", () => {
+describe("LayerPanel — zoom to a geospatial layer", () => {
+  it("offers the zoom button on vector and tileset rows, not raster", () => {
+    addGeoJson();
+    renderPanel(noop);
+    expect(
+      within(geoRows()[0]!).getByRole("button", { name: "Zoom to layer" }),
+    ).toBeTruthy();
+
+    cleanup();
+    useGeoLayerStore.setState({ layers: [] });
+
+    geoStore().addGeoLayer({
+      name: "tiles",
+      kind: "3d-tiles",
+      config: { url: "https://x/tileset.json" },
+    });
+    renderPanel(noop);
+    expect(
+      within(geoRows()[0]!).getByRole("button", { name: "Zoom to layer" }),
+    ).toBeTruthy();
+
+    cleanup();
+    useGeoLayerStore.setState({ layers: [] });
+
+    addRaster();
+    renderPanel(noop);
+    expect(
+      within(geoRows()[0]!).queryByRole("button", { name: "Zoom to layer" }),
+    ).toBeNull();
+  });
+
+  it("reports the layer's id when clicked", () => {
+    const id = addGeoJson();
+    const spy = vi.fn();
+    renderPanel(spy);
+
+    fireEvent.click(
+      within(geoRows()[0]!).getByRole("button", { name: "Zoom to layer" }),
+    );
+
+    expect(spy).toHaveBeenCalledWith(id);
+  });
+
+  // REGRESSION GUARD, not a red step: this one passes even before the
+  // implementation exists (there is no zoom button at all yet). The red
+  // signal for this task comes from the two tests above.
+  it("renders no zoom button when the callback is absent", () => {
     addGeoJson();
     renderPanel();
-
-    const row = within(geoRows()[0]!);
-    const color = row.getByLabelText("Layer color") as HTMLInputElement;
-    expect(color.type).toBe("color");
-    expect(row.getByLabelText("Point size")).toBeTruthy();
-    expect(row.getByLabelText("Line width")).toBeTruthy();
-    expect(row.getByLabelText("Fill opacity")).toBeTruthy();
+    expect(
+      within(geoRows()[0]!).queryByRole("button", { name: "Zoom to layer" }),
+    ).toBeNull();
   });
+});
 
-  it("fades a vector layer through the general opacity slider too", () => {
+describe("LayerPanel — selecting a geospatial layer", () => {
+  it("activates the layer on row click and marks the row", () => {
     const id = addGeoJson();
     renderPanel();
 
-    const slider = within(geoRows()[0]!).getByLabelText(
-      "Opacity",
-    ) as HTMLInputElement;
-    fireEvent.change(slider, { target: { value: "0.3" } });
+    fireEvent.click(geoRows()[0]!);
 
-    expect(geoLayer(id).opacity).toBeCloseTo(0.3);
+    expect(geoStore().activeGeoLayerId).toBe(id);
+    expect(geoRows()[0]!.className).toContain("layer-active");
   });
 
-  it("writes a colour edit through as a FRESH style object", () => {
+  it("clicking a city row hands the selection back to the city side", () => {
+    addCityLayer("Delft");
     const id = addGeoJson();
     renderPanel();
 
-    const before = geoLayer(id).style;
-    fireEvent.change(within(geoRows()[0]!).getByLabelText("Layer color"), {
-      target: { value: "#00ff00" },
-    });
+    fireEvent.click(geoRows()[0]!);
+    expect(geoStore().activeGeoLayerId).toBe(id);
 
-    const after = geoLayer(id).style;
-    expect(after.color).toBe("#00ff00");
-    // Identity moves on every style edit — the reconciler re-describes on it.
-    expect(after).not.toBe(before);
-    // …and the fields the user did not touch come along unchanged.
-    expect(after.pointSizePx).toBe(before.pointSizePx);
-    expect(after.lineWidthPx).toBe(before.lineWidthPx);
-  });
-
-  it("commits point size and line width as numbers", () => {
-    const id = addGeoJson();
-    renderPanel();
-
-    const row = within(geoRows()[0]!);
-    fireEvent.change(row.getByLabelText("Point size"), {
-      target: { value: "8" },
-    });
-    fireEvent.change(row.getByLabelText("Line width"), {
-      target: { value: "5" },
-    });
-
-    expect(geoLayer(id).style.pointSizePx).toBe(8);
-    expect(geoLayer(id).style.lineWidthPx).toBe(5);
-  });
-
-  it("leaves the size alone while its box is empty mid-edit", () => {
-    const id = addGeoJson();
-    renderPanel();
-
-    const row = within(geoRows()[0]!);
-    fireEvent.change(row.getByLabelText("Point size"), {
-      target: { value: "8" },
-    });
-    // Clearing the box to retype it must not read as "0" and snap the layer
-    // back to the app default through the store's normalization.
-    fireEvent.change(row.getByLabelText("Point size"), {
-      target: { value: "" },
-    });
-
-    expect(geoLayer(id).style.pointSizePx).toBe(8);
-  });
-
-  it("commits fill opacity from its own slider", () => {
-    const id = addGeoJson();
-    renderPanel();
-
-    fireEvent.change(within(geoRows()[0]!).getByLabelText("Fill opacity"), {
-      target: { value: "0.25" },
-    });
-
-    expect(geoLayer(id).style.fillOpacity).toBeCloseTo(0.25);
-    // The general opacity is a different value and stays where it was.
-    expect(geoLayer(id).opacity).toBe(1);
-  });
-
-  it("gives a raster row the opacity slider and NO style controls", () => {
-    addRaster();
-    renderPanel();
-
-    const row = within(geoRows()[0]!);
-    expect(row.getByLabelText("Opacity")).toBeTruthy();
-    expect(row.queryByLabelText("Layer color")).toBeNull();
-    expect(row.queryByLabelText("Point size")).toBeNull();
-    expect(row.queryByLabelText("Line width")).toBeNull();
-    expect(row.queryByLabelText("Fill opacity")).toBeNull();
+    fireEvent.click(screen.getByText("Delft"));
+    expect(geoStore().activeGeoLayerId).toBeNull();
   });
 });
 
@@ -332,5 +309,14 @@ describe("LayerPanel — a restored GeoJSON layer whose file is gone", () => {
     const row = geoRows()[0]!;
     expect(within(row).getByText(/file needed/i)).toBeTruthy();
     expect(within(row).getByLabelText(/re-link/i)).toBeTruthy();
+  });
+
+  it("offers no zoom button — an unlinked row has no data to frame", () => {
+    geoStore().addGeoLayer({ name: "parcels", kind: "geojson", config: {} });
+    renderPanel(noop);
+
+    expect(
+      within(geoRows()[0]!).queryByRole("button", { name: "Zoom to layer" }),
+    ).toBeNull();
   });
 });

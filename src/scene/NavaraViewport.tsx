@@ -40,6 +40,7 @@ import {
 } from "react";
 import ThreeView, {
   Color,
+  ColorMap,
   degreeToRadian,
   geodeticToVector3,
   getPickRay,
@@ -72,7 +73,10 @@ import { useSolarStore } from "../features/solar/solarStore";
 import { useStreamStore } from "../features/streaming/streamStore";
 import { useTilesStore } from "../features/tiles/tilesStore";
 import { useGeoLayerStore } from "../features/geoLayers/geoLayerStore";
-import { useBasemapStore } from "../features/basemap/basemapStore";
+import {
+  useBasemapStore,
+  type HeatmapSettings,
+} from "../features/basemap/basemapStore";
 import { useAtmosphereStore } from "../features/atmosphere/atmosphereStore";
 import { useRenderDebugStore } from "../features/debug/renderDebugStore";
 import { setStreamPlugin } from "../features/streaming/streamPlugin";
@@ -184,6 +188,11 @@ const makeEngineColor = (hex: number): unknown => new Color().setHex(hex);
 export interface CitySceneHandle {
   fitAll: () => void;
   fitLayer: (layerId: string) => void;
+  /** Fly to frame caller-supplied bounds — the geo-layer fit, whose extents
+   *  the app computes itself (`geoLayerBounds.ts`); the engine has no bounds
+   *  API for its own geo layers. Same framing and settle suppression as
+   *  `fitLayer`. */
+  fitBounds: (bounds: GeodeticBounds) => void;
   alignView: (direction: ViewDirection) => void;
   getCameraState: () => GeographicCameraState | null;
   setCameraState: (state: GeographicCameraState) => void;
@@ -973,6 +982,58 @@ function resolveBasemapSource(
   return { ...rest, elevationDecoder: TERRARIUM_ELEVATION_DECODER() };
 }
 
+/**
+ * The RdYlBu ramp from Navara's own ElevationHeatmapMaterial docs, low → high.
+ *
+ * Hex strings rather than built `Color`s: `Color` comes from the engine module,
+ * which the viewport suites MOCK, so colours are constructed lazily inside
+ * {@link addBasemap} (only reached with a live engine) instead of at module
+ * scope, where the mock's stub class would be baked in at import time.
+ */
+const ELEVATION_RAMP_HEX = [
+  "#313695",
+  "#4575b4",
+  "#74add1",
+  "#abd9e9",
+  "#e0f3f8",
+  "#ffffbf",
+  "#fee090",
+  "#fdae61",
+  "#f46d43",
+  "#d73027",
+  "#a50026",
+] as const;
+
+/**
+ * Merge the user's ramp settings over a heatmap option's `layer` block.
+ *
+ * Identity for every option WITHOUT one (imagery, "None") — the settings only
+ * mean anything to the elevation heatmap. `logBoundary` is derived, not user
+ * state: the catalogue's 1000 m handover, clamped under the edited `maxHeight`
+ * so a low ceiling (a Dutch user asking for 0–40 m) never puts the log knee
+ * above the whole ramp.
+ */
+function applyHeatmapSettings(
+  option: BasemapOption,
+  settings: HeatmapSettings,
+): BasemapOption {
+  if (option.layer === undefined) return option;
+  return {
+    ...option,
+    layer: {
+      elevationHeatmap: {
+        minHeight: settings.minHeight,
+        maxHeight: settings.maxHeight,
+        logarithmic: settings.logarithmic,
+        logBoundary: Math.min(
+          option.layer.elevationHeatmap.logBoundary,
+          settings.maxHeight,
+        ),
+      },
+    },
+  };
+}
+
 function addBasemap(
   view: ViewInstance,
   option: BasemapOption,
@@ -985,6 +1046,23 @@ function addBasemap(
     // a `raster` layer over a `raster-dem` source draws nothing legible until
     // it is told how to colourise the heights it decodes.
     const layer = view.addLayer({ type: "raster", ...option.layer, source });
+    if (option.layer !== undefined) {
+      // The engine's default ramp is near-monochrome blue — Delft and the Alps
+      // read as the same colour. `globe.elevationColormap` is the one globe
+      // setter probed CLEAN on 0.0.5 (Known Issue (i); `color`/`wireframe`
+      // stay banned), and it is written HERE, at the basemap seam, never from
+      // theme code (`sceneThemePolicy`'s test pins that separation). It stays
+      // written after a swap away, which is inert: only a raster-dem layer
+      // reads it. Reported, not propagated — a refused ramp leaves the
+      // engine's default, not a dead viewport.
+      applyToEngine("the elevation heatmap's colour ramp", () => {
+        view.globe.elevationColormap = new ColorMap(
+          "diverging",
+          "RdYlBu",
+          ELEVATION_RAMP_HEX.map((hex) => new Color().setStyle(hex)),
+        );
+      });
+    }
     return { layer, source };
   } catch (error) {
     console.error(
@@ -1169,6 +1247,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     const tilesWanted = useTilesStore((s) => s.enabled);
     /** Which basemap the user picked. */
     const basemapId = useBasemapStore((s) => s.basemapId);
+    const heatmapSettings = useBasemapStore((s) => s.heatmap);
     /** Photoreal / cartoon / cyber / wireframe. What it MEANS is
      *  `sceneThemePolicy.ts`; this component only applies it. */
     const sceneTheme = useSceneThemeStore((s) => s.theme);
@@ -1622,13 +1701,24 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     // is: React runs cleanups in declaration order, so on unmount the engine is
     // already disposed and the `viewRef.current === view` guard declines to
     // call `delete()` through a dead view. Keyed on `basemapId`, so changing
-    // the option removes the old pair and adds the new one in one commit.
+    // the option removes the old pair and adds the new one in one commit —
+    // and on the heatmap's ramp settings too, because a raster layer's
+    // `elevationHeatmap` block is baked into its description and the honest
+    // way to change a description is the same remove-and-re-add the picker
+    // itself uses (the browser-verified path; `Layer.update` on a live
+    // raster-dem drape is untested on 0.0.5). The settings ride every option
+    // through `applyHeatmapSettings`, which is the identity for imagery, so
+    // editing them while Esri is draped re-adds nothing meaningfully
+    // different and costs one swap of an already-cached tile set.
     useEffect(() => {
       const view = viewRef.current;
       if (!engineReady || view === null) return;
       // The theme's override wins over the picker while it is in force, and
       // the picker wins again the moment it is not.
-      const option = basemapById(effectiveBasemapId);
+      const option = applyHeatmapSettings(
+        basemapById(effectiveBasemapId),
+        heatmapSettings,
+      );
       const handles = addBasemap(view, option);
       // "None", or the engine refused: nothing is draped, so nobody is credited.
       if (handles === null) return;
@@ -1637,7 +1727,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         setActiveBasemap(null);
         if (viewRef.current === view) removeBasemap(handles);
       };
-    }, [engineReady, effectiveBasemapId]);
+    }, [engineReady, effectiveBasemapId, heatmapSettings]);
 
     // --- The user's geospatial layers (GeoJSON / XYZ raster / 3D Tiles) ---
     //
@@ -2115,6 +2205,25 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         withSettleSuppressed(() => view.flyTo(framedForMode(bounds)));
       },
       [boundsOf, framedForMode, withSettleSuppressed],
+    );
+
+    const fitBounds = useCallback(
+      (bounds: GeodeticBounds) => {
+        const view = viewRef.current;
+        if (!view) return;
+        const framed = framedForMode(bounds);
+        // Bounds arrive from outside the engine's own registries, so a bad box
+        // must die here, not as a NaN camera the engine cannot recover from.
+        if (
+          !Number.isFinite(framed.lng) ||
+          !Number.isFinite(framed.lat) ||
+          !Number.isFinite(framed.height)
+        ) {
+          return;
+        }
+        withSettleSuppressed(() => view.flyTo(framed));
+      },
+      [framedForMode, withSettleSuppressed],
     );
 
     const alignView = useCallback(
@@ -3322,6 +3431,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       () => ({
         fitAll,
         fitLayer,
+        fitBounds,
         alignView,
         getCameraState,
         setCameraState,
@@ -3344,6 +3454,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       [
         fitAll,
         fitLayer,
+        fitBounds,
         alignView,
         getCameraState,
         setCameraState,

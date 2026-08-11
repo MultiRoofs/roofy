@@ -20,6 +20,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -77,6 +78,7 @@ vi.mock("../../../src/scene/NavaraViewport", () => ({
             ? {
                 fitAll: () => {},
                 fitLayer: () => {},
+                fitBounds: () => {},
                 alignView: () => {},
                 getCameraState: () => null,
                 setCameraState: () => {},
@@ -139,6 +141,10 @@ const { useLayerStore } =
   await import("../../../src/features/layers/layerStore");
 const { useStreamStore } =
   await import("../../../src/features/streaming/streamStore");
+const { useGeoLayerStore } =
+  await import("../../../src/features/geoLayers/geoLayerStore");
+const { useSelectionStore } =
+  await import("../../../src/features/selection/selectionStore");
 
 const emptyStore: ProjectStateStore = {
   list: async (): Promise<SnapshotSummary[]> => [],
@@ -354,5 +360,67 @@ describe("App object count across static and streaming layers", () => {
     // deleted as a duplicate of it — and `getByText` throwing on a second
     // match is what keeps it that way.
     await waitFor(() => expect(screen.getByText("2123")).toBeTruthy());
+  });
+});
+
+/**
+ * The inspector follows VIEWPORT picks, not just clicks in the layer panel:
+ * a picked geo feature makes its layer the active geo layer (so the panel
+ * shows that layer's config), and a picked city object hands the panel back
+ * by clearing it. Both directions are `App`-level effects with no UI of their
+ * own, so they are driven through the selection store directly.
+ */
+describe("App inspector follows viewport picks across the geo/city split", () => {
+  const resetStores = () => {
+    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useGeoLayerStore.setState({ layers: [], activeGeoLayerId: null });
+    useSelectionStore.getState().clear();
+  };
+
+  beforeEach(resetStores);
+  afterEach(() => {
+    cleanup();
+    resetStores();
+  });
+
+  it("activates the picked feature's geo layer, then clears it on a city pick", async () => {
+    useLayerStore.getState().addLayer({
+      id: "city-1",
+      name: "delft.city.json",
+      model,
+      modelRef: { type: "url", url: JSON_URL },
+      visible: true,
+      rules: [],
+      rulesEnabled: true,
+      isStreaming: false,
+    });
+    const geoLayerId = useGeoLayerStore.getState().addGeoLayer({
+      name: "roads",
+      kind: "geojson",
+      config: { url: "https://x/roads.geojson" },
+    });
+
+    render(<App persistenceStore={emptyStore} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
+    );
+
+    act(() => {
+      useSelectionStore.getState().selectGeoFeature({
+        geoLayerId,
+        batchId: 7,
+        properties: { name: "A13" },
+      });
+    });
+    expect(useGeoLayerStore.getState().activeGeoLayerId).toBe(geoLayerId);
+
+    act(() => {
+      useSelectionStore.getState().select({
+        kind: "object",
+        layerId: "city-1",
+        objectId: "NL.IMBAG.Pand.1",
+      });
+    });
+    expect(useGeoLayerStore.getState().activeGeoLayerId).toBeNull();
   });
 });

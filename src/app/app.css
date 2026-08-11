@@ -2618,10 +2618,10 @@ body {
   line-height: 1.4;
 }
 
-/* Not clickable as a whole, unlike a city-model row: there is no "active"
-   geospatial layer for the inspector to follow. */
+/* Clickable like a city-model row: the inspector follows the active
+   geospatial layer (geoLayerStore.activeGeoLayerId). */
 .geo-layer-item {
-  cursor: default;
+  cursor: pointer;
 }
 
 .layer-badge-geo {
@@ -2635,34 +2635,15 @@ body {
   border-radius: var(--radius-sm);
 }
 
-/* Narrow on purpose: it shares a 240 px row with a name, a badge and the
-   delete button, and it is the one control there that can be read at a glance
-   from its handle position alone. */
+/* Sized for the narrow case and widened in the inspector below. The base
+   widths date from when these controls sat in a 240 px layer row; they now
+   only render in the inspector, but the pair is kept as base + override so a
+   narrower host would still get something readable. */
 .geo-opacity-slider {
   flex-shrink: 0;
   width: 3.5rem;
   accent-color: var(--accent);
   cursor: pointer;
-}
-
-/* Wrapped under the row, like the object-type list: four controls inline would
-   treble the height of every row in a 240 px panel, so they live behind a
-   disclosure that costs one line closed. */
-.geo-style {
-  width: 100%;
-  margin-top: 0.25rem;
-}
-
-.geo-style-summary {
-  color: var(--fg-dim);
-  font-size: 0.62rem;
-  letter-spacing: 0.03em;
-  cursor: pointer;
-  user-select: none;
-}
-
-.geo-style-summary:hover {
-  color: var(--accent);
 }
 
 .geo-style-fields {
@@ -2706,6 +2687,36 @@ body {
   width: 3.5rem;
   accent-color: var(--accent);
   cursor: pointer;
+}
+
+/* The same controls in the INSPECTOR, where the panel is wide: the widths
+   above are sized for a 240 px layer row and read as cramped stubs here, so
+   they are overridden scoped to the inspector rather than loosened globally.
+   A source URL is unbreakable text, so it wraps mid-token instead of forcing
+   the panel wider. */
+
+/* `width: 100%` on a style slider is only half the fix: `.geo-style-field` is
+   `display: contents`, so the control is a grid item of `.geo-style-fields`
+   and 100% resolves against its TRACK — an `auto` track sized to the control's
+   own intrinsic width, which leaves the slider exactly as wide as it was. The
+   second track has to be able to stretch first. `minmax(0, 1fr)` rather than
+   `1fr` so the fixed-width controls (the colour swatch, the number inputs)
+   cannot push the track past its share. */
+.geo-inspector .geo-style-fields {
+  grid-template-columns: 1fr minmax(0, 1fr);
+}
+
+.geo-inspector .geo-opacity-slider,
+.geo-inspector .geo-style-slider {
+  width: 100%;
+}
+
+.geo-inspector .geo-style-number {
+  width: 4.5rem;
+}
+
+.geo-inspector-source {
+  word-break: break-all;
 }
 
 /* Wrapped under the row (the flex line breaks before it), like the city rows'

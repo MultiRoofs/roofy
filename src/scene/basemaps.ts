@@ -70,22 +70,43 @@ export type BasemapSource = BasemapTileSource | BasemapDemSource;
  * source renders nothing legible until it is told to colourise the decoded
  * heights. Imagery options add nothing here and pass `undefined`.
  */
-export interface BasemapLayerOptions {
-  readonly elevationHeatmap: {
-    /** The top of the colour ramp, metres. */
-    readonly maxHeight: number;
-    readonly minHeight: number;
-    /** A logarithmic ramp, so the first few hundred metres — where almost all
-     *  inhabited land is — get most of the colour range instead of one flat
-     *  band at the bottom. */
-    readonly logarithmic: boolean;
-    /** Where the log ramp hands over, metres. */
-    readonly logBoundary: number;
-  };
+export interface ElevationHeatmapOptions {
+  /** The top of the colour ramp, metres. */
+  readonly maxHeight: number;
+  readonly minHeight: number;
+  /** A logarithmic ramp, so the first few hundred metres — where almost all
+   *  inhabited land is — get most of the colour range instead of one flat
+   *  band at the bottom. */
+  readonly logarithmic: boolean;
+  /** Where the log ramp hands over, metres. */
+  readonly logBoundary: number;
 }
 
+export interface BasemapLayerOptions {
+  readonly elevationHeatmap: ElevationHeatmapOptions;
+}
+
+/**
+ * The heatmap's out-of-the-box ramp — the engine example's numbers.
+ *
+ * `maxHeight` is deliberately well below Everest: a ramp that has to reach
+ * 8848 m spends its whole range on land nobody is analysing rooftops on, and
+ * the log ramp below 1000 m is what keeps a Dutch city from being one flat
+ * colour. Exported on its own because `basemapStore` seeds the user-editable
+ * min/max/log settings from it (the sidebar's ramp configurator), and the two
+ * must not drift.
+ */
+export const ELEVATION_HEATMAP_DEFAULTS: ElevationHeatmapOptions = {
+  maxHeight: 3200,
+  minHeight: 0,
+  logarithmic: true,
+  logBoundary: 1000,
+};
+
 export interface BasemapOption {
-  /** Kept out of the pickers (still resolvable by id). See the one user. */
+  /** Kept out of the pickers (still resolvable by id, so a persisted snapshot
+   *  keeps working). No entry sets it today; it existed for the elevation
+   *  heatmap while that option was wrongly convicted of not rendering. */
   readonly hidden?: boolean;
   readonly id: BasemapId;
   readonly label: string;
@@ -158,16 +179,20 @@ export const BASEMAPS: readonly BasemapOption[] = [
     attribution: ["© CARTO", "© OpenStreetMap contributors"],
   },
   {
-    // DOES NOT RENDER on 0.0.5 inside THIS app: the engine fetches ZERO
-    // terrarium tiles for a raster-dem source here — even the engine's own
-    // example, run verbatim through a debug handle at multiple zooms, fetches
-    // nothing, while the identical code works on the vendor's preview site.
-    // Some interaction with this app's view configuration (plugins/photoreal
-    // scene/existing raster) suppresses raster-dem fetching entirely; same
-    // renders-nothing family as Known Issue (k). Hidden from the picker until
-    // a minimal-repro bisection finds the trigger; the machinery stays so the
-    // investigation has something to re-enable.
-    hidden: true,
+    // RENDERS, and the 2026-08-06 "fetches ZERO terrarium tiles" verdict that
+    // hid this entry was a MEASUREMENT artifact, not an engine bug: in-page
+    // probes (a fetch patch, `performance.getEntriesByType("resource")`) read
+    // FALSE ZEROS for tile fetches the CDP network log shows in the hundreds —
+    // the same probe read the draped Esri basemap as 0 in the live app. Which
+    // conditions hide a fetch from in-page observation was NOT pinned down
+    // (the engine's worker pool and the resource-timing buffer cap are both
+    // candidates); judge fetching at the network layer, full stop.
+    // Re-verified 2026-08-11 at the network layer and by
+    // pixels: picking this option in the live app fetched ~100 terrarium
+    // tiles and turned the Innsbruck relief blue where "None" shows the pale
+    // bare globe. Judge this option by an A/B against "None" at the same
+    // camera — atmosphere haze over relief mimics a ramp well enough to have
+    // produced two wrong verdicts in a row.
     id: "elevation-heatmap",
     label: "Elevation heatmap",
     // NOT imagery: a DEM read as data and colourised by the engine, which is
@@ -184,18 +209,9 @@ export const BASEMAPS: readonly BasemapOption[] = [
       tileSize: 512,
       maxZoom: 15,
     },
-    // The engine's own example's numbers. `maxHeight` is deliberately well
-    // below Everest: a ramp that has to reach 8848 m spends its whole range on
-    // land nobody is analysing rooftops on, and the log ramp below 1000 m is
-    // what keeps a Dutch city from being one flat colour.
-    layer: {
-      elevationHeatmap: {
-        maxHeight: 3200,
-        minHeight: 0,
-        logarithmic: true,
-        logBoundary: 1000,
-      },
-    },
+    // The defaults only: the store's user-edited min/max/log settings are
+    // merged over this block at the engine seam (`NavaraViewport`).
+    layer: { elevationHeatmap: ELEVATION_HEATMAP_DEFAULTS },
     // `terrain.ts` credits only what the geoid lines do not already say, and
     // the same reasoning gives a DIFFERENT answer here. The overlay dedupes by
     // exact string, and the geoid's Mapterhorn line is
@@ -214,9 +230,9 @@ export const BASEMAPS: readonly BasemapOption[] = [
  * SATELLITE, not the cartographic OSM sheet. Under the physical-atmosphere
  * calibration the globe is unlit albedo lit by the aerial-perspective pass at
  * exposure ~10, and OSM's tiles are essentially white paper: they blow out
- * where photographic imagery reads naturally (measured — see
- * docs/superpowers/research/2026-08-04-overbright-scene-diagnosis.md). OSM and
- * Positron stay in the picker; they are just not what a fresh session opens on.
+ * where photographic imagery reads naturally (measured in the 2026-08-04
+ * overbright-scene diagnosis). OSM and Positron stay in the picker; they are
+ * just not what a fresh session opens on.
  */
 export const DEFAULT_BASEMAP_ID: BasemapId = "esri-imagery";
 

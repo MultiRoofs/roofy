@@ -290,7 +290,7 @@ Goal: replace the bespoke React Three Fiber scene with the Navara engine, moving
 format-agnostic CityJSON domain code into a reusable plugin monorepo consumed as a git
 submodule (`packages/cityjson-navara-plugins`).
 
-Tracked in detail in `docs/superpowers/plans/2026-08-01-navara-migration.md`. That plan
+Tracked in detail in the Navara-migration plan (2026-08-01). That plan
 numbers its own phases M7.1–M7.7; those labels belong to the plan's internal numbering and
 are unrelated to Milestone 7 (CityGML) above. Phase status:
 
@@ -300,8 +300,7 @@ are unrelated to Milestone 7 (CityGML) above. Phase status:
   deliberately as app vocabulary (`domain/citymodel/types.ts`, `features/rules/types.ts`)
 - M7.3 (plugin + viewport rendering a static CityJSON layer): Complete
 - M7.4 (picking, cursor readout, rules, highlight, LoD): Complete — verified end-to-end
-  in the browser on the real engine; log in
-  `docs/superpowers/research/2026-08-01-navara-spike-findings.md` §10
+  in the browser on the real engine (logged in the Navara spike findings, 2026-08-01)
 - M7.5 (@cityjson/navara-flatcitybuf streaming plugin): Complete — browser-proven against
   a real remote `.fcb` (range requests, resident-cell counts, level swaps)
 - M7.6 (solar, Google 3D Tiles, geographic persistence): Complete
@@ -385,9 +384,6 @@ the migration as a single diff. Per-task reviews were run and closed throughout.
 Goal: load CityParquet packages as ordinary static city-model layers, from a URL, from an
 object-storage bucket, or from local files.
 
-Spec: `docs/superpowers/specs/2026-08-07-cityparquet-loading-design.md`.
-Plan: `docs/superpowers/plans/2026-08-07-cityparquet-loading.md`.
-
 Deliverables:
 
 - Engine-free reader in `@cityjson/navara-cityparquet` — footer `city` metadata, table
@@ -429,9 +425,6 @@ Goal: make the geospatial layers the app can already draw (GeoJSON, XYZ raster t
 Cesium 3D Tiles — added earlier as an unrecorded increment) into first-class, inspectable,
 styleable layers rather than write-only decoration.
 
-Spec: `docs/superpowers/specs/2026-08-10-gis-layers-and-per-layer-styles-design.md`.
-Plan: `docs/superpowers/plans/2026-08-10-gis-layers-per-layer-styles.md`.
-
 Deliverables:
 
 - Add Layer dialog opens on the **Geospatial** tab, and the layer panel's city and
@@ -439,9 +432,10 @@ Deliverables:
 - Rules tab names its target city layer and offers a picker; the legend groups its entries
   by layer, so a multi-layer session can tell whose rule coloured what ✓
 - Per-layer geospatial style — colour, point size (pixels), line width, fill opacity —
-  normalised through one total door (`features/geoLayers/geoLayerStyle.ts`), edited in the
-  layer row's Style block, applied by rebuilding the engine description, and persisted in
-  the snapshot alongside `visible`/`opacity` ✓
+  normalised through one total door (`features/geoLayers/geoLayerStyle.ts`), applied by
+  rebuilding the engine description, and persisted in the snapshot alongside
+  `visible`/`opacity` ✓ (edited in the layer row's Style block as shipped; the controls
+  moved to the inspector in the follow-up below)
 - Geo feature selection: `geoSelection` in the selection store, fed by the engine's own
   `pick` pass (stashed on `pick`, resolved on the `click` that follows), with a city hit
   winning outright and the store's invariant clearing the other side ✓
@@ -461,9 +455,27 @@ Answered by the smoke, and worth recording: the engine's `pick` pass DOES fire f
 GeoJSON feature with no `pickable` flag on the descriptor — `geoLayerDescriptions.ts` sets
 none and relies on the engine default, which the review flagged as unproven under Node.
 
+Follow-up increment, 2026-08-11 — geo-layer zoom and inspector-hosted config:
+
+- **Zoom to layer.** A geo layer could be added and then never found: the engine draws it
+  but Navara 0.0.5 exposes no bounds API for it, so the app now computes the extent itself
+  in the engine-free `features/geoLayers/geoLayerBounds.ts` (GeoJSON coordinate walk; a 3D
+  Tiles root bounding volume — region, sphere or box; results cached by URL) and flies to it
+  through the new generic `CitySceneHandle.fitBounds(bounds: GeodeticBounds)`. The button
+  shows for GeoJSON and 3D Tiles rows only — an XYZ raster template names no extent ✓
+- **Geo layers join the selection model.** `geoLayerStore.activeGeoLayerId` (session-only,
+  not persisted) makes a geo row clickable and swaps the right InspectorPanel to
+  `ui/inspector/GeoLayerInspector.tsx` — the layer's info, opacity and vector style, moved
+  out of the row, which is now identity and actions only. A city row click or a city object
+  pick hands the inspector back; picking a geo feature in the viewport activates its layer ✓
+
+Verification green: `npx tsc -b --noEmit`, app 112 files / 1479 tests.
+
 Deferred, deliberately: a geospatial-only session is still impossible — the landing page
-offers no geospatial door, so the viewer shell only mounts once a city layer exists. A
-follow-up candidate, out of this plan's scope.
+offers no geospatial door, so the viewer shell only mounts once a city layer exists (the
+shell gates on city layers alone), which also means neither the zoom button nor the geo
+inspector is reachable in a geo-only workspace. A follow-up candidate, out of scope for
+both plans.
 
 ## Cross-Cutting Workstreams
 

@@ -36,6 +36,7 @@ import { InspectorPanel } from "../../../../src/ui/inspector/InspectorPanel";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
+import { useGeoLayerStore } from "../../../../src/features/geoLayers/geoLayerStore";
 import { CellCache } from "@cityjson/navara-flatcitybuf";
 import { buildResidentModel } from "@cityjson/navara-flatcitybuf";
 import type { FcbStreamLayerHandle } from "@cityjson/navara-flatcitybuf";
@@ -61,6 +62,7 @@ afterEach(() => {
   cleanup();
   useLayerStore.setState({ layers: [], activeLayerId: null });
   useStreamStore.setState({ streams: {} });
+  useGeoLayerStore.setState({ layers: [], activeGeoLayerId: null });
 });
 
 function emptyModel(): CityModel {
@@ -348,5 +350,54 @@ describe("InspectorPanel — streaming layer", () => {
     expect(screen.getByText("21.0 m²")).toBeTruthy();
     expect(screen.getByText("20.0 m²")).toBeTruthy();
     expect(screen.getByText("128.0 m³")).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Geospatial layer mode — one selection across both sections, so an active
+// geo layer replaces the city tabs entirely (a geo layer has no objects,
+// surfaces or rules to tab between).
+// ---------------------------------------------------------------------------
+
+describe("InspectorPanel — geo layer mode", () => {
+  it("shows the geo layer view instead of the city tabs while a geo layer is active", () => {
+    const id = useGeoLayerStore.getState().addGeoLayer({
+      name: "roads",
+      kind: "geojson",
+      config: { url: "https://x/roads.geojson" },
+    });
+    useGeoLayerStore.getState().setActiveGeoLayer(id);
+
+    render(<InspectorPanel selections={[]} onClose={() => {}} />);
+
+    expect(screen.getByText("roads")).toBeTruthy();
+    expect(screen.getByLabelText("Layer color")).toBeTruthy();
+    // The city tab strip is not offered for a geo layer.
+    expect(screen.queryByRole("button", { name: "Rules" })).toBeNull();
+  });
+
+  it("returns to the city view when the geo selection clears", () => {
+    const id = useGeoLayerStore.getState().addGeoLayer({
+      name: "roads",
+      kind: "geojson",
+      config: { url: "https://x/roads.geojson" },
+    });
+    useGeoLayerStore.getState().setActiveGeoLayer(id);
+    render(<InspectorPanel selections={[]} onClose={() => {}} />);
+
+    act(() => {
+      useGeoLayerStore.getState().setActiveGeoLayer(null);
+    });
+
+    expect(screen.queryByLabelText("Layer color")).toBeNull();
+    expect(screen.getByRole("button", { name: "Rules" })).toBeTruthy();
+  });
+
+  it("ignores a stale active id that no longer names a layer", () => {
+    useGeoLayerStore.getState().setActiveGeoLayer("gone");
+
+    render(<InspectorPanel selections={[]} onClose={() => {}} />);
+
+    expect(screen.getByRole("button", { name: "Rules" })).toBeTruthy();
   });
 });

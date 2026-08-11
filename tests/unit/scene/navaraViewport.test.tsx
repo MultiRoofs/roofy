@@ -3,8 +3,8 @@
  *
  * The engine is MOCKED here and never imported for real: `@navaramap/three`
  * crashes at module scope under Node (Task B1: NODE_IMPORT_SAFE = false), and
- * jsdom has no WebGL anyway. The real engine is exercised by the browser smoke
- * (docs/superpowers/research/assets/b11a-navara-viewport-globe.png), not here.
+ * jsdom has no WebGL anyway. The real engine is exercised by browser smokes,
+ * not here.
  */
 import { createRef, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -263,6 +263,9 @@ vi.mock("@navaramap/three", () => ({
   // highlight passes instances of it into the engine's feature evaluators, so
   // the mock only has to be constructible and chainable; `hex` is recorded so a
   // test can assert WHICH colour a feature was given.
+  // The engine's `ColorMap` — `addBasemap` builds the elevation heatmap's
+  // ramp out of it. A named import of a mocked module has to exist to link.
+  ColorMap: class {},
   Color: class {
     hex: number | undefined;
     style: string | undefined;
@@ -713,6 +716,60 @@ describe("NavaraViewport lifecycle", () => {
     ref.current!.alignView("top");
     expect(flyTo).not.toHaveBeenCalled();
     expect(setCamera).not.toHaveBeenCalled();
+  });
+
+  it("fitBounds flies to caller-supplied bounds without consulting any layer", async () => {
+    const ref = createRef<CitySceneHandle>();
+    render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
+    await waitFor(() => expect(ref.current).not.toBeNull());
+    await ref.current!.ready;
+    ref.current!.fitBounds({
+      west: 4.1,
+      south: 51.9,
+      east: 4.6,
+      north: 52.3,
+      minHeight: 0,
+      maxHeight: 0,
+    });
+
+    expect(flyTo).toHaveBeenCalledTimes(1);
+    const target = flyTo.mock.calls[0]![0] as {
+      lng: number;
+      lat: number;
+      height: number;
+    };
+    // Longitude IS the box centre — the default framing offsets only along the
+    // view axis, which is due north. Latitude is deliberately NOT asserted to
+    // lie inside the box: `cameraForBounds` parks the camera one fit distance
+    // back down a -60 degree view axis, i.e. SOUTH of and above the box, so a
+    // 44 km-tall box puts the camera ~0.4 degrees south of `south`. What the
+    // fit owes the caller is that it framed THEIR box: centred in longitude,
+    // south of their centre, at a real height.
+    expect(target.lng).toBeCloseTo(4.35, 6);
+    expect(target.lat).toBeLessThan((51.9 + 52.3) / 2);
+    expect(target.lat).toBeGreaterThan(51.0);
+    expect(target.height).toBeGreaterThan(0);
+    expect(Number.isFinite(target.height)).toBe(true);
+  });
+
+  it("fitBounds refuses a box that frames to a non-finite camera", async () => {
+    // A no-view call cannot be tested deterministically (init is async and may
+    // already have run), so the guard under test is the finite check — the
+    // deterministic half of "bad input moves no camera".
+    const ref = createRef<CitySceneHandle>();
+    render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
+    await waitFor(() => expect(ref.current).not.toBeNull());
+    await ref.current!.ready;
+    ref.current!.fitBounds({
+      west: Number.NaN,
+      south: Number.NaN,
+      east: Number.NaN,
+      north: Number.NaN,
+      minHeight: 0,
+      maxHeight: 0,
+    });
+
+    expect(flyTo).not.toHaveBeenCalled();
   });
 
   it("disposes the view on unmount", async () => {

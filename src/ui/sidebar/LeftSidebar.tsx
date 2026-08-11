@@ -25,6 +25,7 @@ interface LeftSidebarProps {
   readonly onAddUrl: (url: string) => Promise<AddUrlResult>;
   readonly loading: boolean;
   readonly onFlyToLayer?: (layerId: string) => void;
+  readonly onFlyToGeoLayer?: (geoLayerId: string) => void;
 }
 
 export function LeftSidebar({
@@ -36,6 +37,7 @@ export function LeftSidebar({
   onAddUrl,
   loading,
   onFlyToLayer,
+  onFlyToGeoLayer,
 }: LeftSidebarProps) {
   const draggingRef = useRef(false);
   const startXRef = useRef(0);
@@ -99,6 +101,7 @@ export function LeftSidebar({
           onAddUrl={onAddUrl}
           loading={loading}
           onFlyToLayer={onFlyToLayer}
+          onFlyToGeoLayer={onFlyToGeoLayer}
         />
       </div>
       <div className="left-sidebar-handle" onPointerDown={handlePointerDown} />

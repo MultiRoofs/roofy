@@ -8,8 +8,11 @@
  *    picking, streaming; each row is dense because each of those is a choice
  *    worth making per layer.
  *  - **Geospatial Layers** — context around it (GeoJSON, XYZ raster tiles, 3D
- *    Tiles). No model, no rules, no LoD, nothing to pick: the row carries
- *    visibility, a name, its kind and — for raster — an opacity.
+ *    Tiles). No model, no rules, no LoD: the row carries IDENTITY and ACTIONS
+ *    only — visibility, a name, its kind, "Zoom to layer" (GeoJSON and 3D
+ *    Tiles, which have an extent) and remove. Drawing config (opacity and the
+ *    vector style) lives in the inspector's `GeoLayerInspector`, which follows
+ *    the row you click.
  *
  * THREE buttons open the same {@link AddLayerDialog}, differing only in the tab
  * it opens on: each section header carries a `+` that names its own family, and
@@ -37,6 +40,7 @@ import { LayerTypeToggles } from "./LayerTypeToggles";
 import { GeoLayerRow } from "./GeoLayerRow";
 import { VisibilityIcon } from "./VisibilityIcon";
 import { TrashIcon } from "./TrashIcon";
+import { ZoomToLayerIcon } from "./ZoomToLayerIcon";
 
 interface LayerPanelProps {
   readonly onAddFile: (file: File) => void;
@@ -46,6 +50,7 @@ interface LayerPanelProps {
   readonly onAddUrl: (url: string) => Promise<AddUrlResult>;
   readonly loading: boolean;
   readonly onFlyToLayer?: (layerId: string) => void;
+  readonly onFlyToGeoLayer?: (geoLayerId: string) => void;
 }
 
 export function LayerPanel({
@@ -54,6 +59,7 @@ export function LayerPanel({
   onAddUrl,
   loading,
   onFlyToLayer,
+  onFlyToGeoLayer,
 }: LayerPanelProps) {
   const layers = useLayerStore((s) => s.layers);
   const activeLayerId = useLayerStore((s) => s.activeLayerId);
@@ -62,6 +68,7 @@ export function LayerPanel({
   const removeLayer = useLayerStore((s) => s.removeLayer);
   const setCameraSync = useLayerStore((s) => s.setCameraSync);
   const geoLayers = useGeoLayerStore((s) => s.layers);
+  const setActiveGeoLayer = useGeoLayerStore((s) => s.setActiveGeoLayer);
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -108,7 +115,12 @@ export function LayerPanel({
           <div
             key={layer.id}
             className={`layer-item ${isActive ? "layer-active" : ""} ${!layer.visible ? "layer-hidden" : ""}`}
-            onClick={() => setActiveLayer(layer.id)}
+            onClick={() => {
+              setActiveLayer(layer.id);
+              // One selection across both sections: a city pick hands the
+              // inspector back to the city view.
+              setActiveGeoLayer(null);
+            }}
           >
             <button
               className="layer-vis-btn"
@@ -206,31 +218,7 @@ export function LayerPanel({
                     onFlyToLayer(layer.id);
                   }}
                 >
-                  {/* Locate/crosshair, not the old circle-plus-four-lines: that
-                      glyph read as a compass rose (a bearing, not a target). */}
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="12"
-                    height="12"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <circle cx="12" cy="12" r="7" />
-                    <circle
-                      cx="12"
-                      cy="12"
-                      r="1.5"
-                      fill="currentColor"
-                      stroke="none"
-                    />
-                    <line x1="12" y1="2" x2="12" y2="5" />
-                    <line x1="12" y1="19" x2="12" y2="22" />
-                    <line x1="2" y1="12" x2="5" y2="12" />
-                    <line x1="19" y1="12" x2="22" y2="12" />
-                  </svg>
+                  <ZoomToLayerIcon />
                 </button>
               )}
               <button
@@ -290,7 +278,11 @@ export function LayerPanel({
         </p>
       ) : (
         geoLayers.map((geoLayer) => (
-          <GeoLayerRow key={geoLayer.id} layer={geoLayer} />
+          <GeoLayerRow
+            key={geoLayer.id}
+            layer={geoLayer}
+            onFlyToGeoLayer={onFlyToGeoLayer}
+          />
         ))
       )}
 
