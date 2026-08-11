@@ -3,8 +3,8 @@
  *
  * The engine is MOCKED here and never imported for real: `@navaramap/three`
  * crashes at module scope under Node (Task B1: NODE_IMPORT_SAFE = false), and
- * jsdom has no WebGL anyway. The real engine is exercised by the browser smoke
- * (docs/superpowers/research/assets/b11a-navara-viewport-globe.png), not here.
+ * jsdom has no WebGL anyway. The real engine is exercised by browser smokes,
+ * not here.
  */
 import { createRef, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

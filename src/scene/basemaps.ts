@@ -230,9 +230,9 @@ export const BASEMAPS: readonly BasemapOption[] = [
  * SATELLITE, not the cartographic OSM sheet. Under the physical-atmosphere
  * calibration the globe is unlit albedo lit by the aerial-perspective pass at
  * exposure ~10, and OSM's tiles are essentially white paper: they blow out
- * where photographic imagery reads naturally (measured — see
- * docs/superpowers/research/2026-08-04-overbright-scene-diagnosis.md). OSM and
- * Positron stay in the picker; they are just not what a fresh session opens on.
+ * where photographic imagery reads naturally (measured in the 2026-08-04
+ * overbright-scene diagnosis). OSM and Positron stay in the picker; they are
+ * just not what a fresh session opens on.
  */
 export const DEFAULT_BASEMAP_ID: BasemapId = "esri-imagery";
 
