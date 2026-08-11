@@ -439,9 +439,10 @@ Deliverables:
 - Rules tab names its target city layer and offers a picker; the legend groups its entries
   by layer, so a multi-layer session can tell whose rule coloured what ✓
 - Per-layer geospatial style — colour, point size (pixels), line width, fill opacity —
-  normalised through one total door (`features/geoLayers/geoLayerStyle.ts`), edited in the
-  layer row's Style block, applied by rebuilding the engine description, and persisted in
-  the snapshot alongside `visible`/`opacity` ✓
+  normalised through one total door (`features/geoLayers/geoLayerStyle.ts`), applied by
+  rebuilding the engine description, and persisted in the snapshot alongside
+  `visible`/`opacity` ✓ (edited in the layer row's Style block as shipped; the controls
+  moved to the inspector in the follow-up below)
 - Geo feature selection: `geoSelection` in the selection store, fed by the engine's own
   `pick` pass (stashed on `pick`, resolved on the `click` that follows), with a city hit
   winning outright and the store's invariant clearing the other side ✓
@@ -461,9 +462,28 @@ Answered by the smoke, and worth recording: the engine's `pick` pass DOES fire f
 GeoJSON feature with no `pickable` flag on the descriptor — `geoLayerDescriptions.ts` sets
 none and relies on the engine default, which the review flagged as unproven under Node.
 
+Follow-up increment, 2026-08-11 — geo-layer zoom and inspector-hosted config
+(plan: `.superpowers/sdd/2026-08-11-geo-layer-fit-and-inspector/`):
+
+- **Zoom to layer.** A geo layer could be added and then never found: the engine draws it
+  but Navara 0.0.5 exposes no bounds API for it, so the app now computes the extent itself
+  in the engine-free `features/geoLayers/geoLayerBounds.ts` (GeoJSON coordinate walk; a 3D
+  Tiles root bounding volume — region, sphere or box; results cached by URL) and flies to it
+  through the new generic `CitySceneHandle.fitBounds(bounds: GeodeticBounds)`. The button
+  shows for GeoJSON and 3D Tiles rows only — an XYZ raster template names no extent ✓
+- **Geo layers join the selection model.** `geoLayerStore.activeGeoLayerId` (session-only,
+  not persisted) makes a geo row clickable and swaps the right InspectorPanel to
+  `ui/inspector/GeoLayerInspector.tsx` — the layer's info, opacity and vector style, moved
+  out of the row, which is now identity and actions only. A city row click or a city object
+  pick hands the inspector back; picking a geo feature in the viewport activates its layer ✓
+
+Verification green: `npx tsc -b --noEmit`, app 112 files / 1479 tests.
+
 Deferred, deliberately: a geospatial-only session is still impossible — the landing page
-offers no geospatial door, so the viewer shell only mounts once a city layer exists. A
-follow-up candidate, out of this plan's scope.
+offers no geospatial door, so the viewer shell only mounts once a city layer exists (the
+shell gates on city layers alone), which also means neither the zoom button nor the geo
+inspector is reachable in a geo-only workspace. A follow-up candidate, out of scope for
+both plans.
 
 ## Cross-Cutting Workstreams
 

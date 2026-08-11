@@ -8,8 +8,11 @@
  *    picking, streaming; each row is dense because each of those is a choice
  *    worth making per layer.
  *  - **Geospatial Layers** — context around it (GeoJSON, XYZ raster tiles, 3D
- *    Tiles). No model, no rules, no LoD, nothing to pick: the row carries
- *    visibility, a name, its kind and — for raster — an opacity.
+ *    Tiles). No model, no rules, no LoD: the row carries IDENTITY and ACTIONS
+ *    only — visibility, a name, its kind, "Zoom to layer" (GeoJSON and 3D
+ *    Tiles, which have an extent) and remove. Drawing config (opacity and the
+ *    vector style) lives in the inspector's `GeoLayerInspector`, which follows
+ *    the row you click.
  *
  * THREE buttons open the same {@link AddLayerDialog}, differing only in the tab
  * it opens on: each section header carries a `+` that names its own family, and
