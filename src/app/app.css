@@ -2559,34 +2559,15 @@ body {
   border-radius: var(--radius-sm);
 }
 
-/* Narrow on purpose: it shares a 240 px row with a name, a badge and the
-   delete button, and it is the one control there that can be read at a glance
-   from its handle position alone. */
+/* Sized for the narrow case and widened in the inspector below. The base
+   widths date from when these controls sat in a 240 px layer row; they now
+   only render in the inspector, but the pair is kept as base + override so a
+   narrower host would still get something readable. */
 .geo-opacity-slider {
   flex-shrink: 0;
   width: 3.5rem;
   accent-color: var(--accent);
   cursor: pointer;
-}
-
-/* Wrapped under the row, like the object-type list: four controls inline would
-   treble the height of every row in a 240 px panel, so they live behind a
-   disclosure that costs one line closed. */
-.geo-style {
-  width: 100%;
-  margin-top: 0.25rem;
-}
-
-.geo-style-summary {
-  color: var(--fg-dim);
-  font-size: 0.62rem;
-  letter-spacing: 0.03em;
-  cursor: pointer;
-  user-select: none;
-}
-
-.geo-style-summary:hover {
-  color: var(--accent);
 }
 
 .geo-style-fields {
