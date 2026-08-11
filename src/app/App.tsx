@@ -1187,6 +1187,12 @@ export function App({
     setCursorPosition(null);
     setUnavailableLayers([]);
     clearSelection();
+    // Geo layers SURVIVE "Close file" (only city layers are removed), but the
+    // active geo layer is what the inspector shows: leaving it set means the
+    // next city model opens onto the geospatial view of a layer nobody just
+    // picked. Clearing the selection alone does not cover it — the active geo
+    // layer is also set by clicking a row, which no selection state records.
+    useGeoLayerStore.getState().setActiveGeoLayer(null);
   }, [clearSelection]);
 
   // Re-selecting a file for an "unavailable" (restored-but-file-backed)

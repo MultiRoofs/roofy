@@ -127,8 +127,10 @@ export function GeoLayerRow({
         {/* Only the kinds whose extent the app can actually compute: GeoJSON is
             walked, a tileset names its root volume, but an XYZ template names no
             extent at all — a button that always toasted would teach users to
-            ignore it. */}
-        {onFlyToGeoLayer && layer.kind !== "raster-xyz" && (
+            ignore it. An UNLINKED row (restored from a snapshot, no data and no
+            url) is the same case for the same reason: there is nothing to walk
+            until the file comes back. */}
+        {onFlyToGeoLayer && layer.kind !== "raster-xyz" && !unavailable && (
           <button
             className="rule-action-btn"
             aria-label="Zoom to layer"

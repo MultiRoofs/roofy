@@ -320,6 +320,26 @@ describe("resolveGeoLayerBounds", () => {
     ).rejects.toThrow();
   });
 
+  it("resolves null for a 3d-tiles layer with an empty url, without fetching", async () => {
+    // `fetch("")` would fetch the APP PAGE, then fail in `.json()` — a network
+    // rejection wording a "the source did not load" toast for a layer that
+    // simply names no source. Mirrors the geojson arm.
+    const fetchFn = vi.fn();
+    const layer: GeoLayer = {
+      id: "t2",
+      name: "tiles",
+      kind: "3d-tiles",
+      visible: true,
+      opacity: 1,
+      style: DEFAULT_GEO_LAYER_STYLE,
+      config: { url: "" },
+    };
+    expect(
+      await resolveGeoLayerBounds(layer, fetchFn as unknown as typeof fetch),
+    ).toBeNull();
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
   it("resolves null for a geojson layer with neither data nor url", async () => {
     expect(
       await resolveGeoLayerBounds(geoJsonLayer({}), vi.fn() as never),

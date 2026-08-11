@@ -310,4 +310,13 @@ describe("LayerPanel — a restored GeoJSON layer whose file is gone", () => {
     expect(within(row).getByText(/file needed/i)).toBeTruthy();
     expect(within(row).getByLabelText(/re-link/i)).toBeTruthy();
   });
+
+  it("offers no zoom button — an unlinked row has no data to frame", () => {
+    geoStore().addGeoLayer({ name: "parcels", kind: "geojson", config: {} });
+    renderPanel(noop);
+
+    expect(
+      within(geoRows()[0]!).queryByRole("button", { name: "Zoom to layer" }),
+    ).toBeNull();
+  });
 });

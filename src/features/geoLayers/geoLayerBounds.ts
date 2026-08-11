@@ -139,6 +139,12 @@ function boundsAroundEcef(
  * is already geodetic (radians); `sphere` and `box` are ECEF and become a box
  * around their centre — conservative (a box's half-diagonal), which for a
  * camera fit errs the right way: slightly too far out, never cropping.
+ *
+ * PRECEDENCE when a volume carries more than one form: `region` wins, being
+ * the only exact geodetic one — and a MALFORMED region returns null rather
+ * than falling through to `sphere`/`box`, because a volume that names a region
+ * and gets it wrong is a broken tileset, not one to be second-guessed from a
+ * secondary form.
  */
 export function tilesetBounds(tileset: unknown): GeodeticBounds | null {
   if (!isRecord(tileset)) return null;
@@ -231,8 +237,14 @@ export function resolveGeoLayerBounds(
       }
       return Promise.resolve(null);
     }
-    case "3d-tiles":
+    case "3d-tiles": {
+      // An empty url is "no source", not a source at the app's own origin:
+      // `fetch("")` fetches the page itself and fails inside `.json()`, which
+      // would word a network failure for a layer that names nothing. Same
+      // answer as the geojson arm.
+      if (layer.config.url === "") return Promise.resolve(null);
       return cachedBounds(layer.config.url, fetchFn, tilesetBounds);
+    }
     case "raster-xyz":
       return Promise.resolve(null);
   }
