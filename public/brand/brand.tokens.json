@@ -1,0 +1,48 @@
+{
+  "name": "Urbis",
+  "logo": {
+    "concept": "Monogram u whose right stem breaks into a roof pitch at 45 degrees",
+    "geometry": {
+      "viewBox": "0 0 48 48",
+      "u": "M15 14 V25 a9 9 0 0 0 18 0 V18",
+      "pitch": "M33 18 L38.5 12.5",
+      "strokeWidth": 5,
+      "strokeLinecap": "round",
+      "bowlRadius": 9,
+      "pitchAngleDeg": 45
+    },
+    "smallSize": {
+      "note": "Use at 16-20px: heavier stroke, wider bowl",
+      "u": "M14 12 V25 a10 10 0 0 0 20 0 V16",
+      "pitch": "M34 16 L41 9",
+      "strokeWidth": 9
+    },
+    "minSizePx": 16,
+    "clearSpacePercentOfMark": 25
+  },
+  "color": {
+    "dark": {
+      "ink": "#e8eaf0",
+      "accent": "#e8973f",
+      "plate": "#10131b",
+      "plateBorder": "rgba(255,255,255,0.08)"
+    },
+    "light": {
+      "ink": "#1a1d24",
+      "accent": "#d07830",
+      "plate": "#f9fafb",
+      "plateBorder": "rgba(0,0,0,0.08)"
+    },
+    "reserved": {
+      "teal": "#3ecfcf",
+      "note": "data highlights only — never in the logo"
+    }
+  },
+  "wordmark": {
+    "family": "IBM Plex Sans",
+    "weight": 500,
+    "tracking": "0.11em",
+    "casing": "Urbis",
+    "lockupGap": "0.34 x mark height"
+  }
+}

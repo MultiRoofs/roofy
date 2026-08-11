@@ -456,9 +456,7 @@ describe("App share-hash restore", () => {
     render(<App persistenceStore={storeWith(null)} />);
 
     await waitFor(() =>
-      expect(
-        screen.getByText(/older version of MultiRoof Viewer/),
-      ).toBeInTheDocument(),
+      expect(screen.getByText(/older version of Urbis/)).toBeInTheDocument(),
     );
     // Nothing was opened from a link whose camera cannot be trusted...
     expect(loadFromUrl).not.toHaveBeenCalled();
@@ -538,7 +536,7 @@ describe("App save with a camera that is not readable yet", () => {
     await mountShellWithLayer();
 
     cameraState = null;
-    fireEvent.click(screen.getByRole("button", { name: "Copy share link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Share this view" }));
 
     await waitFor(() =>
       expect(
@@ -546,6 +544,92 @@ describe("App save with a camera that is not readable yet", () => {
       ).toBeInTheDocument(),
     );
     expect(writeText).not.toHaveBeenCalled();
+  });
+});
+
+describe("App share", () => {
+  it("opens a dialog showing the link, and copies it on open", async () => {
+    const writeText = vi.fn(async () => true);
+    render(
+      <App
+        persistenceStore={storeWith(null)}
+        platform={{ clipboard: { writeText } } as unknown as PlatformServices}
+      />,
+    );
+    await mountShellWithLayer();
+
+    fireEvent.click(screen.getByRole("button", { name: "Share this view" }));
+
+    // The link is on screen — the whole point: a 2.5 s toast was evidence
+    // that had usually vanished before the user looked for it.
+    const dialog = await screen.findByRole("dialog");
+    const field = screen.getByLabelText("Share link") as HTMLInputElement;
+    expect(dialog).toContainElement(field);
+    expect(field.value).toContain("#share=");
+
+    // ...and it still reached the clipboard without a second click.
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText).toHaveBeenCalledWith(field.value);
+    expect((await screen.findByRole("status")).textContent).toMatch(/copied/i);
+  });
+
+  it("says so in the dialog when the clipboard refuses, instead of leaving no link", async () => {
+    const writeText = vi.fn(async () => false);
+    render(
+      <App
+        persistenceStore={storeWith(null)}
+        platform={{ clipboard: { writeText } } as unknown as PlatformServices}
+      />,
+    );
+    await mountShellWithLayer();
+
+    fireEvent.click(screen.getByRole("button", { name: "Share this view" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toMatch(/couldn't copy/i),
+    );
+    expect(
+      (screen.getByLabelText("Share link") as HTMLInputElement).value,
+    ).toContain("#share=");
+  });
+
+  it("closes on Escape", async () => {
+    render(
+      <App
+        persistenceStore={storeWith(null)}
+        platform={
+          {
+            clipboard: { writeText: vi.fn(async () => true) },
+          } as unknown as PlatformServices
+        }
+      />,
+    );
+    await mountShellWithLayer();
+
+    fireEvent.click(screen.getByRole("button", { name: "Share this view" }));
+    await screen.findByRole("dialog");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+});
+
+describe("App save success", () => {
+  it("confirms the save and says where the workspace will be", async () => {
+    const save = vi.fn(async () => "snap-2");
+    render(<App persistenceStore={{ ...storeWith(null), save }} />);
+    await mountShellWithLayer();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    // Silence used to be the only signal that a save had worked.
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Workspace saved.*next time you open Urbis/),
+      ).toBeInTheDocument(),
+    );
   });
 });
 
@@ -569,7 +653,7 @@ describe("App toast timers", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);
     });
-    fireEvent.click(screen.getByRole("button", { name: "Copy share link" }));
+    fireEvent.click(screen.getByRole("button", { name: "Share this view" }));
     await waitFor(() =>
       expect(screen.getByText(/try sharing again/)).toBeInTheDocument(),
     );

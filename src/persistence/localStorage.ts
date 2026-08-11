@@ -11,8 +11,8 @@ import type {
   SnapshotSummary,
 } from "./types";
 
-const STORAGE_PREFIX = "multiroof:snapshot:";
-const INDEX_KEY = "multiroof:snapshot-index";
+const STORAGE_PREFIX = "urbis:snapshot:";
+const INDEX_KEY = "urbis:snapshot-index";
 
 /** Snapshot ID + summary stored in the index. */
 interface IndexEntry {

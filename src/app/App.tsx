@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./app.css";
+import "./brand.css";
 import { detectEncoding } from "../domain/citymodel/detectEncoding";
 import {
   loadFromUrl,
@@ -68,7 +69,9 @@ import { LeftSidebar } from "../ui/sidebar/LeftSidebar";
 import { SourcePicker } from "../ui/layers/SourcePicker";
 import { StacBrowserDialog } from "../ui/stac/StacBrowserDialog";
 import type { AddUrlResult } from "../ui/stac/StacBrowser";
+import { ShareDialog } from "../ui/ShareDialog";
 import { StatusBar } from "../ui/StatusBar";
+import { ThemeToggleButton } from "../ui/ThemeToggleButton";
 import { LegendOverlay } from "../ui/viewport/LegendOverlay";
 import { AttributePanel } from "../ui/viewport/AttributePanel";
 import { RenderingPanel } from "../ui/viewport/RenderingPanel";
@@ -165,6 +168,11 @@ export function App({
    * branch that renders it — it is plain state that outlives its own UI.
    */
   const [catalogOpen, setCatalogOpen] = useState(false);
+  /** The minted share link currently on display, or null. Non-null IS the
+   *  dialog's open state: the URL is a snapshot of the view at the moment
+   *  Share was clicked, so a new click mints a new one rather than reopening
+   *  a stale link. Only reachable from the viewer shell (the toolbar). */
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [fps, setFps] = useState<number | undefined>(undefined);
   const [cursorPosition, setCursorPosition] = useState<
     readonly [number, number, number] | null
@@ -709,6 +717,15 @@ export function App({
     try {
       await persistenceStore.save(snapshot);
       await refreshSnapshots();
+      // Success used to be silent, which is indistinguishable from a button
+      // that does nothing. The message also has a fact to teach — saved
+      // workspaces are listed on the landing page on the next visit, and
+      // nobody discovers that by guessing — so it gets the explanatory
+      // duration, not the 3 s status one.
+      showToast(
+        "Workspace saved — you'll find it here next time you open Urbis.",
+        EXPLANATION_TOAST_MS,
+      );
     } catch (e) {
       showToast(
         e instanceof Error ? e.message : "Failed to save workspace.",
@@ -943,6 +960,15 @@ export function App({
     [persistenceStore, refreshSnapshots],
   );
 
+  /** The dialog's clipboard seam. Wrapped in a stable callback rather than
+   *  passed as `platform.clipboard.writeText` directly, so the dialog's
+   *  auto-copy effect cannot re-fire on an unrelated re-render — and so the
+   *  method keeps its `this`. */
+  const copyShareText = useCallback(
+    (text: string) => platform.clipboard.writeText(text),
+    [platform],
+  );
+
   const handleShare = useCallback(() => {
     const cameraState = sceneRef.current?.getCameraState();
     // See handleSave: no camera yet is a real, transient state (Task B11a),
@@ -975,18 +1001,12 @@ export function App({
       pm: pickMode,
     };
 
-    const url = buildShareUrl(state);
-    void platform.clipboard.writeText(url).then((ok) => {
-      if (ok) {
-        showToast("Share link copied to clipboard", 2500);
-      } else {
-        showToast(
-          "Failed to copy link \u2014 check clipboard permissions",
-          STATUS_TOAST_MS,
-        );
-      }
-    });
-  }, [platform, showToast]);
+    // The link is SHOWN, not just posted to a clipboard the user cannot see:
+    // the dialog copies it on mount and reports the result inline, and the
+    // field it renders is the fallback when the clipboard refuses. That
+    // replaces the pair of toasts this used to raise \u2014 see `ShareDialog`.
+    setShareUrl(buildShareUrl(state));
+  }, [showToast]);
 
   // On mount: check URL hash for a share token
   useEffect(() => {
@@ -1378,6 +1398,18 @@ export function App({
           />
         )}
 
+        {/* Keyed on the URL so a second Share click while the dialog is open
+            remounts it — the auto-copy effect must run again for the NEW
+            link, not leave the old one on screen reporting an old result. */}
+        {shareUrl !== null && (
+          <ShareDialog
+            key={shareUrl}
+            url={shareUrl}
+            onClose={() => setShareUrl(null)}
+            copyToClipboard={copyShareText}
+          />
+        )}
+
         {toast && <div className="toast">{toast}</div>}
       </div>
     );
@@ -1386,9 +1418,36 @@ export function App({
   // Landing / drop zone
   return (
     <main className="app-shell">
+      <div className="landing-theme-toggle">
+        <ThemeToggleButton theme={theme} onToggle={toggleTheme} />
+      </div>
+
       <div className="hero">
-        <p className="eyebrow">MultiRoof Viewer</p>
-        <h1>Rooftop analysis starts here.</h1>
+        {/* The same lockup the toolbar wears, one size up — see the LANDING
+            section of app.css for the `--urbis-mark-size` override. The
+            `.eyebrow` wrapper stays so the hero's grid rhythm is unchanged. */}
+        <p className="eyebrow">
+          <span className="urbis-lockup">
+            <svg className="urbis-mark" viewBox="0 0 48 48" aria-hidden="true">
+              <path
+                className="urbis-mark-u"
+                d="M14 12 V25 a10 10 0 0 0 20 0 V16"
+                fill="none"
+                strokeWidth="9"
+                strokeLinecap="round"
+              />
+              <path
+                className="urbis-mark-pitch"
+                d="M34 16 L41 9"
+                fill="none"
+                strokeWidth="9"
+                strokeLinecap="round"
+              />
+            </svg>
+            <span className="urbis-wordmark">Urbis</span>
+          </span>
+        </p>
+        <h1>Your city, in 3D.</h1>
         <p className="summary">
           Drop a city model or pick one from the open catalog.
         </p>
