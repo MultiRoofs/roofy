@@ -161,12 +161,14 @@ export const BASEMAPS: readonly BasemapOption[] = [
   },
   {
     // RENDERS, and the 2026-08-06 "fetches ZERO terrarium tiles" verdict that
-    // hid this entry was a MEASUREMENT artifact, not an engine bug: with the
-    // quantized-mesh terrain layer in the scene the engine issues its raster
-    // drape fetches from its WORKER pool, where neither a main-thread fetch
-    // patch nor `performance.getEntriesByType("resource")` can see them (the
-    // same probe read the Esri basemap as 0 fetches while the CDP network log
-    // showed hundreds). Re-verified 2026-08-11 at the network layer and by
+    // hid this entry was a MEASUREMENT artifact, not an engine bug: in-page
+    // probes (a fetch patch, `performance.getEntriesByType("resource")`) read
+    // FALSE ZEROS for tile fetches the CDP network log shows in the hundreds —
+    // the same probe read the draped Esri basemap as 0 in the live app. Which
+    // conditions hide a fetch from in-page observation was NOT pinned down
+    // (the engine's worker pool and the resource-timing buffer cap are both
+    // candidates); judge fetching at the network layer, full stop.
+    // Re-verified 2026-08-11 at the network layer and by
     // pixels: picking this option in the live app fetched ~100 terrarium
     // tiles and turned the Innsbruck relief blue where "None" shows the pale
     // bare globe. Judge this option by an A/B against "None" at the same
