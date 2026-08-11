@@ -17,6 +17,8 @@ A browser-based 3D city model viewer and analyser, rendered on a real globe with
      sandboxed image rendering cannot load — so the README follows the brand kit's
      rule for font-unguaranteed contexts: bare mark + real text. -->
 
+https://github.com/user-attachments/assets/85f3938b-f45b-43fb-9203-d9936b55898f
+
 ## What it does
 
 - **Loads real city model data**: CityJSON (1.x and 2.x), CityJSONSeq, streaming FlatCityBuf, CityParquet, and zipped CityGML archives — from local files, URLs, cloud buckets, or the built-in [Open3D City](https://open3d.city) STAC catalog browser.
