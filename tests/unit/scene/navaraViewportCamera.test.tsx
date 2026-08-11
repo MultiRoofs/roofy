@@ -101,6 +101,9 @@ vi.mock("@navaramap/three", () => ({
   // in every viewport suite's mock because `NavaraViewport` imports it for the
   // geospatial highlight, and a named import of a mocked module that the
   // factory does not export refuses to link.
+  // The engine's `ColorMap` — `addBasemap` builds the elevation heatmap's
+  // ramp out of it. A named import of a mocked module has to exist to link.
+  ColorMap: class {},
   Color: class {
     setHex() {
       return this;

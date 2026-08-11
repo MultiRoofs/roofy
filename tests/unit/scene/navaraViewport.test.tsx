@@ -263,6 +263,9 @@ vi.mock("@navaramap/three", () => ({
   // highlight passes instances of it into the engine's feature evaluators, so
   // the mock only has to be constructible and chainable; `hex` is recorded so a
   // test can assert WHICH colour a feature was given.
+  // The engine's `ColorMap` — `addBasemap` builds the elevation heatmap's
+  // ramp out of it. A named import of a mocked module has to exist to link.
+  ColorMap: class {},
   Color: class {
     hex: number | undefined;
     style: string | undefined;
