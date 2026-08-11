@@ -11,7 +11,7 @@
 <p align="center"><strong>Your city, in 3D.</strong><br>
 A browser-based 3D city model viewer and analyser, rendered on a real globe with photorealistic terrain.</p>
 
-<p align="center">Use the deployed app at <strong><a href="https://viewer.open3d.city">viewer.open3d.city</a></strong></p>
+<p align="center">Use the deployed app at <strong><a href="https://urbis.open3d.city">urbis.open3d.city</a></strong></p>
 
 <!-- The lockup SVGs set the wordmark as live text in IBM Plex Sans, which GitHub's
      sandboxed image rendering cannot load — so the README follows the brand kit's

@@ -23,7 +23,7 @@ import { create } from "zustand";
 
 /**
  * The exposure Navara's own getting-started sets (`view.toneMappingExposure =
- * 10`; see docs/superpowers/research/2026-08-01-navara-api-report.md §Bootstrap).
+ * 10`).
  *
  * This is the PHYSICAL-ATMOSPHERE calibration, and it is the whole scene's
  * calibration: the atmosphere feeds the tone mapper radiance-scale values, and
@@ -31,10 +31,9 @@ import { create } from "zustand";
  * `SunLightDesc` + `skyLightProbe` — is what lights the city meshes, the globe
  * and the tiles. Every surface in the scene is therefore unlit albedo in the
  * g-buffer; nothing may add scene-light energy on top, or it clips to white at
- * this exposure. See
- * docs/superpowers/research/2026-08-04-overbright-scene-diagnosis.md, which
- * supersedes the earlier "the scene is far darker" note: exposure 10 was
- * right, the lighting model underneath it was wrong.
+ * this exposure. The 2026-08-04 overbright-scene diagnosis supersedes the
+ * earlier "the scene is far darker" note: exposure 10 was right, the lighting
+ * model underneath it was wrong.
  */
 export const DEFAULT_EXPOSURE = 10;
 

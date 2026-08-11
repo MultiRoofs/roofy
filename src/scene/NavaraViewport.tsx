@@ -73,7 +73,10 @@ import { useSolarStore } from "../features/solar/solarStore";
 import { useStreamStore } from "../features/streaming/streamStore";
 import { useTilesStore } from "../features/tiles/tilesStore";
 import { useGeoLayerStore } from "../features/geoLayers/geoLayerStore";
-import { useBasemapStore } from "../features/basemap/basemapStore";
+import {
+  useBasemapStore,
+  type HeatmapSettings,
+} from "../features/basemap/basemapStore";
 import { useAtmosphereStore } from "../features/atmosphere/atmosphereStore";
 import { useRenderDebugStore } from "../features/debug/renderDebugStore";
 import { setStreamPlugin } from "../features/streaming/streamPlugin";
@@ -1001,6 +1004,36 @@ const ELEVATION_RAMP_HEX = [
   "#a50026",
 ] as const;
 
+/**
+ * Merge the user's ramp settings over a heatmap option's `layer` block.
+ *
+ * Identity for every option WITHOUT one (imagery, "None") — the settings only
+ * mean anything to the elevation heatmap. `logBoundary` is derived, not user
+ * state: the catalogue's 1000 m handover, clamped under the edited `maxHeight`
+ * so a low ceiling (a Dutch user asking for 0–40 m) never puts the log knee
+ * above the whole ramp.
+ */
+function applyHeatmapSettings(
+  option: BasemapOption,
+  settings: HeatmapSettings,
+): BasemapOption {
+  if (option.layer === undefined) return option;
+  return {
+    ...option,
+    layer: {
+      elevationHeatmap: {
+        minHeight: settings.minHeight,
+        maxHeight: settings.maxHeight,
+        logarithmic: settings.logarithmic,
+        logBoundary: Math.min(
+          option.layer.elevationHeatmap.logBoundary,
+          settings.maxHeight,
+        ),
+      },
+    },
+  };
+}
+
 function addBasemap(
   view: ViewInstance,
   option: BasemapOption,
@@ -1214,6 +1247,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     const tilesWanted = useTilesStore((s) => s.enabled);
     /** Which basemap the user picked. */
     const basemapId = useBasemapStore((s) => s.basemapId);
+    const heatmapSettings = useBasemapStore((s) => s.heatmap);
     /** Photoreal / cartoon / cyber / wireframe. What it MEANS is
      *  `sceneThemePolicy.ts`; this component only applies it. */
     const sceneTheme = useSceneThemeStore((s) => s.theme);
@@ -1667,13 +1701,24 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     // is: React runs cleanups in declaration order, so on unmount the engine is
     // already disposed and the `viewRef.current === view` guard declines to
     // call `delete()` through a dead view. Keyed on `basemapId`, so changing
-    // the option removes the old pair and adds the new one in one commit.
+    // the option removes the old pair and adds the new one in one commit —
+    // and on the heatmap's ramp settings too, because a raster layer's
+    // `elevationHeatmap` block is baked into its description and the honest
+    // way to change a description is the same remove-and-re-add the picker
+    // itself uses (the browser-verified path; `Layer.update` on a live
+    // raster-dem drape is untested on 0.0.5). The settings ride every option
+    // through `applyHeatmapSettings`, which is the identity for imagery, so
+    // editing them while Esri is draped re-adds nothing meaningfully
+    // different and costs one swap of an already-cached tile set.
     useEffect(() => {
       const view = viewRef.current;
       if (!engineReady || view === null) return;
       // The theme's override wins over the picker while it is in force, and
       // the picker wins again the moment it is not.
-      const option = basemapById(effectiveBasemapId);
+      const option = applyHeatmapSettings(
+        basemapById(effectiveBasemapId),
+        heatmapSettings,
+      );
       const handles = addBasemap(view, option);
       // "None", or the engine refused: nothing is draped, so nobody is credited.
       if (handles === null) return;
@@ -1682,7 +1727,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         setActiveBasemap(null);
         if (viewRef.current === view) removeBasemap(handles);
       };
-    }, [engineReady, effectiveBasemapId]);
+    }, [engineReady, effectiveBasemapId, heatmapSettings]);
 
     // --- The user's geospatial layers (GeoJSON / XYZ raster / 3D Tiles) ---
     //
