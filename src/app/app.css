@@ -2632,6 +2632,24 @@ body {
   cursor: pointer;
 }
 
+/* The same controls in the INSPECTOR, where the panel is wide: the widths
+   above are sized for a 240 px layer row and read as cramped stubs here, so
+   they are overridden scoped to the inspector rather than loosened globally.
+   A source URL is unbreakable text, so it wraps mid-token instead of forcing
+   the panel wider. */
+.geo-inspector .geo-opacity-slider,
+.geo-inspector .geo-style-slider {
+  width: 100%;
+}
+
+.geo-inspector .geo-style-number {
+  width: 4.5rem;
+}
+
+.geo-inspector-source {
+  word-break: break-all;
+}
+
 /* Wrapped under the row (the flex line breaks before it), like the city rows'
    object-type list. */
 .geo-layer-relink {
