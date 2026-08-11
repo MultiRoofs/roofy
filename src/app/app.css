@@ -2618,6 +2618,18 @@ body {
    they are overridden scoped to the inspector rather than loosened globally.
    A source URL is unbreakable text, so it wraps mid-token instead of forcing
    the panel wider. */
+
+/* `width: 100%` on a style slider is only half the fix: `.geo-style-field` is
+   `display: contents`, so the control is a grid item of `.geo-style-fields`
+   and 100% resolves against its TRACK — an `auto` track sized to the control's
+   own intrinsic width, which leaves the slider exactly as wide as it was. The
+   second track has to be able to stretch first. `minmax(0, 1fr)` rather than
+   `1fr` so the fixed-width controls (the colour swatch, the number inputs)
+   cannot push the track past its share. */
+.geo-inspector .geo-style-fields {
+  grid-template-columns: 1fr minmax(0, 1fr);
+}
+
 .geo-inspector .geo-opacity-slider,
 .geo-inspector .geo-style-slider {
   width: 100%;

@@ -51,8 +51,13 @@ export function GeoLayerInspector({ layer }: { readonly layer: GeoLayer }) {
         </div>
       </div>
 
-      {/* A tileset's appearance comes from the tiles' own materials — no
-          opacity, no style (same reasoning as the old row controls). */}
+      {/* A tileset gets no controls here: its appearance IS the tiles' own
+          materials, so a colour or a point size would mean nothing. The
+          descriptor does carry opacity (`geoLayerDescriptions` passes
+          `opacity`/`transparent` for 3d-tiles) — the app simply offers no
+          handle for it, a slider over someone else's photogrammetry having
+          been judged not worth the row. Same reasoning as the old row
+          controls. */}
       {(layer.kind === "raster-xyz" || layer.kind === "geojson") && (
         <div className="attr-section">
           <div className="attr-section-title">
