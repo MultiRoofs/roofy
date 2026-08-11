@@ -8,7 +8,7 @@
  * heading, the city rows keep every control they had) and that a geospatial
  * row's four affordances reach the store.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
   fireEvent,
@@ -32,13 +32,14 @@ const noop = () => {};
 /** The URL path now reports whether a layer landed; these suites never look. */
 const noopUrl = async () => ({ ok: true }) as const;
 
-function renderPanel() {
+function renderPanel(onFlyToGeoLayer?: (id: string) => void) {
   return render(
     <LayerPanel
       onAddFile={noop}
       onAddFiles={noop}
       onAddUrl={noopUrl}
       loading={false}
+      onFlyToGeoLayer={onFlyToGeoLayer}
     />,
   );
 }
@@ -321,6 +322,61 @@ describe("LayerPanel — a vector row's style controls", () => {
     expect(row.queryByLabelText("Point size")).toBeNull();
     expect(row.queryByLabelText("Line width")).toBeNull();
     expect(row.queryByLabelText("Fill opacity")).toBeNull();
+  });
+});
+
+describe("LayerPanel — zoom to a geospatial layer", () => {
+  it("offers the zoom button on vector and tileset rows, not raster", () => {
+    addGeoJson();
+    renderPanel(noop);
+    expect(
+      within(geoRows()[0]!).getByRole("button", { name: "Zoom to layer" }),
+    ).toBeTruthy();
+
+    cleanup();
+    useGeoLayerStore.setState({ layers: [] });
+
+    geoStore().addGeoLayer({
+      name: "tiles",
+      kind: "3d-tiles",
+      config: { url: "https://x/tileset.json" },
+    });
+    renderPanel(noop);
+    expect(
+      within(geoRows()[0]!).getByRole("button", { name: "Zoom to layer" }),
+    ).toBeTruthy();
+
+    cleanup();
+    useGeoLayerStore.setState({ layers: [] });
+
+    addRaster();
+    renderPanel(noop);
+    expect(
+      within(geoRows()[0]!).queryByRole("button", { name: "Zoom to layer" }),
+    ).toBeNull();
+  });
+
+  it("reports the layer's id when clicked", () => {
+    const id = addGeoJson();
+    const spy = vi.fn();
+    renderPanel(spy);
+
+    fireEvent.click(
+      within(geoRows()[0]!).getByRole("button", { name: "Zoom to layer" }),
+    );
+
+    expect(spy).toHaveBeenCalledWith(id);
+  });
+
+  // REGRESSION GUARD, not a red step: this one passes even before the
+  // implementation exists (there is no zoom button at all yet). The red
+  // signal for this task comes from the two tests above.
+  it("renders no zoom button when the callback is absent", () => {
+    addGeoJson();
+    renderPanel();
+    expect(
+      within(geoRows()[0]!).queryByRole("button", { name: "Zoom to layer" }),
+    ).toBeNull();
   });
 });
 

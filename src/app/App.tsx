@@ -43,6 +43,7 @@ import { suppressAutoFit } from "../scene/autoFitSuppression";
 import { useSelectionStore } from "../features/selection/selectionStore";
 import { useLayerStore } from "../features/layers/layerStore";
 import { useGeoLayerStore } from "../features/geoLayers/geoLayerStore";
+import { resolveGeoLayerBounds } from "../features/geoLayers/geoLayerBounds";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
 import { ensureModelCrsLoadable } from "../features/layers/ensureCrs";
 import { loadCityParquetFromUrl } from "../features/cityparquet/loadCityParquet";
@@ -1217,6 +1218,37 @@ export function App({
     sceneRef.current?.fitAll();
   }, []);
 
+  /** Zoom to a GEO layer: its extent is the app's to compute (the engine has
+   *  no bounds API for these), and may live behind a URL — hence async, with
+   *  the failure worded for the user rather than swallowed. */
+  const handleFlyToGeoLayer = useCallback(
+    (geoLayerId: string) => {
+      const layer = useGeoLayerStore
+        .getState()
+        .layers.find((l) => l.id === geoLayerId);
+      if (!layer) return;
+      void (async () => {
+        try {
+          const bounds = await resolveGeoLayerBounds(layer);
+          if (bounds) {
+            sceneRef.current?.fitBounds(bounds);
+            return;
+          }
+          showToast(
+            "Could not determine the layer's extent.",
+            EXPLANATION_TOAST_MS,
+          );
+        } catch {
+          showToast(
+            "Could not determine the layer's extent — its source did not load.",
+            EXPLANATION_TOAST_MS,
+          );
+        }
+      })();
+    },
+    [showToast],
+  );
+
   /** A layer the engine refused (the CRS gate — no reference system, or a
    *  non-metric one). Stable identity on purpose: `NavaraViewport`'s layer-sync
    *  effect lists it as a dependency. */
@@ -1316,6 +1348,7 @@ export function App({
           onAddUrl={handleAddUrl}
           loading={loading}
           onFlyToLayer={(id) => sceneRef.current?.fitLayer(id)}
+          onFlyToGeoLayer={handleFlyToGeoLayer}
         />
 
         <div className="viewport">

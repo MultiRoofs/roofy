@@ -32,8 +32,15 @@ import {
 } from "./geoLayerMeta";
 import { VisibilityIcon } from "./VisibilityIcon";
 import { TrashIcon } from "./TrashIcon";
+import { ZoomToLayerIcon } from "./ZoomToLayerIcon";
 
-export function GeoLayerRow({ layer }: { readonly layer: GeoLayer }) {
+export function GeoLayerRow({
+  layer,
+  onFlyToGeoLayer,
+}: {
+  readonly layer: GeoLayer;
+  readonly onFlyToGeoLayer?: (geoLayerId: string) => void;
+}) {
   const updateGeoLayer = useGeoLayerStore((s) => s.updateGeoLayer);
   const removeGeoLayer = useGeoLayerStore((s) => s.removeGeoLayer);
   const relinkGeoJsonLayer = useGeoLayerStore((s) => s.relinkGeoJsonLayer);
@@ -139,6 +146,25 @@ export function GeoLayerRow({ layer }: { readonly layer: GeoLayer }) {
       )}
 
       <div className="layer-actions">
+        {/* Only the kinds whose extent the app can actually compute: GeoJSON is
+            walked, a tileset names its root volume, but an XYZ template names no
+            extent at all — a button that always toasted would teach users to
+            ignore it. */}
+        {onFlyToGeoLayer && layer.kind !== "raster-xyz" && (
+          <button
+            className="rule-action-btn"
+            aria-label="Zoom to layer"
+            data-tooltip="Zoom to layer"
+            data-tooltip-pos="top"
+            data-tooltip-align="end"
+            onClick={(e) => {
+              e.stopPropagation();
+              onFlyToGeoLayer(layer.id);
+            }}
+          >
+            <ZoomToLayerIcon />
+          </button>
+        )}
         <button
           className="rule-action-btn"
           aria-label="Remove layer"

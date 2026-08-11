@@ -47,6 +47,7 @@ interface LayerPanelProps {
   readonly onAddUrl: (url: string) => Promise<AddUrlResult>;
   readonly loading: boolean;
   readonly onFlyToLayer?: (layerId: string) => void;
+  readonly onFlyToGeoLayer?: (geoLayerId: string) => void;
 }
 
 export function LayerPanel({
@@ -55,6 +56,7 @@ export function LayerPanel({
   onAddUrl,
   loading,
   onFlyToLayer,
+  onFlyToGeoLayer,
 }: LayerPanelProps) {
   const layers = useLayerStore((s) => s.layers);
   const activeLayerId = useLayerStore((s) => s.activeLayerId);
@@ -267,7 +269,11 @@ export function LayerPanel({
         </p>
       ) : (
         geoLayers.map((geoLayer) => (
-          <GeoLayerRow key={geoLayer.id} layer={geoLayer} />
+          <GeoLayerRow
+            key={geoLayer.id}
+            layer={geoLayer}
+            onFlyToGeoLayer={onFlyToGeoLayer}
+          />
         ))
       )}
 
