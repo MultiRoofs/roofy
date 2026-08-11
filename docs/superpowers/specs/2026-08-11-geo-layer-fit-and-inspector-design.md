@@ -142,7 +142,9 @@ ids (city and geo alike) are not persisted.
   GeoJSON types, invalid/empty → null, tileset region/box/sphere, resolver with injected
   fetch (per-kind routing, URL caching, no-cache-on-failure, raster → null).
 - `tests/unit/scene/navaraViewport.test.tsx` — `fitBounds` routes through
-  `flyTo` + settle suppression; ignores calls with no view.
+  `flyTo` + settle suppression; refuses non-finite bounds (the deterministic
+  half of the bad-input guard — the no-view branch cannot be pinned
+  deterministically because engine init is async).
 - `tests/unit/features/geoLayers/geoLayerStore.test.ts` — active-id lifecycle
   (set, clear on remove/removeAll, unaffected by unrelated updates).
 - `tests/unit/ui/layers/LayerPanelSections.test.tsx` — zoom button present for

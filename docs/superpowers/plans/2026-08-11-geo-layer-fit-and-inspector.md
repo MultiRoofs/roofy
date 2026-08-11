@@ -734,13 +734,13 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Write the failing test**
 
-In `tests/unit/scene/navaraViewport.test.tsx`, find the existing test `"fitLayer frames one layer; fitAll frames them all"` (~line 1000) and the suite's mocked-engine helpers. Add a sibling test in the same describe, using the same render/ref pattern the fitLayer test uses:
+`tests/unit/scene/navaraViewport.test.tsx` uses a MODULE-LEVEL `flyTo` mock (declared ~line 17, cleared in the suite's reset ~line 524) and `createRef<CitySceneHandle>()` — there is no `handle` variable or per-test `flyToMock`. Mirror the test `"moves no camera while there are no layers to fit"` (~lines 706–716) exactly: render the viewport with a ref, `await waitFor(() => expect(ref.current).not.toBeNull())`, then `await ref.current!.ready` (this matters: `viewRef` is only set inside `init()`, so calling before ready hits the `!view` guard and proves nothing). No city layers are needed — `fitBounds` consults no registry. Two tests:
 
 ```ts
 it("fitBounds flies to caller-supplied bounds without consulting any layer", async () => {
-  // Same setup as the fitLayer test: render the viewport, await ready.
-  // (Reuse the suite's existing helpers verbatim — handle ref, flyTo mock.)
-  handle.fitBounds({
+  // Setup copied from "moves no camera while there are no layers to fit":
+  // render, waitFor ref, await ref.current!.ready.
+  ref.current!.fitBounds({
     west: 4.1,
     south: 51.9,
     east: 4.6,
@@ -749,16 +749,32 @@ it("fitBounds flies to caller-supplied bounds without consulting any layer", asy
     maxHeight: 0,
   });
 
-  expect(flyToMock).toHaveBeenCalledTimes(1);
-  const target = flyToMock.mock.calls[0]![0];
+  expect(flyTo).toHaveBeenCalledTimes(1);
+  const target = flyTo.mock.calls[0]![0];
   expect(target.lng).toBeGreaterThan(4.1);
   expect(target.lng).toBeLessThan(4.6);
   expect(target.lat).toBeGreaterThan(51.9);
   expect(target.lat).toBeLessThan(52.3);
 });
+
+it("fitBounds refuses a box that frames to a non-finite camera", async () => {
+  // Same setup. A no-view call cannot be tested deterministically (init is
+  // async and may already have run), so the guard under test is the finite
+  // check — the deterministic half of "bad input moves no camera".
+  ref.current!.fitBounds({
+    west: Number.NaN,
+    south: Number.NaN,
+    east: Number.NaN,
+    north: Number.NaN,
+    minHeight: 0,
+    maxHeight: 0,
+  });
+
+  expect(flyTo).not.toHaveBeenCalled();
+});
 ```
 
-Adapt names (`handle`, `flyToMock`) to whatever the surrounding suite actually uses — read the neighbouring fitLayer test first and mirror it exactly. If the suite routes fit calls through a `suppressSettleThenCommit` assertion elsewhere (`navaraViewportStreaming.test.tsx:610`), do NOT extend that file — the plain no-streaming path here is enough.
+(`flyTo` here is the suite's existing module-level mock name — read its declaration first and use the real identifier.) Do NOT extend `navaraViewportStreaming.test.tsx` — the plain no-streaming path here is enough.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -883,7 +899,7 @@ Move `KIND_BADGE`, `KIND_LABEL`, `sourceOf`, `colorInputValue` (with their doc c
  */
 ```
 
-Update `GeoLayerRow.tsx` to import them from `./geoLayerMeta`.
+Update `GeoLayerRow.tsx` to import them from `./geoLayerMeta` — and REMOVE the imports the move orphans there (`hexColorToNumber` and `DEFAULT_GEO_LAYER_STYLE` travel with `colorInputValue` to the new module), so Step 3's typecheck comes back green.
 
 - [ ] **Step 3: Verify nothing changed**
 
@@ -977,6 +993,9 @@ describe("LayerPanel — zoom to a geospatial layer", () => {
     expect(spy).toHaveBeenCalledWith(id);
   });
 
+  // REGRESSION GUARD, not a red step: this one passes even before the
+  // implementation exists (there is no zoom button at all yet). The red
+  // signal for this task comes from the two tests above.
   it("renders no zoom button when the callback is absent", () => {
     addGeoJson();
     renderPanel();
@@ -1074,6 +1093,8 @@ const handleFlyToGeoLayer = useCallback(
 ```
 
 Import `resolveGeoLayerBounds` from `../features/geoLayers/geoLayerBounds` (adjust the relative path to App.tsx's convention) and pass `onFlyToGeoLayer={handleFlyToGeoLayer}` to `<LeftSidebar>` (line ~1318). Verify `useGeoLayerStore` and `EXPLANATION_TOAST_MS` are already imported in App.tsx (both are used there today); import if not.
+
+The two toast branches (null extent vs rejected fetch) are deliberately covered by the post-plan browser smoke only — the routing beneath them is pinned by the Task 3 resolver tests, and an app-level test would have to stand up the whole shell for two string assertions.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -1182,7 +1203,7 @@ removeAllGeoLayers: () =>
   ),
 ```
 
-Also update the `afterEach` store resets in the OTHER suites that reset this store partially (`tests/unit/ui/layers/LayerPanelSections.test.tsx` line 28, and grep for `useGeoLayerStore.setState` across `tests/`) to include `activeGeoLayerId: null`.
+Also extend the `afterEach` resets to `{ layers: [], activeGeoLayerId: null }` in EXACTLY two other files: `tests/unit/features/geoLayers/geoLayerStore.test.ts` (~line 21) and `tests/unit/ui/layers/LayerPanelSections.test.tsx` (line 28). The other `useGeoLayerStore.setState` resets (`AddLayerDialogGeospatial.test.tsx:28`, `navaraViewport.test.tsx:2366,2378`) never read the active id — leave them alone.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -1248,8 +1269,17 @@ function layerById(id: string): GeoLayer {
   return geoStore().layers.find((l) => l.id === id)!;
 }
 
+/** The panel hands `GeoLayerInspector` a LIVE record (InspectorPanel
+ *  subscribes to the store — Task 9). A detached snapshot would go stale
+ *  after the first edit, and the second edit's whole-style spread would
+ *  resurrect old values — so the harness must mirror the live contract. */
+function Host({ id }: { readonly id: string }) {
+  const layer = useGeoLayerStore((s) => s.layers.find((l) => l.id === id));
+  return layer ? <GeoLayerInspector layer={layer} /> : null;
+}
+
 function renderInspector(id: string) {
-  return render(<GeoLayerInspector layer={layerById(id)} />);
+  return render(<Host id={id} />);
 }
 
 describe("GeoLayerInspector — info", () => {
@@ -1480,7 +1510,20 @@ export function GeoLayerInspector({ layer }: { readonly layer: GeoLayer }) {
 
 Copy the four style `<label>` blocks from `GeoLayerRow.tsx:213-275` verbatim into the Style section (they are not shown again here to avoid divergence — the row file is the source).
 
-Then check `src/app/app.css`: the classes reused here (`geo-style-fields`, `geo-style-field`, `geo-style-color`, `geo-style-number`, `geo-style-slider`, `geo-opacity-slider`, `layer-badge-geo`) — grep each; if any selector is descendant-scoped under `.geo-layer-item` or `.geo-style` (the `<details>`), generalise the selector so the same class works inside `.geo-inspector` (do not fork the rules). Add minimal `.geo-inspector-source { word-break: break-all; }` if the URL overflows.
+Then in `src/app/app.css`: the reused classes (`geo-style-fields/-field/-color/-number/-slider`, `geo-opacity-slider`, `layer-badge-geo`) are flat selectors and survive the move as-is — but their WIDTHS are sized for a 240 px row (`.geo-opacity-slider`/`.geo-style-number`/`.geo-style-slider` are ~3.5rem, app.css ~2562-2570). Add inspector-scoped overrides rather than reusing row widths:
+
+```css
+.geo-inspector .geo-opacity-slider,
+.geo-inspector .geo-style-slider {
+  width: 100%;
+}
+.geo-inspector .geo-style-number {
+  width: 4.5rem;
+}
+.geo-inspector-source {
+  word-break: break-all;
+}
+```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -1540,7 +1583,7 @@ describe("LayerPanel — selecting a geospatial layer", () => {
 });
 ```
 
-In `tests/unit/ui/inspector/InspectorPanel.test.tsx` — read the file first and reuse its existing render helper/props pattern; extend its `afterEach` (or add one) to reset `useGeoLayerStore` with `{ layers: [], activeGeoLayerId: null }`. Add:
+In `tests/unit/ui/inspector/InspectorPanel.test.tsx` — there is NO shared render helper: every existing test calls `render(<InspectorPanel selections={[]} onClose={() => {}} />)` inline, so do the same (replace `renderInspectorPanel()` below with that inline call). Extend the file's existing `afterEach` (~line 60, which resets `useLayerStore`/`useStreamStore`) with `useGeoLayerStore.setState({ layers: [], activeGeoLayerId: null })`; `act` is already imported in that file. Add:
 
 ```tsx
 describe("InspectorPanel — geo layer mode", () => {
@@ -1606,7 +1649,7 @@ Root div gains the click and the class (visibility/remove/zoom buttons already `
 >
 ```
 
-Also stop propagation in the rename input/span like the city row does (`onClick={(e) => e.stopPropagation()}` on the input; the double-click span handler adds `e.stopPropagation()`).
+Also stop propagation in the rename input/span like the city row does (`onClick={(e) => e.stopPropagation()}` on the input; the double-click span handler adds `e.stopPropagation()`). The opacity slider and the `<details className="geo-style">` survive in the row until Task 10 — give the slider and the `<summary>` an `onClick={(e) => e.stopPropagation()}` too, so dragging or toggling them doesn't double as layer selection in this intermediate commit (Task 10 deletes both anyway).
 
 2. `LayerPanel.tsx`: in the CITY row's `onClick` (line ~111), clear the geo side:
 
@@ -1745,6 +1788,8 @@ Expected: the new test FAILS (controls still present); deleted tests gone.
 
 In `GeoLayerRow.tsx`, delete: the opacity `<input className="geo-opacity-slider">` block (lines ~166-180), the whole `<details className="geo-style">` block (lines ~209-278), the now-unused `editStyle` helper and the now-unused imports (`colorInputValue` usage, `GeoLayerStyle` type, etc. — let `tsc` and lint report exactly which). Update the component doc comment: the row is now identity + visibility + zoom + remove; drawing config lives in the inspector (`GeoLayerInspector`).
 
+In `src/app/app.css`, delete the two rules the `<details>` removal orphans: `.geo-style` (~line 2575) and `.geo-style-summary` (~lines 2580, 2588). Do NOT touch `.geo-style-fields` and friends — the inspector still uses them (Task 8).
+
 - [ ] **Step 4: Run tests + typecheck to verify**
 
 Run: `npx vitest run tests/unit/ui && npx tsc -b --noEmit`
@@ -1753,7 +1798,7 @@ Expected: PASS, no unused-import errors.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/ui/layers/GeoLayerRow.tsx tests/unit/ui/layers/LayerPanelSections.test.tsx
+git add src/ui/layers/GeoLayerRow.tsx src/app/app.css tests/unit/ui/layers/LayerPanelSections.test.tsx
 git commit -m "refactor: geo row slims to identity and actions; config lives in the inspector
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
@@ -1793,7 +1838,11 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+## Known precondition (documented, not fixed here)
+
+Both features live inside the viewer shell, which `App.tsx:1273` gates on `hasLayers || engineBooting` — and `hasLayers` counts CITY layers only. A workspace holding only geospatial layers still shows the landing page, so neither the zoom button nor the geo inspector is reachable there. This is the pre-existing "geo-only session" gap (tracked as a Milestone-10 follow-up), deliberately out of scope for this plan.
+
 ## Post-plan checks (for the orchestrator, not a task)
 
-- Browser smoke (optional, needs the dev server + agent-browser): add a GeoJSON URL layer, click its zoom button, confirm the flight; click the row, confirm the inspector swaps to the geo view and a colour edit recolours the drape; click a city row, confirm the inspector returns.
+- Browser smoke (optional, needs the dev server + agent-browser): **load a city layer first** (the shell gate above), then add a GeoJSON URL layer, click its zoom button, confirm the flight; click the row, confirm the inspector swaps to the geo view and a colour edit recolours the drape; click a city row, confirm the inspector returns.
 - The pre-existing `LayerPanel.test.tsx` (streaming badge suite) passes untouched.
