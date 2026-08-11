@@ -77,6 +77,7 @@ vi.mock("../../../src/scene/NavaraViewport", () => ({
             ? {
                 fitAll: () => {},
                 fitLayer: () => {},
+                fitBounds: () => {},
                 alignView: () => {},
                 getCameraState: () => null,
                 setCameraState: () => {},

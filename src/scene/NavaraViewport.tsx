@@ -184,6 +184,11 @@ const makeEngineColor = (hex: number): unknown => new Color().setHex(hex);
 export interface CitySceneHandle {
   fitAll: () => void;
   fitLayer: (layerId: string) => void;
+  /** Fly to frame caller-supplied bounds — the geo-layer fit, whose extents
+   *  the app computes itself (`geoLayerBounds.ts`); the engine has no bounds
+   *  API for its own geo layers. Same framing and settle suppression as
+   *  `fitLayer`. */
+  fitBounds: (bounds: GeodeticBounds) => void;
   alignView: (direction: ViewDirection) => void;
   getCameraState: () => GeographicCameraState | null;
   setCameraState: (state: GeographicCameraState) => void;
@@ -2117,6 +2122,25 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       [boundsOf, framedForMode, withSettleSuppressed],
     );
 
+    const fitBounds = useCallback(
+      (bounds: GeodeticBounds) => {
+        const view = viewRef.current;
+        if (!view) return;
+        const framed = framedForMode(bounds);
+        // Bounds arrive from outside the engine's own registries, so a bad box
+        // must die here, not as a NaN camera the engine cannot recover from.
+        if (
+          !Number.isFinite(framed.lng) ||
+          !Number.isFinite(framed.lat) ||
+          !Number.isFinite(framed.height)
+        ) {
+          return;
+        }
+        withSettleSuppressed(() => view.flyTo(framed));
+      },
+      [framedForMode, withSettleSuppressed],
+    );
+
     const alignView = useCallback(
       (direction: ViewDirection) => {
         const view = viewRef.current;
@@ -3322,6 +3346,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       () => ({
         fitAll,
         fitLayer,
+        fitBounds,
         alignView,
         getCameraState,
         setCameraState,
@@ -3344,6 +3369,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       [
         fitAll,
         fitLayer,
+        fitBounds,
         alignView,
         getCameraState,
         setCameraState,

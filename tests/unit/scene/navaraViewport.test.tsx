@@ -715,6 +715,60 @@ describe("NavaraViewport lifecycle", () => {
     expect(setCamera).not.toHaveBeenCalled();
   });
 
+  it("fitBounds flies to caller-supplied bounds without consulting any layer", async () => {
+    const ref = createRef<CitySceneHandle>();
+    render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
+    await waitFor(() => expect(ref.current).not.toBeNull());
+    await ref.current!.ready;
+    ref.current!.fitBounds({
+      west: 4.1,
+      south: 51.9,
+      east: 4.6,
+      north: 52.3,
+      minHeight: 0,
+      maxHeight: 0,
+    });
+
+    expect(flyTo).toHaveBeenCalledTimes(1);
+    const target = flyTo.mock.calls[0]![0] as {
+      lng: number;
+      lat: number;
+      height: number;
+    };
+    // Longitude IS the box centre — the default framing offsets only along the
+    // view axis, which is due north. Latitude is deliberately NOT asserted to
+    // lie inside the box: `cameraForBounds` parks the camera one fit distance
+    // back down a -60 degree view axis, i.e. SOUTH of and above the box, so a
+    // 44 km-tall box puts the camera ~0.4 degrees south of `south`. What the
+    // fit owes the caller is that it framed THEIR box: centred in longitude,
+    // south of their centre, at a real height.
+    expect(target.lng).toBeCloseTo(4.35, 6);
+    expect(target.lat).toBeLessThan((51.9 + 52.3) / 2);
+    expect(target.lat).toBeGreaterThan(51.0);
+    expect(target.height).toBeGreaterThan(0);
+    expect(Number.isFinite(target.height)).toBe(true);
+  });
+
+  it("fitBounds refuses a box that frames to a non-finite camera", async () => {
+    // A no-view call cannot be tested deterministically (init is async and may
+    // already have run), so the guard under test is the finite check — the
+    // deterministic half of "bad input moves no camera".
+    const ref = createRef<CitySceneHandle>();
+    render(<NavaraViewport ref={ref} onTriangleCount={() => {}} />);
+    await waitFor(() => expect(ref.current).not.toBeNull());
+    await ref.current!.ready;
+    ref.current!.fitBounds({
+      west: Number.NaN,
+      south: Number.NaN,
+      east: Number.NaN,
+      north: Number.NaN,
+      minHeight: 0,
+      maxHeight: 0,
+    });
+
+    expect(flyTo).not.toHaveBeenCalled();
+  });
+
   it("disposes the view on unmount", async () => {
     const { unmount } = render(<NavaraViewport onTriangleCount={() => {}} />);
     await waitFor(() => expect(init).toHaveBeenCalled());
