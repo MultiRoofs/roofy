@@ -23,6 +23,8 @@
 
 import {
   CITYPARQUET_SIDECAR_NAMES,
+  sidecarKindOf,
+  type CityParquetSidecars,
   CityParquetError,
   assembleCityParquetModel,
   parseCityParquetManifest,
@@ -215,6 +217,38 @@ function dropSidecars(names: readonly string[]): string[] {
  * wildcard can act on; the count is always in it, since "too many" without a
  * number leaves the user guessing how much narrower to get.
  */
+/** The appearance sidecars among a listing, by kind (first of each wins). */
+function sidecarsAmong(names: readonly string[]): {
+  textures?: string;
+  materials?: string;
+} {
+  const out: { textures?: string; materials?: string } = {};
+  for (const name of names) {
+    const kind = sidecarKindOf(name);
+    if (kind !== null) out[kind] ??= name;
+  }
+  return out;
+}
+
+type Target = { url: string; name: string };
+
+/** Everything a source resolves to: the object tables to load, and the
+ *  appearance sidecars found beside them (fetched too, when present). */
+interface Targets {
+  readonly tables: Target[];
+  readonly sidecars: { textures?: Target; materials?: Target };
+}
+
+function sidecarTargets(
+  beside: { textures?: string; materials?: string },
+  target: (name: string) => Target,
+): Targets["sidecars"] {
+  return {
+    ...(beside.textures ? { textures: target(beside.textures) } : {}),
+    ...(beside.materials ? { materials: target(beside.materials) } : {}),
+  };
+}
+
 function overCap(names: readonly string[]): boolean {
   return names.length > MAX_CITYPARQUET_FILES;
 }
@@ -230,7 +264,7 @@ async function expandGlob(
   store: StorageRef,
   pattern: string,
   http: HttpClient,
-): Promise<string[]> {
+): Promise<{ tables: string[]; listed: string[] }> {
   const listed = await listStorageObjects(
     store,
     globLiteralPrefix(pattern),
@@ -249,7 +283,7 @@ async function expandGlob(
       `The wildcard matches ${String(tables.length)} files; the viewer loads at most ${String(MAX_CITYPARQUET_FILES)} at once — narrow the pattern.`,
     );
   }
-  return tables;
+  return { tables, listed };
 }
 
 /** `storage-dir` without a manifest: the `.parquet` files directly under it. */
@@ -299,18 +333,20 @@ function resolveHref(href: string, baseUrl: string): string {
  * them. The count is refused before the first byte is requested — there is no
  * "narrow the pattern" advice to give here, because there is no pattern.
  */
-function manifestTargets(
-  manifest: unknown,
-  baseUrl: string,
-): { url: string; name: string }[] {
-  const hrefs = parseCityParquetManifest(manifest).objectTables;
+function manifestTargets(manifest: unknown, baseUrl: string): Targets {
+  const parsed = parseCityParquetManifest(manifest);
+  const hrefs = parsed.objectTables;
   if (overCap(hrefs)) {
     throw new Error(declaredOverCap(hrefs.length));
   }
-  return hrefs.map((href) => ({
+  const target = (href: string): Target => ({
     url: resolveHref(href, baseUrl),
     name: href,
-  }));
+  });
+  return {
+    tables: hrefs.map(target),
+    sidecars: sidecarTargets(parsed.sidecars, target),
+  };
 }
 
 /** The sentence for a manifest that declares more tables than the cap. */
@@ -326,10 +362,15 @@ function declaredOverCap(count: number): string {
 async function targetsFor(
   source: CityParquetSource,
   http: HttpClient,
-): Promise<{ url: string; name: string }[]> {
+): Promise<Targets> {
   switch (source.kind) {
     case "table":
-      return [{ url: source.url, name: baseName(source.url) }];
+      // A lone table: nothing lists its siblings, so no sidecars are looked
+      // for — its appearance columns stay unresolved (documented v1 limit).
+      return {
+        tables: [{ url: source.url, name: baseName(source.url) }],
+        sidecars: {},
+      };
 
     case "package-dir": {
       const manifestUrl = `${source.baseUrl}${MANIFEST_FILENAME}`;
@@ -338,12 +379,15 @@ async function targetsFor(
     }
 
     case "storage-table":
-      return [
-        {
-          url: storageObjectUrl(source.store, source.objectName),
-          name: baseName(source.objectName),
-        },
-      ];
+      return {
+        tables: [
+          {
+            url: storageObjectUrl(source.store, source.objectName),
+            name: baseName(source.objectName),
+          },
+        ],
+        sidecars: {},
+      };
 
     case "storage-dir": {
       const listed = await listStorageObjects(
@@ -365,23 +409,59 @@ async function targetsFor(
           storageObjectUrl(source.store, source.prefix),
         );
       }
-      return directTables(listed, source.store, source.prefix).map((name) => ({
+      const objectTarget = (name: string): Target => ({
         url: storageObjectUrl(source.store, name),
         name: baseName(name),
-      }));
+      });
+      return {
+        tables: directTables(listed, source.store, source.prefix).map(
+          objectTarget,
+        ),
+        sidecars: sidecarTargets(
+          sidecarsAmong(listed.filter((n) => n.startsWith(source.prefix))),
+          objectTarget,
+        ),
+      };
     }
 
     case "storage-glob": {
-      const names = await expandGlob(source.store, source.pattern, http);
-      return names.map((name) => ({
+      const { tables, listed } = await expandGlob(
+        source.store,
+        source.pattern,
+        http,
+      );
+      const objectTarget = (name: string): Target => ({
         url: storageObjectUrl(source.store, name),
         // The full object name, because a glob's files usually SHARE a base
         // name ("…/a/building.parquet", "…/b/building.parquet") and an error
         // has to say which one.
         name,
-      }));
+      });
+      return {
+        tables: tables.map(objectTarget),
+        sidecars: sidecarTargets(sidecarsAmong(listed), objectTarget),
+      };
     }
   }
+}
+
+/** Fetch the sidecars a source resolved to, into the assembler's shape. */
+async function fetchSidecars(
+  targets: Targets["sidecars"],
+  http: HttpClient,
+): Promise<CityParquetSidecars> {
+  const out: { textures?: Uint8Array; materials?: Uint8Array } = {};
+  if (targets.textures) {
+    out.textures = (
+      await fetchTable(targets.textures.url, targets.textures.name, http)
+    ).bytes;
+  }
+  if (targets.materials) {
+    out.materials = (
+      await fetchTable(targets.materials.url, targets.materials.name, http)
+    ).bytes;
+  }
+  return out;
 }
 
 /**
@@ -416,7 +496,11 @@ export async function loadCityParquetFromUrl(
     );
   }
   const targets = await targetsFor(source, http);
-  return assembleCityParquetModel(await fetchAll(targets, http));
+  const [tables, sidecars] = await Promise.all([
+    fetchAll(targets.tables, http),
+    fetchSidecars(targets.sidecars, http),
+  ]);
+  return assembleCityParquetModel(tables, { sidecars });
 }
 
 /**
@@ -491,10 +575,13 @@ export async function loadCityParquetFromFiles(
 
   const manifestFile = byPath.get(MANIFEST_FILENAME);
   let names: string[];
+  let sidecarNames: { textures?: string; materials?: string };
   if (manifestFile === undefined) {
-    names = dropSidecars(
-      [...byPath.keys()].filter((path) => path.endsWith(".parquet")),
+    const parquet = [...byPath.keys()].filter((path) =>
+      path.endsWith(".parquet"),
     );
+    names = dropSidecars(parquet);
+    sidecarNames = sidecarsAmong(parquet);
   } else {
     let manifest: unknown;
     try {
@@ -505,7 +592,9 @@ export async function loadCityParquetFromFiles(
         { cause: error },
       );
     }
-    names = parseCityParquetManifest(manifest).objectTables;
+    const parsed = parseCityParquetManifest(manifest);
+    names = parsed.objectTables;
+    sidecarNames = parsed.sidecars;
   }
 
   if (names.length === 0) {
@@ -536,7 +625,13 @@ export async function loadCityParquetFromFiles(
     }
     tables.push({ name, bytes: new Uint8Array(await file.arrayBuffer()) });
   }
-  return assembleCityParquetModel(tables);
+  const sidecars: { textures?: Uint8Array; materials?: Uint8Array } = {};
+  for (const kind of ["textures", "materials"] as const) {
+    const name = sidecarNames[kind];
+    const file = name === undefined ? undefined : fileForHref(name, byPath);
+    if (file) sidecars[kind] = new Uint8Array(await file.arrayBuffer());
+  }
+  return assembleCityParquetModel(tables, { sidecars });
 }
 
 /**
