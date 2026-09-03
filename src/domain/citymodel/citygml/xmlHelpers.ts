@@ -54,7 +54,27 @@ export function parsePosList(raw: string, srsDimension = 3): Vec3[] {
  * Resolve a gml:LinearRing node to an array of Vec3.
  * Handles both gml:posList (preferred) and multiple gml:pos elements.
  */
+/**
+ * GML rings repeat their first vertex as the last one. The triangulator
+ * (`ShapeUtils.triangulateShape`) strips that duplicate from the PROJECTED
+ * copies it works on while the 3D vertex list would keep it, which puts every
+ * hole's indices off by one — so the duplicate is dropped here, at the
+ * boundary, and `gmlSurfaceAppearance` drops the matching texture coordinate.
+ */
+function dropClosingVertex(ring: Vec3[]): Vec3[] {
+  if (ring.length < 4) return ring;
+  const first = ring[0]!;
+  const last = ring[ring.length - 1]!;
+  return first[0] === last[0] && first[1] === last[1] && first[2] === last[2]
+    ? ring.slice(0, -1)
+    : ring;
+}
+
 export function parseLinearRing(ring: GMLLinearRing): Vec3[] {
+  return dropClosingVertex(parseLinearRingVertices(ring));
+}
+
+function parseLinearRingVertices(ring: GMLLinearRing): Vec3[] {
   // gml:posList — may be a string or an object with #text
   const posList = ring["gml:posList"];
   if (posList != null) {

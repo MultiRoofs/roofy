@@ -38,10 +38,11 @@ describe("parseCityGML appearance", () => {
     expect(appearance.materials[0]!.diffuseColor).toEqual([1, 0.6, 0]);
   });
 
-  it("textures the front wall with one UV per posList vertex", () => {
-    // The lod2 front wall: a pentagon written with its closing vertex.
+  it("textures the front wall with one UV per ring vertex, closing duplicate dropped", () => {
+    // The lod2 front wall: a pentagon written with its closing vertex, which
+    // `parseLinearRing` drops (5 vertices) — and so does the UV lookup.
     const front = building.surfaces.find(
-      (s) => s.lod === "2" && s.rings[0]!.length === 6 && s.texture?.Summer,
+      (s) => s.lod === "2" && s.rings[0]!.length === 5 && s.texture?.Summer,
     )!;
     expect(front).toBeDefined();
     const tex = front.texture!.Summer!;
@@ -49,7 +50,7 @@ describe("parseCityGML appearance", () => {
       "front_back_summer.png",
     );
     expect(tex.uvs).toHaveLength(1);
-    expect(tex.uvs[0]).toHaveLength(6);
+    expect(tex.uvs[0]).toHaveLength(5);
     expect(tex.uvs[0]![0]).toEqual([0, 0]);
     expect(tex.uvs[0]![3]).toEqual([0.25, 1]);
   });
@@ -66,7 +67,7 @@ describe("parseCityGML appearance", () => {
 
   it("gives the Winter theme the front wall through a shared TexCoordList", () => {
     const front = building.surfaces.find(
-      (s) => s.lod === "2" && s.rings[0]!.length === 6 && s.texture?.Winter,
+      (s) => s.lod === "2" && s.rings[0]!.length === 5 && s.texture?.Winter,
     )!;
     expect(front).toBeDefined();
     expect(

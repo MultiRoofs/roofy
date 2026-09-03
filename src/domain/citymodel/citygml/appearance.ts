@@ -5,8 +5,8 @@
  * CityGML keys everything by `gml:id`: an `app:ParameterizedTexture` names
  * the polygons it covers (`app:target uri="#polygonId"`) and lists one
  * `app:textureCoordinates ring="#ringId"` per linear ring, with one (u, v)
- * pair per `posList` vertex — the closing duplicate included, which is also
- * what `parseLinearRing` keeps, so the two stay paired. An `app:X3DMaterial`
+ * pair per `posList` vertex — the closing duplicate included; `parseLinearRing`
+ * drops that vertex and the lookup below drops the matching pair. An `app:X3DMaterial`
  * names its targets as plain `app:target` strings; a target may be a
  * polygon or a whole surface/geometry container, so material lookups take a
  * list of candidate ids (polygon first, then its containers).
@@ -340,11 +340,14 @@ export function gmlSurfaceAppearance(
                   e.theme === entry.theme &&
                   e.localTextureIndex === entry.localTextureIndex,
               );
-        if (!found || found.uvs.length !== ringLengths[r]) {
+        // The ring lost its duplicated closing vertex in `parseLinearRing`;
+        // a coordinate list written for the closed ring is one pair long.
+        const n = ringLengths[r]!;
+        if (!found || (found.uvs.length !== n && found.uvs.length !== n + 1)) {
           ok = false;
           break;
         }
-        uvs.push([...found.uvs]);
+        uvs.push(found.uvs.slice(0, n));
       }
       if (!ok) continue;
       (texture ??= {})[entry.theme] = { textureIndex: modelIndex, uvs };
