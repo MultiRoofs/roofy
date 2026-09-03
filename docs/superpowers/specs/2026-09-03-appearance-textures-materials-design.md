@@ -315,6 +315,15 @@ disappears on restore (different file) falls back to the load default.
 
 ## Status (2026-09-03)
 
+- All four phases are implemented. Phase 3 (CityParquet): sidecar-id
+  resolution through one package-wide merger context, inline UVs, sidecars
+  fetched by every listing-capable loader arm (a lone `.parquet` URL stays
+  plain). Phase 4 (CityGML): ring-id keyed textures, container-targeted
+  materials, `xlink:href` reuse, `TexCoordGen`/`GeoreferencedTexture` left
+  untextured, ZIP archives merged. Test data: a five-feature CityParquet
+  package written by the reference implementation (plugin fixture) and the
+  official CityGML 2.0 Appearance example (`fixtures/citygml-appearance.gml`).
+
 - Phase 1 (CityJSONSeq + CityJSON) and phase 2 (FlatCityBuf) are implemented
   and browser-verified on Rotterdam: images fetch from the dataset folder,
   facades render upright (bottom-left UV origin), picking highlights over the
