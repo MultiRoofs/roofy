@@ -312,3 +312,24 @@ disappears on restore (different file) falls back to the load default.
 - Browser smoke (Rotterdam on the dev server): textures visible and upright,
   "None" restores colours, LoD/theme switch, pick still resolves a surface,
   save/restore keeps the theme.
+
+## Status (2026-09-03)
+
+- Phase 1 (CityJSONSeq + CityJSON) and phase 2 (FlatCityBuf) are implemented
+  and browser-verified on Rotterdam: images fetch from the dataset folder,
+  facades render upright (bottom-left UV origin), picking highlights over the
+  image, "None" restores colours, save/restore keeps the choice, and the
+  streamed `.fcb` learns its theme, auto-selects it and re-bakes cells on a
+  theme change.
+- Review-driven changes since the first draft: per-image repaints are
+  coalesced onto one microtask; the masked colour source is cached across
+  hover repaints; a synchronous texture source is handled; a texture theme
+  that covers no drawn surface allocates nothing; the hole-ring fix (3D
+  vertices reversed alongside the rewound projection) is pinned by a
+  themeless test; the "none" option is labelled "None".
+- Known v1 limits: material `transparency`/`specular`/`emissive`/`shininess`
+  are parsed but not drawn; only the exterior ring's texture index counts;
+  `wrapMode: "border"` and `borderColor` collapse to clamp; an interior ring
+  spelled `[null]` leaves the whole surface untextured; image memory is
+  unbounded (148 × 1024² JPEGs on Rotterdam); failed image loads have no UI
+  surface beyond one console warning per layer.
