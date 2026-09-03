@@ -19,6 +19,7 @@ export interface GMLEnvelope {
 }
 
 export interface GMLLinearRing {
+  "@_gml:id"?: string;
   "gml:posList"?: string | { "#text": string; "@_srsDimension"?: string };
   "gml:pos"?: string | string[];
 }
@@ -33,6 +34,7 @@ export interface GMLPolygon {
 }
 
 export interface GMLMultiSurface {
+  "@_gml:id"?: string;
   "gml:surfaceMember"?: GMLSurfaceMemberEntry | GMLSurfaceMemberEntry[];
 }
 
@@ -42,10 +44,12 @@ export interface GMLSurfaceMemberEntry {
 }
 
 export interface GMLCompositeSurface {
+  "@_gml:id"?: string;
   "gml:surfaceMember"?: GMLSurfaceMemberEntry | GMLSurfaceMemberEntry[];
 }
 
 export interface GMLSolid {
+  "@_gml:id"?: string;
   "gml:exterior"?: {
     "gml:CompositeSurface"?: GMLCompositeSurface;
     "gml:Shell"?: {
