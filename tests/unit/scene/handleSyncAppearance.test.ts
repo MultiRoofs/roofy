@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
-import { syncLayers, type LiveLayer } from "../../../src/scene/handleSync";
+import {
+  syncLayers,
+  syncStreamState,
+  type LiveLayer,
+  type StreamInteractionHandle,
+  type StreamSyncMemo,
+} from "../../../src/scene/handleSync";
 import type { Layer } from "../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 
@@ -127,5 +133,56 @@ describe("syncLayers appearance", () => {
       kind: "texture",
       name: "rgb",
     });
+  });
+});
+
+describe("syncStreamState appearance", () => {
+  function streamHandle(): StreamInteractionHandle {
+    return {
+      id: "S1",
+      setRules: vi.fn(),
+      setLod: vi.fn(),
+      setVisible: vi.fn(),
+      setCameraSync: vi.fn(),
+      setThemeStyle: vi.fn(),
+      setHiddenTypes: vi.fn(),
+      setAppearance: vi.fn(),
+      onCommit: () => () => {},
+      lastQueryRegion: () => null,
+      onQueryRegion: () => () => {},
+      setHighlight: vi.fn(),
+      resolvePick: vi.fn(),
+      resolveRaycast: vi.fn(),
+      getBoundsGeodetic: vi.fn(),
+      triangleCount: () => 0,
+      heightOffset: () => 0,
+    } as unknown as StreamInteractionHandle;
+  }
+
+  it("pushes the theme by value and only when it changes", () => {
+    const handle = streamHandle();
+    const memos = new Map<string, StreamSyncMemo>();
+    const l = layer({ id: "S1", isStreaming: true });
+    syncStreamState(l, handle, memos);
+    expect(handle.setAppearance).toHaveBeenCalledWith({
+      kind: "texture",
+      name: "rgb",
+    });
+    syncStreamState(
+      layer({
+        id: "S1",
+        isStreaming: true,
+        selectedAppearance: { kind: "texture", name: "rgb" },
+      }),
+      handle,
+      memos,
+    );
+    expect(handle.setAppearance).toHaveBeenCalledTimes(1);
+    syncStreamState(
+      layer({ id: "S1", isStreaming: true, selectedAppearance: null }),
+      handle,
+      memos,
+    );
+    expect(handle.setAppearance).toHaveBeenLastCalledWith(null);
   });
 });

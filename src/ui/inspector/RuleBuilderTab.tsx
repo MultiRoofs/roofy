@@ -146,7 +146,8 @@ export function RuleBuilderTab({
         {textureThemeActive && (
           <p className="rule-appearance-note" role="note">
             Texture theme active: rule colours show only on untextured surfaces.
-            Pick "No texture" in the layer row to colour every surface.
+            Pick "None" in the layer row's appearance dropdown to colour every
+            surface.
           </p>
         )}
 

@@ -838,6 +838,7 @@ describe("syncStreamState", () => {
       setVisible: vi.fn(),
       setCameraSync: vi.fn(),
       setHiddenTypes: vi.fn(),
+      setAppearance: vi.fn(),
     };
   }
 
@@ -999,6 +1000,7 @@ describe("theme styles", () => {
       setVisible: vi.fn(),
       setCameraSync: vi.fn(),
       setHiddenTypes: vi.fn(),
+      setAppearance: vi.fn(),
       setThemeStyle: vi.fn(),
     };
   }

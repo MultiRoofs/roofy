@@ -61,7 +61,7 @@ export function AppearanceSelector({
       onPointerDown={(e) => e.stopPropagation()}
       title={`Appearance (texture or material theme)${localFileNote}`}
     >
-      <option value="">No texture</option>
+      <option value="">None</option>
       {themes.map((theme) => (
         <option
           key={appearanceOptionValue(theme)}

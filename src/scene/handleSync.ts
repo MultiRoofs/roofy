@@ -17,6 +17,7 @@
  * (NODE_IMPORT_SAFE = false — see Global Constraints).
  */
 import {
+  appearanceThemesEqual,
   compileRuleEvaluator,
   type AppearanceTheme,
 } from "@cityjson/navara-core";
@@ -62,14 +63,6 @@ export interface LiveLayer {
    *  VALUE — the store may hand out a fresh but equal object on restore.
    *  Unset reads as `null` (plain colours), the mesh's own default. */
   appearance?: AppearanceTheme | null;
-}
-
-function sameAppearance(
-  a: AppearanceTheme | null | undefined,
-  b: AppearanceTheme | null | undefined,
-): boolean {
-  if (!a || !b) return (a ?? null) === (b ?? null);
-  return a.kind === b.kind && a.name === b.name;
 }
 
 /**
@@ -159,7 +152,7 @@ export function syncLayers(
       entry.hiddenTypes = layer.hiddenTypes;
       entry.handle.setHiddenTypes(layer.hiddenTypes);
     }
-    if (!sameAppearance(entry.appearance, layer.selectedAppearance)) {
+    if (!appearanceThemesEqual(entry.appearance, layer.selectedAppearance)) {
       entry.appearance = layer.selectedAppearance;
       entry.handle.setAppearance(layer.selectedAppearance);
     }
@@ -274,6 +267,9 @@ export interface StreamInteractionHandle extends InteractionHandle {
   /** First-level object groups to stream without geometry. Forces a commit,
    *  so every affected cell is refetched — the same cost as a LoD change. */
   setHiddenTypes(types: ReadonlyArray<string>): void;
+  /** Bakes the theme into every resident cell on the next commit (a swap,
+   *  like a hidden-type change); `null` for plain colours. */
+  setAppearance(theme: AppearanceTheme | null): void;
   /** Fires after each cell commit; returns its own unsubscribe. Cells arrive
    *  long after any store change, so this — not a React dependency — is what
    *  tells the app to re-count triangles and re-apply the highlight. */
@@ -311,6 +307,8 @@ export interface StreamSyncMemo {
   /** The scene theme's style last pushed, by identity — see
    *  {@link LiveLayer.themeStyle}. */
   themeStyle?: ThemeStyle;
+  /** Compared by VALUE, like the static path's `LiveLayer.appearance`. */
+  appearance?: AppearanceTheme | null;
 }
 
 /**
@@ -374,6 +372,10 @@ export function syncStreamState(
   if (memo.hiddenTypes !== layer.hiddenTypes) {
     memo.hiddenTypes = layer.hiddenTypes;
     handle.setHiddenTypes(layer.hiddenTypes);
+  }
+  if (!appearanceThemesEqual(memo.appearance, layer.selectedAppearance)) {
+    memo.appearance = layer.selectedAppearance;
+    handle.setAppearance(layer.selectedAppearance);
   }
   // Same optional-means-"no theme to push" contract as `syncLayers`, and the
   // same identity comparison: one frozen style object per theme.

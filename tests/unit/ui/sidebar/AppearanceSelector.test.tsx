@@ -42,11 +42,7 @@ describe("AppearanceSelector", () => {
     );
     const select = screen.getByLabelText("Appearance") as HTMLSelectElement;
     const labels = Array.from(select.options).map((o) => o.textContent);
-    expect(labels).toEqual([
-      "No texture",
-      "Texture: rgbTexture",
-      "Material: paint",
-    ]);
+    expect(labels).toEqual(["None", "Texture: rgbTexture", "Material: paint"]);
     expect(select.value).toBe("texture:rgbTexture");
   });
 

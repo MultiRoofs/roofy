@@ -196,6 +196,7 @@ export function useLayerFileLoader(
             rulesEnabled: overrides?.rulesEnabled,
             visible: overrides?.visible,
             hiddenTypes: overrides?.hiddenTypes,
+            selectedAppearance: overrides?.selectedAppearance,
           });
         } else if (encoding === "cityparquet") {
           // A lone `.parquet` drop is a one-table package — the same loader as

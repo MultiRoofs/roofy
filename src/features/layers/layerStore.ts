@@ -6,7 +6,10 @@
  */
 
 import { create } from "zustand";
-import { toplevelCityObjectType } from "@cityjson/navara-core";
+import {
+  appearanceThemesEqual,
+  toplevelCityObjectType,
+} from "@cityjson/navara-core";
 import type { AppearanceTheme, CityModel } from "../../domain/citymodel/types";
 import type { CityModelReference } from "../../persistence/types";
 import type { Rule } from "../rules/types";
@@ -227,14 +230,6 @@ export function defaultAppearanceTheme(
   return material !== null ? { kind: "material", name: material } : null;
 }
 
-function sameAppearance(
-  a: AppearanceTheme | null,
-  b: AppearanceTheme | null,
-): boolean {
-  if (a === null || b === null) return a === b;
-  return a.kind === b.kind && a.name === b.name;
-}
-
 export const useLayerStore = create<LayerStore>((set) => ({
   layers: [],
   activeLayerId: null,
@@ -253,7 +248,7 @@ export const useLayerStore = create<LayerStore>((set) => ({
       restored === undefined
         ? defaultAppearanceTheme(input.model)
         : restored === null ||
-            appearanceThemes.some((t) => sameAppearance(t, restored))
+            appearanceThemes.some((t) => appearanceThemesEqual(t, restored))
           ? restored
           : defaultAppearanceTheme(input.model);
     set((state) => ({

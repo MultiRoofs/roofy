@@ -2530,6 +2530,13 @@ body {
   flex-shrink: 0;
 }
 
+.appearance-select {
+  max-width: 9.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .lod-select:focus {
   outline: none;
   border-color: var(--accent);

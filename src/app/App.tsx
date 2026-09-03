@@ -122,7 +122,7 @@ function streamSourceSnapshot(
 /** A snapshot's `appearance` field, or `undefined` for anything malformed. */
 function readAppearanceTheme(raw: unknown): AppearanceTheme | null | undefined {
   if (raw === null) return null;
-  if (typeof raw !== "object" || raw === undefined) return undefined;
+  if (typeof raw !== "object") return undefined;
   const { kind, name } = raw as { kind?: unknown; name?: unknown };
   return (kind === "texture" || kind === "material") && typeof name === "string"
     ? { kind, name }
@@ -879,6 +879,7 @@ export function App({
                   rulesEnabled,
                   visible,
                   hiddenTypes,
+                  selectedAppearance: appearance,
                 }),
               );
             } else if (isCityParquetUrl(modelRef.url)) {

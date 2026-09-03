@@ -72,6 +72,7 @@ function streamState(types: ReadonlyArray<string>): StreamState {
     ladderVersion: 0,
     types,
     typesVersion: types.length === 0 ? 0 : 1,
+    appearanceThemes: [],
     status: "idle",
     message: null,
     version: 0,
