@@ -47,6 +47,8 @@ function makeLayer(overrides: Partial<Layer> = {}): Layer {
     cameraSync: true,
     hiddenTypes: [],
     availableObjectTypes: ["Building", "Road"],
+    appearanceThemes: [],
+    selectedAppearance: null,
     isStreaming: false,
     ...overrides,
   };

@@ -35,6 +35,7 @@ import { closeStreamingLayer } from "../../features/streaming/openStreamingLayer
 import { getStreamPlugin } from "../../features/streaming/streamPlugin";
 import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
 import { LodSelector } from "../sidebar/LodSelector";
+import { AppearanceSelector } from "../sidebar/AppearanceSelector";
 import { StreamingLodControl } from "./StreamingLodControl";
 import { LayerTypeToggles } from "./LayerTypeToggles";
 import { GeoLayerRow } from "./GeoLayerRow";
@@ -196,13 +197,21 @@ export function LayerPanel({
                 {layer.cameraSync ? "SYNC" : "FROZEN"}
               </button>
             ) : (
-              <LodSelector
-                layerId={layer.id}
-                availableLods={layer.availableLods}
-                selectedLod={layer.selectedLod}
-                isStreaming={layer.isStreaming}
-                lodMode={layer.lodMode}
-              />
+              <>
+                <LodSelector
+                  layerId={layer.id}
+                  availableLods={layer.availableLods}
+                  selectedLod={layer.selectedLod}
+                  isStreaming={layer.isStreaming}
+                  lodMode={layer.lodMode}
+                />
+                <AppearanceSelector
+                  layerId={layer.id}
+                  themes={layer.appearanceThemes}
+                  selected={layer.selectedAppearance}
+                  texturesResolvable={layer.modelRef.type === "url"}
+                />
+              </>
             )}
 
             <div className="layer-actions">

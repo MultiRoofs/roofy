@@ -52,6 +52,8 @@ function baseLayer(overrides: Partial<Layer>): Layer {
     cameraSync: true,
     hiddenTypes: [],
     availableObjectTypes: [],
+    appearanceThemes: [],
+    selectedAppearance: null,
     isStreaming: false,
     ...overrides,
   };

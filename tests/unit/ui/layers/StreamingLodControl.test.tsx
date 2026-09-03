@@ -28,6 +28,8 @@ function makeLayer(id: string, isStreaming: boolean): Layer {
     cameraSync: true,
     hiddenTypes: [],
     availableObjectTypes: [],
+    appearanceThemes: [],
+    selectedAppearance: null,
     isStreaming,
   };
 }

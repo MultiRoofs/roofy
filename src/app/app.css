@@ -1503,6 +1503,17 @@ body {
   color: var(--fg-muted);
 }
 
+.rule-appearance-note {
+  margin: 0 0 0.5rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: var(--fg-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
 .rule-header {
   display: flex;
   align-items: center;

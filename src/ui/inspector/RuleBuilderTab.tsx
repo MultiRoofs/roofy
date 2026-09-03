@@ -54,6 +54,11 @@ export function RuleBuilderTab({
   const rules = layer?.rules ?? [];
   const enabled = layer?.rulesEnabled ?? true;
   const isStreaming = layer?.isStreaming ?? false;
+  // Under a texture theme the images cover their faces outright (the mesh
+  // whites those vertices out), so a rule colour shows only on faces that
+  // have no image. Said here, where the user would otherwise wonder why a
+  // rule "does nothing".
+  const textureThemeActive = layer?.selectedAppearance?.kind === "texture";
 
   // Only subscribed for a streaming layer's re-render trigger; for a static
   // layer this is always undefined and unused below.
@@ -137,6 +142,13 @@ export function RuleBuilderTab({
             ))}
           </select>
         </div>
+
+        {textureThemeActive && (
+          <p className="rule-appearance-note" role="note">
+            Texture theme active: rule colours show only on untextured surfaces.
+            Pick "No texture" in the layer row to colour every surface.
+          </p>
+        )}
 
         <div className="rule-header">
           <div className="attr-section-title">Colorization Rules</div>

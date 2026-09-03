@@ -7,7 +7,7 @@
 
 import { create } from "zustand";
 import { toplevelCityObjectType } from "@cityjson/navara-core";
-import type { CityModel } from "../../domain/citymodel/types";
+import type { AppearanceTheme, CityModel } from "../../domain/citymodel/types";
 import type { CityModelReference } from "../../persistence/types";
 import type { Rule } from "../rules/types";
 
@@ -71,6 +71,21 @@ export interface Layer {
    * instead, for the same reason its LoD ladder does.
    */
   readonly availableObjectTypes: ReadonlyArray<string>;
+  /**
+   * The CityJSON appearance themes the model carries — texture themes first,
+   * then material themes, each by the name the file gave it. Empty for a
+   * model without appearance, and for a streaming layer (its model is a
+   * stub; the stream learns its themes cell by cell, like its LoD ladder).
+   */
+  readonly appearanceThemes: ReadonlyArray<AppearanceTheme>;
+  /**
+   * Which theme the layer draws, or `null` for the plain semantic / rule
+   * colours. Defaults at load to the file's own default texture theme, else
+   * its first texture theme, else its default/first material theme — so a
+   * textured dataset shows its textures without a click. Pushed to the
+   * plugin's `setAppearance` by `handleSync`; captured in snapshots.
+   */
+  readonly selectedAppearance: AppearanceTheme | null;
 }
 
 export interface LayerStoreState {
@@ -90,6 +105,8 @@ export interface LayerStoreActions {
       | "cameraSync"
       | "hiddenTypes"
       | "availableObjectTypes"
+      | "appearanceThemes"
+      | "selectedAppearance"
     > & {
       /** Defaults to a fresh UUID. Supplied only by `openStreamingLayer`,
        *  where the plugin has already registered its handle under an id it
@@ -104,6 +121,10 @@ export interface LayerStoreActions {
        *  value was seeded into the plugin at add/open time so the layer never
        *  renders one frame of the geometry it was saved without. */
       readonly hiddenTypes?: ReadonlyArray<string>;
+      /** Supplied by a RESTORE. Applied only when the (possibly different)
+       *  model actually carries that theme; `undefined` means "choose the
+       *  load default", `null` means "plain colours, deliberately". */
+      readonly selectedAppearance?: AppearanceTheme | null;
     },
   ) => string;
   removeLayer: (id: string) => void;
@@ -115,6 +136,9 @@ export interface LayerStoreActions {
   removeAllLayers: () => void;
   setLayerLod: (layerId: string, lod: string | null) => void;
   setLodMode: (layerId: string, mode: "auto" | "manual") => void;
+  /** Draw `theme` (one of {@link Layer.appearanceThemes}) or `null` for
+   *  plain colours. */
+  setLayerAppearance: (layerId: string, theme: AppearanceTheme | null) => void;
   /** Streaming layers only in practice — a static layer has nothing to
    *  follow the camera with. See {@link Layer.cameraSync}. */
   setCameraSync: (layerId: string, enabled: boolean) => void;
@@ -167,6 +191,50 @@ export function computeAvailableObjectTypes(model: CityModel): string[] {
   return [...set].sort();
 }
 
+/**
+ * The themes a model offers, texture themes first — the order the selector
+ * lists them in, and the order the load default is chosen from.
+ */
+export function computeAppearanceThemes(model: CityModel): AppearanceTheme[] {
+  const appearance = model.appearance;
+  if (!appearance) return [];
+  return [
+    ...appearance.textureThemes.map(
+      (name): AppearanceTheme => ({ kind: "texture", name }),
+    ),
+    ...appearance.materialThemes.map(
+      (name): AppearanceTheme => ({ kind: "material", name }),
+    ),
+  ];
+}
+
+/**
+ * What a freshly loaded layer draws: the file's declared default texture
+ * theme, else its first texture theme, else the declared/first material
+ * theme, else nothing. Textures win over materials because a file that
+ * carries photos of its facades is asking to be seen that way.
+ */
+export function defaultAppearanceTheme(
+  model: CityModel,
+): AppearanceTheme | null {
+  const appearance = model.appearance;
+  if (!appearance) return null;
+  const texture =
+    appearance.defaultTextureTheme ?? appearance.textureThemes[0] ?? null;
+  if (texture !== null) return { kind: "texture", name: texture };
+  const material =
+    appearance.defaultMaterialTheme ?? appearance.materialThemes[0] ?? null;
+  return material !== null ? { kind: "material", name: material } : null;
+}
+
+function sameAppearance(
+  a: AppearanceTheme | null,
+  b: AppearanceTheme | null,
+): boolean {
+  if (a === null || b === null) return a === b;
+  return a.kind === b.kind && a.name === b.name;
+}
+
 export const useLayerStore = create<LayerStore>((set) => ({
   layers: [],
   activeLayerId: null,
@@ -175,6 +243,19 @@ export const useLayerStore = create<LayerStore>((set) => ({
     const id = input.id ?? crypto.randomUUID();
     const availableLods = computeAvailableLods(input.model);
     const selectedLod = availableLods[0] ?? null;
+    const appearanceThemes = input.isStreaming
+      ? []
+      : computeAppearanceThemes(input.model);
+    // A restored choice survives only if this model has that theme — a
+    // re-linked file may differ; an explicit null is honoured as-is.
+    const restored = input.selectedAppearance;
+    const selectedAppearance =
+      restored === undefined
+        ? defaultAppearanceTheme(input.model)
+        : restored === null ||
+            appearanceThemes.some((t) => sameAppearance(t, restored))
+          ? restored
+          : defaultAppearanceTheme(input.model);
     set((state) => ({
       layers: [
         ...state.layers,
@@ -195,6 +276,8 @@ export const useLayerStore = create<LayerStore>((set) => ({
           availableObjectTypes: input.isStreaming
             ? []
             : computeAvailableObjectTypes(input.model),
+          appearanceThemes,
+          selectedAppearance,
         },
       ],
       activeLayerId: state.activeLayerId ?? id,
@@ -225,6 +308,13 @@ export const useLayerStore = create<LayerStore>((set) => ({
     set((state) => ({
       layers: state.layers.map((l) =>
         l.id === layerId ? { ...l, selectedLod: lod } : l,
+      ),
+    })),
+
+  setLayerAppearance: (layerId, theme) =>
+    set((state) => ({
+      layers: state.layers.map((l) =>
+        l.id === layerId ? { ...l, selectedAppearance: theme } : l,
       ),
     })),
 

@@ -495,6 +495,7 @@ function makeHandle(id: string, triangles = 10) {
     // The real `CityModelHandle` gained this with the scene themes; the
     // viewport pushes the active theme's style on the same beat as LoD.
     setThemeStyle: vi.fn(),
+    setAppearance: vi.fn(),
     setHighlight: vi.fn(),
     resolvePick: vi.fn((pick: { properties?: { surfaceIndex?: number } }) => ({
       kind: "surface",
@@ -886,8 +887,18 @@ describe("NavaraViewport lifecycle", () => {
     );
     expect(cityPluginInstance.addCityModel.mock.calls.map((c) => c[1])).toEqual(
       [
-        { id: "a", crs: CRS_URI, lod: "1.2" },
-        { id: "b", crs: CRS_URI, lod: null },
+        {
+          id: "a",
+          crs: CRS_URI,
+          lod: "1.2",
+          textureBaseUrl: "https://example.test/a",
+        },
+        {
+          id: "b",
+          crs: CRS_URI,
+          lod: null,
+          textureBaseUrl: "https://example.test/b",
+        },
       ],
     );
     // 2 handles x 10 triangles.

@@ -16,7 +16,10 @@
  * `@cityjson/navara-cityjson` barrel never reaches an `@navaramap/*` module
  * (NODE_IMPORT_SAFE = false — see Global Constraints).
  */
-import { compileRuleEvaluator } from "@cityjson/navara-core";
+import {
+  compileRuleEvaluator,
+  type AppearanceTheme,
+} from "@cityjson/navara-core";
 import type {
   CityModelHandle,
   EcefRay,
@@ -55,6 +58,18 @@ export interface LiveLayer {
    *  (`DEFAULT_THEME_STYLE`). Pushing is NOT cheap: `setThemeStyle` re-extracts
    *  every structural edge of the layer. */
   themeStyle?: ThemeStyle;
+  /** The appearance theme last pushed (or seeded at add time), compared by
+   *  VALUE — the store may hand out a fresh but equal object on restore.
+   *  Unset reads as `null` (plain colours), the mesh's own default. */
+  appearance?: AppearanceTheme | null;
+}
+
+function sameAppearance(
+  a: AppearanceTheme | null | undefined,
+  b: AppearanceTheme | null | undefined,
+): boolean {
+  if (!a || !b) return (a ?? null) === (b ?? null);
+  return a.kind === b.kind && a.name === b.name;
 }
 
 /**
@@ -120,6 +135,9 @@ export function syncLayers(
           lod: layer.selectedLod,
           visible: layer.visible,
           hiddenTypes: layer.hiddenTypes,
+          // Seeded, not pushed: `registry.add` builds the handle already
+          // drawing this theme.
+          appearance: layer.selectedAppearance,
         };
         live.set(layer.id, entry);
         handle.setVisible(layer.visible);
@@ -140,6 +158,10 @@ export function syncLayers(
     if (entry.hiddenTypes !== layer.hiddenTypes) {
       entry.hiddenTypes = layer.hiddenTypes;
       entry.handle.setHiddenTypes(layer.hiddenTypes);
+    }
+    if (!sameAppearance(entry.appearance, layer.selectedAppearance)) {
+      entry.appearance = layer.selectedAppearance;
+      entry.handle.setAppearance(layer.selectedAppearance);
     }
     if (themeStyle !== undefined && entry.themeStyle !== themeStyle) {
       entry.themeStyle = themeStyle;

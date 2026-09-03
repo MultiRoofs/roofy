@@ -2313,6 +2313,13 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
               // Built filtered, so a restored layer never renders one frame of
               // the geometry it was saved with hidden.
               hiddenTypes: layer.hiddenTypes,
+              appearance: layer.selectedAppearance,
+              // Texture images are the DATASET's: a relative `image` path
+              // resolves against the URL the layer came from, never against
+              // the app. A local file has no URL, so its relative images
+              // stay unresolved (the mesh warns once and draws colours).
+              textureBaseUrl:
+                layer.modelRef.type === "url" ? layer.modelRef.url : null,
             }),
         },
         layers,

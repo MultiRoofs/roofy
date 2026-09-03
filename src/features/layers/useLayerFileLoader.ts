@@ -5,6 +5,7 @@
  * reused by both the landing page and the "add layer" UI.
  */
 
+import type { AppearanceTheme } from "@cityjson/navara-core";
 import { useCallback, useRef, useState } from "react";
 import type { CityModel } from "../../domain/citymodel/types";
 import { detectEncoding } from "../../domain/citymodel/detectEncoding";
@@ -47,6 +48,8 @@ export interface LayerOverrides {
   /** Applied at creation, not afterwards: the layer is built (or its first
    *  cell fetched) already filtered. */
   readonly hiddenTypes?: ReadonlyArray<string>;
+  /** Applied at creation; kept only if the file carries that theme. */
+  readonly selectedAppearance?: AppearanceTheme | null;
 }
 
 function applyPostCreateOverrides(
@@ -207,6 +210,7 @@ export function useLayerFileLoader(
             rules: overrides?.rules ?? [],
             rulesEnabled: overrides?.rulesEnabled ?? true,
             hiddenTypes: overrides?.hiddenTypes,
+            selectedAppearance: overrides?.selectedAppearance,
           });
         } else {
           // Bytes, not `file.text()`: a dropped `.city.json.gz` — the form 3D
@@ -232,6 +236,7 @@ export function useLayerFileLoader(
             rules: overrides?.rules ?? [],
             rulesEnabled: overrides?.rulesEnabled ?? true,
             hiddenTypes: overrides?.hiddenTypes,
+            selectedAppearance: overrides?.selectedAppearance,
           });
         }
         applyPostCreateOverrides(layerId, overrides);
@@ -270,6 +275,7 @@ export function useLayerFileLoader(
           rules: overrides?.rules ?? [],
           rulesEnabled: overrides?.rulesEnabled ?? true,
           hiddenTypes: overrides?.hiddenTypes,
+          selectedAppearance: overrides?.selectedAppearance,
         });
         applyPostCreateOverrides(layerId, overrides);
         return layerId;

@@ -22,4 +22,6 @@ export type {
   CityObject,
   CityModelMetadata,
   CityModel,
+  AppearanceTheme,
+  CityAppearance,
 } from "@cityjson/navara-core";

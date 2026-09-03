@@ -252,6 +252,8 @@ function makeLayer(id: string): Layer {
     cameraSync: true,
     hiddenTypes: [],
     availableObjectTypes: [],
+    appearanceThemes: [],
+    selectedAppearance: null,
     isStreaming: false,
   } as Layer;
 }
@@ -265,6 +267,7 @@ function makeHandle(id: string) {
     // The real `CityModelHandle` gained this with the scene themes; the
     // viewport pushes the active theme's style on the same beat as LoD.
     setThemeStyle: vi.fn(),
+    setAppearance: vi.fn(),
     setHighlight: vi.fn(),
     resolvePick: vi.fn(),
     resolveRaycast: vi.fn(() => null as unknown),
