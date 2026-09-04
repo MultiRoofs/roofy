@@ -2,6 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const sql: string[] = [];
 const dropped: string[] = [];
+/**
+ * Every statement AND every VFS release, interleaved in real call order.
+ *
+ * Two separate arrays cannot answer an ordering question about the two
+ * together: concatenating them puts all the SQL before all the drops whatever
+ * actually happened, so a reversed implementation would still "pass".
+ */
+const events: string[] = [];
+/** When set, every `DROP TABLE` statement fails with this message. */
+let dropFailure: string | null = null;
 /** Resolvers for the gate below, so a build can be held mid-flight. */
 let gate: { promise: Promise<void>; open: () => void } | null = null;
 /** When set, the Nth CREATE (1-based) fails — for the rebuild-failure case. */
@@ -35,6 +45,10 @@ async function flushMicrotasks(): Promise<void> {
 vi.mock("../../../src/analytics/duckdb", () => {
   const run = async (statement: string) => {
     sql.push(statement);
+    events.push(statement);
+    if (dropFailure !== null && statement.startsWith("DROP TABLE")) {
+      return { ok: false as const, message: dropFailure };
+    }
     if (statement.startsWith("CREATE OR REPLACE TABLE")) {
       createCount += 1;
       if (gate) await gate.promise;
@@ -79,6 +93,7 @@ vi.mock("../../../src/analytics/duckdb", () => {
     registerBuffer: vi.fn(async () => true),
     dropBuffer: vi.fn(async (name: string) => {
       dropped.push(name);
+      events.push(`dropFile:${name}`);
     }),
     readFile: vi.fn(async () => null),
     queryDuckDB: vi.fn(async () => null),
@@ -120,9 +135,23 @@ function sent(prefix: string): boolean {
   return sql.some((s) => s.startsWith(prefix));
 }
 
+/** A reader-backed source — the only kind whose table has a VFS name to
+ *  release alongside the DROP. */
+function readerBytes() {
+  return {
+    kind: "bytes" as const,
+    bytes: new Uint8Array(4),
+    reader: "read_cityjson" as const,
+    extension: "city.json" as const,
+    provider: async () => new Uint8Array(4),
+  };
+}
+
 beforeEach(() => {
   sql.length = 0;
   dropped.length = 0;
+  events.length = 0;
+  dropFailure = null;
   gate = null;
   failCreateNumber = null;
   createCount = 0;
@@ -143,8 +172,25 @@ describe("dropLayerTable", () => {
   });
 
   it("is a no-op for a layer that never had a table", async () => {
+    // Layer removal calls this for EVERY layer, geospatial ones included, and
+    // most were never in here at all. `toBe` on the whole state object: two
+    // `setState(null)` writes would each mint a fresh `tables` and re-render
+    // every subscriber for a layer that had no analytics to forget.
+    const before = useLayerTableStore.getState();
     await dropLayerTable("nobody");
     expect(sql).toEqual([]);
+    expect(useLayerTableStore.getState()).toBe(before);
+  });
+
+  it("a SECOND drop of the same layer does nothing at all", async () => {
+    await enqueueLayerTable("L1", ONE_ROW);
+    await dropLayerTable("L1");
+    sql.length = 0;
+    const before = useLayerTableStore.getState();
+
+    await dropLayerTable("L1");
+    expect(sql).toEqual([]);
+    expect(useLayerTableStore.getState()).toBe(before);
   });
 
   it("forgets a PENDING source, so a removed layer never returns on a retry", async () => {
@@ -238,40 +284,48 @@ describe("dropLayerTable", () => {
   });
 
   it("drops a still-registered source buffer as well", async () => {
-    await enqueueLayerTable("L1", {
-      kind: "bytes",
-      bytes: new Uint8Array(4),
-      reader: "read_cityjson",
-      extension: "city.json",
-      provider: async () => new Uint8Array(4),
-    });
+    await enqueueLayerTable("L1", readerBytes());
     dropped.length = 0;
     await dropLayerTable("L1");
     expect(dropped).toEqual(["layer_1.city.json"]);
   });
 
   it("sends the DROP TABLE before releasing the source buffer", async () => {
-    await enqueueLayerTable("L1", {
-      kind: "bytes",
-      bytes: new Uint8Array(4),
-      reader: "read_cityjson",
-      extension: "city.json",
-      provider: async () => new Uint8Array(4),
-    });
-    sql.length = 0;
-    dropped.length = 0;
+    await enqueueLayerTable("L1", readerBytes());
+    events.length = 0;
 
-    const order: string[] = [];
-    const drop = dropLayerTable("L1");
-    await drop;
-    // The statement went out first; only then was the name released. A VFS
-    // name that resolves to zero bytes under a live table is the failure mode
-    // the other order invites.
-    order.push(...sql, ...dropped.map((n) => `dropFile:${n}`));
-    expect(order).toEqual([
-      'DROP TABLE IF EXISTS "layer_1"',
-      "dropFile:layer_1.city.json",
-    ]);
+    await dropLayerTable("L1");
+
+    // Read off the ONE array both mocks append to, in real call order — a
+    // reversed implementation moves these two indices, which concatenating two
+    // separate arrays could never show. A VFS name that resolves to zero bytes
+    // under a live table is the failure mode the other order invites.
+    const dropTableAt = events.indexOf('DROP TABLE IF EXISTS "layer_1"');
+    const dropFileAt = events.indexOf("dropFile:layer_1.city.json");
+    expect(dropTableAt).toBeGreaterThanOrEqual(0);
+    expect(dropFileAt).toBeGreaterThan(dropTableAt);
+  });
+
+  it("WARNS when the DROP itself fails, and still releases the buffer", async () => {
+    await enqueueLayerTable("L1", readerBytes());
+    dropped.length = 0;
+    dropFailure = "Catalog Error: table is locked";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await dropLayerTable("L1");
+
+    // A DROP that failed means the memory is STILL held under a name nothing
+    // will ever use again — unexplained growth later, unless it is said now.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]![0])).toContain("layer_1");
+    expect(String(warn.mock.calls[0]![0])).toContain(
+      "Catalog Error: table is locked",
+    );
+    // The buffer is released regardless: the caller has decided this layer is
+    // gone, and leaving the VFS entry behind too would compound the leak.
+    expect(dropped).toEqual(["layer_1.city.json"]);
+    expect(getLayerTable("L1")).toBeNull();
+    warn.mockRestore();
   });
 });
 

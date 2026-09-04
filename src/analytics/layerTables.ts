@@ -575,7 +575,17 @@ export async function retryEngine(): Promise<void> {
  * replacement, and by `dropLayerTable` (Task 14).
  */
 async function retire(info: LayerTable): Promise<void> {
-  await ddl(`DROP TABLE IF EXISTS ${quoteIdent(info.table)}`);
+  const result = await ddl(`DROP TABLE IF EXISTS ${quoteIdent(info.table)}`);
+  if (!result.ok) {
+    // Not thrown, and not surfaced: the caller has already decided this table
+    // is gone, and the registry entry is going either way. But a DROP that
+    // fails means the memory it was holding is STILL held under a name nothing
+    // will ever use again, which is exactly the sort of thing that shows up
+    // later as unexplained growth — so it must not vanish silently.
+    console.warn(
+      `DuckDB could not drop table ${info.table}: ${result.message}`,
+    );
+  }
   // Belt and braces: the build already dropped this on the way out, and a
   // second drop of an absent name is harmless.
   if (info.sourceName !== null) await dropBuffer(info.sourceName);
@@ -760,6 +770,21 @@ export function enqueueLayerTable(
  * skipped outright — the table is never made.
  */
 export function dropLayerTable(layerId: string): Promise<void> {
+  // NOTHING to forget: no table, no parked source, and no enqueue this module
+  // has not already finished with (`lastEnqueueSeq` is deleted by the drop that
+  // settles a layer, and a build still queued always has its entry). Returning
+  // here is not just an optimisation — it keeps the store object IDENTICAL, so
+  // a drop of a layer that never had analytics cannot re-render every
+  // subscriber of `useLayerTableStore` twice for nothing. Layer removal calls
+  // this for EVERY layer, geospatial ones included; most of them were never in
+  // here at all.
+  if (
+    !registry.has(layerId) &&
+    !pendingSources.has(layerId) &&
+    !lastEnqueueSeq.has(layerId)
+  ) {
+    return Promise.resolve();
+  }
   // Everything enqueued for this layer BEFORE now is superseded; anything
   // enqueued after — a re-add of the same id — takes a higher number and runs.
   const seq = ++seqCounter;
@@ -779,12 +804,16 @@ export function dropLayerTable(layerId: string): Promise<void> {
       // live table invites a misleading parse error instead of a clean drop.
       await retire(info);
     }
-    // Clear the store AGAIN, and this is not belt-and-braces. The synchronous
-    // `setState(null)` above happens while a build may already be RUNNING; that
-    // build's own guard stops it publishing, but a build that had ALREADY
-    // published between the drop being issued and this task running would
-    // otherwise leave a `ready` entry for a layer that no longer exists — a
-    // leak on the one object React subscribes to.
+    // Clear the store AGAIN, and this is not belt-and-braces. It guards against
+    // the writers that are NOT in this queue and so can land between the
+    // synchronous `setState(null)` above and this task running.
+    //
+    // A build inside the queue is not one of them: its final `superseded()`
+    // check, its `registry.set` and its `setState` are consecutive SYNCHRONOUS
+    // statements, so a drop cannot be issued between them. The real case is
+    // `retryEngine`'s catch, which writes a `failed` entry from outside the
+    // queue when a parked source's provider rejects — for a layer this drop may
+    // have removed a moment earlier.
     //
     // Unless a NEWER enqueue has claimed the id since (a remove-then-re-add of
     // the same file): that one's entry is alive and blanking it would empty a
