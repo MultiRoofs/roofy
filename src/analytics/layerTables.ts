@@ -749,3 +749,53 @@ export function enqueueLayerTable(
     }
   });
 }
+
+/**
+ * Forget `layerId`'s table.
+ *
+ * Goes through the SAME queue as the builds, which is the whole reason there
+ * is one: a removal that arrives while a create is in flight waits for it
+ * instead of dropping a table that does not exist yet and then watching the
+ * create put it back. A layer removed while its build is still QUEUED is
+ * skipped outright — the table is never made.
+ */
+export function dropLayerTable(layerId: string): Promise<void> {
+  // Everything enqueued for this layer BEFORE now is superseded; anything
+  // enqueued after — a re-add of the same id — takes a higher number and runs.
+  const seq = ++seqCounter;
+  cancelBefore.set(layerId, seq);
+  // A removed layer must not come back on the next `retryEngine()`. This is the
+  // one thing a build's own cancellation check CANNOT cover: a layer parked
+  // while the engine was down has no build in flight to cancel, so without this
+  // the retry would enqueue a fresh one for a layer nobody can see.
+  pendingSources.delete(layerId);
+  setState(layerId, null);
+  return enqueue(async () => {
+    const info = registry.get(layerId);
+    if (info) {
+      registry.delete(layerId);
+      // DROP TABLE first, dropBuffer second (inside `retire`): a VFS name that
+      // has been dropped still RESOLVES, to zero bytes, so releasing it under a
+      // live table invites a misleading parse error instead of a clean drop.
+      await retire(info);
+    }
+    // Clear the store AGAIN, and this is not belt-and-braces. The synchronous
+    // `setState(null)` above happens while a build may already be RUNNING; that
+    // build's own guard stops it publishing, but a build that had ALREADY
+    // published between the drop being issued and this task running would
+    // otherwise leave a `ready` entry for a layer that no longer exists — a
+    // leak on the one object React subscribes to.
+    //
+    // Unless a NEWER enqueue has claimed the id since (a remove-then-re-add of
+    // the same file): that one's entry is alive and blanking it would empty a
+    // table the user is looking at.
+    if ((lastEnqueueSeq.get(layerId) ?? 0) <= seq) {
+      setState(layerId, null);
+      // Nothing is queued for this layer any more, so its bookkeeping goes with
+      // it. `cancelBefore` deliberately STAYS: it is the record that everything
+      // up to `seq` was cancelled, and forgetting it would let a build still
+      // somewhere in the queue publish a table for a removed layer.
+      lastEnqueueSeq.delete(layerId);
+    }
+  });
+}
