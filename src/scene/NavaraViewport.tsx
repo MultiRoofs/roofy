@@ -2177,7 +2177,17 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
      * rejection with no stack pointing here (Task C13 fold-in); the no-plugin
      * branch above, by contrast, throws synchronously into its caller.
      */
-    const withSettleSuppressed = useCallback((move: () => void): void => {
+    // `move` may return the engine's `flyTo` promise, and every flight here
+    // does: since Navara 0.1.0 that promise settles at the END of the flight
+    // (`true`), or when a newer flight or a `setCamera` supersedes it
+    // (`false`, never a rejection), so `suppressSettleThenCommit` holds the
+    // gate for the whole animation and fires the owed commit `FLYTO_QUIET_MS`
+    // after the camera has landed — the destination the user is looking at,
+    // not a point along the way. 0.0.5's `flyTo` returned nothing, so the
+    // quiet window used to start at TAKE-OFF and could expire mid-flight on a
+    // long one. Returning the promise from every site, rather than `void`ing
+    // it at some, is what keeps a search flight and a fit on one timing.
+    const withSettleSuppressed = useCallback((move: () => unknown): void => {
       const plugin = flatPluginRef.current;
       if (!plugin) {
         move();
@@ -2305,11 +2315,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           pitch: policy.entryPitchDeg ?? SEARCH_PITCH_DEG,
           roll: 0,
         };
-        withSettleSuppressed(() => {
-          // Fire-and-forget: the promise resolves `false` when a newer flight
-          // or a `setCamera` supersedes this one, which is not an error here.
-          void view.flyTo(next, { duration: durationMs ?? SEARCH_FLIGHT_MS });
-        });
+        withSettleSuppressed(() =>
+          view.flyTo(next, { duration: durationMs ?? SEARCH_FLIGHT_MS }),
+        );
       },
       [withSettleSuppressed],
     );
@@ -3385,9 +3393,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       if (current === null) return;
       const entry = entryCameraFor(policy, current);
       if (entry === null) return;
-      withSettleSuppressed(() => {
-        void view.flyTo(entry, { duration: VIEW_MODE_ENTRY_MS });
-      });
+      withSettleSuppressed(() =>
+        view.flyTo(entry, { duration: VIEW_MODE_ENTRY_MS }),
+      );
     }, [engineReady, viewMode, getCameraState, withSettleSuppressed]);
 
     /**

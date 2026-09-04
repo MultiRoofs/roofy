@@ -6,8 +6,8 @@
  * and belong in a module a test can drive with a fake view instead of a live
  * Navara. `NavaraViewport` supplies the real `view` and owns the registry.
  *
- * Three engine facts shape everything below (all audited against
- * `@navaramap/three` 0.0.5):
+ * Three engine facts shape everything below (audited against `@navaramap/three`
+ * 0.0.5 and re-checked unchanged on 0.1.1):
  *
  *  1. `Layer.update()` REPLACES the whole description. A visibility, opacity or
  *     style change therefore re-sends a description rebuilt from scratch out of
