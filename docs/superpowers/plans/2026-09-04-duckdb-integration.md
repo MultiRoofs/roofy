@@ -15282,7 +15282,7 @@ In the **Tech Stack** list, replace
 with
 
 ```
-- **Analytics**: `@duckdb/duckdb-wasm@1.33.1-dev64.0` (DuckDB **1.5.5**, `wasm_eh`) with the `cityjson` community extension v0.4.0; `spatial` and `three_d` are loadable on demand via `ensureExtension` but have NOTHING TO OPERATE ON in v1 — the layer table is attribute-only, and a geometry predicate needs either materialised geometry columns (the memory the design exists to avoid) or a computed-columns feature that re-reads the source. Neither extension autoloads in wasm, and `spatial` is a CORE extension: `INSTALL spatial` (~5 s / 23.6 MB), never `FROM community`, which is what `cityjson` and `three_d` use. Two `three_d` traps for the follow-up: `ST_3DFromWKB` throws on a MultiPolygon Z row and ONE such row poisons a whole column query (use `ST_3DTryFromWKB`), and `ST_3DVolume` raises "solid is not manifold" on an unguarded aggregate (guard with `ST_3DValidationReport(...).is_valid`). Pinned EXACTLY — npm `latest` (dev57 / 1.5.4) serves a stale 4-function `cityjson` and a `three_d` that breaks `LOAD spatial`, silently, and 1.4.4 (dev20) has no `cityjson` wasm artifact at all.
+- **Analytics**: `@duckdb/duckdb-wasm@1.33.1-dev64.0` (DuckDB **1.5.5**, `wasm_eh`) with the `cityjson` community extension v0.4.0; `spatial` and `three_d` are loadable on demand via `ensureExtension` but have NOTHING TO OPERATE ON in v1 — the layer table is attribute-only, and a geometry predicate needs either materialised geometry columns (the memory the design exists to avoid) or a computed-columns feature that re-reads the source. Neither extension autoloads in wasm, and `spatial` is a CORE extension: `INSTALL spatial` (~5 s / 23.6 MB), never `FROM community`, which is what `cityjson` and `three_d` use. Two `three_d` traps for the follow-up: `ST_3DFromWKB` throws on a MultiPolygon Z row and ONE such row poisons a whole column query (use `ST_3DTryFromWKB`), and `ST_3DVolume` raises "solid is not manifold" on an unguarded aggregate (guard with `ST_3DValidationReport(...).is_valid`). Pinned EXACTLY — npm `latest` (dev57 / 1.5.4) serves a stale 4-function `cityjson` and a `three_d` that breaks `LOAD spatial`, silently, and 1.4.4 (dev20) has no `cityjson` wasm artifact at all. **Known staleness, deliberately not fixed here:** `App` takes ONE copy of `getDuckDBStatus()` after `retryEngine()` resolves and holds it as React state, so the status pill and its tooltip never see a later change — and `ensureExtension` publishes one every time it loads `spatial` or `three_d`. Nothing in this milestone calls `ensureExtension`, so nothing is stale yet; the first analysis feature that loads an extension lazily will show a tooltip that omits it. The fix is a `subscribeDuckDBStatus(listener)` in `duckdb.ts` that `publishReady` notifies, with `App` subscribing instead of snapshotting — one function, deferred only because there is nothing to observe until that feature exists.
 ```
 
 Then add this bullet to **Key Architecture Decisions**, after the CityParquet one:
@@ -15330,6 +15330,17 @@ share links; a free-text SQL console; geometry-backed analysis on
 `spatial`/`three_d`; CityJSON/CityJSONSeq/FCB export until the upstream wasm
 writer stops bypassing the VFS; CityParquet-sourced layers as reader-backed
 tables (`cityparquet_read` is unusable in wasm).
+
+Also deferred, and it becomes a real bug the moment the first of those analysis
+features lands: the DuckDB status pill holds a SNAPSHOT. `App` reads
+`getDuckDBStatus()` once, after `retryEngine()` resolves, and keeps it in React
+state — but `ensureExtension` publishes a fresh status every time it loads
+`spatial` or `three_d`, and nothing re-reads it. Today nothing calls
+`ensureExtension`, so the pill is never wrong; a feature that loads an
+extension lazily will leave the tooltip listing the extensions from boot and
+omitting the one it just fetched — exactly the drift the tooltip exists to make
+visible. The fix is a `subscribeDuckDBStatus(listener)` in `duckdb.ts` which
+`publishReady` notifies, with `App` subscribing rather than snapshotting.
 ```
 
 Also update the **Milestones** section of `CLAUDE.md`, appending:
