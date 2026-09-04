@@ -4548,7 +4548,9 @@ export interface LayerTable {
   readonly columns: ReadonlyArray<ColumnInfo>;
   /** The reader's own LoD ladder, label AND suffix; `[]` for a fallback. */
   readonly lods: ReadonlyArray<LodColumn>;
-  readonly rowCount: number;
+  /** `null` when the COUNT itself failed — the table is still browsable, and
+   *  a count nobody could take is not the same as zero rows. */
+  readonly rowCount: number | null;
 }
 
 export type LayerTableState =
@@ -5108,7 +5110,16 @@ export interface LayerTable {
    *  to SHOW and the suffix to BUILD A COLUMN NAME WITH, because the two are
    *  not interconvertible. `[]` for a fallback table. */
   readonly lods: ReadonlyArray<LodColumn>;
-  readonly rowCount: number;
+  /**
+   * How many rows the table holds, or `null` when the COUNT failed.
+   *
+   * NULL rather than 0, because the two are different facts and the UI says
+   * different things about them: an empty table invites "this layer has no
+   * rows yet", a count that could not be taken invites nothing at all. The
+   * table is perfectly browsable either way — the page query is a separate
+   * statement — so a failed count is not a failed build.
+   */
+  readonly rowCount: number | null;
 }
 
 export type LayerTableState =
@@ -5251,11 +5262,15 @@ function columnsFromDescribe(
   return out;
 }
 
-async function countRows(table: string): Promise<number> {
+/** The table's row count, or `null` when the COUNT could not be taken. Never
+ *  0 as a stand-in: "no rows" and "no answer" are different facts. */
+async function countRows(table: string): Promise<number | null> {
   const result = await runQuery(buildCountSql(table, null));
-  if (!result.ok) return 0;
+  if (!result.ok) return null;
   const n = result.rows[0]?.n;
-  return typeof n === "number" ? n : Number(n) || 0;
+  if (typeof n === "number") return n;
+  const parsed = Number(n);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 class BuildError extends Error {}
@@ -7114,7 +7129,9 @@ EOF
 **Files:**
 
 - Create: `src/features/layers/layerTableLifecycle.ts`
+- Modify: `src/analytics/layerTables.ts` (`retryEngine`'s re-parking, Step 5)
 - Test: `tests/unit/features/layers/layerTableLifecycle.test.ts`
+- Test: `tests/unit/analytics/layerTablesBuild.test.ts` (the re-park cases)
 
 **Interfaces:**
 
@@ -7485,10 +7502,138 @@ export function installLayerTableLifecycle(): () => void {
 Run: `npx vitest run tests/unit/features/layers/layerTableLifecycle.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Make `retryEngine` RE-PARK a source it could not build**
+
+This step edits `src/analytics/layerTables.ts` (Task 13's module) because that
+is where the parking lives — but it belongs to the RETRY PATH, which is what
+this task wires up.
+
+`retryEngine` clears `pendingSources` before it builds anything, so a build
+that then fails for a TRANSIENT reason loses its source for good: the layer is
+un-parked and the Retry button has nothing left to retry. The reachable case is
+a source whose bytes are obtained lazily — a provider whose fetch rejects
+because the network blipped — which is a different failure from "this file is
+bad", and the only one worth offering again.
+
+Replace `retryEngine`'s body with:
+
+```ts
+export async function retryEngine(): Promise<void> {
+  await initDuckDB();
+  if (getDuckDBStatus().state !== "ready") return;
+  // Snapshot and CLEAR first: each build below can park its own layer again
+  // (a second "not running"), and iterating a map being written to is how one
+  // layer gets retried forever.
+  const pending = [...pendingSources.entries()];
+  pendingSources.clear();
+  // Everything issued from here on takes a higher number, so a DROP that lands
+  // DURING the retry can be told apart from one that preceded it.
+  const startSeq = seqCounter;
+
+  await Promise.all(
+    pending.map(async ([layerId, source]) => {
+      try {
+        await enqueueLayerTable(layerId, source);
+      } catch {
+        // Ignored here; the outcome below is what decides.
+      }
+      // Re-park when the build did not land AND the failure was not the layer
+      // being removed underneath us — re-parking a removed layer would
+      // resurrect it on the next retry. A build that failed for the engine
+      // parked ITSELF, so this only ever adds back a source that could not be
+      // obtained at all.
+      if (
+        !registry.has(layerId) &&
+        !pendingSources.has(layerId) &&
+        (cancelBefore.get(layerId) ?? 0) <= startSeq
+      ) {
+        pendingSources.set(layerId, source);
+      }
+    }),
+  );
+}
+```
+
+Note the shape this relies on: `enqueueLayerTable` SETTLES rather than throwing
+for a build that fails, so the decision is made on the OUTCOME (is there a
+table now?) rather than on a rejection. The `try/catch` is there for the case
+it cannot settle — a source object whose accessor throws synchronously.
+
+This does mean a table that failed on its own merits (a bad file) is offered to
+the next `retryEngine()` too. That is the deliberate trade: the alternative is
+matching on the failure MESSAGE, which is DuckDB's wording and not a contract,
+and the cost of a wrong guess here is one wasted rebuild per Retry click rather
+than a layer that can never have a table again.
+
+- [ ] **Step 6: Write the tests for it**
+
+Add `dropLayerTable` to the destructured import in
+`tests/unit/analytics/layerTablesBuild.test.ts`, then append inside its
+`describe("waiting for the engine")` block:
+
+```ts
+it("RE-PARKS a source it could not read, so Retry can try it again", async () => {
+  engineReady = false;
+  // A source whose rows cannot be read — the shape a provider failure takes
+  // by the time it reaches the queue.
+  let broken = true;
+  const flaky = {
+    kind: "resident" as const,
+    records: () => {
+      if (broken) throw new Error("the source could not be read");
+      return [];
+    },
+  };
+  await enqueueLayerTable("L1", flaky);
+
+  // First retry: the engine is up, the source still is not.
+  engineReady = true;
+  await retryEngine();
+  expect(getLayerTable("L1")).toBeNull();
+
+  // Second retry: the blip is over. Without the re-park the source would be
+  // gone and this could never succeed, however often the user clicked.
+  broken = false;
+  describeRows = [{ column_name: "id", column_type: "VARCHAR" }];
+  countValue = 0;
+  await retryEngine();
+  expect(getLayerTable("L1")).not.toBeNull();
+});
+
+it("does NOT re-park a source whose layer was removed mid-retry", async () => {
+  engineReady = false;
+  const flaky = {
+    kind: "resident" as const,
+    records: () => {
+      throw new Error("the source could not be read");
+    },
+  };
+  await enqueueLayerTable("L1", flaky);
+
+  engineReady = true;
+  const retry = retryEngine();
+  await dropLayerTable("L1");
+  await retry;
+
+  // A removed layer must not come back on the NEXT retry either.
+  await retryEngine();
+  expect(getLayerTable("L1")).toBeNull();
+  expect(useLayerTableStore.getState().tables.L1).toBeUndefined();
+});
+```
+
+- [ ] **Step 7: Run both suites**
 
 ```bash
-git add src/features/layers/layerTableLifecycle.ts tests/unit/features/layers/layerTableLifecycle.test.ts
+npx vitest run tests/unit/analytics/layerTablesBuild.test.ts tests/unit/features/layers/layerTableLifecycle.test.ts
+```
+
+Expected: PASS.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add src/analytics/layerTables.ts src/features/layers/layerTableLifecycle.ts tests/unit/analytics/layerTablesBuild.test.ts tests/unit/features/layers/layerTableLifecycle.test.ts
 git commit -m "$(cat <<'EOF'
 feat(layers): subscribe the table registry to the layer and stream stores
 
@@ -7804,6 +7949,21 @@ describe("StatsTab's DuckDB section", () => {
     expect(screen.getByText("3")).toBeTruthy();
   });
 
+  it("says 'unknown' when the table's COUNT could not be taken", async () => {
+    runQuery.mockResolvedValue({ ok: true, columns: [], rows: [] });
+    useLayerTableStore.setState({
+      tables: {
+        L1: { ...READY, info: { ...READY.info, rowCount: null } },
+      },
+    });
+
+    render(<StatsTab model={model} selection={null} layerId="L1" />);
+
+    expect(await screen.findByText("DuckDB Analytics")).toBeTruthy();
+    // Not "0", which would read as an empty table, and not "null".
+    expect(screen.getByText("unknown")).toBeTruthy();
+  });
+
   it("shows nothing DuckDB-ish while the table is still building", () => {
     useLayerTableStore.setState({ tables: { L1: { state: "building" } } });
     render(<StatsTab model={model} selection={null} layerId="L1" />);
@@ -7851,7 +8011,9 @@ interface StatsTabProps {
 }
 
 interface DuckDBStats {
-  readonly rowCount: number;
+  /** `null` when the table's COUNT could not be taken — see
+   *  `LayerTable.rowCount`. Rendered as "unknown", never as 0. */
+  readonly rowCount: number | null;
   readonly typeBreakdown: ReadonlyArray<{ type: string; count: number }>;
 }
 
@@ -7915,6 +8077,22 @@ function extractTypeBreakdown(
 ```
 
 (`extractCount` is deleted — the row count comes off `LayerTable.rowCount`.)
+
+And in the render, the existing "Rows loaded" row has to cope with a count that
+could not be taken — `LayerTable.rowCount` is `number | null`, so
+`String(null)` would put the word "null" on screen:
+
+```tsx
+<StatRow
+  label="Rows loaded"
+  // "unknown", not "0" and not "null": a count nobody could take and
+  // a table with nothing in it are different facts, and only one of
+  // them is worth acting on.
+  value={
+    duckdbStats.rowCount === null ? "unknown" : String(duckdbStats.rowCount)
+  }
+/>
+```
 
 - [ ] **Step 4: Pass the layer id from `InspectorPanel`**
 
@@ -7987,9 +8165,12 @@ export interface LayerQueryView {
   /** The columns the grid renders, blobs already dropped. */
   readonly columns: ReadonlyArray<ColumnInfo>;
   readonly rows: ReadonlyArray<Record<string, unknown>>;
-  /** Rows matching the applied filter. */
+  /** Rows matching the applied filter. A NUMBER, not `number | null`: this
+   *  comes from the page's own COUNT query, which is a separate statement from
+   *  the one behind `LayerTable.rowCount` and either answers or reports its
+   *  own failure through `message`. */
   readonly totalRows: number;
-  /** Rows in the table, filter or no filter. */
+  /** Rows in the table, filter or no filter. Same provenance as above. */
   readonly unfilteredRows: number;
   readonly loading: boolean;
   readonly reload: () => void;
@@ -9085,8 +9266,10 @@ export function formatCount(n: number): string;
 export interface PaginationProps {
   readonly page: number;
   readonly pageSize: PageSize;
-  readonly totalRows: number;
-  readonly unfilteredRows: number;
+  /** `null` when a count could not be taken — see `LayerTable.rowCount`. The
+   *  PAGE query is a separate statement, and its rows are shown regardless. */
+  readonly totalRows: number | null;
+  readonly unfilteredRows: number | null;
   readonly filtered: boolean;
   readonly onPage: (page: number) => void;
   readonly onPageSize: (pageSize: PageSize) => void;
@@ -9096,7 +9279,7 @@ export function Pagination(props: PaginationProps): JSX.Element;
 export function rangeLabel(
   page: number,
   pageSize: number,
-  totalRows: number,
+  totalRows: number | null,
 ): string;
 ```
 
@@ -9271,6 +9454,13 @@ describe("rangeLabel", () => {
   it("says so for an empty result", () => {
     expect(rangeLabel(0, 100, 0)).toBe("0 rows");
   });
+
+  it("keeps the range and drops only the total when the count is unknown", () => {
+    // A null total is not zero: the page query is separate, so there ARE rows
+    // on screen, and "0 rows" over a full grid contradicts what is visible.
+    expect(rangeLabel(0, 100, null)).toBe("1–100 of ?");
+    expect(rangeLabel(2, 100, null)).toBe("201–300 of ?");
+  });
 });
 
 describe("Pagination", () => {
@@ -9282,6 +9472,19 @@ describe("Pagination", () => {
   it("names the unfiltered total when a filter is applied", () => {
     setup({ totalRows: 12, filtered: true, unfilteredRows: 2231 });
     expect(screen.getByText("filtered from 2,231")).toBeTruthy();
+  });
+
+  it("omits the 'filtered from' line when the unfiltered total is unknown", () => {
+    setup({ totalRows: 12, filtered: true, unfilteredRows: null });
+    expect(screen.queryByText(/filtered from/)).toBeNull();
+  });
+
+  it("keeps Next live when the total is unknown", () => {
+    setup({ totalRows: null, unfilteredRows: null });
+    expect(
+      (screen.getByRole("button", { name: "Next page" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
   });
 
   it("disables Previous on the first page and Next on the last", () => {
@@ -9521,12 +9724,23 @@ export function formatCount(n: number): string {
   return COUNT_FORMAT.format(n);
 }
 
-/** "1–100 of 2,231". Counts from ONE: nobody reads a row range zero-based. */
+/**
+ * "1–100 of 2,231". Counts from ONE: nobody reads a row range zero-based.
+ *
+ * A NULL total means the COUNT could not be taken (`LayerTable.rowCount`),
+ * which is NOT the same as zero: the page query is a separate statement and
+ * its rows are on screen, so the range is real and only the total is missing.
+ * "0 rows" over a full grid would be a plain contradiction.
+ */
 export function rangeLabel(
   page: number,
   pageSize: number,
-  totalRows: number,
+  totalRows: number | null,
 ): string {
+  if (totalRows === null) {
+    const from = page * pageSize + 1;
+    return `${formatCount(from)}–${formatCount(from + pageSize - 1)} of ?`;
+  }
   if (totalRows === 0) return "0 rows";
   const first = page * pageSize + 1;
   const last = Math.min((page + 1) * pageSize, totalRows);
@@ -9536,8 +9750,8 @@ export function rangeLabel(
 export interface PaginationProps {
   readonly page: number;
   readonly pageSize: PageSize;
-  readonly totalRows: number;
-  readonly unfilteredRows: number;
+  readonly totalRows: number | null;
+  readonly unfilteredRows: number | null;
   readonly filtered: boolean;
   readonly onPage: (page: number) => void;
   readonly onPageSize: (pageSize: PageSize) => void;
@@ -9552,14 +9766,19 @@ export function Pagination({
   onPage,
   onPageSize,
 }: PaginationProps) {
-  const lastPage = Math.max(0, Math.ceil(totalRows / pageSize) - 1);
+  // With no total there is no last page to stop at — Next stays live, and the
+  // page query's own empty result is what ends the walk.
+  const lastPage =
+    totalRows === null
+      ? Number.POSITIVE_INFINITY
+      : Math.max(0, Math.ceil(totalRows / pageSize) - 1);
 
   return (
     <div className="table-pagination">
       <span className="table-range">
         {rangeLabel(page, pageSize, totalRows)}
       </span>
-      {filtered && (
+      {filtered && unfilteredRows !== null && (
         <span className="table-range-muted">
           filtered from {formatCount(unfilteredRows)}
         </span>
@@ -10041,10 +10260,13 @@ const STREAMING_FILTER_REASON =
 function emptyGridMessage(
   filtered: boolean,
   syncToMap: boolean,
-  unfilteredRows: number,
+  unfilteredRows: number | null,
 ): string {
   if (!filtered) return "This layer has no rows yet.";
   if (!syncToMap) return "No rows match this filter.";
+  if (unfilteredRows === null) {
+    return "Nothing matches this filter; the map shows nothing while Filter map is on";
+  }
   return `0 of ${formatCount(unfilteredRows)} rows match; the map shows nothing while Filter map is on`;
 }
 
@@ -15135,6 +15357,8 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
 | §3.2          | **Cancellation is a monotonic SEQUENCE, not a flag: a drop supersedes only what was enqueued before it**                                                             | 13, 14                                            |
 | §3.2          | **A build cancelled MID-FLIGHT publishes nothing and retires its own table; the drop re-clears the store unless a newer enqueue owns the id**                        | 13, 14                                            |
 | §3.2          | **A build AWAITS `initDuckDB` before touching DuckDB, and a source refused for want of the engine is kept and rebuilt by `retryEngine`**                             | 13, 14, 18, 23                                    |
+| §3.2          | **`retryEngine` RE-PARKS a source it could not read, so a transient provider failure does not cost the layer its last chance at a table**                            | 17                                                |
+| §3.2          | **`LayerTable.rowCount` is `number \| null` — a count nobody could take is not zero rows, and every consumer says so**                                               | 13, 19, 22, 23                                    |
 | §2            | **LoDs are DERIVED from the reader's own column names (`LodColumn` = label + suffix); a suffix is never rebuilt from a label — 3D BAG's LoD 0 is `geometry_lod0_0`** | 5, 11, 13, 30, 31, 32, 33                         |
 | §3.3          | **An empty LIKE needle and an empty / mis-typed `IN` element are refused, never compiled to `LIKE '%%'` or `IN ('10')` on a DOUBLE**                                 | 9                                                 |
 | §3.3          | **`ORDER BY` is TABLE-QUALIFIED, so a `castText` column sorts on the base column and not on its `::VARCHAR` alias**                                                  | 10, 33                                            |
@@ -15270,8 +15494,11 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
   failed permanently for a reason that had already stopped being true. Task 13
   awaits the (memoised, never-rejecting) `initDuckDB` before minting a table
   name, keeps the refused source in `pendingSources`, and `retryEngine()` —
-  called by App on boot AND by the panel's Retry — rebuilds them. A table that
-  failed on its own merits is not retried.
+  called by App on boot AND by the panel's Retry — rebuilds them. Task 17 then
+  closes the other half of that hole: `retryEngine` clears the park before it
+  builds, so a source that could not be READ (a provider whose fetch blipped)
+  was un-parked and could never be retried again; it is now put back unless the
+  layer was removed meanwhile.
 - §3.2's flat fallback assumes `read_json_auto` reproduces the reader's schema.
   Probed 2026-09-04: an all-NULL `parents` types as JSON, `sample_size = -1`
   and `union_by_name` do not help, and a PARTIAL `columns = {…}` drops every
@@ -15391,6 +15618,14 @@ Every name that crosses a task boundary, re-checked after the edits:
   31, which stores `chosenLodSuffix` and matches `selectedLod` against
   `label`). `lodColumnSuffix` is DELETED — no task references it, and
   `sql.ts` no longer imports anything from `columnKind` for LoD purposes.
+- `LayerTable.rowCount` is `number | null` in both of the plan's copies of the
+  interface, and `countRows` returns `null` rather than 0 for a failed COUNT
+  (Task 13). Its consumers match: `DuckDBStats.rowCount` and the "Rows loaded"
+  row (Task 19, "unknown"), and `PaginationProps.totalRows` /
+  `unfilteredRows` + `rangeLabel` (Task 22, "… of ?" and no "filtered from"
+  line). `LayerQueryView.totalRows` / `unfilteredRows` stay NUMBERS and say so:
+  they come from the page's own COUNT query, a separate statement that reports
+  its own failure through `message`.
 - `pendingSources` and `ENGINE_NOT_RUNNING` are module state in
   `analytics/layerTables.ts` (Task 13); `retryEngine()` is its only reader,
   `dropLayerTable` (Task 14) its only other writer, and
