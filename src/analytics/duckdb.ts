@@ -280,6 +280,10 @@ export async function ensureExtension(name: ExtensionName): Promise<boolean> {
   if (existing) return await existing;
   const promise = (async () => {
     const ok = await loadExtension(name);
+    // A successful lazy load changes what `duckdb_extensions()` reports, and
+    // THAT list is the status tooltip — without this re-read the tooltip goes
+    // on claiming the extension the user just triggered is absent.
+    if (ok) loadedExtensions = await readLoadedExtensions();
     if (status.state === "ready") publishReady();
     return ok;
   })().finally(() => extensionPromises.delete(name));
@@ -318,11 +322,15 @@ export async function queryDuckDB(sql: string): Promise<QueryResult | null> {
  * should not have to distinguish it from "bad SQL". Works WITHOUT the cityjson
  * extension: `read_parquet` is DuckDB core.
  *
- * CALLING THIS TWICE WITH THE SAME `buffer` IS SAFE, and it takes both of the
- * things below to make it so:
+ * CALLING THIS TWICE WITH THE SAME `fileName` AND `buffer` IS SAFE, and it
+ * takes both of the things below to make it so:
  *
- * 1. the file is dropped in a `finally`, so the name is free again (a
- *    `dropFile` failure still never discards a result already produced); and
+ * 1. every call REGISTERS `fileName` again before reading it, and registering
+ *    a name that already exists REPLACES its bytes (probed). The `finally`
+ *    drop is hygiene — nothing of ours is left in the VFS — not what makes the
+ *    reuse safe, and a `dropFile` failure still never discards a result
+ *    already produced. What is NOT safe is READING a dropped name without
+ *    re-registering it first: see {@link registerBuffer}; and
  * 2. the bytes are COPIED with `.slice()` before registration, because
  *    duckdb-wasm's async bindings post the buffer to their worker in the
  *    TRANSFER list (`postTask(task, [buffer.buffer])`), which DETACHES the
@@ -414,8 +422,13 @@ export async function ddl(sql: string): Promise<QueryOutcome> {
  * `queryParquetBuffer` `.slice()`s instead, because ITS callers deliberately
  * re-use one buffer across two queries — see its own doc comment.
  *
- * A name is NEVER reused: a `dropFile`d name still resolves, to zero bytes,
- * and fails with a misleading JSON parse error.
+ * Re-REGISTERING a name is fine: the new bytes replace whatever that name held
+ * and read back correctly (probed) — which is exactly what makes
+ * {@link queryParquetBuffer}'s repeated use of one name safe. READING a name
+ * after {@link dropBuffer} is not: a dropped name still RESOLVES, to empty or
+ * garbage bytes, so the query fails with a misleading parse error instead of
+ * "no such file". Callers therefore mint a fresh name per load and never read
+ * a name they have dropped.
  */
 export async function registerBuffer(
   name: string,

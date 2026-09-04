@@ -3,7 +3,7 @@
  * formatter, and every entry point's "not initialized" answer. Anything that
  * needs a real database is covered by the opt-in integration suite.
  */
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   ddl,
   dropBuffer,
@@ -97,6 +97,174 @@ describe("init failure", () => {
     vi.unstubAllGlobals();
     vi.doUnmock("@duckdb/duckdb-wasm");
     vi.resetModules();
+  });
+});
+
+/** A fake Arrow table. The engine reads only `numRows`, `schema.fields` and
+ *  `getChild(name).get(i)`, so that is all this supplies. */
+function arrow(rows: ReadonlyArray<Record<string, unknown>>) {
+  return {
+    numRows: rows.length,
+    schema: { fields: Object.keys(rows[0] ?? {}).map((name) => ({ name })) },
+    getChild: (name: string) => ({ get: (i: number) => rows[i]?.[name] }),
+  };
+}
+
+interface EngineHarness {
+  readonly engine: typeof import("../../../src/analytics/duckdb");
+  /** Every statement the engine sent, in order. */
+  readonly sql: string[];
+  /** Make matching statements throw, e.g. the next INSTALL. */
+  readonly failWhen: (match: (sql: string) => boolean) => void;
+}
+
+const EXTENSION_REFUSED = "Catalog Error: extension is not available";
+
+/**
+ * A module instance whose `AsyncDuckDB` connects to a fake connection that
+ * RECORDS its SQL. It is the only way to pin the INSTALL spellings: `spatial`
+ * is a CORE extension and `INSTALL spatial FROM community` fails outright
+ * against a real DuckDB, so a regression here is invisible until a browser.
+ */
+async function bootEngine(): Promise<EngineHarness> {
+  vi.resetModules();
+
+  const sql: string[] = [];
+  // What `duckdb_extensions()` reports; a successful LOAD adds to it, the way
+  // a real database would.
+  const loaded = new Set<string>(["parquet"]);
+  let failMatch: (sql: string) => boolean = () => false;
+
+  const connection = {
+    query: async (statement: string) => {
+      sql.push(statement);
+      if (failMatch(statement)) throw new Error(EXTENSION_REFUSED);
+      const load = /^LOAD (\w+)$/.exec(statement);
+      if (load) loaded.add(load[1]!);
+      if (statement === "PRAGMA platform") {
+        return arrow([{ platform: "wasm_eh" }]);
+      }
+      if (statement.startsWith("SELECT extension_name")) {
+        return arrow(
+          [...loaded].map((name) => ({
+            extension_name: name,
+            extension_version: "1.0",
+          })),
+        );
+      }
+      return arrow([]);
+    },
+  };
+
+  vi.doMock("@duckdb/duckdb-wasm", () => ({
+    selectBundle: vi.fn(async () => ({
+      mainModule: "m.wasm",
+      mainWorker: "https://cdn.test/w.js",
+    })),
+    getJsDelivrBundles: vi.fn(() => ({})),
+    ConsoleLogger: class {},
+    LogLevel: { WARNING: 2 },
+    AsyncDuckDB: class {
+      async instantiate() {}
+      async connect() {
+        return connection;
+      }
+    },
+  }));
+  vi.stubGlobal(
+    "Worker",
+    class {
+      terminate = vi.fn();
+    },
+  );
+
+  // Imported before `URL` is stubbed, and unstubbed again the moment init is
+  // done — see the init-failure test for why the object stub cannot be live
+  // across a dynamic import.
+  const engine = await import("../../../src/analytics/duckdb");
+  vi.stubGlobal("URL", {
+    ...URL,
+    createObjectURL: () => "blob:fake",
+    revokeObjectURL: () => {},
+  });
+  await engine.initDuckDB();
+  vi.unstubAllGlobals();
+
+  sql.length = 0; // Init's own statements are not what these tests are about.
+  return { engine, sql, failWhen: (match) => (failMatch = match) };
+}
+
+describe("ensureExtension", () => {
+  afterEach(() => {
+    vi.doUnmock("@duckdb/duckdb-wasm");
+    vi.resetModules();
+  });
+
+  it("installs spatial as a CORE extension, never FROM community", async () => {
+    const { engine, sql } = await bootEngine();
+
+    expect(await engine.ensureExtension("spatial")).toBe(true);
+    expect(sql.slice(0, 2)).toEqual(["INSTALL spatial", "LOAD spatial"]);
+    expect(sql.join(" | ")).not.toContain("FROM community");
+    expect(engine.isExtensionLoaded("spatial")).toBe(true);
+
+    // The tooltip list is re-read, so it names what was just loaded.
+    const status = engine.getDuckDBStatus();
+    expect(status.state).toBe("ready");
+    if (status.state !== "ready") throw new Error("unreachable");
+    expect(status.loadedExtensions.map((e) => e.name)).toContain("spatial");
+    expect(status.extensions.spatial).toEqual({ state: "loaded" });
+  });
+
+  it("installs three_d from the community repo", async () => {
+    const { engine, sql } = await bootEngine();
+
+    expect(await engine.ensureExtension("three_d")).toBe(true);
+    expect(sql.slice(0, 2)).toEqual([
+      "INSTALL three_d FROM community",
+      "LOAD three_d",
+    ]);
+  });
+
+  it("costs one INSTALL for two concurrent calls", async () => {
+    const { engine, sql } = await bootEngine();
+
+    const [a, b] = await Promise.all([
+      engine.ensureExtension("spatial"),
+      engine.ensureExtension("spatial"),
+    ]);
+
+    expect([a, b]).toEqual([true, true]);
+    expect(sql.filter((s) => s.startsWith("INSTALL"))).toEqual([
+      "INSTALL spatial",
+    ]);
+    // And a third call after the fact is answered from the recorded state.
+    expect(await engine.ensureExtension("spatial")).toBe(true);
+    expect(sql.filter((s) => s.startsWith("INSTALL"))).toHaveLength(1);
+  });
+
+  it("records a failure in the status and retries on the next call", async () => {
+    const { engine, sql, failWhen } = await bootEngine();
+    failWhen((s) => s === "INSTALL spatial");
+    const before = engine.getDuckDBStatus();
+
+    expect(await engine.ensureExtension("spatial")).toBe(false);
+
+    const failedStatus = engine.getDuckDBStatus();
+    expect(failedStatus.state).toBe("ready");
+    if (failedStatus.state !== "ready") throw new Error("unreachable");
+    expect(failedStatus.extensions.spatial).toEqual({
+      state: "failed",
+      error: EXTENSION_REFUSED,
+    });
+    // Republished, not mutated: the status is a value React subscribes to.
+    expect(failedStatus).not.toBe(before);
+    expect(engine.isExtensionLoaded("spatial")).toBe(false);
+
+    // The memo is per-attempt, so the next call really re-installs.
+    failWhen(() => false);
+    expect(await engine.ensureExtension("spatial")).toBe(true);
+    expect(sql.filter((s) => s === "INSTALL spatial")).toHaveLength(2);
   });
 });
 
