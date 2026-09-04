@@ -43,9 +43,10 @@ import {
   encodeRowsAsJson,
   flatRowsFromModel,
   flatRowsFromRecords,
+  FLAT_PREFIX_COLUMNS,
   type FlatRow,
 } from "./layerRows";
-import { buildCountSql, quoteIdent } from "./sql";
+import { buildCountSql, quoteIdent, quoteLiteral } from "./sql";
 
 /**
  * Re-registers a layer's source bytes for an export.
@@ -59,13 +60,26 @@ import { buildCountSql, quoteIdent } from "./sql";
  *
  * Every call returns a FRESH array. `registerBuffer` CONSUMES what it is given
  * (the worker transfer detaches it), and a provider may be called more than
- * once — two exports of one layer, or a retry after a failed write.
+ * once — two exports of one layer, a retry after a failed write, or
+ * {@link retryEngine} reviving a source parked while the engine was down.
  *
  * Lives in the registry, never in the layer store — a function is not snapshot
  * state, which is also why a layer restored from a snapshot has to re-obtain
  * its bytes rather than inherit them.
  */
 export type SourceProvider = () => Promise<Uint8Array>;
+
+/**
+ * The VFS spellings a reader-backed layer may ask for.
+ *
+ * A CLOSED union, not a free string: the name is interpolated into the SQL
+ * `read_cityjson('…')` argument, so an unconstrained extension would be an
+ * injection point through a value the loader assembles from a URL. It is ALSO
+ * passed through {@link quoteLiteral} at the call site — the type stops a
+ * nonsense spelling reaching the SQL, the quoting stops a quote in one from
+ * ending the literal, and neither alone is the whole answer.
+ */
+export type ReaderExtension = "city.json" | "city.jsonl";
 
 export type LayerTableSource =
   | {
@@ -84,8 +98,8 @@ export type LayerTableSource =
        */
       readonly bytes: Uint8Array;
       readonly reader: "read_cityjson" | "read_cityjsonseq";
-      /** The VFS file extension, e.g. "city.json" / "city.jsonl". */
-      readonly extension: string;
+      /** The VFS file extension. */
+      readonly extension: ReaderExtension;
       /** `null` when the bytes cannot be obtained again — the table is still
        *  built and browsable, but a CityParquet export needs the source and is
        *  refused with that reason. Each call returns a FRESH array, because
@@ -112,7 +126,10 @@ export interface LayerTable {
    *  to SHOW and the suffix to BUILD A COLUMN NAME WITH, because the two are
    *  not interconvertible. `[]` for a fallback table. */
   readonly lods: ReadonlyArray<LodColumn>;
-  readonly rowCount: number;
+  /** `null` when the COUNT itself failed — the table exists and is browsable,
+   *  but its size is UNKNOWN. Not 0: a zero would be shown as "0 rows" over a
+   *  grid that then pages real data, which is worse than saying nothing. */
+  readonly rowCount: number | null;
 }
 
 export type LayerTableState =
@@ -193,6 +210,32 @@ const cancelBefore = new Map<string, number>();
  * perfectly alive.
  */
 const lastEnqueueSeq = new Map<string, number>();
+
+/**
+ * A source parked for {@link retryEngine}, with a reader layer's ARRAY LEFT
+ * BEHIND whenever a provider can mint a fresh one.
+ *
+ * The array is the whole point of the distinction: a dropped 200 MB `.city.json`
+ * is already on the JS heap twice while the engine boots (the raw bytes and
+ * the parsed `CityModel`), and pinning a third reference in a module-level map
+ * for an engine that may never come up is how a tab dies of memory rather than
+ * of a message. A `provider` re-reads the `File` (a reference, not a copy) or
+ * re-fetches the URL, so parking the FUNCTION costs nothing and yields a fresh,
+ * un-detached array at retry time.
+ *
+ * Raw parking survives only for the case with no way back: a `bytes` source
+ * whose provider is `null`, and the `model`/`resident` sources, which are
+ * references to objects the layer store already holds.
+ */
+type PendingSource =
+  | {
+      readonly kind: "reader";
+      readonly reader: "read_cityjson" | "read_cityjsonseq";
+      readonly extension: ReaderExtension;
+      readonly provider: SourceProvider;
+    }
+  | { readonly kind: "raw"; readonly source: LayerTableSource };
+
 /**
  * Sources whose build was refused because the ENGINE was not running.
  *
@@ -201,12 +244,8 @@ const lastEnqueueSeq = new Map<string, number>();
  * window: a snapshot restored at boot, a share link, a file dropped on the
  * landing page. Without this that layer's table fails PERMANENTLY, and the
  * only way back is to remove and re-add the layer — which nobody would guess.
- *
- * Safe to keep. On this path `registerFileBuffer` was never called, so a
- * `bytes` source's array is intact rather than detached; a `model` or
- * `resident` source is a reference either way.
  */
-const pendingSources = new Map<string, LayerTableSource>();
+const pendingSources = new Map<string, PendingSource>();
 /** The message the engine itself uses for a query it cannot run. Repeated
  *  rather than imported because `duckdb.ts` keeps it private — but it must
  *  READ the same, or the panel says two different things about one cause. */
@@ -214,6 +253,51 @@ const ENGINE_NOT_RUNNING = "The analytics engine is not running.";
 let seqCounter = 0;
 let counter = 0;
 let chain: Promise<void> = Promise.resolve();
+
+/** Park a source that has NOT yet been handed to DuckDB, so its `bytes` (if
+ *  any) are still intact and raw parking is a valid fallback. */
+function parkIntact(source: LayerTableSource): PendingSource {
+  if (source.kind === "bytes" && source.provider !== null) {
+    return {
+      kind: "reader",
+      reader: source.reader,
+      extension: source.extension,
+      provider: source.provider,
+    };
+  }
+  return { kind: "raw", source };
+}
+
+/**
+ * Park a source whose `bytes` may already have been CONSUMED — the engine died
+ * part-way through a build. `null` when there is no way to replay it: a
+ * detached array would register as zero bytes and build an empty table with no
+ * error at all, which is strictly worse than an honest failure.
+ */
+function parkConsumed(source: LayerTableSource): PendingSource | null {
+  if (source.kind !== "bytes") return { kind: "raw", source };
+  return source.provider === null
+    ? null
+    : {
+        kind: "reader",
+        reader: source.reader,
+        extension: source.extension,
+        provider: source.provider,
+      };
+}
+
+/** The source a parked entry stands for, calling the provider for a FRESH
+ *  array. May reject — a deleted file, a URL that has since gone. */
+async function reviveSource(pending: PendingSource): Promise<LayerTableSource> {
+  if (pending.kind === "raw") return pending.source;
+  return {
+    kind: "bytes",
+    bytes: await pending.provider(),
+    reader: pending.reader,
+    extension: pending.extension,
+    provider: pending.provider,
+  };
+}
 
 export function getLayerTable(layerId: string): LayerTable | null {
   return registry.get(layerId) ?? null;
@@ -255,28 +339,49 @@ function columnsFromDescribe(
   return out;
 }
 
-async function countRows(table: string): Promise<number> {
+async function countRows(table: string): Promise<number | null> {
   const result = await runQuery(buildCountSql(table, null));
-  if (!result.ok) return 0;
+  // NOT 0. A count that could not run says nothing about the table's size, and
+  // a table that exists with an unknown row count is a real, browsable state.
+  if (!result.ok) return null;
   const n = result.rows[0]?.n;
-  return typeof n === "number" ? n : Number(n) || 0;
+  if (typeof n === "number") return n;
+  const coerced = Number(n);
+  return Number.isFinite(coerced) ? coerced : null;
 }
 
 class BuildError extends Error {}
 
+/**
+ * The VFS names a build has registered and NOT yet dropped.
+ *
+ * Each builder drops its own in a `finally` and deletes the name here as it
+ * goes, so this set is empty on every path a builder controls. It exists for
+ * the path none of them can: a throw between the register and the `finally`,
+ * which would otherwise strand a multi-megabyte buffer in the VFS for the
+ * lifetime of the page.
+ */
+type BuildScratch = Set<string>;
+
+async function releaseBuffer(scratch: BuildScratch, name: string) {
+  await dropBuffer(name);
+  scratch.delete(name);
+}
+
 async function buildFromReader(
   table: string,
   source: Extract<LayerTableSource, { kind: "bytes" }>,
+  scratch: BuildScratch,
 ): Promise<LayerTable> {
   const sourceName = `${table}.${source.extension}`;
   const registered = await registerBuffer(sourceName, source.bytes);
   if (!registered) {
     throw new BuildError("The source bytes could not be handed to DuckDB.");
   }
+  scratch.add(sourceName);
+  const from = `${source.reader}(${quoteLiteral(sourceName)})`;
   try {
-    const described = await runQuery(
-      `DESCRIBE SELECT * FROM ${source.reader}('${sourceName}')`,
-    );
+    const described = await runQuery(`DESCRIBE SELECT * FROM ${from}`);
     if (!described.ok) throw new BuildError(described.message);
 
     const all = columnsFromDescribe(described.rows);
@@ -286,7 +391,7 @@ async function buildFromReader(
     }
     const select = kept.map((c) => quoteIdent(c.name)).join(", ");
     const created = await ddl(
-      `CREATE OR REPLACE TABLE ${quoteIdent(table)} AS SELECT ${select} FROM ${source.reader}('${sourceName}')`,
+      `CREATE OR REPLACE TABLE ${quoteIdent(table)} AS SELECT ${select} FROM ${from}`,
     );
     if (!created.ok) throw new BuildError(created.message);
 
@@ -296,25 +401,49 @@ async function buildFromReader(
       source: source.provider,
       reader: source.reader,
       columns: kept,
+      // From ALL the described names, never the kept ones: the `geometry_lod*`
+      // columns the ladder is read from are exactly the ones dropped.
       lods: lodsFromColumnNames(all.map((c) => c.name)),
       rowCount: await countRows(table),
     };
   } finally {
     // ALWAYS, success or not: the table (if it was made) survives this, and a
     // failed build must not leave a multi-megabyte buffer in the VFS.
-    await dropBuffer(sourceName);
+    await releaseBuffer(scratch, sourceName);
   }
 }
+
+/**
+ * The flat-fallback columns' declared types, keyed by the names
+ * {@link FLAT_PREFIX_COLUMNS} publishes — which is where the NAMES come from,
+ * so an empty table cannot drift out of agreement with the rows a populated
+ * one is built from.
+ */
+const FLAT_COLUMN_TYPES: Readonly<Record<string, string>> = {
+  id: "VARCHAR",
+  feature_id: "VARCHAR",
+  object_type: "VARCHAR",
+  parents: "VARCHAR[]",
+  children: "VARCHAR[]",
+};
+
+/** The flat columns that must end up as `VARCHAR[]` — the ones `read_json_auto`
+ *  can mistype, and the ones an empty table declares as lists. */
+const FLAT_LIST_COLUMNS: ReadonlyArray<string> = FLAT_PREFIX_COLUMNS.filter(
+  (name) => FLAT_COLUMN_TYPES[name] === "VARCHAR[]",
+);
 
 /** The columns an empty fallback table is declared with — the vocabulary every
  *  other layer publishes, so a streaming layer with no cells yet still has a
  *  browsable (empty) table rather than a failure. */
-const EMPTY_FALLBACK_DDL =
-  '("id" VARCHAR, "feature_id" VARCHAR, "object_type" VARCHAR, "parents" VARCHAR[], "children" VARCHAR[])';
+const EMPTY_FALLBACK_DDL = `(${FLAT_PREFIX_COLUMNS.map(
+  (name) => `${quoteIdent(name)} ${FLAT_COLUMN_TYPES[name] ?? "VARCHAR"}`,
+).join(", ")})`;
 
 async function buildFromRows(
   table: string,
   rows: ReadonlyArray<FlatRow>,
+  scratch: BuildScratch,
 ): Promise<LayerTable> {
   let sourceName: string | null = null;
   try {
@@ -329,8 +458,9 @@ async function buildFromRows(
       if (!ok) {
         throw new BuildError("The layer's rows could not be handed to DuckDB.");
       }
+      scratch.add(sourceName);
       const created = await ddl(
-        `CREATE OR REPLACE TABLE ${quoteIdent(table)} AS SELECT * FROM read_json_auto('${sourceName}')`,
+        `CREATE OR REPLACE TABLE ${quoteIdent(table)} AS SELECT * FROM read_json_auto(${quoteLiteral(sourceName)})`,
       );
       if (!created.ok) throw new BuildError(created.message);
 
@@ -347,9 +477,9 @@ async function buildFromRows(
       // which would throw the layer's attributes away. `ALTER COLUMN … TYPE`
       // is the route that works: it is a no-op when the inference was already
       // right, and it preserves both the list values and the NULLs.
-      for (const column of ["parents", "children"]) {
+      for (const column of FLAT_LIST_COLUMNS) {
         const altered = await ddl(
-          `ALTER TABLE ${quoteIdent(table)} ALTER COLUMN ${quoteIdent(column)} TYPE VARCHAR[]`,
+          `ALTER TABLE ${quoteIdent(table)} ALTER COLUMN ${quoteIdent(column)} TYPE ${FLAT_COLUMN_TYPES[column]}`,
         );
         if (!altered.ok) throw new BuildError(altered.message);
       }
@@ -372,8 +502,29 @@ async function buildFromRows(
       rowCount: await countRows(table),
     };
   } finally {
-    if (sourceName !== null) await dropBuffer(sourceName);
+    if (sourceName !== null) await releaseBuffer(scratch, sourceName);
   }
+}
+
+/**
+ * Tear down whatever a FAILED build left behind.
+ *
+ * A build is several statements, and the `CREATE` is not the last of them: the
+ * fallback route runs two `ALTER COLUMN`s and a `DESCRIBE` after it, and any
+ * of those can fail over a table that now exists. Without this the layer is
+ * `failed` while a fully materialised table of its rows sits in the database
+ * under a name nothing will ever use again — memory held for the life of the
+ * page, invisible to every code path.
+ *
+ * `DROP TABLE IF EXISTS` is idempotent, so this is safe on the paths where the
+ * `CREATE` itself never ran.
+ */
+async function discardHalfBuilt(
+  table: string,
+  scratch: BuildScratch,
+): Promise<void> {
+  await ddl(`DROP TABLE IF EXISTS ${quoteIdent(table)}`);
+  for (const name of [...scratch]) await releaseBuffer(scratch, name);
 }
 
 /**
@@ -394,7 +545,26 @@ export async function retryEngine(): Promise<void> {
   const pending = [...pendingSources.entries()];
   pendingSources.clear();
   await Promise.all(
-    pending.map(([layerId, source]) => enqueueLayerTable(layerId, source)),
+    pending.map(async ([layerId, entry]) => {
+      let source: LayerTableSource;
+      try {
+        // A reader entry was parked WITHOUT its array; this is where the fresh
+        // one is obtained.
+        source = await reviveSource(entry);
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "The layer's source could not be read again.";
+        console.warn(`DuckDB retry for layer ${layerId} failed: ${message}`);
+        // Never over a table that works — a rebuild whose source has gone
+        // leaves the previous table exactly where it was.
+        if (!registry.has(layerId))
+          setState(layerId, { state: "failed", message });
+        return;
+      }
+      await enqueueLayerTable(layerId, source);
+    }),
   );
 }
 
@@ -407,8 +577,7 @@ export async function retryEngine(): Promise<void> {
 async function retire(info: LayerTable): Promise<void> {
   await ddl(`DROP TABLE IF EXISTS ${quoteIdent(info.table)}`);
   // Belt and braces: the build already dropped this on the way out, and a
-  // second drop of an absent name is harmless. A build that failed BETWEEN
-  // registration and its own `finally` is the case this covers.
+  // second drop of an absent name is harmless.
   if (info.sourceName !== null) await dropBuffer(info.sourceName);
 }
 
@@ -426,13 +595,19 @@ export function enqueueLayerTable(
   const seq = ++seqCounter;
   lastEnqueueSeq.set(layerId, seq);
   // A REBUILD keeps the table it is replacing ON SCREEN. Only a layer with no
-  // table yet passes through "queued"/"building".
+  // table yet passes through "queued"/"building" — and one whose FIRST build is
+  // already running stays "building", because a second enqueue behind it has
+  // not put the layer back at the start of the queue for any purpose the panel
+  // cares about, and "queued" over "building" reads as going backwards.
   const queuedOver = registry.get(layerId);
+  const current = useLayerTableStore.getState().tables[layerId];
   setState(
     layerId,
     queuedOver
       ? { state: "ready", info: queuedOver, rebuilding: true }
-      : { state: "queued" },
+      : current?.state === "building"
+        ? current
+        : { state: "queued" },
   );
   /** Has a drop superseded this build? Asked twice — once before it starts,
    *  once after it finishes — because a drop can arrive at any point in
@@ -444,9 +619,15 @@ export function enqueueLayerTable(
     // when the drop arrived is skipped outright and never touches DuckDB.
     if (superseded()) return;
     // Re-read at RUN time, not at enqueue time: a drop or an earlier rebuild
-    // may have landed in between.
+    // may have landed in between, so a build that was queued over nothing can
+    // turn out to be a rebuild by the time it runs (and vice versa).
     const previous = registry.get(layerId);
-    if (!previous) setState(layerId, { state: "building" });
+    setState(
+      layerId,
+      previous
+        ? { state: "ready", info: previous, rebuilding: true }
+        : { state: "building" },
+    );
 
     // WAIT FOR THE ENGINE. `registerBuffer` and `ddl` both answer "not
     // running" while the status is anything but ready, and the boot takes ~5 s
@@ -459,10 +640,10 @@ export function enqueueLayerTable(
     await initDuckDB();
     if (superseded()) return;
     if (getDuckDBStatus().state !== "ready") {
-      // KEEP the source: `registerFileBuffer` was never called, so a `bytes`
-      // array is still intact, and `retryEngine` can build this table without
-      // the user re-adding the layer.
-      pendingSources.set(layerId, source);
+      // PARK the source: nothing has been handed to DuckDB, so a `bytes`
+      // array is still intact — but a provider is preferred over it anyway,
+      // so a huge file is not pinned in the heap while the engine is down.
+      pendingSources.set(layerId, parkIntact(source));
       if (previous) {
         // An engine that stopped being ready under a working table does not
         // take the table with it — same rule as a failed rebuild.
@@ -483,15 +664,17 @@ export function enqueueLayerTable(
     // build order rather than enqueue order and a cancelled build burns no
     // number at all.
     const table = `layer_${++counter}`;
+    const scratch: BuildScratch = new Set();
     try {
       const info =
         source.kind === "bytes"
-          ? await buildFromReader(table, source)
+          ? await buildFromReader(table, source, scratch)
           : await buildFromRows(
               table,
               source.kind === "model"
                 ? flatRowsFromModel(source.model)
                 : flatRowsFromRecords(source.records()),
+              scratch,
             );
       // NOTE what is NOT kept: `info` carries the PROVIDER, never the source
       // object, so the (now detached) `bytes` array and the `model`/`records`
@@ -520,11 +703,34 @@ export function enqueueLayerTable(
           ? error.message
           : "The table could not be built.";
       console.warn(`DuckDB table for layer ${layerId} failed: ${message}`);
+      // BEFORE any publishing, and on every branch below: a `CREATE` that
+      // succeeded before a later statement failed has left a table nothing
+      // will ever name again.
+      await discardHalfBuilt(table, scratch);
       if (superseded()) {
         // Same reason as the success path: the drop owns the store entry now,
         // and a failed build of a removed layer has nothing to report to a
         // panel that is no longer showing it.
         return;
+      }
+      if (getDuckDBStatus().state !== "ready") {
+        // The engine DIED mid-build — `registerBuffer` and `ddl` both start
+        // answering "not running" the moment it does. That is the same cause
+        // as the not-ready path above and deserves the same treatment, not a
+        // dead `failed` a retry would never touch. Only when the source cannot
+        // be replayed at all (bytes already consumed, no provider) does it
+        // fall through to a real failure.
+        const parked = parkConsumed(source);
+        if (parked) {
+          pendingSources.set(layerId, parked);
+          setState(
+            layerId,
+            previous
+              ? { state: "ready", info: previous, rebuilding: false }
+              : { state: "failed", message: ENGINE_NOT_RUNNING },
+          );
+          return;
+        }
       }
       if (previous) {
         // A failed REBUILD is not a failed layer: the old table was never

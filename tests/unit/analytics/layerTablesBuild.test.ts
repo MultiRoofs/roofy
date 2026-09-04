@@ -13,6 +13,14 @@ let failures: Record<string, string> = {};
 /** The engine's readiness, and a gate to hold `initDuckDB` open with. */
 let engineReady = true;
 let initGate: Promise<void> | null = null;
+/**
+ * Whether `registerBuffer` accepts a buffer.
+ *
+ * `duckdb.ts` returns false from it in exactly one situation — no database, or
+ * a status that is not `ready` — so the fake flips `engineReady` alongside its
+ * refusal rather than inventing a failure mode the real one does not have.
+ */
+let registerAccepts = true;
 
 vi.mock("../../../src/analytics/duckdb", () => {
   const run = async (statement: string) => {
@@ -53,6 +61,10 @@ vi.mock("../../../src/analytics/duckdb", () => {
     runQuery: vi.fn(run),
     ddl: vi.fn(run),
     registerBuffer: vi.fn(async (name: string, bytes: Uint8Array) => {
+      if (!registerAccepts) {
+        engineReady = false;
+        return false;
+      }
       registered.push({ name, length: bytes.length });
       return true;
     }),
@@ -72,6 +84,8 @@ const {
   retryEngine,
   useLayerTableStore,
 } = await import("../../../src/analytics/layerTables");
+import type { SourceProvider } from "../../../src/analytics/layerTables";
+import { FLAT_PREFIX_COLUMNS } from "../../../src/analytics/layerRows";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 
 const READER_DESCRIBE = [
@@ -97,6 +111,28 @@ const READER_DESCRIBE = [
   { column_name: "bouwjaar", column_type: "BIGINT" },
 ];
 
+const FALLBACK_DESCRIBE = [
+  { column_name: "id", column_type: "VARCHAR" },
+  { column_name: "feature_id", column_type: "VARCHAR" },
+  { column_name: "object_type", column_type: "VARCHAR" },
+  { column_name: "parents", column_type: "VARCHAR[]" },
+  { column_name: "children", column_type: "VARCHAR[]" },
+];
+
+/** ONE provider instance, so `LayerTable.source` can be asserted by identity
+ *  rather than by "is a function". */
+const PROVIDER: SourceProvider = async () => new Uint8Array(16);
+
+function readerSource() {
+  return {
+    kind: "bytes" as const,
+    bytes: new Uint8Array(16),
+    reader: "read_cityjson" as const,
+    extension: "city.json" as const,
+    provider: PROVIDER,
+  };
+}
+
 function model(): CityModel {
   return {
     sourceEncoding: "citygml",
@@ -118,6 +154,26 @@ function model(): CityModel {
   } as unknown as CityModel;
 }
 
+function stateOf(layerId: string) {
+  return useLayerTableStore.getState().tables[layerId];
+}
+
+/** A gate over `initDuckDB`, so a build can be observed MID-FLIGHT. */
+function holdEngine(): () => void {
+  let open!: () => void;
+  initGate = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return open;
+}
+
+/** Two microtask turns — enough for a queued task to start and reach its first
+ *  real await, and no more. */
+async function tick(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 beforeEach(() => {
   sql.length = 0;
   registered.length = 0;
@@ -127,19 +183,14 @@ beforeEach(() => {
   failures = {};
   engineReady = true;
   initGate = null;
+  registerAccepts = true;
   resetLayerTablesForTest();
   useLayerTableStore.setState({ tables: {} });
 });
 
 describe("reader-backed layer table", () => {
   async function build(): Promise<void> {
-    await enqueueLayerTable("L1", {
-      kind: "bytes",
-      bytes: new Uint8Array(16),
-      reader: "read_cityjson",
-      extension: "city.json",
-      provider: async () => new Uint8Array(16),
-    });
+    await enqueueLayerTable("L1", readerSource());
   }
 
   it("registers the bytes under the table's own name", async () => {
@@ -185,30 +236,31 @@ describe("reader-backed layer table", () => {
       { name: "b3_h_dak_max", type: "DOUBLE", kind: "scalar" },
       { name: "bouwjaar", type: "BIGINT", kind: "castText" },
     ]);
-    expect(info!.source).toBeTypeOf("function");
+    // The SAME function the caller passed, not a wrapper: the export re-runs
+    // the loader's own re-fetch, and identity is what proves it.
+    expect(info!.source).toBe(PROVIDER);
+  });
+
+  it("publishes a NULL row count when the COUNT itself failed", async () => {
+    // A table that exists with an unknown size is a real state; "0 rows" over
+    // a grid that then pages real data is a lie.
+    failures = { "COUNT(*)": "Out of Memory Error: could not allocate" };
+    await build();
+    expect(getLayerTable("L1")).toMatchObject({ rowCount: null });
+    expect(stateOf("L1")).toMatchObject({ state: "ready" });
   });
 
   it("mirrors the outcome into the store", async () => {
-    const promise = enqueueLayerTable("L1", {
-      kind: "bytes",
-      bytes: new Uint8Array(16),
-      reader: "read_cityjson",
-      extension: "city.json",
-      provider: async () => new Uint8Array(16),
-    });
-    expect(useLayerTableStore.getState().tables.L1).toEqual({
-      state: "queued",
-    });
+    const promise = enqueueLayerTable("L1", readerSource());
+    expect(stateOf("L1")).toEqual({ state: "queued" });
     await promise;
-    expect(useLayerTableStore.getState().tables.L1).toMatchObject({
-      state: "ready",
-    });
+    expect(stateOf("L1")).toMatchObject({ state: "ready" });
   });
 
   it("records a CREATE failure instead of throwing, and still drops the buffer", async () => {
     failures = { "CREATE OR REPLACE TABLE": "Binder Error: nope" };
     await expect(build()).resolves.toBeUndefined();
-    expect(useLayerTableStore.getState().tables.L1).toEqual({
+    expect(stateOf("L1")).toEqual({
       state: "failed",
       message: "Binder Error: nope",
     });
@@ -232,48 +284,198 @@ describe("reader-backed layer table", () => {
   });
 });
 
-describe("waiting for the engine", () => {
-  function readerSource() {
-    return {
-      kind: "bytes" as const,
-      bytes: new Uint8Array(16),
-      reader: "read_cityjson" as const,
-      extension: "city.json",
-      provider: async () => new Uint8Array(16),
-    };
-  }
+describe("a failed build leaves nothing behind", () => {
+  it("DROPs the table when a step AFTER the CREATE fails", async () => {
+    // The fallback route runs two ALTERs and a DESCRIBE after its CREATE, so a
+    // failure there strands a fully materialised table under a name nothing
+    // will ever use again — memory held for the life of the page.
+    describeRows = FALLBACK_DESCRIBE;
+    failures = { 'DESCRIBE SELECT * FROM "layer_1"': "Catalog Error: boom" };
+    await enqueueLayerTable("L1", { kind: "model", model: model() });
 
+    expect(sql).toContain(
+      "CREATE OR REPLACE TABLE \"layer_1\" AS SELECT * FROM read_json_auto('layer_1.json')",
+    );
+    expect(sql).toContain('DROP TABLE IF EXISTS "layer_1"');
+    expect(stateOf("L1")).toEqual({
+      state: "failed",
+      message: "Catalog Error: boom",
+    });
+    expect(getLayerTable("L1")).toBeNull();
+    // Exactly once: the builder's own `finally` dropped it and struck it off
+    // the scratch set, so the cleanup has nothing left to re-drop.
+    expect(dropped).toEqual(["layer_1.json"]);
+  });
+
+  it("refuses a file whose columns are ALL geometry", async () => {
+    describeRows = [
+      { column_name: "geometry_lod1_2", column_type: "BLOB" },
+      { column_name: "material_lod1_2", column_type: "INTEGER[]" },
+      { column_name: "template", column_type: "STRUCT(a INTEGER)" },
+    ];
+    await enqueueLayerTable("L1", readerSource());
+
+    expect(stateOf("L1")).toEqual({
+      state: "failed",
+      message: "This file has no attribute columns to browse.",
+    });
+    expect(sql.some((s) => s.startsWith("CREATE OR REPLACE TABLE"))).toBe(
+      false,
+    );
+    expect(dropped).toEqual(["layer_1.city.json"]);
+  });
+});
+
+describe("rebuilding a layer that already has a table", () => {
+  it("keeps the OLD table on screen while the replacement builds, then swaps", async () => {
+    await enqueueLayerTable("L1", readerSource());
+    const first = getLayerTable("L1")!;
+
+    const open = holdEngine();
+    const rebuild = enqueueLayerTable("L1", readerSource());
+    expect(stateOf("L1")).toEqual({
+      state: "ready",
+      info: first,
+      rebuilding: true,
+    });
+    await tick();
+    expect(stateOf("L1")).toEqual({
+      state: "ready",
+      info: first,
+      rebuilding: true,
+    });
+    expect(getLayerTable("L1")).toBe(first);
+
+    open();
+    await rebuild;
+
+    const second = getLayerTable("L1")!;
+    expect(second.table).toBe("layer_2");
+    expect(stateOf("L1")).toEqual({ state: "ready", info: second });
+  });
+
+  it("retires the OLD table only AFTER the replacement is published", async () => {
+    await enqueueLayerTable("L1", readerSource());
+    await enqueueLayerTable("L1", readerSource());
+
+    const createdSecond = sql.findIndex((s) =>
+      s.startsWith('CREATE OR REPLACE TABLE "layer_2"'),
+    );
+    const countedSecond = sql.indexOf('SELECT COUNT(*) AS "n" FROM "layer_2"');
+    const retiredFirst = sql.indexOf('DROP TABLE IF EXISTS "layer_1"');
+    expect(createdSecond).toBeGreaterThanOrEqual(0);
+    expect(countedSecond).toBeGreaterThan(createdSecond);
+    // The whole point: the drop comes after the replacement is finished, never
+    // before, so the layer is never without a table.
+    expect(retiredFirst).toBeGreaterThan(countedSecond);
+    expect(dropped).toContain("layer_1.city.json");
+  });
+
+  it("keeps the previous table when a REBUILD fails", async () => {
+    await enqueueLayerTable("L1", readerSource());
+    const first = getLayerTable("L1")!;
+
+    failures = { "CREATE OR REPLACE TABLE": "Binder Error: nope" };
+    await enqueueLayerTable("L1", readerSource());
+
+    expect(getLayerTable("L1")).toBe(first);
+    expect(stateOf("L1")).toEqual({
+      state: "ready",
+      info: first,
+      rebuilding: false,
+    });
+    // The old table was never touched — only the half-built replacement was.
+    expect(sql).not.toContain('DROP TABLE IF EXISTS "layer_1"');
+    expect(sql).toContain('DROP TABLE IF EXISTS "layer_2"');
+  });
+
+  it("keeps the old table and parks the source when the engine goes down under a rebuild", async () => {
+    await enqueueLayerTable("L1", readerSource());
+    const first = getLayerTable("L1")!;
+
+    engineReady = false;
+    await enqueueLayerTable("L1", readerSource());
+    expect(getLayerTable("L1")).toBe(first);
+    expect(stateOf("L1")).toEqual({
+      state: "ready",
+      info: first,
+      rebuilding: false,
+    });
+
+    engineReady = true;
+    await retryEngine();
+    expect(getLayerTable("L1")).toMatchObject({ table: "layer_2" });
+    expect(stateOf("L1")).toEqual({
+      state: "ready",
+      info: getLayerTable("L1")!,
+    });
+  });
+
+  it("does NOT put a layer back to queued while its FIRST build is running", async () => {
+    const open = holdEngine();
+    const first = enqueueLayerTable("L1", readerSource());
+    await tick();
+    expect(stateOf("L1")).toEqual({ state: "building" });
+
+    const second = enqueueLayerTable("L1", readerSource());
+    // "queued" over "building" reads as the layer going backwards.
+    expect(stateOf("L1")).toEqual({ state: "building" });
+
+    open();
+    await first;
+    await second;
+    expect(getLayerTable("L1")).toMatchObject({ table: "layer_2" });
+  });
+});
+
+describe("the build queue", () => {
+  it("serialises two builds, second only after the first has finished", async () => {
+    const open = holdEngine();
+    const a = enqueueLayerTable("L1", readerSource());
+    const b = enqueueLayerTable("L2", readerSource());
+    await tick();
+    expect(sql).toEqual([]);
+
+    open();
+    await Promise.all([a, b]);
+
+    const firstCounted = sql.indexOf('SELECT COUNT(*) AS "n" FROM "layer_1"');
+    const secondDescribed = sql.indexOf(
+      "DESCRIBE SELECT * FROM read_cityjson('layer_2.city.json')",
+    );
+    expect(firstCounted).toBeGreaterThanOrEqual(0);
+    expect(secondDescribed).toBeGreaterThan(firstCounted);
+  });
+});
+
+describe("waiting for the engine", () => {
   it("sends NOTHING until initDuckDB has resolved", async () => {
     // The window this closes: a snapshot restored at boot, or a file dropped
     // on the landing page, reaches the queue two seconds into a five-second
     // engine boot. Before this await, that layer's table failed for good.
     engineReady = false;
-    let openGate!: () => void;
-    initGate = new Promise<void>((resolve) => {
-      openGate = resolve;
-    });
+    const open = holdEngine();
 
     const build = enqueueLayerTable("L1", readerSource());
-    await Promise.resolve();
-    await Promise.resolve();
+    await tick();
     expect(sql).toEqual([]);
     expect(registered).toEqual([]);
 
     engineReady = true;
-    openGate();
+    open();
     await build;
 
     expect(getLayerTable("L1")).toMatchObject({ table: "layer_1" });
     expect(registered).toEqual([{ name: "layer_1.city.json", length: 16 }]);
   });
 
-  it("records the not-running message and KEEPS the source when the engine never came up", async () => {
+  it("records the not-running message and PARKS the source when the engine never came up", async () => {
     engineReady = false;
     await enqueueLayerTable("L1", readerSource());
 
     expect(sql).toEqual([]);
     expect(getLayerTable("L1")).toBeNull();
-    expect(useLayerTableStore.getState().tables.L1).toEqual({
+    expect(stateOf("L1")).toEqual({
       state: "failed",
       message: "The analytics engine is not running.",
     });
@@ -282,20 +484,14 @@ describe("waiting for the engine", () => {
   it("retryEngine rebuilds what only the engine's absence had failed", async () => {
     engineReady = false;
     await enqueueLayerTable("L1", readerSource());
-    expect(useLayerTableStore.getState().tables.L1).toMatchObject({
-      state: "failed",
-    });
+    expect(stateOf("L1")).toMatchObject({ state: "failed" });
 
     engineReady = true;
     await retryEngine();
 
-    // The SAME bytes: on the refused path `registerFileBuffer` was never
-    // called, so the array was never transferred and never detached.
     expect(registered).toEqual([{ name: "layer_1.city.json", length: 16 }]);
     expect(getLayerTable("L1")).toMatchObject({ table: "layer_1" });
-    expect(useLayerTableStore.getState().tables.L1).toMatchObject({
-      state: "ready",
-    });
+    expect(stateOf("L1")).toMatchObject({ state: "ready" });
   });
 
   it("retryEngine does nothing while the engine is STILL down", async () => {
@@ -305,15 +501,13 @@ describe("waiting for the engine", () => {
 
     await retryEngine();
     expect(sql).toEqual([]);
-    expect(useLayerTableStore.getState().tables.L1).toMatchObject({
-      state: "failed",
-    });
+    expect(stateOf("L1")).toMatchObject({ state: "failed" });
   });
 
   it("does NOT retry a table that failed on its own merits", async () => {
     failures = { "CREATE OR REPLACE TABLE": "Binder Error: nope" };
     await enqueueLayerTable("L1", readerSource());
-    expect(useLayerTableStore.getState().tables.L1).toMatchObject({
+    expect(stateOf("L1")).toMatchObject({
       state: "failed",
       message: "Binder Error: nope",
     });
@@ -326,14 +520,96 @@ describe("waiting for the engine", () => {
   });
 });
 
+describe("parking a source while the engine is down", () => {
+  it("parks a reader source WITHOUT its array and re-obtains bytes from the provider", async () => {
+    // A dropped 200 MB file is already on the heap twice while DuckDB boots;
+    // pinning a third reference in a module map for an engine that may never
+    // come up is how the tab dies of memory rather than of a message.
+    engineReady = false;
+    await enqueueLayerTable("L1", {
+      kind: "bytes",
+      bytes: new Uint8Array(16),
+      reader: "read_cityjson",
+      extension: "city.json",
+      provider: async () => new Uint8Array(32),
+    });
+    expect(registered).toEqual([]);
+
+    engineReady = true;
+    await retryEngine();
+
+    // 32, not 16: what got registered came from the PROVIDER, so the parked
+    // entry cannot have been holding the original array.
+    expect(registered).toEqual([{ name: "layer_1.city.json", length: 32 }]);
+    expect(getLayerTable("L1")).toMatchObject({ table: "layer_1" });
+  });
+
+  it("keeps the raw bytes only when there is NO provider to re-obtain them", async () => {
+    engineReady = false;
+    await enqueueLayerTable("L1", {
+      kind: "bytes",
+      bytes: new Uint8Array(16),
+      reader: "read_cityjson",
+      extension: "city.json",
+      provider: null,
+    });
+
+    engineReady = true;
+    await retryEngine();
+
+    expect(registered).toEqual([{ name: "layer_1.city.json", length: 16 }]);
+    expect(getLayerTable("L1")).toMatchObject({ source: null });
+  });
+
+  it("parks via the provider when the engine dies AT REGISTRATION", async () => {
+    registerAccepts = false;
+    await enqueueLayerTable("L1", {
+      kind: "bytes",
+      bytes: new Uint8Array(16),
+      reader: "read_cityjson",
+      extension: "city.json",
+      provider: async () => new Uint8Array(32),
+    });
+    // The cause is the engine, not the file, so it reads as the engine.
+    expect(stateOf("L1")).toEqual({
+      state: "failed",
+      message: "The analytics engine is not running.",
+    });
+
+    registerAccepts = true;
+    engineReady = true;
+    await retryEngine();
+    expect(registered).toEqual([{ name: "layer_2.city.json", length: 32 }]);
+    expect(getLayerTable("L1")).toMatchObject({ table: "layer_2" });
+  });
+
+  it("fails outright when the engine dies and the bytes cannot be re-obtained", async () => {
+    // A detached array would register as zero bytes and build an EMPTY table
+    // with no error at all — strictly worse than an honest failure.
+    registerAccepts = false;
+    await enqueueLayerTable("L1", {
+      kind: "bytes",
+      bytes: new Uint8Array(16),
+      reader: "read_cityjson",
+      extension: "city.json",
+      provider: null,
+    });
+    expect(stateOf("L1")).toEqual({
+      state: "failed",
+      message: "The source bytes could not be handed to DuckDB.",
+    });
+
+    engineReady = true;
+    sql.length = 0;
+    await retryEngine();
+    expect(sql).toEqual([]);
+  });
+});
+
 describe("flat-fallback layer table", () => {
   it("registers JSON rows and creates the table through read_json_auto", async () => {
     describeRows = [
-      { column_name: "id", column_type: "VARCHAR" },
-      { column_name: "feature_id", column_type: "VARCHAR" },
-      { column_name: "object_type", column_type: "VARCHAR" },
-      { column_name: "parents", column_type: "VARCHAR[]" },
-      { column_name: "children", column_type: "VARCHAR[]" },
+      ...FALLBACK_DESCRIBE,
       { column_name: "bouwjaar", column_type: "BIGINT" },
     ];
     countValue = 1;
@@ -365,13 +641,7 @@ describe("flat-fallback layer table", () => {
   });
 
   it("creates an EMPTY typed table when a streaming layer has no residents yet", async () => {
-    describeRows = [
-      { column_name: "id", column_type: "VARCHAR" },
-      { column_name: "feature_id", column_type: "VARCHAR" },
-      { column_name: "object_type", column_type: "VARCHAR" },
-      { column_name: "parents", column_type: "VARCHAR[]" },
-      { column_name: "children", column_type: "VARCHAR[]" },
-    ];
+    describeRows = FALLBACK_DESCRIBE;
     countValue = 0;
     await enqueueLayerTable("L9", { kind: "resident", records: () => [] });
 
@@ -380,6 +650,20 @@ describe("flat-fallback layer table", () => {
       'CREATE OR REPLACE TABLE "layer_1" ("id" VARCHAR, "feature_id" VARCHAR, "object_type" VARCHAR, "parents" VARCHAR[], "children" VARCHAR[])',
     );
     expect(getLayerTable("L9")).toMatchObject({ rowCount: 0 });
+  });
+
+  it("declares the empty table from FLAT_PREFIX_COLUMNS itself", async () => {
+    // Pinned to the array, not to a hand-written second copy of the
+    // vocabulary: the fallback rows and the empty table must name the same
+    // columns or a streaming layer's schema changes when its first cell lands.
+    describeRows = FALLBACK_DESCRIBE;
+    countValue = 0;
+    await enqueueLayerTable("L9", { kind: "resident", records: () => [] });
+
+    const names = [...sql[0]!.matchAll(/"([a-z_0-9]+)"/g)]
+      .map((m) => m[1])
+      .slice(1); // the first quoted name is the TABLE
+    expect(names).toEqual([...FLAT_PREFIX_COLUMNS]);
   });
 
   it("reads the records lazily, at build time", async () => {
