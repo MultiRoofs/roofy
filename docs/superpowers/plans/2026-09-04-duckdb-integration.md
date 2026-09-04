@@ -4266,6 +4266,9 @@ export function enqueueLayerTable(
   layerId: string,
   source: LayerTableSource,
 ): Promise<void>;
+/** Try the engine again, and rebuild every table that failed ONLY because it
+ *  was not running yet. Resolves once those builds have settled. */
+export function retryEngine(): Promise<void>;
 export function getLayerTable(layerId: string): LayerTable | null;
 /** Test-only: clears the registry, the queue memo and the counter. */
 export function resetLayerTablesForTest(): void;
@@ -4288,6 +4291,9 @@ let describeRows: Record<string, unknown>[] = [];
 let countValue = 0;
 /** SQL substrings that must FAIL, mapped to their message. */
 let failures: Record<string, string> = {};
+/** The engine's readiness, and a gate to hold `initDuckDB` open with. */
+let engineReady = true;
+let initGate: Promise<void> | null = null;
 
 vi.mock("../../../src/analytics/duckdb", () => {
   const run = async (statement: string) => {
@@ -4304,8 +4310,23 @@ vi.mock("../../../src/analytics/duckdb", () => {
     return { ok: true as const, columns: [], rows: [] };
   };
   return {
-    initDuckDB: vi.fn(async () => {}),
-    getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
+    initDuckDB: vi.fn(async () => {
+      if (initGate) await initGate;
+    }),
+    getDuckDBStatus: vi.fn(() =>
+      engineReady
+        ? {
+            state: "ready",
+            extensions: {
+              cityjson: { state: "loaded" },
+              spatial: { state: "unloaded" },
+              three_d: { state: "unloaded" },
+            },
+            loadedExtensions: [{ name: "cityjson", version: "0.4.0" }],
+            platform: "wasm_eh",
+          }
+        : { state: "uninitialized" },
+    ),
     isExtensionLoaded: vi.fn(() => true),
     ensureExtension: vi.fn(async () => false),
     formatDuckDBError: (e: unknown) =>
@@ -4329,6 +4350,7 @@ const {
   enqueueLayerTable,
   getLayerTable,
   resetLayerTablesForTest,
+  retryEngine,
   useLayerTableStore,
 } = await import("../../../src/analytics/layerTables");
 import type { CityModel } from "../../../src/domain/citymodel/types";
@@ -4384,6 +4406,8 @@ beforeEach(() => {
   describeRows = READER_DESCRIBE;
   countValue = 2231;
   failures = {};
+  engineReady = true;
+  initGate = null;
   resetLayerTablesForTest();
   useLayerTableStore.setState({ tables: {} });
 });
@@ -4483,6 +4507,100 @@ describe("reader-backed layer table", () => {
       "layer_1.city.json",
       "layer_2.city.jsonl",
     ]);
+  });
+});
+
+describe("waiting for the engine", () => {
+  function readerSource() {
+    return {
+      kind: "bytes" as const,
+      bytes: new Uint8Array(16),
+      reader: "read_cityjson" as const,
+      extension: "city.json",
+      provider: async () => new Uint8Array(16),
+    };
+  }
+
+  it("sends NOTHING until initDuckDB has resolved", async () => {
+    // The window this closes: a snapshot restored at boot, or a file dropped
+    // on the landing page, reaches the queue two seconds into a five-second
+    // engine boot. Before this await, that layer's table failed for good.
+    engineReady = false;
+    let openGate!: () => void;
+    initGate = new Promise<void>((resolve) => {
+      openGate = resolve;
+    });
+
+    const build = enqueueLayerTable("L1", readerSource());
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(sql).toEqual([]);
+    expect(registered).toEqual([]);
+
+    engineReady = true;
+    openGate();
+    await build;
+
+    expect(getLayerTable("L1")).toMatchObject({ table: "layer_1" });
+    expect(registered).toEqual([{ name: "layer_1.city.json", length: 16 }]);
+  });
+
+  it("records the not-running message and KEEPS the source when the engine never came up", async () => {
+    engineReady = false;
+    await enqueueLayerTable("L1", readerSource());
+
+    expect(sql).toEqual([]);
+    expect(getLayerTable("L1")).toBeNull();
+    expect(useLayerTableStore.getState().tables.L1).toEqual({
+      state: "failed",
+      message: "The analytics engine is not running.",
+    });
+  });
+
+  it("retryEngine rebuilds what only the engine's absence had failed", async () => {
+    engineReady = false;
+    await enqueueLayerTable("L1", readerSource());
+    expect(useLayerTableStore.getState().tables.L1).toMatchObject({
+      state: "failed",
+    });
+
+    engineReady = true;
+    await retryEngine();
+
+    // The SAME bytes: on the refused path `registerFileBuffer` was never
+    // called, so the array was never transferred and never detached.
+    expect(registered).toEqual([{ name: "layer_1.city.json", length: 16 }]);
+    expect(getLayerTable("L1")).toMatchObject({ table: "layer_1" });
+    expect(useLayerTableStore.getState().tables.L1).toMatchObject({
+      state: "ready",
+    });
+  });
+
+  it("retryEngine does nothing while the engine is STILL down", async () => {
+    engineReady = false;
+    await enqueueLayerTable("L1", readerSource());
+    sql.length = 0;
+
+    await retryEngine();
+    expect(sql).toEqual([]);
+    expect(useLayerTableStore.getState().tables.L1).toMatchObject({
+      state: "failed",
+    });
+  });
+
+  it("does NOT retry a table that failed on its own merits", async () => {
+    failures = { "CREATE OR REPLACE TABLE": "Binder Error: nope" };
+    await enqueueLayerTable("L1", readerSource());
+    expect(useLayerTableStore.getState().tables.L1).toMatchObject({
+      state: "failed",
+      message: "Binder Error: nope",
+    });
+    sql.length = 0;
+
+    // A bad file is still a bad file with the engine up; re-running it would
+    // only fail again, and `retryEngine` is about ONE cause.
+    await retryEngine();
+    expect(sql).toEqual([]);
   });
 });
 
@@ -4593,7 +4711,14 @@ import {
   lodsFromColumnNames,
   type ColumnInfo,
 } from "./columnKind";
-import { ddl, dropBuffer, registerBuffer, runQuery } from "./duckdb";
+import {
+  ddl,
+  dropBuffer,
+  getDuckDBStatus,
+  initDuckDB,
+  registerBuffer,
+  runQuery,
+} from "./duckdb";
 import {
   encodeRowsAsJson,
   flatRowsFromModel,
@@ -4746,6 +4871,24 @@ const cancelBefore = new Map<string, number>();
  * perfectly alive.
  */
 const lastEnqueueSeq = new Map<string, number>();
+/**
+ * Sources whose build was refused because the ENGINE was not running.
+ *
+ * DuckDB takes ~5 s to come up (a 36 MB wasm module plus a 3.5 s `LOAD
+ * cityjson`), and the most common first layer of a session lands inside that
+ * window: a snapshot restored at boot, a share link, a file dropped on the
+ * landing page. Without this that layer's table fails PERMANENTLY, and the
+ * only way back is to remove and re-add the layer — which nobody would guess.
+ *
+ * Safe to keep. On this path `registerFileBuffer` was never called, so a
+ * `bytes` source's array is intact rather than detached; a `model` or
+ * `resident` source is a reference either way.
+ */
+const pendingSources = new Map<string, LayerTableSource>();
+/** The message the engine itself uses for a query it cannot run. Repeated
+ *  rather than imported because `duckdb.ts` keeps it private — but it must
+ *  READ the same, or the panel says two different things about one cause. */
+const ENGINE_NOT_RUNNING = "The analytics engine is not running.";
 let seqCounter = 0;
 let counter = 0;
 let chain: Promise<void> = Promise.resolve();
@@ -4766,6 +4909,7 @@ export function resetLayerTablesForTest(): void {
   registry.clear();
   cancelBefore.clear();
   lastEnqueueSeq.clear();
+  pendingSources.clear();
   counter = 0;
   seqCounter = 0;
   chain = Promise.resolve();
@@ -4911,6 +5055,28 @@ async function buildFromRows(
 }
 
 /**
+ * Try the engine again, and rebuild whatever failed only for want of it.
+ *
+ * Two callers, and both matter: the table panel's Retry button, and the app's
+ * own boot — because the engine becoming ready three seconds after a layer
+ * landed must not require the user to notice and act. A table that failed for
+ * any OTHER reason (a bad file, a missing column) is not retried here; it
+ * failed on its merits and re-running it would just fail again.
+ */
+export async function retryEngine(): Promise<void> {
+  await initDuckDB();
+  if (getDuckDBStatus().state !== "ready") return;
+  // Snapshot and CLEAR first: each `enqueueLayerTable` below can put its layer
+  // straight back in (a second failure), and iterating a map being written to
+  // is how one layer gets retried forever.
+  const pending = [...pendingSources.entries()];
+  pendingSources.clear();
+  await Promise.all(
+    pending.map(([layerId, source]) => enqueueLayerTable(layerId, source)),
+  );
+}
+
+/**
  * `DROP TABLE` plus the VFS cleanup for one entry.
  *
  * Called from INSIDE the queue only — by a rebuild that has just published its
@@ -4959,6 +5125,38 @@ export function enqueueLayerTable(
     // may have landed in between.
     const previous = registry.get(layerId);
     if (!previous) setState(layerId, { state: "building" });
+
+    // WAIT FOR THE ENGINE. `registerBuffer` and `ddl` both answer "not
+    // running" while the status is anything but ready, and the boot takes ~5 s
+    // — comfortably longer than a restored snapshot, a share link or a quick
+    // file drop takes to reach this point. Without this await, the first layer
+    // of a session reliably gets a table that failed for a reason that had
+    // already stopped being true. `initDuckDB` never rejects (it records a
+    // failure in the status), and it is memoised, so this is one await for the
+    // first build and free for every one after.
+    await initDuckDB();
+    if (superseded()) return;
+    if (getDuckDBStatus().state !== "ready") {
+      // KEEP the source: `registerFileBuffer` was never called, so a `bytes`
+      // array is still intact, and `retryEngine` can build this table without
+      // the user re-adding the layer.
+      pendingSources.set(layerId, source);
+      if (previous) {
+        // An engine that stopped being ready under a working table does not
+        // take the table with it — same rule as a failed rebuild.
+        setState(layerId, {
+          state: "ready",
+          info: previous,
+          rebuilding: false,
+        });
+      } else {
+        setState(layerId, { state: "failed", message: ENGINE_NOT_RUNNING });
+      }
+      return;
+    }
+    // Past this point the engine is up, so this attempt is not a candidate for
+    // the retry queue any more.
+    pendingSources.delete(layerId);
     // The name is minted INSIDE the queued task, so table numbering follows
     // build order rather than enqueue order and a cancelled build burns no
     // number at all.
@@ -5083,6 +5281,8 @@ let gate: { promise: Promise<void>; open: () => void } | null = null;
 /** When set, the Nth CREATE (1-based) fails — for the rebuild-failure case. */
 let failCreateNumber: number | null = null;
 let createCount = 0;
+/** The engine's readiness — the build task awaits `initDuckDB` and checks it. */
+let engineReady = true;
 
 function makeGate() {
   let open!: () => void;
@@ -5130,7 +5330,20 @@ vi.mock("../../../src/analytics/duckdb", () => {
   };
   return {
     initDuckDB: vi.fn(async () => {}),
-    getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
+    getDuckDBStatus: vi.fn(() =>
+      engineReady
+        ? {
+            state: "ready",
+            extensions: {
+              cityjson: { state: "loaded" },
+              spatial: { state: "unloaded" },
+              three_d: { state: "unloaded" },
+            },
+            loadedExtensions: [{ name: "cityjson", version: "0.4.0" }],
+            platform: "wasm_eh",
+          }
+        : { state: "uninitialized" },
+    ),
     isExtensionLoaded: vi.fn(() => true),
     ensureExtension: vi.fn(async () => false),
     formatDuckDBError: (e: unknown) =>
@@ -5152,6 +5365,7 @@ const {
   enqueueLayerTable,
   getLayerTable,
   resetLayerTablesForTest,
+  retryEngine,
   useLayerTableStore,
 } = await import("../../../src/analytics/layerTables");
 
@@ -5181,6 +5395,7 @@ beforeEach(() => {
   gate = null;
   failCreateNumber = null;
   createCount = 0;
+  engineReady = true;
   resetLayerTablesForTest();
 });
 
@@ -5199,6 +5414,17 @@ describe("dropLayerTable", () => {
   it("is a no-op for a layer that never had a table", async () => {
     await dropLayerTable("nobody");
     expect(sql).toEqual([]);
+  });
+
+  it("forgets a PENDING source, so a removed layer never returns on a retry", async () => {
+    engineReady = false;
+    await enqueueLayerTable("L1", ONE_ROW);
+    await dropLayerTable("L1");
+
+    engineReady = true;
+    await retryEngine();
+    expect(getLayerTable("L1")).toBeNull();
+    expect(useLayerTableStore.getState().tables.L1).toBeUndefined();
   });
 
   it("WAITS for an in-flight create rather than racing it", async () => {
@@ -5400,6 +5626,8 @@ export function dropLayerTable(layerId: string): Promise<void> {
   // enqueued after — a re-add of the same id — takes a higher number and runs.
   const seq = ++seqCounter;
   cancelBefore.set(layerId, seq);
+  // A removed layer must not come back on the next `retryEngine()`.
+  pendingSources.delete(layerId);
   setState(layerId, null);
   return enqueue(async () => {
     const info = registry.get(layerId);
@@ -6790,6 +7018,12 @@ Expected: FAIL — module not found.
  *
  * Installed ONCE from `App`'s mount effect, not at module scope: tests import
  * this module, and a module-scope subscription would leak between them.
+ *
+ * It deliberately does NOT own the engine retry. `retryEngine` (in
+ * `layerTables`) is driven by `App`, which is the only place that already
+ * awaits the boot and re-reads the status — the DuckDB status is not a store,
+ * so a subscription here would have to POLL for a transition App observes for
+ * free.
  */
 
 import { useStreamStore } from "../streaming/streamStore";
@@ -7031,7 +7265,7 @@ Expected: FAIL — nothing enqueues yet from the share path (Task 16 wired it, s
 
 - Delete the whole `// Load active layer's model into DuckDB …` effect (the one whose dependency array is `[duckdbStatus, activeLayerId, layers, activeStreamVersion]`).
 - Delete the `duckdbModelLoaded` and `duckdbTableLoaded` state declarations and every `setDuckdbModelLoaded` / `setDuckdbTableLoaded` call (including the two inside `handleClose`).
-- Delete the now-unused imports `loadModelIntoDuckDB`, `loadCityModelFromMemory`, `loadResidentObjectsIntoDuckDB`, `shouldUseSourceUrlPath`, and `getResidentModel` if nothing else in the file uses it (grep first — `useTotalObjectCount` is separate).
+- Delete the now-unused imports `loadModelIntoDuckDB`, `loadCityModelFromMemory`, `loadResidentObjectsIntoDuckDB`, `shouldUseSourceUrlPath`, and `getResidentModel` if nothing else in the file uses it (grep first — `useTotalObjectCount` is separate). Add `retryEngine` from `../analytics/layerTables`; `initDuckDB` is no longer imported directly by `App.tsx`.
 - Delete the `activeStreamVersion` selector if nothing else reads it (grep: it is also unused once the effect goes).
 - Replace `<TablePanel duckdbTableLoaded={duckdbTableLoaded} … />` with `<TablePanel … />` (props: `onCollapse`, `onHeightChange`).
 - Replace `<InspectorPanel … duckdbModelLoaded={duckdbModelLoaded} />` with the same element minus that prop.
@@ -7048,7 +7282,11 @@ useEffect(() => {
   // not running" with a Retry button. Announcing the ATTEMPT first turns that
   // into "Loading" for the duration.
   setDuckdbStatus({ state: "initializing" });
-  void initDuckDB().then(() => {
+  // `retryEngine`, not `initDuckDB`: it awaits the same (memoised) boot and
+  // then rebuilds any table that was refused while the engine was still coming
+  // up. A layer added during the boot — a restored snapshot, a share link, a
+  // quick drop — must not need the user to notice and re-add it.
+  void retryEngine().then(() => {
     setDuckdbStatus(getDuckDBStatus());
   });
   return installLayerTableLifecycle();
@@ -7079,19 +7317,64 @@ Delete `shouldUseSourceUrlPath`, `loadModelIntoDuckDB`, the whole `In-memory loa
 - `src/ui/inspector/InspectorPanel.tsx`: remove `duckdbModelLoaded` from the props interface, the destructuring and the `<StatsTab … />` call.
 - `src/ui/inspector/StatsTab.tsx`: remove `duckdbModelLoaded` from `StatsTabProps`, the destructuring, and the effect's dependency; leave the effect returning early (`setDuckdbStats(null); return;`) — Task 19 rewrites it.
 
-- [ ] **Step 6: Run the suite and the type check**
+- [ ] **Step 6: Move `duckdbLabel` / `duckdbTooltip` out of `StatusBar.tsx`**
+
+Task 3 exported them from the component file for their test, which trips the
+lint rule `react/only-export-components` (`vp check --fix` warns and cannot fix
+it). They are pure functions of a status object with no JSX in them, so they
+belong in a module of their own.
+
+Create `src/ui/duckdbStatusText.ts` and move `duckdbLabel`, `duckdbTooltip` and
+`duckdbDotClass` into it VERBATIM — the same bodies and the same doc comments,
+plus the `DuckDBStatus` type import:
+
+```ts
+/**
+ * The words the status bar says about the analytics engine.
+ *
+ * Split out of `StatusBar.tsx` because they are pure functions of a status
+ * object and a file that exports a component must export only components
+ * (`react/only-export-components`) — a lint rule that exists so a fast-refresh
+ * boundary stays a component boundary.
+ */
+
+import type { DuckDBStatus } from "../analytics/duckdb";
+```
+
+Then, in `StatusBar.tsx`, delete the three functions and import them:
+
+```ts
+import { duckdbDotClass, duckdbLabel, duckdbTooltip } from "./duckdbStatusText";
+```
+
+Finally, point the test at the new module — in
+`tests/unit/ui/StatusBarDuckdb.test.tsx`, change
+
+```ts
+import { duckdbLabel, duckdbTooltip } from "../../../src/ui/StatusBar";
+```
+
+to
+
+```ts
+import { duckdbLabel, duckdbTooltip } from "../../../src/ui/duckdbStatusText";
+```
+
+- [ ] **Step 7: Run the suite, the type check and the linter**
 
 ```bash
 npx vitest run
 npx tsc -b --noEmit
+npx vp check
 ```
 
-Expected: PASS and clean.
+Expected: PASS, clean, and no `only-export-components` warning for
+`StatusBar.tsx`.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/app/App.tsx src/analytics/duckdb.ts src/ui tests/unit/app/appCityParquetLayers.test.tsx
+git add src/app/App.tsx src/analytics/duckdb.ts src/ui tests/unit/app/appCityParquetLayers.test.tsx tests/unit/ui/StatusBarDuckdb.test.tsx
 git commit -m "$(cat <<'EOF'
 refactor: delete the single global city_objects table and its loaders
 
@@ -9772,15 +10055,22 @@ const [tableHeight, setTableHeight] = useState(DEFAULT_TABLE_HEIGHT);
 with, beside the other callbacks:
 
 ```ts
-/** Retry a failed DuckDB init. `initDuckDB` clears its memo on failure, so
- *  this really re-runs rather than handing back the rejected-once promise. */
+/**
+ * Retry a failed DuckDB init.
+ *
+ * `retryEngine` awaits `initDuckDB` — which clears its memo on failure, so
+ * this really re-runs rather than handing back the rejected-once promise — and
+ * then REBUILDS every table that failed only because the engine was not
+ * running. A Retry that fixed the status but left every table still reading
+ * "The analytics engine is not running" would look like it had done nothing.
+ */
 const handleRetryDuckDB = useCallback(() => {
   setDuckdbStatus({ state: "initializing" });
-  void initDuckDB().then(() => setDuckdbStatus(getDuckDBStatus()));
+  void retryEngine().then(() => setDuckdbStatus(getDuckDBStatus()));
 }, []);
 ```
 
-and import `DEFAULT_TABLE_HEIGHT` alongside `TablePanel`. Delete the `useLayerTableStore.getState().setTablePanelOpen(tableOpen)` effect added in Task 18 — the panel owns that now, and two writers of one flag is one too many.
+and import `DEFAULT_TABLE_HEIGHT` alongside `TablePanel`, plus `retryEngine` from `../analytics/layerTables`. Delete the `useLayerTableStore.getState().setTablePanelOpen(tableOpen)` effect added in Task 18 — the panel owns that now, and two writers of one flag is one too many.
 
 - [ ] **Step 5: Add the CSS**
 
@@ -14401,6 +14691,7 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
 | §3.2          | **A REBUILD keeps the old table until the new one exists; a FAILED rebuild keeps it for good**                                                | 13, 14                                            |
 | §3.2          | **Cancellation is a monotonic SEQUENCE, not a flag: a drop supersedes only what was enqueued before it**                                      | 13, 14                                            |
 | §3.2          | **A build cancelled MID-FLIGHT publishes nothing and retires its own table; the drop re-clears the store unless a newer enqueue owns the id** | 13, 14                                            |
+| §3.2          | **A build AWAITS `initDuckDB` before touching DuckDB, and a source refused for want of the engine is kept and rebuilt by `retryEngine`**      | 13, 14, 18, 23                                    |
 | §3.2          | **The flat fallback ALTERs `parents`/`children` to `VARCHAR[]` — `read_json_auto` types an all-NULL column as JSON**                          | 12, 13, 33                                        |
 | §3.2          | **`registerBuffer` CONSUMES its array; no needless second copy anywhere**                                                                     | 2, 13, 15, 16                                     |
 | §3.2          | **`SourceProvider` returns DECODED bytes for file AND url**                                                                                   | 15 (`fetchModelBytes`, gunzip test), 16           |
@@ -14505,6 +14796,16 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
   build asks again when it settles, retires its own table and publishes
   nothing, and the drop task clears the store a second time unless a newer
   enqueue has claimed the id.
+- Nothing in §3.2 says the build waits for the ENGINE, and the first draft did
+  not: the queued task went straight to `registerBuffer`/`ddl`, both of which
+  answer "not running" until the status is ready. The boot is ~5 s and the most
+  common first layer of a session — a snapshot restored at boot, a share link,
+  a file dropped on the landing page — lands inside it, so that layer's table
+  failed permanently for a reason that had already stopped being true. Task 13
+  awaits the (memoised, never-rejecting) `initDuckDB` before minting a table
+  name, keeps the refused source in `pendingSources`, and `retryEngine()` —
+  called by App on boot AND by the panel's Retry — rebuilds them. A table that
+  failed on its own merits is not retried.
 - §3.2's flat fallback assumes `read_json_auto` reproduces the reader's schema.
   Probed 2026-09-04: an all-NULL `parents` types as JSON, `sample_size = -1`
   and `union_by_name` do not help, and a PARTIAL `columns = {…}` drops every
@@ -14609,6 +14910,17 @@ Every name that crosses a task boundary, re-checked after the edits:
   function (Task 2), and REFERENCED — not restated differently — on
   `LayerTableSource.bytes` and `SourceProvider` (Task 13), `modelTableSource`
   and both providers (Task 16), and `loadFromUrl`'s `bytes` field (Task 15).
+- `pendingSources` and `ENGINE_NOT_RUNNING` are module state in
+  `analytics/layerTables.ts` (Task 13); `retryEngine()` is its only reader,
+  `dropLayerTable` (Task 14) its only other writer, and
+  `resetLayerTablesForTest` clears it. `retryEngine` is exported in Task 13's
+  Interfaces block and called from `App.tsx` in exactly two places — the mount
+  effect (Task 18) and `handleRetryDuckDB` (Task 23) — which are also the two
+  places `initDuckDB` used to be called from directly.
+- `duckdbLabel` / `duckdbTooltip` / `duckdbDotClass` move to
+  `src/ui/duckdbStatusText.ts` in Task 18; Task 3 introduces them in
+  `StatusBar.tsx` and its test's import is updated in the same step that moves
+  them, so no task references the old location afterwards.
 - `cancelBefore` / `lastEnqueueSeq` / `seqCounter` replace the old `cancelled`
   Set outright: no reference to a cancellation Set survives in Task 13's
   implementation, Task 14's `dropLayerTable`, `resetLayerTablesForTest` or
