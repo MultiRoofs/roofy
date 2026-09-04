@@ -41,7 +41,7 @@
 
 **New — engine-free pure modules**
 
-- `src/analytics/columnKind.ts` — the DuckDB column vocabulary: `ColumnKind`, `ColumnInfo`, `classifyColumnType`, `isTextColumn`, `isDroppedColumn`, `lodColumnSuffix`, `lodsFromColumnNames`.
+- `src/analytics/columnKind.ts` — the DuckDB column vocabulary: `ColumnKind`, `ColumnInfo`, `LodColumn`, `classifyColumnType`, `isTextColumn`, `isDroppedColumn`, `lodsFromColumnNames`.
 - `src/domain/citymodel/featureId.ts` — `rootFeatureId`, the cycle-safe walk up `parents` that gives the flat fallback the same `feature_id` the reader produces.
 - `src/analytics/cityGmlModule.ts` — `CityGmlModule`, `cityGmlModuleOf`, `groupTypesByModule`.
 - `src/features/query/types.ts` — `FilterOp`, `FilterValue`, `FilterCondition`, `FilterGroup`, `LayerQuery`, `PageSize`, `PAGE_SIZES`, `EMPTY_FILTER`, `DEFAULT_LAYER_QUERY`, `isNullaryOp`.
@@ -1238,7 +1238,18 @@ EOF
 
 ---
 
-## Task 5: Column vocabulary — `classifyColumnType` and the LoD column maths
+## Task 5: Column vocabulary — `classifyColumnType` and the LoD ladder
+
+> **Already implemented, and this task now carries a CORRECTION.** The first
+> version exported `lodColumnSuffix(lod)`, which rebuilt a column suffix from a
+> label by replacing `.` with `_`. That is wrong on real data: 3D BAG spells
+> Delft's LoD 0 `geometry_lod0_0` (probe P3), so `lodColumnSuffix("0")` yields
+> `geometry_lod0` — a column that does not exist, and a CityParquet export that
+> names it fails at bind time. LoDs are DERIVED from the actual column names
+> and a suffix is never reconstructed from a label. If Task 5 has already
+> landed, apply the delta below as a follow-up commit
+> (`fix(analytics): derive LoD suffixes from the reader's own column names`)
+> rather than amending the original.
 
 **Files:**
 
@@ -1263,8 +1274,16 @@ export interface ColumnInfo {
 export function classifyColumnType(type: string): ColumnKind;
 export function isTextColumn(column: ColumnInfo): boolean;
 export function isDroppedColumn(name: string): boolean;
-export function lodColumnSuffix(lod: string): string;
-export function lodsFromColumnNames(names: ReadonlyArray<string>): string[];
+/** One rung of a layer's LoD ladder, as the reader actually spells it. */
+export interface LodColumn {
+  /** What the UI shows: "2.2", or a bare "0" for `geometry_lod0`. */
+  readonly label: string;
+  /** What goes into a column name, VERBATIM: "2_2", "0_0", "0". */
+  readonly suffix: string;
+}
+export function lodsFromColumnNames(
+  names: ReadonlyArray<string>,
+): ReadonlyArray<LodColumn>;
 ```
 
 - [ ] **Step 1: Write the failing test**
@@ -1277,7 +1296,6 @@ import {
   classifyColumnType,
   isDroppedColumn,
   isTextColumn,
-  lodColumnSuffix,
   lodsFromColumnNames,
 } from "../../../src/analytics/columnKind";
 
@@ -1387,13 +1405,8 @@ describe("isDroppedColumn", () => {
   });
 });
 
-describe("LoD column maths", () => {
-  it("spells an LoD as DuckDB spells it in a column name", () => {
-    expect(lodColumnSuffix("2.2")).toBe("2_2");
-    expect(lodColumnSuffix("0")).toBe("0");
-  });
-
-  it("reads the LoD ladder back off the geometry columns, sorted and deduped", () => {
+describe("lodsFromColumnNames", () => {
+  it("reads the ladder off the geometry columns, sorted and deduped", () => {
     expect(
       lodsFromColumnNames([
         "id",
@@ -1402,7 +1415,50 @@ describe("LoD column maths", () => {
         "geometry_lod1_2",
         "geometry_lod1_3",
       ]),
-    ).toEqual(["1.2", "1.3", "2.2"]);
+    ).toEqual([
+      { label: "1.2", suffix: "1_2" },
+      { label: "1.3", suffix: "1_3" },
+      { label: "2.2", suffix: "2_2" },
+    ]);
+  });
+
+  it("keeps the reader's own spelling of LoD 0", () => {
+    // 3D BAG writes `geometry_lod0_0`, not `geometry_lod0` (probe P3). The
+    // SUFFIX is what a column name is built from, and it is never
+    // reconstructed from the label — "0.0" and "0" both exist in the wild.
+    expect(lodsFromColumnNames(["geometry_lod0_0"])).toEqual([
+      { label: "0.0", suffix: "0_0" },
+    ]);
+    expect(lodsFromColumnNames(["geometry_lod0"])).toEqual([
+      { label: "0", suffix: "0" },
+    ]);
+  });
+
+  it("orders the whole ladder numerically, LoD 0 first", () => {
+    expect(
+      lodsFromColumnNames([
+        "geometry_lod2_2",
+        "geometry_lod0_0",
+        "geometry_lod1_3",
+        "geometry_lod1_2",
+      ]).map((l) => l.label),
+    ).toEqual(["0.0", "1.2", "1.3", "2.2"]);
+  });
+
+  it("dedupes by SUFFIX — geometry and its sidecar name the same rung", () => {
+    expect(
+      lodsFromColumnNames([
+        "geometry_lod2_2",
+        "geometry_properties_lod2_2",
+        "material_lod2_2",
+      ]),
+    ).toEqual([{ label: "2.2", suffix: "2_2" }]);
+  });
+
+  it("ignores a column that is not a numbered geometry LoD", () => {
+    expect(
+      lodsFromColumnNames(["id", "object_type", "geometry_lodX", "template"]),
+    ).toEqual([]);
   });
 
   it("is empty for a table with no geometry columns", () => {
@@ -1492,19 +1548,48 @@ export function isDroppedColumn(name: string): boolean {
   return name === "template" || DROPPED.test(name);
 }
 
-/** "2.2" -> "2_2": how the reader spells an LoD inside a column name. */
-export function lodColumnSuffix(lod: string): string {
-  return lod.replace(/\./g, "_");
+/**
+ * One rung of a layer's LoD ladder — the label to show, and the suffix the
+ * reader actually spells its column names with.
+ *
+ * Both, because they are NOT interconvertible. 3D BAG's LoD 0 is
+ * `geometry_lod0_0`, so its label is "0.0" and its suffix "0_0"; another file
+ * may write `geometry_lod0`, label "0" and suffix "0". Rebuilding a suffix
+ * from a label (`"0".replace(".", "_")`) produces `geometry_lod0` for the
+ * first of those, which does not exist — a CityParquet export that names it
+ * fails at bind time, with a message about a missing column.
+ */
+export interface LodColumn {
+  readonly label: string;
+  readonly suffix: string;
 }
 
-/** The LoD ladder a reader's column list implies, sorted ascending. */
-export function lodsFromColumnNames(names: ReadonlyArray<string>): string[] {
-  const lods = new Set<string>();
+/** `geometry_lod<major>[_<minor>]` and nothing else: `geometry_properties_*`,
+ *  `material_*` and a non-numeric suffix are all excluded here. */
+const GEOMETRY_LOD = /^geometry_lod(\d+)(?:_(\d+))?$/;
+
+/**
+ * The LoD ladder a reader's column list implies, ascending.
+ *
+ * DERIVED from the actual names, never guessed: the suffix is whatever follows
+ * `geometry_lod`, verbatim, and the label is only for display. Deduped by
+ * SUFFIX, because one rung shows up under several prefixes.
+ */
+export function lodsFromColumnNames(
+  names: ReadonlyArray<string>,
+): ReadonlyArray<LodColumn> {
+  const bySuffix = new Map<string, LodColumn>();
   for (const name of names) {
-    const match = /^geometry_lod(.+)$/.exec(name);
-    if (match?.[1] !== undefined) lods.add(match[1].replace(/_/g, "."));
+    const match = GEOMETRY_LOD.exec(name);
+    if (!match) continue;
+    const [, major, minor] = match;
+    const suffix = minor === undefined ? major! : `${major!}_${minor}`;
+    const label = minor === undefined ? major! : `${major!}.${minor}`;
+    if (!bySuffix.has(suffix)) bySuffix.set(suffix, { label, suffix });
   }
-  return [...lods].sort((a, b) => parseFloat(a) - parseFloat(b));
+  return [...bySuffix.values()].sort(
+    (a, b) => parseFloat(a.label) - parseFloat(b.label),
+  );
 }
 ```
 
@@ -3466,7 +3551,7 @@ EOF
 
 **Interfaces:**
 
-- Consumes: Task 10's `buildFeatureScopeWhere`, Task 5's `lodColumnSuffix`.
+- Consumes: Task 10's `buildFeatureScopeWhere`; Task 5's `LodColumn` vocabulary (the caller passes `LodColumn.suffix`).
 - Produces:
 
 ```ts
@@ -3493,7 +3578,8 @@ export function buildCityParquetSourceSql(input: {
   readonly sourceFile: string;
   /** The materialised layer table, which BOTH predicates read. */
   readonly table: string;
-  readonly lod: string;
+  /** `LodColumn.suffix`, used VERBATIM — never a label to be re-spelled. */
+  readonly lodSuffix: string;
   readonly attributes: ReadonlyArray<string>;
   readonly where: string | null;
 }): string;
@@ -3597,7 +3683,7 @@ describe("buildCityParquetSourceSql", () => {
         reader: "read_cityjson",
         sourceFile: "exp_1_src.city.json",
         table: "layer_1",
-        lod: "2.2",
+        lodSuffix: "2_2",
         attributes: ["b3_h_dak_max", "bouwjaar"],
         where: `"b3_h_dak_max" > 10`,
       }),
@@ -3613,7 +3699,7 @@ describe("buildCityParquetSourceSql", () => {
         reader: "read_cityjsonseq",
         sourceFile: "exp_2_src.city.jsonl",
         table: "layer_3",
-        lod: "1.2",
+        lodSuffix: "1_2",
         attributes: [],
         where: null,
       }),
@@ -3629,11 +3715,27 @@ describe("buildCityParquetSourceSql", () => {
         reader: "read_cityjson",
         sourceFile: "s.json",
         table: "t",
-        lod: "0",
+        lodSuffix: "0_0",
         attributes: [],
         where: null,
       }),
-    ).toContain('"geometry_lod0", "geometry_properties_lod0"');
+    ).toContain('"geometry_lod0_0", "geometry_properties_lod0_0"');
+  });
+
+  it("uses the suffix VERBATIM — 3D BAG's LoD 0 is `0_0`, not `0`", () => {
+    // The regression this guards: a label of "0" re-spelled as a suffix gives
+    // `geometry_lod0`, which delft.fcb does not have (probe P3), and the CTAS
+    // fails at bind time with a missing-column error.
+    const sql = buildCityParquetSourceSql({
+      scratchSchema: "e",
+      reader: "read_cityjson",
+      sourceFile: "s.json",
+      table: "t",
+      lodSuffix: "0_0",
+      attributes: [],
+      where: null,
+    });
+    expect(sql).not.toContain('"geometry_lod0"');
   });
 });
 
@@ -3687,7 +3789,8 @@ Expected: FAIL — the three builders are not exported.
 
 - [ ] **Step 3: Append the export builders to `src/analytics/sql.ts`**
 
-Add the import of `lodColumnSuffix` to the existing `./columnKind` import, then append:
+Append the following (no new import is needed — the caller supplies the LoD
+suffix, so `sql.ts` never has to spell one itself):
 
 ```ts
 // ---------------------------------------------------------------------------
@@ -3766,6 +3869,9 @@ export const CITYPARQUET_SOURCE_TABLE = "src";
  * `cityparquet_init` describes every table in the schema it is given, and a
  * table called `src` is not a CityGML module.
  *
+ * The LoD arrives as a SUFFIX taken from a real column name, not as a label to
+ * be re-spelled — see `LodColumn`.
+ *
  * No `lod := …` argument: the explicit column list already names exactly one
  * LoD's geometry pair, and that is the route probed end to end (P6b/P6c/P6g).
  * `lod :=` narrows the SCHEMA rather than the rows and would only add a
@@ -3776,11 +3882,14 @@ export function buildCityParquetSourceSql(input: {
   readonly reader: "read_cityjson" | "read_cityjsonseq";
   readonly sourceFile: string;
   readonly table: string;
-  readonly lod: string;
+  readonly lodSuffix: string;
   readonly attributes: ReadonlyArray<string>;
   readonly where: string | null;
 }): string {
-  const suffix = lodColumnSuffix(input.lod);
+  // VERBATIM. The suffix came off a real column name (`lodsFromColumnNames`),
+  // and re-deriving it from a label would spell 3D BAG's `geometry_lod0_0` as
+  // `geometry_lod0` — a column that is not there.
+  const suffix = input.lodSuffix;
   const select = [
     ...CITYPARQUET_REQUIRED_COLUMNS,
     `geometry_lod${suffix}`,
@@ -4203,7 +4312,7 @@ EOF
 
 **Interfaces:**
 
-- Consumes: `runQuery`, `ddl`, `registerBuffer`, `dropBuffer` (Task 2); `classifyColumnType`, `isDroppedColumn`, `lodsFromColumnNames`, `ColumnInfo` (Task 5); `flatRowsFromModel`, `flatRowsFromRecords`, `encodeRowsAsJson` (Task 12); `quoteIdent` (Task 9).
+- Consumes: `runQuery`, `ddl`, `registerBuffer`, `dropBuffer`, `initDuckDB`, `getDuckDBStatus` (Task 2); `classifyColumnType`, `isDroppedColumn`, `lodsFromColumnNames`, `ColumnInfo`, `LodColumn` (Task 5); `flatRowsFromModel`, `flatRowsFromRecords`, `encodeRowsAsJson` (Task 12); `quoteIdent` (Task 9).
 - Produces:
 
 ```ts
@@ -4236,7 +4345,8 @@ export interface LayerTable {
   readonly source: SourceProvider | null;
   readonly reader: "read_cityjson" | "read_cityjsonseq" | null;
   readonly columns: ReadonlyArray<ColumnInfo>;
-  readonly lods: ReadonlyArray<string>;
+  /** The reader's own LoD ladder, label AND suffix; `[]` for a fallback. */
+  readonly lods: ReadonlyArray<LodColumn>;
   readonly rowCount: number;
 }
 
@@ -4453,7 +4563,10 @@ describe("reader-backed layer table", () => {
       sourceName: "layer_1.city.json",
       reader: "read_cityjson",
       rowCount: 2231,
-      lods: ["1.2", "2.2"],
+      lods: [
+        { label: "1.2", suffix: "1_2" },
+        { label: "2.2", suffix: "2_2" },
+      ],
     });
     expect(info!.columns).toEqual([
       { name: "id", type: "VARCHAR", kind: "scalar" },
@@ -4711,6 +4824,7 @@ import {
   isDroppedColumn,
   lodsFromColumnNames,
   type ColumnInfo,
+  type LodColumn,
 } from "./columnKind";
 import {
   ddl,
@@ -4789,8 +4903,10 @@ export interface LayerTable {
   readonly source: SourceProvider | null;
   readonly reader: "read_cityjson" | "read_cityjsonseq" | null;
   readonly columns: ReadonlyArray<ColumnInfo>;
-  /** From the reader's `geometry_lod*` names; `[]` for a fallback table. */
-  readonly lods: ReadonlyArray<string>;
+  /** From the reader's own `geometry_lod*` names — each rung carries the label
+   *  to SHOW and the suffix to BUILD A COLUMN NAME WITH, because the two are
+   *  not interconvertible. `[]` for a fallback table. */
+  readonly lods: ReadonlyArray<LodColumn>;
   readonly rowCount: number;
 }
 
@@ -12231,7 +12347,8 @@ export interface CityParquetExportRequest {
   readonly source: SourceProvider;
   /** The VFS extension the re-registered source takes. */
   readonly sourceExtension: string;
-  readonly lod: string;
+  /** `LodColumn.suffix`, used verbatim in the geometry column names. */
+  readonly lodSuffix: string;
   readonly attributes: ReadonlyArray<string>;
   readonly where: string | null;
   /** The TOP-LEVEL types the user chose; parts follow their root. */
@@ -12331,7 +12448,7 @@ function request(over: Record<string, unknown> = {}) {
     reader: "read_cityjson" as const,
     source: async () => new Uint8Array([9, 9]),
     sourceExtension: "city.json",
-    lod: "2.2",
+    lodSuffix: "2_2",
     attributes: ["b3_h_dak_max"],
     where: null,
     rootTypes: ["Building"],
@@ -12637,7 +12754,9 @@ export interface CityParquetExportRequest {
   readonly reader: "read_cityjson" | "read_cityjsonseq";
   readonly source: SourceProvider;
   readonly sourceExtension: string;
-  readonly lod: string;
+  /** `LodColumn.suffix` — the reader's own spelling ("2_2", "0_0"), never a
+   *  label re-spelled here. */
+  readonly lodSuffix: string;
   readonly attributes: ReadonlyArray<string>;
   readonly where: string | null;
   readonly rootTypes: ReadonlyArray<string>;
@@ -12752,7 +12871,7 @@ async function exportCityParquet(
         reader: request.reader,
         sourceFile: sourceName,
         table: request.table,
-        lod: request.lod,
+        lodSuffix: request.lodSuffix,
         attributes: request.attributes,
         where: request.where,
       }),
@@ -12900,7 +13019,8 @@ export interface ExportDialogProps {
   /** The EPSG code the package is written with, or null when the layer's
    *  reference system names none — the CityParquet format is then refused. */
   readonly epsg: number | null;
-  /** The layer's currently selected LoD, the default for the picker. */
+  /** The layer's currently selected LoD, as a LABEL — matched against
+   *  `LodColumn.label` to seed the picker. */
   readonly selectedLod: string | null;
   /** A streaming layer's table is only as fresh as its last rebuild, so
    *  opening this dialog forces one. */
@@ -12985,7 +13105,10 @@ const READER_TABLE = {
     { name: "children", type: "VARCHAR[]", kind: "nested" as const },
     { name: "b3_h_dak_max", type: "DOUBLE", kind: "scalar" as const },
   ],
-  lods: ["1.2", "2.2"],
+  lods: [
+    { label: "1.2", suffix: "1_2" },
+    { label: "2.2", suffix: "2_2" },
+  ],
   rowCount: 10,
 };
 
@@ -13065,12 +13188,38 @@ describe("ExportDialog", () => {
     expect(screen.queryByLabelText("object_type")).toBeNull();
   });
 
-  it("offers the layer's LoDs, defaulted to its selected one", async () => {
+  it("offers the layer's LoDs by LABEL, valued by SUFFIX, defaulted to the selected one", async () => {
     open();
     await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
     const lod = screen.getByLabelText("Level of detail") as HTMLSelectElement;
-    expect([...lod.options].map((o) => o.value)).toEqual(["1.2", "2.2"]);
-    expect(lod.value).toBe("2.2");
+    // The user reads "1.2"; the option's value is what a column name is built
+    // from. Conflating the two is what spelled 3D BAG's `geometry_lod0_0` as
+    // `geometry_lod0`.
+    expect([...lod.options].map((o) => o.textContent)).toEqual(["1.2", "2.2"]);
+    expect([...lod.options].map((o) => o.value)).toEqual(["1_2", "2_2"]);
+    expect(lod.value).toBe("2_2");
+  });
+
+  it("falls back to the HIGHEST rung when the layer's LoD is not in the ladder", async () => {
+    open({ selectedLod: "9.9" });
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    expect(
+      (screen.getByLabelText("Level of detail") as HTMLSelectElement).value,
+    ).toBe("2_2");
+  });
+
+  it("keeps the reader's own spelling of LoD 0", async () => {
+    open({
+      table: {
+        ...READER_TABLE,
+        lods: [{ label: "0.0", suffix: "0_0" }],
+      },
+      selectedLod: "0.0",
+    });
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    const lod = screen.getByLabelText("Level of detail") as HTMLSelectElement;
+    expect(lod.value).toBe("0_0");
+    expect([...lod.options].map((o) => o.textContent)).toEqual(["0.0"]);
   });
 
   it("hides the LoD picker and every geometry format for a fallback table, and says why", async () => {
@@ -13202,7 +13351,7 @@ describe("ExportDialog", () => {
     await waitFor(() => expect(runExport).toHaveBeenCalled());
     const request = runExport.mock.calls[0]![0] as {
       kind: string;
-      lod: string;
+      lodSuffix: string;
       epsg: number;
       rootTypes: string[];
       attributes: string[];
@@ -13210,7 +13359,8 @@ describe("ExportDialog", () => {
       fileName: string;
     };
     expect(request.kind).toBe("cityparquet");
-    expect(request.lod).toBe("2.2");
+    // The SUFFIX travels, not the label.
+    expect(request.lodSuffix).toBe("2_2");
     expect(request.epsg).toBe(7415);
     expect(request.rootTypes).toEqual(["Building"]);
     expect(request.attributes).toEqual(["b3_h_dak_max"]);
@@ -13372,6 +13522,7 @@ Expected: FAIL — module not found.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { runQuery } from "../../analytics/duckdb";
+import type { LodColumn } from "../../analytics/columnKind";
 import type { LayerTable } from "../../analytics/layerTables";
 import { runExport, type ExportRequest } from "../../analytics/export";
 import { buildRootTypesSql, compileFilter } from "../../analytics/sql";
@@ -13523,11 +13674,27 @@ export function ExportDialog({
   const format: Format = formats.includes(chosenFormat)
     ? chosenFormat
     : formats[0]!;
-  const [lod, setLod] = useState<string>(
-    selectedLod !== null && table.lods.includes(selectedLod)
-      ? selectedLod
-      : (table.lods[table.lods.length - 1] ?? ""),
+  // The SUFFIX is the identity here — labels are for reading. The layer's own
+  // `selectedLod` is a label ("2.2"), so it is matched against `label`, and the
+  // fallback is the LAST (highest) rung rather than a re-spelled string.
+  const defaultLod =
+    table.lods.find((l) => l.label === selectedLod) ??
+    table.lods[table.lods.length - 1] ??
+    null;
+  const [chosenLodSuffix, setChosenLodSuffix] = useState<string | null>(
+    defaultLod?.suffix ?? null,
   );
+  const lod: LodColumn | null =
+    table.lods.find((l) => l.suffix === chosenLodSuffix) ?? defaultLod;
+
+  // Re-seeded with the columns, for the same reason: a rebuilt table can carry
+  // a different ladder, and a suffix from the old one names no column.
+  useEffect(() => {
+    setChosenLodSuffix(defaultLod?.suffix ?? null);
+    // `defaultLod` is derived from `table.lods`; keying on the array identity
+    // is what makes this run once per table rather than once per render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [table.lods]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<ReadonlyArray<string>>([]);
@@ -13593,9 +13760,14 @@ export function ExportDialog({
         // then send `undefined` into the exporter and fail somewhere deep in
         // the SQL, where the message means nothing to the user.
         const { reader, source } = table;
-        if (reader === null || source === null || epsg === null) {
+        if (
+          reader === null ||
+          source === null ||
+          epsg === null ||
+          lod === null
+        ) {
           throw new Error(
-            "This layer no longer has a CityJSON source with an EPSG code, so a CityParquet package cannot be written. Pick another format.",
+            "This layer no longer has a CityJSON source with an LoD and an EPSG code, so a CityParquet package cannot be written. Pick another format.",
           );
         }
         request = {
@@ -13605,7 +13777,7 @@ export function ExportDialog({
           source,
           sourceExtension:
             reader === "read_cityjsonseq" ? "city.jsonl" : "city.json",
-          lod,
+          lodSuffix: lod.suffix,
           attributes,
           where,
           rootTypes: rootTypes.filter((t) => selectedTypes.has(t)),
@@ -13779,12 +13951,14 @@ export function ExportDialog({
               <span>Level of detail</span>
               <select
                 aria-label="Level of detail"
-                value={lod}
-                onChange={(e) => setLod(e.target.value)}
+                value={lod?.suffix ?? ""}
+                onChange={(e) => setChosenLodSuffix(e.target.value)}
               >
                 {table.lods.map((l) => (
-                  <option key={l} value={l}>
-                    {l}
+                  // The VALUE is the suffix — what a column name is built
+                  // from — and the label is only what the user reads.
+                  <option key={l.suffix} value={l.suffix}>
+                    {l.label}
                   </option>
                 ))}
               </select>
@@ -14035,6 +14209,20 @@ come back.
 For `CSV`, `JSON`, `Parquet` and `CityParquet package (.zip)` in turn: open
 `Export`, pick the format, click Export, and confirm a file arrives. Confirm the
 three city formats are visible but greyed out with the reason on hover.
+
+Before the CityParquet run, check the LoD picker: its OPTION TEXT must read like
+LoDs ("1.2", "2.2" — never "1_2"), and its option VALUES must be the reader's
+own suffixes. Then run the CityParquet export TWICE — once at the default rung
+and once at the lowest one in the list. A rung whose label and suffix differ
+(3D BAG's "0.0" / `0_0`) is exactly where re-spelling a label used to name a
+column that does not exist.
+
+```bash
+agent-browser eval '
+Array.from(document.querySelector("select[aria-label=\x27Level of detail\x27]").options)
+  .map(o => [o.textContent, o.value])
+'
+```
 
 ```bash
 agent-browser eval 'Array.from(document.querySelectorAll("input[name=export-format]")).map(i => [i.getAttribute("aria-label"), i.disabled])'
@@ -14328,6 +14516,29 @@ suite("layer tables over real fixtures", () => {
       described.map((r) => String(r.column_name)),
     );
     expect(lods.length).toBeGreaterThan(0);
+  });
+
+  it("spells Delft's ladder the way the reader does — LoD 0 is `0_0`", () => {
+    // The regression this pins: `lodColumnSuffix("0")` produced
+    // `geometry_lod0`, and 3D BAG writes `geometry_lod0_0`. The label is what
+    // the dialog SHOWS; the suffix is what a column name is BUILT FROM, and
+    // only the file gets to decide the second one.
+    db.register("delft.fcb", "delft.fcb");
+    const described = db.query(
+      "DESCRIBE SELECT * FROM read_flatcitybuf('delft.fcb')",
+    );
+    const lods = lodsFromColumnNames(
+      described.map((r) => String(r.column_name)),
+    );
+    expect(lods.map((l) => l.label)).toEqual(["0.0", "1.2", "1.3", "2.2"]);
+    expect(lods.map((l) => l.suffix)).toEqual(["0_0", "1_2", "1_3", "2_2"]);
+
+    // And every suffix really does name a pair of columns that exist.
+    const names = new Set(described.map((r) => String(r.column_name)));
+    for (const { suffix } of lods) {
+      expect(names.has(`geometry_lod${suffix}`)).toBe(true);
+      expect(names.has(`geometry_properties_lod${suffix}`)).toBe(true);
+    }
   });
 
   it("runs the page SQL and returns rows", () => {
@@ -14660,95 +14871,96 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
 
 ### 1. Spec coverage
 
-| Spec section  | Requirement                                                                                                                                   | Task(s)                                           |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| §1.1          | Every city-model layer in its own DuckDB table                                                                                                | 12, 13, 14, 16, 17                                |
-| §1.2          | Table panel: pagination ≤1000, sort, structured WHERE                                                                                         | 8, 9, 10, 20, 21, 22, 23                          |
-| §1.3          | A toggle applies the filter to the 3D map                                                                                                     | 24, 25, 26, 27                                    |
-| §1.4          | Export dialog: format, LoD, object types, attributes                                                                                          | 7, 11, 28, 29, 30, 31                             |
-| §1 (breaking) | In-memory branches and `city_objects` REMOVED, not kept                                                                                       | 18, 23                                            |
-| §2            | duckdb-wasm pinned to dev64 / DuckDB 1.5.5, arrow 17                                                                                          | 1                                                 |
-| §2            | Never `latest`; the city-format writers never offered as usable                                                                               | Global Constraints; 11, 29, 31                    |
-| §2            | A dropped VFS name never reused                                                                                                               | 13 (counter), 29, 30                              |
-| §2            | Reader schema; `id`/`feature_id` semantics                                                                                                    | 6, 12, 13, 33                                     |
-| §2            | Drop `geometry_*`/`material_*`/`texture_*`/`template`                                                                                         | 5, 13                                             |
-| §2            | Cell types: `to_json`, `::VARCHAR`, BigInt                                                                                                    | 5, 10, 12                                         |
-| §2            | **HUGEINT / DECIMAL arrive as STRINGS → `castText`, no `toFixed`**                                                                            | 5, 22                                             |
-| §2            | CityParquet write: schema, module tables, init (own statement), validate, write                                                               | 7, 11, 30                                         |
-| §2            | Directory argument with NO trailing slash                                                                                                     | 30                                                |
-| §2            | **A MISSING VFS name reads back as ONE garbage byte, no error → validate by content**                                                         | 29 (`validateExportBytes`), 30                    |
-| §2            | `globFiles` lists never-created names → cleanup only, never discovery                                                                         | 30                                                |
-| §2            | `cityparquet_write` browser-verified; table survives `dropFile`                                                                               | 13 (doc), 30, 32                                  |
-| §2            | `cityparquet_read` / `cityjson_geoparquet_geo` unusable                                                                                       | Global Constraints (never called)                 |
-| §2            | **`spatial` does not autoload and is CORE (`INSTALL spatial`)**                                                                               | 2 (`installStatement`), 34                        |
-| §3.1          | Per-extension status, `ensureExtension`, `runQuery`, `formatDuckDBError`                                                                      | 2                                                 |
-| §3.1          | `registerBuffer`/`dropBuffer`/`readFile`/`ddl`                                                                                                | 2                                                 |
-| §3.1          | **Init failure terminates the Worker, then resets the memo**                                                                                  | 2                                                 |
-| §3.1          | StatusBar labels + **`PRAGMA platform`** + `duckdb_extensions()` tooltip                                                                      | 2, 3                                              |
-| §3.2          | `LayerTable`/`ColumnInfo` shape, `classifyColumnType`                                                                                         | 5, 13                                             |
-| §3.2          | Source table (file/URL/CityGML/CityParquet/streaming)                                                                                         | 15, 16, 17                                        |
-| §3.2          | `shouldUseSourceUrlPath` deleted; `loadFromUrl` returns bytes                                                                                 | 15, 18                                            |
-| §3.2          | Reader-backed creation SQL, then `dropBuffer`                                                                                                 | 13                                                |
-| §3.2          | **A REBUILD keeps the old table until the new one exists; a FAILED rebuild keeps it for good**                                                | 13, 14                                            |
-| §3.2          | **Cancellation is a monotonic SEQUENCE, not a flag: a drop supersedes only what was enqueued before it**                                      | 13, 14                                            |
-| §3.2          | **A build cancelled MID-FLIGHT publishes nothing and retires its own table; the drop re-clears the store unless a newer enqueue owns the id** | 13, 14                                            |
-| §3.2          | **A build AWAITS `initDuckDB` before touching DuckDB, and a source refused for want of the engine is kept and rebuilt by `retryEngine`**      | 13, 14, 18, 23                                    |
-| §3.2          | **The flat fallback ALTERs `parents`/`children` to `VARCHAR[]` — `read_json_auto` types an all-NULL column as JSON**                          | 12, 13, 33                                        |
-| §3.2          | **`registerBuffer` CONSUMES its array; no needless second copy anywhere**                                                                     | 2, 13, 15, 16                                     |
-| §3.2          | **`SourceProvider` returns DECODED bytes for file AND url**                                                                                   | 15 (`fetchModelBytes`, gunzip test), 16           |
-| §3.2          | **A restored file layer has no provider → export refused with that reason**                                                                   | 13/16 (`provider: null`), 31 (`RELINK_REASON`)    |
-| §3.2          | Flat fallback aligned to the reader's names; `featureId.ts`                                                                                   | 6, 12, 13                                         |
-| §3.2          | Lifecycle: enqueue/drop, FIFO, skip-if-removed, rebuild, counter                                                                              | 13, 14, 17                                        |
-| §3.2          | **Streaming debounce gated on the PANEL; the export dialog forces one rebuild**                                                               | 17 (`refreshStreamingTable`), 31                  |
-| §3.2          | Failures recorded, never thrown into the loader                                                                                               | 13, 16                                            |
-| §3.2          | `layerTableStore` mirror                                                                                                                      | 13                                                |
-| §3.2          | App loses its DuckDB effect and flags; StatsTab on `object_type`                                                                              | 18, 19                                            |
-| §3.3          | Filter AST, `LayerQuery`, `queryStore`, session-only                                                                                          | 8                                                 |
-| §3.3          | `quoteIdent`/`quoteLiteral`/`compileFilter`/LIKE escaping                                                                                     | 9                                                 |
-| §3.3          | `projectColumn`, `buildPageSql`, `buildCountSql`                                                                                              | 10                                                |
-| §3.3          | `buildFeatureIdsSql` with COALESCE + positive IN                                                                                              | 10, 27                                            |
-| §3.3          | `buildDistinctSql` — deliberately NOT built (see the gaps note); `buildRootTypesSql` added for §3.6                                           | 10                                                |
-| §3.4          | `TablePanel`→`FilterBar`→`DataGrid`→`Pagination`, `useLayerQuery`                                                                             | 20, 21, 22, 23                                    |
-| §3.4          | Header: Sync selection, Filter map, Export, collapse                                                                                          | 23, 31                                            |
-| §3.4          | IntersectionObserver removed; 320 px default, 120–800 clamp                                                                                   | 22, 23                                            |
-| §3.4          | States: engine failed+Retry, queued/building, failed, no layer, zero rows                                                                     | 20, 23                                            |
-| §3.4          | **`initializing` is published BEFORE the 3.5 s boot, so the panel never offers Retry over a healthy engine**                                  | 23                                                |
-| §3.4          | **A DuckDB page error / compile refusal is shown in the panel BODY, not only in the collapsed bar**                                           | 23                                                |
-| §3.4          | **Values are kept RAW in the condition and coerced at compile time — a fractional threshold can be typed**                                    | 9, 21                                             |
-| §3.4          | **Zero rows + Filter map on → "0 of N rows match; the map shows nothing…"**                                                                   | 22 (`emptyMessage`), 23                           |
-| §3.5          | `syncToMap` → ids → `setVisibleObjectIds`; null vs empty                                                                                      | 26, 27                                            |
-| §3.5          | `buildCityMeshArrays` visible-id parameter, slot invariant                                                                                    | 24                                                |
-| §3.5          | `CityModelMesh.setVisibleObjectIds` + handle + registry                                                                                       | 25                                                |
-| §3.5          | `Layer.visibleObjectIds` session-only; `handleSync` push                                                                                      | 26                                                |
-| §3.5          | **`setVisibleObjectIds` is a no-op on identity; the sync returns early when there is nothing to clear**                                       | 26, 27                                            |
-| §3.5          | **`syncFilterToMap` carries a per-layer generation: a slow earlier query cannot rebuild the geometry over a newer one**                       | 27                                                |
-| §3.5          | Streaming disabled with the exact reason string                                                                                               | 23                                                |
-| §3.6          | Dialog: scope, object types, attributes, LoD, format                                                                                          | 31                                                |
-| §3.6          | **The chosen format is clamped to what is offered, and the attribute list re-seeds when the table changes**                                   | 31                                                |
-| §3.6          | CityParquet: schema, re-register, CTAS, init, validate, write, zip, cleanup                                                                   | 30                                                |
-| §3.6          | **Every file the write names must be in the zip**                                                                                             | 30                                                |
-| §3.6          | **The output name is the FIRST string column of the write's result row, with a repeated dir prefix stripped**                                 | 30                                                |
-| §3.6          | **The source is read ONCE into a scratch schema; N modules is not N parses**                                                                  | 11, 30                                            |
-| §3.6          | **`cityparquet_validate` returns no rows — the temp table is dropped first, and a run/read failure is a VISIBLE warning**                     | 30                                                |
-| §3.6          | **`dropBuffer` over a writer-created file is unverified: try/catch + warn, checked by the smoke**                                             | 30, 32                                            |
-| §3.6          | `cityGmlModuleOf`                                                                                                                             | 7                                                 |
-| §3.6          | Parquet/CSV/JSON via `COPY`                                                                                                                   | 29                                                |
-| §3.6          | **City formats shown DISABLED with the exact title**                                                                                          | 31                                                |
-| §3.6          | **Fallback layers: attribute formats only, plus the "no CityJSON source" sentence**                                                           | 31                                                |
-| §3.6          | `platform/download.ts` factored from `RuleBuilderTab`                                                                                         | 28                                                |
-| §3.6          | Busy state, cancel-safe `finally`, inline errors                                                                                              | 30, 31                                            |
-| §3.7          | Snapshot stays v3; nothing new persisted                                                                                                      | 8, 26 (no `persistence/types.ts` change at all)   |
-| §4            | Unit tests for every pure module and store                                                                                                    | 5–14, 20–22, 26–31                                |
-| §4            | Plugin unit tests                                                                                                                             | 24, 25                                            |
-| §4            | Opt-in Node integration behind `DUCKDB_INTEGRATION`                                                                                           | 33                                                |
-| §4            | **Reader `id` set == `parseCityJSON().objects` key set**                                                                                      | 33                                                |
-| §4            | Browser smoke: boot, table, filter, map sync, all four exports                                                                                | 32                                                |
-| §5            | Submodule branch from `947c980`, pushed, gitlink bump                                                                                         | 24, 25, 26, 34                                    |
-| §5            | Lockfile regenerated; `npm ci` verified in a fresh clone                                                                                      | 1, 34                                             |
-| §5            | The seven mocking test files                                                                                                                  | 4                                                 |
-| §5            | `duckdb.ts` the only importer of `@duckdb/duckdb-wasm`                                                                                        | Global Constraints; 13, 29, 30 all import from it |
-| §6            | `spatial`/`three_d` loadable but with nothing to operate on in v1                                                                             | 34                                                |
-| §6            | The two `three_d` traps recorded for the follow-up                                                                                            | 34                                                |
+| Spec section  | Requirement                                                                                                                                                          | Task(s)                                           |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| §1.1          | Every city-model layer in its own DuckDB table                                                                                                                       | 12, 13, 14, 16, 17                                |
+| §1.2          | Table panel: pagination ≤1000, sort, structured WHERE                                                                                                                | 8, 9, 10, 20, 21, 22, 23                          |
+| §1.3          | A toggle applies the filter to the 3D map                                                                                                                            | 24, 25, 26, 27                                    |
+| §1.4          | Export dialog: format, LoD, object types, attributes                                                                                                                 | 7, 11, 28, 29, 30, 31                             |
+| §1 (breaking) | In-memory branches and `city_objects` REMOVED, not kept                                                                                                              | 18, 23                                            |
+| §2            | duckdb-wasm pinned to dev64 / DuckDB 1.5.5, arrow 17                                                                                                                 | 1                                                 |
+| §2            | Never `latest`; the city-format writers never offered as usable                                                                                                      | Global Constraints; 11, 29, 31                    |
+| §2            | A dropped VFS name never reused                                                                                                                                      | 13 (counter), 29, 30                              |
+| §2            | Reader schema; `id`/`feature_id` semantics                                                                                                                           | 6, 12, 13, 33                                     |
+| §2            | Drop `geometry_*`/`material_*`/`texture_*`/`template`                                                                                                                | 5, 13                                             |
+| §2            | Cell types: `to_json`, `::VARCHAR`, BigInt                                                                                                                           | 5, 10, 12                                         |
+| §2            | **HUGEINT / DECIMAL arrive as STRINGS → `castText`, no `toFixed`**                                                                                                   | 5, 22                                             |
+| §2            | CityParquet write: schema, module tables, init (own statement), validate, write                                                                                      | 7, 11, 30                                         |
+| §2            | Directory argument with NO trailing slash                                                                                                                            | 30                                                |
+| §2            | **A MISSING VFS name reads back as ONE garbage byte, no error → validate by content**                                                                                | 29 (`validateExportBytes`), 30                    |
+| §2            | `globFiles` lists never-created names → cleanup only, never discovery                                                                                                | 30                                                |
+| §2            | `cityparquet_write` browser-verified; table survives `dropFile`                                                                                                      | 13 (doc), 30, 32                                  |
+| §2            | `cityparquet_read` / `cityjson_geoparquet_geo` unusable                                                                                                              | Global Constraints (never called)                 |
+| §2            | **`spatial` does not autoload and is CORE (`INSTALL spatial`)**                                                                                                      | 2 (`installStatement`), 34                        |
+| §3.1          | Per-extension status, `ensureExtension`, `runQuery`, `formatDuckDBError`                                                                                             | 2                                                 |
+| §3.1          | `registerBuffer`/`dropBuffer`/`readFile`/`ddl`                                                                                                                       | 2                                                 |
+| §3.1          | **Init failure terminates the Worker, then resets the memo**                                                                                                         | 2                                                 |
+| §3.1          | StatusBar labels + **`PRAGMA platform`** + `duckdb_extensions()` tooltip                                                                                             | 2, 3                                              |
+| §3.2          | `LayerTable`/`ColumnInfo` shape, `classifyColumnType`                                                                                                                | 5, 13                                             |
+| §3.2          | Source table (file/URL/CityGML/CityParquet/streaming)                                                                                                                | 15, 16, 17                                        |
+| §3.2          | `shouldUseSourceUrlPath` deleted; `loadFromUrl` returns bytes                                                                                                        | 15, 18                                            |
+| §3.2          | Reader-backed creation SQL, then `dropBuffer`                                                                                                                        | 13                                                |
+| §3.2          | **A REBUILD keeps the old table until the new one exists; a FAILED rebuild keeps it for good**                                                                       | 13, 14                                            |
+| §3.2          | **Cancellation is a monotonic SEQUENCE, not a flag: a drop supersedes only what was enqueued before it**                                                             | 13, 14                                            |
+| §3.2          | **A build cancelled MID-FLIGHT publishes nothing and retires its own table; the drop re-clears the store unless a newer enqueue owns the id**                        | 13, 14                                            |
+| §3.2          | **A build AWAITS `initDuckDB` before touching DuckDB, and a source refused for want of the engine is kept and rebuilt by `retryEngine`**                             | 13, 14, 18, 23                                    |
+| §2            | **LoDs are DERIVED from the reader's own column names (`LodColumn` = label + suffix); a suffix is never rebuilt from a label — 3D BAG's LoD 0 is `geometry_lod0_0`** | 5, 11, 13, 30, 31, 32, 33                         |
+| §3.2          | **The flat fallback ALTERs `parents`/`children` to `VARCHAR[]` — `read_json_auto` types an all-NULL column as JSON**                                                 | 12, 13, 33                                        |
+| §3.2          | **`registerBuffer` CONSUMES its array; no needless second copy anywhere**                                                                                            | 2, 13, 15, 16                                     |
+| §3.2          | **`SourceProvider` returns DECODED bytes for file AND url**                                                                                                          | 15 (`fetchModelBytes`, gunzip test), 16           |
+| §3.2          | **A restored file layer has no provider → export refused with that reason**                                                                                          | 13/16 (`provider: null`), 31 (`RELINK_REASON`)    |
+| §3.2          | Flat fallback aligned to the reader's names; `featureId.ts`                                                                                                          | 6, 12, 13                                         |
+| §3.2          | Lifecycle: enqueue/drop, FIFO, skip-if-removed, rebuild, counter                                                                                                     | 13, 14, 17                                        |
+| §3.2          | **Streaming debounce gated on the PANEL; the export dialog forces one rebuild**                                                                                      | 17 (`refreshStreamingTable`), 31                  |
+| §3.2          | Failures recorded, never thrown into the loader                                                                                                                      | 13, 16                                            |
+| §3.2          | `layerTableStore` mirror                                                                                                                                             | 13                                                |
+| §3.2          | App loses its DuckDB effect and flags; StatsTab on `object_type`                                                                                                     | 18, 19                                            |
+| §3.3          | Filter AST, `LayerQuery`, `queryStore`, session-only                                                                                                                 | 8                                                 |
+| §3.3          | `quoteIdent`/`quoteLiteral`/`compileFilter`/LIKE escaping                                                                                                            | 9                                                 |
+| §3.3          | `projectColumn`, `buildPageSql`, `buildCountSql`                                                                                                                     | 10                                                |
+| §3.3          | `buildFeatureIdsSql` with COALESCE + positive IN                                                                                                                     | 10, 27                                            |
+| §3.3          | `buildDistinctSql` — deliberately NOT built (see the gaps note); `buildRootTypesSql` added for §3.6                                                                  | 10                                                |
+| §3.4          | `TablePanel`→`FilterBar`→`DataGrid`→`Pagination`, `useLayerQuery`                                                                                                    | 20, 21, 22, 23                                    |
+| §3.4          | Header: Sync selection, Filter map, Export, collapse                                                                                                                 | 23, 31                                            |
+| §3.4          | IntersectionObserver removed; 320 px default, 120–800 clamp                                                                                                          | 22, 23                                            |
+| §3.4          | States: engine failed+Retry, queued/building, failed, no layer, zero rows                                                                                            | 20, 23                                            |
+| §3.4          | **`initializing` is published BEFORE the 3.5 s boot, so the panel never offers Retry over a healthy engine**                                                         | 23                                                |
+| §3.4          | **A DuckDB page error / compile refusal is shown in the panel BODY, not only in the collapsed bar**                                                                  | 23                                                |
+| §3.4          | **Values are kept RAW in the condition and coerced at compile time — a fractional threshold can be typed**                                                           | 9, 21                                             |
+| §3.4          | **Zero rows + Filter map on → "0 of N rows match; the map shows nothing…"**                                                                                          | 22 (`emptyMessage`), 23                           |
+| §3.5          | `syncToMap` → ids → `setVisibleObjectIds`; null vs empty                                                                                                             | 26, 27                                            |
+| §3.5          | `buildCityMeshArrays` visible-id parameter, slot invariant                                                                                                           | 24                                                |
+| §3.5          | `CityModelMesh.setVisibleObjectIds` + handle + registry                                                                                                              | 25                                                |
+| §3.5          | `Layer.visibleObjectIds` session-only; `handleSync` push                                                                                                             | 26                                                |
+| §3.5          | **`setVisibleObjectIds` is a no-op on identity; the sync returns early when there is nothing to clear**                                                              | 26, 27                                            |
+| §3.5          | **`syncFilterToMap` carries a per-layer generation: a slow earlier query cannot rebuild the geometry over a newer one**                                              | 27                                                |
+| §3.5          | Streaming disabled with the exact reason string                                                                                                                      | 23                                                |
+| §3.6          | Dialog: scope, object types, attributes, LoD, format                                                                                                                 | 31                                                |
+| §3.6          | **The chosen format is clamped to what is offered, and the attribute list re-seeds when the table changes**                                                          | 31                                                |
+| §3.6          | CityParquet: schema, re-register, CTAS, init, validate, write, zip, cleanup                                                                                          | 30                                                |
+| §3.6          | **Every file the write names must be in the zip**                                                                                                                    | 30                                                |
+| §3.6          | **The output name is the FIRST string column of the write's result row, with a repeated dir prefix stripped**                                                        | 30                                                |
+| §3.6          | **The source is read ONCE into a scratch schema; N modules is not N parses**                                                                                         | 11, 30                                            |
+| §3.6          | **`cityparquet_validate` returns no rows — the temp table is dropped first, and a run/read failure is a VISIBLE warning**                                            | 30                                                |
+| §3.6          | **`dropBuffer` over a writer-created file is unverified: try/catch + warn, checked by the smoke**                                                                    | 30, 32                                            |
+| §3.6          | `cityGmlModuleOf`                                                                                                                                                    | 7                                                 |
+| §3.6          | Parquet/CSV/JSON via `COPY`                                                                                                                                          | 29                                                |
+| §3.6          | **City formats shown DISABLED with the exact title**                                                                                                                 | 31                                                |
+| §3.6          | **Fallback layers: attribute formats only, plus the "no CityJSON source" sentence**                                                                                  | 31                                                |
+| §3.6          | `platform/download.ts` factored from `RuleBuilderTab`                                                                                                                | 28                                                |
+| §3.6          | Busy state, cancel-safe `finally`, inline errors                                                                                                                     | 30, 31                                            |
+| §3.7          | Snapshot stays v3; nothing new persisted                                                                                                                             | 8, 26 (no `persistence/types.ts` change at all)   |
+| §4            | Unit tests for every pure module and store                                                                                                                           | 5–14, 20–22, 26–31                                |
+| §4            | Plugin unit tests                                                                                                                                                    | 24, 25                                            |
+| §4            | Opt-in Node integration behind `DUCKDB_INTEGRATION`                                                                                                                  | 33                                                |
+| §4            | **Reader `id` set == `parseCityJSON().objects` key set**                                                                                                             | 33                                                |
+| §4            | Browser smoke: boot, table, filter, map sync, all four exports                                                                                                       | 32                                                |
+| §5            | Submodule branch from `947c980`, pushed, gitlink bump                                                                                                                | 24, 25, 26, 34                                    |
+| §5            | Lockfile regenerated; `npm ci` verified in a fresh clone                                                                                                             | 1, 34                                             |
+| §5            | The seven mocking test files                                                                                                                                         | 4                                                 |
+| §5            | `duckdb.ts` the only importer of `@duckdb/duckdb-wasm`                                                                                                               | Global Constraints; 13, 29, 30 all import from it |
+| §6            | `spatial`/`three_d` loadable but with nothing to operate on in v1                                                                                                    | 34                                                |
+| §6            | The two `three_d` traps recorded for the follow-up                                                                                                                   | 34                                                |
 
 **Gaps found and closed while writing (both drafts):**
 
@@ -14797,6 +15009,13 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
   build asks again when it settles, retires its own table and publishes
   nothing, and the drop task clears the store a second time unless a newer
   enqueue has claimed the id.
+- §2's schema line writes the geometry column as `geometry_lod<L>`, which the
+  first draft read as "the label with the dot swapped for an underscore". Probe
+  P3 says otherwise: Delft's LoD 0 is `geometry_lod0_0`, so a suffix rebuilt
+  from the label "0" names `geometry_lod0` — a column that is not there, and a
+  CityParquet export that fails at bind time. Task 5 now returns
+  `{label, suffix}` pairs read off the real names, `lodColumnSuffix` is gone,
+  and the suffix travels untouched from the DESCRIBE to the CTAS.
 - Nothing in §3.2 says the build waits for the ENGINE, and the first draft did
   not: the queued task went straight to `registerBuffer`/`ddl`, both of which
   answer "not running" until the status is ready. The boot is ~5 s and the most
@@ -14911,6 +15130,13 @@ Every name that crosses a task boundary, re-checked after the edits:
   function (Task 2), and REFERENCED — not restated differently — on
   `LayerTableSource.bytes` and `SourceProvider` (Task 13), `modelTableSource`
   and both providers (Task 16), and `loadFromUrl`'s `bytes` field (Task 15).
+- `LodColumn` is declared once, in `analytics/columnKind.ts` (Task 5), and is
+  the only shape a LoD travels in: `LayerTable.lods` (Task 13),
+  `buildCityParquetSourceSql`'s `lodSuffix` (Task 11),
+  `CityParquetExportRequest.lodSuffix` (Task 30) and the dialog's picker (Task
+  31, which stores `chosenLodSuffix` and matches `selectedLod` against
+  `label`). `lodColumnSuffix` is DELETED — no task references it, and
+  `sql.ts` no longer imports anything from `columnKind` for LoD purposes.
 - `pendingSources` and `ENGINE_NOT_RUNNING` are module state in
   `analytics/layerTables.ts` (Task 13); `retryEngine()` is its only reader,
   `dropLayerTable` (Task 14) its only other writer, and
