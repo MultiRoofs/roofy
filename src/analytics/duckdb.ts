@@ -23,10 +23,34 @@ import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
 // Types
 // ---------------------------------------------------------------------------
 
+export type ExtensionName = "cityjson" | "spatial" | "three_d";
+
+/** Per-extension load state. `cityjson` is loaded at init; `spatial` and
+ *  `three_d` stay `"unloaded"` until `ensureExtension` asks for them. */
+export type ExtensionStatus =
+  | { readonly state: "unloaded" | "loading" | "loaded" }
+  | { readonly state: "failed"; readonly error: string };
+
+/** One row of `duckdb_extensions() WHERE loaded`, for the status tooltip. The
+ *  community slot for a DuckDB version can be REBUILT under us — the
+ *  duckdb-wasm pin is what pins the extension build — so a schema drift has to
+ *  be diagnosable from the UI without a console. */
+export interface LoadedExtension {
+  readonly name: string;
+  readonly version: string;
+}
+
 export type DuckDBStatus =
   | { readonly state: "uninitialized" }
   | { readonly state: "initializing" }
-  | { readonly state: "ready"; readonly extensionLoaded: boolean }
+  | {
+      readonly state: "ready";
+      readonly extensions: Readonly<Record<ExtensionName, ExtensionStatus>>;
+      readonly loadedExtensions: ReadonlyArray<LoadedExtension>;
+      /** `PRAGMA platform` — "wasm_eh" or "wasm_mvp". The two get DIFFERENT
+       *  extension artefacts, so it belongs in any bug report. */
+      readonly platform: string | null;
+    }
   | { readonly state: "failed"; readonly error: string };
 
 export interface QueryResult {
@@ -34,17 +58,139 @@ export interface QueryResult {
   readonly rows: Record<string, unknown>[];
 }
 
+/** A query's outcome WITH its failure message — the contract every new caller
+ *  uses. {@link queryDuckDB} keeps its swallow-to-null shape for the two
+ *  legacy callers (`stacItems`, the old stats path). */
+export type QueryOutcome =
+  | {
+      readonly ok: true;
+      readonly columns: string[];
+      readonly rows: Record<string, unknown>[];
+    }
+  | { readonly ok: false; readonly message: string };
+
+const NOT_RUNNING = "The analytics engine is not running.";
+
 // ---------------------------------------------------------------------------
 // Singleton state
 // ---------------------------------------------------------------------------
 
 let db: duckdb.AsyncDuckDB | null = null;
 let conn: duckdb.AsyncDuckDBConnection | null = null;
+let extensions: Record<ExtensionName, ExtensionStatus> = {
+  cityjson: { state: "unloaded" },
+  spatial: { state: "unloaded" },
+  three_d: { state: "unloaded" },
+};
+let loadedExtensions: ReadonlyArray<LoadedExtension> = [];
+let platform: string | null = null;
 let status: DuckDBStatus = { state: "uninitialized" };
 let initPromise: Promise<void> | null = null;
+/** One in-flight load per extension, so N concurrent `ensureExtension` calls
+ *  cost one INSTALL. */
+const extensionPromises = new Map<ExtensionName, Promise<boolean>>();
 
 export function getDuckDBStatus(): DuckDBStatus {
   return status;
+}
+
+export function isExtensionLoaded(name: ExtensionName): boolean {
+  return extensions[name].state === "loaded";
+}
+
+/** Publish the current extension map into the `ready` status object — the
+ *  status is a VALUE React subscribes to, so a lazy load has to mint a new
+ *  one rather than mutate the old. */
+function publishReady(): void {
+  status = {
+    state: "ready",
+    extensions: { ...extensions },
+    loadedExtensions,
+    platform,
+  };
+}
+
+/** DuckDB's own first error line. Its messages are one useful line plus a
+ *  `LINE 1: …` echo and a caret; the echo is the SQL we just sent and the
+ *  caret is meaningless outside a terminal, so both are dropped. */
+export function formatDuckDBError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const kept: string[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (/^LINE \d+:/.test(trimmed)) break;
+    if (trimmed !== "") kept.push(trimmed);
+  }
+  const message = kept.join(" ");
+  return message === "" ? "The query failed." : message;
+}
+
+// ---------------------------------------------------------------------------
+// Extensions
+// ---------------------------------------------------------------------------
+
+/** `spatial` is a CORE extension — `INSTALL spatial FROM community` fails
+ *  outright — while `cityjson` and `three_d` come from the community repo.
+ *  Neither `spatial` nor `three_d` autoloads in wasm. */
+function installStatement(name: ExtensionName): string {
+  return name === "spatial"
+    ? "INSTALL spatial"
+    : `INSTALL ${name} FROM community`;
+}
+
+async function loadExtension(name: ExtensionName): Promise<boolean> {
+  const connection = conn;
+  if (!connection) return false;
+  extensions = { ...extensions, [name]: { state: "loading" } };
+  try {
+    await connection.query(installStatement(name));
+    await connection.query(`LOAD ${name}`);
+    extensions = { ...extensions, [name]: { state: "loaded" } };
+    return true;
+  } catch (error) {
+    const message = formatDuckDBError(error);
+    extensions = { ...extensions, [name]: { state: "failed", error: message } };
+    console.warn(`DuckDB extension "${name}" did not load:`, message);
+    return false;
+  }
+}
+
+/** `PRAGMA platform` — "wasm_eh" or "wasm_mvp". Which one a session got
+ *  decides WHICH extension artefacts the community repo served it, so a
+ *  schema-drift report is unactionable without it. Best effort. */
+async function readPlatform(): Promise<string | null> {
+  const connection = conn;
+  if (!connection) return null;
+  try {
+    const result = await connection.query("PRAGMA platform");
+    const value = result.getChild("platform")?.get(0);
+    return typeof value === "string" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The extensions actually loaded, for the status tooltip. Best effort: a
+ *  database that cannot answer this is still perfectly usable. */
+async function readLoadedExtensions(): Promise<ReadonlyArray<LoadedExtension>> {
+  const connection = conn;
+  if (!connection) return [];
+  try {
+    const result = await connection.query(
+      "SELECT extension_name, extension_version FROM duckdb_extensions() WHERE loaded",
+    );
+    const out: LoadedExtension[] = [];
+    for (let i = 0; i < result.numRows; i++) {
+      const name = result.getChild("extension_name")?.get(i);
+      const version = result.getChild("extension_version")?.get(i);
+      if (typeof name === "string") {
+        out.push({ name, version: typeof version === "string" ? version : "" });
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -53,6 +199,11 @@ export function getDuckDBStatus(): DuckDBStatus {
 
 async function doInit(): Promise<void> {
   status = { state: "initializing" };
+
+  // Held OUTSIDE the try so the catch can terminate it. A failed init used to
+  // leave its Worker running — and `initDuckDB` clears its memo on failure, so
+  // a Retry starts a SECOND one beside the zombie, each holding a wasm heap.
+  let worker: Worker | null = null;
 
   try {
     // Bundles come from jsDelivr, not from our own dist/: the mvp wasm alone
@@ -72,7 +223,7 @@ async function doInit(): Promise<void> {
         type: "text/javascript",
       }),
     );
-    const worker = new Worker(workerUrl);
+    worker = new Worker(workerUrl);
     URL.revokeObjectURL(workerUrl);
     const logger = new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING);
     const instance = new duckdb.AsyncDuckDB(logger, worker);
@@ -81,36 +232,59 @@ async function doInit(): Promise<void> {
     db = instance;
     conn = await db.connect();
 
-    // Try to load the cityjson community extension
-    let extensionLoaded = false;
-    try {
-      await conn.query("INSTALL cityjson FROM community");
-      await conn.query("LOAD cityjson");
-      extensionLoaded = true;
-    } catch (extErr) {
-      console.warn(
-        "DuckDB cityjson extension not available in WASM runtime:",
-        extErr,
-      );
-    }
-
-    status = { state: "ready", extensionLoaded };
+    // `cityjson` at init, because every layer table wants it. `spatial` and
+    // `three_d` are lazy (`ensureExtension`): nothing in this feature needs
+    // them, and `spatial` alone is a 23 MB download.
+    await loadExtension("cityjson");
+    platform = await readPlatform();
+    loadedExtensions = await readLoadedExtensions();
+    publishReady();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     status = { state: "failed", error: message };
+    // Kill the Worker BEFORE clearing the memo: the reset below is what makes
+    // a Retry re-run this function, and a retry must not stack a second
+    // 36 MB wasm heap beside one nobody can reach any more.
+    worker?.terminate();
+    db = null;
+    conn = null;
+    // RESET, so a Retry button can call `initDuckDB()` again rather than being
+    // handed the same rejected-once memo forever.
+    initPromise = null;
     console.error("DuckDB-wasm initialization failed:", err);
   }
 }
 
 /**
- * Initialize DuckDB-wasm. Safe to call multiple times — returns the
- * same promise if already initializing or initialized.
+ * Initialize DuckDB-wasm. Safe to call multiple times — returns the same
+ * promise while initializing or once initialized. A FAILED init clears the
+ * memo, so the next call genuinely retries.
  */
 export function initDuckDB(): Promise<void> {
   if (!initPromise) {
     initPromise = doInit();
   }
   return initPromise;
+}
+
+/**
+ * Load `spatial` or `three_d` on demand, memoised per extension.
+ *
+ * Nothing in the query/filter/export features needs either one; they are made
+ * loadable for the analysis features to come, and a failed load is a `false`
+ * plus a recorded status, never a throw.
+ */
+export async function ensureExtension(name: ExtensionName): Promise<boolean> {
+  if (extensions[name].state === "loaded") return true;
+  const existing = extensionPromises.get(name);
+  if (existing) return await existing;
+  const promise = (async () => {
+    const ok = await loadExtension(name);
+    if (status.state === "ready") publishReady();
+    return ok;
+  })().finally(() => extensionPromises.delete(name));
+  extensionPromises.set(name, promise);
+  return await promise;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,23 +297,8 @@ export function initDuckDB(): Promise<void> {
  */
 export async function queryDuckDB(sql: string): Promise<QueryResult | null> {
   if (!conn || status.state !== "ready") return null;
-
   try {
-    const result = await conn.query(sql);
-    const columns = result.schema.fields.map((f) => f.name);
-    const rows: Record<string, unknown>[] = [];
-
-    for (let i = 0; i < result.numRows; i++) {
-      const row: Record<string, unknown> = {};
-      for (const col of columns) {
-        const val = result.getChild(col)?.get(i);
-        // Convert BigInt to Number for JSON compatibility
-        row[col] = typeof val === "bigint" ? Number(val) : val;
-      }
-      rows.push(row);
-    }
-
-    return { columns, rows };
+    return toRows(await conn.query(sql));
   } catch {
     return null;
   }
@@ -195,6 +354,102 @@ export async function queryParquetBuffer(
   }
 }
 
+/** One Arrow table as plain rows. BigInt is narrowed to Number because a
+ *  `COUNT(*)` comes back as one and `JSON.stringify` throws on it. */
+function toRows(
+  result: Awaited<ReturnType<duckdb.AsyncDuckDBConnection["query"]>>,
+): QueryResult {
+  const columns = result.schema.fields.map((f) => f.name);
+  const rows: Record<string, unknown>[] = [];
+  for (let i = 0; i < result.numRows; i++) {
+    const row: Record<string, unknown> = {};
+    for (const col of columns) {
+      const val = result.getChild(col)?.get(i);
+      row[col] = typeof val === "bigint" ? Number(val) : val;
+    }
+    rows.push(row);
+  }
+  return { columns, rows };
+}
+
+/**
+ * Run `sql` and report EITHER rows OR the reason it failed.
+ *
+ * The whole point next to {@link queryDuckDB}: a filter bar that shows
+ * "Binder Error: Referenced column \"nope\" not found!" teaches the user what
+ * to fix, where a null teaches nothing. All new code uses this.
+ */
+export async function runQuery(sql: string): Promise<QueryOutcome> {
+  if (!conn || status.state !== "ready") {
+    return { ok: false, message: NOT_RUNNING };
+  }
+  try {
+    const { columns, rows } = toRows(await conn.query(sql));
+    return { ok: true, columns, rows };
+  } catch (error) {
+    return { ok: false, message: formatDuckDBError(error) };
+  }
+}
+
+/** {@link runQuery} for a statement run for EFFECT (CREATE, DROP, COPY,
+ *  PRAGMA). Same outcome shape, so a caller can report the message. */
+export async function ddl(sql: string): Promise<QueryOutcome> {
+  return await runQuery(sql);
+}
+
+/**
+ * Register `bytes` in DuckDB's virtual file system under `name`.
+ *
+ * **CONSUMES `bytes`.** The array is handed over AS IS, deliberately not
+ * copied: duckdb-wasm's async bindings post the buffer to their worker in the
+ * TRANSFER list (`postTask(task, [buffer.buffer])`), which DETACHES the
+ * caller's `ArrayBuffer` — the whole backing buffer, even for a partial view.
+ * After this call the caller's array has length 0 and must never be read,
+ * re-registered or handed to a second consumer; a caller that needs the bytes
+ * again must obtain a FRESH array (see `SourceProvider`). That is the intent,
+ * not a hazard to route around: a layer's source bytes are released from the
+ * JS heap the moment the table is materialised, which is the whole reason the
+ * VFS copy is dropped straight afterwards.
+ *
+ * `queryParquetBuffer` `.slice()`s instead, because ITS callers deliberately
+ * re-use one buffer across two queries — see its own doc comment.
+ *
+ * A name is NEVER reused: a `dropFile`d name still resolves, to zero bytes,
+ * and fails with a misleading JSON parse error.
+ */
+export async function registerBuffer(
+  name: string,
+  bytes: Uint8Array,
+): Promise<boolean> {
+  if (!db || status.state !== "ready") return false;
+  try {
+    await db.registerFileBuffer(name, bytes);
+    return true;
+  } catch (error) {
+    console.warn(`DuckDB could not register "${name}":`, error);
+    return false;
+  }
+}
+
+/** Drop a VFS entry. Never throws: a drop that fails must not discard a
+ *  result already produced, and the name is dead either way. */
+export async function dropBuffer(name: string): Promise<void> {
+  if (!db) return;
+  await db.dropFile(name).catch(() => {});
+}
+
+/** A file DuckDB wrote (a `COPY` target, a `cityparquet_write` output) as
+ *  bytes, or null when there is no database or no such file. */
+export async function readFile(name: string): Promise<Uint8Array | null> {
+  if (!db || status.state !== "ready") return null;
+  try {
+    return await db.copyFileToBuffer(name);
+  } catch (error) {
+    console.warn(`DuckDB could not read "${name}":`, error);
+    return null;
+  }
+}
+
 /**
  * Whether the whole-file extension reader (`loadModelIntoDuckDB`, below) is
  * allowed for a layer: only for a static (non-streaming) URL layer.
@@ -229,7 +484,8 @@ export async function loadModelIntoDuckDB(
   encoding: "cityjson" | "cityjsonseq" | "flatcitybuf",
 ): Promise<boolean> {
   if (!conn || status.state !== "ready") return false;
-  if (!(status as { extensionLoaded: boolean }).extensionLoaded) return false;
+  // Was `status.extensionLoaded`, which meant exactly "cityjson loaded".
+  if (!isExtensionLoaded("cityjson")) return false;
 
   const readerFn =
     encoding === "cityjsonseq"
