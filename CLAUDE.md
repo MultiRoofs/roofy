@@ -145,6 +145,8 @@ npx tsc -b --noEmit  # Type check only (plain `tsc --noEmit` is a no-op: root ts
 npx vitest run       # Run app tests once
 ```
 
+Deploys: `.github/workflows/deploy.yml` deploys the `multiroof-viewer` Worker (static assets, `wrangler.jsonc`) on push to `main`; `.github/workflows/preview.yml` uploads an UNDEPLOYED preview version of the same Worker for every pull request and every push to `develop` (`wrangler versions upload --preview-alias <branch>`), posting the per-commit and per-branch `*.workers.dev` URLs on the PR — see `docs/repository-setup.md`.
+
 **`.env` is dotenvx-ENCRYPTED, so `dev`/`build`/`preview` run through `dotenvx run`** (the private key is `.env.keys`, gitignored). Plain `vite`/`vp dev` reads `.env` verbatim and inlines the `encrypted:…` CIPHERTEXT as the value — which is how `VITE_GOOGLE_MAPS_API_KEY` reached Google as a nonsense key and every Photorealistic-3D-Tiles request 400'd, silently, for months. `googleTilesConfig` now rejects a still-encrypted key with one console warning rather than pointing the engine at a URL that cannot work. Never bypass the wrapper to "simplify" a script.
 
 Plugin submodule (pnpm — Corepack refuses to run pnpm from the app root, which pins npm, so **always `cd` into the submodule**; never `pnpm -C` from the root):

@@ -1,11 +1,22 @@
 // Cloudflare Workers config: a static-assets Worker serving the built Vite
 // app from dist/. No Worker script — assets-only. Deployed by
 // .github/workflows/deploy.yml (push to main) or locally with
-// `npx wrangler deploy` after `npm run build`.
+// `npx wrangler deploy` after `npm run build`; previewed (never deployed) by
+// .github/workflows/preview.yml, or locally with
+// `npx wrangler versions upload --preview-alias <name>`.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "multiroof-viewer",
   "compatibility_date": "2026-08-01",
+  // Preview environment (.github/workflows/preview.yml): every pull request
+  // and every push to develop uploads an UNDEPLOYED version with
+  // `wrangler versions upload --preview-alias <branch>`, reachable at
+  // <version>-multiroof-viewer.<account>.workers.dev and the stable
+  // <branch>-multiroof-viewer.<account>.workers.dev. Both need preview URLs
+  // on, and since wrangler 4.44 that default follows `workers_dev`, so both
+  // are stated explicitly rather than inherited.
+  "workers_dev": true,
+  "preview_urls": true,
   "assets": {
     "directory": "./dist",
     // The viewer is an SPA (share links live in the URL hash; there are no
