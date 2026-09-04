@@ -4736,6 +4736,16 @@ const registry = new Map<string, LayerTable>();
  * the answer has to be a number.
  */
 const cancelBefore = new Map<string, number>();
+/**
+ * The sequence number of the most recent ENQUEUE for a layer.
+ *
+ * Read by `dropLayerTable`'s queued task, which has to decide whether the
+ * store entry it is about to clear belongs to the build it superseded or to a
+ * newer one that has since claimed the same id (a remove-then-re-add of the
+ * same file). Clearing the newer one's entry would blank a table that is
+ * perfectly alive.
+ */
+const lastEnqueueSeq = new Map<string, number>();
 let seqCounter = 0;
 let counter = 0;
 let chain: Promise<void> = Promise.resolve();
@@ -4755,6 +4765,7 @@ function enqueue(task: () => Promise<void>): Promise<void> {
 export function resetLayerTablesForTest(): void {
   registry.clear();
   cancelBefore.clear();
+  lastEnqueueSeq.clear();
   counter = 0;
   seqCounter = 0;
   chain = Promise.resolve();
@@ -4925,6 +4936,7 @@ export function enqueueLayerTable(
   source: LayerTableSource,
 ): Promise<void> {
   const seq = ++seqCounter;
+  lastEnqueueSeq.set(layerId, seq);
   // A REBUILD keeps the table it is replacing ON SCREEN. Only a layer with no
   // table yet passes through "queued"/"building".
   const queuedOver = registry.get(layerId);
@@ -4934,11 +4946,15 @@ export function enqueueLayerTable(
       ? { state: "ready", info: queuedOver, rebuilding: true }
       : { state: "queued" },
   );
+  /** Has a drop superseded this build? Asked twice — once before it starts,
+   *  once after it finishes — because a drop can arrive at any point in
+   *  between. (`?? 0` is safe: `seqCounter` starts at 1.) */
+  const superseded = () => seq <= (cancelBefore.get(layerId) ?? 0);
+
   return enqueue(async () => {
-    // Checked SYNCHRONOUSLY, before the first await: a build that has already
-    // STARTED runs to completion and the drop queued behind it removes what it
-    // produced. Only a build still waiting when the drop arrived is skipped.
-    if (seq <= (cancelBefore.get(layerId) ?? 0)) return;
+    // Checked SYNCHRONOUSLY, before the first await: a build still WAITING
+    // when the drop arrived is skipped outright and never touches DuckDB.
+    if (superseded()) return;
     // Re-read at RUN time, not at enqueue time: a drop or an earlier rebuild
     // may have landed in between.
     const previous = registry.get(layerId);
@@ -4962,6 +4978,16 @@ export function enqueueLayerTable(
       // closure are both released with the caller's reference. A rebuild
       // therefore always re-obtains its input rather than replaying a
       // consumed one.
+      if (superseded()) {
+        // The layer was REMOVED while this build ran. Publishing now would
+        // write a `ready` entry over the `null` the drop already set — a store
+        // entry for a layer that no longer exists, on the very object React
+        // subscribes to — so tear the new table down instead and publish
+        // nothing. Any `previous` is left alone: the drop's own queued task
+        // is right behind us and will retire it.
+        await retire(info);
+        return;
+      }
       registry.set(layerId, info);
       setState(layerId, { state: "ready", info });
       // AFTER the replacement exists, never before. Retiring first would leave
@@ -4974,6 +5000,12 @@ export function enqueueLayerTable(
           ? error.message
           : "The table could not be built.";
       console.warn(`DuckDB table for layer ${layerId} failed: ${message}`);
+      if (superseded()) {
+        // Same reason as the success path: the drop owns the store entry now,
+        // and a failed build of a removed layer has nothing to report to a
+        // panel that is no longer showing it.
+        return;
+      }
       if (previous) {
         // A failed REBUILD is not a failed layer: the old table was never
         // touched and still answers every query. The console carries the
@@ -5187,11 +5219,13 @@ describe("dropLayerTable", () => {
     await drop;
     const createIdx = sql.findIndex((s) => s.startsWith("CREATE OR REPLACE"));
     const dropIdx = sql.findIndex((s) => s.startsWith("DROP TABLE"));
-    // A build already in flight finishes, and the drop behind it removes what
-    // it produced — the point of a single queue.
+    // A build already in flight finishes — and then tears down what it made,
+    // because the drop that arrived meanwhile means nobody wants it. Either
+    // way the CREATE is never left standing.
     expect(createIdx).toBeGreaterThanOrEqual(0);
     expect(dropIdx).toBeGreaterThan(createIdx);
     expect(getLayerTable("L1")).toBeNull();
+    expect(useLayerTableStore.getState().tables.L1).toBeUndefined();
   });
 
   it("SKIPS a build whose layer was removed while it was still queued", async () => {
@@ -5210,6 +5244,25 @@ describe("dropLayerTable", () => {
     expect(sql.filter((s) => s.startsWith("CREATE OR REPLACE")).length).toBe(1);
   });
 
+  it("a build cancelled MID-FLIGHT publishes nothing and drops what it made", async () => {
+    gate = makeGate();
+    const build = enqueueLayerTable("L1", ONE_ROW);
+    // Past the entry guard: this build WILL run to completion.
+    await flushMicrotasks();
+    const drop = dropLayerTable("L1");
+
+    gate.open();
+    await Promise.all([build, drop]);
+
+    // Neither the registry nor — the point of this test — the STORE keeps an
+    // entry for a layer that has been removed.
+    expect(getLayerTable("L1")).toBeNull();
+    expect(useLayerTableStore.getState().tables.L1).toBeUndefined();
+    // And the table the build did create was torn down, not orphaned.
+    expect(sql).toContain('CREATE OR REPLACE TABLE "layer_1"');
+    expect(sql).toContain('DROP TABLE IF EXISTS "layer_1"');
+  });
+
   it("does NOT cancel a re-add enqueued AFTER the drop", async () => {
     await enqueueLayerTable("L1", ONE_ROW);
     const drop = dropLayerTable("L1");
@@ -5219,6 +5272,8 @@ describe("dropLayerTable", () => {
     const readd = enqueueLayerTable("L1", ONE_ROW);
     await Promise.all([drop, readd]);
 
+    // The drop's queued task runs BEFORE the re-add's and must not blank the
+    // newcomer's entry on its way out — hence `lastEnqueueSeq`.
     expect(getLayerTable("L1")).not.toBeNull();
     expect(useLayerTableStore.getState().tables.L1).toMatchObject({
       state: "ready",
@@ -5343,13 +5398,26 @@ calls it too:
 export function dropLayerTable(layerId: string): Promise<void> {
   // Everything enqueued for this layer BEFORE now is superseded; anything
   // enqueued after — a re-add of the same id — takes a higher number and runs.
-  cancelBefore.set(layerId, ++seqCounter);
+  const seq = ++seqCounter;
+  cancelBefore.set(layerId, seq);
   setState(layerId, null);
   return enqueue(async () => {
     const info = registry.get(layerId);
-    if (!info) return;
-    registry.delete(layerId);
-    await retire(info);
+    if (info) {
+      registry.delete(layerId);
+      await retire(info);
+    }
+    // Clear the store AGAIN, and this is not belt-and-braces. The synchronous
+    // `setState(null)` above happens while a build may already be RUNNING; that
+    // build's own guard stops it publishing, but a build that had ALREADY
+    // published between the drop being issued and this task running would
+    // otherwise leave a `ready` entry for a layer that no longer exists — a
+    // leak on the one object React subscribes to.
+    //
+    // Unless a NEWER enqueue has claimed the id since (a remove-then-re-add of
+    // the same file): that one's entry is alive and blanking it would empty a
+    // table the user is looking at.
+    if ((lastEnqueueSeq.get(layerId) ?? 0) <= seq) setState(layerId, null);
   });
 }
 ```
@@ -14301,93 +14369,94 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
 
 ### 1. Spec coverage
 
-| Spec section  | Requirement                                                                                                               | Task(s)                                           |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| §1.1          | Every city-model layer in its own DuckDB table                                                                            | 12, 13, 14, 16, 17                                |
-| §1.2          | Table panel: pagination ≤1000, sort, structured WHERE                                                                     | 8, 9, 10, 20, 21, 22, 23                          |
-| §1.3          | A toggle applies the filter to the 3D map                                                                                 | 24, 25, 26, 27                                    |
-| §1.4          | Export dialog: format, LoD, object types, attributes                                                                      | 7, 11, 28, 29, 30, 31                             |
-| §1 (breaking) | In-memory branches and `city_objects` REMOVED, not kept                                                                   | 18, 23                                            |
-| §2            | duckdb-wasm pinned to dev64 / DuckDB 1.5.5, arrow 17                                                                      | 1                                                 |
-| §2            | Never `latest`; the city-format writers never offered as usable                                                           | Global Constraints; 11, 29, 31                    |
-| §2            | A dropped VFS name never reused                                                                                           | 13 (counter), 29, 30                              |
-| §2            | Reader schema; `id`/`feature_id` semantics                                                                                | 6, 12, 13, 33                                     |
-| §2            | Drop `geometry_*`/`material_*`/`texture_*`/`template`                                                                     | 5, 13                                             |
-| §2            | Cell types: `to_json`, `::VARCHAR`, BigInt                                                                                | 5, 10, 12                                         |
-| §2            | **HUGEINT / DECIMAL arrive as STRINGS → `castText`, no `toFixed`**                                                        | 5, 22                                             |
-| §2            | CityParquet write: schema, module tables, init (own statement), validate, write                                           | 7, 11, 30                                         |
-| §2            | Directory argument with NO trailing slash                                                                                 | 30                                                |
-| §2            | **A MISSING VFS name reads back as ONE garbage byte, no error → validate by content**                                     | 29 (`validateExportBytes`), 30                    |
-| §2            | `globFiles` lists never-created names → cleanup only, never discovery                                                     | 30                                                |
-| §2            | `cityparquet_write` browser-verified; table survives `dropFile`                                                           | 13 (doc), 30, 32                                  |
-| §2            | `cityparquet_read` / `cityjson_geoparquet_geo` unusable                                                                   | Global Constraints (never called)                 |
-| §2            | **`spatial` does not autoload and is CORE (`INSTALL spatial`)**                                                           | 2 (`installStatement`), 34                        |
-| §3.1          | Per-extension status, `ensureExtension`, `runQuery`, `formatDuckDBError`                                                  | 2                                                 |
-| §3.1          | `registerBuffer`/`dropBuffer`/`readFile`/`ddl`                                                                            | 2                                                 |
-| §3.1          | **Init failure terminates the Worker, then resets the memo**                                                              | 2                                                 |
-| §3.1          | StatusBar labels + **`PRAGMA platform`** + `duckdb_extensions()` tooltip                                                  | 2, 3                                              |
-| §3.2          | `LayerTable`/`ColumnInfo` shape, `classifyColumnType`                                                                     | 5, 13                                             |
-| §3.2          | Source table (file/URL/CityGML/CityParquet/streaming)                                                                     | 15, 16, 17                                        |
-| §3.2          | `shouldUseSourceUrlPath` deleted; `loadFromUrl` returns bytes                                                             | 15, 18                                            |
-| §3.2          | Reader-backed creation SQL, then `dropBuffer`                                                                             | 13                                                |
-| §3.2          | **A REBUILD keeps the old table until the new one exists; a FAILED rebuild keeps it for good**                            | 13, 14                                            |
-| §3.2          | **Cancellation is a monotonic SEQUENCE, not a flag: a drop supersedes only what was enqueued before it**                  | 13, 14                                            |
-| §3.2          | **The flat fallback ALTERs `parents`/`children` to `VARCHAR[]` — `read_json_auto` types an all-NULL column as JSON**      | 12, 13, 33                                        |
-| §3.2          | **`registerBuffer` CONSUMES its array; no needless second copy anywhere**                                                 | 2, 13, 15, 16                                     |
-| §3.2          | **`SourceProvider` returns DECODED bytes for file AND url**                                                               | 15 (`fetchModelBytes`, gunzip test), 16           |
-| §3.2          | **A restored file layer has no provider → export refused with that reason**                                               | 13/16 (`provider: null`), 31 (`RELINK_REASON`)    |
-| §3.2          | Flat fallback aligned to the reader's names; `featureId.ts`                                                               | 6, 12, 13                                         |
-| §3.2          | Lifecycle: enqueue/drop, FIFO, skip-if-removed, rebuild, counter                                                          | 13, 14, 17                                        |
-| §3.2          | **Streaming debounce gated on the PANEL; the export dialog forces one rebuild**                                           | 17 (`refreshStreamingTable`), 31                  |
-| §3.2          | Failures recorded, never thrown into the loader                                                                           | 13, 16                                            |
-| §3.2          | `layerTableStore` mirror                                                                                                  | 13                                                |
-| §3.2          | App loses its DuckDB effect and flags; StatsTab on `object_type`                                                          | 18, 19                                            |
-| §3.3          | Filter AST, `LayerQuery`, `queryStore`, session-only                                                                      | 8                                                 |
-| §3.3          | `quoteIdent`/`quoteLiteral`/`compileFilter`/LIKE escaping                                                                 | 9                                                 |
-| §3.3          | `projectColumn`, `buildPageSql`, `buildCountSql`                                                                          | 10                                                |
-| §3.3          | `buildFeatureIdsSql` with COALESCE + positive IN                                                                          | 10, 27                                            |
-| §3.3          | `buildDistinctSql` — deliberately NOT built (see the gaps note); `buildRootTypesSql` added for §3.6                       | 10                                                |
-| §3.4          | `TablePanel`→`FilterBar`→`DataGrid`→`Pagination`, `useLayerQuery`                                                         | 20, 21, 22, 23                                    |
-| §3.4          | Header: Sync selection, Filter map, Export, collapse                                                                      | 23, 31                                            |
-| §3.4          | IntersectionObserver removed; 320 px default, 120–800 clamp                                                               | 22, 23                                            |
-| §3.4          | States: engine failed+Retry, queued/building, failed, no layer, zero rows                                                 | 20, 23                                            |
-| §3.4          | **`initializing` is published BEFORE the 3.5 s boot, so the panel never offers Retry over a healthy engine**              | 23                                                |
-| §3.4          | **A DuckDB page error / compile refusal is shown in the panel BODY, not only in the collapsed bar**                       | 23                                                |
-| §3.4          | **Values are kept RAW in the condition and coerced at compile time — a fractional threshold can be typed**                | 9, 21                                             |
-| §3.4          | **Zero rows + Filter map on → "0 of N rows match; the map shows nothing…"**                                               | 22 (`emptyMessage`), 23                           |
-| §3.5          | `syncToMap` → ids → `setVisibleObjectIds`; null vs empty                                                                  | 26, 27                                            |
-| §3.5          | `buildCityMeshArrays` visible-id parameter, slot invariant                                                                | 24                                                |
-| §3.5          | `CityModelMesh.setVisibleObjectIds` + handle + registry                                                                   | 25                                                |
-| §3.5          | `Layer.visibleObjectIds` session-only; `handleSync` push                                                                  | 26                                                |
-| §3.5          | **`setVisibleObjectIds` is a no-op on identity; the sync returns early when there is nothing to clear**                   | 26, 27                                            |
-| §3.5          | **`syncFilterToMap` carries a per-layer generation: a slow earlier query cannot rebuild the geometry over a newer one**   | 27                                                |
-| §3.5          | Streaming disabled with the exact reason string                                                                           | 23                                                |
-| §3.6          | Dialog: scope, object types, attributes, LoD, format                                                                      | 31                                                |
-| §3.6          | **The chosen format is clamped to what is offered, and the attribute list re-seeds when the table changes**               | 31                                                |
-| §3.6          | CityParquet: schema, re-register, CTAS, init, validate, write, zip, cleanup                                               | 30                                                |
-| §3.6          | **Every file the write names must be in the zip**                                                                         | 30                                                |
-| §3.6          | **The output name is the FIRST string column of the write's result row, with a repeated dir prefix stripped**             | 30                                                |
-| §3.6          | **The source is read ONCE into a scratch schema; N modules is not N parses**                                              | 11, 30                                            |
-| §3.6          | **`cityparquet_validate` returns no rows — the temp table is dropped first, and a run/read failure is a VISIBLE warning** | 30                                                |
-| §3.6          | **`dropBuffer` over a writer-created file is unverified: try/catch + warn, checked by the smoke**                         | 30, 32                                            |
-| §3.6          | `cityGmlModuleOf`                                                                                                         | 7                                                 |
-| §3.6          | Parquet/CSV/JSON via `COPY`                                                                                               | 29                                                |
-| §3.6          | **City formats shown DISABLED with the exact title**                                                                      | 31                                                |
-| §3.6          | **Fallback layers: attribute formats only, plus the "no CityJSON source" sentence**                                       | 31                                                |
-| §3.6          | `platform/download.ts` factored from `RuleBuilderTab`                                                                     | 28                                                |
-| §3.6          | Busy state, cancel-safe `finally`, inline errors                                                                          | 30, 31                                            |
-| §3.7          | Snapshot stays v3; nothing new persisted                                                                                  | 8, 26 (no `persistence/types.ts` change at all)   |
-| §4            | Unit tests for every pure module and store                                                                                | 5–14, 20–22, 26–31                                |
-| §4            | Plugin unit tests                                                                                                         | 24, 25                                            |
-| §4            | Opt-in Node integration behind `DUCKDB_INTEGRATION`                                                                       | 33                                                |
-| §4            | **Reader `id` set == `parseCityJSON().objects` key set**                                                                  | 33                                                |
-| §4            | Browser smoke: boot, table, filter, map sync, all four exports                                                            | 32                                                |
-| §5            | Submodule branch from `947c980`, pushed, gitlink bump                                                                     | 24, 25, 26, 34                                    |
-| §5            | Lockfile regenerated; `npm ci` verified in a fresh clone                                                                  | 1, 34                                             |
-| §5            | The seven mocking test files                                                                                              | 4                                                 |
-| §5            | `duckdb.ts` the only importer of `@duckdb/duckdb-wasm`                                                                    | Global Constraints; 13, 29, 30 all import from it |
-| §6            | `spatial`/`three_d` loadable but with nothing to operate on in v1                                                         | 34                                                |
-| §6            | The two `three_d` traps recorded for the follow-up                                                                        | 34                                                |
+| Spec section  | Requirement                                                                                                                                   | Task(s)                                           |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| §1.1          | Every city-model layer in its own DuckDB table                                                                                                | 12, 13, 14, 16, 17                                |
+| §1.2          | Table panel: pagination ≤1000, sort, structured WHERE                                                                                         | 8, 9, 10, 20, 21, 22, 23                          |
+| §1.3          | A toggle applies the filter to the 3D map                                                                                                     | 24, 25, 26, 27                                    |
+| §1.4          | Export dialog: format, LoD, object types, attributes                                                                                          | 7, 11, 28, 29, 30, 31                             |
+| §1 (breaking) | In-memory branches and `city_objects` REMOVED, not kept                                                                                       | 18, 23                                            |
+| §2            | duckdb-wasm pinned to dev64 / DuckDB 1.5.5, arrow 17                                                                                          | 1                                                 |
+| §2            | Never `latest`; the city-format writers never offered as usable                                                                               | Global Constraints; 11, 29, 31                    |
+| §2            | A dropped VFS name never reused                                                                                                               | 13 (counter), 29, 30                              |
+| §2            | Reader schema; `id`/`feature_id` semantics                                                                                                    | 6, 12, 13, 33                                     |
+| §2            | Drop `geometry_*`/`material_*`/`texture_*`/`template`                                                                                         | 5, 13                                             |
+| §2            | Cell types: `to_json`, `::VARCHAR`, BigInt                                                                                                    | 5, 10, 12                                         |
+| §2            | **HUGEINT / DECIMAL arrive as STRINGS → `castText`, no `toFixed`**                                                                            | 5, 22                                             |
+| §2            | CityParquet write: schema, module tables, init (own statement), validate, write                                                               | 7, 11, 30                                         |
+| §2            | Directory argument with NO trailing slash                                                                                                     | 30                                                |
+| §2            | **A MISSING VFS name reads back as ONE garbage byte, no error → validate by content**                                                         | 29 (`validateExportBytes`), 30                    |
+| §2            | `globFiles` lists never-created names → cleanup only, never discovery                                                                         | 30                                                |
+| §2            | `cityparquet_write` browser-verified; table survives `dropFile`                                                                               | 13 (doc), 30, 32                                  |
+| §2            | `cityparquet_read` / `cityjson_geoparquet_geo` unusable                                                                                       | Global Constraints (never called)                 |
+| §2            | **`spatial` does not autoload and is CORE (`INSTALL spatial`)**                                                                               | 2 (`installStatement`), 34                        |
+| §3.1          | Per-extension status, `ensureExtension`, `runQuery`, `formatDuckDBError`                                                                      | 2                                                 |
+| §3.1          | `registerBuffer`/`dropBuffer`/`readFile`/`ddl`                                                                                                | 2                                                 |
+| §3.1          | **Init failure terminates the Worker, then resets the memo**                                                                                  | 2                                                 |
+| §3.1          | StatusBar labels + **`PRAGMA platform`** + `duckdb_extensions()` tooltip                                                                      | 2, 3                                              |
+| §3.2          | `LayerTable`/`ColumnInfo` shape, `classifyColumnType`                                                                                         | 5, 13                                             |
+| §3.2          | Source table (file/URL/CityGML/CityParquet/streaming)                                                                                         | 15, 16, 17                                        |
+| §3.2          | `shouldUseSourceUrlPath` deleted; `loadFromUrl` returns bytes                                                                                 | 15, 18                                            |
+| §3.2          | Reader-backed creation SQL, then `dropBuffer`                                                                                                 | 13                                                |
+| §3.2          | **A REBUILD keeps the old table until the new one exists; a FAILED rebuild keeps it for good**                                                | 13, 14                                            |
+| §3.2          | **Cancellation is a monotonic SEQUENCE, not a flag: a drop supersedes only what was enqueued before it**                                      | 13, 14                                            |
+| §3.2          | **A build cancelled MID-FLIGHT publishes nothing and retires its own table; the drop re-clears the store unless a newer enqueue owns the id** | 13, 14                                            |
+| §3.2          | **The flat fallback ALTERs `parents`/`children` to `VARCHAR[]` — `read_json_auto` types an all-NULL column as JSON**                          | 12, 13, 33                                        |
+| §3.2          | **`registerBuffer` CONSUMES its array; no needless second copy anywhere**                                                                     | 2, 13, 15, 16                                     |
+| §3.2          | **`SourceProvider` returns DECODED bytes for file AND url**                                                                                   | 15 (`fetchModelBytes`, gunzip test), 16           |
+| §3.2          | **A restored file layer has no provider → export refused with that reason**                                                                   | 13/16 (`provider: null`), 31 (`RELINK_REASON`)    |
+| §3.2          | Flat fallback aligned to the reader's names; `featureId.ts`                                                                                   | 6, 12, 13                                         |
+| §3.2          | Lifecycle: enqueue/drop, FIFO, skip-if-removed, rebuild, counter                                                                              | 13, 14, 17                                        |
+| §3.2          | **Streaming debounce gated on the PANEL; the export dialog forces one rebuild**                                                               | 17 (`refreshStreamingTable`), 31                  |
+| §3.2          | Failures recorded, never thrown into the loader                                                                                               | 13, 16                                            |
+| §3.2          | `layerTableStore` mirror                                                                                                                      | 13                                                |
+| §3.2          | App loses its DuckDB effect and flags; StatsTab on `object_type`                                                                              | 18, 19                                            |
+| §3.3          | Filter AST, `LayerQuery`, `queryStore`, session-only                                                                                          | 8                                                 |
+| §3.3          | `quoteIdent`/`quoteLiteral`/`compileFilter`/LIKE escaping                                                                                     | 9                                                 |
+| §3.3          | `projectColumn`, `buildPageSql`, `buildCountSql`                                                                                              | 10                                                |
+| §3.3          | `buildFeatureIdsSql` with COALESCE + positive IN                                                                                              | 10, 27                                            |
+| §3.3          | `buildDistinctSql` — deliberately NOT built (see the gaps note); `buildRootTypesSql` added for §3.6                                           | 10                                                |
+| §3.4          | `TablePanel`→`FilterBar`→`DataGrid`→`Pagination`, `useLayerQuery`                                                                             | 20, 21, 22, 23                                    |
+| §3.4          | Header: Sync selection, Filter map, Export, collapse                                                                                          | 23, 31                                            |
+| §3.4          | IntersectionObserver removed; 320 px default, 120–800 clamp                                                                                   | 22, 23                                            |
+| §3.4          | States: engine failed+Retry, queued/building, failed, no layer, zero rows                                                                     | 20, 23                                            |
+| §3.4          | **`initializing` is published BEFORE the 3.5 s boot, so the panel never offers Retry over a healthy engine**                                  | 23                                                |
+| §3.4          | **A DuckDB page error / compile refusal is shown in the panel BODY, not only in the collapsed bar**                                           | 23                                                |
+| §3.4          | **Values are kept RAW in the condition and coerced at compile time — a fractional threshold can be typed**                                    | 9, 21                                             |
+| §3.4          | **Zero rows + Filter map on → "0 of N rows match; the map shows nothing…"**                                                                   | 22 (`emptyMessage`), 23                           |
+| §3.5          | `syncToMap` → ids → `setVisibleObjectIds`; null vs empty                                                                                      | 26, 27                                            |
+| §3.5          | `buildCityMeshArrays` visible-id parameter, slot invariant                                                                                    | 24                                                |
+| §3.5          | `CityModelMesh.setVisibleObjectIds` + handle + registry                                                                                       | 25                                                |
+| §3.5          | `Layer.visibleObjectIds` session-only; `handleSync` push                                                                                      | 26                                                |
+| §3.5          | **`setVisibleObjectIds` is a no-op on identity; the sync returns early when there is nothing to clear**                                       | 26, 27                                            |
+| §3.5          | **`syncFilterToMap` carries a per-layer generation: a slow earlier query cannot rebuild the geometry over a newer one**                       | 27                                                |
+| §3.5          | Streaming disabled with the exact reason string                                                                                               | 23                                                |
+| §3.6          | Dialog: scope, object types, attributes, LoD, format                                                                                          | 31                                                |
+| §3.6          | **The chosen format is clamped to what is offered, and the attribute list re-seeds when the table changes**                                   | 31                                                |
+| §3.6          | CityParquet: schema, re-register, CTAS, init, validate, write, zip, cleanup                                                                   | 30                                                |
+| §3.6          | **Every file the write names must be in the zip**                                                                                             | 30                                                |
+| §3.6          | **The output name is the FIRST string column of the write's result row, with a repeated dir prefix stripped**                                 | 30                                                |
+| §3.6          | **The source is read ONCE into a scratch schema; N modules is not N parses**                                                                  | 11, 30                                            |
+| §3.6          | **`cityparquet_validate` returns no rows — the temp table is dropped first, and a run/read failure is a VISIBLE warning**                     | 30                                                |
+| §3.6          | **`dropBuffer` over a writer-created file is unverified: try/catch + warn, checked by the smoke**                                             | 30, 32                                            |
+| §3.6          | `cityGmlModuleOf`                                                                                                                             | 7                                                 |
+| §3.6          | Parquet/CSV/JSON via `COPY`                                                                                                                   | 29                                                |
+| §3.6          | **City formats shown DISABLED with the exact title**                                                                                          | 31                                                |
+| §3.6          | **Fallback layers: attribute formats only, plus the "no CityJSON source" sentence**                                                           | 31                                                |
+| §3.6          | `platform/download.ts` factored from `RuleBuilderTab`                                                                                         | 28                                                |
+| §3.6          | Busy state, cancel-safe `finally`, inline errors                                                                                              | 30, 31                                            |
+| §3.7          | Snapshot stays v3; nothing new persisted                                                                                                      | 8, 26 (no `persistence/types.ts` change at all)   |
+| §4            | Unit tests for every pure module and store                                                                                                    | 5–14, 20–22, 26–31                                |
+| §4            | Plugin unit tests                                                                                                                             | 24, 25                                            |
+| §4            | Opt-in Node integration behind `DUCKDB_INTEGRATION`                                                                                           | 33                                                |
+| §4            | **Reader `id` set == `parseCityJSON().objects` key set**                                                                                      | 33                                                |
+| §4            | Browser smoke: boot, table, filter, map sync, all four exports                                                                                | 32                                                |
+| §5            | Submodule branch from `947c980`, pushed, gitlink bump                                                                                         | 24, 25, 26, 34                                    |
+| §5            | Lockfile regenerated; `npm ci` verified in a fresh clone                                                                                      | 1, 34                                             |
+| §5            | The seven mocking test files                                                                                                                  | 4                                                 |
+| §5            | `duckdb.ts` the only importer of `@duckdb/duckdb-wasm`                                                                                        | Global Constraints; 13, 29, 30 all import from it |
+| §6            | `spatial`/`three_d` loadable but with nothing to operate on in v1                                                                             | 34                                                |
+| §6            | The two `three_d` traps recorded for the follow-up                                                                                            | 34                                                |
 
 **Gaps found and closed while writing (both drafts):**
 
@@ -14428,7 +14497,14 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
   which the first draft implemented as a `Set`. A set also cancels builds
   enqueued AFTER the drop, and clearing it at enqueue time un-cancels a build
   the drop was meant to kill; the question is "which came first", so Tasks
-  13/14 answer it with a monotonic sequence number.
+  13/14 answer it with a monotonic sequence number. The spec is silent on the
+  harder half — a build that has already STARTED when the drop arrives — and
+  the obvious reading (let it finish, let the drop clean up) LEAKS: the build
+  publishes `{state:"ready"}` after the drop's `setState(null)`, leaving an
+  entry for a removed layer on the very object React subscribes to. So the
+  build asks again when it settles, retires its own table and publishes
+  nothing, and the drop task clears the store a second time unless a newer
+  enqueue has claimed the id.
 - §3.2's flat fallback assumes `read_json_auto` reproduces the reader's schema.
   Probed 2026-09-04: an all-NULL `parents` types as JSON, `sample_size = -1`
   and `union_by_name` do not help, and a PARTIAL `columns = {…}` drops every
@@ -14533,9 +14609,13 @@ Every name that crosses a task boundary, re-checked after the edits:
   function (Task 2), and REFERENCED — not restated differently — on
   `LayerTableSource.bytes` and `SourceProvider` (Task 13), `modelTableSource`
   and both providers (Task 16), and `loadFromUrl`'s `bytes` field (Task 15).
-- `cancelBefore` / `seqCounter` replace the old `cancelled` Set outright: no
-  reference to a cancellation Set survives in Task 13's implementation, Task
-  14's `dropLayerTable`, `resetLayerTablesForTest` or either test file.
+- `cancelBefore` / `lastEnqueueSeq` / `seqCounter` replace the old `cancelled`
+  Set outright: no reference to a cancellation Set survives in Task 13's
+  implementation, Task 14's `dropLayerTable`, `resetLayerTablesForTest` or
+  either test file. `superseded()` is asked TWICE in the build task — before
+  its first await and after the build settles — `lastEnqueueSeq` is read only
+  by the drop task, and all three maps are cleared by
+  `resetLayerTablesForTest`.
 - `isValueList`, `literalFor` and `NUMERIC_TYPES` are file-local to
   `analytics/sql.ts` (Task 9); `FilterValue` is imported there for the first.
   Task 21's `parseValue(raw, op)` dropped its `column` parameter, and its one
