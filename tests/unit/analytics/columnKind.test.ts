@@ -3,7 +3,6 @@ import {
   classifyColumnType,
   isDroppedColumn,
   isTextColumn,
-  lodColumnSuffix,
   lodsFromColumnNames,
 } from "../../../src/analytics/columnKind";
 
@@ -131,13 +130,6 @@ describe("isDroppedColumn", () => {
 });
 
 describe("LoD column maths", () => {
-  it("spells an LoD as DuckDB spells it in a column name", () => {
-    // Deprecated: `src/analytics/sql.ts` is the last caller. This case goes
-    // when that call does — a suffix belongs to a column, not to a label.
-    expect(lodColumnSuffix("2.2")).toBe("2_2");
-    expect(lodColumnSuffix("0")).toBe("0");
-  });
-
   it("reads the LoD ladder back off the geometry columns, sorted and deduped", () => {
     expect(
       lodsFromColumnNames([

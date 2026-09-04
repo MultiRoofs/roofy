@@ -80,20 +80,6 @@ export function isDroppedColumn(name: string): boolean {
 }
 
 /**
- * "2.2" -> "2_2": how the reader spells an LoD inside a column name.
- *
- * @deprecated — use `LodColumn.suffix` from {@link lodsFromColumnNames}.
- * Reconstructing a suffix from a LABEL is the bug this file now avoids: the
- * reader writes `geometry_lod0_0` for Delft's LoD 0, and nothing guarantees
- * every file spells an LoD in two parts, so the only safe suffix is the one
- * read off the actual column name. Kept for the moment because
- * `src/analytics/sql.ts` still calls it; delete both together.
- */
-export function lodColumnSuffix(lod: string): string {
-  return lod.replace(/\./g, "_");
-}
-
-/**
  * One rung of a layer's LoD ladder, as the reader's own columns spell it.
  *
  * Two fields because the two jobs differ: `label` is what a human picks from
