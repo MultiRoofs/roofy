@@ -235,7 +235,8 @@ function compileCondition(
  * wording is about SQL rather than about the row the user was editing.
  *
  * The clause is returned WITHOUT outer parentheses. Callers that embed it
- * beside another predicate wrap it themselves — see {@link buildExportWhere}.
+ * beside another predicate wrap it themselves — see
+ * {@link buildFeatureScopeWhere}.
  */
 export function compileFilter(
   group: FilterGroup,
@@ -250,4 +251,125 @@ export function compileFilter(
     parts.push(compiled.sql);
   }
   return { ok: true, where: parts.join(` ${group.logic} `) };
+}
+
+// ---------------------------------------------------------------------------
+// Browsing: projection, paging, counts, feature ids
+// ---------------------------------------------------------------------------
+
+/**
+ * How one column reaches the grid.
+ *
+ * `scalar` crosses raw; `castText` is cast IN SQL because DuckDB knows its own
+ * formatting for a DATE, a TIMESTAMP or a HUGEINT and JS does not (a BIGINT
+ * arrives as a `BigInt`, which `JSON.stringify` refuses outright); `nested`
+ * goes through `to_json`, which yields a plain `Utf8` and leaves NULL as null;
+ * `blob` is not shown at all — geometry WKB in a table cell is noise.
+ */
+export function projectColumn(column: ColumnInfo): string | null {
+  const ident = quoteIdent(column.name);
+  switch (column.kind) {
+    case "scalar":
+      return ident;
+    case "castText":
+      return `${ident}::VARCHAR AS ${ident}`;
+    case "nested":
+      return `to_json(${ident}) AS ${ident}`;
+    case "blob":
+      return null;
+  }
+}
+
+/** The columns a grid shows, in table order. */
+export function gridColumns(
+  columns: ReadonlyArray<ColumnInfo>,
+): ReadonlyArray<ColumnInfo> {
+  return columns.filter((c) => c.kind !== "blob");
+}
+
+/** ORDER BY is offered only for a column that HAS an order: a LIST or a
+ *  STRUCT sorts by a rule nobody could predict from the header. */
+function orderClause(
+  columns: ReadonlyArray<ColumnInfo>,
+  sort: { readonly column: string; readonly dir: "asc" | "desc" } | null,
+): string {
+  if (sort === null) return "";
+  const column = columns.find((c) => c.name === sort.column);
+  if (!column) return "";
+  if (column.kind !== "scalar" && column.kind !== "castText") return "";
+  // NULLS LAST in both directions: a page of nulls at the top of a descending
+  // sort is the one thing nobody clicks a header to see.
+  return ` ORDER BY ${quoteIdent(column.name)} ${sort.dir === "asc" ? "ASC" : "DESC"} NULLS LAST`;
+}
+
+export function buildPageSql(
+  table: string,
+  columns: ReadonlyArray<ColumnInfo>,
+  where: string | null,
+  sort: { readonly column: string; readonly dir: "asc" | "desc" } | null,
+  page: number,
+  pageSize: number,
+): string {
+  const projections = columns
+    .map(projectColumn)
+    .filter((p): p is string => p !== null);
+  // `SELECT 1` rather than `SELECT ` for a table of nothing but blobs: an
+  // empty select list does not bind, and the row count still has to work.
+  const select = projections.length === 0 ? "1" : projections.join(", ");
+  const whereClause = where === null ? "" : ` WHERE ${where}`;
+  const offset = Math.max(0, page) * pageSize;
+  return `SELECT ${select} FROM ${quoteIdent(table)}${whereClause}${orderClause(columns, sort)} LIMIT ${pageSize} OFFSET ${offset}`;
+}
+
+export function buildCountSql(table: string, where: string | null): string {
+  const whereClause = where === null ? "" : ` WHERE ${where}`;
+  return `SELECT COUNT(*) AS "n" FROM ${quoteIdent(table)}${whereClause}`;
+}
+
+/**
+ * The scope predicate every FEATURE-wise operation shares.
+ *
+ * Always the POSITIVE `IN` form, and `COALESCE` on BOTH sides: a single NULL
+ * `feature_id` makes a `NOT IN` predicate NULL, which hides nothing and looks
+ * like a filter that silently did not apply. The COALESCE is what lets a root
+ * object (whose `feature_id` may be its own id, or NULL in a fallback table)
+ * match its own parts.
+ */
+export function buildFeatureScopeWhere(
+  table: string,
+  where: string | null,
+): string | null {
+  if (where === null) return null;
+  const t = quoteIdent(table);
+  return `COALESCE("feature_id", "id") IN (SELECT COALESCE("feature_id", "id") FROM ${t} WHERE ${where})`;
+}
+
+/**
+ * The ids the map should draw for `where`.
+ *
+ * Matches are expanded to their whole FEATURE, because attributes and geometry
+ * live on different rows in real data: a `Building` carries the semantics and
+ * a `BuildingPart` carries the shape, so filtering on `b3_h_dak_max > 10` and
+ * drawing only the matching rows would draw nothing at all.
+ */
+export function buildFeatureIdsSql(
+  table: string,
+  where: string | null,
+): string {
+  const t = quoteIdent(table);
+  const scope = buildFeatureScopeWhere(table, where);
+  return scope === null
+    ? `SELECT "id" FROM ${t}`
+    : `SELECT "id" FROM ${t} WHERE ${scope}`;
+}
+
+/**
+ * The layer's TOP-LEVEL object types — what the export dialog offers.
+ *
+ * `parents IS NULL` is the test, not a type-name heuristic: the reader writes
+ * SQL NULL (never `[]`) for an object with no parents, so this is exactly the
+ * set of feature roots. Parts follow their root into the export.
+ */
+export function buildRootTypesSql(table: string): string {
+  return `SELECT DISTINCT "object_type" AS "value" FROM ${quoteIdent(table)} WHERE "parents" IS NULL AND "object_type" IS NOT NULL ORDER BY 1`;
 }
