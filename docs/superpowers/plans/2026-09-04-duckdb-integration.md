@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - `@duckdb/duckdb-wasm` is pinned EXACTLY to `1.33.1-dev64.0`. Never `latest` (dev57 / DuckDB 1.5.4) — its community slot serves a stale 4-function `cityjson` and a `three_d` that breaks `LOAD spatial`, silently.
-- `src/analytics/duckdb.ts` is the ONLY module that may `import … from "@duckdb/duckdb-wasm"`. `layerTables`, `export`, `sql` and every UI module take the engine through that module's exported functions so they can be mocked with `vi.mock`.
+- `src/analytics/duckdb.ts` is the ONLY module UNDER `src/` that may `import … from "@duckdb/duckdb-wasm"`. `layerTables`, `export`, `sql` and every UI module take the engine through that module's exported functions so they can be mocked with `vi.mock`. (The opt-in integration harness under `tests/integration/duckdb/` loads the NODE bindings directly — a different entry point, and the reason the rule is scoped to `src/`.)
 - `COPY … TO (FORMAT cityjson | cityjsonseq | flatcitybuf)` writes **0 bytes** in wasm, silently. Those three formats are NEVER offered in the export dialog.
 - `cityparquet_read` and `cityjson_geoparquet_geo` are unusable in wasm. Never call them.
 - A `dropFile`d VFS name still resolves to ZERO BYTES and fails with a misleading JSON parse error. VFS names are minted from a module counter and **never reused**.
@@ -22,7 +22,7 @@
 - `HUGEINT` and `DECIMAL` cells arrive through Arrow as STRINGS, which is why they classify `castText` (`::VARCHAR` makes every such column uniform) and why no formatter may assume a number.
 - `globFiles` works in the browser but lists names that were never created, so it is used for cleanup only — never to discover what a write produced.
 - Reader schema (identical for `read_cityjson` / `read_cityjsonseq` / `read_flatcitybuf` on 1.5.5): `id, feature_id, object_type, parents VARCHAR[], children VARCHAR[], children_roles VARCHAR[], address STRUCT[], bbox STRUCT, geometry_lod<L> BLOB, geometry_properties_lod<L> STRUCT, material_lod<L>, texture_lod<L>, template STRUCT, other`, then one inferred column per attribute. `id` IS `CityObject.id`; `feature_id` is the root object of the feature. Absent `parents`/`children` are SQL NULL, never `[]`.
-- Every new export from `src/analytics/duckdb.ts` must be added to the SEVEN test files that `vi.mock` it: `tests/unit/app/appCatalogEntry.test.tsx`, `tests/unit/app/appRestoreShare.test.tsx`, `tests/unit/app/appEngineBoot.test.tsx`, `tests/unit/app/appCityParquetLayers.test.tsx`, `tests/unit/features/stac/stacItems.test.ts`, `tests/unit/analytics/duckdbStatus.test.ts`, `tests/unit/analytics/streamingDuckdb.test.ts`.
+- Every new export from `src/analytics/duckdb.ts` must reach the test files that `vi.mock` it. Seven exist today; Task 4 brings SIX of them up to the new surface — `tests/unit/app/appCatalogEntry.test.tsx`, `tests/unit/app/appRestoreShare.test.tsx`, `tests/unit/app/appEngineBoot.test.tsx`, `tests/unit/app/appCityParquetLayers.test.tsx`, `tests/unit/features/stac/stacItems.test.ts`, `tests/unit/analytics/duckdbStatus.test.ts` — and DELETES the seventh, `tests/unit/analytics/streamingDuckdb.test.ts`, whose subject is removed.
 - Plugin (submodule) changes go on a `duckdb-integration` branch cut from the parent's current pin `947c980`, are pushed, and the parent gitlink points at that branch's head. NEVER push onto the plugin repo's `main` from the detached pin.
 - Snapshot schema stays at **v3**. Filter, sort, page, sync-to-map and `visibleObjectIds` are SESSION state and are never persisted.
 - Tests import from `"vitest"`, never `"vite-plus/test"`. React tests use `@testing-library/react`.
@@ -41,10 +41,10 @@
 
 **New — engine-free pure modules**
 
-- `src/analytics/columnKind.ts` — the DuckDB column vocabulary: `ColumnKind`, `ColumnInfo`, `classifyColumnType`, `lodColumnSuffix`, `lodsFromColumnNames`, `isDroppedColumn`.
+- `src/analytics/columnKind.ts` — the DuckDB column vocabulary: `ColumnKind`, `ColumnInfo`, `classifyColumnType`, `isTextColumn`, `isDroppedColumn`, `lodColumnSuffix`, `lodsFromColumnNames`.
 - `src/domain/citymodel/featureId.ts` — `rootFeatureId`, the cycle-safe walk up `parents` that gives the flat fallback the same `feature_id` the reader produces.
 - `src/analytics/cityGmlModule.ts` — `CityGmlModule`, `cityGmlModuleOf`, `groupTypesByModule`.
-- `src/features/query/types.ts` — `FilterOp`, `FilterCondition`, `FilterGroup`, `LayerQuery`, `DEFAULT_LAYER_QUERY`.
+- `src/features/query/types.ts` — `FilterOp`, `FilterValue`, `FilterCondition`, `FilterGroup`, `LayerQuery`, `PageSize`, `PAGE_SIZES`, `EMPTY_FILTER`, `DEFAULT_LAYER_QUERY`, `isNullaryOp`.
 - `src/analytics/sql.ts` — every SQL string this feature emits, as pure functions.
 - `src/analytics/layerRows.ts` — the flat-fallback row builders (`CityModel` / `ResidentObjectRecord` → rows → JSON bytes).
 
@@ -118,9 +118,23 @@ Expected: `1.33.1-dev64.0 17.0.0`
 
 ```bash
 cd packages/cityjson-navara-plugins && pnpm install
+git -C packages/cityjson-navara-plugins status --short
 ```
 
 (npm's install above rewrote the linked packages' `node_modules`; without this the submodule's workspace links are gone.)
+
+If `pnpm-lock.yaml` moved, it must be dealt with INSIDE the submodule before
+anything else — a dirty submodule turns the parent's gitlink into a
+`-dirty` hash that nobody else can check out:
+
+```bash
+# Either commit it there (it is a real change, on the plugin branch)…
+git -C packages/cityjson-navara-plugins add pnpm-lock.yaml
+# …or discard it, if the diff is only the churn of a local resolver:
+git -C packages/cityjson-navara-plugins checkout -- pnpm-lock.yaml
+```
+
+Never leave the submodule with uncommitted changes at the end of this task.
 
 - [ ] **Step 5: Type-check both repos**
 
@@ -400,6 +414,16 @@ export type DuckDBStatus =
       readonly state: "ready";
       readonly extensions: Readonly<Record<ExtensionName, ExtensionStatus>>;
       readonly loadedExtensions: ReadonlyArray<LoadedExtension>;
+      /**
+       * `PRAGMA platform` — "wasm_eh" or "wasm_mvp", or null if it could not
+       * be read.
+       *
+       * In the status because the two platforms are served DIFFERENT extension
+       * artefacts from the community repo, so "which build am I actually
+       * running" is unanswerable without it — and that is the first question a
+       * schema-drift report has to answer.
+       */
+      readonly platform: string | null;
     }
   | { readonly state: "failed"; readonly error: string };
 
@@ -751,7 +775,7 @@ Expected: PASS — the four `formatDuckDBError` cases, the init-failure case
 
 - [ ] **Step 7: Fix the two now-broken status readers**
 
-`src/ui/StatusBar.tsx` and `src/app/App.tsx` still read `status.extensionLoaded`, which no longer exists. Leave `App.tsx` for Task 17; for now make `StatusBar` compile by replacing `duckdbDotClass` / `duckdbLabel` with the Task 3 versions — do that in Task 3 and, for THIS task only, verify the type error is confined to those two files:
+`src/ui/StatusBar.tsx` and `src/app/App.tsx` still read `status.extensionLoaded`, which no longer exists. Leave `App.tsx` for Task 18; for now make `StatusBar` compile by replacing `duckdbDotClass` / `duckdbLabel` with the Task 3 versions — do that in Task 3 and, for THIS task only, verify the type error is confined to those two files:
 
 Run: `npx tsc -b --noEmit 2>&1 | head -20`
 Expected: errors only in `src/ui/StatusBar.tsx` and `src/app/App.tsx`, both about `extensionLoaded`.
@@ -956,7 +980,7 @@ const extensionLoaded =
   duckdbStatus.extensions.cityjson.state === "loaded";
 ```
 
-(The whole effect is deleted in Task 17; this keeps the tree compiling in between.)
+(The whole effect is deleted in Task 18; this keeps the tree compiling in between.)
 
 - [ ] **Step 6: Run the tests and the type check**
 
@@ -1005,6 +1029,16 @@ EOF
 - Consumes: Task 2's exports.
 - Produces: a mock factory literal (below) that every one of the six surviving files uses, so no later task has to touch them again.
 
+**Why the interim state is safe.** Between this task and Task 18, `App.tsx`
+still imports `loadModelIntoDuckDB`, `loadCityModelFromMemory`,
+`loadResidentObjectsIntoDuckDB` and `shouldUseSourceUrlPath`, which these
+factories no longer export — so under these mocks they are `undefined`. Nothing
+CALLS them: App's DuckDB effect returns at
+`if (duckdbStatus.state !== "ready")`, and every surviving mock reports
+`"uninitialized"`. The only tests that ever reached the ready branch are the two
+`extensionReady` ones deleted in Step 5. The real module still exports all four
+until Task 18, so the app itself compiles and runs throughout.
+
 **The canonical mock literal.** Every file below gets exactly this object (paths adjusted for depth), even where a given test never calls half of it — a `vi.mock` factory REPLACES the module, so an export the app imports but the factory omits arrives as `undefined` and throws at call time:
 
 ```ts
@@ -1024,7 +1058,7 @@ EOF
 
 - [ ] **Step 1: Delete the obsolete streaming-DuckDB test**
 
-`tests/unit/analytics/streamingDuckdb.test.ts` tests `shouldUseSourceUrlPath` and `loadResidentObjectsIntoDuckDB`, both of which Task 17 deletes. Its subject is gone, not moved.
+`tests/unit/analytics/streamingDuckdb.test.ts` tests `shouldUseSourceUrlPath` and `loadResidentObjectsIntoDuckDB`, both of which Task 18 deletes. Its subject is gone, not moved.
 
 ```bash
 git rm tests/unit/analytics/streamingDuckdb.test.ts
@@ -1160,7 +1194,24 @@ vi.mock("../../../src/analytics/duckdb", () => ({
 }));
 ```
 
-Its two DuckDB-effect tests (`"never offers a CityParquet layer to the cityjson extension…"` and `"still uses the extension for an ordinary CityJSON URL layer"`) reference `loadModelIntoDuckDB` / `loadCityModelFromMemory`, which no longer exist. **Delete those two `it(...)` blocks and the `loadModelIntoDuckDB` / `loadCityModelFromMemory` `vi.fn` declarations and their `mockClear()` calls in `beforeEach`** — Task 17 replaces them with an `enqueueLayerTable` assertion. Keep the four restore/share routing tests untouched.
+Delete the ENTIRE `describe("App DuckDB load — CityParquet layers")` block —
+both its tests reference `loadModelIntoDuckDB` / `loadCityModelFromMemory`,
+which no longer exist — together with:
+
+- the `loadModelIntoDuckDB` and `loadCityModelFromMemory` `vi.fn` declarations
+  and their `mockClear()` calls in `beforeEach`;
+- **`let urlPath`**, which that describe was the only reader of. Left behind, it
+  is a write-only `let` that trips `no-unused-vars` — and `vp check --fix`
+  cannot delete a variable for you, so the pre-commit hook would simply block
+  the commit.
+
+`extensionReady` stays (the mock's ternary still reads it) but nothing sets it
+true any more, which is correct: the four surviving tests never need a ready
+engine. Also update the file's module doc comment, whose third bullet ("The
+DuckDB effect must not offer a CityParquet layer to the cityjson extension…")
+describes a test that is gone — Task 18 adds the layer-table equivalent.
+
+Keep the four restore/share routing tests untouched.
 
 - [ ] **Step 6: Run the full suite**
 
@@ -2669,7 +2720,62 @@ describe("compileFilter", () => {
       ),
     ).toEqual({
       ok: false,
-      message: '"b3_h_dak_max" was given a value that is not a number.',
+      message: '"b3_h_dak_max" needs a number; "NaN" is not one.',
+    });
+  });
+
+  it("coerces a RAW STRING against a numeric column", () => {
+    // The bar keeps what the user typed — "1." on the way to "1.5" would be
+    // eaten by a parse-as-you-type input — so the coercion happens here.
+    expect(
+      compileFilter(
+        group([{ id: "c", column: "b3_h_dak_max", op: ">", value: "1.5" }]),
+        COLUMNS,
+      ),
+    ).toEqual({ ok: true, where: `"b3_h_dak_max" > 1.5` });
+  });
+
+  it("refuses text against a numeric column, with a sentence", () => {
+    expect(
+      compileFilter(
+        group([{ id: "c", column: "b3_h_dak_max", op: ">", value: "abc" }]),
+        COLUMNS,
+      ),
+    ).toEqual({
+      ok: false,
+      message: '"b3_h_dak_max" needs a number; "abc" is not one.',
+    });
+  });
+
+  it("refuses an EMPTY value rather than emitting \"col\" > ''", () => {
+    for (const column of ["b3_h_dak_max", "id"]) {
+      expect(
+        compileFilter(
+          group([{ id: "c", column, op: ">", value: "   " }]),
+          COLUMNS,
+        ),
+      ).toEqual({
+        ok: false,
+        message: `"${column}" needs a value for this comparison.`,
+      });
+    }
+  });
+
+  it("reads true/false text against a BOOLEAN column", () => {
+    expect(
+      compileFilter(
+        group([{ id: "c", column: "geconstateerd", op: "=", value: "true" }]),
+        COLUMNS,
+      ),
+    ).toEqual({ ok: true, where: `"geconstateerd" = TRUE` });
+    expect(
+      compileFilter(
+        group([{ id: "c", column: "geconstateerd", op: "=", value: "ja" }]),
+        COLUMNS,
+      ),
+    ).toEqual({
+      ok: false,
+      message: '"geconstateerd" is a true/false column; "ja" is neither.',
     });
   });
 });
@@ -2702,6 +2808,7 @@ import type {
   FilterCondition,
   FilterGroup,
   FilterOp,
+  FilterValue,
 } from "../features/query/types";
 
 export type CompileResult =
@@ -2740,6 +2847,90 @@ export function escapeLikeNeedle(needle: string): string {
 
 const COMPARISONS = new Set<FilterOp>(["=", "!=", "<", "<=", ">", ">="]);
 const LIKE_OPS = new Set<FilterOp>(["contains", "startsWith", "endsWith"]);
+
+/** The scalar types a comparison reads as a NUMBER. Everything else scalar is
+ *  VARCHAR or BOOLEAN; everything else entirely is `castText`, which takes a
+ *  string literal and lets DuckDB do the cast. */
+const NUMERIC_TYPES = new Set([
+  "DOUBLE",
+  "FLOAT",
+  "REAL",
+  "INTEGER",
+  "SMALLINT",
+  "TINYINT",
+  "UINTEGER",
+  "USMALLINT",
+  "UTINYINT",
+]);
+
+/**
+ * The SQL literal for a comparison against `column`.
+ *
+ * The coercion lives HERE, not in the filter bar's input handler, and that is
+ * the whole point: an input that parsed as it typed could not accept "1." on
+ * the way to "1.5" (`Number("1.")` re-renders as "1", so the decimal point is
+ * eaten as fast as it is typed) and could never hold "-" on the way to "-3".
+ * `FilterCondition.value` therefore keeps the RAW string, and the column's own
+ * type decides what it means at the moment the SQL is built.
+ *
+ * A value that arrives already typed — a number or a boolean, from a
+ * programmatic caller or a restored draft — is honoured as-is.
+ */
+function literalFor(
+  column: ColumnInfo,
+  value: string | number | boolean,
+): { ok: true; sql: string } | { ok: false; message: string } {
+  const type = column.type.trim().toUpperCase();
+
+  if (typeof value === "string" && value.trim() === "") {
+    return {
+      ok: false,
+      message: `"${column.name}" needs a value for this comparison.`,
+    };
+  }
+
+  if (typeof value === "boolean" || type === "BOOLEAN") {
+    if (typeof value === "boolean")
+      return { ok: true, sql: quoteLiteral(value) };
+    const text = String(value).trim().toLowerCase();
+    if (text === "true" || text === "false") {
+      return { ok: true, sql: quoteLiteral(text === "true") };
+    }
+    return {
+      ok: false,
+      message: `"${column.name}" is a true/false column; "${String(value)}" is neither.`,
+    };
+  }
+
+  if (column.kind === "scalar" && NUMERIC_TYPES.has(type)) {
+    const n = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(n)) {
+      return {
+        ok: false,
+        message: `"${column.name}" needs a number; "${String(value)}" is not one.`,
+      };
+    }
+    return { ok: true, sql: quoteLiteral(n) };
+  }
+
+  // VARCHAR, and every `castText` type (BIGINT, DECIMAL, DATE, TIMESTAMP…):
+  // a string literal, which DuckDB casts with its own knowledge of its own
+  // date and numeric formats.
+  return { ok: true, sql: quoteLiteral(String(value)) };
+}
+
+/**
+ * Is this condition's value a LIST?
+ *
+ * A hand-written predicate, not a bare `Array.isArray`, because that one's
+ * built-in signature is `arg is any[]` — it narrows the TRUE branch but leaves
+ * `ReadonlyArray<string>` in the union on the FALSE branch, so `quoteLiteral`
+ * (which takes a scalar) fails to typecheck. It also does not narrow the true
+ * branch to `ReadonlyArray<string>`, so `.map` over it loses its element type.
+ */
+function isValueList(value: FilterValue): value is ReadonlyArray<string> {
+  return Array.isArray(value);
+}
 
 function likePattern(op: FilterOp, needle: string): string {
   const escaped = escapeLikeNeedle(needle);
@@ -2794,7 +2985,7 @@ function compileCondition(
   }
 
   if (condition.op === "in") {
-    if (!Array.isArray(condition.value)) {
+    if (!isValueList(condition.value)) {
       return {
         ok: false,
         message: `"in" needs a list of values; "${column.name}" was given one value.`,
@@ -2816,25 +3007,15 @@ function compileCondition(
       message: `"${condition.op}" is not an operator this filter understands.`,
     };
   }
-  if (Array.isArray(condition.value)) {
+  if (isValueList(condition.value)) {
     return {
       ok: false,
       message: `"${condition.op}" takes one value, not a list, for "${column.name}".`,
     };
   }
-  try {
-    // A castText column (BIGINT, DATE, TIMESTAMP) takes a STRING literal and
-    // lets DuckDB do the cast — it knows its own date formats and we do not.
-    return {
-      ok: true,
-      sql: `${ident} ${condition.op} ${quoteLiteral(condition.value)}`,
-    };
-  } catch {
-    return {
-      ok: false,
-      message: `"${column.name}" was given a value that is not a number.`,
-    };
-  }
+  const literal = literalFor(column, condition.value);
+  if (!literal.ok) return { ok: false, message: literal.message };
+  return { ok: true, sql: `${ident} ${condition.op} ${literal.sql}` };
 }
 
 /**
@@ -2918,7 +3099,6 @@ export function buildPageSql(
 ): string;
 export function buildCountSql(table: string, where: string | null): string;
 export function buildFeatureIdsSql(table: string, where: string | null): string;
-export function buildDistinctSql(table: string, column: string): string;
 export function buildRootTypesSql(table: string): string;
 /** `COALESCE("feature_id", "id") IN (SELECT … WHERE <where>)`, or null. */
 export function buildFeatureScopeWhere(
@@ -2935,7 +3115,6 @@ Create `tests/unit/analytics/sqlQuery.test.ts`:
 import { describe, it, expect } from "vitest";
 import {
   buildCountSql,
-  buildDistinctSql,
   buildFeatureIdsSql,
   buildFeatureScopeWhere,
   buildPageSql,
@@ -3112,13 +3291,7 @@ describe("buildFeatureScopeWhere", () => {
   });
 });
 
-describe("buildDistinctSql / buildRootTypesSql", () => {
-  it("lists a column's distinct values", () => {
-    expect(buildDistinctSql("layer_1", "object_type")).toBe(
-      'SELECT DISTINCT "object_type" AS "value" FROM "layer_1" WHERE "object_type" IS NOT NULL ORDER BY 1 LIMIT 1000',
-    );
-  });
-
+describe("buildRootTypesSql", () => {
   it("lists the TOP-LEVEL object types — the rows with no parents", () => {
     expect(buildRootTypesSql("layer_1")).toBe(
       'SELECT DISTINCT "object_type" AS "value" FROM "layer_1" WHERE "parents" IS NULL AND "object_type" IS NOT NULL ORDER BY 1',
@@ -3243,13 +3416,6 @@ export function buildFeatureIdsSql(
   return scope === null
     ? `SELECT "id" FROM ${t}`
     : `SELECT "id" FROM ${t} WHERE ${scope}`;
-}
-
-/** A column's distinct values, for the filter bar's value suggestions.
- *  Capped: a free-text attribute has as many values as rows. */
-export function buildDistinctSql(table: string, column: string): string {
-  const c = quoteIdent(column);
-  return `SELECT DISTINCT ${c} AS "value" FROM ${quoteIdent(table)} WHERE ${c} IS NOT NULL ORDER BY 1 LIMIT 1000`;
 }
 
 /**
@@ -4337,7 +4503,16 @@ describe("flat-fallback layer table", () => {
     expect(sql[0]).toBe(
       "CREATE OR REPLACE TABLE \"layer_1\" AS SELECT * FROM read_json_auto('layer_1.json')",
     );
-    expect(sql[1]).toBe('DESCRIBE SELECT * FROM "layer_1"');
+    // read_json_auto types an all-NULL `parents` as JSON, not VARCHAR[], so
+    // the fallback schema would diverge from the reader's without these. Both
+    // are no-ops when the inference was already right.
+    expect(sql[1]).toBe(
+      'ALTER TABLE "layer_1" ALTER COLUMN "parents" TYPE VARCHAR[]',
+    );
+    expect(sql[2]).toBe(
+      'ALTER TABLE "layer_1" ALTER COLUMN "children" TYPE VARCHAR[]',
+    );
+    expect(sql[3]).toBe('DESCRIBE SELECT * FROM "layer_1"');
     expect(dropped).toEqual(["layer_1.json"]);
 
     const info = getLayerTable("L1");
@@ -4450,9 +4625,18 @@ export type SourceProvider = () => Promise<Uint8Array>;
 export type LayerTableSource =
   | {
       readonly kind: "bytes";
-      /** CONSUMED by the build: `registerBuffer` transfers this array to the
-       *  DuckDB worker and detaches it, so the caller must hand over an array
-       *  it will not read again — never one it also keeps. */
+      /**
+       * CONSUMED by the build: `registerBuffer` transfers this array to the
+       * DuckDB worker and DETACHES it, so the caller hands over an array it
+       * will not read again — never one it also keeps.
+       *
+       * Which makes this source object SINGLE-USE. The registry never retains
+       * it (only the `provider`), and a re-enqueue must supply a fresh one —
+       * `refreshStreamingTable` builds a `resident` source, and the export
+       * calls the provider. Re-submitting the same `bytes` source twice
+       * registers a detached, zero-length array and produces a table with no
+       * rows and no error.
+       */
       readonly bytes: Uint8Array;
       readonly reader: "read_cityjson" | "read_cityjsonseq";
       /** The VFS file extension, e.g. "city.json" / "city.jsonl". */
@@ -4540,8 +4724,19 @@ function setState(layerId: string, state: LayerTableState | null): void {
 // ---------------------------------------------------------------------------
 
 const registry = new Map<string, LayerTable>();
-/** Layers whose removal arrived while their build was still queued. */
-const cancelled = new Set<string>();
+/**
+ * Per-layer cancellation, by SEQUENCE rather than by a flag.
+ *
+ * Every enqueue and every drop takes the next number off `seqCounter`, and a
+ * queued build runs only if its own number is HIGHER than the last drop
+ * recorded for its layer. A boolean set cannot express that: it also cancels
+ * builds enqueued AFTER the drop, and clearing the flag at enqueue time —
+ * which is what makes re-adding the same id work at all — silently un-cancels
+ * a build the drop was meant to kill. The question is "which came first", so
+ * the answer has to be a number.
+ */
+const cancelBefore = new Map<string, number>();
+let seqCounter = 0;
 let counter = 0;
 let chain: Promise<void> = Promise.resolve();
 
@@ -4559,8 +4754,9 @@ function enqueue(task: () => Promise<void>): Promise<void> {
 
 export function resetLayerTablesForTest(): void {
   registry.clear();
-  cancelled.clear();
+  cancelBefore.clear();
   counter = 0;
+  seqCounter = 0;
   chain = Promise.resolve();
   useLayerTableStore.setState({ tables: {}, tablePanelOpen: false });
 }
@@ -4660,6 +4856,26 @@ async function buildFromRows(
         `CREATE OR REPLACE TABLE ${quoteIdent(table)} AS SELECT * FROM read_json_auto('${sourceName}')`,
       );
       if (!created.ok) throw new BuildError(created.message);
+
+      // `read_json_auto` infers from the DATA, and a layer of nothing but root
+      // objects has `parents` NULL in every row — which it types as JSON, not
+      // VARCHAR[]. That is a real divergence from the reader schema: a JSON
+      // column classifies `castText` instead of `nested`, so the filter bar
+      // would offer it comparisons it cannot honour and `parents IS NULL`
+      // would stop meaning the same thing on the two kinds of table.
+      //
+      // Probed (2026-09-04, DuckDB 1.5.5): `sample_size = -1` and
+      // `union_by_name` do NOT help — an all-NULL column stays JSON — and a
+      // PARTIAL `columns = {...}` option DROPS every column it does not name,
+      // which would throw the layer's attributes away. `ALTER COLUMN … TYPE`
+      // is the route that works: it is a no-op when the inference was already
+      // right, and it preserves both the list values and the NULLs.
+      for (const column of ["parents", "children"]) {
+        const altered = await ddl(
+          `ALTER TABLE ${quoteIdent(table)} ALTER COLUMN ${quoteIdent(column)} TYPE VARCHAR[]`,
+        );
+        if (!altered.ok) throw new BuildError(altered.message);
+      }
     }
 
     // DESCRIBE the TABLE, not the source: `read_json_auto` infers the types,
@@ -4708,14 +4924,25 @@ export function enqueueLayerTable(
   layerId: string,
   source: LayerTableSource,
 ): Promise<void> {
-  cancelled.delete(layerId);
-  setState(layerId, { state: "queued" });
+  const seq = ++seqCounter;
+  // A REBUILD keeps the table it is replacing ON SCREEN. Only a layer with no
+  // table yet passes through "queued"/"building".
+  const queuedOver = registry.get(layerId);
+  setState(
+    layerId,
+    queuedOver
+      ? { state: "ready", info: queuedOver, rebuilding: true }
+      : { state: "queued" },
+  );
   return enqueue(async () => {
-    if (cancelled.has(layerId)) {
-      cancelled.delete(layerId);
-      return;
-    }
-    setState(layerId, { state: "building" });
+    // Checked SYNCHRONOUSLY, before the first await: a build that has already
+    // STARTED runs to completion and the drop queued behind it removes what it
+    // produced. Only a build still waiting when the drop arrived is skipped.
+    if (seq <= (cancelBefore.get(layerId) ?? 0)) return;
+    // Re-read at RUN time, not at enqueue time: a drop or an earlier rebuild
+    // may have landed in between.
+    const previous = registry.get(layerId);
+    if (!previous) setState(layerId, { state: "building" });
     // The name is minted INSIDE the queued task, so table numbering follows
     // build order rather than enqueue order and a cancelled build burns no
     // number at all.
@@ -4730,16 +4957,37 @@ export function enqueueLayerTable(
                 ? flatRowsFromModel(source.model)
                 : flatRowsFromRecords(source.records()),
             );
+      // NOTE what is NOT kept: `info` carries the PROVIDER, never the source
+      // object, so the (now detached) `bytes` array and the `model`/`records`
+      // closure are both released with the caller's reference. A rebuild
+      // therefore always re-obtains its input rather than replaying a
+      // consumed one.
       registry.set(layerId, info);
       setState(layerId, { state: "ready", info });
+      // AFTER the replacement exists, never before. Retiring first would leave
+      // the layer with NO table for the length of the build — several times a
+      // pan, on a streaming layer — and with none at all if the build failed.
+      if (previous) await retire(previous);
     } catch (error) {
-      registry.delete(layerId);
       const message =
         error instanceof Error
           ? error.message
           : "The table could not be built.";
       console.warn(`DuckDB table for layer ${layerId} failed: ${message}`);
-      setState(layerId, { state: "failed", message });
+      if (previous) {
+        // A failed REBUILD is not a failed layer: the old table was never
+        // touched and still answers every query. The console carries the
+        // reason; the panel keeps showing real data rather than an error over
+        // a table that works.
+        setState(layerId, {
+          state: "ready",
+          info: previous,
+          rebuilding: false,
+        });
+      } else {
+        registry.delete(layerId);
+        setState(layerId, { state: "failed", message });
+      }
     }
   });
 }
@@ -4810,6 +5058,20 @@ function makeGate() {
     open = resolve;
   });
   return { promise, open };
+}
+
+/**
+ * Let the queue's microtasks run.
+ *
+ * `enqueue` defers through `chain.then(task)`, so a task enqueued on this tick
+ * has not STARTED yet when the caller's next statement executes. The
+ * cancellation check happens at the top of the task, before its first await —
+ * so "a drop that arrives while a build is in flight" and "a drop that arrives
+ * while a build is still queued" are two genuinely different tests, and this
+ * is what puts the first one in the first state.
+ */
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 5; i++) await Promise.resolve();
 }
 
 vi.mock("../../../src/analytics/duckdb", () => {
@@ -4910,10 +5172,14 @@ describe("dropLayerTable", () => {
   it("WAITS for an in-flight create rather than racing it", async () => {
     gate = makeGate();
     const build = enqueueLayerTable("L1", ONE_ROW);
+    // Let the build actually START — past its cancellation check — before the
+    // drop arrives. Without this the drop supersedes a build that never ran,
+    // which is the OTHER test, below.
+    await flushMicrotasks();
     const drop = dropLayerTable("L1");
 
     // The DROP has not been sent while the CREATE is still held.
-    await Promise.resolve();
+    await flushMicrotasks();
     expect(sql.some((s) => s.startsWith("DROP TABLE"))).toBe(false);
 
     gate.open();
@@ -4921,6 +5187,8 @@ describe("dropLayerTable", () => {
     await drop;
     const createIdx = sql.findIndex((s) => s.startsWith("CREATE OR REPLACE"));
     const dropIdx = sql.findIndex((s) => s.startsWith("DROP TABLE"));
+    // A build already in flight finishes, and the drop behind it removes what
+    // it produced — the point of a single queue.
     expect(createIdx).toBeGreaterThanOrEqual(0);
     expect(dropIdx).toBeGreaterThan(createIdx);
     expect(getLayerTable("L1")).toBeNull();
@@ -4930,6 +5198,7 @@ describe("dropLayerTable", () => {
     gate = makeGate();
     const first = enqueueLayerTable("L1", ONE_ROW);
     const second = enqueueLayerTable("L2", ONE_ROW);
+    // No flush: L2's build is still WAITING behind L1's when the drop lands.
     const drop = dropLayerTable("L2");
 
     gate.open();
@@ -4939,6 +5208,21 @@ describe("dropLayerTable", () => {
     expect(getLayerTable("L2")).toBeNull();
     // Only ONE table was ever created — L2's build never ran.
     expect(sql.filter((s) => s.startsWith("CREATE OR REPLACE")).length).toBe(1);
+  });
+
+  it("does NOT cancel a re-add enqueued AFTER the drop", async () => {
+    await enqueueLayerTable("L1", ONE_ROW);
+    const drop = dropLayerTable("L1");
+    // The user removes a layer and immediately drops the same file back in.
+    // A boolean cancellation flag gets this wrong in one direction or the
+    // other; a sequence number does not.
+    const readd = enqueueLayerTable("L1", ONE_ROW);
+    await Promise.all([drop, readd]);
+
+    expect(getLayerTable("L1")).not.toBeNull();
+    expect(useLayerTableStore.getState().tables.L1).toMatchObject({
+      state: "ready",
+    });
   });
 
   it("drops a still-registered source buffer as well", async () => {
@@ -5057,10 +5341,11 @@ calls it too:
  * skipped outright — the table is never made.
  */
 export function dropLayerTable(layerId: string): Promise<void> {
-  cancelled.add(layerId);
+  // Everything enqueued for this layer BEFORE now is superseded; anything
+  // enqueued after — a re-add of the same id — takes a higher number and runs.
+  cancelBefore.set(layerId, ++seqCounter);
   setState(layerId, null);
   return enqueue(async () => {
-    cancelled.delete(layerId);
     const info = registry.get(layerId);
     if (!info) return;
     registry.delete(layerId);
@@ -5179,10 +5464,16 @@ describe("loadFromUrl's LoadedModel envelope", () => {
   });
 
   it("says cityjsonseq for a .jsonl URL", async () => {
-    const seq = `{"type":"CityJSON","version":"2.0","CityObjects":{},"vertices":[],"transform":{"scale":[1,1,1],"translate":[0,0,0]}}`;
-    const loaded = await loadFromUrl("https://x/a.city.jsonl", http(seq));
+    // `seqFixtureText` is the real two-buildings fixture this file already
+    // reads at the top — a hand-written one-liner would be a second, weaker
+    // idea of what CityJSONSeq looks like.
+    const loaded = await loadFromUrl(
+      "https://x/a.city.jsonl",
+      http(seqFixtureText),
+    );
     expect(loaded.encoding).toBe("cityjsonseq");
     expect(loaded.bytes).not.toBeNull();
+    expect(Object.keys(loaded.model.objects).length).toBeGreaterThan(0);
   });
 
   it("carries NO bytes for a CityGML document — it has no DuckDB reader", async () => {
@@ -6683,6 +6974,12 @@ Expected: FAIL — nothing enqueues yet from the share path (Task 16 wired it, s
 // the stores. One install, torn down with the app: the subscriptions are
 // module-level machinery, not per-render state.
 useEffect(() => {
+  // BEFORE the await, not after: the cold boot takes ~3.5 s (a 36 MB wasm
+  // module plus the community extension), and the status starts as
+  // `uninitialized`, which the table panel renders as "the analytics engine is
+  // not running" with a Retry button. Announcing the ATTEMPT first turns that
+  // into "Loading" for the duration.
+  setDuckdbStatus({ state: "initializing" });
   void initDuckDB().then(() => {
     setDuckdbStatus(getDuckDBStatus());
   });
@@ -6952,15 +7249,22 @@ function extractTypeBreakdown(
 
 - [ ] **Step 4: Pass the layer id from `InspectorPanel`**
 
-In `src/ui/inspector/InspectorPanel.tsx`, the stats tab already computes `displayLayer = selectedLayer ?? activeLayer`; pass its id:
+In `src/ui/inspector/InspectorPanel.tsx`, the stats branch is guarded on
+`model` — NOT on `displayLayer`, which is `Layer | undefined` — so leave the
+two existing props exactly as they are and add ONE line. Reaching for
+`displayLayer.model` here is a TS18048 ("possibly undefined") that the `model`
+guard does not narrow:
 
 ```tsx
 <StatsTab
-  model={displayLayer.model}
-  selection={selections[0] ?? null}
-  layerId={displayLayer.id}
+  model={model}
+  selection={selection}
+  layerId={displayLayer?.id ?? null}
 />
 ```
+
+(and delete the `duckdbModelLoaded={duckdbModelLoaded}` line, plus the prop on
+`InspectorPanelProps` and its destructuring, if Task 18 has not already.)
 
 - [ ] **Step 5: Run the tests and the type check**
 
@@ -7005,6 +7309,8 @@ EOF
 
 ```ts
 export interface LayerQueryView {
+  /** `"no-layer"` means NOTHING is selected. A selected layer whose registry
+   *  entry has not been written yet is `"queued"`, never `"no-layer"`. */
   readonly status: "no-layer" | "queued" | "building" | "failed" | "ready";
   /** A build failure, a compile refusal or DuckDB's own message. */
   readonly message: string | null;
@@ -7099,6 +7405,15 @@ describe("useLayerQuery", () => {
   it("reports no-layer with nothing selected", () => {
     render(<Probe layerId={null} />);
     expect(screen.getByTestId("status").textContent).toBe("no-layer");
+    expect(runQuery).not.toHaveBeenCalled();
+  });
+
+  it("reports QUEUED for a selected layer whose entry has not been written yet", () => {
+    // `addCityLayer` adds the layer, THEN enqueues: there is a commit in
+    // between with no registry entry, and "Select a layer…" must not flash
+    // over a layer the user just dropped.
+    render(<Probe layerId="L" />);
+    expect(screen.getByTestId("status").textContent).toBe("queued");
     expect(runQuery).not.toHaveBeenCalled();
   });
 
@@ -7286,6 +7601,8 @@ import {
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 
 export interface LayerQueryView {
+  /** `"no-layer"` means NOTHING is selected. A selected layer whose registry
+   *  entry has not been written yet is `"queued"`, never `"no-layer"`. */
   readonly status: "no-layer" | "queued" | "building" | "failed" | "ready";
   readonly message: string | null;
   readonly table: LayerTable | null;
@@ -7339,6 +7656,12 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
       return;
     }
 
+    // Bumped FIRST, before any early return: a page query from the previous
+    // effect run may still be in flight, and if this run bails on a compile
+    // refusal without invalidating it, that older answer lands afterwards and
+    // replaces the rows with a page the refused filter never asked for.
+    const gen = ++generation.current;
+
     const compiled =
       applied === null
         ? ({ ok: true, where: null } as const)
@@ -7351,7 +7674,6 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
       return;
     }
 
-    const gen = ++generation.current;
     setLoading(true);
     setQueryMessage(null);
 
@@ -7395,9 +7717,27 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
     })();
   }, [table, applied, sort, page, pageSize, reloadToken]);
 
-  if (layerId === null || tableState === undefined) {
+  if (layerId === null) {
     return {
       status: "no-layer",
+      message: null,
+      table: null,
+      columns: NO_COLUMNS,
+      rows: NO_ROWS,
+      totalRows: 0,
+      unfilteredRows: 0,
+      loading: false,
+      reload,
+    };
+  }
+  if (tableState === undefined) {
+    // A layer IS selected; its registry entry has simply not been written yet.
+    // `addCityLayer` adds the layer and enqueues the table in that order, so
+    // there is a commit in between where the registry has nothing — and
+    // "Select a layer to browse its table" over a layer the user just dropped
+    // is a lie that flashes on every single add.
+    return {
+      status: "queued",
       message: null,
       table: null,
       columns: NO_COLUMNS,
@@ -7451,7 +7791,7 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
 - [ ] **Step 4: Run the test**
 
 Run: `npx vitest run tests/unit/ui/table/useLayerQuery.test.tsx`
-Expected: PASS — both export builders green.
+Expected: PASS — every status, paging, filter and failure case green.
 
 - [ ] **Step 5: Commit**
 
@@ -7629,7 +7969,7 @@ describe("FilterBar", () => {
     expect(next.conditions.map((c) => c.id)).toEqual(["c2"]);
   });
 
-  it("toggles the group logic", () => {
+  it("toggles the group logic from the BAR, with a single condition present", () => {
     const { onChange } = setup({
       filter: {
         logic: "AND",
@@ -7640,6 +7980,31 @@ describe("FilterBar", () => {
       screen.getByRole("button", { name: "Match ALL conditions" }),
     );
     expect((onChange.mock.calls[0]![0] as FilterGroup).logic).toBe("OR");
+  });
+
+  it("offers no logic toggle when there is nothing to combine", () => {
+    setup();
+    expect(
+      screen.queryByRole("button", { name: "Match ALL conditions" }),
+    ).toBeNull();
+  });
+
+  it("leads the second row with the group's logic as TEXT, not a second toggle", () => {
+    setup({
+      filter: {
+        logic: "OR",
+        conditions: [
+          { id: "c1", column: "id", op: "=", value: "a" },
+          { id: "c2", column: "id", op: "=", value: "b" },
+        ],
+      },
+    });
+    expect(screen.getByText("Where")).toBeTruthy();
+    expect(screen.getByText("OR")).toBeTruthy();
+    // ONE toggle for the group, however many rows.
+    expect(
+      screen.getAllByRole("button", { name: "Match ANY conditions" }),
+    ).toHaveLength(1);
   });
 
   it("applies and clears", () => {
@@ -7694,9 +8059,12 @@ Expected: FAIL — module not found.
 /**
  * The structured WHERE builder above the grid.
  *
- * A flat list of conditions with ONE logic for the group. Nested groups are
- * deliberately out of scope: a two-level builder in a 320 px panel costs more
- * screen and more explaining than the questions this data invites are worth.
+ * A flat list of conditions with ONE logic for the group, and the AND/OR
+ * toggle in the BAR rather than between the rows — the group has one logic, so
+ * a per-row control would be N buttons that always agree, and the first row
+ * could never carry one at all. Nested groups are deliberately out of scope: a
+ * two-level builder in a 320 px panel costs more screen and more explaining
+ * than the questions this data invites are worth.
  *
  * The operator list is narrowed by the column's KIND, so an impossible
  * predicate cannot be built in the first place — `compileFilter` still refuses
@@ -7761,25 +8129,26 @@ function valueText(value: FilterCondition["value"]): string {
   return typeof value === "boolean" ? String(value) : String(value ?? "");
 }
 
-/** The typed value a text input should produce for this column and operator.
- *  A number column gets a NUMBER, so `quoteLiteral` emits a bare literal
- *  rather than a string DuckDB then has to cast. */
-function parseValue(
-  raw: string,
-  column: ColumnInfo | undefined,
-  op: FilterOp,
-): FilterCondition["value"] {
+/**
+ * What a text input contributes to the condition.
+ *
+ * The RAW STRING, for everything but "is one of" — and that is deliberate.
+ * Parsing as the user types cannot work: `Number("1.")` is 1, so the decimal
+ * point is deleted the instant it is typed and no fractional threshold can
+ * ever be entered; `Number("-")` is NaN, so a negative number cannot be
+ * started either. The column's type decides what the string MEANS at compile
+ * time (`literalFor` in `analytics/sql.ts`), where nothing is being retyped
+ * and a bad value can be refused with a sentence.
+ *
+ * "is one of" is the exception: a list is not something a single string can
+ * hold, so the commas are split here.
+ */
+function parseValue(raw: string, op: FilterOp): FilterCondition["value"] {
   if (op === "in") {
     return raw
       .split(",")
       .map((part) => part.trim())
       .filter((part) => part !== "");
-  }
-  if (column && column.kind === "scalar" && !isTextColumn(column)) {
-    const upper = column.type.trim().toUpperCase();
-    if (upper === "BOOLEAN") return raw.trim().toLowerCase() === "true";
-    const n = Number(raw);
-    if (raw.trim() !== "" && Number.isFinite(n)) return n;
   }
   return raw;
 }
@@ -7837,25 +8206,11 @@ export function FilterBar({
           const ops = operatorsFor(column);
           return (
             <div className="filter-row" key={condition.id}>
-              {index === 0 ? (
-                <span className="filter-lead">Where</span>
-              ) : (
-                <button
-                  type="button"
-                  className="filter-logic-btn"
-                  disabled={disabled}
-                  aria-label={`Match ${filter.logic === "AND" ? "ALL" : "ANY"} conditions`}
-                  title="Switch between matching all and any conditions"
-                  onClick={() =>
-                    onChange({
-                      ...filter,
-                      logic: filter.logic === "AND" ? "OR" : "AND",
-                    })
-                  }
-                >
-                  {filter.logic}
-                </button>
-              )}
+              {/* The row lead is TEXT: the group has ONE logic, and it is
+                  toggled once, in the actions row below. */}
+              <span className="filter-lead">
+                {index === 0 ? "Where" : filter.logic}
+              </span>
 
               <select
                 className="filter-select"
@@ -7907,7 +8262,7 @@ export function FilterBar({
                   placeholder={condition.op === "in" ? "a, b, c" : "value"}
                   onChange={(e) =>
                     patch(condition.id, {
-                      value: parseValue(e.target.value, column, condition.op),
+                      value: parseValue(e.target.value, condition.op),
                     })
                   }
                   onKeyDown={(e) => {
@@ -7944,6 +8299,23 @@ export function FilterBar({
         >
           Add condition
         </button>
+        {filter.conditions.length >= 1 && (
+          <button
+            type="button"
+            className="tb-btn table-action-btn filter-logic-btn"
+            disabled={disabled}
+            aria-label={`Match ${filter.logic === "AND" ? "ALL" : "ANY"} conditions`}
+            title="Switch between matching all and any conditions"
+            onClick={() =>
+              onChange({
+                ...filter,
+                logic: filter.logic === "AND" ? "OR" : "AND",
+              })
+            }
+          >
+            {filter.logic === "AND" ? "Match all" : "Match any"}
+          </button>
+        )}
         <button
           type="button"
           className="tb-btn table-action-btn filter-apply"
@@ -8027,11 +8399,20 @@ export interface DataGridProps {
    *  filter."; the panel overrides it when the map is being filtered too. */
   readonly emptyMessage?: string;
 }
-export function DataGrid(props: DataGridProps): JSX.Element;
+/** `React.memo`-wrapped: the panel re-renders far more often than the rows
+ *  change, and this is up to 1000 rows of DOM. */
+export const DataGrid: React.MemoExoticComponent<
+  (props: DataGridProps) => JSX.Element
+>;
 /** A cell as display text; exported for its test. */
 export function formatCell(value: unknown): string;
+/** The UNROUNDED value, for the cell's `title`; exported for its test. */
+export function rawCellTitle(value: unknown): string;
 
 // Pagination.tsx
+/** Row counts in a PINNED locale — `TablePanel` imports this one too, so a
+ *  de_DE host cannot render "2.231" where a test expects "2,231". */
+export function formatCount(n: number): string;
 export interface PaginationProps {
   readonly page: number;
   readonly pageSize: PageSize;
@@ -8128,6 +8509,14 @@ describe("DataGrid", () => {
   it("shows an em dash for a null cell", () => {
     setup();
     expect(screen.getAllByText("—")).toHaveLength(1);
+  });
+
+  it("rounds the cell TEXT but keeps the raw value on hover", () => {
+    setup();
+    const cell = screen.getByText("12.35");
+    // The tooltip exists to reveal what the rounding hid; repeating the
+    // rounded number in it makes the hover pointless.
+    expect(cell.getAttribute("title")).toBe("12.3456");
   });
 
   it("reports a header click as a sort request", () => {
@@ -8281,6 +8670,7 @@ Expected: FAIL — modules not found.
  * `IntersectionObserver` sentinel is gone with the in-memory paths it fed.)
  */
 
+import { memo } from "react";
 import type { ColumnInfo } from "../../analytics/columnKind";
 
 /**
@@ -8309,6 +8699,15 @@ export function formatCell(value: unknown): string {
   return JSON.stringify(value) ?? "";
 }
 
+/** The unrounded value, for the cell's `title`. Null renders as the same em
+ *  dash the text does — there is nothing more to reveal about a null. */
+export function rawCellTitle(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "string") return value;
+  if (typeof value === "object") return JSON.stringify(value) ?? "";
+  return String(value);
+}
+
 /** The id a row is selected by. Every layer table has an `id` column, but a
  *  hand-built one may not, so the index is the fallback. */
 function rowIdOf(row: Record<string, unknown>, index: number): string {
@@ -8335,7 +8734,16 @@ export interface DataGridProps {
   readonly emptyMessage?: string;
 }
 
-export function DataGrid({
+/**
+ * MEMOISED, and its props are memoised at the call site to match.
+ *
+ * The panel above re-renders on every hover, every camera settle and every
+ * store touch; this component's output is up to 1000 rows x N columns of DOM,
+ * and none of it changes on any of those. `React.memo` turns those into a
+ * props comparison — provided nobody hands it a freshly built `Set` or array
+ * each time, which is why `TablePanel` memoises `selectedIds`.
+ */
+export const DataGrid = memo(function DataGrid({
   columns,
   rows,
   sort,
@@ -8391,10 +8799,17 @@ export function DataGrid({
               onClick={(e) => onRowClick(rowId, e.shiftKey)}
             >
               {columns.map((col) => {
-                const text = formatCell(row[col.name]);
+                const value = row[col.name];
                 return (
-                  <td key={col.name} className="data-td" title={text}>
-                    {text}
+                  <td
+                    key={col.name}
+                    className="data-td"
+                    // The RAW value on hover: the cell TEXT rounds a float to
+                    // two places, and a tooltip that repeats the rounding is a
+                    // tooltip that hides the number the user hovered to see.
+                    title={rawCellTitle(value)}
+                  >
+                    {formatCell(value)}
                   </td>
                 );
               })}
@@ -8404,7 +8819,7 @@ export function DataGrid({
       </tbody>
     </table>
   );
-}
+});
 ```
 
 - [ ] **Step 4: Write `src/ui/table/Pagination.tsx`**
@@ -8421,6 +8836,22 @@ export function DataGrid({
 
 import { PAGE_SIZES, type PageSize } from "../../features/query/types";
 
+/**
+ * Row counts, grouped, in ONE locale.
+ *
+ * Explicitly `en-US`, not the host's: a bare `toLocaleString()` renders 2231 as
+ * "2.231" on a de_DE machine and "2 231" on fr_FR, so every test asserting
+ * "2,231" would fail on a developer's laptop and pass in CI, or the reverse.
+ * The app has no localisation for this to be consistent with, so the formatter
+ * is pinned and SHARED — `TablePanel` imports this one rather than growing a
+ * second.
+ */
+const COUNT_FORMAT = new Intl.NumberFormat("en-US");
+
+export function formatCount(n: number): string {
+  return COUNT_FORMAT.format(n);
+}
+
 /** "1–100 of 2,231". Counts from ONE: nobody reads a row range zero-based. */
 export function rangeLabel(
   page: number,
@@ -8430,7 +8861,7 @@ export function rangeLabel(
   if (totalRows === 0) return "0 rows";
   const first = page * pageSize + 1;
   const last = Math.min((page + 1) * pageSize, totalRows);
-  return `${first.toLocaleString()}–${last.toLocaleString()} of ${totalRows.toLocaleString()}`;
+  return `${formatCount(first)}–${formatCount(last)} of ${formatCount(totalRows)}`;
 }
 
 export interface PaginationProps {
@@ -8461,7 +8892,7 @@ export function Pagination({
       </span>
       {filtered && (
         <span className="table-range-muted">
-          filtered from {unfilteredRows.toLocaleString()}
+          filtered from {formatCount(unfilteredRows)}
         </span>
       )}
 
@@ -8715,6 +9146,30 @@ describe("TablePanel states", () => {
     ).toBeTruthy();
   });
 
+  it("does NOT offer a Retry while the engine is still starting", () => {
+    // The cold boot is ~3.5 s. "The analytics engine is not running" with a
+    // Retry button, for three and a half seconds of every session, is a lie.
+    panel({ state: "initializing" });
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(screen.queryByText(/is not running/)).toBeNull();
+  });
+
+  it("shows a DuckDB page error in the BODY, with the filter bar closed", async () => {
+    runQuery.mockResolvedValue({
+      ok: false,
+      message: "Conversion Error: could not convert",
+    });
+    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    panel();
+    // The bar is collapsed by default, so its inline alert is off screen —
+    // without the body copy the grid would simply go stale in silence.
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Conversion Error: could not convert");
+  });
+
   it("shows a spinner while the table is building", () => {
     useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
     useLayerTableStore.setState({ tables: { L: { state: "building" } } });
@@ -8785,6 +9240,25 @@ describe("TablePanel states", () => {
         "0 of 2,231 rows match; the map shows nothing while Filter map is on",
       ),
     ).toBeTruthy();
+  });
+
+  it("says the TABLE is empty when there is no filter at all", async () => {
+    runQuery.mockImplementation(async (sql: string) =>
+      sql.includes("COUNT(*)")
+        ? { ok: true, columns: ["n"], rows: [{ n: 0 }] }
+        : { ok: true, columns: [], rows: [] },
+    );
+    useLayerStore.setState({
+      layers: [layer({ isStreaming: true })],
+      activeLayerId: "L",
+    });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    panel();
+    // "No rows match this filter" over a table that has no rows — a streaming
+    // layer whose first cells have not landed — is simply untrue.
+    expect(await screen.findByText("This layer has no rows yet.")).toBeTruthy();
   });
 
   it("says only 'no rows match' when the map is NOT being filtered", async () => {
@@ -8859,7 +9333,7 @@ Expected: FAIL — `TablePanel` still takes `duckdbTableLoaded` and renders the 
  * happened.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { DuckDBStatus } from "../../analytics/duckdb";
 import { useLayerTableStore } from "../../analytics/layerTables";
 import { useLayerStore } from "../../features/layers/layerStore";
@@ -8868,7 +9342,8 @@ import { useSelectionStore } from "../../features/selection/selectionStore";
 import type { Selection } from "../../domain/selection/types";
 import { DataGrid } from "./DataGrid";
 import { FilterBar } from "./FilterBar";
-import { Pagination } from "./Pagination";
+// ONE pinned `en-US` formatter for the whole panel — see Pagination.tsx.
+import { formatCount, Pagination } from "./Pagination";
 import { useLayerQuery } from "./useLayerQuery";
 
 /** The panel's height limits. Raised from 100–600: a filter bar, a header row
@@ -8881,21 +9356,27 @@ const STREAMING_FILTER_REASON =
   "Map filtering is not available for streaming layers yet";
 
 /**
- * What the grid says when a filter matched nothing.
+ * What the grid says with no rows to show.
  *
- * With "Filter map" ON, an empty result also empties the VIEWPORT — and an
- * empty globe reads as a rendering bug, not as a filter doing its job. Naming
- * both numbers and the cause is the difference between "the app broke" and
- * "my predicate is too narrow".
+ * Three different situations, three different sentences — "No rows match this
+ * filter" over a table that HAS no rows is simply wrong, and an empty viewport
+ * with no explanation reads as a rendering bug rather than as a filter doing
+ * its job:
+ *
+ *  - no filter applied → the table itself is empty (a streaming layer whose
+ *    first cells have not landed);
+ *  - a filter applied, map sync off → the ordinary "nothing matched";
+ *  - a filter applied, map sync ON → the same, plus why the globe went empty,
+ *    with both numbers so "too narrow" is distinguishable from "broken".
  */
 function emptyGridMessage(
   filtered: boolean,
   syncToMap: boolean,
   unfilteredRows: number,
-): string | undefined {
-  if (!filtered) return undefined;
-  if (!syncToMap) return undefined;
-  return `0 of ${unfilteredRows.toLocaleString()} rows match; the map shows nothing while Filter map is on`;
+): string {
+  if (!filtered) return "This layer has no rows yet.";
+  if (!syncToMap) return "No rows match this filter.";
+  return `0 of ${formatCount(unfilteredRows)} rows match; the map shows nothing while Filter map is on`;
 }
 
 export interface TablePanelProps {
@@ -8935,9 +9416,17 @@ export function TablePanel({
     return () => useLayerTableStore.getState().setTablePanelOpen(false);
   }, []);
 
-  const selectedIds = syncSelection
-    ? new Set(sceneSelections.map((s) => s.objectId))
-    : tableSelection;
+  // MEMOISED: a new Set on every render gives `DataGrid` a new prop identity,
+  // which defeats the `React.memo` below — and this component re-renders on
+  // every hover, every camera settle and every store touch, while the grid is
+  // up to 1000 rows of DOM.
+  const selectedIds = useMemo(
+    () =>
+      syncSelection
+        ? new Set(sceneSelections.map((s) => s.objectId))
+        : tableSelection,
+    [syncSelection, sceneSelections, tableSelection],
+  );
 
   const handleRowClick = useCallback(
     (objectId: string, shiftKey: boolean) => {
@@ -8982,7 +9471,7 @@ export function TablePanel({
           {view.status === "ready" && (
             <span className="table-count">
               {" "}
-              ({view.totalRows.toLocaleString()} rows)
+              ({formatCount(view.totalRows)} rows)
             </span>
           )}
         </span>
@@ -9103,23 +9592,34 @@ export function TablePanel({
             This layer's table could not be built: {view.message}
           </div>
         ) : (
-          <DataGrid
-            columns={view.columns}
-            rows={view.rows}
-            sort={query?.sort ?? null}
-            selectedIds={selectedIds}
-            emptyMessage={emptyGridMessage(
-              (query?.applied ?? null) !== null,
-              query?.syncToMap ?? false,
-              view.unfilteredRows,
+          <>
+            {/* The FilterBar carries this too — but the bar is COLLAPSED by
+                default, so a DuckDB page error or a compile refusal would
+                otherwise leave a stale grid with no explanation anywhere on
+                screen. */}
+            {view.message !== null && !filterOpen && (
+              <div className="table-message" role="alert">
+                {view.message}
+              </div>
             )}
-            onSort={(column) => {
-              if (layerId !== null) {
-                useQueryStore.getState().toggleSort(layerId, column);
-              }
-            }}
-            onRowClick={handleRowClick}
-          />
+            <DataGrid
+              columns={view.columns}
+              rows={view.rows}
+              sort={query?.sort ?? null}
+              selectedIds={selectedIds}
+              emptyMessage={emptyGridMessage(
+                (query?.applied ?? null) !== null,
+                query?.syncToMap ?? false,
+                view.unfilteredRows,
+              )}
+              onSort={(column) => {
+                if (layerId !== null) {
+                  useQueryStore.getState().toggleSort(layerId, column);
+                }
+              }}
+              onRowClick={handleRowClick}
+            />
+          </>
         )}
       </div>
 
@@ -9263,8 +9763,7 @@ In `src/app/app.css`, inside the `TABLE PANEL` block: delete the `.scroll-sentin
   gap: 0.35rem;
 }
 
-.filter-lead,
-.filter-logic-btn {
+.filter-lead {
   font-size: 0.65rem;
   color: var(--fg-label);
   min-width: 3rem;
@@ -9272,11 +9771,6 @@ In `src/app/app.css`, inside the `TABLE PANEL` block: delete the `.scroll-sentin
 }
 
 .filter-logic-btn {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  cursor: pointer;
-  padding: 0.1rem 0.3rem;
   color: var(--accent-text);
 }
 
@@ -9437,16 +9931,18 @@ describe("buildCityMeshArrays visible-id filtering", () => {
     ...makeObject(id, [tri(z)]),
     objectType,
   });
-  const model = makeModel({
+  // `visibleModel`, not `model`: this file already has a top-level `model`, and
+  // shadowing it inside the describe reads as the same fixture when it is not.
+  const visibleModel = makeModel({
     b1: typed("b1", "Building", 0),
     b2: typed("b2", "Building", 1),
     tree: typed("tree", "SolitaryVegetationObject", 2),
   });
-  const unfiltered = buildCityMeshArrays(model, "L", [0, 0, 0], null);
+  const unfiltered = buildCityMeshArrays(visibleModel, "L", [0, 0, 0], null);
 
   it("passes everything through for a null set", () => {
     const arrays = buildCityMeshArrays(
-      model,
+      visibleModel,
       "L",
       [0, 0, 0],
       null,
@@ -9460,7 +9956,7 @@ describe("buildCityMeshArrays visible-id filtering", () => {
 
   it("emits only the named objects", () => {
     const arrays = buildCityMeshArrays(
-      model,
+      visibleModel,
       "L",
       [0, 0, 0],
       null,
@@ -9474,7 +9970,7 @@ describe("buildCityMeshArrays visible-id filtering", () => {
 
   it("hides EVERYTHING for an empty set — distinct from null", () => {
     const arrays = buildCityMeshArrays(
-      model,
+      visibleModel,
       "L",
       [0, 0, 0],
       null,
@@ -9488,7 +9984,7 @@ describe("buildCityMeshArrays visible-id filtering", () => {
 
   it("keeps the objectKeys slot invariant — a filtered object still takes its index", () => {
     const arrays = buildCityMeshArrays(
-      model,
+      visibleModel,
       "L",
       [0, 0, 0],
       null,
@@ -9503,7 +9999,7 @@ describe("buildCityMeshArrays visible-id filtering", () => {
 
   it("ANDs with hiddenTypes — a visible id that is a hidden type stays hidden", () => {
     const arrays = buildCityMeshArrays(
-      model,
+      visibleModel,
       "L",
       [0, 0, 0],
       null,
@@ -9517,7 +10013,7 @@ describe("buildCityMeshArrays visible-id filtering", () => {
 
   it("ignores an id the model does not have", () => {
     const arrays = buildCityMeshArrays(
-      model,
+      visibleModel,
       "L",
       [0, 0, 0],
       null,
@@ -9856,6 +10352,8 @@ git -C packages/cityjson-navara-plugins push -u origin duckdb-integration
 - Modify: `src/features/layers/layerStore.ts`
 - Modify: `src/scene/handleSync.ts`
 - Modify: `packages/cityjson-navara-plugins` (gitlink bump only)
+- Modify: `tests/unit/scene/handleSync.test.ts` (its `fakeHandle` factory)
+- Modify: `tests/unit/scene/handleSyncAppearance.test.ts` (both handle literals)
 - Test: `tests/unit/features/layers/layerStoreVisibleIds.test.ts`
 - Test: `tests/unit/scene/handleSyncVisibleIds.test.ts`
 
@@ -10171,6 +10669,26 @@ if (entry.visibleObjectIds !== layer.visibleObjectIds) {
 
 Do NOT seed `visibleObjectIds` in the add path's `entry` literal — leaving it `undefined` is what makes that first push happen.
 
+- [ ] **Step 4b: Teach the EXISTING fake handles the new method**
+
+That unconditional first push calls `entry.handle.setVisibleObjectIds(...)` on
+every static handle, and the fakes in the two existing `handleSync` suites do
+not have it — so without this every static-path test in the repo throws
+`entry.handle.setVisibleObjectIds is not a function`.
+
+In `tests/unit/scene/handleSync.test.ts`, add one line to `fakeHandle`'s
+returned object, beside `setHiddenTypes`:
+
+```ts
+    setVisibleObjectIds: vi.fn(),
+```
+
+In `tests/unit/scene/handleSyncAppearance.test.ts`, add the same line to BOTH
+handle literals (grep the file for `setHiddenTypes: vi.fn(),` — there are two).
+
+Run: `npx vitest run tests/unit/scene`
+Expected: PASS — the whole scene suite, not only the new file.
+
 - [ ] **Step 5: Run the tests, both type checks, and bump the gitlink**
 
 ```bash
@@ -10404,6 +10922,42 @@ describe("syncFilterToMap", () => {
     expect(visibleIds(id)).toBeNull();
   });
 
+  it("a SLOW earlier call cannot overwrite a faster later one", async () => {
+    const id = addLayer();
+    useLayerTableStore.setState({
+      tables: { [id]: { state: "ready", info: TABLE } },
+    });
+    useQueryStore.getState().setSyncToMap(id, true);
+    useQueryStore.getState().setFilter(id, FILTER);
+    useQueryStore.getState().applyFilter(id);
+
+    // The FIRST query is held; the second answers at once.
+    let releaseFirst!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    runQuery
+      .mockImplementationOnce(async () => {
+        await held;
+        return { ok: true, columns: ["id"], rows: [{ id: "OLD" }] };
+      })
+      .mockImplementationOnce(async () => ({
+        ok: true,
+        columns: ["id"],
+        rows: [{ id: "NEW" }],
+      }));
+
+    const first = syncFilterToMap(id);
+    const second = syncFilterToMap(id);
+    await second;
+    releaseFirst();
+    await first;
+
+    // The stale answer is DISCARDED. Without the generation check it would
+    // rebuild the mesh from a predicate the user had already replaced.
+    expect([...visibleIds(id)!]).toEqual(["NEW"]);
+  });
+
   it("clears when the layer has no table (a rebuild in flight)", async () => {
     const id = addLayer();
     useLayerStore.getState().setVisibleObjectIds(id, new Set(["OLD"]));
@@ -10443,7 +10997,23 @@ import { buildFeatureIdsSql, compileFilter } from "../../analytics/sql";
 import { useLayerStore } from "../layers/layerStore";
 import { layerQuery, useQueryStore } from "./queryStore";
 
+/**
+ * One generation per layer, bumped on every call.
+ *
+ * The same reason `useLayerQuery` has one — an Apply, a toggle and a table
+ * rebuild can all be in flight at once and DuckDB answers in whatever order it
+ * finishes — but the stakes are higher here: the LOSER does not merely paint a
+ * stale grid, it rebuilds the layer's GEOMETRY from a predicate the user has
+ * already replaced. Bumped on the early paths too, so a clear that lands late
+ * cannot undo the filter that overtook it.
+ */
+const generations = new Map<string, number>();
+
 export async function syncFilterToMap(layerId: string): Promise<void> {
+  const generation = (generations.get(layerId) ?? 0) + 1;
+  generations.set(layerId, generation);
+  const isCurrent = () => generations.get(layerId) === generation;
+
   const clear = () =>
     useLayerStore.getState().setVisibleObjectIds(layerId, null);
 
@@ -10476,6 +11046,10 @@ export async function syncFilterToMap(layerId: string): Promise<void> {
   const result = await runQuery(
     buildFeatureIdsSql(table.table, compiled.where),
   );
+  // A newer call overtook this one while the query ran. Its answer is the
+  // current one; writing ours would rebuild the geometry from a predicate the
+  // user has already moved on from.
+  if (!isCurrent()) return;
   if (!result.ok) {
     clear();
     return;
@@ -10778,6 +11352,10 @@ export function validateExportBytes(
   bytes: Uint8Array | null,
 ): ReadbackOutcome;
 
+/** Test-only: rewinds the VFS-name counter so a suite's expected names
+ *  (`export_1.csv`, `exp_1`) are the ones actually produced. */
+export function resetExportCounterForTests(): void;
+
 export type ExportRequest = AttributeExportRequest | CityParquetExportRequest;
 export function runExport(request: ExportRequest): Promise<ExportResult>;
 ```
@@ -10833,7 +11411,7 @@ vi.mock("../../../src/analytics/duckdb", () => ({
   queryParquetBuffer: vi.fn(async () => null),
 }));
 
-const { runExport, validateExportBytes } =
+const { resetExportCounterForTests, runExport, validateExportBytes } =
   await import("../../../src/analytics/export");
 import type { ColumnInfo } from "../../../src/analytics/columnKind";
 
@@ -10849,6 +11427,10 @@ beforeEach(() => {
   dropped.length = 0;
   ddlFailure = null;
   fileBytes = undefined;
+  // The counter is MODULE state: without this every test after the first
+  // writes export_2, export_3 … and the exact-name assertions below — the
+  // "never reuses a VFS name" one above all — check the wrong numbers.
+  resetExportCounterForTests();
 });
 
 describe("validateExportBytes", () => {
@@ -11187,6 +11769,21 @@ function nextExportName(): string {
   return `export_${++exportCounter}`;
 }
 
+/**
+ * Rewind the counter. TEST-ONLY.
+ *
+ * Module state survives between `it` blocks in one file, so without this the
+ * second test in a suite writes `export_2.csv` and every exact-name assertion
+ * after the first is checking the wrong number — including the one that exists
+ * precisely to prove names are NOT reused, which would then be asserting the
+ * wrong pair. Exported rather than papered over with a regex: the names are
+ * part of the contract, and `export_\d+` would not notice a counter that had
+ * stopped incrementing.
+ */
+export function resetExportCounterForTests(): void {
+  exportCounter = 0;
+}
+
 async function exportAttributes(
   request: AttributeExportRequest,
 ): Promise<ExportResult> {
@@ -11365,7 +11962,8 @@ vi.mock("../../../src/analytics/duckdb", () => {
   };
 });
 
-const { runExport } = await import("../../../src/analytics/export");
+const { resetExportCounterForTests, runExport } =
+  await import("../../../src/analytics/export");
 
 function request(over: Record<string, unknown> = {}) {
   return {
@@ -11393,6 +11991,8 @@ beforeEach(() => {
   validationReadFails = false;
   failOn = null;
   badFile = null;
+  // Module state; the `exp_<n>` names in the regexes below are per-run.
+  resetExportCounterForTests();
   writeRows = [
     { file: "building.parquet", action: "written", rows: 765, bytes: 1539498 },
     { file: "metadata.json", action: "written", rows: 0, bytes: 6517 },
@@ -11569,6 +12169,26 @@ describe("CityParquet package export", () => {
     );
   });
 
+  it("takes the name from the FIRST string column, and strips a repeated dir prefix", async () => {
+    // The column is called `file` today, but that is the extension's private
+    // spelling; and the writer has been seen to report a path relative to the
+    // database rather than a bare name, which would otherwise be read back as
+    // `exp_1/exp_1/building.parquet` — the missing-file signature.
+    writeRows = [
+      { name: "exp_1/building.parquet", action: "written", rows: 1, bytes: 10 },
+      { name: "metadata.json", action: "written", rows: 0, bytes: 10 },
+    ];
+    const result = await runExport(request());
+    for (const path of readFiles) {
+      expect(path).not.toMatch(/exp_\d+\/exp_\d+\//);
+    }
+    const entries = unzipSync(new Uint8Array(await result.blob.arrayBuffer()));
+    expect(Object.keys(entries).sort()).toEqual([
+      "building.parquet",
+      "metadata.json",
+    ]);
+  });
+
   it("zips EVERY file the write named — a package missing one is not a package", async () => {
     writeRows = [
       { file: "building.parquet", action: "written", rows: 1, bytes: 10 },
@@ -11617,6 +12237,33 @@ import {
 and the request type plus the implementation:
 
 ```ts
+/**
+ * The file NAME out of one `cityparquet_write` result row.
+ *
+ * The FIRST string-valued column, not a column called `file`: the observed
+ * shape is `file | action | rows | bytes`, but that column name is the
+ * extension's, undocumented, and a rename would silently produce an empty zip
+ * rather than an error. The first string in a row of (name, action, count,
+ * count) is the name in any spelling of that tuple.
+ *
+ * A leading `<outDir>/` is stripped: the extension has been seen to report
+ * both a bare name and a path relative to the database, and prefixing an
+ * already-prefixed name yields `exp_1/exp_1/building.parquet`, which reads
+ * back as the missing-file signature.
+ */
+function writtenFileName(
+  row: Record<string, unknown>,
+  outDir: string,
+): string | null {
+  for (const value of Object.values(row)) {
+    if (typeof value !== "string" || value === "") continue;
+    return value.startsWith(`${outDir}/`)
+      ? value.slice(outDir.length + 1)
+      : value;
+  }
+  return null;
+}
+
 /** How one of the writer's own output files is checked. Its package holds
  *  parquet object tables and a JSON STAC Item, nothing else. */
 function contentFormatOf(fileName: string): ExportContentFormat {
@@ -11787,7 +12434,7 @@ async function exportCityParquet(
     // the writer produces a second, duplicated set of paths.
     const entries: Record<string, Uint8Array> = {};
     for (const row of written.rows) {
-      const name = typeof row.file === "string" ? row.file : null;
+      const name = writtenFileName(row, outDir);
       if (name === null) continue;
       const path = `${outDir}/${name}`;
       writtenFiles.push(path);
@@ -12252,6 +12899,80 @@ describe("ExportDialog", () => {
     ).toBe(false);
   });
 
+  it("falls back to an offered format when the table loses its reader", async () => {
+    const { rerender } = render(
+      <ExportDialog
+        layerId="L"
+        layerName="delft"
+        table={READER_TABLE}
+        epsg={7415}
+        selectedLod="2.2"
+        isStreaming={false}
+        onClose={() => {}}
+      />,
+    );
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    fireEvent.click(screen.getByLabelText("CityParquet package (.zip)"));
+
+    // A streaming rebuild lands: the table comes back as a fallback.
+    rerender(
+      <ExportDialog
+        layerId="L"
+        layerName="delft"
+        table={FALLBACK_TABLE}
+        epsg={7415}
+        selectedLod={null}
+        isStreaming={false}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.queryByLabelText("CityParquet package (.zip)")).toBeNull();
+    // A radio is still checked, and it is one the layer can actually serve.
+    expect((screen.getByLabelText("Parquet") as HTMLInputElement).checked).toBe(
+      true,
+    );
+  });
+
+  it("re-seeds the attribute list when the table's columns change", async () => {
+    const { rerender } = render(
+      <ExportDialog
+        layerId="L"
+        layerName="delft"
+        table={READER_TABLE}
+        epsg={7415}
+        selectedLod="2.2"
+        isStreaming={false}
+        onClose={() => {}}
+      />,
+    );
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    expect(screen.getByLabelText("b3_h_dak_max")).toBeTruthy();
+
+    rerender(
+      <ExportDialog
+        layerId="L"
+        layerName="delft"
+        table={{
+          ...READER_TABLE,
+          columns: [
+            { name: "id", type: "VARCHAR", kind: "scalar" as const },
+            { name: "feature_id", type: "VARCHAR", kind: "scalar" as const },
+            { name: "object_type", type: "VARCHAR", kind: "scalar" as const },
+            { name: "bouwjaar", type: "BIGINT", kind: "castText" as const },
+          ],
+        }}
+        epsg={7415}
+        selectedLod="2.2"
+        isStreaming={false}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.queryByLabelText("b3_h_dak_max")).toBeNull();
+    expect(
+      (screen.getByLabelText("bouwjaar") as HTMLInputElement).checked,
+    ).toBe(true);
+  });
+
   it("shows the export's warnings after a successful download", async () => {
     runExport.mockResolvedValue({
       blob: new Blob(["x"]),
@@ -12301,12 +13022,26 @@ import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 import { downloadBlob } from "../../platform/download";
 import { useModalChrome } from "../useModalChrome";
 
-/** The columns that are never offered as "attributes": they are identity and
- *  structure, and the exporter always writes them. */
+/**
+ * The columns that are never offered as "attributes".
+ *
+ * `id, feature_id, object_type, parents, children` plus `children_roles` and
+ * `bbox` are identity and structure — the exporter always writes them, and
+ * `CITYPARQUET_REQUIRED_COLUMNS` says so.
+ *
+ * `address` and `other` are here for the OPPOSITE reason: they are the
+ * reader's own columns, not the file's attributes, and the CityParquet source
+ * table does not carry them (the writer does not require them, and nobody
+ * chose them). Leaving them in the attribute list would offer
+ * `address STRUCT[]` as a tick-box and then feed it into a source SELECT that
+ * has no business holding it.
+ */
 const FIXED_COLUMNS = new Set([
   ...FLAT_PREFIX_COLUMNS,
   "children_roles",
   "bbox",
+  "address",
+  "other",
 ]);
 
 type Format = "cityparquet" | "parquet" | "csv" | "json";
@@ -12409,10 +13144,26 @@ export function ExportDialog({
   const [selectedAttributes, setSelectedAttributes] = useState<
     ReadonlySet<string>
   >(() => new Set(attributeColumns.map((c) => c.name)));
+
+  // That initialiser runs ONCE. A streaming layer's table is rebuilt under
+  // this dialog — `refreshStreamingTable` on open, and again on every commit
+  // while the panel is up — and the new table can carry different columns, so
+  // re-seed on the column list's identity. Without it the export writes a
+  // column list belonging to a table that no longer exists.
+  useEffect(() => {
+    setSelectedAttributes(new Set(attributeColumns.map((c) => c.name)));
+  }, [attributeColumns]);
   const [scope, setScope] = useState<"all" | "filter">(
     query.applied === null ? "all" : "filter",
   );
-  const [format, setFormat] = useState<Format>(formats[0]!);
+  const [chosenFormat, setChosenFormat] = useState<Format>("csv");
+  // CLAMPED, not stored blind: `formats` SHRINKS when the table is rebuilt as
+  // a fallback (a streaming layer's rebuild), and a `chosenFormat` of
+  // "cityparquet" that is no longer offered would leave the dialog with no
+  // radio checked and an Export button running a route this layer cannot serve.
+  const format: Format = formats.includes(chosenFormat)
+    ? chosenFormat
+    : formats[0]!;
   const [lod, setLod] = useState<string>(
     selectedLod !== null && table.lods.includes(selectedLod)
       ? selectedLod
@@ -12475,43 +13226,51 @@ export function ExportDialog({
         .filter((c) => selectedAttributes.has(c.name))
         .map((c) => c.name);
 
-      const request: ExportRequest =
-        format === "cityparquet"
-          ? {
-              kind: "cityparquet",
-              table: table.table,
-              // Narrowed by `canCityParquet`, which gates this option.
-              reader: table.reader!,
-              source: table.source!,
-              sourceExtension:
-                table.reader === "read_cityjsonseq"
-                  ? "city.jsonl"
-                  : "city.json",
-              lod,
-              attributes,
-              where,
-              rootTypes: rootTypes.filter((t) => selectedTypes.has(t)),
-              epsg: epsg!,
-              fileName: exportFileName(layerName, EXTENSIONS.cityparquet),
-            }
-          : {
-              kind: "attributes",
-              format,
-              table: table.table,
-              columns: [
-                ...table.columns.filter(
-                  (c) =>
-                    c.name === "id" ||
-                    c.name === "feature_id" ||
-                    c.name === "object_type",
-                ),
-                ...attributeColumns.filter((c) =>
-                  selectedAttributes.has(c.name),
-                ),
-              ],
-              where,
-              fileName: exportFileName(layerName, EXTENSIONS[format]),
-            };
+      let request: ExportRequest;
+      if (format === "cityparquet") {
+        // A real guard, not `!`. `canCityParquet` gates the option, but the
+        // TABLE can be rebuilt under an open dialog and come back as a
+        // fallback with no reader and no source; a non-null assertion would
+        // then send `undefined` into the exporter and fail somewhere deep in
+        // the SQL, where the message means nothing to the user.
+        const { reader, source } = table;
+        if (reader === null || source === null || epsg === null) {
+          throw new Error(
+            "This layer no longer has a CityJSON source with an EPSG code, so a CityParquet package cannot be written. Pick another format.",
+          );
+        }
+        request = {
+          kind: "cityparquet",
+          table: table.table,
+          reader,
+          source,
+          sourceExtension:
+            reader === "read_cityjsonseq" ? "city.jsonl" : "city.json",
+          lod,
+          attributes,
+          where,
+          rootTypes: rootTypes.filter((t) => selectedTypes.has(t)),
+          epsg,
+          fileName: exportFileName(layerName, EXTENSIONS.cityparquet),
+        };
+      } else {
+        request = {
+          kind: "attributes",
+          format,
+          table: table.table,
+          columns: [
+            ...table.columns.filter(
+              (c) =>
+                c.name === "id" ||
+                c.name === "feature_id" ||
+                c.name === "object_type",
+            ),
+            ...attributeColumns.filter((c) => selectedAttributes.has(c.name)),
+          ],
+          where,
+          fileName: exportFileName(layerName, EXTENSIONS[format]),
+        };
+      }
 
       const result = await runExport(request);
       downloadBlob(result.blob, result.fileName);
@@ -12628,7 +13387,7 @@ export function ExportDialog({
                   name="export-format"
                   aria-label={FORMAT_LABELS[f]}
                   checked={format === f}
-                  onChange={() => setFormat(f)}
+                  onChange={() => setChosenFormat(f)}
                 />
                 <span>{FORMAT_LABELS[f]}</span>
               </label>
@@ -13025,7 +13784,10 @@ const require = createRequire(import.meta.url);
 
 export interface Harness {
   query(sql: string): Record<string, unknown>[];
+  /** Register a file from `fixtures/`. */
   register(name: string, fixture: string): void;
+  /** Register bytes built in the test itself. */
+  registerBytes(name: string, bytes: Uint8Array): void;
   close(): void;
 }
 
@@ -13079,6 +13841,9 @@ export async function openDuckDB(): Promise<Harness> {
         new Uint8Array(readFileSync(resolve("fixtures", fixture))),
       );
     },
+    registerBytes(name, bytes) {
+      db.registerFileBuffer(name, bytes);
+    },
     close() {
       conn.close();
     },
@@ -13109,7 +13874,7 @@ Create `tests/integration/duckdb/layerTables.test.ts`:
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { openDuckDB, type Harness } from "./harness";
+import type { Harness } from "./harness";
 import {
   classifyColumnType,
   isDroppedColumn,
@@ -13134,6 +13899,12 @@ suite("layer tables over real fixtures", () => {
   const TABLE = "layer_1";
 
   beforeAll(async () => {
+    // DYNAMIC, inside `beforeAll`: the file is collected by the default run
+    // (it matches `tests/**/*.test.ts`) and only `describe.skip` keeps it from
+    // executing — a top-level import would still evaluate the harness, which
+    // `require`s the DuckDB node bindings and resolves three wasm paths, in
+    // every offline run of the suite.
+    const { openDuckDB } = await import("./harness");
     db = await openDuckDB();
     db.register("two.city.json", "two-buildings.city.json");
 
@@ -13242,6 +14013,71 @@ suite("layer tables over real fixtures", () => {
     expect(types).toContain("Building");
   });
 
+  it("reads validation findings the way the exporter does", () => {
+    // The exporter's route, against the real extension: the PRAGMA returns no
+    // rows and materialises `cityparquet_validation`, which is then selected
+    // from. If a future build made the pragma RETURN its findings instead,
+    // every export would silently report "no warnings".
+    db.query("CREATE SCHEMA exp_probe");
+    db.query(
+      `CREATE TABLE exp_probe.building AS SELECT * FROM ${quoteIdent(TABLE)} LIMIT 0`,
+    );
+    db.query("PRAGMA cityparquet_init('exp_probe')");
+    const pragmaRows = db.query("PRAGMA cityparquet_validate('exp_probe')");
+    expect(pragmaRows).toEqual([]);
+    // The temp table exists and carries a `severity` column, which is what the
+    // exporter groups by.
+    const findings = db.query(
+      'SELECT "severity", count(*) AS "n" FROM cityparquet_validation GROUP BY 1',
+    );
+    expect(Array.isArray(findings)).toBe(true);
+    db.query("DROP SCHEMA exp_probe CASCADE");
+  });
+
+  it("types an ALL-NULL parents column as VARCHAR[] on the flat-fallback path", async () => {
+    // The fallback's schema must match the reader's, and `read_json_auto`
+    // types an all-NULL column as JSON. The ALTER in `buildFromRows` is what
+    // fixes it — this asserts the SQL that task emits really does.
+    const rows = [
+      {
+        id: "A",
+        feature_id: "A",
+        object_type: "Building",
+        parents: null,
+        children: null,
+      },
+      {
+        id: "B",
+        feature_id: "B",
+        object_type: "Building",
+        parents: null,
+        children: null,
+      },
+    ];
+    db.registerBytes(
+      "flat.json",
+      new TextEncoder().encode(JSON.stringify(rows)),
+    );
+    db.query(
+      "CREATE OR REPLACE TABLE flat AS SELECT * FROM read_json_auto('flat.json')",
+    );
+    const inferred = db
+      .query("DESCRIBE flat")
+      .find((r) => r.column_name === "parents");
+    expect(inferred?.column_type).toBe("JSON");
+
+    for (const column of ["parents", "children"]) {
+      db.query(`ALTER TABLE flat ALTER COLUMN "${column}" TYPE VARCHAR[]`);
+    }
+    const fixed = db
+      .query("DESCRIBE flat")
+      .find((r) => r.column_name === "parents");
+    expect(fixed?.column_type).toBe("VARCHAR[]");
+    expect(
+      db.query("SELECT count(*) AS n FROM flat WHERE parents IS NULL")[0]!.n,
+    ).toBe(2);
+  });
+
   it("sorts with NULLS LAST without erroring on any scalar column", () => {
     for (const column of columns.filter(
       (c) => c.kind === "scalar" || c.kind === "castText",
@@ -13336,12 +14172,13 @@ Then add this bullet to **Key Architecture Decisions**, after the CityParquet on
 
 - [ ] **Step 2: Add the milestone to `docs/roadmap.md`**
 
-Append to the milestone list, in the same style as the entries around it:
+House style, matched to Milestones 9 and 10: the heading carries the status in
+parentheses, and the entry goes AFTER `## Milestone 10: GIS Layers …` and
+BEFORE `## Cross-Cutting Workstreams` — not at the end of the file, where
+`## Main Risks` and `## Recommended Immediate Next Step` live.
 
 ```markdown
-## Milestone 11 — DuckDB integration (per-layer tables, query table, map filter, export)
-
-Status: complete.
+## Milestone 11: DuckDB Integration — Per-Layer Tables, Query Table, Map Filter, Export (Complete)
 
 - 11.1 Engine: `@duckdb/duckdb-wasm@1.33.1-dev64.0` (DuckDB 1.5.5), per-extension
   status, `ensureExtension` for `spatial`/`three_d`, `runQuery` with DuckDB's own
@@ -13392,14 +14229,24 @@ Expected: all clean, 0 failed files in both.
 
 - [ ] **Step 4: Verify a fresh clone installs (CI runs `npm ci`)**
 
+`--recursive` resolves the gitlink from GITHUB, not from this checkout, so this
+only works once the plugin branch is published — which Task 25 already did
+(`git push -u origin duckdb-integration`). Confirm that first, then clone into a
+throwaway directory:
+
 ```bash
-cd /tmp/claude-1020/-data2-hideba-multiroof-viewer-integration-of-duckdb-wasm-and-relevant-extensio/4f7d932c-5989-43a6-b1c3-594a6d58b4af/scratchpad
-rm -rf ci-check
+git -C packages/cityjson-navara-plugins rev-parse HEAD
+git -C packages/cityjson-navara-plugins rev-parse origin/duckdb-integration
+cd "$(mktemp -d)"
 git clone --recursive /data2/hideba/multiroof-viewer-integration-of-duckdb-wasm-and-relevant-extensio ci-check
 cd ci-check && npm ci
 ```
 
-Expected: `npm ci` completes with no `EUSAGE` lockfile-mismatch error. If it fails, re-run `npm install` in the worktree, commit the regenerated `package-lock.json`, and repeat.
+Expected: the two hashes match, the recursive clone resolves the submodule, and
+`npm ci` completes with no `EUSAGE` lockfile-mismatch error. If `npm ci` fails,
+re-run `npm install` in the worktree, commit the regenerated
+`package-lock.json`, and repeat. If the SUBMODULE step fails, the branch was
+never pushed — go back and push it before anything else.
 
 - [ ] **Step 5: Commit the docs**
 
@@ -13414,14 +14261,36 @@ EOF
 )"
 ```
 
-- [ ] **Step 6: Push the submodule first, then the parent**
+- [ ] **Step 6: Code review before the push**
+
+CLAUDE.md requires it: "When completing a major feature or milestone, use the
+`feature-dev:code-reviewer` agent with high effort to review changes. Run the
+review BEFORE committing. Address critical issues before pushing."
+
+Dispatch it over the WHOLE branch diff — parent and submodule — not the last
+commit:
 
 ```bash
-git -C packages/cityjson-navara-plugins push origin duckdb-integration
+git log --oneline main..HEAD
+git diff main...HEAD --stat
+git -C packages/cityjson-navara-plugins log --oneline 947c980..HEAD
+```
+
+Give the reviewer that diff plus this plan and the spec, at high effort. Address
+every **Critical** finding with its own commit (prefixed `fix:`) before Step 7;
+record anything deliberately not acted on, and why, in the PR description.
+
+- [ ] **Step 7: Push**
+
+```bash
 git push
 ```
 
-(Submodule-first, always: pushing the parent's gitlink before the branch it names leaves a repository nobody else can clone.)
+The submodule branch went up in Task 25, and Step 4 has just proved a recursive
+clone of this commit resolves — so there is nothing left to push there. (If Task
+25's push was somehow skipped, `git -C packages/cityjson-navara-plugins push -u
+origin duckdb-integration` must go first: a parent gitlink naming an unpublished
+commit leaves a repository nobody else can clone.)
 
 ---
 
@@ -13462,6 +14331,8 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
 | §3.2          | `shouldUseSourceUrlPath` deleted; `loadFromUrl` returns bytes                                                             | 15, 18                                            |
 | §3.2          | Reader-backed creation SQL, then `dropBuffer`                                                                             | 13                                                |
 | §3.2          | **A REBUILD keeps the old table until the new one exists; a FAILED rebuild keeps it for good**                            | 13, 14                                            |
+| §3.2          | **Cancellation is a monotonic SEQUENCE, not a flag: a drop supersedes only what was enqueued before it**                  | 13, 14                                            |
+| §3.2          | **The flat fallback ALTERs `parents`/`children` to `VARCHAR[]` — `read_json_auto` types an all-NULL column as JSON**      | 12, 13, 33                                        |
 | §3.2          | **`registerBuffer` CONSUMES its array; no needless second copy anywhere**                                                 | 2, 13, 15, 16                                     |
 | §3.2          | **`SourceProvider` returns DECODED bytes for file AND url**                                                               | 15 (`fetchModelBytes`, gunzip test), 16           |
 | §3.2          | **A restored file layer has no provider → export refused with that reason**                                               | 13/16 (`provider: null`), 31 (`RELINK_REASON`)    |
@@ -13475,21 +14346,27 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
 | §3.3          | `quoteIdent`/`quoteLiteral`/`compileFilter`/LIKE escaping                                                                 | 9                                                 |
 | §3.3          | `projectColumn`, `buildPageSql`, `buildCountSql`                                                                          | 10                                                |
 | §3.3          | `buildFeatureIdsSql` with COALESCE + positive IN                                                                          | 10, 27                                            |
-| §3.3          | `buildDistinctSql` (+ `buildRootTypesSql`, added for §3.6)                                                                | 10                                                |
+| §3.3          | `buildDistinctSql` — deliberately NOT built (see the gaps note); `buildRootTypesSql` added for §3.6                       | 10                                                |
 | §3.4          | `TablePanel`→`FilterBar`→`DataGrid`→`Pagination`, `useLayerQuery`                                                         | 20, 21, 22, 23                                    |
 | §3.4          | Header: Sync selection, Filter map, Export, collapse                                                                      | 23, 31                                            |
 | §3.4          | IntersectionObserver removed; 320 px default, 120–800 clamp                                                               | 22, 23                                            |
 | §3.4          | States: engine failed+Retry, queued/building, failed, no layer, zero rows                                                 | 20, 23                                            |
+| §3.4          | **`initializing` is published BEFORE the 3.5 s boot, so the panel never offers Retry over a healthy engine**              | 23                                                |
+| §3.4          | **A DuckDB page error / compile refusal is shown in the panel BODY, not only in the collapsed bar**                       | 23                                                |
+| §3.4          | **Values are kept RAW in the condition and coerced at compile time — a fractional threshold can be typed**                | 9, 21                                             |
 | §3.4          | **Zero rows + Filter map on → "0 of N rows match; the map shows nothing…"**                                               | 22 (`emptyMessage`), 23                           |
 | §3.5          | `syncToMap` → ids → `setVisibleObjectIds`; null vs empty                                                                  | 26, 27                                            |
 | §3.5          | `buildCityMeshArrays` visible-id parameter, slot invariant                                                                | 24                                                |
 | §3.5          | `CityModelMesh.setVisibleObjectIds` + handle + registry                                                                   | 25                                                |
 | §3.5          | `Layer.visibleObjectIds` session-only; `handleSync` push                                                                  | 26                                                |
 | §3.5          | **`setVisibleObjectIds` is a no-op on identity; the sync returns early when there is nothing to clear**                   | 26, 27                                            |
+| §3.5          | **`syncFilterToMap` carries a per-layer generation: a slow earlier query cannot rebuild the geometry over a newer one**   | 27                                                |
 | §3.5          | Streaming disabled with the exact reason string                                                                           | 23                                                |
 | §3.6          | Dialog: scope, object types, attributes, LoD, format                                                                      | 31                                                |
+| §3.6          | **The chosen format is clamped to what is offered, and the attribute list re-seeds when the table changes**               | 31                                                |
 | §3.6          | CityParquet: schema, re-register, CTAS, init, validate, write, zip, cleanup                                               | 30                                                |
 | §3.6          | **Every file the write names must be in the zip**                                                                         | 30                                                |
+| §3.6          | **The output name is the FIRST string column of the write's result row, with a repeated dir prefix stripped**             | 30                                                |
 | §3.6          | **The source is read ONCE into a scratch schema; N modules is not N parses**                                              | 11, 30                                            |
 | §3.6          | **`cityparquet_validate` returns no rows — the temp table is dropped first, and a run/read failure is a VISIBLE warning** | 30                                                |
 | §3.6          | **`dropBuffer` over a writer-created file is unverified: try/catch + warn, checked by the smoke**                         | 30, 32                                            |
@@ -13514,8 +14391,12 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
 
 **Gaps found and closed while writing (both drafts):**
 
-- §3.6 needs the layer's TOP-LEVEL types; §3.3 lists only `buildDistinctSql`.
-  Added `buildRootTypesSql(table)` in Task 10.
+- §3.6 needs the layer's TOP-LEVEL types, and §3.3 offers only
+  `buildDistinctSql`. Task 10 adds `buildRootTypesSql(table)` and DROPS
+  `buildDistinctSql`: §3.3 lists it for "value suggestions" in the filter bar,
+  and §3.4's bar is a plain text input with no suggestions in it — so it would
+  ship as an exported, unit-tested function with no caller, which is a
+  liability rather than a head start.
 - §3.6's scope predicate is written with a bare `feature_id`, while §3.3
   explains why `COALESCE("feature_id","id")` is required. Task 10's
   `buildFeatureScopeWhere` uses COALESCE everywhere; Task 11's CTAS builds on it.
@@ -13537,6 +14418,23 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
   file that can be hundreds of megabytes. Task 11 splits it into one scratch
   read plus N cheap cuts, the scratch table in a schema of its own because
   `cityparquet_init` describes every table in the schema it is handed.
+- §3.4's filter bar parses its value input as the user types, which cannot
+  work: `Number("1.")` is 1, so the decimal point is deleted the instant it is
+  typed and no fractional threshold can be entered at all. Task 21 keeps the
+  RAW string in the condition and Task 9's `literalFor` coerces from the
+  column's type at compile time, where a bad value becomes a sentence rather
+  than a silently altered number.
+- §3.2's cancellation reads "a layer removed while still queued is skipped",
+  which the first draft implemented as a `Set`. A set also cancels builds
+  enqueued AFTER the drop, and clearing it at enqueue time un-cancels a build
+  the drop was meant to kill; the question is "which came first", so Tasks
+  13/14 answer it with a monotonic sequence number.
+- §3.2's flat fallback assumes `read_json_auto` reproduces the reader's schema.
+  Probed 2026-09-04: an all-NULL `parents` types as JSON, `sample_size = -1`
+  and `union_by_name` do not help, and a PARTIAL `columns = {…}` drops every
+  column it does not name. Tasks 12/13 add two `ALTER COLUMN … TYPE VARCHAR[]`
+  statements — verified idempotent, NULL- and value-preserving — with a Task 33
+  probe over the real engine.
 - §3.6 reads the validation findings with `SELECT count(*) FROM
 cityparquet_validation`. Probes P6b/P6c/P6f/P6g and FUNCTIONS.md show the
   PRAGMA returns no rows and materialises a temp table instead — and that when
@@ -13547,7 +14445,7 @@ cityparquet_validation`. Probes P6b/P6c/P6f/P6g and FUNCTIONS.md show the
 - §3.5 writes the plugin signature as `(…, hiddenTypes, visibleObjectIds)`, but
   the shipped signature carries `appearance` at position 6 and ~20 call sites
   pass it positionally. Task 24 uses position 7.
-- §3.6's CTAS is written with `lod := '<L>'`. Probe `p8.out` shows `lod :=`
+- §3.6's source read is written with `lod := '<L>'`. Probe `p8.out` shows `lod :=`
   narrows the SCHEMA, keeps every row, and raises a Binder Error for an LoD the
   file lacks — so it works, but it is redundant beside an explicit column list
   that already names one LoD's geometry pair, and the explicit projection is the
@@ -13635,5 +14533,31 @@ Every name that crosses a task boundary, re-checked after the edits:
   function (Task 2), and REFERENCED — not restated differently — on
   `LayerTableSource.bytes` and `SourceProvider` (Task 13), `modelTableSource`
   and both providers (Task 16), and `loadFromUrl`'s `bytes` field (Task 15).
+- `cancelBefore` / `seqCounter` replace the old `cancelled` Set outright: no
+  reference to a cancellation Set survives in Task 13's implementation, Task
+  14's `dropLayerTable`, `resetLayerTablesForTest` or either test file.
+- `isValueList`, `literalFor` and `NUMERIC_TYPES` are file-local to
+  `analytics/sql.ts` (Task 9); `FilterValue` is imported there for the first.
+  Task 21's `parseValue(raw, op)` dropped its `column` parameter, and its one
+  caller passes two arguments.
+- `buildDistinctSql` no longer exists anywhere: not in Task 10's Interfaces,
+  its implementation, its test, the File Structure, or §3.3's builder list —
+  the coverage table records it as deliberately absent.
+- `writtenFileName(row, outDir)` is file-local to `analytics/export.ts` (Task 30) and is the ONLY place an output name is derived; nothing reads `row.file`
+  by name any more.
+- `resetExportCounterForTests` is declared in Task 29's Interfaces and called
+  in BOTH export suites' `beforeEach` (Tasks 29 and 30).
+- `DataGrid` is a `React.memo` component: Task 22's Interfaces block says so,
+  `TablePanel` memoises `selectedIds` to match (Task 23), and both test files
+  render it as an ordinary element, which `memo` does not change.
+- `rawCellTitle` (Task 22) is exported beside `formatCell` and used only by
+  `DataGrid`'s `<td title>`.
+- `Harness` gains `registerBytes` (Task 33); the flat-fallback probe is its one
+  caller, and the harness is imported DYNAMICALLY inside `beforeAll`.
+- `formatCount` is declared once, in `Pagination.tsx` (Task 22), and imported by
+  `TablePanel` (Task 23). No `toLocaleString()` call survives in either.
+- `setVisibleObjectIds: vi.fn()` reaches the two PRE-EXISTING fake handles
+  (Task 26, Step 4b) as well as the new suite's — the first push is
+  unconditional, so every static-path test needs it.
 
 No mismatches remain.
