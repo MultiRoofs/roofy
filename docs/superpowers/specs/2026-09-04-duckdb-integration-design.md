@@ -208,7 +208,7 @@ then
 ```sql
 CREATE TABLE "layer_3" AS
 SELECT "id", "feature_id", "object_type", … -- every column NOT matching
-       -- ^(geometry_|geometry_properties_|material_|texture_)|^template$
+       -- ^(geometry|geometry_properties|material|texture)_lod\d+(_\d+)?$ or template (the reader's LoD-suffixed columns only; a user attribute such as material_roof is kept)
 FROM read_cityjson('layer_3.city.json')
 ```
 

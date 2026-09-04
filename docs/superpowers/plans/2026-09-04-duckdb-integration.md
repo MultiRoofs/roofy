@@ -1484,7 +1484,8 @@ export function isTextColumn(column: ColumnInfo): boolean {
   );
 }
 
-const DROPPED = /^(geometry_|geometry_properties_|material_|texture_)/;
+const DROPPED =
+  /^(geometry|geometry_properties|material|texture)_lod\d+(_\d+)?$/; // the reader's own LoD-suffixed columns only — never a user attribute like material_roof
 
 /** Whether a reader column is left out of a layer's browsing table. */
 export function isDroppedColumn(name: string): boolean {
