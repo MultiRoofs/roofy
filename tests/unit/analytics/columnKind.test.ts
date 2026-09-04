@@ -1,0 +1,137 @@
+import { describe, it, expect } from "vitest";
+import {
+  classifyColumnType,
+  isDroppedColumn,
+  isTextColumn,
+  lodColumnSuffix,
+  lodsFromColumnNames,
+} from "../../../src/analytics/columnKind";
+
+describe("classifyColumnType", () => {
+  it("calls a list, a struct and a map nested", () => {
+    expect(classifyColumnType("VARCHAR[]")).toBe("nested");
+    expect(classifyColumnType("STRUCT(xmin DOUBLE, ymin DOUBLE)")).toBe(
+      "nested",
+    );
+    expect(classifyColumnType("MAP(VARCHAR, VARCHAR)")).toBe("nested");
+    expect(classifyColumnType("STRUCT(a INTEGER)[]")).toBe("nested");
+  });
+
+  it("calls BLOB blob", () => {
+    expect(classifyColumnType("BLOB")).toBe("blob");
+  });
+
+  it("calls the JS-safe scalars scalar", () => {
+    for (const t of [
+      "VARCHAR",
+      "BOOLEAN",
+      "DOUBLE",
+      "FLOAT",
+      "REAL",
+      "INTEGER",
+      "SMALLINT",
+      "TINYINT",
+      "UINTEGER",
+      "USMALLINT",
+      "UTINYINT",
+    ]) {
+      expect(classifyColumnType(t)).toBe("scalar");
+    }
+  });
+
+  it("sends HUGEINT and DECIMAL to castText — Arrow hands them back as STRINGS", () => {
+    // Not a nicety: an unguarded `toFixed` on one of these throws, and a
+    // formatter that assumed a number would blank the whole column.
+    expect(classifyColumnType("HUGEINT")).toBe("castText");
+    expect(classifyColumnType("DECIMAL(38,10)")).toBe("castText");
+  });
+
+  it("calls everything else castText — the types JS cannot render faithfully", () => {
+    for (const t of [
+      "BIGINT",
+      "HUGEINT",
+      "DECIMAL(18,3)",
+      "DATE",
+      "TIMESTAMP",
+      "TIMESTAMP WITH TIME ZONE",
+      "TIME",
+      "INTERVAL",
+      "UUID",
+    ]) {
+      expect(classifyColumnType(t)).toBe("castText");
+    }
+  });
+
+  it("is case- and whitespace-insensitive", () => {
+    expect(classifyColumnType("  varchar  ")).toBe("scalar");
+    expect(classifyColumnType("varchar[]")).toBe("nested");
+  });
+});
+
+describe("isTextColumn", () => {
+  it("is true only for a VARCHAR scalar", () => {
+    expect(isTextColumn({ name: "a", type: "VARCHAR", kind: "scalar" })).toBe(
+      true,
+    );
+    expect(isTextColumn({ name: "a", type: "DOUBLE", kind: "scalar" })).toBe(
+      false,
+    );
+    expect(isTextColumn({ name: "a", type: "VARCHAR[]", kind: "nested" })).toBe(
+      false,
+    );
+  });
+});
+
+describe("isDroppedColumn", () => {
+  it("drops geometry, its sidecar, materials, textures and template", () => {
+    for (const n of [
+      "geometry_lod2_2",
+      "geometry_properties_lod2_2",
+      "material_lod1_2",
+      "texture_lod2_2",
+      "template",
+    ]) {
+      expect(isDroppedColumn(n)).toBe(true);
+    }
+  });
+
+  it("keeps the identity, structural and attribute columns", () => {
+    for (const n of [
+      "id",
+      "feature_id",
+      "object_type",
+      "parents",
+      "children",
+      "children_roles",
+      "address",
+      "bbox",
+      "other",
+      "b3_h_dak_max",
+    ]) {
+      expect(isDroppedColumn(n)).toBe(false);
+    }
+  });
+});
+
+describe("LoD column maths", () => {
+  it("spells an LoD as DuckDB spells it in a column name", () => {
+    expect(lodColumnSuffix("2.2")).toBe("2_2");
+    expect(lodColumnSuffix("0")).toBe("0");
+  });
+
+  it("reads the LoD ladder back off the geometry columns, sorted and deduped", () => {
+    expect(
+      lodsFromColumnNames([
+        "id",
+        "geometry_lod2_2",
+        "geometry_properties_lod2_2",
+        "geometry_lod1_2",
+        "geometry_lod1_3",
+      ]),
+    ).toEqual(["1.2", "1.3", "2.2"]);
+  });
+
+  it("is empty for a table with no geometry columns", () => {
+    expect(lodsFromColumnNames(["id", "object_type"])).toEqual([]);
+  });
+});
