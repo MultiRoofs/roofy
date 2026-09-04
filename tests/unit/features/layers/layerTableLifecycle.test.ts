@@ -21,6 +21,7 @@ vi.mock("../../../../src/analytics/layerTables", async (importOriginal) => {
 const {
   installLayerTableLifecycle,
   refreshStreamingTable,
+  residentTableSource,
   STREAM_REBUILD_DEBOUNCE_MS,
 } = await import("../../../../src/features/layers/layerTableLifecycle");
 const { useLayerStore } =
@@ -164,6 +165,61 @@ describe("streaming layers", () => {
     expect(enqueued.sort()).toEqual(["S1", "S2"]);
   });
 
+  it("keeps a separate debounce timer per streaming layer", () => {
+    useLayerStore.setState({
+      layers: [
+        layer({ id: "S1", isStreaming: true }),
+        layer({ id: "S2", isStreaming: true }),
+      ],
+    });
+    useLayerTableStore.getState().setTablePanelOpen(true);
+    enqueued.length = 0;
+
+    useStreamStore.setState({ streams: { S1: { version: 1 } as never } });
+    vi.advanceTimersByTime(300);
+    useStreamStore.setState({
+      streams: {
+        S1: { version: 1 } as never,
+        S2: { version: 1 } as never,
+      },
+    });
+
+    // S1's window closes first; S2's is still 300 ms from the end. One shared
+    // timer would fire both at once, or restart S1's on S2's commit.
+    vi.advanceTimersByTime(300);
+    expect(enqueued).toEqual(["S1"]);
+    vi.advanceTimersByTime(300);
+    expect(enqueued).toEqual(["S1", "S2"]);
+  });
+
+  it("abandons a debounced rebuild if the panel is CLOSED before it fires", () => {
+    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useLayerTableStore.getState().setTablePanelOpen(true);
+    enqueued.length = 0;
+
+    useStreamStore.setState({ streams: { S: { version: 1 } as never } });
+    // Half a second is long enough to close the panel inside the window.
+    useLayerTableStore.getState().setTablePanelOpen(false);
+    vi.advanceTimersByTime(STREAM_REBUILD_DEBOUNCE_MS * 2);
+    expect(enqueued).toEqual([]);
+  });
+
+  it("does not build twice when the panel reopens over an armed timer", () => {
+    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    const panel = useLayerTableStore.getState();
+    panel.setTablePanelOpen(true);
+    enqueued.length = 0;
+
+    useStreamStore.setState({ streams: { S: { version: 1 } as never } });
+    panel.setTablePanelOpen(false);
+    panel.setTablePanelOpen(true);
+    // The reopen sweep rebuilt it; the timer left over from the commit must
+    // not find the panel open again and do it a second time.
+    expect(enqueued).toEqual(["S"]);
+    vi.advanceTimersByTime(STREAM_REBUILD_DEBOUNCE_MS * 2);
+    expect(enqueued).toEqual(["S"]);
+  });
+
   it("cancels a pending rebuild on uninstall", () => {
     useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
     useLayerTableStore.getState().setTablePanelOpen(true);
@@ -172,5 +228,52 @@ describe("streaming layers", () => {
     uninstall();
     vi.advanceTimersByTime(STREAM_REBUILD_DEBOUNCE_MS * 2);
     expect(enqueued).toEqual([]);
+  });
+});
+
+describe("residentTableSource", () => {
+  /** A stream entry whose handle reports whatever `objects` currently holds. */
+  function stubStream(objects: () => Record<string, unknown>) {
+    useStreamStore.setState({
+      streams: {
+        S: {
+          version: 1,
+          handle: {
+            getResidentModel: () => ({
+              objects: objects(),
+              cellCount: 1,
+              featureCount: Object.keys(objects()).length,
+              surfaceAttrKeys: [],
+            }),
+          },
+        } as never,
+      },
+    });
+  }
+
+  function readRecords(layerId: string): ReadonlyArray<unknown> {
+    const source = residentTableSource(layerId);
+    if (source.kind !== "resident") throw new Error("not a resident source");
+    return source.records();
+  }
+
+  it("reads the LATEST resident set, at call time", () => {
+    // The thunk is the whole point: a streaming layer's table is rebuilt over
+    // and over, and each build must see the cells resident THEN — not the ones
+    // that happened to be loaded when the source object was made.
+    let objects: Record<string, unknown> = {};
+    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    stubStream(() => objects);
+
+    const source = residentTableSource("S");
+    if (source.kind !== "resident") throw new Error("not a resident source");
+    expect(source.records()).toEqual([]);
+
+    objects = { R1: { id: "R1" }, R2: { id: "R2" } };
+    expect(source.records()).toHaveLength(2);
+  });
+
+  it("is empty for a layer with no stream registered", () => {
+    expect(readRecords("nobody")).toEqual([]);
   });
 });

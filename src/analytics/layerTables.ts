@@ -288,6 +288,21 @@ function parkConsumed(source: LayerTableSource): PendingSource | null {
 
 /** The source a parked entry stands for, calling the provider for a FRESH
  *  array. May reject — a deleted file, a URL that has since gone. */
+/**
+ * The entry to park AGAIN after a retry build that did not land — `null` when
+ * the source cannot be replayed.
+ *
+ * Routed through {@link parkConsumed} rather than re-using the entry blindly,
+ * because by this point the build HAS run: a `raw` entry wrapping a `bytes`
+ * source has had its array handed to `registerBuffer`, which detaches it. Put
+ * back as it is, the next Retry would register zero bytes and build an empty
+ * table with no error anywhere. A provider-backed entry has no such problem —
+ * the provider is exactly what mints a fresh array.
+ */
+function reparkable(entry: PendingSource): PendingSource | null {
+  return entry.kind === "reader" ? entry : parkConsumed(entry.source);
+}
+
 async function reviveSource(pending: PendingSource): Promise<LayerTableSource> {
   if (pending.kind === "raw") return pending.source;
   return {
@@ -547,6 +562,20 @@ export async function retryEngine(): Promise<void> {
   // Everything issued from here on takes a HIGHER number, so a drop that lands
   // DURING the retry can be told apart from one that preceded it.
   const startSeq = seqCounter;
+  /**
+   * Has a DROP landed since this retry began?
+   *
+   * Asked at every point this function can resume, because a provider is
+   * network-slow and a removal can arrive at any of them. It cannot be left to
+   * `enqueueLayerTable`'s own `superseded()` check: that compares the build's
+   * OWN sequence number, which is taken when the build is enqueued — AFTER the
+   * drop — so it sits above the drop's `cancelBefore` and the build runs. The
+   * layer would get a live table and a `ready` entry that nothing will ever
+   * drop, because the drop's queued task has already been and gone (it found
+   * an empty registry and retired nothing).
+   */
+  const droppedSince = (layerId: string): boolean =>
+    (cancelBefore.get(layerId) ?? 0) > startSeq;
 
   await Promise.all(
     pending.map(async ([layerId, entry]) => {
@@ -554,12 +583,17 @@ export async function retryEngine(): Promise<void> {
         // A reader entry was parked WITHOUT its array; this is where the fresh
         // one is obtained, and where a provider whose fetch rejects throws.
         const source = await reviveSource(entry);
+        if (droppedSince(layerId)) return;
         // SETTLES rather than throwing for a build that fails, so the decision
         // below is made on the OUTCOME — is there a table now? — and not on a
         // rejection. The catch is for what cannot settle: a provider that
         // rejects, or a source accessor that throws synchronously.
         await enqueueLayerTable(layerId, source);
       } catch (error) {
+        // A provider that rejects for a layer that has since been REMOVED has
+        // nothing to report: writing `failed` here would leave an entry for a
+        // layer that no longer exists, and the drop's own task has already run.
+        if (droppedSince(layerId)) return;
         const message =
           error instanceof Error
             ? error.message
@@ -583,19 +617,22 @@ export async function retryEngine(): Promise<void> {
       // removed layer on the next click.
       //
       // The ENTRY goes back, never the revived source — re-parking a revived
-      // `bytes` source would pin the very array the parking exists to release.
+      // `bytes` source would pin the very array the parking exists to release —
+      // and only when {@link reparkable} says it can be replayed at all.
       //
       // This does re-park a table that failed on its own merits (a bad file)
       // too. Deliberate: the alternative is matching on the failure MESSAGE,
       // which is DuckDB's wording and not a contract, and the cost of a wrong
       // guess here is one wasted rebuild per Retry click rather than a layer
       // that can never have a table again.
+      const again = reparkable(entry);
       if (
+        again !== null &&
         !registry.has(layerId) &&
         !pendingSources.has(layerId) &&
-        (cancelBefore.get(layerId) ?? 0) <= startSeq
+        !droppedSince(layerId)
       ) {
-        pendingSources.set(layerId, entry);
+        pendingSources.set(layerId, again);
       }
     }),
   );

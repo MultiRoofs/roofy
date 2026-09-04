@@ -601,6 +601,94 @@ describe("waiting for the engine", () => {
     expect(getLayerTable("L1")).toBeNull();
     expect(stateOf("L1")).toBeUndefined();
   });
+
+  it("abandons a retry whose layer was dropped while its PROVIDER was in flight", async () => {
+    // The provider is a network fetch. `enqueueLayerTable`'s own supersede
+    // check cannot catch this: the build's sequence number is taken AFTER the
+    // drop, so it sits above the drop's `cancelBefore` and the build runs —
+    // giving a removed layer a live table and a `ready` entry that nothing will
+    // ever drop, because the drop's queued task has already been and gone.
+    engineReady = false;
+    let dropPromise: Promise<void> | null = null;
+    await enqueueLayerTable("L1", {
+      kind: "bytes",
+      bytes: new Uint8Array(16),
+      reader: "read_cityjson",
+      extension: "city.json",
+      provider: async () => {
+        dropPromise ??= dropLayerTable("L1");
+        await dropPromise; // resolve only once the drop has fully settled
+        return new Uint8Array(32);
+      },
+    });
+    expect(dropPromise).toBeNull();
+
+    engineReady = true;
+    await retryEngine();
+    await dropPromise;
+
+    expect(sql.some((s) => s.startsWith("CREATE OR REPLACE TABLE"))).toBe(
+      false,
+    );
+    expect(getLayerTable("L1")).toBeNull();
+    expect(stateOf("L1")).toBeUndefined();
+
+    // And it was not re-parked either.
+    sql.length = 0;
+    await retryEngine();
+    expect(sql).toEqual([]);
+  });
+
+  it("leaves NO failed entry when a dropped layer's provider then rejects", async () => {
+    engineReady = false;
+    let dropPromise: Promise<void> | null = null;
+    await enqueueLayerTable("L1", {
+      kind: "bytes",
+      bytes: new Uint8Array(16),
+      reader: "read_cityjson",
+      extension: "city.json",
+      provider: async () => {
+        dropPromise ??= dropLayerTable("L1");
+        await dropPromise;
+        throw new Error("the file has gone");
+      },
+    });
+
+    engineReady = true;
+    await retryEngine();
+    await dropPromise;
+
+    // A `failed` entry here would be an ORPHAN: the drop's task has already
+    // cleared the store and will never run again.
+    expect(stateOf("L1")).toBeUndefined();
+    expect(getLayerTable("L1")).toBeNull();
+  });
+
+  it("does NOT re-park a provider-less source whose array the build consumed", async () => {
+    engineReady = false;
+    await enqueueLayerTable("L1", {
+      kind: "bytes",
+      bytes: new Uint8Array(16),
+      reader: "read_cityjson",
+      extension: "city.json",
+      provider: null,
+    });
+
+    engineReady = true;
+    failures = { "CREATE OR REPLACE TABLE": "Binder Error: nope" };
+    await retryEngine();
+    expect(stateOf("L1")).toEqual({
+      state: "failed",
+      message: "Binder Error: nope",
+    });
+
+    // `registerBuffer` DETACHED that array. Re-parking it would register zero
+    // bytes on the next Retry and build an empty table with no error anywhere —
+    // the same refusal `parkConsumed` makes on the mid-build path.
+    sql.length = 0;
+    await retryEngine();
+    expect(sql).toEqual([]);
+  });
 });
 
 describe("parking a source while the engine is down", () => {

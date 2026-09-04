@@ -77,13 +77,25 @@ export function installLayerTableLifecycle(): () => void {
   const rebuildWanted = (): boolean =>
     useLayerTableStore.getState().tablePanelOpen;
 
-  const scheduleRebuild = (layerId: string): void => {
+  /** Cancel `layerId`'s armed rebuild, if it has one. */
+  const cancelRebuild = (layerId: string): void => {
     const existing = timers.get(layerId);
-    if (existing !== undefined) clearTimeout(existing);
+    if (existing === undefined) return;
+    clearTimeout(existing);
+    timers.delete(layerId);
+  };
+
+  const scheduleRebuild = (layerId: string): void => {
+    cancelRebuild(layerId);
     timers.set(
       layerId,
       setTimeout(() => {
         timers.delete(layerId);
+        // Re-checked at FIRE time, not only when the timer was armed: half a
+        // second is long enough to close the panel inside the window, and a
+        // rebuild for a grid nobody is looking at any more is the exact cost
+        // this gate exists to avoid.
+        if (!rebuildWanted()) return;
         void enqueueLayerTable(layerId, residentTableSource(layerId));
       }, STREAM_REBUILD_DEBOUNCE_MS),
     );
@@ -94,11 +106,7 @@ export function installLayerTableLifecycle(): () => void {
 
     for (const id of knownLayerIds) {
       if (ids.has(id)) continue;
-      const timer = timers.get(id);
-      if (timer !== undefined) {
-        clearTimeout(timer);
-        timers.delete(id);
-      }
+      cancelRebuild(id);
       knownVersions.delete(id);
       // The query is written against THAT table's columns; a re-added layer is
       // a different table and must not inherit a predicate naming columns it
@@ -123,8 +131,12 @@ export function installLayerTableLifecycle(): () => void {
     for (const [layerId, stream] of Object.entries(state.streams)) {
       const version = stream?.version ?? 0;
       if (knownVersions.get(layerId) === version) continue;
-      knownVersions.set(layerId, version);
+      // The membership check comes FIRST. A stream that commits before its
+      // layer reaches the store would otherwise record its version here, and
+      // the layer's real first commit — arriving at that same version — would
+      // then be read as "nothing changed" and never rebuild anything.
       if (!knownLayerIds.has(layerId)) continue;
+      knownVersions.set(layerId, version);
       if (rebuildWanted()) scheduleRebuild(layerId);
     }
   });
@@ -137,9 +149,12 @@ export function installLayerTableLifecycle(): () => void {
     // Opening the panel: every streaming layer's version moved while it was
     // shut, and the tables it is about to show are stale by exactly that much.
     for (const layer of useLayerStore.getState().layers) {
-      if (layer.isStreaming) {
-        void enqueueLayerTable(layer.id, residentTableSource(layer.id));
-      }
+      if (!layer.isStreaming) continue;
+      // Disarm first: a commit that landed while the panel was open, before it
+      // was shut, can still have a timer pending. Its fire-time gate would find
+      // the panel open AGAIN and rebuild a second time, moments after this one.
+      cancelRebuild(layer.id);
+      void enqueueLayerTable(layer.id, residentTableSource(layer.id));
     }
   });
 
