@@ -2818,7 +2818,7 @@ describe("compileFilter", () => {
     ).toBe(false);
   });
 
-  it("rejects a text operator on a non-text column", () => {
+  it("rejects a text operator on a NUMERIC column", () => {
     expect(
       compileFilter(
         group([
@@ -2830,6 +2830,37 @@ describe("compileFilter", () => {
       ok: false,
       message: '"contains" needs a text column; "b3_h_dak_max" is DOUBLE.',
     });
+  });
+
+  it("allows the LIKE family on a castText column, by casting the LEFT side", () => {
+    // "starts with 2024" on a date, "contains 3412" on an identifier-shaped
+    // BIGINT — real questions. `::VARCHAR` is the same rendering the grid
+    // shows, so what the user searches is what they see.
+    expect(
+      compileFilter(
+        group([
+          {
+            id: "c",
+            column: "oorspronkelijkbouwjaar",
+            op: "contains",
+            value: "19",
+          },
+        ]),
+        COLUMNS,
+      ),
+    ).toEqual({
+      ok: true,
+      where: `"oorspronkelijkbouwjaar"::VARCHAR LIKE '%19%' ESCAPE '\\'`,
+    });
+  });
+
+  it("still refuses the LIKE family on a nested column", () => {
+    expect(
+      compileFilter(
+        group([{ id: "c", column: "parents", op: "contains", value: "B1" }]),
+        COLUMNS,
+      ).ok,
+    ).toBe(false);
   });
 
   it("rejects IN without a list", () => {
@@ -3117,12 +3148,20 @@ function compileCondition(
   }
 
   if (LIKE_OPS.has(condition.op)) {
-    if (!isTextColumn(column)) {
+    // VARCHAR needs no cast; a `castText` column (BIGINT, DATE, TIMESTAMP,
+    // DECIMAL…) gets one, because "starts with 2024" on a date and "contains
+    // 3412" on an identifier-shaped BIGINT are questions people really ask,
+    // and DuckDB's own `::VARCHAR` is the same rendering the grid shows —
+    // so what the user searches is what they see. `nested` and `blob` were
+    // refused above and stay refused: there is no text there to match.
+    const searchable = isTextColumn(column) || column.kind === "castText";
+    if (!searchable) {
       return {
         ok: false,
         message: `"${condition.op}" needs a text column; "${column.name}" is ${column.type}.`,
       };
     }
+    const target = isTextColumn(column) ? ident : `${ident}::VARCHAR`;
     const needle =
       typeof condition.value === "string"
         ? condition.value
@@ -3139,7 +3178,7 @@ function compileCondition(
     }
     return {
       ok: true,
-      sql: `${ident} LIKE ${quoteLiteral(likePattern(condition.op, needle))} ESCAPE '\\'`,
+      sql: `${target} LIKE ${quoteLiteral(likePattern(condition.op, needle))} ESCAPE '\\'`,
     };
   }
 
@@ -3793,16 +3832,40 @@ describe("buildAttributeExportSql", () => {
     );
   });
 
-  it("uses to_json for JSON, and names the format", () => {
-    expect(
-      buildAttributeExportSql({
+  it("writes JSON as ONE ARRAY, not newline-delimited objects", () => {
+    // Without `ARRAY true` the file is a stream of objects, which is not JSON
+    // a browser or `JSON.parse` will open — and an export nobody can read is
+    // not an export (probe P7).
+    const sql = buildAttributeExportSql({
+      table: "layer_1",
+      columns: COLUMNS,
+      where: null,
+      format: "json",
+      outFile: "exp_3.json",
+    });
+    expect(sql).toContain("(FORMAT json, ARRAY true)");
+    expect(sql).toContain('to_json("parents") AS "parents"');
+  });
+
+  it("does NOT cast a castText column — that cast is for the GRID", () => {
+    // `"bouwjaar"::VARCHAR` would hand the user a Parquet file whose year is a
+    // string. DuckDB's writers keep the real type, and format it correctly for
+    // CSV and JSON too.
+    const columns: ReadonlyArray<ColumnInfo> = [
+      { name: "id", type: "VARCHAR", kind: "scalar" },
+      { name: "bouwjaar", type: "BIGINT", kind: "castText" },
+    ];
+    for (const format of ["parquet", "csv", "json"] as const) {
+      const sql = buildAttributeExportSql({
         table: "layer_1",
-        columns: COLUMNS,
+        columns,
         where: null,
-        format: "json",
-        outFile: "exp_3.json",
-      }),
-    ).toContain("(FORMAT json)");
+        format,
+        outFile: `x.${format}`,
+      });
+      expect(sql).toContain('SELECT "id", "bouwjaar" FROM');
+      expect(sql).not.toContain("::VARCHAR");
+    }
   });
 
   it("drops a blob column from every format", () => {
@@ -3966,15 +4029,44 @@ export type AttributeExportFormat = "parquet" | "csv" | "json";
 /**
  * `COPY (SELECT …) TO '<file>' (FORMAT …)` for the attribute formats.
  *
+ * The projection is NOT {@link projectColumn}: that one casts every `castText`
+ * column to VARCHAR, which exists so the GRID gets DuckDB's own rendering of a
+ * DATE or a HUGEINT instead of JS's. An export has no such problem — DuckDB's
+ * writers keep the real type in Parquet and format it correctly in CSV and
+ * JSON — and casting would hand the user a Parquet file whose `bouwjaar` is a
+ * string. So `scalar` AND `castText` go out under their own names.
+ *
  * Nested columns stay NATIVE for parquet — the format holds a list — and go
  * through `to_json` for CSV and JSON, where an Arrow list would otherwise
  * arrive as DuckDB's own bracket spelling in one case and as a nested document
- * in the other. Blobs are excluded from every format: {@link projectColumn}
- * already refuses them, and geometry belongs in the CityParquet route.
+ * in the other. Blobs are excluded from every format: geometry belongs in the
+ * CityParquet route.
+ *
+ * `FORMAT json` carries `ARRAY true`, so the file is ONE valid JSON array
+ * rather than newline-delimited objects (probe P7) — a `.json` a browser or
+ * `JSON.parse` will not open is not an export.
  *
  * NOT offered here, and never to be added without re-probing: `FORMAT cityjson
  * | cityjsonseq | flatcitybuf` write ZERO BYTES in wasm, silently.
  */
+/** How one column reaches an export FILE — deliberately not how it reaches the
+ *  grid. See the note above on why `castText` is not cast here. */
+function exportProjection(
+  column: ColumnInfo,
+  format: AttributeExportFormat,
+): string | null {
+  if (column.kind === "blob") return null;
+  if (column.kind !== "nested") return quoteIdent(column.name);
+  return format === "parquet"
+    ? quoteIdent(column.name)
+    : `to_json(${quoteIdent(column.name)}) AS ${quoteIdent(column.name)}`;
+}
+
+/** `ARRAY true` for JSON: one valid array, not newline-delimited objects. */
+function copyFormatOptions(format: AttributeExportFormat): string {
+  return format === "json" ? "FORMAT json, ARRAY true" : `FORMAT ${format}`;
+}
+
 export function buildAttributeExportSql(input: {
   readonly table: string;
   readonly columns: ReadonlyArray<ColumnInfo>;
@@ -3983,16 +4075,12 @@ export function buildAttributeExportSql(input: {
   readonly outFile: string;
 }): string {
   const projections = input.columns
-    .map((column) =>
-      input.format === "parquet" && column.kind === "nested"
-        ? quoteIdent(column.name)
-        : projectColumn(column),
-    )
+    .map((column) => exportProjection(column, input.format))
     .filter((p): p is string => p !== null);
   const select = projections.length === 0 ? "1" : projections.join(", ");
   const scope = buildFeatureScopeWhere(input.table, input.where);
   const whereClause = scope === null ? "" : ` WHERE ${scope}`;
-  return `COPY (SELECT ${select} FROM ${quoteIdent(input.table)}${whereClause}) TO ${quoteLiteral(input.outFile)} (FORMAT ${input.format})`;
+  return `COPY (SELECT ${select} FROM ${quoteIdent(input.table)}${whereClause}) TO ${quoteLiteral(input.outFile)} (${copyFormatOptions(input.format)})`;
 }
 
 /**
@@ -8709,6 +8797,7 @@ const COLUMNS: ReadonlyArray<ColumnInfo> = [
   { name: "id", type: "VARCHAR", kind: "scalar" },
   { name: "b3_h_dak_max", type: "DOUBLE", kind: "scalar" },
   { name: "parents", type: "VARCHAR[]", kind: "nested" },
+  { name: "bouwjaar", type: "BIGINT", kind: "castText" },
 ];
 
 const EMPTY: FilterGroup = { logic: "AND", conditions: [] };
@@ -8735,8 +8824,10 @@ function setup(over: Partial<Parameters<typeof FilterBar>[0]> = {}) {
 afterEach(cleanup);
 
 describe("operatorsFor", () => {
-  it("offers the LIKE family only for a VARCHAR column", () => {
+  it("offers the LIKE family for VARCHAR and for castText, never for a number", () => {
     expect(operatorsFor(COLUMNS[0])).toContain("contains");
+    // BIGINT: `compileFilter` casts the left side, so this is a real question.
+    expect(operatorsFor(COLUMNS[3])).toContain("contains");
     expect(operatorsFor(COLUMNS[1])).not.toContain("contains");
   });
 
@@ -8961,14 +9052,21 @@ const OP_LABELS: Readonly<Record<FilterOp, string>> = {
   in: "is one of",
 };
 
-/** What a column can be asked. A LIST, STRUCT or BLOB has no ordering and no
- *  equality a user could mean, so only the null tests survive for it. */
+/**
+ * What a column can be asked.
+ *
+ * A LIST, STRUCT or BLOB has no ordering and no equality a user could mean, so
+ * only the null tests survive for it. The LIKE family is offered for VARCHAR
+ * AND for `castText` — `compileFilter` casts the left side for the latter, so
+ * "starts with 2024" on a DATE and "contains 3412" on a BIGINT both work, and
+ * against exactly the rendering the grid is showing.
+ */
 export function operatorsFor(
   column: ColumnInfo | undefined,
 ): ReadonlyArray<FilterOp> {
   if (!column) return [];
   if (column.kind === "nested" || column.kind === "blob") return NULL_OPS;
-  return isTextColumn(column)
+  return isTextColumn(column) || column.kind === "castText"
     ? [...COMPARISON_OPS, ...TEXT_OPS, "in", ...NULL_OPS]
     : [...COMPARISON_OPS, "in", ...NULL_OPS];
 }
@@ -15361,6 +15459,9 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
 | §3.2          | **`LayerTable.rowCount` is `number \| null` — a count nobody could take is not zero rows, and every consumer says so**                                               | 13, 19, 22, 23                                    |
 | §2            | **LoDs are DERIVED from the reader's own column names (`LodColumn` = label + suffix); a suffix is never rebuilt from a label — 3D BAG's LoD 0 is `geometry_lod0_0`** | 5, 11, 13, 30, 31, 32, 33                         |
 | §3.3          | **An empty LIKE needle and an empty / mis-typed `IN` element are refused, never compiled to `LIKE '%%'` or `IN ('10')` on a DOUBLE**                                 | 9                                                 |
+| §3.3          | **The LIKE family is offered on `castText` columns by casting the LEFT side — the same rendering the grid shows**                                                    | 9, 21                                             |
+| §3.6          | **Exports do NOT cast `castText` columns: that cast is the grid's, and a Parquet file whose year is a string is not the export asked for**                           | 11                                                |
+| §3.6          | **`FORMAT json` carries `ARRAY true`, so the download is one valid JSON array (probe P7)**                                                                           | 11                                                |
 | §3.3          | **`ORDER BY` is TABLE-QUALIFIED, so a `castText` column sorts on the base column and not on its `::VARCHAR` alias**                                                  | 10, 33                                            |
 | §3.2          | **One BigInt-safe JSON replacer for both the attribute columns and the row encoding**                                                                                | 12                                                |
 | §3.2          | **The flat fallback ALTERs `parents`/`children` to `VARCHAR[]` — `read_json_auto` types an all-NULL column as JSON**                                                 | 12, 13, 33                                        |
@@ -15474,6 +15575,20 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
   routes every `IN` element through `literalFor` for the same reason a
   comparison goes there: the list comes from a comma-split text input, so on a
   numeric column its elements are strings.
+- §3.3 says `contains` is rejected on "a non-text column", which the first
+  draft read as VARCHAR-only. A `castText` column is text by the time anyone
+  sees it — the grid shows `"c"::VARCHAR` — so "starts with 2024" on a DATE and
+  "contains 3412" on an identifier-shaped BIGINT are questions the data invites
+  and the filter refused. Tasks 9 and 21 cast the LEFT side and offer the three
+  operators; `nested` and `blob` stay refused, because there is no text there.
+- §3.6 says nested columns are exported "as-is for Parquet and via `to_json`
+  for CSV/JSON" and is silent on `castText`, so the first draft reused
+  `projectColumn` — which casts them to VARCHAR for the GRID's benefit, and
+  would have handed the user a Parquet file whose `bouwjaar` is a string.
+  DuckDB's writers keep the real type and format it correctly in every one of
+  the three formats, so Task 11 exports `scalar` and `castText` under their own
+  names. It also adds `ARRAY true` to `FORMAT json` (probe P7): without it the
+  file is newline-delimited objects, which `JSON.parse` will not open.
 - §3.3's `ORDER BY "c" dir NULLS LAST` binds the ALIAS a `castText` column is
   projected under (`"c"::VARCHAR AS "c"`), which sorts a BIGINT
   lexicographically — 985 after 2005. Task 10 qualifies it with the table name,
@@ -15603,6 +15718,11 @@ Every name that crosses a task boundary, re-checked after the edits:
   function (Task 2), and REFERENCED — not restated differently — on
   `LayerTableSource.bytes` and `SourceProvider` (Task 13), `modelTableSource`
   and both providers (Task 16), and `loadFromUrl`'s `bytes` field (Task 15).
+- `projectColumn` (Task 10) and `exportProjection` (Task 11) are deliberately
+  DIFFERENT functions with different rules — the first casts `castText` for the
+  grid, the second never does — and neither calls the other. `buildPageSql` is
+  `projectColumn`'s only caller; `buildAttributeExportSql` is
+  `exportProjection`'s. `copyFormatOptions` is file-local beside the second.
 - `literalFor` is now the ONE coercion point: comparisons, and every element of
   an `IN` list (Task 9). `likePattern` is reached only after an empty-needle
   refusal, and `quoteLiteral` is no longer called directly on a condition value.
