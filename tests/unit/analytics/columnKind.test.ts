@@ -132,6 +132,8 @@ describe("isDroppedColumn", () => {
 
 describe("LoD column maths", () => {
   it("spells an LoD as DuckDB spells it in a column name", () => {
+    // Deprecated: `src/analytics/sql.ts` is the last caller. This case goes
+    // when that call does — a suffix belongs to a column, not to a label.
     expect(lodColumnSuffix("2.2")).toBe("2_2");
     expect(lodColumnSuffix("0")).toBe("0");
   });
@@ -145,23 +147,39 @@ describe("LoD column maths", () => {
         "geometry_lod1_2",
         "geometry_lod1_3",
       ]),
-    ).toEqual(["1.2", "1.3", "2.2"]);
+    ).toEqual([
+      { label: "1.2", suffix: "1_2" },
+      { label: "1.3", suffix: "1_3" },
+      { label: "2.2", suffix: "2_2" },
+    ]);
   });
 
   it("is empty for a table with no geometry columns", () => {
     expect(lodsFromColumnNames(["id", "object_type"])).toEqual([]);
   });
 
-  it("ignores an attribute that only looks like a geometry column", () => {
-    // `geometry_lod_note` is a plausible attribute name; letting it through
-    // would put a bogus rung on the layer's LoD ladder. Order is the module's
-    // existing convention — ascending, not the caller's column order.
+  it("keeps the reader's own suffix, minor part or not, and rejects an attribute", () => {
+    // The reader spells Delft's LoD 0 `geometry_lod0_0`, and nothing promises
+    // every file uses two parts — so the suffix is read off the column and
+    // never rebuilt from the label. `geometry_lod_note` is not a rung.
     expect(
       lodsFromColumnNames([
-        "geometry_lod2_2",
         "geometry_lod0_0",
+        "geometry_lod2_2",
+        "geometry_lod1",
         "geometry_lod_note",
+        "geometry_properties_lod2_2",
       ]),
-    ).toEqual(["0.0", "2.2"]);
+    ).toEqual([
+      { label: "0.0", suffix: "0_0" },
+      { label: "1", suffix: "1" },
+      { label: "2.2", suffix: "2_2" },
+    ]);
+  });
+
+  it("dedupes by suffix when a column repeats", () => {
+    expect(lodsFromColumnNames(["geometry_lod2_2", "geometry_lod2_2"])).toEqual(
+      [{ label: "2.2", suffix: "2_2" }],
+    );
   });
 });

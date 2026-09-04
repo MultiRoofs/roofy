@@ -79,7 +79,7 @@ describe("buildCityParquetSourceSql", () => {
         reader: "read_cityjson",
         sourceFile: "exp_1_src.city.json",
         table: "layer_1",
-        lod: "2.2",
+        lodSuffix: "2_2",
         attributes: ["b3_h_dak_max", "bouwjaar"],
         where: `"b3_h_dak_max" > 10`,
       }),
@@ -95,7 +95,7 @@ describe("buildCityParquetSourceSql", () => {
         reader: "read_cityjsonseq",
         sourceFile: "exp_2_src.city.jsonl",
         table: "layer_3",
-        lod: "1.2",
+        lodSuffix: "1_2",
         attributes: [],
         where: null,
       }),
@@ -104,18 +104,40 @@ describe("buildCityParquetSourceSql", () => {
     );
   });
 
-  it("always keeps the geometry_properties sidecar beside the geometry", () => {
+  it("uses the suffix VERBATIM — the reader spells LoD 0 as lod0_0 here", () => {
     expect(
       buildCityParquetSourceSql({
         scratchSchema: "e",
         reader: "read_cityjson",
         sourceFile: "s.json",
         table: "t",
-        lod: "0",
+        lodSuffix: "0_0",
         attributes: [],
         where: null,
       }),
-    ).toContain('"geometry_lod0", "geometry_properties_lod0"');
+    ).toContain('"geometry_lod0_0", "geometry_properties_lod0_0"');
+  });
+
+  it("names every column ONCE, whatever the attribute list repeats", () => {
+    expect(
+      buildCityParquetSourceSql({
+        scratchSchema: "e",
+        reader: "read_cityjson",
+        sourceFile: "s.json",
+        table: "t",
+        lodSuffix: "2_2",
+        attributes: [
+          "id",
+          "parents",
+          "geometry_lod2_2",
+          "bouwjaar",
+          "bouwjaar",
+        ],
+        where: null,
+      }),
+    ).toBe(
+      'CREATE TABLE "e"."src" AS SELECT "id", "feature_id", "object_type", "parents", "children", "children_roles", "bbox", "geometry_lod2_2", "geometry_properties_lod2_2", "bouwjaar" FROM read_cityjson(\'s.json\')',
+    );
   });
 });
 

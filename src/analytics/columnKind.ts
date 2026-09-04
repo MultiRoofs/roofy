@@ -79,19 +79,56 @@ export function isDroppedColumn(name: string): boolean {
   return name === "template" || DROPPED.test(name);
 }
 
-/** "2.2" -> "2_2": how the reader spells an LoD inside a column name. */
+/**
+ * "2.2" -> "2_2": how the reader spells an LoD inside a column name.
+ *
+ * @deprecated — use `LodColumn.suffix` from {@link lodsFromColumnNames}.
+ * Reconstructing a suffix from a LABEL is the bug this file now avoids: the
+ * reader writes `geometry_lod0_0` for Delft's LoD 0, and nothing guarantees
+ * every file spells an LoD in two parts, so the only safe suffix is the one
+ * read off the actual column name. Kept for the moment because
+ * `src/analytics/sql.ts` still calls it; delete both together.
+ */
 export function lodColumnSuffix(lod: string): string {
   return lod.replace(/\./g, "_");
 }
 
-/** The LoD ladder a reader's column list implies, sorted ascending. */
-export function lodsFromColumnNames(names: ReadonlyArray<string>): string[] {
-  const lods = new Set<string>();
+/**
+ * One rung of a layer's LoD ladder, as the reader's own columns spell it.
+ *
+ * Two fields because the two jobs differ: `label` is what a human picks from
+ * the LoD dropdown ("2.2"), `suffix` is the text that rebuilds the column name
+ * (`geometry_lod` + suffix). The suffix is never derived from the label —
+ * `"0.0"` and `"0"` are different columns and only the file knows which it has.
+ */
+export interface LodColumn {
+  /** `major.minor`, or the bare major when the column names no minor part. */
+  readonly label: string;
+  /** The text after `geometry_lod`, verbatim: "0_0", "2_2", "1". */
+  readonly suffix: string;
+}
+
+/**
+ * The LoD ladder a reader's column list implies, ascending by label.
+ *
+ * Deduplicated by SUFFIX, since the suffix is the thing that addresses a
+ * column. The minor part is optional, so `geometry_lod1` is a rung labelled
+ * "1" rather than being skipped; `geometry_lod_note` is not a rung at all.
+ */
+export function lodsFromColumnNames(
+  names: ReadonlyArray<string>,
+): ReadonlyArray<LodColumn> {
+  const bySuffix = new Map<string, LodColumn>();
   for (const name of names) {
-    const match = /^geometry_lod(\d+)_(\d+)$/.exec(name);
-    if (match?.[1] !== undefined && match[2] !== undefined) {
-      lods.add(`${match[1]}.${match[2]}`);
-    }
+    const match = /^geometry_lod((\d+)(?:_(\d+))?)$/.exec(name);
+    const suffix = match?.[1];
+    const major = match?.[2];
+    if (suffix === undefined || major === undefined) continue;
+    const minor = match?.[3];
+    const label = minor === undefined ? major : `${major}.${minor}`;
+    if (!bySuffix.has(suffix)) bySuffix.set(suffix, { label, suffix });
   }
-  return [...lods].sort((a, b) => parseFloat(a) - parseFloat(b));
+  return [...bySuffix.values()].sort(
+    (a, b) => parseFloat(a.label) - parseFloat(b.label),
+  );
 }

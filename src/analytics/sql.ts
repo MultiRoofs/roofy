@@ -12,7 +12,7 @@
  * `runQuery`/`ddl` from `analytics/duckdb.ts`.
  */
 
-import { isTextColumn, lodColumnSuffix, type ColumnInfo } from "./columnKind";
+import { isTextColumn, type ColumnInfo } from "./columnKind";
 import type {
   FilterCondition,
   FilterGroup,
@@ -454,25 +454,34 @@ export const CITYPARQUET_SOURCE_TABLE = "src";
  * LoD's geometry pair, and that is the route probed end to end (P6b/P6c/P6g).
  * `lod :=` narrows the SCHEMA rather than the rows and would only add a
  * bind-time failure mode for an LoD spelled differently than the file spells it.
+ *
+ * `lodSuffix` is the exact text after `geometry_lod` in the SOURCE'S OWN column
+ * name — "0_0", "2_2" — never a label put through string surgery: the reader
+ * spells Delft's LoD 0 as `geometry_lod0_0` while another file may spell the
+ * same rung `geometry_lod0`, so only the column list can say which it is.
+ *
+ * The whole select list is DEDUPED. A caller's attribute list is chosen from
+ * the layer's columns, which include the required names and the geometry pair,
+ * so `id` or `geometry_lod2_2` arriving twice is a UI slip rather than an
+ * impossibility — and a repeated column makes `CREATE TABLE … AS SELECT` fail
+ * on a duplicate name, losing the whole export to a cosmetic mistake.
  */
 export function buildCityParquetSourceSql(input: {
   readonly scratchSchema: string;
   readonly reader: "read_cityjson" | "read_cityjsonseq";
   readonly sourceFile: string;
   readonly table: string;
-  readonly lod: string;
+  readonly lodSuffix: string;
   readonly attributes: ReadonlyArray<string>;
   readonly where: string | null;
 }): string {
-  const suffix = lodColumnSuffix(input.lod);
-  const select = [
+  const columns = [
     ...CITYPARQUET_REQUIRED_COLUMNS,
-    `geometry_lod${suffix}`,
-    `geometry_properties_lod${suffix}`,
+    `geometry_lod${input.lodSuffix}`,
+    `geometry_properties_lod${input.lodSuffix}`,
     ...input.attributes,
-  ]
-    .map(quoteIdent)
-    .join(", ");
+  ];
+  const select = [...new Set(columns)].map(quoteIdent).join(", ");
   const scope = buildFeatureScopeWhere(input.table, input.where);
   const whereClause = scope === null ? "" : ` WHERE ${scope}`;
   return `CREATE TABLE ${quoteIdent(input.scratchSchema)}.${quoteIdent(CITYPARQUET_SOURCE_TABLE)} AS SELECT ${select} FROM ${input.reader}(${quoteLiteral(input.sourceFile)})${whereClause}`;
