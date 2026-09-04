@@ -139,6 +139,36 @@ describe("compileFilter", () => {
     ).toEqual({ ok: true, where: `"id" LIKE '%-0' ESCAPE '\\'` });
   });
 
+  it("compiles LIKE on a castText column by casting the left-hand side", () => {
+    // "does the year contain 19" is a question worth asking of a BIGINT, and
+    // the cast is the same one the grid already shows that column through.
+    expect(
+      compileFilter(
+        group([
+          {
+            id: "c",
+            column: "oorspronkelijkbouwjaar",
+            op: "contains",
+            value: "19",
+          },
+        ]),
+        COLUMNS,
+      ),
+    ).toEqual({
+      ok: true,
+      where: `"oorspronkelijkbouwjaar"::VARCHAR LIKE '%19%' ESCAPE '\\'`,
+    });
+  });
+
+  it("still refuses LIKE on a nested column", () => {
+    expect(
+      compileFilter(
+        group([{ id: "c", column: "parents", op: "contains", value: "B1" }]),
+        COLUMNS,
+      ).ok,
+    ).toBe(false);
+  });
+
   it("refuses an EMPTY needle rather than compiling LIKE '%%'", () => {
     // A blank "contains" box is a row the user has not finished, not a request
     // for every object in the layer — and `LIKE '%%'` is indistinguishable

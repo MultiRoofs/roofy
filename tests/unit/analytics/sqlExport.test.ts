@@ -43,6 +43,26 @@ describe("buildAttributeExportSql", () => {
     );
   });
 
+  it("keeps a castText column NATIVE in every format — an export is not a grid", () => {
+    // The grid casts a BIGINT to VARCHAR because JS cannot hold one; a Parquet
+    // or JSON file can, and writing "1920" where 1920 belongs makes the export
+    // useless for anything that would compare or sum it afterwards.
+    for (const format of ["parquet", "csv", "json"] as const) {
+      const sql = buildAttributeExportSql({
+        table: "layer_1",
+        columns: [
+          { name: "id", type: "VARCHAR", kind: "scalar" },
+          { name: "bouwjaar", type: "BIGINT", kind: "castText" },
+        ],
+        where: null,
+        format,
+        outFile: `x.${format}`,
+      });
+      expect(sql).toContain('SELECT "id", "bouwjaar" FROM "layer_1"');
+      expect(sql).not.toContain("::VARCHAR");
+    }
+  });
+
   it("uses to_json for JSON, and names the format", () => {
     expect(
       buildAttributeExportSql({
@@ -52,7 +72,7 @@ describe("buildAttributeExportSql", () => {
         format: "json",
         outFile: "exp_3.json",
       }),
-    ).toContain("(FORMAT json)");
+    ).toContain("(FORMAT json, ARRAY true)");
   });
 
   it("drops a blob column from every format", () => {

@@ -177,12 +177,18 @@ function compileCondition(
   }
 
   if (LIKE_OPS.has(condition.op)) {
-    if (!isTextColumn(column)) {
+    // A `castText` column is ALREADY shown as text — the grid projects it
+    // `"c"::VARCHAR` because JS cannot hold a BIGINT or a DATE exactly — so
+    // "does the year contain 19" is a question the user can see the answer to,
+    // and the same cast makes it askable. A DOUBLE is not text in any
+    // rendering, and nested/blob were refused above.
+    if (!isTextColumn(column) && column.kind !== "castText") {
       return {
         ok: false,
         message: `"${condition.op}" needs a text column; "${column.name}" is ${column.type}.`,
       };
     }
+    const subject = column.kind === "castText" ? `${ident}::VARCHAR` : ident;
     const needle =
       typeof condition.value === "string"
         ? condition.value
@@ -198,7 +204,7 @@ function compileCondition(
     }
     return {
       ok: true,
-      sql: `${ident} LIKE ${quoteLiteral(likePattern(condition.op, needle))} ESCAPE '\\'`,
+      sql: `${subject} LIKE ${quoteLiteral(likePattern(condition.op, needle))} ESCAPE '\\'`,
     };
   }
 
@@ -434,13 +440,48 @@ export function buildRootTypesSql(table: string): string {
 export type AttributeExportFormat = "parquet" | "csv" | "json";
 
 /**
+ * How one column reaches a FILE — deliberately not {@link projectColumn}.
+ *
+ * The grid's projection exists to work around JS: a BIGINT arrives as a
+ * `BigInt` that `JSON.stringify` refuses, a DATE as epoch milliseconds, so
+ * `castText` columns are cast to VARCHAR and DuckDB's own formatting becomes
+ * the answer. A FILE has no such limit — Parquet holds an INT64 and a DATE
+ * exactly, and CSV/JSON get DuckDB's text rendering of the native value
+ * anyway — so casting here would silently downgrade `bouwjaar` to a string in
+ * the artefact the user takes away, and anything that later sums or compares
+ * that column would be sorting text. Hence: scalar and castText alike travel
+ * as themselves.
+ *
+ * Only NESTED columns still differ by format — native for parquet, which holds
+ * a list, and `to_json` for CSV and JSON, where a raw list would arrive as
+ * DuckDB's bracket spelling in one and as a nested document in the other —
+ * and BLOBs are dropped everywhere: geometry belongs in the CityParquet route.
+ */
+function exportProjection(
+  column: ColumnInfo,
+  format: AttributeExportFormat,
+): string | null {
+  if (column.kind === "blob") return null;
+  const ident = quoteIdent(column.name);
+  if (column.kind !== "nested") return ident;
+  return format === "parquet" ? ident : `to_json(${ident}) AS ${ident}`;
+}
+
+/**
+ * The `COPY` option list for a format.
+ *
+ * JSON needs `ARRAY true`: without it DuckDB writes newline-delimited objects
+ * (JSONL), which `JSON.parse` and every "load this JSON" tool reject, and the
+ * user asked for a `.json` file.
+ */
+function copyFormatOptions(format: AttributeExportFormat): string {
+  return format === "json" ? "FORMAT json, ARRAY true" : `FORMAT ${format}`;
+}
+
+/**
  * `COPY (SELECT …) TO '<file>' (FORMAT …)` for the attribute formats.
  *
- * Nested columns stay NATIVE for parquet — the format holds a list — and go
- * through `to_json` for CSV and JSON, where an Arrow list would otherwise
- * arrive as DuckDB's own bracket spelling in one case and as a nested document
- * in the other. Blobs are excluded from every format: {@link projectColumn}
- * already refuses them, and geometry belongs in the CityParquet route.
+ * See {@link exportProjection} for why a file's projection is not the grid's.
  *
  * NOT offered here, and never to be added without re-probing: `FORMAT cityjson
  * | cityjsonseq | flatcitybuf` write ZERO BYTES in wasm, silently.
@@ -453,16 +494,12 @@ export function buildAttributeExportSql(input: {
   readonly outFile: string;
 }): string {
   const projections = input.columns
-    .map((column) =>
-      input.format === "parquet" && column.kind === "nested"
-        ? quoteIdent(column.name)
-        : projectColumn(column),
-    )
+    .map((column) => exportProjection(column, input.format))
     .filter((p): p is string => p !== null);
   const select = projections.length === 0 ? "1" : projections.join(", ");
   const scope = buildFeatureScopeWhere(input.table, input.where);
   const whereClause = scope === null ? "" : ` WHERE ${scope}`;
-  return `COPY (SELECT ${select} FROM ${quoteIdent(input.table)}${whereClause}) TO ${quoteLiteral(input.outFile)} (FORMAT ${input.format})`;
+  return `COPY (SELECT ${select} FROM ${quoteIdent(input.table)}${whereClause}) TO ${quoteLiteral(input.outFile)} (${copyFormatOptions(input.format)})`;
 }
 
 /**
