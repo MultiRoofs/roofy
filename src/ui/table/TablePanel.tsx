@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CityModel, CityObject } from "../../domain/citymodel/types";
 import { queryDuckDB } from "../../analytics/duckdb";
+import { useLayerTableStore } from "../../analytics/layerTables";
 import { useSelectionStore } from "../../features/selection/selectionStore";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useStreamStore } from "../../features/streaming/streamStore";
@@ -19,18 +20,13 @@ import type { Selection } from "../../domain/selection/types";
 const PAGE_SIZE = 100;
 
 interface TablePanelProps {
-  readonly duckdbTableLoaded: boolean;
   readonly onCollapse: () => void;
   readonly onHeightChange: (height: number) => void;
 }
 
 type SortDir = "asc" | "desc";
 
-export function TablePanel({
-  duckdbTableLoaded,
-  onCollapse,
-  onHeightChange,
-}: TablePanelProps) {
+export function TablePanel({ onCollapse, onHeightChange }: TablePanelProps) {
   const [columns, setColumns] = useState<string[]>([]);
   /**
    * Mirror of `columns` for `loadPage`'s SQL guard. `columns` cannot be a
@@ -65,6 +61,21 @@ export function TablePanel({
     activeLayer ? s.streams[activeLayer.id]?.version : undefined,
   );
 
+  /**
+   * The active layer has a DuckDB table of its own.
+   *
+   * A TEMPORARY bridge: it replaces the `duckdbTableLoaded` prop App used to
+   * pass from the single global `city_objects` table, which no longer exists.
+   * The SQL branch below still names that table, so it reads nothing until the
+   * grid is rewritten against `LayerTable.table` — this only keeps the flag
+   * honest about which layer the panel is looking at in the meantime.
+   */
+  const activeTableReady = useLayerTableStore((s) =>
+    activeLayer === undefined
+      ? false
+      : s.tables[activeLayer.id]?.state === "ready",
+  );
+
   // Determine the active selected IDs based on sync mode
   const selectedIds = syncSelection
     ? new Set(sceneSelections.map((s) => s.objectId))
@@ -92,7 +103,7 @@ export function TablePanel({
       try {
         const offset = page * PAGE_SIZE;
 
-        if (duckdbTableLoaded) {
+        if (activeTableReady) {
           // DuckDB path — fetch data and count in parallel to avoid
           // generation counter race (count was discarded if a re-render
           // triggered another loadPage before the count query finished)
@@ -182,7 +193,7 @@ export function TablePanel({
       }
     },
     [
-      duckdbTableLoaded,
+      activeTableReady,
       sortCol,
       sortDir,
       activeLayer,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { duckdbLabel, duckdbTooltip } from "../../../src/ui/StatusBar";
+import { duckdbLabel, duckdbTooltip } from "../../../src/ui/duckdbStatusText";
 import type { DuckDBStatus } from "../../../src/analytics/duckdb";
 
 const ready = (cityjson: "loaded" | "failed"): DuckDBStatus => ({

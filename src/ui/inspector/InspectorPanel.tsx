@@ -46,7 +46,6 @@ type AggMode = "sum" | "avg" | "min" | "max";
 interface InspectorPanelProps {
   readonly selections: ReadonlyArray<Selection>;
   readonly onClose: () => void;
-  readonly duckdbModelLoaded?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -122,11 +121,7 @@ function displayDataFromRecord(
   };
 }
 
-export function InspectorPanel({
-  selections,
-  onClose,
-  duckdbModelLoaded,
-}: InspectorPanelProps) {
+export function InspectorPanel({ selections, onClose }: InspectorPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>("object");
 
   const layers = useLayerStore((s) => s.layers);
@@ -346,11 +341,7 @@ export function InspectorPanel({
                 )
               ) : activeTab === "stats" ? (
                 model ? (
-                  <StatsTab
-                    model={model}
-                    selection={selection}
-                    duckdbModelLoaded={duckdbModelLoaded}
-                  />
+                  <StatsTab model={model} selection={selection} />
                 ) : (
                   <div className="inspector-placeholder">No layer selected</div>
                 )

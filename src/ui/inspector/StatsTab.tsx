@@ -13,13 +13,10 @@ import {
   computeModelStats,
   computeObjectStats,
 } from "../../analytics/computeStats";
-import { queryDuckDB } from "../../analytics/duckdb";
-import type { QueryResult } from "../../analytics/duckdb";
 
 interface StatsTabProps {
   readonly model: CityModel;
   readonly selection: Selection | null;
-  readonly duckdbModelLoaded?: boolean;
 }
 
 interface DuckDBStats {
@@ -27,11 +24,7 @@ interface DuckDBStats {
   readonly typeBreakdown: ReadonlyArray<{ type: string; count: number }>;
 }
 
-export function StatsTab({
-  model,
-  selection,
-  duckdbModelLoaded,
-}: StatsTabProps) {
+export function StatsTab({ model, selection }: StatsTabProps) {
   const modelStats = useMemo(() => computeModelStats(model), [model]);
 
   const objectStats = useMemo(
@@ -41,34 +34,13 @@ export function StatsTab({
 
   const [duckdbStats, setDuckdbStats] = useState<DuckDBStats | null>(null);
 
+  // The single global `city_objects` table this block queried is gone (its
+  // loaders were deleted with App's per-active-layer DuckDB effect). Task 19
+  // rewires the tab to the picked layer's own table; until then the SQL block
+  // below simply never renders.
   useEffect(() => {
-    if (!duckdbModelLoaded) {
-      setDuckdbStats(null);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function fetchStats() {
-      const [countResult, typeResult] = await Promise.all([
-        queryDuckDB("SELECT COUNT(*) AS cnt FROM city_objects"),
-        queryDuckDB(
-          "SELECT type, COUNT(*) AS cnt FROM city_objects GROUP BY type ORDER BY cnt DESC",
-        ),
-      ]);
-
-      if (cancelled) return;
-
-      const rowCount = extractCount(countResult);
-      const typeBreakdown = extractTypeBreakdown(typeResult);
-      setDuckdbStats({ rowCount, typeBreakdown });
-    }
-
-    void fetchStats();
-    return () => {
-      cancelled = true;
-    };
-  }, [duckdbModelLoaded]);
+    setDuckdbStats(null);
+  }, []);
 
   return (
     <>
@@ -200,23 +172,4 @@ function cardinalFromDeg(deg: number): string {
   if (deg < 247.5) return "SW";
   if (deg < 292.5) return "W";
   return "NW";
-}
-
-function extractCount(result: QueryResult | null): number {
-  if (!result || result.rows.length === 0) return 0;
-  const val = result.rows[0]!.cnt;
-  return typeof val === "number" ? val : Number(val) || 0;
-}
-
-function extractTypeBreakdown(
-  result: QueryResult | null,
-): Array<{ type: string; count: number }> {
-  if (!result) return [];
-  return result.rows.map((row) => ({
-    type:
-      typeof row.type === "string"
-        ? row.type
-        : JSON.stringify(row.type ?? "unknown"),
-    count: typeof row.cnt === "number" ? row.cnt : Number(row.cnt) || 0,
-  }));
 }

@@ -26,15 +26,9 @@ import { captureSnapshot } from "../persistence/captureSnapshot";
 import { restoreSnapshot } from "../persistence/restoreSnapshot";
 import { readShareHash, buildShareUrl } from "../persistence/urlShare";
 import type { ShareableViewState } from "../persistence/urlShare";
-import {
-  initDuckDB,
-  getDuckDBStatus,
-  loadModelIntoDuckDB,
-  loadCityModelFromMemory,
-  loadResidentObjectsIntoDuckDB,
-  shouldUseSourceUrlPath,
-} from "../analytics/duckdb";
+import { getDuckDBStatus } from "../analytics/duckdb";
 import type { DuckDBStatus } from "../analytics/duckdb";
+import { retryEngine, useLayerTableStore } from "../analytics/layerTables";
 import { browserPlatform } from "../platform/browser";
 import type { PlatformServices } from "../platform/types";
 import { NavaraViewport } from "../scene/NavaraViewport";
@@ -46,6 +40,7 @@ import { useSelectionStore } from "../features/selection/selectionStore";
 import { useLayerStore } from "../features/layers/layerStore";
 import { useGeoLayerStore } from "../features/geoLayers/geoLayerStore";
 import { resolveGeoLayerBounds } from "../features/geoLayers/geoLayerBounds";
+import { installLayerTableLifecycle } from "../features/layers/layerTableLifecycle";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
 import { ensureModelCrsLoadable } from "../features/layers/ensureCrs";
 import {
@@ -58,7 +53,6 @@ import { isCityParquetUrl } from "../features/cityparquet/sourceClassify";
 import { useFileDropGuard } from "../features/layers/useFileDropGuard";
 import { useStreamStore } from "../features/streaming/streamStore";
 import { useTotalObjectCount } from "../features/streaming/useTotalObjectCount";
-import { getResidentModel } from "../features/streaming/residentModel";
 import {
   closeAllStreamingLayers,
   openStreamingLayer,
@@ -170,8 +164,6 @@ export function App({
   const [duckdbStatus, setDuckdbStatus] = useState<DuckDBStatus>({
     state: "uninitialized",
   });
-  const [duckdbModelLoaded, setDuckdbModelLoaded] = useState(false);
-  const [duckdbTableLoaded, setDuckdbTableLoaded] = useState(false);
   const [tableOpen, setTableOpen] = useState(false);
   const [tableHeight, setTableHeight] = useState(250);
   const [toast, setToast] = useState<string | null>(null);
@@ -279,9 +271,6 @@ export function App({
   // doc comment on why a commit only ever touches `streams`, never
   // `layers`, and why consumers that DO need to react to one select
   // narrowly rather than subscribing to the whole entry.
-  const activeStreamVersion = useStreamStore((s) =>
-    activeLayerId ? s.streams[activeLayerId]?.version : undefined,
-  );
   const activeStreamStatus = useStreamStore((s) =>
     activeLayerId ? s.streams[activeLayerId]?.status : undefined,
   );
@@ -560,100 +549,31 @@ export function App({
     void refreshSnapshots();
   }, [refreshSnapshots]);
 
-  // Initialize DuckDB-wasm on mount
+  // Initialize DuckDB-wasm on mount, and subscribe the layer-table registry to
+  // the stores. One install, torn down with the app: the subscriptions are
+  // module-level machinery, not per-render state.
   useEffect(() => {
-    void initDuckDB().then(() => {
+    // BEFORE the await, not after: the cold boot takes ~3.5 s (a 36 MB wasm
+    // module plus the community extension), and the status starts as
+    // `uninitialized`, which the table panel renders as "the analytics engine is
+    // not running" with a Retry button. Announcing the ATTEMPT first turns that
+    // into "Loading" for the duration.
+    setDuckdbStatus({ state: "initializing" });
+    // `retryEngine`, not `initDuckDB`: it awaits the same (memoised) boot and
+    // then rebuilds any table that was refused while the engine was still coming
+    // up. A layer added during the boot — a restored snapshot, a share link, a
+    // quick drop — must not need the user to notice and re-add it.
+    void retryEngine().then(() => {
       setDuckdbStatus(getDuckDBStatus());
     });
+    return installLayerTableLifecycle();
   }, []);
 
-  // Load active layer's model into DuckDB (URL via extension, file via
-  // in-memory, streaming via resident cells — see shouldUseSourceUrlPath).
+  // Keep the table panel's open flag in step with the registry, so a streaming
+  // layer's table rebuilds while it is on screen and holds still when it is not.
   useEffect(() => {
-    let cancelled = false;
-
-    if (duckdbStatus.state !== "ready") return;
-
-    // Reset synchronously so table doesn't show stale data during load
-    setDuckdbModelLoaded(false);
-    setDuckdbTableLoaded(false);
-
-    const activeLayer = layers.find((l) => l.id === activeLayerId);
-    if (!activeLayer) return;
-
-    const extensionLoaded =
-      duckdbStatus.state === "ready" &&
-      duckdbStatus.extensions.cityjson.state === "loaded";
-
-    void (async () => {
-      let loaded = false;
-
-      if (activeLayer.isStreaming) {
-        // shouldUseSourceUrlPath refuses the extension path here — it would
-        // open a second, complete read of the remote file just to populate
-        // `city_objects`, exactly what viewport streaming exists to avoid.
-        // Feed the table from whatever cells are actually resident instead,
-        // so Stats/Table only ever report what the UI itself claims to show.
-        const resident = getResidentModel(
-          activeLayer.id,
-          activeStreamVersion ?? 0,
-        );
-        loaded = await loadResidentObjectsIntoDuckDB(
-          Object.values(resident.objects),
-        );
-      } else {
-        // Try extension reader for URL models. CityGML and CityParquet are not
-        // readable by the DuckDB cityjson extension, so they skip straight to
-        // the in-memory fallback below.
-        if (
-          shouldUseSourceUrlPath(
-            activeLayer.modelRef,
-            activeLayer.isStreaming,
-          ) &&
-          extensionLoaded
-        ) {
-          const encoding = detectEncoding(activeLayer.modelRef.url);
-          // The MODEL is the authority on a CityParquet layer, not its URL: a
-          // `gs://` bucket or an https package directory has no extension, so
-          // `detectEncoding` calls it "cityjson" and `read_cityjson` would be
-          // handed a URL it can never open — a wasted query and a console
-          // error on every selection. `sourceEncoding` cannot drift from
-          // whatever the URL classifier decided at load time. The extension
-          // tests stay because they are what NARROWS `encoding` to the union
-          // `loadModelIntoDuckDB` accepts.
-          if (
-            activeLayer.model.sourceEncoding !== "cityparquet" &&
-            encoding !== "citygml" &&
-            encoding !== "cityparquet"
-          ) {
-            loaded = await loadModelIntoDuckDB(
-              activeLayer.modelRef.url,
-              encoding,
-            );
-          }
-        }
-
-        // Fall back to in-memory loading (works for file and URL models)
-        if (!loaded) {
-          loaded = await loadCityModelFromMemory(activeLayer.model);
-        }
-      }
-
-      if (!cancelled) {
-        setDuckdbModelLoaded(
-          !activeLayer.isStreaming &&
-            activeLayer.modelRef.type === "url" &&
-            extensionLoaded &&
-            loaded,
-        );
-        setDuckdbTableLoaded(loaded);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [duckdbStatus, activeLayerId, layers, activeStreamVersion]);
+    useLayerTableStore.getState().setTablePanelOpen(tableOpen);
+  }, [tableOpen]);
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -1239,8 +1159,6 @@ export function App({
     // the exits back to the landing page. Two half-rules for one invariant is
     // what let the sidebar's remove-last-layer path slip through.
     setTriangleCount(0);
-    setDuckdbModelLoaded(false);
-    setDuckdbTableLoaded(false);
     setTableOpen(false);
     setFps(undefined);
     setCursorPosition(null);
@@ -1450,13 +1368,11 @@ export function App({
           <InspectorPanel
             selections={selections}
             onClose={() => setInspectorOpen(false)}
-            duckdbModelLoaded={duckdbModelLoaded}
           />
         )}
 
         {tableOpen && (
           <TablePanel
-            duckdbTableLoaded={duckdbTableLoaded}
             onCollapse={() => setTableOpen(false)}
             onHeightChange={setTableHeight}
           />

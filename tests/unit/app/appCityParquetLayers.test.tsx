@@ -140,6 +140,25 @@ vi.mock("../../../src/analytics/duckdb", () => ({
   queryParquetBuffer: vi.fn(async () => null),
 }));
 
+/** What the app asked DuckDB to build a table from, per layer. `vi.hoisted`
+ *  because the `vi.mock` factory below is hoisted above this declaration. */
+const enqueued = vi.hoisted(
+  () => [] as Array<{ layerId: string; kind: string }>,
+);
+vi.mock("../../../src/analytics/layerTables", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../../src/analytics/layerTables")>();
+  return {
+    ...actual,
+    enqueueLayerTable: vi.fn(
+      async (layerId: string, source: { kind: string }) => {
+        enqueued.push({ layerId, kind: source.kind });
+      },
+    ),
+    dropLayerTable: vi.fn(async () => {}),
+  };
+});
+
 vi.mock("../../../src/features/streaming/openStreamingLayer", () => ({
   openStreamingLayer: vi.fn(async () => "stream-1"),
   closeStreamingLayer: vi.fn(),
@@ -242,6 +261,7 @@ beforeEach(() => {
   loadCityParquetFromFiles.mockReset();
   loadCityParquetFromFiles.mockResolvedValue(parquetModel);
   useLayerStore.setState({ layers: [], activeLayerId: null });
+  enqueued.length = 0;
   location.hash = "";
 });
 
@@ -448,5 +468,37 @@ describe("App — a failed group add is reported", () => {
       NO_TABLES,
     );
     expect(document.querySelector(".toast")).toBeNull();
+  });
+});
+
+describe("DuckDB layer tables", () => {
+  it("builds a CityParquet layer's table from the parsed MODEL — there is no reader for it", async () => {
+    location.hash = shareHash([
+      {
+        name: "pkg",
+        modelUrl: PARQUET_URL,
+        rules: [],
+        rulesEnabled: true,
+        visible: true,
+      },
+    ]);
+    render(<App persistenceStore={storeWith(null)} />);
+    await waitFor(() => expect(enqueued).toHaveLength(1));
+    expect(enqueued[0]!.kind).toBe("model");
+  });
+
+  it("builds an ordinary CityJSON URL layer's table from the decoded BYTES", async () => {
+    location.hash = shareHash([
+      {
+        name: "delft",
+        modelUrl: JSON_URL,
+        rules: [],
+        rulesEnabled: true,
+        visible: true,
+      },
+    ]);
+    render(<App persistenceStore={storeWith(null)} />);
+    await waitFor(() => expect(enqueued).toHaveLength(1));
+    expect(enqueued[0]!.kind).toBe("bytes");
   });
 });

@@ -125,13 +125,7 @@ describe("TablePanel — streaming layer, no DuckDB table", () => {
   });
 
   it("reads surface_count from ResidentObjectRecord.surfaceCount, not `.surfaces.length`", async () => {
-    render(
-      <TablePanel
-        duckdbTableLoaded={false}
-        onCollapse={() => {}}
-        onHeightChange={() => {}}
-      />,
-    );
+    render(<TablePanel onCollapse={() => {}} onHeightChange={() => {}} />);
 
     // The row and its attribute column render once loadPage's async
     // effect has committed the resident-model read.
