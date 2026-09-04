@@ -1,8 +1,35 @@
 import { describe, it, expect } from "vitest";
 import {
+  CITY_GML_MODULES,
   cityGmlModuleOf,
   groupTypesByModule,
 } from "../../../src/analytics/cityGmlModule";
+
+describe("CITY_GML_MODULES", () => {
+  it("names only tables cityparquet_write accepts", () => {
+    // Provenance: the extension's own error text, which lists the accepted
+    // object-table names verbatim. A name outside this set is refused at
+    // write time, so the list is a contract with the extension, not taste.
+    const ACCEPTED = new Set([
+      "building",
+      "bridge",
+      "tunnel",
+      "construction",
+      "transportation",
+      "vegetation",
+      "relief",
+      "water_body",
+      "land_use",
+      "city_furniture",
+      "generics",
+    ]);
+    for (const module of CITY_GML_MODULES) {
+      expect(ACCEPTED.has(module)).toBe(true);
+    }
+    expect(CITY_GML_MODULES.length).toBe(ACCEPTED.size);
+    expect(new Set(CITY_GML_MODULES).size).toBe(CITY_GML_MODULES.length);
+  });
+});
 
 describe("cityGmlModuleOf", () => {
   it("maps every Building* type to building", () => {

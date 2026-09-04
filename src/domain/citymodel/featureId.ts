@@ -35,6 +35,13 @@ export function parentsIndexOf(
  * is a cross-reference rather than containment, and a feature has one root by
  * definition. A parent the index never saw is the answer (it is as far up as
  * this model goes); a cycle stops at the id that would repeat.
+ *
+ * So for a PARTIAL extract — a streaming layer's resident cells, a tiled
+ * CityParquet package — the root returned may name an object that is not in
+ * the table at all. That is correct rather than a gap: the feature-scoped
+ * predicates compare `feature_id` to `feature_id`, so both sides of the `IN`
+ * are computed the same way and an absent root simply matches the rows that
+ * do declare it.
  */
 export function rootFeatureId(id: string, parents: ParentsIndex): string {
   const seen = new Set<string>([id]);

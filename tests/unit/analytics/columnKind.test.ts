@@ -90,8 +90,25 @@ describe("isDroppedColumn", () => {
       "material_lod1_2",
       "texture_lod2_2",
       "template",
+      "material_lod2_2",
+      "geometry_lod0_0",
+      "geometry_properties_lod1_3",
     ]) {
       expect(isDroppedColumn(n)).toBe(true);
+    }
+  });
+
+  it("keeps a user attribute that merely STARTS with a dropped word", () => {
+    // A reader column of that family always carries the LoD suffix; these are
+    // ordinary third-party attribute names, and hiding one would take it out
+    // of the table, the filter builder and the export with nothing to show it.
+    for (const n of [
+      "material_roof",
+      "geometry_source",
+      "texture_quality",
+      "geometry_lod_note",
+    ]) {
+      expect(isDroppedColumn(n)).toBe(false);
     }
   });
 
@@ -133,5 +150,18 @@ describe("LoD column maths", () => {
 
   it("is empty for a table with no geometry columns", () => {
     expect(lodsFromColumnNames(["id", "object_type"])).toEqual([]);
+  });
+
+  it("ignores an attribute that only looks like a geometry column", () => {
+    // `geometry_lod_note` is a plausible attribute name; letting it through
+    // would put a bogus rung on the layer's LoD ladder. Order is the module's
+    // existing convention — ascending, not the caller's column order.
+    expect(
+      lodsFromColumnNames([
+        "geometry_lod2_2",
+        "geometry_lod0_0",
+        "geometry_lod_note",
+      ]),
+    ).toEqual(["0.0", "2.2"]);
   });
 });

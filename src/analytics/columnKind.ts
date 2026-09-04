@@ -17,6 +17,15 @@
  *    geometry-template struct. Dropping them keeps 53 of 70 columns on the
  *    Delft sample and cuts table memory 2.45x (13.1 vs 32.1 MiB for 2231 rows).
  *
+ * The dropped SHAPE is matched exactly, never by prefix. A reader column of
+ * this family always carries the LoD suffix (`geometry_lod2_2`,
+ * `material_lod1_2`), whereas `material_roof`, `texture_quality` and
+ * `geometry_source` are perfectly ordinary third-party ATTRIBUTE names — a
+ * prefix test would hide one of those from the table, the filter builder and
+ * the export, silently and with nothing to show the user it happened. The same
+ * precision governs `lodsFromColumnNames`, so an attribute like
+ * `geometry_lod_note` cannot inject a bogus rung into a layer's LoD ladder.
+ *
  * Pure, no engine import, no I/O.
  */
 
@@ -61,7 +70,9 @@ export function isTextColumn(column: ColumnInfo): boolean {
   );
 }
 
-const DROPPED = /^(geometry_|geometry_properties_|material_|texture_)/;
+/** A reader geometry/material/texture column, LoD suffix and all. */
+const DROPPED =
+  /^(geometry|geometry_properties|material|texture)_lod\d+(_\d+)?$/;
 
 /** Whether a reader column is left out of a layer's browsing table. */
 export function isDroppedColumn(name: string): boolean {
@@ -77,8 +88,10 @@ export function lodColumnSuffix(lod: string): string {
 export function lodsFromColumnNames(names: ReadonlyArray<string>): string[] {
   const lods = new Set<string>();
   for (const name of names) {
-    const match = /^geometry_lod(.+)$/.exec(name);
-    if (match?.[1] !== undefined) lods.add(match[1].replace(/_/g, "."));
+    const match = /^geometry_lod(\d+)_(\d+)$/.exec(name);
+    if (match?.[1] !== undefined && match[2] !== undefined) {
+      lods.add(`${match[1]}.${match[2]}`);
+    }
   }
   return [...lods].sort((a, b) => parseFloat(a) - parseFloat(b));
 }
