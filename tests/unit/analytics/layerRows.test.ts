@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   encodeRowsAsJson,
   flatRowsFromModel,
@@ -105,6 +105,43 @@ describe("flatRowsFromModel", () => {
   });
 });
 
+describe("a dropped reserved attribute name", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("is reported ONCE per table, naming every key it dropped", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const m = model();
+    (m.objects.B1 as { attributes: Record<string, unknown> }).attributes = {
+      id: "SPOOF",
+      parents: "SPOOF",
+      ok: 1,
+    };
+    flatRowsFromModel(m);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      "Flat table: source attributes named id, parents were dropped because they collide with the fixed columns.",
+    );
+  });
+
+  it("says nothing when no attribute collides", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    flatRowsFromModel(model());
+    flatRowsFromRecords([record({ attributes: { ok: 1 } })]);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("reports the streaming path the same way", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    flatRowsFromRecords([record({ attributes: { children: [], ok: 1 } })]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      "Flat table: source attributes named children were dropped because they collide with the fixed columns.",
+    );
+  });
+});
+
 describe("flatRowsFromRecords", () => {
   it("produces the same column vocabulary from resident records", () => {
     const rows = flatRowsFromRecords([
@@ -155,5 +192,23 @@ describe("encodeRowsAsJson", () => {
     ]);
     const text = new TextDecoder().decode(encodeRowsAsJson(rows));
     expect(JSON.parse(text)[0].big).toBe("9007199254740993");
+  });
+});
+
+describe("a BigInt NESTED in an object attribute", () => {
+  // hyparquet decodes an INT64 to a BigInt, and CityParquet attributes are
+  // routinely objects — so the nested case is the common one, not the exotic
+  // one, and a bare JSON.stringify there throws and loses the whole layer.
+  const nested = { attributes: { ref: { bag: BigInt("9007199254740993") } } };
+
+  it("serialises to its decimal string rather than throwing", () => {
+    const rows = flatRowsFromRecords([record(nested)]);
+    expect(rows[0]!.ref).toBe('{"bag":"9007199254740993"}');
+  });
+
+  it("survives the JSON encoding too", () => {
+    const rows = flatRowsFromRecords([record(nested)]);
+    const text = new TextDecoder().decode(encodeRowsAsJson(rows));
+    expect(JSON.parse(text)[0].ref).toBe('{"bag":"9007199254740993"}');
   });
 });

@@ -139,6 +139,23 @@ describe("compileFilter", () => {
     ).toEqual({ ok: true, where: `"id" LIKE '%-0' ESCAPE '\\'` });
   });
 
+  it("refuses an EMPTY needle rather than compiling LIKE '%%'", () => {
+    // A blank "contains" box is a row the user has not finished, not a request
+    // for every object in the layer — and `LIKE '%%'` is indistinguishable
+    // from a filter that silently did not apply.
+    for (const op of ["contains", "startsWith", "endsWith"] as const) {
+      expect(
+        compileFilter(
+          group([{ id: "c", column: "id", op, value: "   " }]),
+          COLUMNS,
+        ),
+      ).toEqual({
+        ok: false,
+        message: `"${op}" needs something to look for in "id".`,
+      });
+    }
+  });
+
   it("compiles the null tests without a value", () => {
     expect(
       compileFilter(
@@ -170,6 +187,53 @@ describe("compileFilter", () => {
     ).toEqual({
       ok: true,
       where: `"object_type" IN ('Building', 'BuildingPart')`,
+    });
+  });
+
+  it("coerces every IN element the way a comparison would", () => {
+    // The list comes from the same text inputs as a single value, so a
+    // numeric column's list must not become IN ('10', '20.5') — DuckDB would
+    // cast it row by row, and a genuinely bad element would never be named.
+    expect(
+      compileFilter(
+        group([
+          { id: "c", column: "b3_h_dak_max", op: "in", value: ["10", "20.5"] },
+        ]),
+        COLUMNS,
+      ),
+    ).toEqual({ ok: true, where: `"b3_h_dak_max" IN (10, 20.5)` });
+  });
+
+  it("names the element that cannot be coerced", () => {
+    expect(
+      compileFilter(
+        group([
+          { id: "c", column: "b3_h_dak_max", op: "in", value: ["10", "abc"] },
+        ]),
+        COLUMNS,
+      ),
+    ).toEqual({
+      ok: false,
+      message: '"b3_h_dak_max" needs a number; "abc" is not one.',
+    });
+  });
+
+  it("refuses an EMPTY element of an IN list", () => {
+    expect(
+      compileFilter(
+        group([
+          {
+            id: "c",
+            column: "object_type",
+            op: "in",
+            value: ["Building", " "],
+          },
+        ]),
+        COLUMNS,
+      ),
+    ).toEqual({
+      ok: false,
+      message: '"in" cannot take an empty value for "object_type".',
     });
   });
 

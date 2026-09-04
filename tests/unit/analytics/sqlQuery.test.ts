@@ -72,7 +72,7 @@ describe("buildPageSql", () => {
         500,
       ),
     ).toBe(
-      'SELECT "id", "feature_id", "object_type", to_json("parents") AS "parents", "b3_h_dak_max" FROM "layer_1" WHERE "object_type" = \'Building\' ORDER BY "b3_h_dak_max" DESC NULLS LAST LIMIT 500 OFFSET 1000',
+      'SELECT "id", "feature_id", "object_type", to_json("parents") AS "parents", "b3_h_dak_max" FROM "layer_1" WHERE "object_type" = \'Building\' ORDER BY "layer_1"."b3_h_dak_max" DESC NULLS LAST LIMIT 500 OFFSET 1000',
     );
   });
 
@@ -92,7 +92,7 @@ describe("buildPageSql", () => {
         0,
         100,
       ),
-    ).toContain('ORDER BY "id" ASC NULLS LAST');
+    ).toContain('ORDER BY "layer_1"."id" ASC NULLS LAST');
   });
 
   it("refuses to sort on a nested column, dropping the ORDER BY", () => {
@@ -119,6 +119,36 @@ describe("buildPageSql", () => {
         100,
       ),
     ).not.toContain("ORDER BY");
+  });
+
+  it("QUALIFIES the sort column, so a castText alias cannot capture it", () => {
+    // `"bouwjaar"::VARCHAR AS "bouwjaar"` puts a VARCHAR alias in scope under
+    // the column's own name, and an unqualified ORDER BY binds the ALIAS —
+    // sorting 1920 next to 199 lexicographically. A qualified reference can
+    // only ever mean the table's column.
+    expect(
+      buildPageSql(
+        "layer_1",
+        [
+          { name: "id", type: "VARCHAR", kind: "scalar" },
+          { name: "bouwjaar", type: "BIGINT", kind: "castText" },
+        ],
+        null,
+        { column: "bouwjaar", dir: "asc" },
+        0,
+        100,
+      ),
+    ).toBe(
+      'SELECT "id", "bouwjaar"::VARCHAR AS "bouwjaar" FROM "layer_1" ORDER BY "layer_1"."bouwjaar" ASC NULLS LAST LIMIT 100 OFFSET 0',
+    );
+  });
+
+  it("clamps a page or page size SQL could not take", () => {
+    const paging = (page: number, pageSize: number) =>
+      buildPageSql("layer_1", COLUMNS, null, null, page, pageSize);
+    expect(paging(Number.NaN, Number.NaN)).toContain("LIMIT 100 OFFSET 0");
+    expect(paging(-3, -3)).toContain("LIMIT 100 OFFSET 0");
+    expect(paging(2.5, 2.5)).toContain("LIMIT 2 OFFSET 4");
   });
 
   it("selects 1 when every column is a blob, so the page query still binds", () => {

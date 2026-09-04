@@ -187,6 +187,15 @@ function compileCondition(
       typeof condition.value === "string"
         ? condition.value
         : String(condition.value);
+    // An empty needle compiles to `LIKE '%%'`, which matches every non-NULL
+    // row — a blank box in a half-written condition would silently read as
+    // "everything", indistinguishable from a filter that did not apply.
+    if (needle.trim() === "") {
+      return {
+        ok: false,
+        message: `"${condition.op}" needs something to look for in "${column.name}".`,
+      };
+    }
     return {
       ok: true,
       sql: `${ident} LIKE ${quoteLiteral(likePattern(condition.op, needle))} ESCAPE '\\'`,
@@ -206,8 +215,23 @@ function compileCondition(
         message: `"in" needs at least one value for "${column.name}".`,
       };
     }
-    const list = condition.value.map((v) => quoteLiteral(v)).join(", ");
-    return { ok: true, sql: `${ident} IN (${list})` };
+    // Every element goes through the SAME coercion a single value would: the
+    // list is typed into the same kind of box, so a numeric column must get
+    // `IN (10, 20.5)` rather than `IN ('10', '20.5')` — and a mis-typed
+    // element must be named, which a blanket cast in SQL could never do.
+    const literals: string[] = [];
+    for (const element of condition.value) {
+      if (String(element).trim() === "") {
+        return {
+          ok: false,
+          message: `"in" cannot take an empty value for "${column.name}".`,
+        };
+      }
+      const literal = literalFor(column, element);
+      if (!literal.ok) return { ok: false, message: literal.message };
+      literals.push(literal.sql);
+    }
+    return { ok: true, sql: `${ident} IN (${literals.join(", ")})` };
   }
 
   if (!COMPARISONS.has(condition.op)) {
@@ -287,9 +311,19 @@ export function gridColumns(
   return columns.filter((c) => c.kind !== "blob");
 }
 
-/** ORDER BY is offered only for a column that HAS an order: a LIST or a
- *  STRUCT sorts by a rule nobody could predict from the header. */
+/**
+ * ORDER BY is offered only for a column that HAS an order: a LIST or a STRUCT
+ * sorts by a rule nobody could predict from the header.
+ *
+ * The reference is TABLE-QUALIFIED, and that is load-bearing rather than
+ * decorative. A `castText` column is projected as `"c"::VARCHAR AS "c"`, so
+ * the select list puts a VARCHAR alias in scope under the column's own name —
+ * and DuckDB resolves a bare `ORDER BY "c"` to that ALIAS, sorting a BIGINT
+ * year lexicographically ("1920" before "199"). `"table"."c"` can only ever
+ * name the table's column.
+ */
 function orderClause(
+  table: string,
   columns: ReadonlyArray<ColumnInfo>,
   sort: { readonly column: string; readonly dir: "asc" | "desc" } | null,
 ): string {
@@ -299,7 +333,25 @@ function orderClause(
   if (column.kind !== "scalar" && column.kind !== "castText") return "";
   // NULLS LAST in both directions: a page of nulls at the top of a descending
   // sort is the one thing nobody clicks a header to see.
-  return ` ORDER BY ${quoteIdent(column.name)} ${sort.dir === "asc" ? "ASC" : "DESC"} NULLS LAST`;
+  return ` ORDER BY ${quoteIdent(table)}.${quoteIdent(column.name)} ${sort.dir === "asc" ? "ASC" : "DESC"} NULLS LAST`;
+}
+
+/** The page size a caller gets when it asks for one SQL cannot take. */
+const DEFAULT_PAGE_SIZE = 100;
+
+/**
+ * A LIMIT/OFFSET operand that is certainly a non-negative integer.
+ *
+ * These two numbers are the only ones this module interpolates WITHOUT
+ * quoting them — `LIMIT '100'` does not bind — so they are the one place a
+ * value from a store could reach SQL as a token. `NaN`, `Infinity` and `-1`
+ * all stringify to something DuckDB reads as a syntax error rather than as a
+ * number, and a fractional page size is not a page size at all.
+ */
+function pagingInt(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  const floored = Math.floor(value);
+  return floored < 0 ? fallback : floored;
 }
 
 export function buildPageSql(
@@ -317,8 +369,9 @@ export function buildPageSql(
   // empty select list does not bind, and the row count still has to work.
   const select = projections.length === 0 ? "1" : projections.join(", ");
   const whereClause = where === null ? "" : ` WHERE ${where}`;
-  const offset = Math.max(0, page) * pageSize;
-  return `SELECT ${select} FROM ${quoteIdent(table)}${whereClause}${orderClause(columns, sort)} LIMIT ${pageSize} OFFSET ${offset}`;
+  const limit = Math.max(1, pagingInt(pageSize, DEFAULT_PAGE_SIZE));
+  const offset = pagingInt(page, 0) * limit;
+  return `SELECT ${select} FROM ${quoteIdent(table)}${whereClause}${orderClause(table, columns, sort)} LIMIT ${limit} OFFSET ${offset}`;
 }
 
 export function buildCountSql(table: string, where: string | null): string {
@@ -504,6 +557,13 @@ export function buildCityParquetModuleSql(input: {
 }): string {
   const t = quoteIdent(input.table);
   const types = input.moduleTypes.map((v) => quoteLiteral(v)).join(", ");
-  const modulePredicate = `COALESCE("feature_id", "id") IN (SELECT "id" FROM ${t} WHERE "parents" IS NULL AND "object_type" IN (${types}))`;
+  // `IN ()` is a SYNTAX error, so an empty module would take the whole export
+  // down at the first statement. `WHERE FALSE` is the honest reading of "no
+  // types belong to this module": an empty table, and the package still
+  // builds around it.
+  const modulePredicate =
+    input.moduleTypes.length === 0
+      ? "FALSE"
+      : `COALESCE("feature_id", "id") IN (SELECT "id" FROM ${t} WHERE "parents" IS NULL AND "object_type" IN (${types}))`;
   return `CREATE TABLE ${quoteIdent(input.schema)}.${quoteIdent(input.module)} AS SELECT * FROM ${quoteIdent(input.scratchSchema)}.${quoteIdent(CITYPARQUET_SOURCE_TABLE)} WHERE ${modulePredicate}`;
 }

@@ -170,6 +170,22 @@ describe("buildCityParquetModuleSql", () => {
     );
   });
 
+  it("emits WHERE FALSE for no types, never an empty IN list", () => {
+    // `IN ()` is a syntax error, so an empty module would take the whole
+    // export down; an empty table is the honest answer to "no types".
+    expect(
+      buildCityParquetModuleSql({
+        schema: "e",
+        module: "generics",
+        scratchSchema: "es",
+        table: "t",
+        moduleTypes: [],
+      }),
+    ).toBe(
+      'CREATE TABLE "e"."generics" AS SELECT * FROM "es"."src" WHERE FALSE',
+    );
+  });
+
   it("escapes a quote in a type name rather than breaking out of the literal", () => {
     expect(
       buildCityParquetModuleSql({
