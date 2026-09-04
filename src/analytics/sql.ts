@@ -12,7 +12,7 @@
  * `runQuery`/`ddl` from `analytics/duckdb.ts`.
  */
 
-import { isTextColumn, type ColumnInfo } from "./columnKind";
+import { isTextColumn, lodColumnSuffix, type ColumnInfo } from "./columnKind";
 import type {
   FilterCondition,
   FilterGroup,
@@ -372,4 +372,129 @@ export function buildFeatureIdsSql(
  */
 export function buildRootTypesSql(table: string): string {
   return `SELECT DISTINCT "object_type" AS "value" FROM ${quoteIdent(table)} WHERE "parents" IS NULL AND "object_type" IS NOT NULL ORDER BY 1`;
+}
+
+// ---------------------------------------------------------------------------
+// Export
+// ---------------------------------------------------------------------------
+
+export type AttributeExportFormat = "parquet" | "csv" | "json";
+
+/**
+ * `COPY (SELECT …) TO '<file>' (FORMAT …)` for the attribute formats.
+ *
+ * Nested columns stay NATIVE for parquet — the format holds a list — and go
+ * through `to_json` for CSV and JSON, where an Arrow list would otherwise
+ * arrive as DuckDB's own bracket spelling in one case and as a nested document
+ * in the other. Blobs are excluded from every format: {@link projectColumn}
+ * already refuses them, and geometry belongs in the CityParquet route.
+ *
+ * NOT offered here, and never to be added without re-probing: `FORMAT cityjson
+ * | cityjsonseq | flatcitybuf` write ZERO BYTES in wasm, silently.
+ */
+export function buildAttributeExportSql(input: {
+  readonly table: string;
+  readonly columns: ReadonlyArray<ColumnInfo>;
+  readonly where: string | null;
+  readonly format: AttributeExportFormat;
+  readonly outFile: string;
+}): string {
+  const projections = input.columns
+    .map((column) =>
+      input.format === "parquet" && column.kind === "nested"
+        ? quoteIdent(column.name)
+        : projectColumn(column),
+    )
+    .filter((p): p is string => p !== null);
+  const select = projections.length === 0 ? "1" : projections.join(", ");
+  const scope = buildFeatureScopeWhere(input.table, input.where);
+  const whereClause = scope === null ? "" : ` WHERE ${scope}`;
+  return `COPY (SELECT ${select} FROM ${quoteIdent(input.table)}${whereClause}) TO ${quoteLiteral(input.outFile)} (FORMAT ${input.format})`;
+}
+
+/**
+ * The columns a CityParquet object table must carry, whatever else is dropped.
+ *
+ * Measured, not guessed (probe P6g): attributes may go to zero and one LoD is
+ * fine, but `id, feature_id, parents, children` must be present, and a
+ * `geometry_lodX_Y` without its `geometry_properties_lodX_Y` sidecar fails
+ * validation. `object_type`, `children_roles` and `bbox` are kept because the
+ * writer's `metadata.json` reports them and a package without them is poorer
+ * for no saving.
+ */
+export const CITYPARQUET_REQUIRED_COLUMNS: ReadonlyArray<string> = [
+  "id",
+  "feature_id",
+  "object_type",
+  "parents",
+  "children",
+  "children_roles",
+  "bbox",
+];
+
+/** The scratch table's name inside its own schema. */
+export const CITYPARQUET_SOURCE_TABLE = "src";
+
+/**
+ * ONE read of the re-registered source, filtered to the export's feature scope.
+ *
+ * The source is read again (rather than the layer's browsing table being
+ * reused) because that table has no geometry in it at all — the entire point of
+ * dropping the BLOB columns — and a CityParquet package without geometry is not
+ * a package. But it is read exactly ONCE: cutting each module table straight
+ * from the reader would re-parse the whole file per module, so a package with
+ * buildings, vegetation and city furniture in it would parse a 300 MB CityJSON
+ * three times over.
+ *
+ * The scratch table lives in a SCHEMA OF ITS OWN, not beside the module tables:
+ * `cityparquet_init` describes every table in the schema it is given, and a
+ * table called `src` is not a CityGML module.
+ *
+ * No `lod := …` argument: the explicit column list already names exactly one
+ * LoD's geometry pair, and that is the route probed end to end (P6b/P6c/P6g).
+ * `lod :=` narrows the SCHEMA rather than the rows and would only add a
+ * bind-time failure mode for an LoD spelled differently than the file spells it.
+ */
+export function buildCityParquetSourceSql(input: {
+  readonly scratchSchema: string;
+  readonly reader: "read_cityjson" | "read_cityjsonseq";
+  readonly sourceFile: string;
+  readonly table: string;
+  readonly lod: string;
+  readonly attributes: ReadonlyArray<string>;
+  readonly where: string | null;
+}): string {
+  const suffix = lodColumnSuffix(input.lod);
+  const select = [
+    ...CITYPARQUET_REQUIRED_COLUMNS,
+    `geometry_lod${suffix}`,
+    `geometry_properties_lod${suffix}`,
+    ...input.attributes,
+  ]
+    .map(quoteIdent)
+    .join(", ");
+  const scope = buildFeatureScopeWhere(input.table, input.where);
+  const whereClause = scope === null ? "" : ` WHERE ${scope}`;
+  return `CREATE TABLE ${quoteIdent(input.scratchSchema)}.${quoteIdent(CITYPARQUET_SOURCE_TABLE)} AS SELECT ${select} FROM ${input.reader}(${quoteLiteral(input.sourceFile)})${whereClause}`;
+}
+
+/**
+ * One `exp.<module>` table, cut from the scratch table.
+ *
+ * The MODULE predicate asks which table a feature belongs in by its ROOT's
+ * type, so a BuildingPart follows its Building rather than being classified on
+ * its own. It reads the LAYER table (which has `parents` and `object_type` for
+ * every object) while the rows come from the scratch table.
+ */
+export function buildCityParquetModuleSql(input: {
+  readonly schema: string;
+  readonly module: string;
+  readonly scratchSchema: string;
+  readonly table: string;
+  readonly moduleTypes: ReadonlyArray<string>;
+}): string {
+  const t = quoteIdent(input.table);
+  const types = input.moduleTypes.map((v) => quoteLiteral(v)).join(", ");
+  const modulePredicate = `COALESCE("feature_id", "id") IN (SELECT "id" FROM ${t} WHERE "parents" IS NULL AND "object_type" IN (${types}))`;
+  return `CREATE TABLE ${quoteIdent(input.schema)}.${quoteIdent(input.module)} AS SELECT * FROM ${quoteIdent(input.scratchSchema)}.${quoteIdent(CITYPARQUET_SOURCE_TABLE)} WHERE ${modulePredicate}`;
 }
