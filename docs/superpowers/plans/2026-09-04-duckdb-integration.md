@@ -2706,6 +2706,69 @@ describe("compileFilter", () => {
     });
   });
 
+  it("coerces EVERY element of an IN list against the column", () => {
+    // The list comes from a comma-split text input, so on a numeric column
+    // its elements are strings; emitting them as string literals against a
+    // DOUBLE is a cast waiting to go wrong.
+    expect(
+      compileFilter(
+        group([
+          { id: "c", column: "b3_h_dak_max", op: "in", value: ["10", "20.5"] },
+        ]),
+        COLUMNS,
+      ),
+    ).toEqual({ ok: true, where: `"b3_h_dak_max" IN (10, 20.5)` });
+  });
+
+  it("refuses an IN list with an element the column cannot take", () => {
+    expect(
+      compileFilter(
+        group([
+          { id: "c", column: "b3_h_dak_max", op: "in", value: ["10", "abc"] },
+        ]),
+        COLUMNS,
+      ),
+    ).toEqual({
+      ok: false,
+      message: '"b3_h_dak_max" needs a number; "abc" is not one.',
+    });
+  });
+
+  it("refuses an EMPTY element — a trailing comma is not a value", () => {
+    expect(
+      compileFilter(
+        group([
+          {
+            id: "c",
+            column: "object_type",
+            op: "in",
+            value: ["Building", " "],
+          },
+        ]),
+        COLUMNS,
+      ),
+    ).toEqual({
+      ok: false,
+      message: '"in" cannot take an empty value for "object_type".',
+    });
+  });
+
+  it("refuses an EMPTY needle rather than compiling LIKE '%%'", () => {
+    // `LIKE '%%'` matches every non-NULL row: a condition that reads as a
+    // filter and silently does nothing.
+    for (const op of ["contains", "startsWith", "endsWith"] as const) {
+      expect(
+        compileFilter(
+          group([{ id: "c", column: "id", op, value: "" }]),
+          COLUMNS,
+        ),
+      ).toEqual({
+        ok: false,
+        message: `"${op}" needs something to look for in "id".`,
+      });
+    }
+  });
+
   it("joins with the group's logic", () => {
     const conditions = [
       { id: "c1", column: "object_type", op: "=" as const, value: "Building" },
@@ -3064,6 +3127,16 @@ function compileCondition(
       typeof condition.value === "string"
         ? condition.value
         : String(condition.value);
+    if (needle === "") {
+      // `LIKE '%%'` matches every non-NULL row — a condition that reads as a
+      // filter and does nothing, which is worse than one that is refused. It
+      // is also what an unfinished row looks like: the user added a condition
+      // and has not typed the needle yet.
+      return {
+        ok: false,
+        message: `"${condition.op}" needs something to look for in "${column.name}".`,
+      };
+    }
     return {
       ok: true,
       sql: `${ident} LIKE ${quoteLiteral(likePattern(condition.op, needle))} ESCAPE '\\'`,
@@ -3083,8 +3156,25 @@ function compileCondition(
         message: `"in" needs at least one value for "${column.name}".`,
       };
     }
-    const list = condition.value.map((v) => quoteLiteral(v)).join(", ");
-    return { ok: true, sql: `${ident} IN (${list})` };
+    // Every element through `literalFor`, exactly like a comparison: the list
+    // comes from a comma-split text input, so on a numeric column
+    // `quoteLiteral` alone would emit `"h" IN ('10', '20')` — string literals
+    // against a DOUBLE, which DuckDB either casts silently or refuses at run
+    // time depending on the value. And an empty element (a trailing comma) is
+    // refused rather than compiled to `''`.
+    const parts: string[] = [];
+    for (const element of condition.value) {
+      if (element.trim() === "") {
+        return {
+          ok: false,
+          message: `"in" cannot take an empty value for "${column.name}".`,
+        };
+      }
+      const literal = literalFor(column, element);
+      if (!literal.ok) return { ok: false, message: literal.message };
+      parts.push(literal.sql);
+    }
+    return { ok: true, sql: `${ident} IN (${parts.join(", ")})` };
   }
 
   if (!COMPARISONS.has(condition.op)) {
@@ -3272,7 +3362,7 @@ describe("buildPageSql", () => {
         500,
       ),
     ).toBe(
-      'SELECT "id", "feature_id", "object_type", to_json("parents") AS "parents", "b3_h_dak_max" FROM "layer_1" WHERE "object_type" = \'Building\' ORDER BY "b3_h_dak_max" DESC NULLS LAST LIMIT 500 OFFSET 1000',
+      'SELECT "id", "feature_id", "object_type", to_json("parents") AS "parents", "b3_h_dak_max" FROM "layer_1" WHERE "object_type" = \'Building\' ORDER BY "layer_1"."b3_h_dak_max" DESC NULLS LAST LIMIT 500 OFFSET 1000',
     );
   });
 
@@ -3292,7 +3382,44 @@ describe("buildPageSql", () => {
         0,
         100,
       ),
-    ).toContain('ORDER BY "id" ASC NULLS LAST');
+    ).toContain('ORDER BY "layer_1"."id" ASC NULLS LAST');
+  });
+
+  it("TABLE-QUALIFIES the sort column, so a castText column sorts numerically", () => {
+    // `"bouwjaar"::VARCHAR AS "bouwjaar"` is in the select list, and a bare
+    // `ORDER BY "bouwjaar"` binds THAT — sorting 985 after 2005 because "9" is
+    // greater than "2". Qualifying it cannot resolve to the alias.
+    expect(
+      buildPageSql(
+        "layer_1",
+        [
+          { name: "id", type: "VARCHAR", kind: "scalar" },
+          { name: "bouwjaar", type: "BIGINT", kind: "castText" },
+        ],
+        null,
+        { column: "bouwjaar", dir: "desc" },
+        0,
+        100,
+      ),
+    ).toBe(
+      'SELECT "id", "bouwjaar"::VARCHAR AS "bouwjaar" FROM "layer_1" ORDER BY "layer_1"."bouwjaar" DESC NULLS LAST LIMIT 100 OFFSET 0',
+    );
+  });
+
+  it("clamps a page or page size that is not a non-negative integer", () => {
+    // These reach SQL as bare numbers; `LIMIT NaN` fails to bind with a
+    // message about a syntax error, which says nothing about where it came
+    // from. Paging is not something a user can get wrong, so there is nothing
+    // to report — only a number to make usable.
+    expect(
+      buildPageSql("layer_1", COLUMNS, null, null, Number.NaN, 100),
+    ).toContain("LIMIT 100 OFFSET 0");
+    expect(buildPageSql("layer_1", COLUMNS, null, null, -3, 100)).toContain(
+      "LIMIT 100 OFFSET 0",
+    );
+    expect(buildPageSql("layer_1", COLUMNS, null, null, 1, 2.5)).toContain(
+      "LIMIT 100 OFFSET 100",
+    );
   });
 
   it("refuses to sort on a nested column, dropping the ORDER BY", () => {
@@ -3431,6 +3558,7 @@ export function gridColumns(
 /** ORDER BY is offered only for a column that HAS an order: a LIST or a
  *  STRUCT sorts by a rule nobody could predict from the header. */
 function orderClause(
+  table: string,
   columns: ReadonlyArray<ColumnInfo>,
   sort: { readonly column: string; readonly dir: "asc" | "desc" } | null,
 ): string {
@@ -3438,9 +3566,26 @@ function orderClause(
   const column = columns.find((c) => c.name === sort.column);
   if (!column) return "";
   if (column.kind !== "scalar" && column.kind !== "castText") return "";
+  // TABLE-QUALIFIED, and that is the whole point. A `castText` column is
+  // projected as `"c"::VARCHAR AS "c"`, and a bare `ORDER BY "c"` binds to
+  // that ALIAS — so a BIGINT column sorts LEXICOGRAPHICALLY: 985 lands after
+  // 2005 because "9" > "2". `"table"."c"` cannot resolve to the alias, so it
+  // binds the base column and sorts numerically.
+  //
   // NULLS LAST in both directions: a page of nulls at the top of a descending
   // sort is the one thing nobody clicks a header to see.
-  return ` ORDER BY ${quoteIdent(column.name)} ${sort.dir === "asc" ? "ASC" : "DESC"} NULLS LAST`;
+  return ` ORDER BY ${quoteIdent(table)}.${quoteIdent(column.name)} ${sort.dir === "asc" ? "ASC" : "DESC"} NULLS LAST`;
+}
+
+/** A paging argument as a non-negative integer, or its floor.
+ *
+ *  These reach SQL as bare numbers, so a `NaN`, an `Infinity` or a fractional
+ *  page from arithmetic upstream would produce a statement that fails to bind
+ *  with a message about a syntax error near "NaN". Clamped rather than
+ *  refused: paging is not something a user can get wrong, so there is nothing
+ *  to report — only a number to make usable. */
+function pagingInt(value: number, fallback: number): number {
+  return Number.isInteger(value) && value >= 0 ? value : fallback;
 }
 
 export function buildPageSql(
@@ -3458,8 +3603,9 @@ export function buildPageSql(
   // empty select list does not bind, and the row count still has to work.
   const select = projections.length === 0 ? "1" : projections.join(", ");
   const whereClause = where === null ? "" : ` WHERE ${where}`;
-  const offset = Math.max(0, page) * pageSize;
-  return `SELECT ${select} FROM ${quoteIdent(table)}${whereClause}${orderClause(columns, sort)} LIMIT ${pageSize} OFFSET ${offset}`;
+  const size = pagingInt(pageSize, 100);
+  const offset = pagingInt(page, 0) * size;
+  return `SELECT ${select} FROM ${quoteIdent(table)}${whereClause}${orderClause(table, columns, sort)} LIMIT ${size} OFFSET ${offset}`;
 }
 
 export function buildCountSql(table: string, where: string | null): string {
@@ -3779,6 +3925,24 @@ describe("buildCityParquetModuleSql", () => {
       }),
     ).toContain(`IN ('O''dd')`);
   });
+
+  it("emits WHERE FALSE for an empty type list, never `IN ()`", () => {
+    // `IN ()` is a syntax error, not an empty set. Unreachable through the
+    // exporter (`groupTypesByModule` never yields an empty bucket), but a
+    // builder that emits invalid SQL for an empty array is a trap for the next
+    // caller.
+    expect(
+      buildCityParquetModuleSql({
+        schema: "e",
+        module: "generics",
+        scratchSchema: "es",
+        table: "t",
+        moduleTypes: [],
+      }),
+    ).toBe(
+      'CREATE TABLE "e"."generics" AS SELECT * FROM "es"."src" WHERE FALSE',
+    );
+  });
 });
 ```
 
@@ -3919,8 +4083,16 @@ export function buildCityParquetModuleSql(input: {
   readonly moduleTypes: ReadonlyArray<string>;
 }): string {
   const t = quoteIdent(input.table);
-  const types = input.moduleTypes.map((v) => quoteLiteral(v)).join(", ");
-  const modulePredicate = `COALESCE("feature_id", "id") IN (SELECT "id" FROM ${t} WHERE "parents" IS NULL AND "object_type" IN (${types}))`;
+  // `IN ()` is a syntax error, not an empty set. `groupTypesByModule` never
+  // produces an empty bucket, so this is unreachable through the exporter —
+  // but a builder that emits invalid SQL for an empty array is a trap for the
+  // next caller, and `WHERE FALSE` says exactly what an empty list means.
+  const modulePredicate =
+    input.moduleTypes.length === 0
+      ? "FALSE"
+      : `COALESCE("feature_id", "id") IN (SELECT "id" FROM ${t} WHERE "parents" IS NULL AND "object_type" IN (${input.moduleTypes
+          .map((v) => quoteLiteral(v))
+          .join(", ")}))`;
   return `CREATE TABLE ${quoteIdent(input.schema)}.${quoteIdent(input.module)} AS SELECT * FROM ${quoteIdent(input.scratchSchema)}.${quoteIdent(CITYPARQUET_SOURCE_TABLE)} WHERE ${modulePredicate}`;
 }
 ```
@@ -4083,6 +4255,19 @@ describe("flatRowsFromModel", () => {
     expect(rows[0]!.tags).toBe('{"a":1}');
   });
 
+  it("survives a BigInt NESTED in an object-valued attribute", () => {
+    // hyparquet decodes an INT64 column to a BigInt, so this is reachable from
+    // any CityParquet layer with a 64-bit field inside a struct — and a bare
+    // `JSON.stringify` throws on it, failing the whole layer's table for one
+    // cell.
+    const m = model();
+    (m.objects.B1 as { attributes: Record<string, unknown> }).attributes = {
+      ids: { bag: BigInt("9007199254740993") },
+    };
+    expect(() => flatRowsFromModel(m)).not.toThrow();
+    expect(flatRowsFromModel(m)[0]!.ids).toBe('{"bag":"9007199254740993"}');
+  });
+
   it("drops the old app-side derivations", () => {
     expect(rows[0]!.lod).toBeUndefined();
     expect(rows[0]!.surface_count).toBeUndefined();
@@ -4207,9 +4392,29 @@ export const FLAT_PREFIX_COLUMNS: ReadonlyArray<string> = [
 
 const RESERVED = new Set(FLAT_PREFIX_COLUMNS);
 
-/** An object's attributes as columns. A key that collides with a prefix
- *  column is DROPPED, not renamed: a file whose attribute is called `id`
- *  would otherwise silently replace the identity every join depends on. */
+/**
+ * `JSON.stringify`'s replacer for everything in this module.
+ *
+ * `JSON.stringify` THROWS on a BigInt — "Do not know how to serialize a
+ * BigInt" — and a BigInt is entirely reachable here: hyparquet decodes an
+ * INT64 column to one, so a CityParquet layer with a 64-bit attribute, or one
+ * NESTED inside an object-valued attribute, would fail its whole table on a
+ * single cell. Stringified rather than narrowed to a Number, because that is
+ * what loses the value silently past 2^53.
+ */
+function bigintSafe(_key: string, value: unknown): unknown {
+  return typeof value === "bigint" ? value.toString() : value;
+}
+
+/**
+ * An object's attributes as columns.
+ *
+ * A key that collides with a prefix column is DROPPED, not renamed: a file
+ * whose attribute is called `id` would otherwise silently replace the identity
+ * every join depends on. An object-valued attribute is JSON — through the SAME
+ * replacer `encodeRowsAsJson` uses, because a BigInt nested inside one throws
+ * exactly as loudly as a top-level one and would take the layer's table with it.
+ */
 function attributeColumns(
   attributes: Readonly<Record<string, unknown>>,
 ): Record<string, unknown> {
@@ -4218,7 +4423,7 @@ function attributeColumns(
     if (RESERVED.has(key)) continue;
     out[key] =
       typeof value === "object" && value !== null
-        ? JSON.stringify(value)
+        ? JSON.stringify(value, bigintSafe)
         : value;
   }
   return out;
@@ -4266,15 +4471,11 @@ export function flatRowsFromRecords(
 /**
  * The rows as UTF-8 JSON for `registerBuffer` + `read_json_auto`.
  *
- * BigInt is stringified rather than allowed to throw: a CityParquet or CityGML
- * attribute can genuinely be a 64-bit integer, and `JSON.stringify` refuses
- * one outright — which would fail the whole layer's table for one cell.
+ * Through {@link bigintSafe}, the same replacer `attributeColumns` uses — one
+ * rule for one hazard, rather than two that can drift apart.
  */
 export function encodeRowsAsJson(rows: ReadonlyArray<FlatRow>): Uint8Array {
-  const json = JSON.stringify(rows, (_key, value: unknown) =>
-    typeof value === "bigint" ? value.toString() : value,
-  );
-  return new TextEncoder().encode(json);
+  return new TextEncoder().encode(JSON.stringify(rows, bigintSafe));
 }
 ```
 
@@ -14648,6 +14849,36 @@ suite("layer tables over real fixtures", () => {
     ).toBe(2);
   });
 
+  it("sorts a BIGINT (castText) column NUMERICALLY, not lexicographically", () => {
+    // The regression: `castText` is projected as `"c"::VARCHAR AS "c"`, and a
+    // bare `ORDER BY "c"` binds the ALIAS — so 985 sorts after 2005 because
+    // "9" > "2". Only the table-qualified clause gets this right, and only the
+    // real engine can prove it.
+    db.query(
+      `CREATE OR REPLACE TABLE sort_probe AS SELECT * FROM (VALUES
+         ('a', 2005::BIGINT), ('b', 985::BIGINT), ('c', NULL)
+       ) AS t("id", "bouwjaar")`,
+    );
+    const columnsProbe: ColumnInfo[] = [
+      { name: "id", type: "VARCHAR", kind: "scalar" },
+      { name: "bouwjaar", type: "BIGINT", kind: "castText" },
+    ];
+    const rows = db.query(
+      buildPageSql(
+        "sort_probe",
+        columnsProbe,
+        null,
+        { column: "bouwjaar", dir: "desc" },
+        0,
+        10,
+      ),
+    );
+    // 2005 first, then 985, then the NULL — lexicographically it would be
+    // "985", "2005", and the null would still be last.
+    expect(rows.map((r) => r.id)).toEqual(["a", "b", "c"]);
+    db.query("DROP TABLE sort_probe");
+  });
+
   it("sorts with NULLS LAST without erroring on any scalar column", () => {
     for (const column of columns.filter(
       (c) => c.kind === "scalar" || c.kind === "castText",
@@ -14905,6 +15136,9 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
 | §3.2          | **A build cancelled MID-FLIGHT publishes nothing and retires its own table; the drop re-clears the store unless a newer enqueue owns the id**                        | 13, 14                                            |
 | §3.2          | **A build AWAITS `initDuckDB` before touching DuckDB, and a source refused for want of the engine is kept and rebuilt by `retryEngine`**                             | 13, 14, 18, 23                                    |
 | §2            | **LoDs are DERIVED from the reader's own column names (`LodColumn` = label + suffix); a suffix is never rebuilt from a label — 3D BAG's LoD 0 is `geometry_lod0_0`** | 5, 11, 13, 30, 31, 32, 33                         |
+| §3.3          | **An empty LIKE needle and an empty / mis-typed `IN` element are refused, never compiled to `LIKE '%%'` or `IN ('10')` on a DOUBLE**                                 | 9                                                 |
+| §3.3          | **`ORDER BY` is TABLE-QUALIFIED, so a `castText` column sorts on the base column and not on its `::VARCHAR` alias**                                                  | 10, 33                                            |
+| §3.2          | **One BigInt-safe JSON replacer for both the attribute columns and the row encoding**                                                                                | 12                                                |
 | §3.2          | **The flat fallback ALTERs `parents`/`children` to `VARCHAR[]` — `read_json_auto` types an all-NULL column as JSON**                                                 | 12, 13, 33                                        |
 | §3.2          | **`registerBuffer` CONSUMES its array; no needless second copy anywhere**                                                                                            | 2, 13, 15, 16                                     |
 | §3.2          | **`SourceProvider` returns DECODED bytes for file AND url**                                                                                                          | 15 (`fetchModelBytes`, gunzip test), 16           |
@@ -15009,6 +15243,18 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
   build asks again when it settles, retires its own table and publishes
   nothing, and the drop task clears the store a second time unless a newer
   enqueue has claimed the id.
+- §3.3 says `contains`/`startsWith`/`endsWith` compile to `LIKE … ESCAPE`, and
+  the first draft did so unconditionally — including for an EMPTY needle, which
+  is `LIKE '%%'`: a condition that reads as a filter and matches every non-NULL
+  row. It is also what a half-typed row looks like. Task 9 refuses it, and
+  routes every `IN` element through `literalFor` for the same reason a
+  comparison goes there: the list comes from a comma-split text input, so on a
+  numeric column its elements are strings.
+- §3.3's `ORDER BY "c" dir NULLS LAST` binds the ALIAS a `castText` column is
+  projected under (`"c"::VARCHAR AS "c"`), which sorts a BIGINT
+  lexicographically — 985 after 2005. Task 10 qualifies it with the table name,
+  which cannot resolve to an alias, and Task 33 proves it against the real
+  engine.
 - §2's schema line writes the geometry column as `geometry_lod<L>`, which the
   first draft read as "the label with the dot swapped for an underscore". Probe
   P3 says otherwise: Delft's LoD 0 is `geometry_lod0_0`, so a suffix rebuilt
@@ -15130,6 +15376,14 @@ Every name that crosses a task boundary, re-checked after the edits:
   function (Task 2), and REFERENCED — not restated differently — on
   `LayerTableSource.bytes` and `SourceProvider` (Task 13), `modelTableSource`
   and both providers (Task 16), and `loadFromUrl`'s `bytes` field (Task 15).
+- `literalFor` is now the ONE coercion point: comparisons, and every element of
+  an `IN` list (Task 9). `likePattern` is reached only after an empty-needle
+  refusal, and `quoteLiteral` is no longer called directly on a condition value.
+- `orderClause(table, columns, sort)` gained its first parameter (Task 10) and
+  has one caller, `buildPageSql`; `pagingInt` is file-local beside it.
+- `bigintSafe` is file-local to `analytics/layerRows.ts` (Task 12) and used by
+  both `attributeColumns` and `encodeRowsAsJson` — the two places a value can
+  reach `JSON.stringify`.
 - `LodColumn` is declared once, in `analytics/columnKind.ts` (Task 5), and is
   the only shape a LoD travels in: `LayerTable.lods` (Task 13),
   `buildCityParquetSourceSql`'s `lodSuffix` (Task 11),
