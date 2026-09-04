@@ -105,7 +105,7 @@ export function StatusBar({
       )}
 
       {duckdbStatus && duckdbStatus.state !== "uninitialized" && (
-        <div className="status-item">
+        <div className="status-item" title={duckdbTooltip(duckdbStatus)}>
           <span className={`status-dot ${duckdbDotClass(duckdbStatus)}`} />
           <span className="status-label">DuckDB</span>
           <span className="status-value">{duckdbLabel(duckdbStatus)}</span>
@@ -174,17 +174,58 @@ function streamStatusLabel(
 }
 
 function duckdbDotClass(status: DuckDBStatus): string {
-  if (status.state === "ready")
-    return status.extensionLoaded ? "dot-ready" : "dot-partial";
+  if (status.state === "ready") {
+    return status.extensions.cityjson.state === "loaded"
+      ? "dot-ready"
+      : "dot-partial";
+  }
   if (status.state === "initializing") return "dot-loading";
   return "dot-failed";
 }
 
-function duckdbLabel(status: DuckDBStatus): string {
-  if (status.state === "ready")
-    return status.extensionLoaded ? "Ready" : "No ext";
+/** Exported for its unit test — the four words are the whole of what the user
+ *  sees about the analytics engine. */
+export function duckdbLabel(status: DuckDBStatus): string {
+  if (status.state === "ready") {
+    return status.extensions.cityjson.state === "loaded" ? "Ready" : "No ext";
+  }
   if (status.state === "initializing") return "Loading";
-  return "N/A";
+  return "Failed";
+}
+
+/**
+ * What the status pill's `title` says.
+ *
+ * It names `PRAGMA platform` and lists `duckdb_extensions()` because BOTH
+ * decide which artefacts this session actually got: `wasm_eh` and `wasm_mvp`
+ * are served different builds, and the community slot for a DuckDB version can
+ * be REBUILT under us (the duckdb-wasm pin is what pins the extension build).
+ * A schema drift ("id is suddenly missing") has to be diagnosable from the UI,
+ * not only from a console nobody opens.
+ */
+export function duckdbTooltip(status: DuckDBStatus): string {
+  if (status.state === "uninitialized") {
+    return "The analytics engine has not started.";
+  }
+  if (status.state === "initializing") {
+    return "The analytics engine is starting…";
+  }
+  if (status.state === "failed") {
+    return `The analytics engine failed to start: ${status.error}`;
+  }
+  const listed =
+    status.loadedExtensions.length === 0
+      ? "no extensions loaded"
+      : status.loadedExtensions
+          .map((e) => (e.version === "" ? e.name : `${e.name} ${e.version}`))
+          .join(", ");
+  const cityjson = status.extensions.cityjson;
+  const prefix =
+    cityjson.state === "failed"
+      ? `cityjson did not load: ${cityjson.error}. `
+      : "";
+  const platform = status.platform === null ? "unknown" : status.platform;
+  return `${prefix}Platform ${platform}. Loaded extensions: ${listed}`;
 }
 
 function formatCount(n: number): string {

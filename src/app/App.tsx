@@ -577,7 +577,8 @@ export function App({
     if (!activeLayer) return;
 
     const extensionLoaded =
-      "extensionLoaded" in duckdbStatus && duckdbStatus.extensionLoaded;
+      duckdbStatus.state === "ready" &&
+      duckdbStatus.extensions.cityjson.state === "loaded";
 
     void (async () => {
       let loaded = false;
