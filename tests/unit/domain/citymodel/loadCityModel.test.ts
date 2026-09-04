@@ -13,6 +13,7 @@ import {
   parseText,
   fileNameFromUrl,
   loadFromUrl,
+  fetchModelBytes,
 } from "../../../../src/domain/citymodel/loadCityModel";
 
 // ---------------------------------------------------------------------------
@@ -164,5 +165,166 @@ describe("fileNameFromUrl", () => {
 
   it("handles trailing slash", () => {
     expect(fileNameFromUrl("https://example.com/data/")).toBe("data");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The LoadedModel envelope
+// ---------------------------------------------------------------------------
+
+describe("loadFromUrl's LoadedModel envelope", () => {
+  const cityjson = JSON.stringify({
+    type: "CityJSON",
+    version: "2.0",
+    CityObjects: {},
+    vertices: [],
+  });
+
+  /** Keeps the array it serves, so a test can assert the loader handed that
+   *  very array on rather than a re-encoded copy of it. */
+  function http(body: string) {
+    const bytes = new TextEncoder().encode(body);
+    return {
+      bytes,
+      fetchText: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: body,
+      }),
+      fetchBytes: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        bytes,
+      }),
+    };
+  }
+
+  it("carries the decoded bytes and the encoding for a CityJSON URL", async () => {
+    const client = http(cityjson);
+    const loaded = await loadFromUrl("https://x/a.city.json", client);
+    expect(loaded.encoding).toBe("cityjson");
+    // IDENTITY rather than `toBeInstanceOf(Uint8Array)`: the body was never
+    // gzipped, so the fetched array IS the decoded one and no second copy is
+    // allocated. (`instanceof` would be the wrong probe here anyway — under
+    // jsdom a TextEncoder produces a NODE-realm Uint8Array that fails it
+    // against the jsdom global. A test-realm artifact, not a property of the
+    // value.)
+    expect(loaded.bytes).toBe(client.bytes);
+    expect(new TextDecoder().decode(loaded.bytes!)).toBe(cityjson);
+    expect(loaded.model.sourceEncoding).toBe("cityjson");
+  });
+
+  it("says cityjsonseq for a .jsonl URL", async () => {
+    // `seqFixtureText` is the real two-buildings fixture this file already
+    // reads at the top — a hand-written one-liner would be a second, weaker
+    // idea of what CityJSONSeq looks like.
+    const loaded = await loadFromUrl(
+      "https://x/a.city.jsonl",
+      http(seqFixtureText),
+    );
+    expect(loaded.encoding).toBe("cityjsonseq");
+    expect(loaded.bytes).not.toBeNull();
+    expect(Object.keys(loaded.model.objects).length).toBeGreaterThan(0);
+  });
+
+  it("carries NO bytes for a CityGML document — it has no DuckDB reader", async () => {
+    const gml = `<?xml version="1.0"?><CityModel xmlns="http://www.opengis.net/citygml/2.0"></CityModel>`;
+    const loaded = await loadFromUrl("https://x/a.gml", http(gml));
+    expect(loaded.encoding).toBe("citygml");
+    expect(loaded.bytes).toBeNull();
+  });
+});
+
+describe("fetchModelBytes", () => {
+  it("GUNZIPS by magic bytes, not by extension — no DuckDB reader gunzips", async () => {
+    const body =
+      '{"type":"CityJSON","version":"2.0","CityObjects":{},"vertices":[]}';
+    const gz = new Uint8Array(
+      await new Response(
+        new Response(
+          new TextEncoder().encode(body) as BodyInit,
+        ).body!.pipeThrough(new CompressionStream("gzip")),
+      ).arrayBuffer(),
+    );
+    // The URL says ".city.json", the BYTES say gzip. The bytes win.
+    const bytes = await fetchModelBytes("https://x/a.city.json", {
+      fetchText: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: "",
+      }),
+      fetchBytes: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        bytes: gz,
+      }),
+    });
+    expect(new TextDecoder().decode(bytes)).toBe(body);
+  });
+
+  it("returns the FETCHED array untouched when the body was not gzipped", async () => {
+    const raw = new TextEncoder().encode(
+      '{"type":"CityJSON","version":"2.0","CityObjects":{},"vertices":[]}',
+    );
+    const bytes = await fetchModelBytes("https://x/a.city.json", {
+      fetchText: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: "",
+      }),
+      fetchBytes: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        bytes: raw,
+      }),
+    });
+    // Identity, not equality: a second copy of a 300 MB file is the cost this
+    // avoids, and `registerBuffer` is about to consume whichever array it gets.
+    expect(bytes).toBe(raw);
+  });
+
+  it("returns the decoded bytes for an export re-registration", async () => {
+    const body =
+      '{"type":"CityJSON","version":"2.0","CityObjects":{},"vertices":[]}';
+    const bytes = await fetchModelBytes("https://x/a.city.json", {
+      fetchText: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: body,
+      }),
+      fetchBytes: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        bytes: new TextEncoder().encode(body),
+      }),
+    });
+    expect(new TextDecoder().decode(bytes)).toBe(body);
+  });
+
+  it("keeps the friendly 404 sentence", async () => {
+    await expect(
+      fetchModelBytes("https://x/a.city.json", {
+        fetchText: async () => ({
+          ok: false,
+          status: 404,
+          statusText: "Not Found",
+          text: "",
+        }),
+        fetchBytes: async () => ({
+          ok: false,
+          status: 404,
+          statusText: "Not Found",
+          bytes: new Uint8Array(),
+        }),
+      }),
+    ).rejects.toThrow(/File not found \(404\)/);
   });
 });

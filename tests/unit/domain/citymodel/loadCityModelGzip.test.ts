@@ -50,7 +50,7 @@ describe("loadFromUrl (gzip)", () => {
     const gzipped = new Uint8Array(gzipSync(Buffer.from(cjFixtureText)));
     expect(gzipped[0]).toBe(0x1f);
     expect(gzipped[1]).toBe(0x8b);
-    const model = await loadFromUrl(
+    const { model } = await loadFromUrl(
       "https://example.com/tile.city.json.gz",
       okBytes(gzipped),
     );
@@ -58,7 +58,7 @@ describe("loadFromUrl (gzip)", () => {
   });
 
   it("passes plain (already-decompressed) bytes through as text", async () => {
-    const model = await loadFromUrl(
+    const { model } = await loadFromUrl(
       "https://example.com/tile.city.json.gz",
       okBytes(new TextEncoder().encode(cjFixtureText)),
     );
@@ -73,7 +73,7 @@ describe("loadFromUrl (gzip)", () => {
       ),
       "utf-8",
     );
-    const model = await loadFromUrl(
+    const { model } = await loadFromUrl(
       "https://example.com/tile.city.jsonl.gz",
       okBytes(new Uint8Array(gzipSync(Buffer.from(seqText)))),
     );

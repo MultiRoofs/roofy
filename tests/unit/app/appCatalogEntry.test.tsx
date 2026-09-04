@@ -147,6 +147,14 @@ const model = {
   vertexCount: 0,
 };
 
+/** What `loadFromUrl` resolves since Task 15: the model PLUS the decoded
+ *  source bytes and the encoding, for the layer's DuckDB table. */
+const loaded = {
+  model,
+  bytes: new TextEncoder().encode("{}"),
+  encoding: "cityjson" as const,
+};
+
 describe("App landing page — catalog entry point", () => {
   beforeEach(() => {
     addOutcomes.length = 0;
@@ -221,7 +229,7 @@ describe("App landing page — catalog entry point", () => {
   });
 
   it("resolves TRUE once the layer has actually landed", async () => {
-    loadFromUrl.mockResolvedValue(model);
+    loadFromUrl.mockResolvedValue(loaded);
     render(<App persistenceStore={emptyStore} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Browse catalog" }));
@@ -236,7 +244,7 @@ describe("App landing page — catalog entry point", () => {
     // missed entirely: `LayerPanel`'s per-layer remove calls `removeLayer`
     // directly, so `hasLayers` flips false without `handleClose` ever running.
     // Driven through the REAL sidebar button, not the store.
-    loadFromUrl.mockResolvedValue(model);
+    loadFromUrl.mockResolvedValue(loaded);
     render(<App persistenceStore={emptyStore} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Browse catalog" }));
@@ -261,7 +269,7 @@ describe("App landing page — catalog entry point", () => {
     // `catalogOpen` survives the round trip to the viewer and back. A user who
     // browsed, added a tile, then hit Close would find the modal open over the
     // landing page — scroll locked, hero hidden — having asked for nothing.
-    loadFromUrl.mockResolvedValue(model);
+    loadFromUrl.mockResolvedValue(loaded);
     render(<App persistenceStore={emptyStore} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Browse catalog" }));

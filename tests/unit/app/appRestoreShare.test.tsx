@@ -203,6 +203,14 @@ const model = {
   vertexCount: 0,
 };
 
+/** What `loadFromUrl` resolves since Task 15: the model PLUS the decoded
+ *  source bytes and the encoding, for the layer's DuckDB table. */
+const loaded = {
+  model,
+  bytes: new TextEncoder().encode("{}"),
+  encoding: "cityjson" as const,
+};
+
 const SAVED_AT = "2026-08-01T10:00:00.000Z";
 
 function snapshotWithUrlLayer(): ProjectSnapshot {
@@ -261,7 +269,7 @@ beforeEach(() => {
   setCameraState.mockClear();
   cameraState = CAM;
   loadFromUrl.mockReset();
-  loadFromUrl.mockResolvedValue(model);
+  loadFromUrl.mockResolvedValue(loaded);
   useLayerStore.setState({ layers: [], activeLayerId: null });
   location.hash = "";
 });

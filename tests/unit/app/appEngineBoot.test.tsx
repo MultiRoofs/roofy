@@ -177,6 +177,14 @@ const model = {
   vertexCount: 0,
 };
 
+/** What `loadFromUrl` resolves since Task 15: the model PLUS the decoded
+ *  source bytes and the encoding, for the layer's DuckDB table. */
+const loaded = {
+  model,
+  bytes: new TextEncoder().encode("{}"),
+  encoding: "cityjson" as const,
+};
+
 describe("App engine-boot flag for a first-layer .fcb open", () => {
   beforeEach(() => {
     openCalls.length = 0;
@@ -262,7 +270,7 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
     // existing, so there is nothing to boot early for.
     expect(screen.queryByTestId("navara-viewport")).toBeNull();
 
-    release(model);
+    release(loaded);
     await waitFor(() =>
       expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
     );

@@ -326,10 +326,10 @@ export function useLayerFileLoader(
         }
 
         const parsed = await loadFromUrl(url);
-        await ensureModelCrsLoadable(parsed);
+        await ensureModelCrsLoadable(parsed.model);
         return useLayerStore.getState().addLayer({
           name: fileNameFromUrl(url),
-          model: parsed,
+          model: parsed.model,
           modelRef: { type: "url", url },
           visible: true,
           rules: [],

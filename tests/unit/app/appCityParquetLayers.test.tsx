@@ -75,6 +75,14 @@ const jsonModel: CityModel = {
   vertexCount: 0,
 };
 
+/** What `loadFromUrl` resolves since Task 15: the model PLUS the decoded
+ *  source bytes and the encoding, for the layer's DuckDB table. */
+const jsonLoaded = {
+  model: jsonModel,
+  bytes: new TextEncoder().encode("{}"),
+  encoding: "cityjson" as const,
+};
+
 vi.mock("../../../src/scene/NavaraViewport", () => ({
   NavaraViewport: forwardRef<CitySceneHandle, Record<string, unknown>>(
     function MockNavaraViewport(_props, ref) {
@@ -228,7 +236,7 @@ function shareHash(
 beforeEach(() => {
   extensionReady = false;
   loadFromUrl.mockReset();
-  loadFromUrl.mockResolvedValue(jsonModel);
+  loadFromUrl.mockResolvedValue(jsonLoaded);
   loadCityParquetFromUrl.mockReset();
   loadCityParquetFromUrl.mockResolvedValue(parquetModel);
   loadCityParquetFromFiles.mockReset();

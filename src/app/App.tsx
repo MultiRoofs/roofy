@@ -903,10 +903,10 @@ export function App({
               });
             } else {
               const parsed = await loadFromUrl(modelRef.url);
-              await ensureModelCrsLoadable(parsed);
+              await ensureModelCrsLoadable(parsed.model);
               layerId = useLayerStore.getState().addLayer({
                 name,
-                model: parsed,
+                model: parsed.model,
                 modelRef,
                 visible,
                 rules,
@@ -1113,10 +1113,10 @@ export function App({
             });
           } else {
             const parsed = await loadFromUrl(sl.modelUrl);
-            await ensureModelCrsLoadable(parsed);
+            await ensureModelCrsLoadable(parsed.model);
             useLayerStore.getState().addLayer({
               name,
-              model: parsed,
+              model: parsed.model,
               modelRef: { type: "url", url: sl.modelUrl },
               visible,
               rules,
