@@ -677,11 +677,19 @@ export async function ddl(sql: string): Promise<QueryOutcome> {
 /**
  * Register `bytes` in DuckDB's virtual file system under `name`.
  *
- * The buffer is handed over AS IS, not copied: duckdb-wasm posts it to its
- * worker in the transfer list, so the caller's `Uint8Array` is DETACHED
- * afterwards and must not be read again. That is the intent — a layer's source
- * bytes are released from the JS heap the moment the table is materialised.
- * (`queryParquetBuffer` slices instead, because ITS callers re-use the buffer.)
+ * **CONSUMES `bytes`.** The array is handed over AS IS, deliberately not
+ * copied: duckdb-wasm's async bindings post the buffer to their worker in the
+ * TRANSFER list (`postTask(task, [buffer.buffer])`), which DETACHES the
+ * caller's `ArrayBuffer` — the whole backing buffer, even for a partial view.
+ * After this call the caller's array has length 0 and must never be read,
+ * re-registered or handed to a second consumer; a caller that needs the bytes
+ * again must obtain a FRESH array (see `SourceProvider`). That is the intent,
+ * not a hazard to route around: a layer's source bytes are released from the
+ * JS heap the moment the table is materialised, which is the whole reason the
+ * VFS copy is dropped straight afterwards.
+ *
+ * `queryParquetBuffer` `.slice()`s instead, because ITS callers deliberately
+ * re-use one buffer across two queries — see its own doc comment.
  *
  * A name is NEVER reused: a `dropFile`d name still resolves, to zero bytes,
  * and fails with a misleading JSON parse error.
@@ -3309,9 +3317,11 @@ export function buildAttributeExportSql(input: {
 /** The fixed columns every CityParquet object table must carry. */
 export const CITYPARQUET_REQUIRED_COLUMNS: ReadonlyArray<string>;
 
-export function buildCityParquetCtasSql(input: {
-  readonly schema: string;
-  readonly module: string;
+/** ONE read of the source into a scratch table, filtered to the export's
+ *  feature scope. Every module table is then cut from this. */
+export function buildCityParquetSourceSql(input: {
+  /** A schema of its own, so `cityparquet_init` never sees the scratch table. */
+  readonly scratchSchema: string;
   readonly reader: "read_cityjson" | "read_cityjsonseq";
   readonly sourceFile: string;
   /** The materialised layer table, which BOTH predicates read. */
@@ -3319,8 +3329,19 @@ export function buildCityParquetCtasSql(input: {
   readonly lod: string;
   readonly attributes: ReadonlyArray<string>;
   readonly where: string | null;
+}): string;
+
+/** One `exp.<module>` table, cut from the scratch table by root type. */
+export function buildCityParquetModuleSql(input: {
+  readonly schema: string;
+  readonly module: string;
+  readonly scratchSchema: string;
+  readonly table: string;
   readonly moduleTypes: ReadonlyArray<string>;
 }): string;
+
+/** The scratch table's name inside its schema. */
+export const CITYPARQUET_SOURCE_TABLE: "src";
 ```
 
 - [ ] **Step 1: Write the failing test**
@@ -3331,7 +3352,8 @@ Create `tests/unit/analytics/sqlExport.test.ts`:
 import { describe, it, expect } from "vitest";
 import {
   buildAttributeExportSql,
-  buildCityParquetCtasSql,
+  buildCityParquetModuleSql,
+  buildCityParquetSourceSql,
 } from "../../../src/analytics/sql";
 import type { ColumnInfo } from "../../../src/analytics/columnKind";
 
@@ -3400,70 +3422,93 @@ describe("buildAttributeExportSql", () => {
   });
 });
 
-describe("buildCityParquetCtasSql", () => {
-  it("builds one module table from the re-registered source, with both predicates", () => {
+describe("buildCityParquetSourceSql", () => {
+  it("reads the source ONCE into a scratch schema, with the feature scope", () => {
     expect(
-      buildCityParquetCtasSql({
-        schema: "exp_1",
-        module: "building",
+      buildCityParquetSourceSql({
+        scratchSchema: "exp_src_1",
         reader: "read_cityjson",
         sourceFile: "exp_1_src.city.json",
         table: "layer_1",
         lod: "2.2",
         attributes: ["b3_h_dak_max", "bouwjaar"],
         where: `"b3_h_dak_max" > 10`,
-        moduleTypes: ["Building"],
       }),
     ).toBe(
-      'CREATE TABLE "exp_1"."building" AS SELECT "id", "feature_id", "object_type", "parents", "children", "children_roles", "bbox", "geometry_lod2_2", "geometry_properties_lod2_2", "b3_h_dak_max", "bouwjaar" FROM read_cityjson(\'exp_1_src.city.json\') WHERE COALESCE("feature_id", "id") IN (SELECT COALESCE("feature_id", "id") FROM "layer_1" WHERE "b3_h_dak_max" > 10) AND COALESCE("feature_id", "id") IN (SELECT "id" FROM "layer_1" WHERE "parents" IS NULL AND "object_type" IN (\'Building\'))',
+      'CREATE TABLE "exp_src_1"."src" AS SELECT "id", "feature_id", "object_type", "parents", "children", "children_roles", "bbox", "geometry_lod2_2", "geometry_properties_lod2_2", "b3_h_dak_max", "bouwjaar" FROM read_cityjson(\'exp_1_src.city.json\') WHERE COALESCE("feature_id", "id") IN (SELECT COALESCE("feature_id", "id") FROM "layer_1" WHERE "b3_h_dak_max" > 10)',
     );
   });
 
-  it("omits the filter predicate when the whole layer is exported", () => {
-    const sql = buildCityParquetCtasSql({
-      schema: "exp_2",
-      module: "vegetation",
-      reader: "read_cityjsonseq",
-      sourceFile: "exp_2_src.city.jsonl",
-      table: "layer_3",
-      lod: "1.2",
-      attributes: [],
-      where: null,
-      moduleTypes: ["PlantCover", "SolitaryVegetationObject"],
-    });
-    expect(sql).toBe(
-      'CREATE TABLE "exp_2"."vegetation" AS SELECT "id", "feature_id", "object_type", "parents", "children", "children_roles", "bbox", "geometry_lod1_2", "geometry_properties_lod1_2" FROM read_cityjsonseq(\'exp_2_src.city.jsonl\') WHERE COALESCE("feature_id", "id") IN (SELECT "id" FROM "layer_3" WHERE "parents" IS NULL AND "object_type" IN (\'PlantCover\', \'SolitaryVegetationObject\'))',
+  it("omits the WHERE entirely when the whole layer is exported", () => {
+    expect(
+      buildCityParquetSourceSql({
+        scratchSchema: "exp_src_2",
+        reader: "read_cityjsonseq",
+        sourceFile: "exp_2_src.city.jsonl",
+        table: "layer_3",
+        lod: "1.2",
+        attributes: [],
+        where: null,
+      }),
+    ).toBe(
+      'CREATE TABLE "exp_src_2"."src" AS SELECT "id", "feature_id", "object_type", "parents", "children", "children_roles", "bbox", "geometry_lod1_2", "geometry_properties_lod1_2" FROM read_cityjsonseq(\'exp_2_src.city.jsonl\')',
     );
   });
 
   it("always keeps the geometry_properties sidecar beside the geometry", () => {
-    const sql = buildCityParquetCtasSql({
-      schema: "e",
-      module: "building",
-      reader: "read_cityjson",
-      sourceFile: "s.json",
-      table: "t",
-      lod: "0",
-      attributes: [],
-      where: null,
-      moduleTypes: ["Building"],
-    });
-    expect(sql).toContain('"geometry_lod0", "geometry_properties_lod0"');
+    expect(
+      buildCityParquetSourceSql({
+        scratchSchema: "e",
+        reader: "read_cityjson",
+        sourceFile: "s.json",
+        table: "t",
+        lod: "0",
+        attributes: [],
+        where: null,
+      }),
+    ).toContain('"geometry_lod0", "geometry_properties_lod0"');
+  });
+});
+
+describe("buildCityParquetModuleSql", () => {
+  it("cuts a module table from the scratch table by ROOT type", () => {
+    expect(
+      buildCityParquetModuleSql({
+        schema: "exp_1",
+        module: "building",
+        scratchSchema: "exp_src_1",
+        table: "layer_1",
+        moduleTypes: ["Building"],
+      }),
+    ).toBe(
+      'CREATE TABLE "exp_1"."building" AS SELECT * FROM "exp_src_1"."src" WHERE COALESCE("feature_id", "id") IN (SELECT "id" FROM "layer_1" WHERE "parents" IS NULL AND "object_type" IN (\'Building\'))',
+    );
+  });
+
+  it("lists every type of the module", () => {
+    expect(
+      buildCityParquetModuleSql({
+        schema: "exp_2",
+        module: "vegetation",
+        scratchSchema: "exp_src_2",
+        table: "layer_3",
+        moduleTypes: ["PlantCover", "SolitaryVegetationObject"],
+      }),
+    ).toBe(
+      'CREATE TABLE "exp_2"."vegetation" AS SELECT * FROM "exp_src_2"."src" WHERE COALESCE("feature_id", "id") IN (SELECT "id" FROM "layer_3" WHERE "parents" IS NULL AND "object_type" IN (\'PlantCover\', \'SolitaryVegetationObject\'))',
+    );
   });
 
   it("escapes a quote in a type name rather than breaking out of the literal", () => {
-    const sql = buildCityParquetCtasSql({
-      schema: "e",
-      module: "generics",
-      reader: "read_cityjson",
-      sourceFile: "s.json",
-      table: "t",
-      lod: "1",
-      attributes: [],
-      where: null,
-      moduleTypes: ["O'dd"],
-    });
-    expect(sql).toContain(`IN ('O''dd')`);
+    expect(
+      buildCityParquetModuleSql({
+        schema: "e",
+        module: "generics",
+        scratchSchema: "es",
+        table: "t",
+        moduleTypes: ["O'dd"],
+      }),
+    ).toContain(`IN ('O''dd')`);
   });
 });
 ```
@@ -3471,7 +3516,7 @@ describe("buildCityParquetCtasSql", () => {
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `npx vitest run tests/unit/analytics/sqlExport.test.ts`
-Expected: FAIL — the two builders are not exported.
+Expected: FAIL — the three builders are not exported.
 
 - [ ] **Step 3: Append the export builders to `src/analytics/sql.ts`**
 
@@ -3536,36 +3581,37 @@ export const CITYPARQUET_REQUIRED_COLUMNS: ReadonlyArray<string> = [
   "bbox",
 ];
 
+/** The scratch table's name inside its own schema. */
+export const CITYPARQUET_SOURCE_TABLE = "src";
+
 /**
- * One `exp.<module>` table, read from the RE-REGISTERED source through the
- * cityjson reader, filtered by two predicates that both read the layer's own
- * materialised table:
+ * ONE read of the re-registered source, filtered to the export's feature scope.
  *
- *  - the SCOPE predicate — the user's filter, expanded to whole features;
- *  - the MODULE predicate — the feature's ROOT type decides which object table
- *    it belongs in, so a BuildingPart follows its Building rather than being
- *    classified on its own.
+ * The source is read again (rather than the layer's browsing table being
+ * reused) because that table has no geometry in it at all — the entire point of
+ * dropping the BLOB columns — and a CityParquet package without geometry is not
+ * a package. But it is read exactly ONCE: cutting each module table straight
+ * from the reader would re-parse the whole file per module, so a package with
+ * buildings, vegetation and city furniture in it would parse a 300 MB CityJSON
+ * three times over.
  *
- * The source is read again (rather than the table being reused) because the
- * browsing table has no geometry in it at all — that is the entire point of
- * dropping the BLOB columns — and a CityParquet package without geometry is
- * not a package.
+ * The scratch table lives in a SCHEMA OF ITS OWN, not beside the module tables:
+ * `cityparquet_init` describes every table in the schema it is given, and a
+ * table called `src` is not a CityGML module.
  *
- * No `lod := …` argument: an explicit column list already names exactly one
+ * No `lod := …` argument: the explicit column list already names exactly one
  * LoD's geometry pair, and that is the route probed end to end (P6b/P6c/P6g).
  * `lod :=` narrows the SCHEMA rather than the rows and would only add a
  * bind-time failure mode for an LoD spelled differently than the file spells it.
  */
-export function buildCityParquetCtasSql(input: {
-  readonly schema: string;
-  readonly module: string;
+export function buildCityParquetSourceSql(input: {
+  readonly scratchSchema: string;
   readonly reader: "read_cityjson" | "read_cityjsonseq";
   readonly sourceFile: string;
   readonly table: string;
   readonly lod: string;
   readonly attributes: ReadonlyArray<string>;
   readonly where: string | null;
-  readonly moduleTypes: ReadonlyArray<string>;
 }): string {
   const suffix = lodColumnSuffix(input.lod);
   const select = [
@@ -3576,15 +3622,30 @@ export function buildCityParquetCtasSql(input: {
   ]
     .map(quoteIdent)
     .join(", ");
+  const scope = buildFeatureScopeWhere(input.table, input.where);
+  const whereClause = scope === null ? "" : ` WHERE ${scope}`;
+  return `CREATE TABLE ${quoteIdent(input.scratchSchema)}.${quoteIdent(CITYPARQUET_SOURCE_TABLE)} AS SELECT ${select} FROM ${input.reader}(${quoteLiteral(input.sourceFile)})${whereClause}`;
+}
 
+/**
+ * One `exp.<module>` table, cut from the scratch table.
+ *
+ * The MODULE predicate asks which table a feature belongs in by its ROOT's
+ * type, so a BuildingPart follows its Building rather than being classified on
+ * its own. It reads the LAYER table (which has `parents` and `object_type` for
+ * every object) while the rows come from the scratch table.
+ */
+export function buildCityParquetModuleSql(input: {
+  readonly schema: string;
+  readonly module: string;
+  readonly scratchSchema: string;
+  readonly table: string;
+  readonly moduleTypes: ReadonlyArray<string>;
+}): string {
   const t = quoteIdent(input.table);
   const types = input.moduleTypes.map((v) => quoteLiteral(v)).join(", ");
   const modulePredicate = `COALESCE("feature_id", "id") IN (SELECT "id" FROM ${t} WHERE "parents" IS NULL AND "object_type" IN (${types}))`;
-  const scope = buildFeatureScopeWhere(input.table, input.where);
-  const where =
-    scope === null ? modulePredicate : `${scope} AND ${modulePredicate}`;
-
-  return `CREATE TABLE ${quoteIdent(input.schema)}.${quoteIdent(input.module)} AS SELECT ${select} FROM ${input.reader}(${quoteLiteral(input.sourceFile)}) WHERE ${where}`;
+  return `CREATE TABLE ${quoteIdent(input.schema)}.${quoteIdent(input.module)} AS SELECT * FROM ${quoteIdent(input.scratchSchema)}.${quoteIdent(CITYPARQUET_SOURCE_TABLE)} WHERE ${modulePredicate}`;
 }
 ```
 
@@ -3603,14 +3664,16 @@ Expected: clean.
 ```bash
 git add src/analytics/sql.ts tests/unit/analytics/sqlExport.test.ts
 git commit -m "$(cat <<'EOF'
-feat(analytics): export SQL — COPY for attributes, CTAS per CityGML module
+feat(analytics): export SQL — COPY for attributes, one source read per package
 
 The CityParquet route reads the RE-REGISTERED source rather than the browsing
-table, because the browsing table has no geometry in it by design. Two
-predicates, both against the layer table: the user's filter expanded to whole
-features, and the feature ROOT's type deciding which object table it lands in.
-No `lod :=` — the explicit column list already names one LoD's geometry pair,
-and that is the route probed end to end.
+table, because the browsing table has no geometry in it by design — but exactly
+ONCE, into a scratch table in a schema of its own, from which each module table
+is cut. Cutting straight from the reader would re-parse the whole file per
+module, and cityparquet_init describes every table in the schema it is given,
+so `src` cannot live beside them. The feature ROOT's type decides which object
+table a feature lands in. No `lod :=` — the explicit column list already names
+one LoD's geometry pair, and that is the route probed end to end.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
@@ -3987,8 +4050,9 @@ export type LayerTableSource =
       /** VFS file extension, e.g. "city.json" / "city.jsonl". */
       readonly extension: string;
       /** Re-registers the same DECODED bytes for an export; the originals are
-       *  gone. `null` when this layer's bytes cannot be obtained again — the
-       *  CityParquet format is then refused with that reason. */
+       *  gone (registering consumed them). `null` when this layer's bytes
+       *  cannot be obtained again — the CityParquet format is then refused
+       *  with that reason. */
       readonly provider: SourceProvider | null;
     }
   | { readonly kind: "model"; readonly model: CityModel }
@@ -4012,7 +4076,13 @@ export interface LayerTable {
 export type LayerTableState =
   | { readonly state: "queued" }
   | { readonly state: "building" }
-  | { readonly state: "ready"; readonly info: LayerTable }
+  | {
+      readonly state: "ready";
+      readonly info: LayerTable;
+      /** A REBUILD is in flight over this still-usable table. The grid keeps
+       *  showing `info` throughout; a rebuild that fails leaves it in place. */
+      readonly rebuilding?: boolean;
+    }
   | { readonly state: "failed"; readonly message: string };
 
 export interface LayerTableStoreState {
@@ -4360,11 +4430,16 @@ import { buildCountSql, quoteIdent } from "./sql";
 /**
  * Re-registers a layer's source bytes for an export.
  *
- * DECODED bytes in every case — gunzipped, the text re-encoded as UTF-8 —
- * because that is exactly what the table was built from, and no DuckDB reader
- * gunzips anything, by name or by magic. A dropped `File` is a REFERENCE, not
- * a copy, so re-reading it from disk is free; a URL is re-fetched through the
- * same gunzip-aware client (the browser cache usually serves it).
+ * DECODED bytes in every case — gunzipped when the payload carried gzip magic,
+ * passed straight through when it did not — because that is exactly what the
+ * table was built from, and no DuckDB reader gunzips anything, by name or by
+ * magic. A dropped `File` is a REFERENCE, not a copy, so re-reading it from
+ * disk is free; a URL is re-fetched through the same gunzip-aware client (the
+ * browser cache usually serves it).
+ *
+ * Every call returns a FRESH array. `registerBuffer` CONSUMES what it is given
+ * (the worker transfer detaches it), and a provider may be called more than
+ * once — two exports of one layer, or a retry after a failed write.
  *
  * Lives in the registry, never in the layer store — a function is not snapshot
  * state, which is also why a layer restored from a snapshot has to re-obtain
@@ -4375,13 +4450,17 @@ export type SourceProvider = () => Promise<Uint8Array>;
 export type LayerTableSource =
   | {
       readonly kind: "bytes";
+      /** CONSUMED by the build: `registerBuffer` transfers this array to the
+       *  DuckDB worker and detaches it, so the caller must hand over an array
+       *  it will not read again — never one it also keeps. */
       readonly bytes: Uint8Array;
       readonly reader: "read_cityjson" | "read_cityjsonseq";
       /** The VFS file extension, e.g. "city.json" / "city.jsonl". */
       readonly extension: string;
       /** `null` when the bytes cannot be obtained again — the table is still
        *  built and browsable, but a CityParquet export needs the source and is
-       *  refused with that reason. */
+       *  refused with that reason. Each call returns a FRESH array, because
+       *  registering one consumes it and an export may re-register. */
       readonly provider: SourceProvider | null;
     }
   | { readonly kind: "model"; readonly model: CityModel }
@@ -4408,7 +4487,21 @@ export interface LayerTable {
 export type LayerTableState =
   | { readonly state: "queued" }
   | { readonly state: "building" }
-  | { readonly state: "ready"; readonly info: LayerTable }
+  | {
+      readonly state: "ready";
+      readonly info: LayerTable;
+      /**
+       * A REBUILD is in flight over a table that still works.
+       *
+       * A streaming layer rebuilds on every settle, and the OLD table is
+       * perfectly readable while the new one is built: dropping to "building"
+       * would blank the grid several times a pan, and a rebuild that then
+       * FAILED would leave a layer that had working analytics with none at
+       * all. So the entry stays `ready` with the previous `info`, and only
+       * swaps once the replacement exists.
+       */
+      readonly rebuilding?: boolean;
+    }
   | { readonly state: "failed"; readonly message: string };
 
 export interface LayerTableStoreState {
@@ -4591,6 +4684,20 @@ async function buildFromRows(
 }
 
 /**
+ * `DROP TABLE` plus the VFS cleanup for one entry.
+ *
+ * Called from INSIDE the queue only — by a rebuild that has just published its
+ * replacement, and by `dropLayerTable` (Task 14).
+ */
+async function retire(info: LayerTable): Promise<void> {
+  await ddl(`DROP TABLE IF EXISTS ${quoteIdent(info.table)}`);
+  // Belt and braces: the build already dropped this on the way out, and a
+  // second drop of an absent name is harmless. A build that failed BETWEEN
+  // registration and its own `finally` is the case this covers.
+  if (info.sourceName !== null) await dropBuffer(info.sourceName);
+}
+
+/**
  * Build (or rebuild) `layerId`'s table.
  *
  * Resolves when the build has SETTLED, success or failure — a DuckDB failure
@@ -4675,7 +4782,7 @@ EOF
 
 **Interfaces:**
 
-- Consumes: Task 13's module state.
+- Consumes: Task 13's module state, including the file-local `retire(info)`.
 - Produces:
 
 ```ts
@@ -4693,6 +4800,9 @@ const sql: string[] = [];
 const dropped: string[] = [];
 /** Resolvers for the gate below, so a build can be held mid-flight. */
 let gate: { promise: Promise<void>; open: () => void } | null = null;
+/** When set, the Nth CREATE (1-based) fails — for the rebuild-failure case. */
+let failCreateNumber: number | null = null;
+let createCount = 0;
 
 function makeGate() {
   let open!: () => void;
@@ -4705,8 +4815,12 @@ function makeGate() {
 vi.mock("../../../src/analytics/duckdb", () => {
   const run = async (statement: string) => {
     sql.push(statement);
-    if (statement.startsWith("CREATE OR REPLACE TABLE") && gate) {
-      await gate.promise;
+    if (statement.startsWith("CREATE OR REPLACE TABLE")) {
+      createCount += 1;
+      if (gate) await gate.promise;
+      if (createCount === failCreateNumber) {
+        return { ok: false as const, message: "Binder Error: rebuild failed" };
+      }
     }
     if (statement.startsWith("DESCRIBE")) {
       return {
@@ -4771,6 +4885,8 @@ beforeEach(() => {
   sql.length = 0;
   dropped.length = 0;
   gate = null;
+  failCreateNumber = null;
+  createCount = 0;
   resetLayerTablesForTest();
 });
 
@@ -4840,12 +4956,71 @@ describe("dropLayerTable", () => {
 });
 
 describe("rebuild", () => {
-  it("replaces the table under a FRESH name and forgets the old one", async () => {
+  it("replaces the table under a FRESH name and retires the old one AFTER the new one exists", async () => {
     await enqueueLayerTable("L1", RESIDENT);
     expect(getLayerTable("L1")!.table).toBe("layer_1");
+    sql.length = 0;
+
     await enqueueLayerTable("L1", RESIDENT);
     expect(getLayerTable("L1")!.table).toBe("layer_2");
-    expect(sql).toContain('DROP TABLE IF EXISTS "layer_1"');
+
+    const createIdx = sql.findIndex((s) =>
+      s.startsWith('CREATE OR REPLACE TABLE "layer_2"'),
+    );
+    const dropIdx = sql.indexOf('DROP TABLE IF EXISTS "layer_1"');
+    expect(createIdx).toBeGreaterThanOrEqual(0);
+    // Ordering is the point: the old table must survive until the new one is
+    // real, or the layer has no analytics at all for the length of the build.
+    expect(dropIdx).toBeGreaterThan(createIdx);
+  });
+
+  it("keeps the OLD table visible while the rebuild is in flight", async () => {
+    await enqueueLayerTable("L1", RESIDENT);
+    gate = makeGate();
+    const rebuild = enqueueLayerTable("L1", RESIDENT);
+
+    // Not "building": the previous table still answers every query.
+    expect(useLayerTableStore.getState().tables.L1).toEqual({
+      state: "ready",
+      info: getLayerTable("L1"),
+      rebuilding: true,
+    });
+    expect(getLayerTable("L1")!.table).toBe("layer_1");
+
+    gate.open();
+    await rebuild;
+    expect(useLayerTableStore.getState().tables.L1).toEqual({
+      state: "ready",
+      info: getLayerTable("L1"),
+    });
+    expect(getLayerTable("L1")!.table).toBe("layer_2");
+  });
+
+  it("a FAILED rebuild keeps the previous table, and never drops it", async () => {
+    await enqueueLayerTable("L1", RESIDENT);
+    const before = getLayerTable("L1")!;
+    sql.length = 0;
+    failCreateNumber = 2;
+
+    await enqueueLayerTable("L1", RESIDENT);
+
+    expect(getLayerTable("L1")).toBe(before);
+    expect(useLayerTableStore.getState().tables.L1).toEqual({
+      state: "ready",
+      info: before,
+      rebuilding: false,
+    });
+    expect(sql).not.toContain('DROP TABLE IF EXISTS "layer_1"');
+  });
+
+  it("a first build that fails IS a failed layer — there is nothing to fall back to", async () => {
+    failCreateNumber = 1;
+    await enqueueLayerTable("L1", RESIDENT);
+    expect(getLayerTable("L1")).toBeNull();
+    expect(useLayerTableStore.getState().tables.L1).toEqual({
+      state: "failed",
+      message: "Binder Error: rebuild failed",
+    });
   });
 
   it("runs queued builds in the order they were enqueued", async () => {
@@ -4867,19 +5042,11 @@ Expected: FAIL — `dropLayerTable` is not exported, and the rebuild does not dr
 
 - [ ] **Step 3: Add the drop, and make a rebuild retire its predecessor**
 
-In `src/analytics/layerTables.ts`, add after `enqueueLayerTable`:
+In `src/analytics/layerTables.ts`, add after `enqueueLayerTable`. The `retire`
+helper it uses already exists — Task 13 defines it, because the rebuild path
+calls it too:
 
 ```ts
-/** `DROP TABLE` plus the VFS cleanup for one entry, outside the queue (the
- *  caller is already inside it). */
-async function retire(info: LayerTable): Promise<void> {
-  await ddl(`DROP TABLE IF EXISTS ${quoteIdent(info.table)}`);
-  // Belt and braces: the build already dropped this on the way out, and a
-  // second drop of an absent name is harmless. A build that failed BETWEEN
-  // registration and its own finally is the case this covers.
-  if (info.sourceName !== null) await dropBuffer(info.sourceName);
-}
-
 /**
  * Forget `layerId`'s table.
  *
@@ -4902,17 +5069,13 @@ export function dropLayerTable(layerId: string): Promise<void> {
 }
 ```
 
-Then, inside the queued task in `enqueueLayerTable`, retire the previous table before publishing the new one — immediately after `const table = \`layer\_${++counter}\`;`:
-
-```ts
-// A rebuild gets a FRESH name (names are never reused), so the table it
-// replaces has to be dropped explicitly or it stays resident forever.
-const previous = registry.get(layerId);
-if (previous) {
-  registry.delete(layerId);
-  await retire(previous);
-}
-```
+`enqueueLayerTable` already reads `previous` and retires it AFTER a successful
+build (Task 13, Step 3): a rebuild gets a FRESH name — names are never reused —
+so the table it replaces has to be dropped explicitly or it stays resident
+forever. Nothing more is needed there. VERIFY, by reading the function, that the
+`retire(previous)` call really is inside the `try`, AFTER
+`setState(layerId, { state: "ready", info })`, and that the `catch` restores the
+previous entry rather than deleting it.
 
 - [ ] **Step 4: Run both layerTables test files**
 
@@ -4956,8 +5119,9 @@ EOF
 ```ts
 export interface LoadedModel {
   readonly model: CityModel;
-  /** The DECODED (gunzipped) source bytes, for the DuckDB reader path — null
-   *  when the source has no reader: a CityGML document, or a ZIP archive. */
+  /** The DECODED source bytes, for the DuckDB reader path — the FETCHED array
+   *  itself when the body was not gzipped, the re-encoded text when it was.
+   *  Null when the source has no reader: a CityGML document, or a ZIP archive. */
   readonly bytes: Uint8Array | null;
   readonly encoding: "cityjson" | "cityjsonseq" | "citygml";
 }
@@ -4965,11 +5129,15 @@ export function loadFromUrl(
   url: string,
   http?: HttpClient,
 ): Promise<LoadedModel>;
-/** The same fetch + gunzip, bytes only — the export SourceProvider's door. */
+/** The same fetch + gunzip, bytes only — the export SourceProvider's door.
+ *  A FRESH array every call. */
 export function fetchModelBytes(
   url: string,
   http?: HttpClient,
 ): Promise<Uint8Array>;
+/** Gzip magic (`1f 8b`). Exported so callers can skip a re-encode they do not
+ *  need: when this is false, the array they already hold IS the decoded one. */
+export function isGzipBytes(bytes: Uint8Array): boolean;
 ```
 
 - [ ] **Step 1: Write the failing test**
@@ -5054,6 +5222,29 @@ describe("fetchModelBytes", () => {
     expect(new TextDecoder().decode(bytes)).toBe(body);
   });
 
+  it("returns the FETCHED array untouched when the body was not gzipped", async () => {
+    const raw = new TextEncoder().encode(
+      '{"type":"CityJSON","version":"2.0","CityObjects":{},"vertices":[]}',
+    );
+    const bytes = await fetchModelBytes("https://x/a.city.json", {
+      fetchText: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: "",
+      }),
+      fetchBytes: async () => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        bytes: raw,
+      }),
+    });
+    // Identity, not equality: a second copy of a 300 MB file is the cost this
+    // avoids, and `registerBuffer` is about to consume whichever array it gets.
+    expect(bytes).toBe(raw);
+  });
+
   it("returns the decoded bytes for an export re-registration", async () => {
     const body =
       '{"type":"CityJSON","version":"2.0","CityObjects":{},"vertices":[]}';
@@ -5102,7 +5293,44 @@ Add `fetchModelBytes` to that file's import list.
 Run: `npx vitest run tests/unit/domain/citymodel/loadCityModel.test.ts`
 Expected: FAIL — `loadFromUrl` resolves a `CityModel`, so `loaded.encoding` is undefined; `fetchModelBytes` is not exported.
 
-- [ ] **Step 3: Restructure `loadFromUrl` in `src/domain/citymodel/loadCityModel.ts`**
+- [ ] **Step 3: Promote the gzip test out of `decodeModelBytes`**
+
+In `src/domain/citymodel/loadCityModel.ts`, replace the inline magic-byte test
+at the top of `decodeModelBytes` with a named, exported predicate — three
+callers now need the ANSWER without the decode:
+
+```ts
+/**
+ * Does this payload carry gzip magic?
+ *
+ * Exported because it decides whether a caller needs a SECOND copy of the
+ * bytes: when the answer is false, the array that was fetched or read IS the
+ * decoded array, and `TextEncoder().encode(new TextDecoder().decode(bytes))`
+ * would allocate a duplicate of a file that can be hundreds of megabytes for
+ * no gain at all.
+ */
+export function isGzipBytes(bytes: Uint8Array): boolean {
+  return (
+    bytes.length > 2 && bytes[0] === GZIP_MAGIC_0 && bytes[1] === GZIP_MAGIC_1
+  );
+}
+
+export async function decodeModelBytes(bytes: Uint8Array): Promise<string> {
+  if (isGzipBytes(bytes)) {
+    // Response (not Blob) as the byte source: in tests the Response and
+    // DecompressionStream globals come from the same (Node) realm, whereas
+    // jsdom's Blob.stream() would brand-check-fail against Node's streams.
+    const body = new Response(bytes as BodyInit).body;
+    if (!body) return new TextDecoder().decode(bytes);
+    return await new Response(
+      body.pipeThrough(new DecompressionStream("gzip")),
+    ).text();
+  }
+  return new TextDecoder().decode(bytes);
+}
+```
+
+- [ ] **Step 4: Restructure `loadFromUrl` in `src/domain/citymodel/loadCityModel.ts`**
 
 Replace the whole `loadFromUrl` with:
 
@@ -5216,12 +5444,17 @@ export async function loadFromUrl(
     };
   }
 
+  const gzipped = isGzipBytes(raw);
   const text = await decodeOrExplain(url, raw);
+  // The FETCHED array when nothing was gunzipped — re-encoding the text would
+  // allocate a second copy of the whole file for no gain. Safe to hand on:
+  // `registerBuffer` consumes it, and nothing below reads `raw` again.
+  const decodedBytes = gzipped ? new TextEncoder().encode(text) : raw;
 
   if (encoding === "cityjsonseq") {
     return {
       model: parseCityJSONSeq(text),
-      bytes: new TextEncoder().encode(text),
+      bytes: decodedBytes,
       encoding: "cityjsonseq",
     };
   }
@@ -5249,7 +5482,7 @@ export async function loadFromUrl(
   }
   return {
     model: parseCityJSON(json),
-    bytes: new TextEncoder().encode(text),
+    bytes: decodedBytes,
     encoding: "cityjson",
   };
 }
@@ -5262,21 +5495,27 @@ export async function loadFromUrl(
  * browser cache usually serves it) rather than the app holding a copy of every
  * loaded file for the lifetime of the session.
  *
- * DECODED, always. `decodeModelBytes` decides on the MAGIC BYTES, never on the
- * extension, so a `.city.json` a server handed back gzipped comes out as text
- * either way — and it has to, because no DuckDB reader gunzips anything, by
- * name or by magic. These are the same bytes the table was built from.
+ * DECODED, always, and decided on the MAGIC BYTES rather than the extension —
+ * a `.city.json` a server handed back gzipped comes out as text either way,
+ * and it has to, because no DuckDB reader gunzips anything. These are the same
+ * bytes the table was built from.
+ *
+ * A body that was NOT gzipped is returned AS IS: it already is the decoded
+ * array, and a decode-then-re-encode round trip would allocate a second copy
+ * of the whole file. Either way the caller gets a FRESH array, because
+ * `registerBuffer` consumes what it is given and this may be called twice.
  */
 export async function fetchModelBytes(
   url: string,
   http: HttpClient = defaultHttp,
 ): Promise<Uint8Array> {
   const raw = await fetchRawBody(url, http);
+  if (!isGzipBytes(raw)) return raw;
   return new TextEncoder().encode(await decodeOrExplain(url, raw));
 }
 ```
 
-- [ ] **Step 4: Update the three production call sites**
+- [ ] **Step 5: Update the three production call sites**
 
 `src/features/layers/useLayerFileLoader.ts`, in `addLayerFromUrl`:
 
@@ -5327,7 +5566,7 @@ useLayerStore.getState().addLayer({
 
 (Task 16 replaces all three with `addCityLayer`; this step only keeps the tree compiling.)
 
-- [ ] **Step 5: Update every test that stubs or awaits `loadFromUrl`**
+- [ ] **Step 6: Update every test that stubs or awaits `loadFromUrl`**
 
 Run: `grep -rn "loadFromUrl" tests/`
 
@@ -5343,7 +5582,7 @@ loadFromUrl.mockResolvedValue({
 
 For each direct `await loadFromUrl(...)` assertion in `tests/unit/domain/citymodel/loadCityModel.test.ts` and `loadCityModelGzip.test.ts`, read `.model` off the result (e.g. `const { model } = await loadFromUrl(url, http);` and assert against `model`).
 
-- [ ] **Step 6: Run the affected suites and the type check**
+- [ ] **Step 7: Run the affected suites and the type check**
 
 ```bash
 npx vitest run tests/unit/domain/citymodel tests/unit/app tests/unit/features/layers
@@ -5352,7 +5591,7 @@ npx tsc -b --noEmit
 
 Expected: PASS and clean.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add src/domain/citymodel/loadCityModel.ts src/app/App.tsx src/features/layers/useLayerFileLoader.ts tests/
@@ -5427,9 +5666,13 @@ Create `tests/unit/features/layers/addCityLayer.test.ts`:
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const enqueued: Array<{ layerId: string; source: unknown }> = [];
+/** Set to make the next enqueue REJECT — the "a DuckDB failure must not fail a
+ *  layer add" case needs a rejection, not a resolved false. */
+let enqueueRejects = false;
 vi.mock("../../../../src/analytics/layerTables", () => ({
   enqueueLayerTable: vi.fn(async (layerId: string, source: unknown) => {
     enqueued.push({ layerId, source });
+    if (enqueueRejects) throw new Error("DuckDB is not running");
   }),
 }));
 
@@ -5451,6 +5694,7 @@ function model(): CityModel {
 
 beforeEach(() => {
   enqueued.length = 0;
+  enqueueRejects = false;
   useLayerStore.setState({ layers: [], activeLayerId: null });
 });
 
@@ -5550,15 +5794,30 @@ describe("addCityLayer", () => {
     expect(layer.hiddenTypes).toEqual(["Building"]);
   });
 
-  it("does not let a table failure reach the caller", () => {
-    expect(() =>
-      addCityLayer({
-        name: "delft",
-        model: model(),
-        modelRef: { type: "url", url: "https://x/a.city.json" },
-        duckdb: { kind: "model", model: model() },
-      }),
-    ).not.toThrow();
+  it("does not let a REJECTED table build reach the caller, or the layer", async () => {
+    enqueueRejects = true;
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+
+    const id = addCityLayer({
+      name: "delft",
+      model: model(),
+      modelRef: { type: "url", url: "https://x/a.city.json" },
+      duckdb: { kind: "model", model: model() },
+    });
+
+    // The layer landed regardless: an analytics engine that cannot start must
+    // not cost the user their model.
+    expect(id).toBeTypeOf("string");
+    expect(useLayerStore.getState().layers.map((l) => l.id)).toEqual([id]);
+    expect(enqueued).toHaveLength(1);
+
+    // And the rejection is SWALLOWED, not left floating: `addCityLayer`
+    // catches it rather than firing `void` at a promise that will reject.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(unhandled).not.toHaveBeenCalled();
+    process.off("unhandledRejection", unhandled);
   });
 });
 ```
@@ -5591,6 +5850,7 @@ import type { CityModel } from "../../domain/citymodel/types";
 import {
   decodeModelBytes,
   fetchModelBytes,
+  isGzipBytes,
 } from "../../domain/citymodel/loadCityModel";
 import type { CityModelReference } from "../../persistence/types";
 import {
@@ -5622,16 +5882,25 @@ export function urlSourceProvider(url: string): SourceProvider {
   return () => fetchModelBytes(url);
 }
 
-/** Re-read a dropped file, decoded the same way. A `File` is a REFERENCE to
- *  something on disk, not a copy in memory, so keeping one costs nothing —
- *  but it does not survive a reload, which is why a layer restored from a
- *  snapshot is presented as "unavailable" rather than silently given a
- *  provider that cannot work. */
+/**
+ * Re-read a dropped file, decoded the same way.
+ *
+ * A `File` is a REFERENCE to something on disk, not a copy in memory, so
+ * keeping one costs nothing — but it does not survive a reload, which is why a
+ * layer restored from a snapshot is presented as "unavailable" rather than
+ * silently given a provider that cannot work.
+ *
+ * Reads afresh on every call (`registerBuffer` CONSUMES what it is given, and
+ * a provider may be called more than once), and only re-encodes when the file
+ * really was gzipped: for the ordinary case the bytes read from disk already
+ * ARE the decoded bytes.
+ */
 export function fileSourceProvider(file: File): SourceProvider {
-  return async () =>
-    new TextEncoder().encode(
-      await decodeModelBytes(new Uint8Array(await file.arrayBuffer())),
-    );
+  return async () => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (!isGzipBytes(bytes)) return bytes;
+    return new TextEncoder().encode(await decodeModelBytes(bytes));
+  };
 }
 
 /**
@@ -5640,6 +5909,11 @@ export function fileSourceProvider(file: File): SourceProvider {
  * Reader-backed whenever we HAVE decoded bytes for a format the cityjson
  * extension reads; the flat fallback otherwise — CityGML (and its ZIP), and
  * anything whose bytes we never held.
+ *
+ * `bytes` is handed straight through, never copied: `registerBuffer` CONSUMES
+ * it, so the caller passes an array it is finished with. `loadFromUrl` and the
+ * file loader both hand over the array they fetched or read whenever it was
+ * not gzipped, and allocate a second one only when a gunzip really happened.
  */
 export function modelTableSource(input: {
   readonly model: CityModel;
@@ -5672,6 +5946,10 @@ export function modelTableSource(input: {
  *
  * The enqueue is FIRE AND FORGET on purpose: a DuckDB failure is recorded on
  * the table entry and shown in the panel, and must never fail a layer add.
+ * `enqueueLayerTable` already settles rather than throwing for a build that
+ * fails, so the `.catch` here is for the case it cannot handle — an engine
+ * that is not running at all — and exists so a rejection cannot escape as an
+ * unhandled promise.
  */
 export function addCityLayer(input: AddCityLayerInput): string {
   const layerId = useLayerStore.getState().addLayer({
@@ -5684,7 +5962,12 @@ export function addCityLayer(input: AddCityLayerInput): string {
     hiddenTypes: input.hiddenTypes,
     selectedAppearance: input.selectedAppearance,
   });
-  void enqueueLayerTable(layerId, input.duckdb);
+  void enqueueLayerTable(layerId, input.duckdb).catch((error: unknown) => {
+    console.warn(
+      `DuckDB table for layer ${layerId} could not be started:`,
+      error,
+    );
+  });
   return layerId;
 }
 ```
@@ -5701,6 +5984,8 @@ import {
   urlSourceProvider,
 } from "./addCityLayer";
 ```
+
+and widen the existing `loadCityModel` import to include `isGzipBytes`.
 
 then replace each `useLayerStore.getState().addLayer({ … })`:
 
@@ -5725,6 +6010,7 @@ layerId = addCityLayer({
 ```ts
 const bytes = new Uint8Array(await file.arrayBuffer());
 const zipped = isZipBytes(bytes);
+const gzipped = !zipped && isGzipBytes(bytes);
 const text = zipped ? "" : await decodeModelBytes(bytes);
 const parsed: CityModel = zipped
   ? parseCityGmlArchive(bytes, file.name)
@@ -5742,8 +6028,15 @@ layerId = addCityLayer({
   selectedAppearance: overrides?.selectedAppearance,
   duckdb: modelTableSource({
     model: parsed,
+    // The array we ALREADY READ when nothing was gunzipped: a re-encode would
+    // duplicate the whole file in the JS heap, and `registerBuffer` is about
+    // to consume whichever array it gets.
     bytes:
-      zipped || encoding === "citygml" ? null : new TextEncoder().encode(text),
+      zipped || encoding === "citygml"
+        ? null
+        : gzipped
+          ? new TextEncoder().encode(text)
+          : bytes,
     encoding:
       encoding === "cityjsonseq"
         ? "cityjsonseq"
@@ -6165,6 +6458,12 @@ export const STREAM_REBUILD_DEBOUNCE_MS = 500;
 export function residentTableSource(layerId: string): LayerTableSource {
   return {
     kind: "resident",
+    // The `0` is NOT a version we are pinning. `getResidentModel`'s second
+    // parameter is a SUBSCRIPTION MARKER for React callers — it exists so a
+    // component that reads the resident model also subscribes to commits, and
+    // the function itself does `void version` (the handle memoises on its own
+    // commit counter). This is not a component: it reads whatever is resident
+    // at the moment the queued build runs, which is exactly what it wants.
     records: () => Object.values(getResidentModel(layerId, 0).objects),
   };
 }
@@ -9324,7 +9623,11 @@ EOF
 - Produces:
 
 ```ts
-// CityModelMeshOptions (cityModelMesh.ts)
+// CityModelMeshOptions (cityModelMesh.ts) — NOT AddCityModelOptions: this
+// option is reachable only by constructing a CityModelMesh directly (the app
+// always goes through `setVisibleObjectIds` on the handle). Adding an add-time
+// option later means threading it through AddCityModelOptions,
+// cityModelRegistry's `addCityModel` AND `CityModelMeshDesc.createMesh`.
 readonly visibleObjectIds?: ReadonlySet<string> | null;
 
 // CityModelHandle (types.ts)
@@ -9419,8 +9722,18 @@ Expected: FAIL — `setVisibleObjectIds` is not a function.
 Add to `CityModelMeshOptions`, next to `hiddenTypes`:
 
 ```ts
-  /** Only these objects contribute geometry; `null`/absent means every one
-   *  does. An EMPTY set draws nothing — see `setVisibleObjectIds`. */
+  /**
+   * Only these objects contribute geometry; `null`/absent means every one
+   * does. An EMPTY set draws nothing — see `setVisibleObjectIds`.
+   *
+   * NOT on `AddCityModelOptions`, deliberately: the app's filter arrives after
+   * the layer exists, so the handle's setter is the only path it needs, and
+   * this option is reachable only by constructing a mesh directly (which the
+   * tests below do). Promoting it to an ADD-TIME option later means threading
+   * it through `AddCityModelOptions`, `cityModelRegistry.addCityModel` and
+   * `CityModelMeshDesc.createMesh` as well — the descriptor is what the engine
+   * actually calls, and an option the desc drops is silently ignored.
+   */
   readonly visibleObjectIds?: ReadonlySet<string> | null;
 ```
 
@@ -9639,6 +9952,36 @@ describe("Layer.visibleObjectIds", () => {
         .visibleObjectIds,
     ).toBeNull();
   });
+
+  it("is a NO-OP when the set is already the one being set", () => {
+    const id = addLayer();
+    const ids = new Set(["B1"]);
+    useLayerStore.getState().setVisibleObjectIds(id, ids);
+    const state = useLayerStore.getState();
+
+    useLayerStore.getState().setVisibleObjectIds(id, ids);
+    // Reference equality of the whole state: a fresh `layers` array would
+    // re-render every subscriber and re-run the viewport's sync effect, whose
+    // test for this field is set IDENTITY — so a churned identical set would
+    // rebuild the mesh's geometry for nothing.
+    expect(useLayerStore.getState()).toBe(state);
+    expect(useLayerStore.getState().layers).toBe(state.layers);
+  });
+
+  it("is a NO-OP for null over null — the common case, on every recompute", () => {
+    const id = addLayer();
+    const state = useLayerStore.getState();
+    useLayerStore.getState().setVisibleObjectIds(id, null);
+    expect(useLayerStore.getState()).toBe(state);
+  });
+
+  it("still replaces an EQUAL but distinct set — identity is the contract", () => {
+    const id = addLayer();
+    useLayerStore.getState().setVisibleObjectIds(id, new Set(["B1"]));
+    const first = useLayerStore.getState().layers;
+    useLayerStore.getState().setVisibleObjectIds(id, new Set(["B1"]));
+    expect(useLayerStore.getState().layers).not.toBe(first);
+  });
 });
 ```
 
@@ -9786,11 +10129,22 @@ Add `"visibleObjectIds"` to `addLayer`'s `Omit<…>` union, set `visibleObjectId
 
 ```ts
   setVisibleObjectIds: (layerId, ids) =>
-    set((state) => ({
-      layers: state.layers.map((l) =>
-        l.id === layerId ? { ...l, visibleObjectIds: ids } : l,
-      ),
-    })),
+    set((state) => {
+      // No-op on IDENTITY (null over null, or the same Set again). The map
+      // filter recomputes on every Apply, every toggle and every table
+      // rebuild, and the common answer is "still null" — without this guard
+      // each of those mints a fresh `layers` array, re-renders every
+      // subscriber, and re-runs `syncLayers`, whose test for this field is
+      // reference identity: a churned identical set rebuilds the mesh's
+      // geometry for nothing.
+      const layer = state.layers.find((l) => l.id === layerId);
+      if (layer === undefined || layer.visibleObjectIds === ids) return state;
+      return {
+        layers: state.layers.map((l) =>
+          l.id === layerId ? { ...l, visibleObjectIds: ids } : l,
+        ),
+      };
+    }),
 ```
 
 - [ ] **Step 4: Push it in `handleSync.ts`**
@@ -9962,6 +10316,20 @@ beforeEach(() => {
 });
 
 describe("syncFilterToMap", () => {
+  it("does NOTHING when sync is off and the layer is already unfiltered", async () => {
+    const id = addLayer();
+    useLayerTableStore.setState({
+      tables: { [id]: { state: "ready", info: TABLE } },
+    });
+    const state = useLayerStore.getState();
+
+    await syncFilterToMap(id);
+    // The common case, re-run on every Apply, toggle and table rebuild: no
+    // query, and no store write that would re-render the viewport.
+    expect(useLayerStore.getState()).toBe(state);
+    expect(runQuery).not.toHaveBeenCalled();
+  });
+
   it("writes null when sync is off", async () => {
     const id = addLayer();
     useLayerStore.getState().setVisibleObjectIds(id, new Set(["B1"]));
@@ -10081,6 +10449,14 @@ export async function syncFilterToMap(layerId: string): Promise<void> {
 
   const query = layerQuery(useQueryStore.getState(), layerId);
   if (!query.syncToMap || query.applied === null) {
+    // The store's own identity guard already makes `clear()` free, but this is
+    // the path taken on EVERY Apply, toggle and table rebuild for every layer
+    // that is not being map-filtered — which is nearly all of them — so return
+    // before touching the store at all.
+    const current = useLayerStore
+      .getState()
+      .layers.find((l) => l.id === layerId);
+    if (current === undefined || current.visibleObjectIds === null) return;
     clear();
     return;
   }
@@ -10888,7 +11264,7 @@ EOF
 
 **Interfaces:**
 
-- Consumes: `registerBuffer`, `runQuery`, `ddl`, `readFile`, `dropBuffer` (Task 2); `buildCityParquetCtasSql`, `quoteIdent` (Tasks 9 & 11); `groupTypesByModule` (Task 7); `SourceProvider` (Task 13); `zipSync` from `fflate`.
+- Consumes: `registerBuffer`, `runQuery`, `ddl`, `readFile`, `dropBuffer` (Task 2); `buildCityParquetSourceSql`, `buildCityParquetModuleSql`, `quoteIdent` (Tasks 9 & 11); `groupTypesByModule` (Task 7); `SourceProvider` (Task 13); `validateExportBytes` (Task 29); `zipSync` from `fflate`.
 - Produces:
 
 ```ts
@@ -10923,7 +11299,9 @@ const registered: string[] = [];
 const dropped: string[] = [];
 const readFiles: string[] = [];
 let writeRows: Record<string, unknown>[] = [];
-let validationCount = 0;
+/** What `SELECT "severity", count(*) … FROM cityparquet_validation` answers. */
+let validationRows: Record<string, unknown>[] = [];
+let validationReadFails = false;
 let failOn: string | null = null;
 /** Override a single read-back to exercise the validators. */
 let badFile: { name: string; bytes: Uint8Array | null } | null = null;
@@ -10944,13 +11322,21 @@ vi.mock("../../../src/analytics/duckdb", () => {
     if (statement.includes("cityparquet_write")) {
       return { ok: true as const, columns: [], rows: writeRows };
     }
-    if (statement.includes("cityparquet_validation")) {
+    if (statement.startsWith('SELECT "severity"')) {
+      if (validationReadFails) {
+        return {
+          ok: false as const,
+          message:
+            "Catalog Error: Table with name cityparquet_validation does not exist!",
+        };
+      }
       return {
         ok: true as const,
-        columns: ["n"],
-        rows: [{ n: validationCount }],
+        columns: ["severity", "n"],
+        rows: validationRows,
       };
     }
+    // The PRAGMA itself returns NO ROWS — it materialises a temp table.
     return { ok: true as const, columns: [], rows: [] };
   };
   return {
@@ -11003,7 +11389,8 @@ beforeEach(() => {
   registered.length = 0;
   dropped.length = 0;
   readFiles.length = 0;
-  validationCount = 0;
+  validationRows = [];
+  validationReadFails = false;
   failOn = null;
   badFile = null;
   writeRows = [
@@ -11016,32 +11403,55 @@ describe("CityParquet package export", () => {
   it("runs the whole sequence in order", async () => {
     await runExport(request());
 
-    expect(sql[0]).toMatch(/^CREATE SCHEMA "exp_\d+"$/);
-    expect(sql[1]).toContain('CREATE TABLE "exp_');
-    expect(sql[1]).toContain('."building" AS SELECT');
-    expect(sql[2]).toMatch(/^PRAGMA cityparquet_init\('exp_\d+'\)$/);
-    expect(sql[3]).toMatch(/^PRAGMA cityparquet_validate\('exp_\d+'\)$/);
-    expect(sql[4]).toBe('SELECT count(*) AS "n" FROM cityparquet_validation');
-    expect(sql[5]).toMatch(
+    expect(sql[0]).toMatch(/^CREATE SCHEMA "exp_\d+_src"$/);
+    expect(sql[1]).toMatch(/^CREATE SCHEMA "exp_\d+"$/);
+    expect(sql[2]).toMatch(/^CREATE TABLE "exp_\d+_src"\."src" AS SELECT/);
+    expect(sql[3]).toContain('."building" AS SELECT * FROM "exp_');
+    expect(sql[4]).toMatch(/^PRAGMA cityparquet_init\('exp_\d+'\)$/);
+    expect(sql[5]).toBe("DROP TABLE IF EXISTS cityparquet_validation");
+    expect(sql[6]).toMatch(/^PRAGMA cityparquet_validate\('exp_\d+'\)$/);
+    expect(sql[7]).toBe(
+      'SELECT "severity", count(*) AS "n" FROM cityparquet_validation GROUP BY 1 ORDER BY 1',
+    );
+    expect(sql[8]).toMatch(
       /^SELECT \* FROM cityparquet_write\('exp_\d+', 'exp_\d+', crs => 'EPSG:7415'\)$/,
     );
   });
 
-  it("re-registers the source under a FRESH name before the CTAS", async () => {
-    await runExport(request());
-    expect(registered).toHaveLength(1);
-    expect(registered[0]).toMatch(/^exp_\d+_src\.city\.json$/);
-    expect(sql[1]).toContain(registered[0]!);
-  });
-
-  it("writes ONE table per CityGML module the chosen types map to", async () => {
+  it("re-registers the source under a FRESH name, reads it ONCE, and drops it", async () => {
     await runExport(
       request({ rootTypes: ["Building", "SolitaryVegetationObject"] }),
     );
-    const creates = sql.filter((s) => s.startsWith("CREATE TABLE"));
+    expect(registered).toHaveLength(1);
+    expect(registered[0]).toMatch(/^exp_\d+_src\.city\.json$/);
+    // Exactly ONE statement names the reader, however many modules there are:
+    // re-reading per module would re-parse the whole file each time.
+    expect(sql.filter((s) => s.includes("read_cityjson("))).toHaveLength(1);
+    // And the bytes go as soon as the parse is done, not at the end.
+    expect(dropped).toContain(registered[0]!);
+  });
+
+  it("puts the scratch table in a SEPARATE schema from the module tables", async () => {
+    await runExport(request());
+    const scratch = sql.find((s) => s.includes('."src" AS SELECT'))!;
+    const module = sql.find((s) => s.includes('."building" AS SELECT'))!;
+    expect(scratch).toMatch(/CREATE TABLE "exp_\d+_src"\."src"/);
+    expect(module).toMatch(/CREATE TABLE "exp_\d+"\."building"/);
+    // cityparquet_init describes every table in the schema it is handed, and
+    // `src` is not a CityGML module.
+    expect(module).not.toContain('"src" AS SELECT');
+  });
+
+  it("writes ONE table per CityGML module, cut from the scratch table", async () => {
+    await runExport(
+      request({ rootTypes: ["Building", "SolitaryVegetationObject"] }),
+    );
+    const creates = sql.filter(
+      (s) => s.startsWith("CREATE TABLE") && !s.includes('."src"'),
+    );
     expect(creates).toHaveLength(2);
-    expect(creates[0]).toContain('."building" AS');
-    expect(creates[1]).toContain('."vegetation" AS');
+    expect(creates[0]).toContain('."building" AS SELECT * FROM "exp_');
+    expect(creates[1]).toContain('."vegetation" AS SELECT * FROM "exp_');
   });
 
   it("zips every file the write NAMED, pulled with readFile from the output dir", async () => {
@@ -11060,20 +11470,55 @@ describe("CityParquet package export", () => {
   });
 
   it("reports validation findings as a WARNING, never a refusal", async () => {
-    validationCount = 3;
+    validationRows = [
+      { severity: "error", n: 2 },
+      { severity: "warning", n: 1 },
+    ];
     const result = await runExport(request());
     expect(result.warnings).toEqual([
-      "cityparquet_validate reported 3 findings. The package was written anyway.",
+      "cityparquet_validate reported 3 findings (2 error, 1 warning). The package was written anyway.",
     ]);
     expect(result.blob.size).toBeGreaterThan(0);
   });
 
-  it("drops the schema, the source and every output — always", async () => {
+  it("says so when the validation could not be RUN, and still writes", async () => {
+    failOn = "PRAGMA cityparquet_validate";
+    const result = await runExport(request());
+    expect(result.warnings).toEqual([
+      "Validation could not be run: Binder Error: bad module",
+    ]);
+    expect(result.blob.size).toBeGreaterThan(0);
+  });
+
+  it("says so when the findings could not be READ — never a silent skip", async () => {
+    // The real shape of this failure: a PRAGMA that threw never created the
+    // temp table, so the follow-up SELECT raises a Catalog Error (probe P6g).
+    validationReadFails = true;
+    const result = await runExport(request());
+    expect(result.warnings).toEqual([
+      "Validation could not be read: Catalog Error: Table with name cityparquet_validation does not exist!",
+    ]);
+    expect(result.blob.size).toBeGreaterThan(0);
+  });
+
+  it("drops the PREVIOUS run's findings table before validating", async () => {
+    // The temp table lives on the CONNECTION, so a second export would
+    // otherwise read the first one's findings as its own.
+    await runExport(request());
+    expect(sql).toContain("DROP TABLE IF EXISTS cityparquet_validation");
+  });
+
+  it("drops BOTH schemas, the source and every output — always", async () => {
     await runExport(request());
     expect(
       sql.some((s) => /^DROP SCHEMA IF EXISTS "exp_\d+" CASCADE$/.test(s)),
     ).toBe(true);
-    expect(dropped[0]).toMatch(/^exp_\d+_src\.city\.json$/);
+    expect(
+      sql.some((s) => /^DROP SCHEMA IF EXISTS "exp_\d+_src" CASCADE$/.test(s)),
+    ).toBe(true);
+    expect(dropped).toContainEqual(
+      expect.stringMatching(/^exp_\d+_src\.city\.json$/),
+    );
     expect(dropped).toContainEqual(expect.stringMatching(/building\.parquet$/));
     expect(dropped).toContainEqual(expect.stringMatching(/metadata\.json$/));
   });
@@ -11083,8 +11528,10 @@ describe("CityParquet package export", () => {
     await expect(runExport(request())).rejects.toThrow(
       "Binder Error: bad module",
     );
-    expect(sql.some((s) => s.startsWith("DROP SCHEMA"))).toBe(true);
-    expect(dropped[0]).toMatch(/_src\.city\.json$/);
+    expect(
+      sql.filter((s) => s.startsWith("DROP SCHEMA IF EXISTS")),
+    ).toHaveLength(2);
+    expect(dropped).toContainEqual(expect.stringMatching(/_src\.city\.json$/));
   });
 
   it("refuses when the write named no files", async () => {
@@ -11160,7 +11607,8 @@ import type { SourceProvider } from "./layerTables";
 // existing `./sql` import, widened:
 import {
   buildAttributeExportSql,
-  buildCityParquetCtasSql,
+  buildCityParquetModuleSql,
+  buildCityParquetSourceSql,
   quoteIdent,
   type AttributeExportFormat,
 } from "./sql";
@@ -11192,51 +11640,128 @@ export interface CityParquetExportRequest {
 }
 
 /**
+ * Everything `cityparquet_validate` had to say, as a line for the dialog.
+ *
+ * The pragma RETURNS NO ROWS: it MATERIALISES its findings into a temp table
+ * called `cityparquet_validation`, which is then selected from (a PRAGMA cannot
+ * be a subquery). Two consequences this function exists to handle:
+ *
+ *  - if the PRAGMA fails, that table is never created at all, and the follow-up
+ *    SELECT fails with `Catalog Error: Table with name cityparquet_validation
+ *    does not exist!` — observed in probe P6g on a schema missing `feature_id`;
+ *  - the table persists on the connection, so a PREVIOUS export's findings would
+ *    be read as this one's. It is dropped first.
+ *
+ * Nothing here is a refusal — the writer never refuses on a finding, so neither
+ * do we — but a validation that could not be RUN or READ is reported, never
+ * silently skipped: "no warnings" and "we never looked" must not look alike.
+ */
+async function validationWarnings(schema: string): Promise<string[]> {
+  await ddl("DROP TABLE IF EXISTS cityparquet_validation");
+
+  const validated = await ddl(`PRAGMA cityparquet_validate('${schema}')`);
+  if (!validated.ok) {
+    return [`Validation could not be run: ${validated.message}`];
+  }
+
+  const findings = await runQuery(
+    'SELECT "severity", count(*) AS "n" FROM cityparquet_validation GROUP BY 1 ORDER BY 1',
+  );
+  if (!findings.ok) {
+    return [`Validation could not be read: ${findings.message}`];
+  }
+
+  let total = 0;
+  const parts: string[] = [];
+  for (const row of findings.rows) {
+    const n = Number(row.n ?? 0);
+    total += n;
+    parts.push(`${n} ${String(row.severity ?? "unknown")}`);
+  }
+  if (total === 0) return [];
+  return [
+    `cityparquet_validate reported ${total} findings (${parts.join(", ")}). The package was written anyway.`,
+  ];
+}
+
+/** Remove one file the WRITER created (as opposed to a buffer we registered).
+ *  `dropFile` over a writer-created path is not something the probes covered,
+ *  so a failure is reported rather than swallowed — and never allowed to mask
+ *  the export's own outcome, which is why it cannot throw. */
+async function dropWrittenFile(path: string): Promise<void> {
+  try {
+    await dropBuffer(path);
+  } catch (error) {
+    console.warn(`Could not remove the exported file "${path}":`, error);
+  }
+}
+
+/**
  * A CityParquet package, written by the extension and zipped here.
  *
  * The shape is dictated by what `cityparquet_write` actually accepts (probed
  * end to end): the export schema must hold ORDINARY tables named for CityGML
  * modules, the source has to be read again through the cityjson reader because
  * the browsing table has no geometry, and the write's own RESULT ROWS name the
- * files it produced — so nothing needs `glob`, which behaves differently in
- * wasm than under Node.
+ * files it produced — so nothing needs `globFiles`, which lists names that were
+ * never created and is fit for cleanup only.
  *
- * `cityparquet_validate` is ADVISORY: the writer never refuses on a finding,
- * so neither do we — the count becomes a warning beside the download.
+ * The source is read exactly ONCE, into a scratch table in a SEPARATE schema:
+ * `cityparquet_init` describes every table in the schema it is handed, so the
+ * scratch table cannot live beside the module tables, and cutting each module
+ * straight from the reader would re-parse the whole file per module.
  */
 async function exportCityParquet(
   request: CityParquetExportRequest,
 ): Promise<ExportResult> {
   const base = nextExportName().replace("export_", "exp_");
   const schema = base;
+  const scratchSchema = `${base}_src`;
   const outDir = base;
   const sourceName = `${base}_src.${request.sourceExtension}`;
   const writtenFiles: string[] = [];
 
   try {
+    const modules = groupTypesByModule(request.rootTypes);
+    if (modules.length === 0) {
+      throw new Error("Choose at least one object type to export.");
+    }
+
+    const scratchCreated = await ddl(
+      `CREATE SCHEMA ${quoteIdent(scratchSchema)}`,
+    );
+    if (!scratchCreated.ok) throw new Error(scratchCreated.message);
     const schemaCreated = await ddl(`CREATE SCHEMA ${quoteIdent(schema)}`);
     if (!schemaCreated.ok) throw new Error(schemaCreated.message);
 
+    // A FRESH array from the provider: registering consumes it.
     const bytes = await request.source();
     if (!(await registerBuffer(sourceName, bytes))) {
       throw new Error("The layer's source could not be re-read for export.");
     }
 
-    const modules = groupTypesByModule(request.rootTypes);
-    if (modules.length === 0) {
-      throw new Error("Choose at least one object type to export.");
-    }
+    const sourceRead = await ddl(
+      buildCityParquetSourceSql({
+        scratchSchema,
+        reader: request.reader,
+        sourceFile: sourceName,
+        table: request.table,
+        lod: request.lod,
+        attributes: request.attributes,
+        where: request.where,
+      }),
+    );
+    if (!sourceRead.ok) throw new Error(sourceRead.message);
+    // The parse is done; the bytes are dead weight from here on.
+    await dropBuffer(sourceName);
+
     for (const { module, types } of modules) {
       const created = await ddl(
-        buildCityParquetCtasSql({
+        buildCityParquetModuleSql({
           schema,
           module,
-          reader: request.reader,
-          sourceFile: sourceName,
+          scratchSchema,
           table: request.table,
-          lod: request.lod,
-          attributes: request.attributes,
-          where: request.where,
           moduleTypes: types,
         }),
       );
@@ -11249,19 +11774,7 @@ async function exportCityParquet(
     const initialised = await ddl(`PRAGMA cityparquet_init('${schema}')`);
     if (!initialised.ok) throw new Error(initialised.message);
 
-    const warnings: string[] = [];
-    const validated = await ddl(`PRAGMA cityparquet_validate('${schema}')`);
-    if (validated.ok) {
-      const findings = await runQuery(
-        'SELECT count(*) AS "n" FROM cityparquet_validation',
-      );
-      const n = findings.ok ? Number(findings.rows[0]?.n ?? 0) : 0;
-      if (n > 0) {
-        warnings.push(
-          `cityparquet_validate reported ${n} findings. The package was written anyway.`,
-        );
-      }
-    }
+    const warnings = await validationWarnings(schema);
 
     const written = await runQuery(
       `SELECT * FROM cityparquet_write('${schema}', '${outDir}', crs => 'EPSG:${request.epsg}')`,
@@ -11302,11 +11815,12 @@ async function exportCityParquet(
       warnings,
     };
   } finally {
-    // ALWAYS: a half-built schema and a multi-megabyte source buffer must not
-    // outlive a failed export.
+    // ALWAYS: a half-built schema, a scratch copy of the whole model and a
+    // multi-megabyte source buffer must not outlive a failed export.
     await ddl(`DROP SCHEMA IF EXISTS ${quoteIdent(schema)} CASCADE`);
+    await ddl(`DROP SCHEMA IF EXISTS ${quoteIdent(scratchSchema)} CASCADE`);
     await dropBuffer(sourceName);
-    for (const path of writtenFiles) await dropBuffer(path);
+    for (const path of writtenFiles) await dropWrittenFile(path);
   }
 }
 ```
@@ -11336,12 +11850,19 @@ git commit -m "$(cat <<'EOF'
 feat(analytics): CityParquet package export, zipped with fflate
 
 The shape is dictated by what cityparquet_write actually accepts: ordinary
-tables named for CityGML modules, the source read AGAIN through the cityjson
-reader (the browsing table has no geometry by design), and the write's own
-result rows naming the files — so nothing needs glob, whose wasm behaviour
-differs from Node's. Validation is advisory: the writer never refuses on a
-finding, so the count becomes a warning beside the download. The schema, the
-source buffer and every output are dropped in a finally.
+tables named for CityGML modules, and the source read AGAIN through the cityjson
+reader (the browsing table has no geometry by design) — but read exactly ONCE,
+into a scratch table in a schema of its own, because cutting each module
+straight from the reader re-parses the whole file per module and
+cityparquet_init describes every table in the schema it is handed.
+
+The write's own result rows name the files (globFiles lists names that were
+never created, so it is cleanup only), and every one of them is read back and
+validated by content. cityparquet_validate returns NO rows — it materialises a
+temp table on the CONNECTION, dropped first so a previous export's findings are
+not read as this one's — and a validation that could not be run or read is
+REPORTED, because "no warnings" and "we never looked" must not look alike. Both
+schemas, the source buffer and every output go in a finally.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
@@ -12415,19 +12936,40 @@ Expected: `PAR1`; a positive row count; a header line plus one data row; a zip
 naming at least one `*.parquet` and `metadata.json`, whose first bytes are a
 JSON object.
 
-- [ ] **Step 6: Check the console and record the run**
+- [ ] **Step 6: Check that no export left anything in the VFS**
+
+`dropFile` over a file the WRITER created — as opposed to a buffer the app
+registered — is not something the Node probes covered, and a leak here holds a
+whole package in memory for the rest of the session.
+
+```bash
+agent-browser eval '
+(async () => {
+  const m = await import("/src/analytics/duckdb.ts");
+  const r = await m.runQuery("SELECT * FROM globFiles(\x27exp_*\x27)");
+  return JSON.stringify(r);
+})()
+'
+```
+
+Expected: `ok: true` with ZERO rows — after four exports nothing named `exp_*`
+survives. (`globFiles` also lists names that were never created, so a non-empty
+result is worth reading rather than trusting: anything it DOES list must at
+least not read back as real bytes.)
+
+- [ ] **Step 7: Check the console and record the run**
 
 ```bash
 agent-browser console
 ```
 
-Expected: no errors.
+Expected: no errors, and no `Could not remove the exported file` warnings.
 
 Write `scripts/smoke/duckdb-table-and-export.md` with the recipe above, the
 date, the Chrome version (`agent-browser eval 'navigator.userAgent'`), and one
 line per step stating what was observed.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add scripts/smoke/duckdb-table-and-export.md
@@ -12890,79 +13432,85 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
 
 ### 1. Spec coverage
 
-| Spec section  | Requirement                                                                           | Task(s)                                           |
-| ------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| §1.1          | Every city-model layer in its own DuckDB table                                        | 12, 13, 14, 16, 17                                |
-| §1.2          | Table panel: pagination ≤1000, sort, structured WHERE                                 | 8, 9, 10, 20, 21, 22, 23                          |
-| §1.3          | A toggle applies the filter to the 3D map                                             | 24, 25, 26, 27                                    |
-| §1.4          | Export dialog: format, LoD, object types, attributes                                  | 7, 11, 28, 29, 30, 31                             |
-| §1 (breaking) | In-memory branches and `city_objects` REMOVED, not kept                               | 18, 23                                            |
-| §2            | duckdb-wasm pinned to dev64 / DuckDB 1.5.5, arrow 17                                  | 1                                                 |
-| §2            | Never `latest`; the city-format writers never offered as usable                       | Global Constraints; 11, 29, 31                    |
-| §2            | A dropped VFS name never reused                                                       | 13 (counter), 29, 30                              |
-| §2            | Reader schema; `id`/`feature_id` semantics                                            | 6, 12, 13, 33                                     |
-| §2            | Drop `geometry_*`/`material_*`/`texture_*`/`template`                                 | 5, 13                                             |
-| §2            | Cell types: `to_json`, `::VARCHAR`, BigInt                                            | 5, 10, 12                                         |
-| §2            | **HUGEINT / DECIMAL arrive as STRINGS → `castText`, no `toFixed`**                    | 5, 22                                             |
-| §2            | CityParquet write: schema, module tables, init (own statement), validate, write       | 7, 11, 30                                         |
-| §2            | Directory argument with NO trailing slash                                             | 30                                                |
-| §2            | **A MISSING VFS name reads back as ONE garbage byte, no error → validate by content** | 29 (`validateExportBytes`), 30                    |
-| §2            | `globFiles` lists never-created names → cleanup only, never discovery                 | 30                                                |
-| §2            | `cityparquet_write` browser-verified; table survives `dropFile`                       | 13 (doc), 30, 32                                  |
-| §2            | `cityparquet_read` / `cityjson_geoparquet_geo` unusable                               | Global Constraints (never called)                 |
-| §2            | **`spatial` does not autoload and is CORE (`INSTALL spatial`)**                       | 2 (`installStatement`), 34                        |
-| §3.1          | Per-extension status, `ensureExtension`, `runQuery`, `formatDuckDBError`              | 2                                                 |
-| §3.1          | `registerBuffer`/`dropBuffer`/`readFile`/`ddl`                                        | 2                                                 |
-| §3.1          | **Init failure terminates the Worker, then resets the memo**                          | 2                                                 |
-| §3.1          | StatusBar labels + **`PRAGMA platform`** + `duckdb_extensions()` tooltip              | 2, 3                                              |
-| §3.2          | `LayerTable`/`ColumnInfo` shape, `classifyColumnType`                                 | 5, 13                                             |
-| §3.2          | Source table (file/URL/CityGML/CityParquet/streaming)                                 | 15, 16, 17                                        |
-| §3.2          | `shouldUseSourceUrlPath` deleted; `loadFromUrl` returns bytes                         | 15, 18                                            |
-| §3.2          | Reader-backed creation SQL, then `dropBuffer`                                         | 13                                                |
-| §3.2          | **`SourceProvider` returns DECODED bytes for file AND url**                           | 15 (`fetchModelBytes`, gunzip test), 16           |
-| §3.2          | **A restored file layer has no provider → export refused with that reason**           | 13/16 (`provider: null`), 31 (`RELINK_REASON`)    |
-| §3.2          | Flat fallback aligned to the reader's names; `featureId.ts`                           | 6, 12, 13                                         |
-| §3.2          | Lifecycle: enqueue/drop, FIFO, skip-if-removed, rebuild, counter                      | 13, 14, 17                                        |
-| §3.2          | **Streaming debounce gated on the PANEL; the export dialog forces one rebuild**       | 17 (`refreshStreamingTable`), 31                  |
-| §3.2          | Failures recorded, never thrown into the loader                                       | 13, 16                                            |
-| §3.2          | `layerTableStore` mirror                                                              | 13                                                |
-| §3.2          | App loses its DuckDB effect and flags; StatsTab on `object_type`                      | 18, 19                                            |
-| §3.3          | Filter AST, `LayerQuery`, `queryStore`, session-only                                  | 8                                                 |
-| §3.3          | `quoteIdent`/`quoteLiteral`/`compileFilter`/LIKE escaping                             | 9                                                 |
-| §3.3          | `projectColumn`, `buildPageSql`, `buildCountSql`                                      | 10                                                |
-| §3.3          | `buildFeatureIdsSql` with COALESCE + positive IN                                      | 10, 27                                            |
-| §3.3          | `buildDistinctSql` (+ `buildRootTypesSql`, added for §3.6)                            | 10                                                |
-| §3.4          | `TablePanel`→`FilterBar`→`DataGrid`→`Pagination`, `useLayerQuery`                     | 20, 21, 22, 23                                    |
-| §3.4          | Header: Sync selection, Filter map, Export, collapse                                  | 23, 31                                            |
-| §3.4          | IntersectionObserver removed; 320 px default, 120–800 clamp                           | 22, 23                                            |
-| §3.4          | States: engine failed+Retry, queued/building, failed, no layer, zero rows             | 20, 23                                            |
-| §3.4          | **Zero rows + Filter map on → "0 of N rows match; the map shows nothing…"**           | 22 (`emptyMessage`), 23                           |
-| §3.5          | `syncToMap` → ids → `setVisibleObjectIds`; null vs empty                              | 26, 27                                            |
-| §3.5          | `buildCityMeshArrays` visible-id parameter, slot invariant                            | 24                                                |
-| §3.5          | `CityModelMesh.setVisibleObjectIds` + handle + registry                               | 25                                                |
-| §3.5          | `Layer.visibleObjectIds` session-only; `handleSync` push                              | 26                                                |
-| §3.5          | Streaming disabled with the exact reason string                                       | 23                                                |
-| §3.6          | Dialog: scope, object types, attributes, LoD, format                                  | 31                                                |
-| §3.6          | CityParquet: schema, re-register, CTAS, init, validate, write, zip, cleanup           | 30                                                |
-| §3.6          | **Every file the write names must be in the zip**                                     | 30                                                |
-| §3.6          | `cityGmlModuleOf`                                                                     | 7                                                 |
-| §3.6          | Parquet/CSV/JSON via `COPY`                                                           | 29                                                |
-| §3.6          | **City formats shown DISABLED with the exact title**                                  | 31                                                |
-| §3.6          | **Fallback layers: attribute formats only, plus the "no CityJSON source" sentence**   | 31                                                |
-| §3.6          | `platform/download.ts` factored from `RuleBuilderTab`                                 | 28                                                |
-| §3.6          | Busy state, cancel-safe `finally`, inline errors                                      | 30, 31                                            |
-| §3.7          | Snapshot stays v3; nothing new persisted                                              | 8, 26 (no `persistence/types.ts` change at all)   |
-| §4            | Unit tests for every pure module and store                                            | 5–14, 20–22, 26–31                                |
-| §4            | Plugin unit tests                                                                     | 24, 25                                            |
-| §4            | Opt-in Node integration behind `DUCKDB_INTEGRATION`                                   | 33                                                |
-| §4            | **Reader `id` set == `parseCityJSON().objects` key set**                              | 33                                                |
-| §4            | Browser smoke: boot, table, filter, map sync, all four exports                        | 32                                                |
-| §5            | Submodule branch from `947c980`, pushed, gitlink bump                                 | 24, 25, 26, 34                                    |
-| §5            | Lockfile regenerated; `npm ci` verified in a fresh clone                              | 1, 34                                             |
-| §5            | The seven mocking test files                                                          | 4                                                 |
-| §5            | `duckdb.ts` the only importer of `@duckdb/duckdb-wasm`                                | Global Constraints; 13, 29, 30 all import from it |
-| §6            | `spatial`/`three_d` loadable but with nothing to operate on in v1                     | 34                                                |
-| §6            | The two `three_d` traps recorded for the follow-up                                    | 34                                                |
+| Spec section  | Requirement                                                                                                               | Task(s)                                           |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| §1.1          | Every city-model layer in its own DuckDB table                                                                            | 12, 13, 14, 16, 17                                |
+| §1.2          | Table panel: pagination ≤1000, sort, structured WHERE                                                                     | 8, 9, 10, 20, 21, 22, 23                          |
+| §1.3          | A toggle applies the filter to the 3D map                                                                                 | 24, 25, 26, 27                                    |
+| §1.4          | Export dialog: format, LoD, object types, attributes                                                                      | 7, 11, 28, 29, 30, 31                             |
+| §1 (breaking) | In-memory branches and `city_objects` REMOVED, not kept                                                                   | 18, 23                                            |
+| §2            | duckdb-wasm pinned to dev64 / DuckDB 1.5.5, arrow 17                                                                      | 1                                                 |
+| §2            | Never `latest`; the city-format writers never offered as usable                                                           | Global Constraints; 11, 29, 31                    |
+| §2            | A dropped VFS name never reused                                                                                           | 13 (counter), 29, 30                              |
+| §2            | Reader schema; `id`/`feature_id` semantics                                                                                | 6, 12, 13, 33                                     |
+| §2            | Drop `geometry_*`/`material_*`/`texture_*`/`template`                                                                     | 5, 13                                             |
+| §2            | Cell types: `to_json`, `::VARCHAR`, BigInt                                                                                | 5, 10, 12                                         |
+| §2            | **HUGEINT / DECIMAL arrive as STRINGS → `castText`, no `toFixed`**                                                        | 5, 22                                             |
+| §2            | CityParquet write: schema, module tables, init (own statement), validate, write                                           | 7, 11, 30                                         |
+| §2            | Directory argument with NO trailing slash                                                                                 | 30                                                |
+| §2            | **A MISSING VFS name reads back as ONE garbage byte, no error → validate by content**                                     | 29 (`validateExportBytes`), 30                    |
+| §2            | `globFiles` lists never-created names → cleanup only, never discovery                                                     | 30                                                |
+| §2            | `cityparquet_write` browser-verified; table survives `dropFile`                                                           | 13 (doc), 30, 32                                  |
+| §2            | `cityparquet_read` / `cityjson_geoparquet_geo` unusable                                                                   | Global Constraints (never called)                 |
+| §2            | **`spatial` does not autoload and is CORE (`INSTALL spatial`)**                                                           | 2 (`installStatement`), 34                        |
+| §3.1          | Per-extension status, `ensureExtension`, `runQuery`, `formatDuckDBError`                                                  | 2                                                 |
+| §3.1          | `registerBuffer`/`dropBuffer`/`readFile`/`ddl`                                                                            | 2                                                 |
+| §3.1          | **Init failure terminates the Worker, then resets the memo**                                                              | 2                                                 |
+| §3.1          | StatusBar labels + **`PRAGMA platform`** + `duckdb_extensions()` tooltip                                                  | 2, 3                                              |
+| §3.2          | `LayerTable`/`ColumnInfo` shape, `classifyColumnType`                                                                     | 5, 13                                             |
+| §3.2          | Source table (file/URL/CityGML/CityParquet/streaming)                                                                     | 15, 16, 17                                        |
+| §3.2          | `shouldUseSourceUrlPath` deleted; `loadFromUrl` returns bytes                                                             | 15, 18                                            |
+| §3.2          | Reader-backed creation SQL, then `dropBuffer`                                                                             | 13                                                |
+| §3.2          | **A REBUILD keeps the old table until the new one exists; a FAILED rebuild keeps it for good**                            | 13, 14                                            |
+| §3.2          | **`registerBuffer` CONSUMES its array; no needless second copy anywhere**                                                 | 2, 13, 15, 16                                     |
+| §3.2          | **`SourceProvider` returns DECODED bytes for file AND url**                                                               | 15 (`fetchModelBytes`, gunzip test), 16           |
+| §3.2          | **A restored file layer has no provider → export refused with that reason**                                               | 13/16 (`provider: null`), 31 (`RELINK_REASON`)    |
+| §3.2          | Flat fallback aligned to the reader's names; `featureId.ts`                                                               | 6, 12, 13                                         |
+| §3.2          | Lifecycle: enqueue/drop, FIFO, skip-if-removed, rebuild, counter                                                          | 13, 14, 17                                        |
+| §3.2          | **Streaming debounce gated on the PANEL; the export dialog forces one rebuild**                                           | 17 (`refreshStreamingTable`), 31                  |
+| §3.2          | Failures recorded, never thrown into the loader                                                                           | 13, 16                                            |
+| §3.2          | `layerTableStore` mirror                                                                                                  | 13                                                |
+| §3.2          | App loses its DuckDB effect and flags; StatsTab on `object_type`                                                          | 18, 19                                            |
+| §3.3          | Filter AST, `LayerQuery`, `queryStore`, session-only                                                                      | 8                                                 |
+| §3.3          | `quoteIdent`/`quoteLiteral`/`compileFilter`/LIKE escaping                                                                 | 9                                                 |
+| §3.3          | `projectColumn`, `buildPageSql`, `buildCountSql`                                                                          | 10                                                |
+| §3.3          | `buildFeatureIdsSql` with COALESCE + positive IN                                                                          | 10, 27                                            |
+| §3.3          | `buildDistinctSql` (+ `buildRootTypesSql`, added for §3.6)                                                                | 10                                                |
+| §3.4          | `TablePanel`→`FilterBar`→`DataGrid`→`Pagination`, `useLayerQuery`                                                         | 20, 21, 22, 23                                    |
+| §3.4          | Header: Sync selection, Filter map, Export, collapse                                                                      | 23, 31                                            |
+| §3.4          | IntersectionObserver removed; 320 px default, 120–800 clamp                                                               | 22, 23                                            |
+| §3.4          | States: engine failed+Retry, queued/building, failed, no layer, zero rows                                                 | 20, 23                                            |
+| §3.4          | **Zero rows + Filter map on → "0 of N rows match; the map shows nothing…"**                                               | 22 (`emptyMessage`), 23                           |
+| §3.5          | `syncToMap` → ids → `setVisibleObjectIds`; null vs empty                                                                  | 26, 27                                            |
+| §3.5          | `buildCityMeshArrays` visible-id parameter, slot invariant                                                                | 24                                                |
+| §3.5          | `CityModelMesh.setVisibleObjectIds` + handle + registry                                                                   | 25                                                |
+| §3.5          | `Layer.visibleObjectIds` session-only; `handleSync` push                                                                  | 26                                                |
+| §3.5          | **`setVisibleObjectIds` is a no-op on identity; the sync returns early when there is nothing to clear**                   | 26, 27                                            |
+| §3.5          | Streaming disabled with the exact reason string                                                                           | 23                                                |
+| §3.6          | Dialog: scope, object types, attributes, LoD, format                                                                      | 31                                                |
+| §3.6          | CityParquet: schema, re-register, CTAS, init, validate, write, zip, cleanup                                               | 30                                                |
+| §3.6          | **Every file the write names must be in the zip**                                                                         | 30                                                |
+| §3.6          | **The source is read ONCE into a scratch schema; N modules is not N parses**                                              | 11, 30                                            |
+| §3.6          | **`cityparquet_validate` returns no rows — the temp table is dropped first, and a run/read failure is a VISIBLE warning** | 30                                                |
+| §3.6          | **`dropBuffer` over a writer-created file is unverified: try/catch + warn, checked by the smoke**                         | 30, 32                                            |
+| §3.6          | `cityGmlModuleOf`                                                                                                         | 7                                                 |
+| §3.6          | Parquet/CSV/JSON via `COPY`                                                                                               | 29                                                |
+| §3.6          | **City formats shown DISABLED with the exact title**                                                                      | 31                                                |
+| §3.6          | **Fallback layers: attribute formats only, plus the "no CityJSON source" sentence**                                       | 31                                                |
+| §3.6          | `platform/download.ts` factored from `RuleBuilderTab`                                                                     | 28                                                |
+| §3.6          | Busy state, cancel-safe `finally`, inline errors                                                                          | 30, 31                                            |
+| §3.7          | Snapshot stays v3; nothing new persisted                                                                                  | 8, 26 (no `persistence/types.ts` change at all)   |
+| §4            | Unit tests for every pure module and store                                                                                | 5–14, 20–22, 26–31                                |
+| §4            | Plugin unit tests                                                                                                         | 24, 25                                            |
+| §4            | Opt-in Node integration behind `DUCKDB_INTEGRATION`                                                                       | 33                                                |
+| §4            | **Reader `id` set == `parseCityJSON().objects` key set**                                                                  | 33                                                |
+| §4            | Browser smoke: boot, table, filter, map sync, all four exports                                                            | 32                                                |
+| §5            | Submodule branch from `947c980`, pushed, gitlink bump                                                                     | 24, 25, 26, 34                                    |
+| §5            | Lockfile regenerated; `npm ci` verified in a fresh clone                                                                  | 1, 34                                             |
+| §5            | The seven mocking test files                                                                                              | 4                                                 |
+| §5            | `duckdb.ts` the only importer of `@duckdb/duckdb-wasm`                                                                    | Global Constraints; 13, 29, 30 all import from it |
+| §6            | `spatial`/`three_d` loadable but with nothing to operate on in v1                                                         | 34                                                |
+| §6            | The two `three_d` traps recorded for the follow-up                                                                        | 34                                                |
 
 **Gaps found and closed while writing (both drafts):**
 
@@ -12979,6 +13527,23 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
   `setTablePanelOpen` (Task 23) and the export dialog forces one rebuild through
   `refreshStreamingTable` (Task 17/31) — no "export pending" flag, because an
   export wants the table to hold STILL once it starts.
+- §3.2 says a rebuild "replaces the table", which the first draft did by
+  retiring the old one FIRST — dropping a streaming layer to "building" several
+  times a pan, and leaving a layer that HAD working analytics with none at all
+  whenever a rebuild failed. Tasks 13/14 build first and retire only on success;
+  a failed rebuild keeps the previous table with `rebuilding: false` and a
+  console warning.
+- §3.6's per-module CTAS reads the source once PER MODULE — N full parses of a
+  file that can be hundreds of megabytes. Task 11 splits it into one scratch
+  read plus N cheap cuts, the scratch table in a schema of its own because
+  `cityparquet_init` describes every table in the schema it is handed.
+- §3.6 reads the validation findings with `SELECT count(*) FROM
+cityparquet_validation`. Probes P6b/P6c/P6f/P6g and FUNCTIONS.md show the
+  PRAGMA returns no rows and materialises a temp table instead — and that when
+  the pragma FAILS the table is never created, so the follow-up SELECT raises a
+  `Catalog Error`. Task 30 drops the table first (it lives on the connection and
+  would otherwise carry a previous export's findings), groups by `severity`, and
+  turns either failure into a visible warning.
 - §3.5 writes the plugin signature as `(…, hiddenTypes, visibleObjectIds)`, but
   the shipped signature carries `appearance` at position 6 and ~20 call sites
   pass it positionally. Task 24 uses position 7.
@@ -13051,5 +13616,24 @@ Every name that crosses a task boundary, re-checked after the edits:
   `RuleBuilderTab`.
 - `DEFAULT_TABLE_HEIGHT` / `MIN_TABLE_HEIGHT` / `MAX_TABLE_HEIGHT` (Task 23) are
   the only height constants; `App.tsx` imports the default.
+- `LayerTableState`'s ready member carries the optional `rebuilding` in Task 13's
+  interface block, in its implementation, and in Task 14's three new assertions.
+  Nothing else reads it: `useLayerQuery` (Task 20) and `StatsTab` (Task 19) both
+  narrow on `state === "ready"` and take `info`, which is exactly what keeps the
+  grid showing real rows through a rebuild.
+- `buildCityParquetCtasSql` is GONE. The two builders that replace it —
+  `buildCityParquetSourceSql` and `buildCityParquetModuleSql`, plus
+  `CITYPARQUET_SOURCE_TABLE` — are declared in Task 11 and consumed only by
+  Task 30, whose "Consumes" line names both. No reference to the old name
+  survives anywhere in the plan.
+- `isGzipBytes` is declared in Task 15 and imported by `addCityLayer` (Task 16)
+  and by `useLayerFileLoader` (Task 16, Step 5); `decodeModelBytes` keeps its
+  signature and simply calls it.
+- `validationWarnings`, `dropWrittenFile` and `contentFormatOf` are file-local
+  to `analytics/export.ts` (Task 30) and never exported.
+- The "`registerBuffer` CONSUMES its array" contract is stated once, on the
+  function (Task 2), and REFERENCED — not restated differently — on
+  `LayerTableSource.bytes` and `SourceProvider` (Task 13), `modelTableSource`
+  and both providers (Task 16), and `loadFromUrl`'s `bytes` field (Task 15).
 
 No mismatches remain.
