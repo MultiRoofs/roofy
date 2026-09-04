@@ -17,7 +17,26 @@ vi.mock("../../../../src/analytics/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   // Defaults to READY, because that is the state every other test in this
   // file assumes; the one test that cares overrides it per call.
-  getDuckDBStatus: vi.fn(() => ({ state: "ready", extensionLoaded: true })),
+  getDuckDBStatus: vi.fn(() => ({
+    state: "ready",
+    extensions: {
+      cityjson: { state: "loaded" },
+      spatial: { state: "unloaded" },
+      three_d: { state: "unloaded" },
+    },
+    loadedExtensions: [{ name: "cityjson", version: "0.4.0" }],
+    platform: "wasm_eh",
+  })),
+  isExtensionLoaded: vi.fn(() => true),
+  ensureExtension: vi.fn(async () => false),
+  formatDuckDBError: (e: unknown) =>
+    e instanceof Error ? e.message : String(e),
+  runQuery: vi.fn(async () => ({ ok: false, message: "no engine" })),
+  ddl: vi.fn(async () => ({ ok: false, message: "no engine" })),
+  registerBuffer: vi.fn(async () => false),
+  dropBuffer: vi.fn(async () => {}),
+  readFile: vi.fn(async () => null),
+  queryDuckDB: vi.fn(async () => null),
   queryParquetBuffer: vi.fn(),
 }));
 

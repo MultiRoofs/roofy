@@ -1,7 +1,7 @@
 /**
- * `App`'s CityParquet paths: the two URL-restore sites, and the DuckDB skip.
+ * `App`'s CityParquet paths: the two URL-restore sites.
  *
- * Why these three cases exist:
+ * Why these cases exist:
  *
  *   * A snapshot and a share link each rebuild a URL layer with their OWN copy
  *     of the loader hook's routing, so each has to be pinned separately — the
@@ -9,10 +9,6 @@
  *     Both use a `gs://` source on purpose: it carries no extension at all, so
  *     a site that classified with `detectEncoding` would read it as CityJSON
  *     and hand parquet bytes (or a bucket listing) to `JSON.parse`.
- *   * The DuckDB effect must not offer a CityParquet layer to the cityjson
- *     extension. Same trap, one step later: `read_cityjson('gs://…')` is a
- *     query that can only fail, on every selection, and the layer's real
- *     analytics come from the in-memory fallback.
  *
  * The engine is never imported (`NavaraViewport` is mocked — jsdom has no
  * WebGL and `@navaramap/three` crashes at module scope under Node), and the
@@ -102,30 +98,38 @@ vi.mock("../../../src/scene/NavaraViewport", () => ({
   ),
 }));
 
-/** DuckDB's analytics surface, controlled per test. `extensionReady` and
- *  `urlPath` are what put the effect on the extension branch at all — the
- *  other app tests pin them false and never reach it. */
+/** DuckDB's analytics surface, controlled per test. `extensionReady` is what
+ *  would put the effect on the extension branch at all — no surviving test in
+ *  this file needs a ready engine, so it stays false throughout. */
 let extensionReady = false;
-let urlPath = false;
-const loadModelIntoDuckDB = vi.fn((_url: string, _encoding: string) =>
-  Promise.resolve(true),
-);
-const loadCityModelFromMemory = vi.fn((_model: CityModel) =>
-  Promise.resolve(true),
-);
 
 vi.mock("../../../src/analytics/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   getDuckDBStatus: vi.fn(() =>
     extensionReady
-      ? { state: "ready", extensionLoaded: true }
+      ? {
+          state: "ready",
+          extensions: {
+            cityjson: { state: "loaded" },
+            spatial: { state: "unloaded" },
+            three_d: { state: "unloaded" },
+          },
+          loadedExtensions: [{ name: "cityjson", version: "0.4.0" }],
+          platform: "wasm_eh",
+        }
       : { state: "uninitialized" },
   ),
-  loadModelIntoDuckDB: (url: string, encoding: string) =>
-    loadModelIntoDuckDB(url, encoding),
-  loadCityModelFromMemory: (model: CityModel) => loadCityModelFromMemory(model),
-  loadResidentObjectsIntoDuckDB: vi.fn(async () => false),
-  shouldUseSourceUrlPath: () => urlPath,
+  isExtensionLoaded: vi.fn(() => extensionReady),
+  ensureExtension: vi.fn(async () => false),
+  formatDuckDBError: (e: unknown) =>
+    e instanceof Error ? e.message : String(e),
+  runQuery: vi.fn(async () => ({ ok: false, message: "no engine" })),
+  ddl: vi.fn(async () => ({ ok: false, message: "no engine" })),
+  registerBuffer: vi.fn(async () => false),
+  dropBuffer: vi.fn(async () => {}),
+  readFile: vi.fn(async () => null),
+  queryDuckDB: vi.fn(async () => null),
+  queryParquetBuffer: vi.fn(async () => null),
 }));
 
 vi.mock("../../../src/features/streaming/openStreamingLayer", () => ({
@@ -223,9 +227,6 @@ function shareHash(
 
 beforeEach(() => {
   extensionReady = false;
-  urlPath = false;
-  loadModelIntoDuckDB.mockClear();
-  loadCityModelFromMemory.mockClear();
   loadFromUrl.mockReset();
   loadFromUrl.mockResolvedValue(jsonModel);
   loadCityParquetFromUrl.mockReset();
@@ -368,52 +369,6 @@ describe("App share-link restore — CityParquet layers", () => {
     const layers = useLayerStore.getState().layers;
     expect(layers).toHaveLength(1);
     expect(layers[0]!.name).toBe("delft-json");
-  });
-});
-
-describe("App DuckDB load — CityParquet layers", () => {
-  beforeEach(() => {
-    // The branch this suite is about: the extension is loaded and the layer's
-    // source is a URL, so the effect WOULD reach for `read_cityjson`.
-    extensionReady = true;
-    urlPath = true;
-  });
-
-  it("never offers a CityParquet layer to the cityjson extension, falling back in-memory", async () => {
-    render(<App persistenceStore={storeWith(null)} />);
-    useLayerStore.getState().addLayer({
-      id: "layer-1",
-      name: "delft",
-      model: parquetModel,
-      // No extension to read: `detectEncoding` calls this "cityjson", so only
-      // the model's own `sourceEncoding` can keep it off the extension path.
-      modelRef: { type: "url", url: PARQUET_URL },
-      visible: true,
-      rules: [],
-      rulesEnabled: true,
-    });
-
-    await waitFor(() =>
-      expect(loadCityModelFromMemory).toHaveBeenCalledWith(parquetModel),
-    );
-    expect(loadModelIntoDuckDB).not.toHaveBeenCalled();
-  });
-
-  it("still uses the extension for an ordinary CityJSON URL layer", async () => {
-    render(<App persistenceStore={storeWith(null)} />);
-    useLayerStore.getState().addLayer({
-      id: "layer-1",
-      name: "delft",
-      model: jsonModel,
-      modelRef: { type: "url", url: JSON_URL },
-      visible: true,
-      rules: [],
-      rulesEnabled: true,
-    });
-
-    await waitFor(() =>
-      expect(loadModelIntoDuckDB).toHaveBeenCalledWith(JSON_URL, "cityjson"),
-    );
   });
 });
 

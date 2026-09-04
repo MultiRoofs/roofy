@@ -1,9 +1,7 @@
 /**
- * Unit tests for DuckDB status management.
- *
- * DuckDB-wasm initialization requires a browser Worker environment,
- * so these tests verify the module's status tracking and query-guard
- * behavior without attempting full initialization.
+ * DuckDB-wasm initialization needs a browser Worker, so these tests verify the
+ * module's status tracking and query guards without attempting a real init.
+ * The engine's error formatting and VFS guards live in duckdbEngine.test.ts.
  */
 
 import { describe, it, expect } from "vitest";
@@ -15,13 +13,11 @@ import {
 
 describe("DuckDB status", () => {
   it("starts in uninitialized state", () => {
-    const status = getDuckDBStatus();
-    expect(status.state).toBe("uninitialized");
+    expect(getDuckDBStatus().state).toBe("uninitialized");
   });
 
   it("queryDuckDB returns null when not initialized", async () => {
-    const result = await queryDuckDB("SELECT 1");
-    expect(result).toBeNull();
+    expect(await queryDuckDB("SELECT 1")).toBeNull();
   });
 
   it("queryParquetBuffer returns null when not initialized", async () => {

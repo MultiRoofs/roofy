@@ -60,11 +60,17 @@ vi.mock("../../../src/scene/NavaraViewport", () => ({
 vi.mock("../../../src/analytics/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
-  loadModelIntoDuckDB: vi.fn(async () => false),
-  loadCityModelFromMemory: vi.fn(async () => false),
-  loadResidentObjectsIntoDuckDB: vi.fn(async () => false),
-  shouldUseSourceUrlPath: vi.fn(() => false),
-  queryParquetBuffer: vi.fn(),
+  isExtensionLoaded: vi.fn(() => false),
+  ensureExtension: vi.fn(async () => false),
+  formatDuckDBError: (e: unknown) =>
+    e instanceof Error ? e.message : String(e),
+  runQuery: vi.fn(async () => ({ ok: false, message: "no engine" })),
+  ddl: vi.fn(async () => ({ ok: false, message: "no engine" })),
+  registerBuffer: vi.fn(async () => false),
+  dropBuffer: vi.fn(async () => {}),
+  readFile: vi.fn(async () => null),
+  queryDuckDB: vi.fn(async () => null),
+  queryParquetBuffer: vi.fn(async () => null),
 }));
 
 vi.mock("../../../src/features/streaming/openStreamingLayer", () => ({
