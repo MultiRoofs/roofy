@@ -27,7 +27,8 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 const init = vi.fn(async () => {});
 const dispose = vi.fn();
 const setCamera = vi.fn();
-const flyTo = vi.fn();
+// Returns the never-landing flight declared below (called only after module init).
+const flyTo = vi.fn((..._args: unknown[]): unknown => flightInProgress);
 
 /** The view's own bus (`postRender` is what seeds the first pose). */
 const listeners = new Map<string, Set<(...args: never[]) => void>>();
@@ -177,6 +178,14 @@ vi.mock("@cityjson/navara-cityjson/plugin", () => ({
  *  A passthrough, so the move still happens — but a RECORDED one, because "did
  *  this move run inside the window?" is the assertion. */
 const suppressSettleThenCommit = vi.fn(async (fn: () => unknown) => fn());
+/** A flight that never lands — `view.flyTo`'s return on Navara 0.1.x resolves
+ *  at the END of the flight, and the settle gate holds only as long as the
+ *  move hands that very promise to `suppressSettleThenCommit`. */
+const flightInProgress = new Promise<boolean>(() => {});
+function settleWrappedMove(): unknown {
+  const move = suppressSettleThenCommit.mock.calls.at(-1)![0] as () => unknown;
+  return move();
+}
 vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
   FlatCityBufPlugin: vi.fn(function () {
     return {
@@ -541,8 +550,9 @@ describe("NavaraViewport view modes and flyTo", () => {
       pitch: PLAN_PITCH_DEG,
     });
     // A programmatic move is not a gesture: it goes through the streaming
-    // settle window like every other one.
+    // settle window like every other one — holding it for the whole flight.
     expect(suppressSettleThenCommit).toHaveBeenCalled();
+    expect(settleWrappedMove()).toBe(flightInProgress);
   });
 
   it("tilts to exactly 60 degrees for 2.5D, keeping the heading", async () => {
@@ -639,6 +649,9 @@ describe("NavaraViewport view modes and flyTo", () => {
     // `maxHeight`/`easing`), no longer as a bare second argument.
     expect(options).toEqual({ duration: 1200 });
     expect(suppressSettleThenCommit).toHaveBeenCalled();
+    // ...and the flight promise (resolved at the END of the flight) is what
+    // the settle gate holds on: the move RETURNS it, never `void`s it.
+    expect(settleWrappedMove()).toBe(flightInProgress);
   });
 
   it("keeps a searched flight flat while in 2D", async () => {

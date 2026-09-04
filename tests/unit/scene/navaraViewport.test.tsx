@@ -14,7 +14,8 @@ const addPlugin = vi.fn();
 const init = vi.fn(async () => {});
 const dispose = vi.fn();
 const setCamera = vi.fn();
-const flyTo = vi.fn();
+// Returns the never-landing flight declared below (called only after module init).
+const flyTo = vi.fn((..._args: unknown[]): unknown => flightInProgress);
 /** `view.addSource` / `view.addLayer` — the whole of the Google tiles seam
  *  (Task C17, toggled since Task C21). `addSource` answers with a
  *  `Source`-shaped stub, which is what the layer must reference; both stubs
@@ -357,6 +358,17 @@ const flatPluginInstance = {
   dispose: vi.fn(),
   suppressSettleThenCommit: vi.fn(async (fn: () => unknown) => fn()),
 };
+/** A flight that never lands. `view.flyTo` returns it (Navara 0.1.x resolves
+ *  the promise at the END of the flight), and the assertion that matters is
+ *  that the very same object reaches `suppressSettleThenCommit` — the settle
+ *  gate holds for the whole animation only if the move RETURNS it. */
+const flightInProgress = new Promise<boolean>(() => {});
+/** What the last settle-suppressed move hands back when re-invoked. */
+function settleWrappedMove(): unknown {
+  const calls = flatPluginInstance.suppressSettleThenCommit.mock.calls;
+  const move = calls.at(-1)![0] as () => unknown;
+  return move();
+}
 vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
   FlatCityBufPlugin: vi.fn(function () {
     return flatPluginInstance;
@@ -734,6 +746,7 @@ describe("NavaraViewport lifecycle", () => {
     });
 
     expect(flyTo).toHaveBeenCalledTimes(1);
+    expect(settleWrappedMove()).toBe(flightInProgress);
     const target = flyTo.mock.calls[0]![0] as {
       lng: number;
       lat: number;
@@ -1082,11 +1095,16 @@ describe("NavaraViewport lifecycle", () => {
     ref.current!.fitLayer("b");
     expect(handleA.getBoundsGeodetic).not.toHaveBeenCalled();
     expect(handleB.getBoundsGeodetic).toHaveBeenCalled();
+    // The fit's flight promise (Navara 0.1.x resolves it at the END of the
+    // flight) is what the streaming settle gate waits on — `void`ing it here
+    // would re-open the gate two seconds after take-off, mid-flight.
+    expect(settleWrappedMove()).toBe(flightInProgress);
 
     handleB.getBoundsGeodetic.mockClear();
     ref.current!.fitAll();
     expect(handleA.getBoundsGeodetic).toHaveBeenCalled();
     expect(handleB.getBoundsGeodetic).toHaveBeenCalled();
+    expect(settleWrappedMove()).toBe(flightInProgress);
 
     // alignView reads the same union, so it aligns against real bounds too.
     ref.current!.alignView("top");
@@ -1355,11 +1373,8 @@ describe("NavaraViewport lifecycle", () => {
       { a: null, b: 12 },
       { onCursorPosition },
     );
-    pickDepthPosition.mockReturnValue({
-      x: (4.348 * Math.PI) / 180,
-      y: (52.006 * Math.PI) / 180,
-      z: 14,
-    });
+    // Degrees, like every geodetic value the 0.1.x engine hands back.
+    pickDepthPosition.mockReturnValue({ x: 4.348, y: 52.006, z: 14 });
     onCursorPosition.mockClear();
     domMouse(host, "pointermove", 10, 20, { engineSees: true });
     // Same event object reached both listeners: the cursor is on the globe.
