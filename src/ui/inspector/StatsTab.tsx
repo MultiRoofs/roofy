@@ -3,7 +3,11 @@
  *
  * Shows model-level aggregate stats when nothing is selected,
  * and per-object stats when a building is selected.
- * Optionally shows DuckDB SQL-derived analytics when available.
+ *
+ * The DuckDB section summarises the DISPLAYED LAYER'S OWN table — the one
+ * `layerTables` built for it — grouped by `object_type`. There is no global
+ * `city_objects` table any more, so nothing DuckDB-ish renders until that
+ * layer's entry in `useLayerTableStore` reaches `ready`.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -13,18 +17,27 @@ import {
   computeModelStats,
   computeObjectStats,
 } from "../../analytics/computeStats";
+import { runQuery } from "../../analytics/duckdb";
+import { useLayerTableStore } from "../../analytics/layerTables";
+import { quoteIdent } from "../../analytics/sql";
 
 interface StatsTabProps {
   readonly model: CityModel;
   readonly selection: Selection | null;
+  /** Whose DuckDB table to summarise — the layer the inspector is showing,
+   *  which follows the SELECTION when there is one. `null` while no layer has
+   *  a table, in which case the pure model statistics stand alone. */
+  readonly layerId: string | null;
 }
 
 interface DuckDBStats {
-  readonly rowCount: number;
+  /** `null` when the table's COUNT could not be taken — see
+   *  `LayerTable.rowCount`. Rendered as "unknown", never as 0. */
+  readonly rowCount: number | null;
   readonly typeBreakdown: ReadonlyArray<{ type: string; count: number }>;
 }
 
-export function StatsTab({ model, selection }: StatsTabProps) {
+export function StatsTab({ model, selection, layerId }: StatsTabProps) {
   const modelStats = useMemo(() => computeModelStats(model), [model]);
 
   const objectStats = useMemo(
@@ -32,15 +45,39 @@ export function StatsTab({ model, selection }: StatsTabProps) {
     [model, selection],
   );
 
+  // Subscribed to the entry, not read imperatively: the table is built
+  // asynchronously after the layer lands, so the panel has to re-render when
+  // it becomes ready.
+  const tableState = useLayerTableStore((s) =>
+    layerId === null ? undefined : s.tables[layerId],
+  );
+  const table = tableState?.state === "ready" ? tableState.info : null;
+
   const [duckdbStats, setDuckdbStats] = useState<DuckDBStats | null>(null);
 
-  // The single global `city_objects` table this block queried is gone (its
-  // loaders were deleted with App's per-active-layer DuckDB effect). Task 19
-  // rewires the tab to the picked layer's own table; until then the SQL block
-  // below simply never renders.
   useEffect(() => {
-    setDuckdbStats(null);
-  }, []);
+    if (table === null) {
+      setDuckdbStats(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      // `object_type`, not `type`: that is the column the cityjson reader
+      // writes, and the one the flat fallback was aligned to. The old query
+      // named `type`, which no layer table has ever had.
+      const result = await runQuery(
+        `SELECT "object_type", COUNT(*) AS "n" FROM ${quoteIdent(table.table)} GROUP BY 1 ORDER BY 2 DESC`,
+      );
+      if (cancelled) return;
+      setDuckdbStats({
+        rowCount: table.rowCount,
+        typeBreakdown: result.ok ? extractTypeBreakdown(result.rows) : [],
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [table]);
 
   return (
     <>
@@ -138,7 +175,17 @@ export function StatsTab({ model, selection }: StatsTabProps) {
           <div className="attr-section-title" style={{ color: "var(--teal)" }}>
             DuckDB Analytics
           </div>
-          <StatRow label="Rows loaded" value={String(duckdbStats.rowCount)} />
+          <StatRow
+            label="Rows loaded"
+            // "unknown", not "0" and not "null": a count nobody could take and
+            // a table with nothing in it are different facts, and only one of
+            // them is worth acting on.
+            value={
+              duckdbStats.rowCount === null
+                ? "unknown"
+                : String(duckdbStats.rowCount)
+            }
+          />
           {duckdbStats.typeBreakdown.map((t) => (
             <StatRow key={t.type} label={t.type} value={String(t.count)} />
           ))}
@@ -161,6 +208,18 @@ function StatRow({
       <span className="attr-value">{value}</span>
     </div>
   );
+}
+
+function extractTypeBreakdown(
+  rows: ReadonlyArray<Record<string, unknown>>,
+): Array<{ type: string; count: number }> {
+  return rows.map((row) => ({
+    type:
+      typeof row.object_type === "string"
+        ? row.object_type
+        : JSON.stringify(row.object_type ?? "unknown"),
+    count: typeof row.n === "number" ? row.n : Number(row.n) || 0,
+  }));
 }
 
 function cardinalFromDeg(deg: number): string {

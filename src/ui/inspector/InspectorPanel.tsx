@@ -341,7 +341,11 @@ export function InspectorPanel({ selections, onClose }: InspectorPanelProps) {
                 )
               ) : activeTab === "stats" ? (
                 model ? (
-                  <StatsTab model={model} selection={selection} />
+                  <StatsTab
+                    model={model}
+                    selection={selection}
+                    layerId={displayLayer?.id ?? null}
+                  />
                 ) : (
                   <div className="inspector-placeholder">No layer selected</div>
                 )
