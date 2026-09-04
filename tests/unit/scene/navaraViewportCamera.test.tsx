@@ -627,7 +627,7 @@ describe("NavaraViewport view modes and flyTo", () => {
       ref.current!.flyTo({ lng: 6.92, lat: 53.33, heightM: 1500 }, 1200),
     );
     expect(flyTo).toHaveBeenCalledTimes(1);
-    const [target, duration] = flyTo.mock.calls[0]!;
+    const [target, options] = flyTo.mock.calls[0]!;
     expect(target).toMatchObject({
       lng: 6.92,
       lat: 53.33,
@@ -635,7 +635,9 @@ describe("NavaraViewport view modes and flyTo", () => {
       heading: 0,
       pitch: -60,
     });
-    expect(duration).toBe(1200);
+    // Navara 0.1.x: the duration travels in a `FlyToOptions` object (with
+    // `maxHeight`/`easing`), no longer as a bare second argument.
+    expect(options).toEqual({ duration: 1200 });
     expect(suppressSettleThenCommit).toHaveBeenCalled();
   });
 
