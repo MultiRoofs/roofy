@@ -28,6 +28,33 @@ const cityparquet = vi.hoisted(() => ({
   loadCityParquetFromFiles: vi.fn(),
 }));
 
+/**
+ * The TABLE REGISTRY is faked; the call INTO it is not.
+ *
+ * Every static add now goes through `addCityLayer`, so without this the real
+ * `enqueueLayerTable` runs on every file drop in this file: it awaits
+ * `initDuckDB`, which imports `@duckdb/duckdb-wasm`, runs `selectBundle` and
+ * reaches `new Worker` under jsdom. The failure is caught and recorded, so
+ * nothing goes red — but the boot attempt outlives the test that started it
+ * and the engine's module state accumulates across this whole file. What these
+ * tests are ABOUT is routing, so the registry is the right seam to cut.
+ *
+ * `enqueueLayerTable` is the only value `addCityLayer` imports from the module
+ * (`LayerTableSource`/`SourceProvider` are types and erase), so a bare factory
+ * is enough — no `importOriginal` spread.
+ */
+const tables = vi.hoisted(() => ({
+  // Typed rather than bare, so `mock.calls[0]` is a two-element tuple a test
+  // can destructure instead of the empty one a zero-parameter fake implies.
+  enqueueLayerTable: vi.fn<(layerId: string, source: unknown) => Promise<void>>(
+    async () => {},
+  ),
+}));
+
+vi.mock("../../../../src/analytics/layerTables", () => ({
+  enqueueLayerTable: tables.enqueueLayerTable,
+}));
+
 vi.mock(
   "../../../../src/features/cityparquet/loadCityParquet",
   async (importOriginal) => ({
@@ -86,6 +113,7 @@ function installPlugin(): void {
 
 beforeEach(() => {
   installPlugin();
+  tables.enqueueLayerTable.mockClear();
   useLayerStore.getState().removeAllLayers();
   useStreamStore.setState({ streams: {} });
 });
@@ -268,6 +296,36 @@ describe("useLayerFileLoader — addLayerFromFile overrides", () => {
     const layers = useLayerStore.getState().layers;
     expect(layers).toHaveLength(1);
     expect(layers[0]!.name).toBe("compressed.city.json.gz");
+  });
+
+  it("enqueues the dropped file's table under that layer's id, from its bytes", async () => {
+    // The other half of `addCityLayer`: a layer that reached the store without
+    // its table would have no table panel, no filter and no export, and
+    // nothing else in this file would notice.
+    const { result } = renderHook(() => useLayerFileLoader());
+    const file = new File([MINIMAL_CITYJSON], "tabled.city.json");
+
+    await act(async () => {
+      await result.current.addLayerFromFile(file);
+    });
+
+    const layerId = useLayerStore.getState().layers[0]!.id;
+    expect(tables.enqueueLayerTable).toHaveBeenCalledTimes(1);
+    const [enqueuedId, enqueuedSource] =
+      tables.enqueueLayerTable.mock.calls[0]!;
+    const source = enqueuedSource as {
+      kind: string;
+      reader?: string;
+      extension?: string;
+      bytes?: Uint8Array;
+    };
+    expect(enqueuedId).toBe(layerId);
+    // Reader-backed, not the flat fallback: the loader HELD the bytes, so
+    // DuckDB reads the file itself rather than a flattened copy of the model.
+    expect(source.kind).toBe("bytes");
+    expect(source.reader).toBe("read_cityjson");
+    expect(source.extension).toBe("city.json");
+    expect(new TextDecoder().decode(source.bytes)).toBe(MINIMAL_CITYJSON);
   });
 
   it("with no overrides, behaves exactly as before (fresh-layer defaults)", async () => {

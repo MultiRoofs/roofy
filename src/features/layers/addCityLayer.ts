@@ -116,9 +116,16 @@ export function modelTableSource(input: {
  * The enqueue is FIRE AND FORGET on purpose: a DuckDB failure is recorded on
  * the table entry and shown in the panel, and must never fail a layer add.
  * `enqueueLayerTable` already settles rather than throwing for a build that
- * fails, so the `.catch` here is for the case it cannot handle — an engine
- * that is not running at all — and exists so a rejection cannot escape as an
- * unhandled promise.
+ * fails, so the guards here are for the cases it cannot handle — an engine
+ * that is not running at all — and exist so neither a rejection nor a throw
+ * can escape once the layer is already in the store.
+ *
+ * BOTH guards, not just the `.catch`: `enqueueLayerTable` runs a synchronous
+ * prelude (the sequence counter, the registry lookup, the first `setState`)
+ * before it returns its promise, so a throw from there would never reach a
+ * `.catch` — it would propagate straight out of `addCityLayer` and fail an add
+ * whose layer has ALREADY landed, leaving the caller to report a failure the
+ * user can see did not happen.
  */
 export function addCityLayer(input: AddCityLayerInput): string {
   const layerId = useLayerStore.getState().addLayer({
@@ -131,11 +138,16 @@ export function addCityLayer(input: AddCityLayerInput): string {
     hiddenTypes: input.hiddenTypes,
     selectedAppearance: input.selectedAppearance,
   });
-  void enqueueLayerTable(layerId, input.duckdb).catch((error: unknown) => {
+  const warn = (error: unknown): void => {
     console.warn(
       `DuckDB table for layer ${layerId} could not be started:`,
       error,
     );
-  });
+  };
+  try {
+    void enqueueLayerTable(layerId, input.duckdb).catch(warn);
+  } catch (error) {
+    warn(error);
+  }
   return layerId;
 }

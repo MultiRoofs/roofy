@@ -1,19 +1,31 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { gzipSync } from "node:zlib";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 
 const enqueued: Array<{ layerId: string; source: unknown }> = [];
 /** Set to make the next enqueue REJECT — the "a DuckDB failure must not fail a
  *  layer add" case needs a rejection, not a resolved false. */
 let enqueueRejects = false;
+/** Set to make the next enqueue throw SYNCHRONOUSLY, the way a failure in
+ *  `enqueueLayerTable`'s prelude — before it ever returns a promise — would.
+ *  Deliberately not an `async` function body, which could not do that. */
+let enqueueThrowsSync = false;
 vi.mock("../../../../src/analytics/layerTables", () => ({
-  enqueueLayerTable: vi.fn(async (layerId: string, source: unknown) => {
+  enqueueLayerTable: vi.fn((layerId: string, source: unknown) => {
     enqueued.push({ layerId, source });
-    if (enqueueRejects) throw new Error("DuckDB is not running");
+    if (enqueueThrowsSync) throw new Error("DuckDB module failed to load");
+    return enqueueRejects
+      ? Promise.reject(new Error("DuckDB is not running"))
+      : Promise.resolve();
   }),
 }));
 
-const { addCityLayer, modelTableSource } =
-  await import("../../../../src/features/layers/addCityLayer");
+const {
+  addCityLayer,
+  fileSourceProvider,
+  modelTableSource,
+  urlSourceProvider,
+} = await import("../../../../src/features/layers/addCityLayer");
 const { useLayerStore } =
   await import("../../../../src/features/layers/layerStore");
 
@@ -30,7 +42,19 @@ function model(): CityModel {
 beforeEach(() => {
   enqueued.length = 0;
   enqueueRejects = false;
+  enqueueThrowsSync = false;
   useLayerStore.setState({ layers: [], activeLayerId: null });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+const MINIMAL_CITYJSON = JSON.stringify({
+  type: "CityJSON",
+  version: "2.0",
+  CityObjects: {},
+  vertices: [],
 });
 
 describe("modelTableSource", () => {
@@ -156,5 +180,92 @@ describe("addCityLayer", () => {
     expect(warn).toHaveBeenCalled();
     process.off("unhandledRejection", unhandled);
     warn.mockRestore();
+  });
+
+  it("does not let a SYNCHRONOUS throw from the enqueue reach the caller either", () => {
+    // `enqueueLayerTable` runs a prelude — the sequence counter, the registry
+    // lookup, the first `setState` — before it returns a promise, and a throw
+    // from THERE never reaches a `.catch`. It would propagate out of a call
+    // whose layer has already landed in the store, leaving the caller to
+    // report a failed add the user can plainly see succeeded.
+    enqueueThrowsSync = true;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const id = addCityLayer({
+      name: "delft",
+      model: model(),
+      modelRef: { type: "url", url: "https://x/a.city.json" },
+      duckdb: { kind: "model", model: model() },
+    });
+
+    expect(id).toBeTypeOf("string");
+    expect(useLayerStore.getState().layers.map((l) => l.id)).toEqual([id]);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
+
+describe("fileSourceProvider", () => {
+  it("re-reads the File on EVERY call — a fresh array each time", async () => {
+    // `registerBuffer` transfers and DETACHES the array it is given, so a
+    // provider that handed back one cached array would serve a zero-length
+    // buffer to the second export of a layer.
+    const provider = fileSourceProvider(
+      new File([MINIMAL_CITYJSON], "a.city.json"),
+    );
+
+    const first = await provider();
+    const second = await provider();
+
+    expect(first).not.toBe(second);
+    expect(new TextDecoder().decode(first)).toBe(MINIMAL_CITYJSON);
+    expect(new TextDecoder().decode(second)).toBe(MINIMAL_CITYJSON);
+  });
+
+  it("gunzips a gzipped File by its MAGIC BYTES — no DuckDB reader gunzips", async () => {
+    // The real gunzip runs; nothing here is stubbed.
+    const gz = new Uint8Array(gzipSync(Buffer.from(MINIMAL_CITYJSON)));
+    // The NAME says nothing useful on purpose: the bytes decide.
+    const provider = fileSourceProvider(
+      new File([gz as unknown as BlobPart], "a.city.json"),
+    );
+
+    expect(new TextDecoder().decode(await provider())).toBe(MINIMAL_CITYJSON);
+  });
+});
+
+describe("urlSourceProvider", () => {
+  it("REFETCHES on every call, and returns the DECODED bytes", async () => {
+    // Through the real `fetchModelBytes` — only `fetch` is stubbed — so the
+    // gunzip that makes these the same bytes the table was built from is
+    // genuinely exercised rather than asserted about a mock.
+    const gz = new Uint8Array(gzipSync(Buffer.from(MINIMAL_CITYJSON)));
+    const fetchMock = vi.fn(
+      async () => new Response(gz as unknown as BodyInit, { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const provider = urlSourceProvider("https://x/a.city.json");
+    const first = await provider();
+    const second = await provider();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenLastCalledWith("https://x/a.city.json");
+    expect(new TextDecoder().decode(first)).toBe(MINIMAL_CITYJSON);
+    expect(first).not.toBe(second);
+  });
+
+  it("propagates the loader's own sentence for a URL that has gone away", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(null, { status: 404, statusText: "Not Found" }),
+      ),
+    );
+
+    await expect(urlSourceProvider("https://x/a.city.json")()).rejects.toThrow(
+      /File not found \(404\)/,
+    );
   });
 });
