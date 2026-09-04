@@ -14,6 +14,7 @@ import {
   loadFromUrl,
   fileNameFromUrl,
   decodeModelBytes,
+  isGzipBytes,
 } from "../../domain/citymodel/loadCityModel";
 import {
   cityParquetLayerNameFromUrl,
@@ -26,6 +27,12 @@ import {
 } from "../../domain/citymodel/cityGmlArchive";
 import { isCityParquetUrl } from "../cityparquet/sourceClassify";
 import { ensureModelCrsLoadable } from "./ensureCrs";
+import {
+  addCityLayer,
+  fileSourceProvider,
+  modelTableSource,
+  urlSourceProvider,
+} from "./addCityLayer";
 import { useLayerStore } from "./layerStore";
 import { openStreamingLayer } from "../streaming/openStreamingLayer";
 import {
@@ -203,15 +210,18 @@ export function useLayerFileLoader(
           // a picked folder, given a selection of one.
           const model = await loadCityParquetFromFiles([file]);
           await ensureModelCrsLoadable(model);
-          layerId = useLayerStore.getState().addLayer({
+          layerId = addCityLayer({
             name: file.name,
             model,
             modelRef: { type: "file", fileName: file.name },
-            visible: overrides?.visible ?? true,
-            rules: overrides?.rules ?? [],
-            rulesEnabled: overrides?.rulesEnabled ?? true,
+            visible: overrides?.visible,
+            rules: overrides?.rules,
+            rulesEnabled: overrides?.rulesEnabled,
             hiddenTypes: overrides?.hiddenTypes,
             selectedAppearance: overrides?.selectedAppearance,
+            // The parser produces the model and nothing else — a CityParquet
+            // table is not something a cityjson reader can read.
+            duckdb: { kind: "model", model },
           });
         } else {
           // Bytes, not `file.text()`: a dropped `.city.json.gz` — the form 3D
@@ -223,21 +233,43 @@ export function useLayerFileLoader(
           // A dropped ZIP of CityGML takes the same container path as a
           // catalog `application/zip` asset, decided the same way — on the
           // magic bytes, since this path already holds them.
-          const parsed: CityModel = isZipBytes(bytes)
+          const zipped = isZipBytes(bytes);
+          const gzipped = !zipped && isGzipBytes(bytes);
+          const text = zipped ? "" : await decodeModelBytes(bytes);
+          const parsed: CityModel = zipped
             ? parseCityGmlArchive(bytes, file.name)
-            : parseText(file.name, await decodeModelBytes(bytes));
+            : parseText(file.name, text);
           // Fetch-and-gate the CRS while we are still async — a refusal here
           // reads as a load error instead of a dead layer in the scene sync.
           await ensureModelCrsLoadable(parsed);
-          layerId = useLayerStore.getState().addLayer({
+          layerId = addCityLayer({
             name: file.name,
             model: parsed,
             modelRef: { type: "file", fileName: file.name },
-            visible: overrides?.visible ?? true,
-            rules: overrides?.rules ?? [],
-            rulesEnabled: overrides?.rulesEnabled ?? true,
+            visible: overrides?.visible,
+            rules: overrides?.rules,
+            rulesEnabled: overrides?.rulesEnabled,
             hiddenTypes: overrides?.hiddenTypes,
             selectedAppearance: overrides?.selectedAppearance,
+            duckdb: modelTableSource({
+              model: parsed,
+              // The array we ALREADY READ when nothing was gunzipped: a
+              // re-encode would duplicate the whole file in the JS heap, and
+              // `registerBuffer` is about to consume whichever array it gets.
+              bytes:
+                zipped || encoding === "citygml"
+                  ? null
+                  : gzipped
+                    ? new TextEncoder().encode(text)
+                    : bytes,
+              encoding:
+                encoding === "cityjsonseq"
+                  ? "cityjsonseq"
+                  : encoding === "citygml"
+                    ? "citygml"
+                    : "cityjson",
+              refetch: fileSourceProvider(file),
+            }),
           });
         }
         applyPostCreateOverrides(layerId, overrides);
@@ -266,17 +298,18 @@ export function useLayerFileLoader(
         const name = packageNameFromFiles(files);
         const model = await loadCityParquetFromFiles(files);
         await ensureModelCrsLoadable(model);
-        const layerId = useLayerStore.getState().addLayer({
+        const layerId = addCityLayer({
           name,
           model,
           // The FOLDER is the source, so that is what a snapshot records as
           // needing re-selection — no single file could re-link this layer.
           modelRef: { type: "file", fileName: name },
-          visible: overrides?.visible ?? true,
-          rules: overrides?.rules ?? [],
-          rulesEnabled: overrides?.rulesEnabled ?? true,
+          visible: overrides?.visible,
+          rules: overrides?.rules,
+          rulesEnabled: overrides?.rulesEnabled,
           hiddenTypes: overrides?.hiddenTypes,
           selectedAppearance: overrides?.selectedAppearance,
+          duckdb: { kind: "model", model },
         });
         applyPostCreateOverrides(layerId, overrides);
         return layerId;
@@ -315,25 +348,26 @@ export function useLayerFileLoader(
         if (isCityParquetUrl(url)) {
           const model = await loadCityParquetFromUrl(url);
           await ensureModelCrsLoadable(model);
-          return useLayerStore.getState().addLayer({
+          return addCityLayer({
             name: cityParquetLayerNameFromUrl(url),
             model,
             modelRef: { type: "url", url },
-            visible: true,
-            rules: [],
-            rulesEnabled: true,
+            duckdb: { kind: "model", model },
           });
         }
 
         const parsed = await loadFromUrl(url);
         await ensureModelCrsLoadable(parsed.model);
-        return useLayerStore.getState().addLayer({
+        return addCityLayer({
           name: fileNameFromUrl(url),
           model: parsed.model,
           modelRef: { type: "url", url },
-          visible: true,
-          rules: [],
-          rulesEnabled: true,
+          duckdb: modelTableSource({
+            model: parsed.model,
+            bytes: parsed.bytes,
+            encoding: parsed.encoding,
+            refetch: urlSourceProvider(url),
+          }),
         });
       } catch (e) {
         setError(

@@ -48,6 +48,11 @@ import { useGeoLayerStore } from "../features/geoLayers/geoLayerStore";
 import { resolveGeoLayerBounds } from "../features/geoLayers/geoLayerBounds";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
 import { ensureModelCrsLoadable } from "../features/layers/ensureCrs";
+import {
+  addCityLayer,
+  modelTableSource,
+  urlSourceProvider,
+} from "../features/layers/addCityLayer";
 import { loadCityParquetFromUrl } from "../features/cityparquet/loadCityParquet";
 import { isCityParquetUrl } from "../features/cityparquet/sourceClassify";
 import { useFileDropGuard } from "../features/layers/useFileDropGuard";
@@ -891,7 +896,7 @@ export function App({
               // caught by this loop's per-layer `catch` and counted.
               const parsed = await loadCityParquetFromUrl(modelRef.url);
               await ensureModelCrsLoadable(parsed);
-              layerId = useLayerStore.getState().addLayer({
+              layerId = addCityLayer({
                 name,
                 model: parsed,
                 modelRef,
@@ -900,11 +905,12 @@ export function App({
                 rulesEnabled,
                 hiddenTypes,
                 selectedAppearance: appearance,
+                duckdb: { kind: "model", model: parsed },
               });
             } else {
               const parsed = await loadFromUrl(modelRef.url);
               await ensureModelCrsLoadable(parsed.model);
-              layerId = useLayerStore.getState().addLayer({
+              layerId = addCityLayer({
                 name,
                 model: parsed.model,
                 modelRef,
@@ -913,6 +919,12 @@ export function App({
                 rulesEnabled,
                 hiddenTypes,
                 selectedAppearance: appearance,
+                duckdb: modelTableSource({
+                  model: parsed.model,
+                  bytes: parsed.bytes,
+                  encoding: parsed.encoding,
+                  refetch: urlSourceProvider(modelRef.url),
+                }),
               });
             }
             if (lodMode === "manual") {
@@ -1103,24 +1115,31 @@ export function App({
             // `JSON.parse`. Failures are counted by this loop's `catch`.
             const parsed = await loadCityParquetFromUrl(sl.modelUrl);
             await ensureModelCrsLoadable(parsed);
-            useLayerStore.getState().addLayer({
+            addCityLayer({
               name,
               model: parsed,
               modelRef: { type: "url", url: sl.modelUrl },
               visible,
               rules,
               rulesEnabled,
+              duckdb: { kind: "model", model: parsed },
             });
           } else {
             const parsed = await loadFromUrl(sl.modelUrl);
             await ensureModelCrsLoadable(parsed.model);
-            useLayerStore.getState().addLayer({
+            addCityLayer({
               name,
               model: parsed.model,
               modelRef: { type: "url", url: sl.modelUrl },
               visible,
               rules,
               rulesEnabled,
+              duckdb: modelTableSource({
+                model: parsed.model,
+                bytes: parsed.bytes,
+                encoding: parsed.encoding,
+                refetch: urlSourceProvider(sl.modelUrl),
+              }),
             });
           }
         } catch {
