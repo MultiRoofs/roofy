@@ -544,13 +544,21 @@ export async function retryEngine(): Promise<void> {
   // is how one layer gets retried forever.
   const pending = [...pendingSources.entries()];
   pendingSources.clear();
+  // Everything issued from here on takes a HIGHER number, so a drop that lands
+  // DURING the retry can be told apart from one that preceded it.
+  const startSeq = seqCounter;
+
   await Promise.all(
     pending.map(async ([layerId, entry]) => {
-      let source: LayerTableSource;
       try {
         // A reader entry was parked WITHOUT its array; this is where the fresh
-        // one is obtained.
-        source = await reviveSource(entry);
+        // one is obtained, and where a provider whose fetch rejects throws.
+        const source = await reviveSource(entry);
+        // SETTLES rather than throwing for a build that fails, so the decision
+        // below is made on the OUTCOME — is there a table now? — and not on a
+        // rejection. The catch is for what cannot settle: a provider that
+        // rejects, or a source accessor that throws synchronously.
+        await enqueueLayerTable(layerId, source);
       } catch (error) {
         const message =
           error instanceof Error
@@ -561,9 +569,34 @@ export async function retryEngine(): Promise<void> {
         // leaves the previous table exactly where it was.
         if (!registry.has(layerId))
           setState(layerId, { state: "failed", message });
-        return;
       }
-      await enqueueLayerTable(layerId, source);
+      // RE-PARK what did not land. `pendingSources` was cleared up front, so a
+      // build that failed for a TRANSIENT reason — a provider whose fetch
+      // blipped — would otherwise lose its source for good and leave the Retry
+      // button with nothing to retry.
+      //
+      // Three conditions, and each rules out a different wrong answer. A table
+      // in the registry succeeded. A layer already in `pendingSources` parked
+      // ITSELF (a second "not running"), and re-parking would overwrite the
+      // entry that build chose. And a `cancelBefore` past `startSeq` means a
+      // DROP landed during this retry: re-parking then would resurrect a
+      // removed layer on the next click.
+      //
+      // The ENTRY goes back, never the revived source — re-parking a revived
+      // `bytes` source would pin the very array the parking exists to release.
+      //
+      // This does re-park a table that failed on its own merits (a bad file)
+      // too. Deliberate: the alternative is matching on the failure MESSAGE,
+      // which is DuckDB's wording and not a contract, and the cost of a wrong
+      // guess here is one wasted rebuild per Retry click rather than a layer
+      // that can never have a table again.
+      if (
+        !registry.has(layerId) &&
+        !pendingSources.has(layerId) &&
+        (cancelBefore.get(layerId) ?? 0) <= startSeq
+      ) {
+        pendingSources.set(layerId, entry);
+      }
     }),
   );
 }

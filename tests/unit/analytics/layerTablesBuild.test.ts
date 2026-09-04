@@ -78,6 +78,7 @@ vi.mock("../../../src/analytics/duckdb", () => {
 });
 
 const {
+  dropLayerTable,
   enqueueLayerTable,
   getLayerTable,
   resetLayerTablesForTest,
@@ -517,6 +518,88 @@ describe("waiting for the engine", () => {
     // only fail again, and `retryEngine` is about ONE cause.
     await retryEngine();
     expect(sql).toEqual([]);
+  });
+
+  it("RE-PARKS a source it could not read, so Retry can try it again", async () => {
+    engineReady = false;
+    // A source whose rows cannot be read — the shape a provider failure takes
+    // by the time it reaches the queue.
+    let broken = true;
+    const flaky = {
+      kind: "resident" as const,
+      records: () => {
+        if (broken) throw new Error("the source could not be read");
+        return [];
+      },
+    };
+    await enqueueLayerTable("L1", flaky);
+
+    // First retry: the engine is up, the source still is not.
+    engineReady = true;
+    await retryEngine();
+    expect(getLayerTable("L1")).toBeNull();
+
+    // Second retry: the blip is over. Without the re-park the source would be
+    // gone and this could never succeed, however often the user clicked.
+    broken = false;
+    describeRows = [{ column_name: "id", column_type: "VARCHAR" }];
+    countValue = 0;
+    await retryEngine();
+    expect(getLayerTable("L1")).not.toBeNull();
+  });
+
+  it("does NOT re-park a source whose layer was removed mid-retry", async () => {
+    engineReady = false;
+    const flaky = {
+      kind: "resident" as const,
+      records: () => {
+        throw new Error("the source could not be read");
+      },
+    };
+    await enqueueLayerTable("L1", flaky);
+
+    engineReady = true;
+    const retry = retryEngine();
+    await dropLayerTable("L1");
+    await retry;
+
+    // A removed layer must not come back on the NEXT retry either.
+    await retryEngine();
+    expect(getLayerTable("L1")).toBeNull();
+    expect(stateOf("L1")).toBeUndefined();
+  });
+
+  it("does NOT re-park when the drop lands AFTER the retry took its snapshot", async () => {
+    // The test above is won by `dropLayerTable`'s SYNCHRONOUS
+    // `pendingSources.delete`: the retry has not snapshotted yet, so its
+    // `pending` list comes back empty and `cancelBefore` never decides
+    // anything. The only window where the guard is what answers is a drop
+    // issued while the retry's own build is in flight — so the source itself
+    // issues it, from inside `records()`.
+    engineReady = false;
+    let dropPromise: Promise<void> | null = null;
+    const flaky = {
+      kind: "resident" as const,
+      records: () => {
+        dropPromise ??= dropLayerTable("L1");
+        throw new Error("the source could not be read");
+      },
+    };
+    await enqueueLayerTable("L1", flaky);
+    // The engine-down path returns before `records()`, so nothing dropped yet.
+    expect(dropPromise).toBeNull();
+    expect(stateOf("L1")).toMatchObject({ state: "failed" });
+
+    engineReady = true;
+    await retryEngine();
+    await dropPromise;
+
+    // Re-parking here would resurrect a layer the user removed.
+    sql.length = 0;
+    await retryEngine();
+    expect(sql).toEqual([]);
+    expect(getLayerTable("L1")).toBeNull();
+    expect(stateOf("L1")).toBeUndefined();
   });
 });
 
