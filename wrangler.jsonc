@@ -7,7 +7,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "multiroof-viewer",
-  "compatibility_date": "2026-08-01",
+  "compatibility_date": "2026-08-04",
   // Preview environment (.github/workflows/preview.yml): every pull request
   // and every push to develop uploads an UNDEPLOYED version with
   // `wrangler versions upload --preview-alias <branch>`, reachable at
