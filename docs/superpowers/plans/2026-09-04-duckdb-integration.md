@@ -23,7 +23,8 @@
 - DuckDB's `glob()` table function works in the browser but lists names that were never created, so it is used for CLEANUP CHECKS only — never to discover what a write produced. There is no glob helper in `analytics/duckdb.ts`; a caller that wants one sends `SELECT file FROM glob('…')` through `runQuery`.
 - Reader schema (identical for `read_cityjson` / `read_cityjsonseq` / `read_flatcitybuf` on 1.5.5): `id, feature_id, object_type, parents VARCHAR[], children VARCHAR[], children_roles VARCHAR[], address STRUCT[], bbox STRUCT, geometry_lod<L> BLOB, geometry_properties_lod<L> STRUCT, material_lod<L>, texture_lod<L>, template STRUCT, other`, then one inferred column per attribute. `id` IS `CityObject.id`; `feature_id` is the root object of the feature. Absent `parents`/`children` are SQL NULL, never `[]`.
 - Every new export from `src/analytics/duckdb.ts` must reach the test files that `vi.mock` it. Seven exist today; Task 4 brings SIX of them up to the new surface — `tests/unit/app/appCatalogEntry.test.tsx`, `tests/unit/app/appRestoreShare.test.tsx`, `tests/unit/app/appEngineBoot.test.tsx`, `tests/unit/app/appCityParquetLayers.test.tsx`, `tests/unit/features/stac/stacItems.test.ts`, `tests/unit/analytics/duckdbStatus.test.ts` — and DELETES the seventh, `tests/unit/analytics/streamingDuckdb.test.ts`, whose subject is removed.
-- Plugin (submodule) changes go on a `duckdb-integration` branch cut from **`2963ddb`** — the gitlink `origin/develop` carries after the Navara 0.1.1 merge, and the head of the plugin repo's `main` — are pushed, and the parent gitlink points at that branch's head. NEVER push onto the plugin repo's `main`. (This branch reaches that pin in Task 23b; before then it is still on `947c980`.)
+- Plugin (submodule) changes go on a `duckdb-integration` branch cut from **`2963ddb`** — the gitlink `origin/develop` carried after the Navara 0.1.1 merge — are pushed, and the parent gitlink points at that branch's head. NEVER push onto the plugin repo's `main`. (This branch reaches `2963ddb` in Task 23b; before then it is still on `947c980`. `develop` has since moved its pin to **`ec65845`**, which Task 34's Step 7 merges INTO the branch rather than rebasing onto.)
+- `buildCityMeshArrays`'s parameter order is `(model, layerId, originOffset, selectedLod, hiddenTypes, appearance, surfaceColors, visibleObjectIds)`. `surfaceColors` is `ec65845`'s, and **main's shape wins**: `visibleObjectIds` is the EIGHTH parameter, never the seventh. Every call site passes `SURFACE_COLORS_LINEAR` as the seventh argument, exactly as `ec65845`'s own sites do.
 - Snapshot schema stays at **v3**. Filter, sort, page, sync-to-map and `visibleObjectIds` are SESSION state and are never persisted.
 - Tests import from `"vitest"`, never `"vite-plus/test"`. React tests use `@testing-library/react`.
 - Every commit message ends with:
@@ -78,7 +79,7 @@
 
 **Submodule (`packages/cityjson-navara-plugins`)**
 
-- `packages/navara-core/src/geometry/buildCityMeshArrays.ts` — 7th parameter `visibleObjectIds`.
+- `packages/navara-core/src/geometry/buildCityMeshArrays.ts` — 8th parameter `visibleObjectIds`, after `surfaceColors`.
 - `packages/navara-cityjson/src/cityModelMesh.ts` / `types.ts` / `cityModelRegistry.ts` — `setVisibleObjectIds`.
 
 ---
@@ -11209,8 +11210,31 @@ git -C packages/cityjson-navara-plugins rev-parse origin/main   # the same
 ```
 
 `buildCityMeshArrays`' signature is UNCHANGED at `2963ddb` — the 0.1.1 upgrade
-did not touch it — so `appearance` is still the sixth parameter and
-`visibleObjectIds` still goes at position 7.)
+did not touch it — so `appearance` is the sixth parameter and
+`visibleObjectIds` is added AFTER it.
+
+The plugin's `ec65845`, which `develop` has since pinned, adds a SEVENTH:
+`surfaceColors`. Main's shape wins, so the final order is
+
+```
+(model, layerId, originOffset, selectedLod, hiddenTypes, appearance,
+ surfaceColors, visibleObjectIds)
+```
+
+— `visibleObjectIds` EIGHTH, and every call site passing
+`SURFACE_COLORS_LINEAR` as its seventh argument, exactly as `ec65845`'s own
+sites do. Task 34's Step 7 merges that in; whether it has already happened when
+you reach this task decides which position you write today, so check:
+
+```bash
+git -C packages/cityjson-navara-plugins log --oneline -1
+grep -n "surfaceColors" packages/cityjson-navara-plugins/packages/navara-core/src/geometry/buildCityMeshArrays.ts
+```
+
+If `surfaceColors` is NOT there, add `visibleObjectIds` as the seventh
+parameter and Step 7's merge moves it to eighth. If it IS there, add it as the
+eighth and pass `SURFACE_COLORS_LINEAR` seventh at every call site and in every
+test below. Either way the rule is the same: **`visibleObjectIds` goes LAST.**)
 
 - [ ] **Step 2: Write the failing test**
 
@@ -11329,11 +11353,17 @@ describe("buildCityMeshArrays visible-id filtering", () => {
 cd packages/cityjson-navara-plugins && pnpm vitest run packages/navara-core/tests/geometry/buildCityMeshArrays.test.ts
 ```
 
-Expected: FAIL — the 7th argument is ignored, so the "only the named objects" case still emits 3 triangles.
+Expected: FAIL — the trailing argument is ignored, so the "only the named objects" case still emits 3 triangles.
 
 - [ ] **Step 4: Add the parameter**
 
-In `packages/navara-core/src/geometry/buildCityMeshArrays.ts`, extend the signature (position 7, AFTER `appearance` — the existing five positional call sites in `cityModelMesh.ts`, `fcb.worker.ts` and ~20 tests all pass `appearance` sixth):
+In `packages/navara-core/src/geometry/buildCityMeshArrays.ts`, extend the
+signature — `visibleObjectIds` goes LAST, after every parameter that already
+exists. On `2963ddb` that is position 7 (after `appearance`); on `ec65845` it is
+position 8 (after `surfaceColors`). The rule is "last", not a number: the
+existing positional call sites in `cityModelMesh.ts`, `fcb.worker.ts` and ~20
+tests pass their arguments in order, and inserting anywhere but the end
+re-points every one of them.
 
 ```ts
 export function buildCityMeshArrays(
@@ -11412,7 +11442,7 @@ EOF
 
 **Interfaces:**
 
-- Consumes: Task 24's 7th parameter.
+- Consumes: Task 24's trailing `visibleObjectIds` parameter — LAST in the signature, whichever plugin commit the submodule is on (7th on `2963ddb`, 8th once `ec65845`'s `surfaceColors` lands).
 - Produces:
 
 ```ts
@@ -11542,7 +11572,8 @@ Initialise it in the constructor, beside `this.hiddenTypes = new Set(options.hid
 this.visibleObjectIds = options.visibleObjectIds ?? null;
 ```
 
-Pass it as the 7th argument in `buildArrays`:
+Pass it as the LAST argument in `buildArrays` — after `this.appearance` on
+`2963ddb`, after the surface-colour argument on `ec65845`:
 
 ```ts
 const arrays = buildCityMeshArrays(
@@ -11552,6 +11583,8 @@ const arrays = buildCityMeshArrays(
   this.lod,
   this.hiddenTypes.size > 0 ? this.hiddenTypes : null,
   this.appearance,
+  // On `ec65845` a surface-colour argument sits here — keep whatever this
+  // call already passes and add `visibleObjectIds` after it.
   this.visibleObjectIds,
 );
 ```
@@ -16099,9 +16132,10 @@ texture/material work and is passed positionally by `cityModelMesh.ts`,
 
 ```
 - `buildCityMeshArrays(model, layerId, originOffset, selectedLod, hiddenTypes,
-appearance, visibleObjectIds: ReadonlySet<string> | null = null)`:
-  `visibleObjectIds` is the SEVENTH parameter — `appearance` has been the sixth
-  since the texture/material work, and is passed positionally by
+appearance, surfaceColors, visibleObjectIds: ReadonlySet<string> | null =
+null)`: `visibleObjectIds` is the EIGHTH parameter — `appearance` has been the
+  sixth since the texture/material work and `surfaceColors` the seventh since
+  the plugin's `ec65845`, and both are passed positionally by
   `cityModelMesh.ts`, `fcb.worker.ts` and every test that names a theme. An
   object is emitted iff not hidden by type AND (visibleObjectIds is null OR
   has(id)). The `objectKeys` slot invariant is preserved (a filtered object
@@ -16252,18 +16286,39 @@ git ls-tree HEAD packages/cityjson-navara-plugins
 git -C packages/cityjson-navara-plugins rev-parse HEAD
 ```
 
-Today develop's pin is still `2963ddb`, the commit Task 23b took, so our
-`duckdb-integration` head (which contains it) is strictly ahead and there is
-nothing to do. Note that the plugin repo's own `origin/main` HAS moved past it
-— to `ec65845`, which changes a `colors` parameter — but develop has not
-adopted that, and neither do we: taking an upgrade nobody asked for, in the
-last step before a push, is how a merge becomes a debugging session.
-
-If develop's pin HAS moved to something our branch does not contain, that pin
-wins and it has to reach the plugin branch before the parent can name it:
+**Develop's pin HAS moved.** `f81ad23` carries **`ec65845`**, not the
+`2963ddb` Task 23b took — that is the plugin's `colors` change, which adds a
+seventh positional parameter `surfaceColors` to `buildCityMeshArrays`. Develop's
+pin wins, and it has to reach the plugin BRANCH before the parent can name it:
 
 ```bash
-git -C packages/cityjson-navara-plugins merge <develop's pin>
+git -C packages/cityjson-navara-plugins fetch origin
+git -C packages/cityjson-navara-plugins merge ec65845
+```
+
+A MERGE COMMIT on `duckdb-integration`, never a rebase: the branch is already
+pushed, and rebasing it would strand the gitlink every earlier parent commit
+names.
+
+Resolving it: **both features coexist.** `cityModelMesh.ts` keeps its
+surface-colour handling AND its `visibleObjectIds`; `buildCityMeshArrays` ends
+up with
+
+```
+(model, layerId, originOffset, selectedLod, hiddenTypes, appearance,
+ surfaceColors, visibleObjectIds)
+```
+
+— main's shape first, ours LAST. Our call sites gain `SURFACE_COLORS_LINEAR` as
+their seventh argument, exactly as `ec65845`'s own sites pass it; our tests that
+call the function positionally get the same insertion. If a test of ours now
+reads `buildCityMeshArrays(m, "L", [0,0,0], null, null, null, new Set([...]))`,
+that seventh argument is being read as `surfaceColors` — add the colour table
+before the set.
+
+Then verify, publish, and only then let the parent name it:
+
+```bash
 cd packages/cityjson-navara-plugins && pnpm typecheck && pnpm vitest run
 git -C packages/cityjson-navara-plugins push origin duckdb-integration
 git add packages/cityjson-navara-plugins
@@ -16271,6 +16326,20 @@ git add packages/cityjson-navara-plugins
 
 Do that BEFORE finishing the parent merge commit, so the gitlink it records is
 the new, published head — not one this branch is about to leave behind.
+
+**Two parent-side resolutions that are not obvious:**
+
+- **`src/app/app.css`** — take DEVELOP's file whole, then re-append our blocks
+  (the table panel, the filter bar, the footer, the export dialog). They are
+  additive and sit at the end, so a three-way merge of a stylesheet both sides
+  edited throughout is all cost and no benefit. Then re-point any token our
+  blocks name that develop has RENAMED: `grep` each `var(--…)` in the appended
+  region against develop's `:root` block and fix what no longer resolves — a
+  missing custom property is not an error, it is an invisible element.
+- **`package.json`** — `@duckdb/duckdb-wasm` keeps `1.33.1-dev64.0` (ours), and
+  everything develop changed comes across: the package `name` is now `"roofy"`,
+  and the `@fontsource` dependencies it added are kept. Then `npm install` to
+  regenerate the lockfile, as always.
 
 Then everything, in both repos:
 
@@ -16504,6 +16573,8 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
 | §4            | **Reader `id` set == `parseCityJSON().objects` key set**                                                                                                                     | 33                                                |
 | §4            | Browser smoke: boot, table, filter, map sync, all four exports                                                                                                               | 32                                                |
 | §5            | Submodule branch from **`2963ddb`** (was `947c980` before the develop merge), pushed, gitlink bump                                                                           | 23b, 24, 25, 26, 34                               |
+| §3.5          | **`visibleObjectIds` goes LAST — position 8 once `ec65845`'s `surfaceColors` lands; main's shape wins and both features coexist**                                            | 24, 25, 26, 34                                    |
+| §5            | **develop's pin `ec65845` is MERGED into the plugin branch (a merge commit, pushed) before the parent gitlink is repointed**                                                 | 34                                                |
 | §5            | **`origin/develop`'s Navara 0.1.1 merge is taken BEFORE the plugin work, and again immediately before the push**                                                             | 23b, 34                                           |
 | §5            | **The docs land where develop's restructure put their equivalents — hard rules in CLAUDE.md, the decision record and Known Issues in `docs/architecture-notes.md`**          | 34                                                |
 | §5            | **TWO whole-branch reviews before the push — `feature-dev:code-reviewer` and `codex exec -m gpt6-astra` (timeout-bounded, with a `claude -p` fallback) — then ONE fix wave** | 34                                                |
@@ -16512,7 +16583,7 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
 | §3.6          | **Schema names, the output directory and the CRS go through `quoteLiteral`, behind a `Number.isInteger(epsg)` gate**                                                         | 30                                                |
 | §3.6          | **Every written name reaches the cleanup list BEFORE any file is validated, and the findings table is dropped in `finally`**                                                 | 30                                                |
 | §3.6          | **The dialog wears the codebase's real modal classes (`.modal`, `.modal-title` + `aria-labelledby`, `.modal-close`)**                                                        | 31                                                |
-| §3.5          | **The spec's own signature line is CORRECTED in place (`appearance` sixth, `visibleObjectIds` seventh), and records that the id test is raw**                                | 34                                                |
+| §3.5          | **The spec's own signature line is CORRECTED in place (`appearance` sixth, `surfaceColors` seventh, `visibleObjectIds` EIGHTH), and records that the id test is raw**        | 34                                                |
 | §4            | **The smoke proves the map filter is a REBUILD: excluded objects stop occluding AND stop answering a click**                                                                 | 32                                                |
 | §5            | Lockfile regenerated; `npm ci` verified in a fresh clone                                                                                                                     | 1, 34                                             |
 | §5            | The seven mocking test files                                                                                                                                                 | 4                                                 |
@@ -16656,11 +16727,12 @@ cityparquet_validation`. Probes P6b/P6c/P6f/P6g and FUNCTIONS.md show the
   turns either failure into a visible warning.
 - §3.5 writes the plugin signature as `(…, hiddenTypes, visibleObjectIds)`, but
   the shipped signature carries `appearance` at position 6 and ~20 call sites
-  pass it positionally. Task 24 uses position 7 — and Task 34 now CORRECTS the
-  spec itself rather than leaving a wrong signature in the document a reader
-  reaches for first, adding while it is there that the id test is RAW (no
-  ancestor walk) because `buildFeatureIdsSql` has already expanded every match
-  to its whole feature.
+  pass it positionally — and the plugin's `ec65845` has since added a SEVENTH,
+  `surfaceColors`. Main's shape wins: `visibleObjectIds` goes LAST, which is
+  position 8. Task 34 now CORRECTS the spec itself rather than leaving a wrong
+  signature in the document a reader reaches for first, adding while it is
+  there that the id test is RAW (no ancestor walk) because
+  `buildFeatureIdsSql` has already expanded every match to its whole feature.
 - §4's browser smoke says only "map sync hides objects", which a style evaluator
   would also appear to do. Task 32 asks for the two things only a geometry
   REBUILD can deliver: an excluded object stops OCCLUDING what is behind it, and
@@ -16791,10 +16863,17 @@ Every name that crosses a task boundary, re-checked after the edits:
   31, which stores `chosenLodSuffix` and matches `selectedLod` against
   `label`). `lodColumnSuffix` is DELETED — no task references it, and
   `sql.ts` no longer imports anything from `columnKind` for LoD purposes.
-- The submodule pin is `2963ddb` everywhere it appears after Task 23b: the
-  Global Constraints line, Task 24's `checkout -b`, Task 34's reviewer diff and
-  the coverage table. `947c980` survives only where the text says explicitly
-  that it is the pin this branch carried BEFORE the merge.
+- The submodule pin is `2963ddb` where the branch is CUT (Task 23b, Task 24's
+  `checkout -b`, Task 34's reviewer diff) and `ec65845` where develop's current
+  pin is MERGED in (Task 34, Step 7). `947c980` survives only where the text
+  says explicitly that it is the pin this branch carried before Task 23b.
+- The parameter order is stated once, in the Global Constraints —
+  `(model, layerId, originOffset, selectedLod, hiddenTypes, appearance,
+surfaceColors, visibleObjectIds)` — and every task that touches it says
+  "LAST" rather than a number, because the number depends on which plugin
+  commit the submodule is on when that task runs. Tasks 24 and 25 carry the
+  check (`grep -n "surfaceColors"`) that settles it; Task 34's spec correction
+  and Step 7 both name position 8 explicitly, which is where it ends up.
 - `LayerTable.rowCount` is `number | null` in both of the plan's copies of the
   interface, and `countRows` returns `null` rather than 0 for a failed COUNT
   (Task 13). Its consumers match: `DuckDBStats.rowCount` and the "Rows loaded"
