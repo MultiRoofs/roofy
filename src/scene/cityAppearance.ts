@@ -30,9 +30,11 @@ export const CITY_APPEARANCE: CityAppearance = {
   /** lime-500 — the brand primary: "selected" is the same colour as the
    *  chrome's active states. */
   highlightColor: "#a7e32b",
-  /** lime-100 — a pale lift under the cursor, distinct from the selection
-   *  and from the amber the energy presets use. */
-  hoverColor: "#edfbc8",
+  /** lime-300 — a lift under the cursor that keeps its hue against the
+   *  light walls under the exposure-10 atmosphere (lime-100 would drift to
+   *  white there), distinct from the lime-500 selection and from every
+   *  preset. */
+  hoverColor: "#cdf176",
   surfaceColors: {
     /** The subject of the app, in the brand's darker orange. */
     RoofSurface: "#d9481c",
