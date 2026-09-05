@@ -26,6 +26,7 @@ import type {
   Rule,
 } from "../../features/rules/types";
 import { RULE_PRESETS } from "../../features/rules/presets";
+import { downloadText } from "../../platform/download";
 
 interface RuleBuilderTabProps {
   readonly model: CityModel;
@@ -90,14 +91,7 @@ export function RuleBuilderTab({
     const currentRules =
       useLayerStore.getState().layers.find((l) => l.id === layerId)?.rules ??
       [];
-    const json = JSON.stringify(currentRules, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "rules.json";
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadText(JSON.stringify(currentRules, null, 2), "rules.json");
   }, [layerId]);
 
   const handleImport = useCallback(
