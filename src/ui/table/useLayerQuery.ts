@@ -184,12 +184,29 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
         setLoading(false);
         return;
       }
-      setRows(pageResult.rows);
-
       // A COUNT that failed is an UNKNOWN total, never a zero — and it is
       // reported, because a footer quietly reading "of ?" is a symptom nobody
       // can act on without the engine's own sentence.
       const filtered = filteredCount.ok ? countOf(filteredCount.rows) : null;
+
+      // CLAMP BEFORE PUBLISHING. The page index is stored per layer and
+      // survives a rebuild that SHRINKS the table — a streaming layer whose
+      // cells were dropped, a filter narrowed elsewhere — so a stored page 9
+      // keeps asking for `OFFSET 900` of a 50-row table and the grid is empty
+      // with a footer that says there are rows. Writing the clamp back to the
+      // store re-runs this effect with a page that exists; publishing the empty
+      // page first would flash "no rows" on the way there, so `loading` is left
+      // raised and the rows are left alone until the real page lands. An
+      // UNKNOWN total clamps nothing: there is no last page to clamp to.
+      if (filtered !== null && layerId !== null) {
+        const lastPage = Math.max(0, Math.ceil(filtered / pageSize) - 1);
+        if (page > lastPage) {
+          useQueryStore.getState().setPage(layerId, lastPage);
+          return;
+        }
+      }
+
+      setRows(pageResult.rows);
       setTotalRows(filtered);
       setUnfilteredRows(
         totalCount === null

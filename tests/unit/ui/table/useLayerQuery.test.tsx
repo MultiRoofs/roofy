@@ -235,6 +235,64 @@ describe("useLayerQuery", () => {
       ),
     );
   });
+  it("CLAMPS a stored page the table has shrunk past, and fetches the real one", async () => {
+    // The page index is per layer and survives a rebuild. A streaming layer
+    // whose cells were dropped goes from 1000 rows to 50 with the store still
+    // on page 9, and every query after that asks for `OFFSET 900` of a 50-row
+    // table: an empty grid under a footer that says there are rows.
+    runQuery.mockImplementation(async (sql: string) =>
+      sql.includes("COUNT(*)")
+        ? { ok: true, columns: ["n"], rows: [{ n: 50 }] }
+        : { ok: true, columns: [], rows: [{ id: "a" }] },
+    );
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    act(() => {
+      useQueryStore.getState().setPage("L", 9);
+    });
+    render(<Probe layerId="L" />);
+
+    // 50 rows at the default page size of 100 is ONE page, so the only valid
+    // index is 0 — written back to the store, which is what re-runs the query.
+    await waitFor(() =>
+      expect(useQueryStore.getState().queries.L?.page).toBe(0),
+    );
+    await waitFor(() =>
+      expect(runQuery).toHaveBeenCalledWith(
+        'SELECT "id", "feature_id", "object_type" FROM "layer_1" LIMIT 100 OFFSET 0',
+      ),
+    );
+    // And the rows on screen are that page's, not the empty one that provoked
+    // the clamp.
+    await waitFor(() =>
+      expect(screen.getByTestId("rows").textContent).toBe("1"),
+    );
+    expect(screen.getByTestId("loading").textContent).toBe("false");
+  });
+
+  it("leaves a page that is still valid, and clamps nothing on an unknown total", async () => {
+    // No last page can be computed from a COUNT that failed, so the stored
+    // page stands — the alternative is throwing the user back to page 1 on a
+    // transient engine error.
+    runQuery.mockImplementation(async (sql: string) =>
+      sql.includes("COUNT(*)")
+        ? { ok: false, message: "IO Error: boom" }
+        : { ok: true, columns: [], rows: [{ id: "a" }] },
+    );
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    act(() => {
+      useQueryStore.getState().setPage("L", 4);
+    });
+    render(<Probe layerId="L" />);
+    await waitFor(() =>
+      expect(screen.getByTestId("total").textContent).toBe(""),
+    );
+    expect(useQueryStore.getState().queries.L?.page).toBe(4);
+  });
+
   it("never lets a STALE page response overwrite a newer one", async () => {
     // Two pages in flight at once, answered in the WRONG order. Without the
     // generation counter the first (slow) page lands last and the grid shows
@@ -244,7 +302,10 @@ describe("useLayerQuery", () => {
       (sql: string) =>
         new Promise((resolve) => {
           if (sql.includes("COUNT(*)")) {
-            resolve({ ok: true, columns: ["n"], rows: [{ n: 42 }] });
+            // 420 rows, not 42: page 1 has to EXIST at the default page
+            // size of 100, or the clamp (rightly) sends this query back to
+            // page 0 and there is no out-of-order race left to test.
+            resolve({ ok: true, columns: ["n"], rows: [{ n: 420 }] });
             return;
           }
           gate.push(() =>
