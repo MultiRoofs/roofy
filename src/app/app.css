@@ -112,6 +112,52 @@
   box-sizing: border-box;
 }
 
+/* ONE focus ring. Every control the keyboard can reach shows the accent ring
+   on :focus-visible (never on pointer focus); fields swap it for the lime
+   border the system already gives them, and the tight groups (toolbar, tabs,
+   segmented scopes, camera cluster) draw it inset so neighbours never clip it. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.tb-btn:focus-visible,
+.inspector-tab:focus-visible,
+.modal-tab:focus-visible,
+.scope-btn:focus-visible,
+.view-mode-btn:focus-visible,
+.camera-ctl-btn:focus-visible,
+.legend-toggle:focus-visible,
+.preset-btn:focus-visible,
+.layer-item:focus-visible {
+  outline-offset: -2px;
+}
+
+input:not([type="checkbox"]):not([type="range"]):not(
+    [type="color"]
+  ):focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Browser surfaces are part of the palette too. */
+::selection {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--fg);
+}
+
+input,
+textarea {
+  caret-color: var(--accent);
+}
+
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
 /* The token ground, not the UA's white: `.app-shell` is capped at 960px and
    centred, so on any wider window the body IS the landing page's margins.
    White gutters beside a near-black shell were invisible while that page had
@@ -301,7 +347,7 @@ body {
 .sample-footnote {
   margin: 0;
   font-size: 0.85rem;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
 .sample-link {
@@ -353,7 +399,7 @@ body {
 
 .drop-or {
   font-size: 0.85rem;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
 /* Browse files + Choose folder sit side by side: two ways in, one row.
@@ -475,7 +521,7 @@ body {
 
 .snapshot-date {
   font-size: 0.75rem;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
 .snapshot-actions {
@@ -524,6 +570,7 @@ body {
 .error-message {
   color: var(--danger);
   background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
   padding: 0.75rem 1rem;
   border-radius: var(--radius);
   width: min(100%, 34rem);
@@ -994,6 +1041,15 @@ body {
   cursor: not-allowed;
 }
 
+/* Inside an `.attr-section` the section already pads 0.75rem, so the rows
+   drop their own horizontal padding and line up with the attribute rows
+   above them instead of sitting 0.75rem further in. */
+.attr-section .advanced-toggle-row,
+.attr-section .advanced-slider-row {
+  padding-left: 0;
+  padding-right: 0;
+}
+
 /* Panel-wide action row, outside the scrolling body so it cannot read as part
    of the last section. */
 .advanced-settings-footer {
@@ -1202,7 +1258,7 @@ body {
   border: none;
   border-bottom: 2px solid transparent;
   background: transparent;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   font-family: var(--font-display);
   font-size: 0.78rem;
   font-weight: 500;
@@ -1213,7 +1269,7 @@ body {
 }
 
 .inspector-tab:hover {
-  color: var(--fg-muted);
+  color: var(--fg);
 }
 
 .inspector-tab.active {
@@ -1224,6 +1280,7 @@ body {
 .inspector-body {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 0.5rem 0;
 }
 
@@ -1232,7 +1289,7 @@ body {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   font-size: 0.82rem;
   text-align: center;
   padding: 1rem;
@@ -1366,7 +1423,7 @@ body {
 }
 
 .status-label {
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
 .status-value {
@@ -1421,7 +1478,7 @@ body {
   flex-direction: column;
   gap: 0.15rem;
   font-size: 0.6rem;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   text-align: center;
 }
 
@@ -1446,7 +1503,7 @@ body {
   padding: 0.3rem 0.5rem;
   border: none;
   background: transparent;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   font-size: 0.7rem;
   cursor: pointer;
   transition:
@@ -1461,7 +1518,7 @@ body {
 
 .scope-btn:hover:not(.active) {
   background: var(--bg-panel-hover);
-  color: var(--fg-muted);
+  color: var(--fg);
 }
 
 .section-highlight {
@@ -1529,7 +1586,7 @@ body {
 
 .rule-empty {
   font-size: 0.75rem;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   padding: 0.5rem 0;
 }
 
@@ -1568,7 +1625,7 @@ body {
 
 .rule-summary {
   font-size: 0.65rem;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   font-family: var(--font-mono);
   white-space: nowrap;
   overflow: hidden;
@@ -1586,7 +1643,7 @@ body {
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   font-size: 0.6rem;
   cursor: pointer;
   transition:
@@ -1639,6 +1696,7 @@ body {
 
 .rule-input {
   flex: 1;
+  min-width: 0;
   padding: 0.3rem 0.4rem;
   background: var(--bg-input);
   border: 1px solid var(--border);
@@ -1677,6 +1735,7 @@ body {
   font-size: 0.68rem;
   font-family: var(--font-mono);
   flex: 1;
+  min-width: 0;
 }
 
 .rule-select-sm {
@@ -1694,7 +1753,7 @@ body {
   padding: 0.25rem;
   border: none;
   background: transparent;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   font-size: 0.65rem;
   cursor: pointer;
 }
@@ -1927,7 +1986,7 @@ body {
 
 .solar-preset-time {
   font-size: 0.55rem;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
 .solar-now-btn {
@@ -2441,7 +2500,7 @@ body {
 
 .layer-meta {
   font-size: 0.6rem;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   flex-shrink: 0;
 }
 
@@ -2478,7 +2537,7 @@ body {
 
 .lod-readout {
   font-size: 0.6rem;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   cursor: default;
 }
 
@@ -2487,7 +2546,7 @@ body {
 }
 
 .lod-readout-cellsize {
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
 .lod-readout-cellsize::before {
@@ -2499,7 +2558,7 @@ body {
   padding: 0.1rem 0.3rem;
   font-size: 0.6rem;
   background: transparent;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -2605,7 +2664,7 @@ body {
 }
 
 .layer-types-empty {
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   font-size: 0.62rem;
   font-style: italic;
 }
@@ -2622,7 +2681,7 @@ body {
 
 .layer-section-empty {
   margin: 0 0 0.3rem;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   font-size: 0.65rem;
   font-style: italic;
   line-height: 1.4;
@@ -2742,7 +2801,7 @@ body {
 }
 
 .geo-layer-relink-note {
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   font-size: 0.62rem;
   line-height: 1.3;
 }
@@ -2794,7 +2853,7 @@ body {
 
 .geo-source-hint {
   margin: 0;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   font-size: 0.62rem;
   line-height: 1.4;
 }
@@ -2976,7 +3035,7 @@ body {
 
 .attr-panel-empty {
   padding: 0.5rem 0.6rem;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   font-size: 0.7rem;
   font-style: italic;
 }
@@ -3006,7 +3065,7 @@ body {
   padding: 0.35rem 0.5rem;
   border-bottom: 1px solid var(--border);
   overflow: hidden;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   font-size: 0.62rem;
   text-align: left;
   text-overflow: ellipsis;
@@ -3070,7 +3129,7 @@ body {
 }
 
 .attr-table .attr-table-mixed {
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   font-style: italic;
 }
 
@@ -3273,7 +3332,7 @@ body {
 
 .table-loading {
   font-size: 0.65rem;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
 /* Table toggle button in toolbar */
@@ -3347,7 +3406,7 @@ body {
 
 .query-box-overlay__name {
   overflow: hidden;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3440,7 +3499,7 @@ button.file-label:disabled {
   font-family: var(--font-mono);
   font-size: 0.68rem;
   letter-spacing: 0.02em;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
 /* ---- panel skin (Add Layer dialog) ---- */
@@ -3475,12 +3534,12 @@ button.file-label:disabled {
 }
 
 .source-picker-panel .drop-or {
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   font-size: 0.72rem;
 }
 
 .source-picker-panel .source-picker-formats {
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
 .source-picker-panel button.file-label {
@@ -3737,9 +3796,36 @@ button.file-label:disabled {
   line-height: 1.45;
 }
 
-/* The same danger orange the landing page's `.error-message` wears. */
+/* The same danger orange the landing page's `.error-message` wears, with a
+   dot so the meaning survives the light theme's ink override below. */
 .share-status.is-error {
   color: var(--danger);
+}
+
+.share-status.is-error::before,
+.geo-layer-error::before,
+.geo-source-error::before,
+.drop-zone p.source-picker-hint::before {
+  content: "";
+  display: inline-block;
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-right: 0.35rem;
+  border-radius: 50%;
+  background: var(--danger);
+  vertical-align: 0.05rem;
+}
+
+/* Terracotta reaches only 4.3:1 on white, so on paper an error is ink beside
+   a terracotta dot or inside a terracotta wash, never orange words. */
+[data-theme="light"] .error-message,
+[data-theme="light"] .error-detail,
+[data-theme="light"] .share-status.is-error,
+[data-theme="light"] .geo-layer-error,
+[data-theme="light"] .geo-source-error,
+[data-theme="light"] .drop-zone p.source-picker-hint,
+[data-theme="light"] .source-picker-panel .drop-zone p.source-picker-hint {
+  color: var(--fg);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -3849,7 +3935,7 @@ button.file-label:disabled {
 .stac-card-footer {
   margin-top: auto;
   font-size: 0.65rem;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
 .stac-items-header {
@@ -4041,7 +4127,7 @@ button.file-label:disabled {
 
 .stac-cap-note {
   font-size: 0.65rem;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
 /* A failed add, reported where the add was clicked. Louder than
@@ -4272,7 +4358,7 @@ button.file-label:disabled {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   font-family: var(--font-mono);
   font-size: 0.55rem;
   font-weight: 600;
@@ -4445,7 +4531,7 @@ button.file-label:disabled {
   margin-top: 0.15rem;
   padding: 0.3rem 0.5rem 0.15rem;
   border-top: 1px solid var(--border);
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   font-size: 0.62rem;
 }
 
