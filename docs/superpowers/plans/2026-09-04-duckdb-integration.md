@@ -15433,27 +15433,37 @@ EOF
 - Consumes: everything.
 - Produces: nothing.
 
-- [ ] **Step 1: Replace CLAUDE.md's Analytics line and add the architecture bullet**
+- [ ] **Step 1: Update CLAUDE.md's Analytics line and add the architecture bullet**
 
-In the **Tech Stack** list, replace
+**READ `CLAUDE.md` FIRST, and edit what is there.** `origin/develop` merged the
+Navara 0.1.1 upgrade (Task 23b, and again in Step 6 below), and that merge
+REWROTE this file: the Tech Stack pins now say `@navaramap/* 0.1.1` with
+`three@0.183.2` kept deliberately, and the Known Issues section has moved on
+from the 0.0.5 wording this plan was drafted against. Nothing below is a
+snapshot of CLAUDE.md to paste over it — every block is an INSERTION beside
+whatever the merge left, and any 0.0.5-era sentence you see quoted in this plan
+is stale by definition.
 
-```
-- **Analytics**: DuckDB-wasm with cityjson extension
-```
-
-with
+Find the **Analytics** entry in the Tech Stack list — one line, currently along
+the lines of "DuckDB-wasm with cityjson extension" — and replace THAT LINE ONLY
+with:
 
 ```
 - **Analytics**: `@duckdb/duckdb-wasm@1.33.1-dev64.0` (DuckDB **1.5.5**, `wasm_eh`) with the `cityjson` community extension v0.4.0; `spatial` and `three_d` are loadable on demand via `ensureExtension` but have NOTHING TO OPERATE ON in v1 — the layer table is attribute-only, and a geometry predicate needs either materialised geometry columns (the memory the design exists to avoid) or a computed-columns feature that re-reads the source. Neither extension autoloads in wasm, and `spatial` is a CORE extension: `INSTALL spatial` (~5 s / 23.6 MB), never `FROM community`, which is what `cityjson` and `three_d` use. Two `three_d` traps for the follow-up: `ST_3DFromWKB` throws on a MultiPolygon Z row and ONE such row poisons a whole column query (use `ST_3DTryFromWKB`), and `ST_3DVolume` raises "solid is not manifold" on an unguarded aggregate (guard with `ST_3DValidationReport(...).is_valid`). Pinned EXACTLY — npm `latest` (dev57 / 1.5.4) serves a stale 4-function `cityjson` and a `three_d` that breaks `LOAD spatial`, silently, and 1.4.4 (dev20) has no `cityjson` wasm artifact at all. **Known staleness, deliberately not fixed here:** `App` takes ONE copy of `getDuckDBStatus()` after `retryEngine()` resolves and holds it as React state, so the status pill and its tooltip never see a later change — and `ensureExtension` publishes one every time it loads `spatial` or `three_d`. Nothing in this milestone calls `ensureExtension`, so nothing is stale yet; the first analysis feature that loads an extension lazily will show a tooltip that omits it. The fix is a `subscribeDuckDBStatus(listener)` in `duckdb.ts` that `publishReady` notifies, with `App` subscribing instead of snapshotting — one function, deferred only because there is nothing to observe until that feature exists.
 ```
 
-Then add this bullet to **Key Architecture Decisions**, after the CityParquet one:
+Then ADD this bullet to **Key Architecture Decisions**, after the CityParquet
+one — added beside the existing bullets, never replacing any of them, and in
+particular never touching whatever the 0.1.1 merge wrote about Navara, the
+engine pins or the Known Issues:
 
 ```
 - **Every city layer gets its OWN DuckDB table, built from bytes, and the source is dropped.** `analytics/layerTables.ts` owns a registry plus ONE async FIFO queue: `addCityLayer` (the single door every static add goes through — a dropped file, a picked folder, a URL, a restore, a share link, a re-link) enqueues a build, and `layerTableLifecycle.ts` diffs the layer store to drop tables and to enqueue a STREAMING layer's (whose rows arrive cell by cell, so it rebuilds on commits, debounced 500 ms, only while the panel is open or an export is pending). The single global `city_objects` table is gone, and with it `shouldUseSourceUrlPath`/`loadModelIntoDuckDB`/`loadCityModelFromMemory`/`loadResidentObjectsIntoDuckDB` — one shared table meant a second layer silently replaced the first one's analytics. A reader-backed layer hands DuckDB the DECODED BYTES the loader already holds (`loadFromUrl` returns `{model, bytes, encoding}`), never a URL: `read_cityjson` over http is unexercised in wasm and CORS-dependent, and registering bytes means a URL layer is never downloaded twice. The build drops `geometry_*`/`geometry_properties_*`/`material_*`/`texture_*`/`template` (53 of 70 columns on Delft, 2.45x less table memory) and then drops the source buffer — probed: a materialised table survives `dropFile`, while the DROPPED NAME resolves to ZERO BYTES forever and fails with a misleading JSON parse error, so VFS names come from a module counter and are NEVER reused; an export re-registers the bytes under a fresh name through the entry's `SourceProvider` (a `File` is a reference, a URL is re-fetched). CityGML, its ZIP, CityParquet and streaming residents take the FLAT FALLBACK: rows built app-side and loaded through `read_json_auto`, with the column names ALIGNED to the reader's (`id, feature_id, object_type, parents, children`, `parents`/`children` NULL rather than `[]`, `feature_id` from `domain/citymodel/featureId.ts`) so `parents IS NULL` is the feature-root test on every layer and one filter vocabulary covers all of them. The old `lod`/`surface_count` columns are gone — app-side derivations, not data. **Every SQL string is a pure function** in `analytics/sql.ts`, unit-tested against exact strings; `compileFilter` refuses an unknown column or an impossible operator BEFORE the query is sent. The map filter (`Layer.visibleObjectIds`, pushed by `handleSync` to the plugin's new `setVisibleObjectIds`) expands matches to whole FEATURES — a Building carries the attributes, its BuildingPart the geometry — with `COALESCE("feature_id","id")` on both sides of a POSITIVE `IN`, because one NULL `feature_id` makes a `NOT IN` predicate NULL and hides nothing; `null` means no filter and an EMPTY set means "nothing matched, draw nothing". Streaming layers cannot be map-filtered yet (the id set would have to travel to the FCB worker). Export goes through DuckDB's own writers — `COPY TO parquet|csv|json`, and `cityparquet_write` for a package zipped with `fflate` — and **never** `FORMAT cityjson|cityjsonseq|flatcitybuf`, whose sinks bypass DuckDB's VFS entirely (no file is created at all; the same extension writes fine through `cityparquet_write`, which is the upstream pointer). Those three are shown DISABLED in the dialog so the capability is discoverable. **Every read-back is validated BY CONTENT** — `PAR1` magic, `JSON.parse`, a newline-terminated CSV header — because a MISSING VFS name reads back as ONE GARBAGE BYTE with no error at all, while a genuinely empty file reads 0; `globFiles` lists names that were never created, so it is fit for cleanup and not for discovery, and the write's own result rows are what name the output. Filter, sort, page, sync-to-map and `visibleObjectIds` are SESSION state: snapshot schema stays v3.
 ```
 
 - [ ] **Step 2: Add the milestone to `docs/roadmap.md`**
+
+Same rule as Step 1: read `docs/roadmap.md` as the merge left it and INSERT.
 
 House style, matched to Milestones 9 and 10: the heading carries the status in
 parentheses, and the entry goes AFTER `## Milestone 10: GIS Layers …` and
@@ -15475,6 +15485,12 @@ BEFORE `## Cross-Cutting Workstreams` — not at the end of the file, where
   through `Layer.visibleObjectIds` and `CityModelMesh.setVisibleObjectIds`.
 - 11.5 Export: Parquet / CSV / JSON via `COPY`, and a CityParquet package via
   `cityparquet_write` + `fflate`, every read-back validated by content.
+
+Delivered ON TOP of the Navara 0.1.1 state: `origin/develop` had already merged
+that upgrade (plugin gitlink `2963ddb`, `@navaramap/*` at 0.1.1 with
+`three@0.183.2` kept deliberately), and this milestone was merged onto it
+rather than beside it — so the plugin's `setVisibleObjectIds` sits on 0.1.1,
+not on the 0.0.5 line the branch started from.
 
 `spatial` and `three_d` are integrated as LOADABLE CAPABILITIES only. They have
 nothing to operate on in v1: the layer table is attribute-only, and a geometry
