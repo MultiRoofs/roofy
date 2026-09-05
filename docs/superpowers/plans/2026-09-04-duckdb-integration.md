@@ -14881,11 +14881,28 @@ agent-browser snapshot -i
 
 Click `Filter`, add `object_type` `=` `Building`, click `Apply`. Confirm the
 footer now reads `… filtered from N`. Tick `Filter map` and confirm the viewport
-drops the objects that no longer match. Then edit the condition to a value
-nothing matches, Apply, and confirm the grid says
-`0 of N rows match; the map shows nothing while Filter map is on` rather than
-going blank without explanation. Clear the filter and confirm the buildings
-come back.
+drops the objects that no longer match.
+
+Then prove it is a REBUILD and not a recolour — the whole reason
+`setVisibleObjectIds` goes through `rebuildGeometry` rather than the style
+evaluator. Apply a filter that excludes SOME buildings (a height threshold over
+Delft, say `b3_h_dak_max > 10`), with `Filter map` on, and check both:
+
+- **They stop OCCLUDING.** Put the camera behind an excluded building so
+  something further away is directly behind it. That thing must be VISIBLE. An
+  evaluator writes RGB into an opaque material, so a "hidden" object painted
+  away would still block what is behind it — and against photoreal terrain that
+  reads as a hole, not as a filter.
+- **They stop answering a CLICK.** Click where an excluded building's roof was.
+  The pick must fall through to whatever is behind it — the terrain, or a
+  building that survived — and the inspector must not show the excluded
+  object's attributes. Picking is our own raycast against the real geometry, so
+  an object still in the mesh still answers, however it is coloured.
+
+Then edit the condition to a value nothing matches, Apply, and confirm the grid
+says `0 of N rows match; the map shows nothing while Filter map is on` rather
+than going blank without explanation. Clear the filter and confirm the buildings
+come back — occluding and pickable again.
 
 - [ ] **Step 4: Export each of the four formats**
 
@@ -15430,6 +15447,8 @@ EOF
 - Modify: `docs/architecture-notes.md` (the decision record and the Known
   Issues, which `a1682d9` moved out of CLAUDE.md)
 - Modify: `docs/roadmap.md`
+- Modify: `docs/superpowers/specs/2026-09-04-duckdb-integration-design.md`
+  (§3.5's signature line — see Step 2)
 
 **Interfaces:**
 
@@ -15438,7 +15457,7 @@ EOF
 
 - [ ] **Step 1: Put the DuckDB material where its equivalents now live**
 
-**Do this AFTER Step 6's re-merge, and READ BOTH FILES FIRST.** `origin/develop`
+**Do this AFTER Step 7's re-merge, and READ BOTH FILES FIRST.** `origin/develop`
 has restructured the documentation twice since this plan was drafted: the Navara
 0.1.1 upgrade rewrote CLAUDE.md's pins, and `a1682d9` then split the file in
 two — **CLAUDE.md** is now commands, workflow and HARD RULES, while the decision
@@ -15488,7 +15507,39 @@ If the restructure has left these sections under different names, follow the
 FILE, not this plan: the rule is "hard rules where the hard rules are, decision
 records where the decision records are".
 
-- [ ] **Step 2: Add the milestone to `docs/roadmap.md`**
+- [ ] **Step 2: Correct §3.5's signature line in the spec**
+
+The spec travels with this plan and is what a reader reaches for first, so a
+signature it gets wrong is worse than one it omits. §3.5 writes:
+
+```
+- `buildCityMeshArrays(model, layerId, originOffset, selectedLod, hiddenTypes,
+visibleObjectIds: ReadonlySet<string> | null = null)`: an object is emitted
+  iff not hidden by type AND (visibleObjectIds is null OR has(id)). The
+  `objectKeys` slot invariant is preserved (a filtered object still takes its
+  index).
+```
+
+It omits `appearance`, which has been the SIXTH parameter since the
+texture/material work and is passed positionally by `cityModelMesh.ts`,
+`fcb.worker.ts` and some twenty tests. Replace that bullet with:
+
+```
+- `buildCityMeshArrays(model, layerId, originOffset, selectedLod, hiddenTypes,
+appearance, visibleObjectIds: ReadonlySet<string> | null = null)`:
+  `visibleObjectIds` is the SEVENTH parameter — `appearance` has been the sixth
+  since the texture/material work, and is passed positionally by
+  `cityModelMesh.ts`, `fcb.worker.ts` and every test that names a theme. An
+  object is emitted iff not hidden by type AND (visibleObjectIds is null OR
+  has(id)). The `objectKeys` slot invariant is preserved (a filtered object
+  still takes its index). The id test is RAW — no ancestor walk — because the
+  caller's SQL has already expanded every match to its whole feature
+  (`buildFeatureIdsSql`), so the set it hands over already names the parts as
+  well as the roots; walking parents here would be the same expansion done
+  twice, in a hot geometry loop, against a model the plugin does not index.
+```
+
+- [ ] **Step 3: Add the milestone to `docs/roadmap.md`**
 
 Same rule as Step 1: read `docs/roadmap.md` as the merge left it and INSERT.
 
@@ -15554,7 +15605,7 @@ Also update the **Milestones** section of `CLAUDE.md`, appending:
 - Milestone 11 (DuckDB integration — per-layer tables, query table, map filter, export): Complete
 ```
 
-- [ ] **Step 3: Run every check, in both repos**
+- [ ] **Step 4: Run every check, in both repos**
 
 ```bash
 npx tsc -b --noEmit
@@ -15564,7 +15615,7 @@ cd packages/cityjson-navara-plugins && pnpm typecheck && pnpm vitest run
 
 Expected: all clean, 0 failed files in both.
 
-- [ ] **Step 4: Make sure the submodule branch really is published**
+- [ ] **Step 5: Make sure the submodule branch really is published**
 
 Everything below depends on it: a recursive clone resolves the gitlink from
 GITHUB, not from this checkout, and a parent commit whose gitlink names an
@@ -15580,7 +15631,7 @@ git -C packages/cityjson-navara-plugins rev-parse origin/duckdb-integration
 Expected: the push is a no-op ("Everything up-to-date") and the two hashes
 match.
 
-- [ ] **Step 5: Verify a fresh clone installs (CI runs `npm ci`)**
+- [ ] **Step 6: Verify a fresh clone installs (CI runs `npm ci`)**
 
 Now that the branch is up, clone into a throwaway directory:
 
@@ -15595,7 +15646,7 @@ with no `EUSAGE` lockfile-mismatch error. If `npm ci` fails, re-run
 `npm install` in the worktree, commit the regenerated `package-lock.json`, and
 repeat.
 
-- [ ] **Step 6: Merge `origin/develop` again, and re-run both suites**
+- [ ] **Step 7: Merge `origin/develop` again, and re-run both suites**
 
 A USER INSTRUCTION, and a standing one: this branch is merged up to date with
 `develop` immediately before it is pushed. Task 23b took the Navara 0.1.1
@@ -15659,7 +15710,7 @@ cd packages/cityjson-navara-plugins && pnpm typecheck && pnpm vitest run
 Expected: all clean. A merge that needed no resolution still gets the full run —
 develop can break this branch without touching a line of it.
 
-- [ ] **Step 7: Commit the docs**
+- [ ] **Step 8: Commit the docs**
 
 ```bash
 git add CLAUDE.md docs/roadmap.md
@@ -15672,7 +15723,7 @@ EOF
 )"
 ```
 
-- [ ] **Step 8: Code review before the push**
+- [ ] **Step 9: Code review before the push**
 
 CLAUDE.md requires it: "When completing a major feature or milestone, use the
 `feature-dev:code-reviewer` agent with high effort to review changes. Run the
@@ -15688,13 +15739,13 @@ git -C packages/cityjson-navara-plugins log --oneline 2963ddb..HEAD
 ```
 
 Give the reviewer that diff plus this plan and the spec, at high effort. Address
-every **Critical** finding with its own commit (prefixed `fix:`) before Step 9;
+every **Critical** finding with its own commit (prefixed `fix:`) before Step 10;
 record anything deliberately not acted on, and why, in the PR description.
 
 Run it AFTER the develop merge, not before: the reviewer should see the code as
 it will actually land, including whatever the merge changed.
 
-- [ ] **Step 9: Push**
+- [ ] **Step 10: Push**
 
 ```bash
 git push
@@ -15704,11 +15755,11 @@ git push
 hook that runs `vp check`, `tsc` and the whole test suite before the push is
 allowed — so a `git push` that appears to hang is the hook working, and a
 Ctrl-C is a half-run verification, not a cancelled upload. Everything it runs
-has already passed in Step 6, so it should be a slow yes; if it says no, the
+has already passed in Step 7, so it should be a slow yes; if it says no, the
 answer is to fix what it found, never `--no-verify`.
 
-Nothing is left to push on the submodule — Step 4 confirmed its branch is
-published and Step 5 proved a recursive clone of this commit resolves. The
+Nothing is left to push on the submodule — Step 5 confirmed its branch is
+published and Step 6 proved a recursive clone of this commit resolves. The
 ordering the whole task exists to enforce: **submodule branch pushed → fresh
 clone with `npm ci` → merge `develop` and re-verify → code review → parent
 push.**
@@ -15817,6 +15868,8 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
 | §5            | Submodule branch from **`2963ddb`** (was `947c980` before the develop merge), pushed, gitlink bump                                                                   | 23b, 24, 25, 26, 34                               |
 | §5            | **`origin/develop`'s Navara 0.1.1 merge is taken BEFORE the plugin work, and again immediately before the push**                                                     | 23b, 34                                           |
 | §5            | **The docs land where develop's restructure put their equivalents — hard rules in CLAUDE.md, the decision record and Known Issues in `docs/architecture-notes.md`**  | 34                                                |
+| §3.5          | **The spec's own signature line is CORRECTED in place (`appearance` sixth, `visibleObjectIds` seventh), and records that the id test is raw**                        | 34                                                |
+| §4            | **The smoke proves the map filter is a REBUILD: excluded objects stop occluding AND stop answering a click**                                                         | 32                                                |
 | §5            | Lockfile regenerated; `npm ci` verified in a fresh clone                                                                                                             | 1, 34                                             |
 | §5            | The seven mocking test files                                                                                                                                         | 4                                                 |
 | §5            | `duckdb.ts` the only importer of `@duckdb/duckdb-wasm`                                                                                                               | Global Constraints; 13, 29, 30 all import from it |
@@ -15858,7 +15911,7 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
   stopped quoting the old file at all — it names three destinations (the Tech
   Stack one-liner, four hard rules, and one decision record plus two Known
   Issues) and says to follow the FILE rather than this plan if the sections have
-  been renamed again. Step 6 takes develop's version of both documents whole
+  been renamed again. Step 7 takes develop's version of both documents whole
   rather than three-way merging a file that has been reorganised.
 - §5's delivery constraint says the plugin branch is cut from `947c980` because
   "`origin/main` is ahead of the parent's pin (a Navara 0.1.1 bump the app is
@@ -15948,7 +16001,16 @@ cityparquet_validation`. Probes P6b/P6c/P6f/P6g and FUNCTIONS.md show the
   turns either failure into a visible warning.
 - §3.5 writes the plugin signature as `(…, hiddenTypes, visibleObjectIds)`, but
   the shipped signature carries `appearance` at position 6 and ~20 call sites
-  pass it positionally. Task 24 uses position 7.
+  pass it positionally. Task 24 uses position 7 — and Task 34 now CORRECTS the
+  spec itself rather than leaving a wrong signature in the document a reader
+  reaches for first, adding while it is there that the id test is RAW (no
+  ancestor walk) because `buildFeatureIdsSql` has already expanded every match
+  to its whole feature.
+- §4's browser smoke says only "map sync hides objects", which a style evaluator
+  would also appear to do. Task 32 asks for the two things only a geometry
+  REBUILD can deliver: an excluded object stops OCCLUDING what is behind it, and
+  stops answering a click — picking is our own raycast against the real mesh, so
+  an object still in it still answers however it is coloured.
 - §3.6's source read is written with `lod := '<L>'`. Probe `p8.out` shows `lod :=`
   narrows the SCHEMA, keeps every row, and raises a Binder Error for an LoD the
   file lacks — so it works, but it is redundant beside an explicit column list
