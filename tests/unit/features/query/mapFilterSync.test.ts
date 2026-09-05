@@ -24,7 +24,7 @@ vi.mock("../../../../src/analytics/duckdb", () => ({
   queryParquetBuffer: vi.fn(async () => null),
 }));
 
-const { syncFilterToMap } =
+const { clearMapFilter, forgetMapFilter, syncFilterToMap } =
   await import("../../../../src/features/query/mapFilterSync");
 const { useLayerTableStore } =
   await import("../../../../src/analytics/layerTables");
@@ -221,5 +221,118 @@ describe("syncFilterToMap", () => {
     await syncFilterToMap(id);
     expect(visibleIds(id)).toBeNull();
     expect(runQuery).not.toHaveBeenCalled();
+  });
+});
+
+/** A layer set up to map-filter, with its id query HELD until the returned
+ *  `release` is called. The started promise is returned so a test can await
+ *  the write (or the discarded non-write) deterministically. */
+function heldSync(rows: ReadonlyArray<Record<string, unknown>>): {
+  readonly id: string;
+  readonly release: () => void;
+  readonly done: Promise<void>;
+} {
+  const id = addLayer();
+  useLayerTableStore.setState({
+    tables: { [id]: { state: "ready", info: TABLE } },
+  });
+  useQueryStore.getState().setSyncToMap(id, true);
+  useQueryStore.getState().setFilter(id, FILTER);
+  useQueryStore.getState().applyFilter(id);
+
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  runQuery.mockImplementationOnce(async () => {
+    await held;
+    return { ok: true, columns: ["id"], rows };
+  });
+  return { id, release, done: syncFilterToMap(id) };
+}
+
+describe("clearMapFilter", () => {
+  it("writes null", () => {
+    const id = addLayer();
+    useLayerStore.getState().setVisibleObjectIds(id, new Set(["B1"]));
+
+    clearMapFilter(id);
+    expect(visibleIds(id)).toBeNull();
+  });
+
+  it("INVALIDATES a query already in flight", async () => {
+    const { id, release, done } = heldSync([{ id: "STALE" }]);
+
+    // The lifecycle's rebuild clear, landing while the id query for the table
+    // being RETIRED is still out. Going through the generation is the whole
+    // point: a bare store write would be undone the moment that answer landed,
+    // reinstating a set computed against a table that no longer exists.
+    clearMapFilter(id);
+    release();
+    await done;
+
+    expect(visibleIds(id)).toBeNull();
+  });
+});
+
+describe("forgetMapFilter", () => {
+  it("drops the layer's generation, so a late answer cannot write", async () => {
+    const { id, release, done } = heldSync([{ id: "STALE" }]);
+
+    // What layer removal calls. The layer is gone from the store, so the write
+    // would be a no-op today — but the ENTRY must go too, or the map grows one
+    // per layer ever synced, and a re-added id inherits a stale number.
+    forgetMapFilter(id);
+    release();
+    await done;
+
+    expect(visibleIds(id)).toBeNull();
+  });
+});
+
+describe("non-string ids", () => {
+  it("keeps a BIGINT id rather than silently hiding everything", async () => {
+    runQuery.mockResolvedValue({
+      ok: true,
+      columns: ["id"],
+      rows: [{ id: 42 }, { id: 7n }, { id: "B1" }],
+    });
+    const id = addLayer();
+    useLayerTableStore.setState({
+      tables: { [id]: { state: "ready", info: TABLE } },
+    });
+    useQueryStore.getState().setSyncToMap(id, true);
+    useQueryStore.getState().setFilter(id, FILTER);
+    useQueryStore.getState().applyFilter(id);
+
+    await syncFilterToMap(id);
+    // The reader does not constrain the id column's TYPE — a numeric or UUID
+    // id used to fall through the `typeof === "string"` test and leave an
+    // empty set, which draws nothing at all.
+    expect([...visibleIds(id)!]).toEqual(["42", "7", "B1"]);
+  });
+
+  it("WARNS when rows came back but not one usable id did", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    runQuery.mockResolvedValue({
+      ok: true,
+      columns: ["id"],
+      rows: [{ id: null }, { id: null }],
+    });
+    const id = addLayer();
+    useLayerTableStore.setState({
+      tables: { [id]: { state: "ready", info: TABLE } },
+    });
+    useQueryStore.getState().setSyncToMap(id, true);
+    useQueryStore.getState().setFilter(id, FILTER);
+    useQueryStore.getState().applyFilter(id);
+
+    await syncFilterToMap(id);
+    // Hiding everything is still the honest answer to an id column full of
+    // NULLs — but not SILENTLY: nothing on screen distinguishes it from a
+    // filter that matched nothing.
+    expect(visibleIds(id)!.size).toBe(0);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
   });
 });

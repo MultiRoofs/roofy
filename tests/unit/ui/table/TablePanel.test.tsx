@@ -375,6 +375,47 @@ describe("TablePanel states", () => {
     expect(useQueryStore.getState().queries.L?.syncToMap).toBe(true);
   });
 
+  it("drives the map filter from the applied filter, and again when the table is REBUILT", async () => {
+    runQuery.mockImplementation(async (sql: string) =>
+      sql.includes("COUNT(*)")
+        ? { ok: true, columns: ["n"], rows: [{ n: 1 }] }
+        : sql.startsWith('SELECT "id" FROM')
+          ? { ok: true, columns: ["id"], rows: [{ id: "B1" }] }
+          : { ok: true, columns: [], rows: [] },
+    );
+    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    useQueryStore.getState().setSyncToMap("L", true);
+    useQueryStore.getState().setFilter("L", {
+      logic: "AND",
+      conditions: [
+        { id: "c", column: "object_type", op: "=", value: "Building" },
+      ],
+    });
+    useQueryStore.getState().applyFilter("L");
+
+    panel();
+    await waitFor(() => {
+      const ids = useLayerStore.getState().layers[0]!.visibleObjectIds;
+      expect(ids === null ? null : [...ids]).toEqual(["B1"]);
+    });
+
+    // A REBUILD mints a new `layer_<n>`, and the effect keys on the table
+    // OBJECT so the ids are recomputed against the table that now exists.
+    const idQueries = () =>
+      runQuery.mock.calls
+        .map((args) => String(args[0]))
+        .filter((sql) => sql.startsWith('SELECT "id" FROM'));
+    expect(idQueries().at(-1)).toContain('FROM "layer_1"');
+
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: { ...TABLE, table: "layer_2" } } },
+    });
+    await waitFor(() => expect(idQueries().at(-1)).toContain('FROM "layer_2"'));
+  });
+
   it("tells the registry the panel is open, and shut on unmount", async () => {
     panel();
     await waitFor(() =>

@@ -18,6 +18,17 @@ vi.mock("../../../../src/analytics/layerTables", async (importOriginal) => {
   };
 });
 
+const clearMapFilter = vi.fn();
+const forgetMapFilter = vi.fn();
+// The map-filter door is SPIED, not exercised: this file is about which
+// lifecycle beats call it. That the clear invalidates an in-flight id query is
+// `mapFilterSync`'s own test.
+vi.mock("../../../../src/features/query/mapFilterSync", () => ({
+  syncFilterToMap: vi.fn(async () => {}),
+  clearMapFilter: (layerId: string) => clearMapFilter(layerId),
+  forgetMapFilter: (layerId: string) => forgetMapFilter(layerId),
+}));
+
 const {
   installLayerTableLifecycle,
   refreshStreamingTable,
@@ -74,6 +85,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   enqueued.length = 0;
   dropped.length = 0;
+  clearMapFilter.mockReset();
+  forgetMapFilter.mockReset();
   useLayerStore.setState({ layers: [], activeLayerId: null });
   useStreamStore.setState({ streams: {} });
   useQueryStore.setState({ queries: {} });
@@ -106,6 +119,12 @@ describe("removals", () => {
     useQueryStore.getState().setSyncToMap("A", true);
     useLayerStore.setState({ layers: [] });
     expect(useQueryStore.getState().queries.A).toBeUndefined();
+  });
+
+  it("forgets the layer's map-filter generation along with its table", () => {
+    useLayerStore.setState({ layers: [layer({ id: "A" })] });
+    useLayerStore.setState({ layers: [] });
+    expect(forgetMapFilter).toHaveBeenCalledWith("A");
   });
 
   it("does not drop a table for a layer that is merely renamed", () => {
@@ -145,6 +164,20 @@ describe("streaming layers", () => {
     expect(enqueued).toEqual(["S"]);
   });
 
+  it("clears the map filter through the sync BEFORE a debounced rebuild", () => {
+    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useLayerTableStore.getState().setTablePanelOpen(true);
+    clearMapFilter.mockReset();
+
+    useStreamStore.setState({ streams: { S: { version: 1 } as never } });
+    // Not when the timer is ARMED — a rebuild the fire-time gate abandons must
+    // not have thrown the drawn set away on its way past.
+    expect(clearMapFilter).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(STREAM_REBUILD_DEBOUNCE_MS);
+    expect(clearMapFilter).toHaveBeenCalledWith("S");
+  });
+
   it("refreshStreamingTable rebuilds at once, with no panel and no debounce", async () => {
     useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
     enqueued.length = 0;
@@ -161,8 +194,15 @@ describe("streaming layers", () => {
       ],
     });
     enqueued.length = 0;
+    clearMapFilter.mockReset();
     useLayerTableStore.getState().setTablePanelOpen(true);
     expect(enqueued.sort()).toEqual(["S1", "S2"]);
+    // Every one of those tables is being replaced, so every one of their
+    // drawn sets is stale — and only the streaming ones, never layer "A".
+    expect(clearMapFilter.mock.calls.map((args) => String(args[0]))).toEqual([
+      "S1",
+      "S2",
+    ]);
   });
 
   it("keeps a separate debounce timer per streaming layer", () => {

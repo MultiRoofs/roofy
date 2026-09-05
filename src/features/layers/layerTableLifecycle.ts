@@ -19,6 +19,7 @@
 
 import { useStreamStore } from "../streaming/streamStore";
 import { getResidentModel } from "../streaming/residentModel";
+import { clearMapFilter, forgetMapFilter } from "../query/mapFilterSync";
 import { useQueryStore } from "../query/queryStore";
 import {
   dropLayerTable,
@@ -99,8 +100,10 @@ export function installLayerTableLifecycle(): () => void {
         // The drawn set was computed from the table this rebuild REPLACES.
         // The panel's own effect recomputes it once the new table lands;
         // leaving the old ids in place would draw a filter over a table that
-        // no longer exists.
-        useLayerStore.getState().setVisibleObjectIds(layerId, null);
+        // no longer exists. Through `clearMapFilter`, never straight to the
+        // store: the id query for the retired table can still be in flight,
+        // and only the generation bump stops its answer landing after this.
+        clearMapFilter(layerId);
         void enqueueLayerTable(layerId, residentTableSource(layerId));
       }, STREAM_REBUILD_DEBOUNCE_MS),
     );
@@ -117,6 +120,10 @@ export function installLayerTableLifecycle(): () => void {
       // a different table and must not inherit a predicate naming columns it
       // may not have.
       useQueryStore.getState().resetQuery(id);
+      // The layer is gone, so its drawn set went with it — but the sync's
+      // per-layer generation would outlive it, and a re-add under the same id
+      // would inherit the number.
+      forgetMapFilter(id);
       void dropLayerTable(id);
     }
 
@@ -160,8 +167,8 @@ export function installLayerTableLifecycle(): () => void {
       // the panel open AGAIN and rebuild a second time, moments after this one.
       cancelRebuild(layer.id);
       // Same reason as `scheduleRebuild`: the ids belong to the table being
-      // replaced.
-      useLayerStore.getState().setVisibleObjectIds(layer.id, null);
+      // replaced, and an id query for it may still be out.
+      clearMapFilter(layer.id);
       void enqueueLayerTable(layer.id, residentTableSource(layer.id));
     }
   });
