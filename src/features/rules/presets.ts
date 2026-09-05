@@ -3,6 +3,11 @@
  *
  * Each preset is a function that returns a Rule with a fresh UUID.
  * Presets provide one-click access to frequently used analysis patterns.
+ *
+ * Colours are the brand's rooftop-function hues (`--layer-*` in brand.css):
+ * flat roofs take the water blue, the two sun-facing presets the energy
+ * ambers, steep roofs the social orange and large roofs the nature lime — so
+ * a legend of presets reads in the same palette as the mark.
  */
 
 import type { Rule } from "./types";
@@ -32,7 +37,7 @@ export const RULE_PRESETS: ReadonlyArray<RulePreset> = [
     create: () => ({
       id: crypto.randomUUID(),
       name: "South-facing",
-      color: "#f59e0b",
+      color: "#f0a800",
       logic: "AND",
       conditions: [
         { field: "azimuthDeg", operator: ">=", value: 135 },
@@ -48,7 +53,7 @@ export const RULE_PRESETS: ReadonlyArray<RulePreset> = [
     create: () => ({
       id: crypto.randomUUID(),
       name: "Steep roofs",
-      color: "#ef4444",
+      color: "#f2683c",
       logic: "AND",
       conditions: [{ field: "inclinationDeg", operator: ">", value: 45 }],
       enabled: true,
@@ -60,7 +65,7 @@ export const RULE_PRESETS: ReadonlyArray<RulePreset> = [
     create: () => ({
       id: crypto.randomUUID(),
       name: "Large roofs",
-      color: "#10b981",
+      color: "#a7e32b",
       logic: "AND",
       conditions: [{ field: "areaSqM", operator: ">", value: 50 }],
       enabled: true,
@@ -72,7 +77,7 @@ export const RULE_PRESETS: ReadonlyArray<RulePreset> = [
     create: () => ({
       id: crypto.randomUUID(),
       name: "Solar suitable",
-      color: "#f97316",
+      color: "#ffc530",
       logic: "AND",
       conditions: [
         { field: "azimuthDeg", operator: ">=", value: 120 },

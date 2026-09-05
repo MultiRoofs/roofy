@@ -19,7 +19,7 @@ import {
 describe("DEFAULT_GEO_LAYER_STYLE", () => {
   it("is the accent, point size and line width the app shipped as constants", () => {
     expect(DEFAULT_GEO_LAYER_STYLE).toEqual({
-      color: "#ff5a3c",
+      color: "#f2683c",
       pointSizePx: 24,
       lineWidthPx: 2,
       fillOpacity: 1,
@@ -29,7 +29,7 @@ describe("DEFAULT_GEO_LAYER_STYLE", () => {
 
 describe("hexColorToNumber", () => {
   it("reads the six-digit form the pickers emit", () => {
-    expect(hexColorToNumber("#ff5a3c")).toBe(0xff5a3c);
+    expect(hexColorToNumber("#f2683c")).toBe(0xf2683c);
     expect(hexColorToNumber("#000000")).toBe(0x000000);
     expect(hexColorToNumber("#FFFFFF")).toBe(0xffffff);
   });
@@ -53,7 +53,7 @@ describe("styleColorNumber", () => {
     expect(
       styleColorNumber({ ...DEFAULT_GEO_LAYER_STYLE, color: "#00aaff" }),
     ).toBe(0x00aaff);
-    expect(styleColorNumber(DEFAULT_GEO_LAYER_STYLE)).toBe(0xff5a3c);
+    expect(styleColorNumber(DEFAULT_GEO_LAYER_STYLE)).toBe(0xf2683c);
   });
 
   it("falls back to the default accent rather than handing the engine NaN", () => {
@@ -61,9 +61,9 @@ describe("styleColorNumber", () => {
     // the layer black or not at all, which reads as a data problem.
     expect(
       styleColorNumber({ ...DEFAULT_GEO_LAYER_STYLE, color: "not a colour" }),
-    ).toBe(0xff5a3c);
+    ).toBe(0xf2683c);
     expect(styleColorNumber({ ...DEFAULT_GEO_LAYER_STYLE, color: "" })).toBe(
-      0xff5a3c,
+      0xf2683c,
     );
   });
 });

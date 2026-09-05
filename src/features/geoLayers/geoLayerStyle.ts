@@ -59,7 +59,7 @@ export interface GeoLayerStyle {
  * expect, and fading it is the deliberate act.
  */
 export const DEFAULT_GEO_LAYER_STYLE: GeoLayerStyle = {
-  color: "#ff5a3c",
+  color: "#f2683c",
   pointSizePx: 24,
   lineWidthPx: 2,
   fillOpacity: 1,

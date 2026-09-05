@@ -135,9 +135,9 @@ describe("geoLayerDescription", () => {
     expect(desc.source).toBe(SOURCE);
     // The literal numbers, not just `DEFAULT_GEO_LAYER_STYLE` echoed back:
     // making the style editable must not have restyled anybody's workspace.
-    expect(DEFAULT_ACCENT).toBe(0xff5a3c);
+    expect(DEFAULT_ACCENT).toBe(0xf2683c);
     expect(desc.point).toEqual({
-      color: 0xff5a3c,
+      color: 0xf2683c,
       size: 24,
       // PIXELS. In metres a 24 unit sprite is invisible from a city-wide
       // camera and a blot from a rooftop one.
@@ -147,13 +147,13 @@ describe("geoLayerDescription", () => {
       opacity: 1,
     });
     expect(desc.polyline).toMatchObject({
-      color: 0xff5a3c,
+      color: 0xf2683c,
       width: 2,
       clampToGround: true,
       show: true,
     });
     expect(desc.polygon).toMatchObject({
-      color: 0xff5a3c,
+      color: 0xf2683c,
       clampToGround: true,
       show: true,
       opacity: 1,
@@ -205,9 +205,9 @@ describe("geoLayerDescription", () => {
       SOURCE,
     );
 
-    expect(desc.point).toMatchObject({ color: 0xff5a3c });
-    expect(desc.polyline).toMatchObject({ color: 0xff5a3c });
-    expect(desc.polygon).toMatchObject({ color: 0xff5a3c });
+    expect(desc.point).toMatchObject({ color: 0xf2683c });
+    expect(desc.polyline).toMatchObject({ color: 0xf2683c });
+    expect(desc.polygon).toMatchObject({ color: 0xf2683c });
   });
 
   it("multiplies the fill opacity by the layer's own opacity", () => {

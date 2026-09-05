@@ -420,7 +420,7 @@ describe("geoLayerIdForEngineLayerId", () => {
 /** The style's own colour, as the engine number — what a cleared or unselected
  *  feature must be told explicitly, because an omitted key never resets a
  *  previously evaluated override. */
-const OWN_COLOR_HEX = 0xff5a3c;
+const OWN_COLOR_HEX = 0xf2683c;
 
 describe("GEO_HIGHLIGHT_COLOR_HEX", () => {
   it("is the SAME accent the city meshes highlight a surface with", () => {
