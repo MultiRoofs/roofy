@@ -477,6 +477,56 @@ shell gates on city layers alone), which also means neither the zoom button nor 
 inspector is reachable in a geo-only workspace. A follow-up candidate, out of scope for
 both plans.
 
+## Milestone 11: DuckDB Integration — Per-Layer Tables, Query Table, Map Filter, Export (Complete)
+
+- 11.1 Engine: `@duckdb/duckdb-wasm@1.33.1-dev64.0` (DuckDB 1.5.5), per-extension
+  status, `ensureExtension` for `spatial`/`three_d`, `runQuery` with DuckDB's own
+  error message, VFS primitives, init retry.
+- 11.2 One table per city layer (`analytics/layerTables.ts`), reader-backed from
+  bytes or a flat fallback from the parsed model / resident records; one FIFO
+  queue; `addCityLayer` as the single static add path.
+- 11.3 Table panel: pagination (100/500/1000), sort, structured WHERE filter,
+  DuckDB-only, states for engine-down / queued / building / failed / empty.
+- 11.4 "Filter map": the applied filter's feature-expanded ids reach the plugin
+  through `Layer.visibleObjectIds` and `CityModelMesh.setVisibleObjectIds`.
+- 11.5 Export: Parquet / CSV / JSON via `COPY`, and a CityParquet package via
+  `cityparquet_write` + `fflate`, every read-back validated by content.
+
+Delivered ON TOP of the Navara 0.1.1 state and the Roofy rebrand: `origin/develop`
+had already merged both, and this milestone was merged onto them rather than
+beside them — so the plugin's `setVisibleObjectIds` sits on 0.1.1, not on the
+0.0.5 line the branch started from, and it takes its place beside the plugins'
+`colors` seam: `buildCityMeshArrays` carries `surfaceColors` seventh and
+`visibleObjectIds` EIGHTH.
+
+`spatial` and `three_d` are integrated as LOADABLE CAPABILITIES only. They have
+nothing to operate on in v1: the layer table is attribute-only, and a geometry
+predicate needs either geometry columns materialised (the memory cost the
+design exists to avoid) or a computed-columns feature that reads the
+re-registered source on demand. `spatial` does not autoload in wasm and is a
+CORE extension (`INSTALL spatial`, ~5 s / 23.6 MB — not `FROM community`).
+Known `three_d` traps for that follow-up: `ST_3DFromWKB` throws on a
+MultiPolygon Z row and one such row poisons a whole column query (use
+`ST_3DTryFromWKB`); `ST_3DVolume` raises "solid is not manifold" on an
+unguarded aggregate (guard with `ST_3DValidationReport(...).is_valid`).
+
+Deferred: streaming-layer map filtering; persisting filters in snapshots and
+share links; a free-text SQL console; geometry-backed analysis on
+`spatial`/`three_d`; CityJSON/CityJSONSeq/FCB export until the upstream wasm
+writer stops bypassing the VFS; CityParquet-sourced layers as reader-backed
+tables (`cityparquet_read` is unusable in wasm).
+
+Also deferred, and it becomes a real bug the moment the first of those analysis
+features lands: the DuckDB status pill holds a SNAPSHOT. `App` reads
+`getDuckDBStatus()` once, after `retryEngine()` resolves, and keeps it in React
+state — but `ensureExtension` publishes a fresh status every time it loads
+`spatial` or `three_d`, and nothing re-reads it. Today nothing calls
+`ensureExtension`, so the pill is never wrong; a feature that loads an
+extension lazily will leave the tooltip listing the extensions from boot and
+omitting the one it just fetched — exactly the drift the tooltip exists to make
+visible. The fix is a `subscribeDuckDBStatus(listener)` in `duckdb.ts` which
+`publishReady` notifies, with `App` subscribing rather than snapshotting.
+
 ## Cross-Cutting Workstreams
 
 - Data quality and semantic assumptions

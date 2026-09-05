@@ -13,7 +13,7 @@ Keep this file short: commands, workflow, hard rules. Decision records and engin
 - **CityJSON plugins**: `@cityjson/navara-{core,cityjson,flatcitybuf,cityparquet}` — git submodule at `packages/cityjson-navara-plugins` (pnpm workspace, public repo), consumed via `file:` deps plus a Vite alias + tsconfig `paths` into the packages' `src/` (editing a plugin hot-reloads the app).
 - **Geospatial**: proj4, WGS84 ENU frames + EGM2008 geoid sampling from `@cityjson/navara-core`.
 - **State**: Zustand stores under `src/features/*`.
-- **Analytics**: DuckDB-wasm with the cityjson extension.
+- **Analytics**: `@duckdb/duckdb-wasm@1.33.1-dev64.0` (DuckDB **1.5.5**, `wasm_eh`) with the `cityjson` community extension v0.4.0; `spatial` and `three_d` loadable on demand via `ensureExtension`, unused in v1. See `docs/architecture-notes.md` for the per-layer table design and the verified engine facts.
 - **Catalog mini-map**: `maplibre-gl@^6`, driven imperatively, worker pinned by hand in `StacItemMap.tsx`.
 - **Testing**: Vitest + @testing-library/react.
 
@@ -110,6 +110,10 @@ Each of these has a story in `docs/architecture-notes.md`; the rule here is the 
 - The submodule's root `vitest.config.ts` is load-bearing; never delete it. Every plugin package depending on `navara-core` carries `"three": "0.183.2"` in devDependencies.
 - Singleton-registry libraries (`proj4`, `three`, `@navaramap/*`) go in the app's `resolve.dedupe`; core declares them as peerDependencies.
 - Measure and box-select are disabled, not implemented (toolbar entries remain).
+- `src/analytics/duckdb.ts` is the ONLY module under `src/` that may import `@duckdb/duckdb-wasm`. Everything else — `layerTables`, `export`, `sql`, every UI module — takes the engine through its exported functions, which is what makes them mockable.
+- `@duckdb/duckdb-wasm` is pinned EXACTLY, never a range and never `latest`: npm `latest` (dev57 / DuckDB 1.5.4) serves a stale 4-function `cityjson` and a `three_d` that breaks `LOAD spatial`, both silently.
+- ONE writer of the DuckDB status: `App` owns the `duckdbStatus` state, and `duckdb.ts` owns the value. Nothing else calls `setDuckdbStatus`, and nothing reads `getDuckDBStatus()` into a second copy.
+- `retryEngine()` is the door to the engine on boot and on Retry — not `initDuckDB()`. It awaits the same memoised boot AND rebuilds the tables that were refused while the engine was still coming up; calling `initDuckDB` directly leaves those layers permanently table-less.
 
 ## Project Philosophy
 

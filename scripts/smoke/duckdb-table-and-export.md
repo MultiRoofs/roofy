@@ -14,15 +14,15 @@ do.
 
 ## Last run
 
-|            |                                                                                                                                             |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Date       | 2026-09-05                                                                                                                                  |
-| Browser    | Chrome/151.0.7922.34 (`HeadlessChrome/151.0.0.0`, `--headless=new`, SwiftShader, ~2 fps)                                                    |
-| Branch     | `integration-of-duckdb-wasm-and-relevant-extensio` @ `e3f5db1`                                                                              |
-| Dev server | `npx vp dev --port 5199` → landed on `http://127.0.0.1:5200/`                                                                               |
-| DuckDB     | `duckdb-eh.wasm` + `duckdb-browser-eh.worker.js` from `cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.33.1-dev64.0`                             |
-| Extension  | `community-extensions.duckdb.org/v1.5.5/wasm_eh/cityjson.duckdb_extension.wasm` (plus core `json` / `parquet` from `extensions.duckdb.org`) |
-| Result     | **every step passed; no code changes were needed**                                                                                          |
+|            |                                                                                                                                                           |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Date       | 2026-09-05                                                                                                                                                |
+| Browser    | Chrome/151.0.7922.34 (`HeadlessChrome/151.0.0.0`, `--headless=new`, SwiftShader, ~2 fps)                                                                  |
+| Branch     | `integration-of-duckdb-wasm-and-relevant-extensio` @ `e3f5db1`                                                                                            |
+| Dev server | `npm run dev -- --port 5199 --host 127.0.0.1` → it printed `http://127.0.0.1:5200/` (5199 was taken); use the port it prints, never the one you asked for |
+| DuckDB     | `duckdb-eh.wasm` + `duckdb-browser-eh.worker.js` from `cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.33.1-dev64.0`                                           |
+| Extension  | `community-extensions.duckdb.org/v1.5.5/wasm_eh/cityjson.duckdb_extension.wasm` (plus core `json` / `parquet` from `extensions.duckdb.org`)               |
+| Result     | **every step passed; no code changes were needed**                                                                                                        |
 
 Screenshots are named below as `NN-name.png`. They were written to the run's
 scratch directory (`.../scratchpad/smoke/shots/`), not committed — re-running
@@ -40,21 +40,45 @@ shorter route on a host where `agent-browser` is trustworthy. The assertions are
 what matter; how the clicks arrive is not.
 
 ```bash
-# 1. dev server (this worktree has no .env/.env.keys, so dotenvx is bypassed;
-#    the only casualty is VITE_GOOGLE_MAPS_API_KEY, i.e. photoreal tiles)
-npx vp dev --port 5199 --host 127.0.0.1
+# 1. dev server. ALWAYS through the npm script — `npm run dev` is
+#    `dotenvx run -- vp dev`, and dotenvx runs perfectly well in a worktree with
+#    no `.env`/`.env.keys` (the only casualty is VITE_GOOGLE_MAPS_API_KEY, i.e.
+#    photoreal tiles). Never call `vp dev` directly: on a checkout that DOES
+#    have `.env`, a bare run inlines the ciphertext as the value.
+npm run dev -- --port 5199 --host 127.0.0.1
+# Read the URL it prints and use THAT port: vite takes the next free one when
+# the requested port is busy (the last run asked 5199 and was given 5200).
+PORT=5200
 
 # 2a. with agent-browser
-agent-browser open http://127.0.0.1:5200
+agent-browser open "http://127.0.0.1:$PORT"
 agent-browser snapshot -i
 
-# 2b. or headless Chrome over CDP (what the last run did)
+# 2b. or headless Chrome over CDP (what the last run did), driven by the
+#     committed driver beside this file
 ~/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome \
   --headless=new --remote-debugging-port=9401 --remote-allow-origins='*' \
   --no-sandbox --disable-gpu --enable-unsafe-swiftshader \
   --user-data-dir=<scratch>/profile --log-net-log=<scratch>/netlog.json \
-  --window-size=1600,1000
+  --window-size=1600,1000 &
+
+node scripts/smoke/driver.mjs 9401 9412 "http://127.0.0.1:$PORT" &
+
+# the three one-liners the whole run is written in
+D=http://127.0.0.1:9412
+ev()   { curl -s --data-binary "$1" $D/eval; echo; }             # JS -> {value}|{err}
+clk()  { curl -s --data-binary "{\"x\":$1,\"y\":$2}" $D/click; echo; }
+shot() { curl -s --data-binary "{\"path\":\"$PWD/$1\"}" $D/shot; echo; }
+# and, for the occlusion measurement in Step 3:
+node scripts/smoke/px.mjs before.png after.png 748 338 24 24
 ```
+
+`scripts/smoke/driver.mjs` is the driver the last run used: it opens one CDP
+tab, keeps the console/exception/network log, exposes `/eval` `/click` `/key`
+`/shot` `/dump` `/clearlog` `/quit` over a local HTTP port, and installs the
+download capture described below. `scripts/smoke/px.mjs` decodes two PNGs and
+reports the changed-pixel percentage and mean colour of one region — Step 3's
+occlusion numbers come from it.
 
 Three things the CDP route wants and the obvious spelling does not give:
 
@@ -100,7 +124,7 @@ Status bar: `Objects 2231 · Triangles 109.1K · CRS EPSG:7415`. `01-loaded.png`
 
 `02-table.png`.
 
-## Step 3 — Filter, and filter the map — PASS
+## Step 3 — Filter, and filter the map — PASS (occlusion sub-check PARTIAL)
 
 **`object_type` = `Building`** → footer `1–100 of 1,115 filtered from 2,231`,
 every visible `object_type` cell reads `Building`. Ticking **Filter map**
@@ -219,7 +243,7 @@ delft.csv       2232 lines = header + 2231 rows; header is
                 id,feature_id,object_type,<the ticked attributes>
 delft.cityparquet.zip (2_2)  ['building.parquet', 'metadata.json']
                 building.parquet 2,160,544 B, starts PAR1
-                metadata.json    6,685 B, a STAC Feature, assets ['building.parquet'],
+                metadata.json    6,686 B, a STAC Feature, assets ['building.parquet'],
                                  properties["city3d:lods"] == ["2.2"]
 delft.cityparquet.zip (0_0)  ['building.parquet', 'metadata.json']
                 building.parquet 439,299 B, starts PAR1

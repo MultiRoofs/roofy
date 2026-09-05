@@ -363,10 +363,19 @@ Toggle off, Clear filter, layer table rebuild or failure → `null`.
 Plugin change (submodule, committed and pushed first):
 
 - `buildCityMeshArrays(model, layerId, originOffset, selectedLod, hiddenTypes,
-visibleObjectIds: ReadonlySet<string> | null = null)`: an object is emitted
-  iff not hidden by type AND (visibleObjectIds is null OR has(id)). The
+appearance, surfaceColors, visibleObjectIds: ReadonlySet<string> | null =
+  null)`: `visibleObjectIds` is the EIGHTH parameter — `appearance` has been
+  the sixth since the texture/material work, and `surfaceColors` became the
+  seventh with the Roofy brand's `colors` seam (plugin `ec65845`, which
+  `origin/develop` pinned); both are passed positionally by `cityModelMesh.ts`,
+  `fcb.worker.ts` and every test that names a theme or a palette. An object is
+  emitted iff not hidden by type AND (visibleObjectIds is null OR has(id)). The
   `objectKeys` slot invariant is preserved (a filtered object still takes its
-  index).
+  index). The id test is RAW — no ancestor walk — because the caller's SQL has
+  already expanded every match to its whole feature (`buildFeatureIdsSql`), so
+  the set it hands over already names the parts as well as the roots; walking
+  parents here would be the same expansion done twice, in a hot geometry loop,
+  against a model the plugin does not index.
 - `CityModelMesh.setVisibleObjectIds(ids)` on the same `rebuildGeometry` seam
   as `setHiddenTypes`; exposed on `CityModelHandle` and the registry;
   `handleSync` pushes it on identity change, like `hiddenTypes`.
