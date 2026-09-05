@@ -28,7 +28,7 @@ import { readShareHash, buildShareUrl } from "../persistence/urlShare";
 import type { ShareableViewState } from "../persistence/urlShare";
 import { getDuckDBStatus } from "../analytics/duckdb";
 import type { DuckDBStatus } from "../analytics/duckdb";
-import { retryEngine, useLayerTableStore } from "../analytics/layerTables";
+import { retryEngine } from "../analytics/layerTables";
 import { browserPlatform } from "../platform/browser";
 import type { PlatformServices } from "../platform/types";
 import { NavaraViewport } from "../scene/NavaraViewport";
@@ -76,7 +76,7 @@ import { ThemeToggleButton } from "../ui/ThemeToggleButton";
 import { LegendOverlay } from "../ui/viewport/LegendOverlay";
 import { AttributePanel } from "../ui/viewport/AttributePanel";
 import { RenderingPanel } from "../ui/viewport/RenderingPanel";
-import { TablePanel } from "../ui/table/TablePanel";
+import { DEFAULT_TABLE_HEIGHT, TablePanel } from "../ui/table/TablePanel";
 import type { CityObject } from "../domain/citymodel/types";
 import type { Rule } from "../features/rules/types";
 
@@ -165,7 +165,7 @@ export function App({
     state: "uninitialized",
   });
   const [tableOpen, setTableOpen] = useState(false);
-  const [tableHeight, setTableHeight] = useState(250);
+  const [tableHeight, setTableHeight] = useState(DEFAULT_TABLE_HEIGHT);
   const [toast, setToast] = useState<string | null>(null);
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
   /**
@@ -569,11 +569,19 @@ export function App({
     return installLayerTableLifecycle();
   }, []);
 
-  // Keep the table panel's open flag in step with the registry, so a streaming
-  // layer's table rebuilds while it is on screen and holds still when it is not.
-  useEffect(() => {
-    useLayerTableStore.getState().setTablePanelOpen(tableOpen);
-  }, [tableOpen]);
+  /**
+   * Retry a failed DuckDB init.
+   *
+   * `retryEngine` awaits `initDuckDB` — which clears its memo on failure, so
+   * this really re-runs rather than handing back the rejected-once promise —
+   * and then REBUILDS every table that failed only because the engine was not
+   * running. A Retry that fixed the status but left every table still reading
+   * "The analytics engine is not running" would look like it had done nothing.
+   */
+  const handleRetryDuckDB = useCallback(() => {
+    setDuckdbStatus({ state: "initializing" });
+    void retryEngine().then(() => setDuckdbStatus(getDuckDBStatus()));
+  }, []);
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -1373,6 +1381,8 @@ export function App({
 
         {tableOpen && (
           <TablePanel
+            duckdbStatus={duckdbStatus}
+            onRetryDuckDB={handleRetryDuckDB}
             onCollapse={() => setTableOpen(false)}
             onHeightChange={setTableHeight}
           />

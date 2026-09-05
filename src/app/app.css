@@ -3277,15 +3277,134 @@ body {
   max-width: 200px;
 }
 
-.scroll-sentinel {
-  padding: 0.25rem;
+.table-empty,
+.table-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 1.5rem;
+  font-size: 0.7rem;
+  color: var(--fg-muted);
   text-align: center;
-  min-height: 1px;
 }
 
-.table-loading {
+.table-message[role="alert"] {
+  color: var(--danger-text, var(--fg));
+}
+
+.table-message p {
+  margin: 0;
+}
+
+/* Filter bar */
+
+.filter-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  flex-shrink: 0;
+}
+
+.filter-bar-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.filter-lead {
   font-size: 0.65rem;
+  color: var(--fg-label);
+  min-width: 3rem;
+  text-align: left;
+}
+
+.filter-logic-btn {
+  color: var(--accent-text);
+}
+
+.filter-select,
+.filter-value {
+  font-size: 0.65rem;
+  font-family: inherit;
+  padding: 0.15rem 0.3rem;
+  background: var(--bg-toolbar);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.filter-select-op {
+  min-width: 6rem;
+}
+
+.filter-value {
+  min-width: 9rem;
+}
+
+.filter-remove {
+  background: none;
+  border: none;
   color: var(--fg-dim);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+}
+
+.filter-bar-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.filter-error {
+  font-size: 0.65rem;
+  color: var(--danger-text, var(--fg));
+}
+
+/* Footer */
+
+.table-pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.25rem 0.75rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.65rem;
+  color: var(--fg-muted);
+  flex-shrink: 0;
+}
+
+.table-range-muted {
+  color: var(--fg-dim);
+}
+
+.table-pagesize {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.table-pagesize select {
+  font-size: 0.65rem;
+  background: var(--bg-toolbar);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.1rem 0.2rem;
+}
+
+.data-th-static {
+  cursor: default;
 }
 
 /* Table toggle button in toolbar */

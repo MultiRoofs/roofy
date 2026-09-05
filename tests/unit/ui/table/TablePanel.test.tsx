@@ -1,59 +1,70 @@
 /**
- * Component test for TablePanel's streaming in-memory fallback: with no
- * DuckDB table loaded, a streaming active layer must read rows from
- * `getResidentModel(...)` (the merged resident cells) rather than
- * `activeLayer.model.objects`, which a streaming layer never populates
- * with real objects — see residentModel.ts's doc comment.
+ * The panel's STATES. Data itself is `useLayerQuery`'s test; this file is
+ * about what the user sees when the engine is down, the table is still
+ * building, the build failed, or nothing is selected.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
-import { TablePanel } from "../../../../src/ui/table/TablePanel";
-import { useLayerStore } from "../../../../src/features/layers/layerStore";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+
+const runQuery = vi.fn();
+vi.mock("../../../../src/analytics/duckdb", () => ({
+  initDuckDB: vi.fn(async () => {}),
+  getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
+  isExtensionLoaded: vi.fn(() => false),
+  ensureExtension: vi.fn(async () => false),
+  formatDuckDBError: (e: unknown) =>
+    e instanceof Error ? e.message : String(e),
+  runQuery: (sql: string) => runQuery(sql),
+  ddl: vi.fn(async () => ({ ok: false, message: "no engine" })),
+  registerBuffer: vi.fn(async () => false),
+  dropBuffer: vi.fn(async () => {}),
+  readFile: vi.fn(async () => null),
+  queryDuckDB: vi.fn(async () => null),
+  queryParquetBuffer: vi.fn(async () => null),
+}));
+
+const { TablePanel } = await import("../../../../src/ui/table/TablePanel");
+const { useLayerStore } =
+  await import("../../../../src/features/layers/layerStore");
+const { useLayerTableStore } =
+  await import("../../../../src/analytics/layerTables");
+const { useQueryStore } =
+  await import("../../../../src/features/query/queryStore");
+const { useSelectionStore } =
+  await import("../../../../src/features/selection/selectionStore");
 import type { Layer } from "../../../../src/features/layers/layerStore";
-import { useStreamStore } from "../../../../src/features/streaming/streamStore";
-import { useSelectionStore } from "../../../../src/features/selection/selectionStore";
-import { CellCache } from "@cityjson/navara-flatcitybuf";
-import { buildResidentModel } from "@cityjson/navara-flatcitybuf";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
+import type { DuckDBStatus } from "../../../../src/analytics/duckdb";
 
-/** The streaming layer's plugin handle, reduced to the one method the UI
- *  reaches: the resident-model merge (which the plugin owns and memoises on
- *  its own commit counter). Built over a real `CellCache` so the merge under
- *  test is the real `buildResidentModel`, not a hand-written stand-in. */
-function residentHandle(cache: unknown) {
-  return {
-    getResidentModel: () =>
-      buildResidentModel(cache as Parameters<typeof buildResidentModel>[0]),
-  };
-}
+const READY_STATUS: DuckDBStatus = {
+  state: "ready",
+  extensions: {
+    cityjson: { state: "loaded" },
+    spatial: { state: "unloaded" },
+    three_d: { state: "unloaded" },
+  },
+  loadedExtensions: [{ name: "cityjson", version: "0.4.0" }],
+  platform: "wasm_eh",
+};
 
-// jsdom doesn't implement IntersectionObserver (used for TablePanel's
-// infinite-scroll sentinel) — a minimal no-op stub is enough since this
-// suite never scrolls the sentinel into view.
-class FakeIntersectionObserver implements IntersectionObserver {
-  readonly root = null;
-  readonly rootMargin = "";
-  readonly scrollMargin = "";
-  readonly thresholds: ReadonlyArray<number> = [];
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
-  takeRecords(): IntersectionObserverEntry[] {
-    return [];
-  }
-}
-
-afterEach(() => {
-  cleanup();
-  useLayerStore.setState({ layers: [], activeLayerId: null });
-  useStreamStore.setState({ streams: {} });
-  useSelectionStore.setState({ selections: [] });
-  vi.unstubAllGlobals();
-});
-
-beforeEach(() => {
-  vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
-});
+const TABLE = {
+  table: "layer_1",
+  sourceName: null,
+  source: null,
+  reader: null,
+  columns: [
+    { name: "id", type: "VARCHAR", kind: "scalar" as const },
+    { name: "object_type", type: "VARCHAR", kind: "scalar" as const },
+  ],
+  lods: [],
+  rowCount: 2,
+};
 
 function emptyModel(): CityModel {
   return {
@@ -62,13 +73,13 @@ function emptyModel(): CityModel {
     bbox: null,
     objects: {},
     vertexCount: 0,
-  };
+  } as unknown as CityModel;
 }
 
-function baseLayer(overrides: Partial<Layer>): Layer {
+function layer(over: Partial<Layer> = {}): Layer {
   return {
     id: "L",
-    name: "test layer",
+    name: "delft",
     model: emptyModel(),
     modelRef: { type: "url", url: "https://x/a.city.json" },
     visible: true,
@@ -83,54 +94,224 @@ function baseLayer(overrides: Partial<Layer>): Layer {
     appearanceThemes: [],
     selectedAppearance: null,
     isStreaming: false,
-    ...overrides,
-  };
+    visibleObjectIds: null,
+    ...over,
+  } as Layer;
 }
 
-describe("TablePanel — streaming layer, no DuckDB table", () => {
-  beforeEach(() => {
-    const cache = new CellCache<never>({
-      maxTriangles: Infinity,
-      maxBytes: Infinity,
-    });
-    cache.set(
-      "2/0/0",
-      {
-        objects: [
-          {
-            id: "row-a",
-            objectType: "Building",
-            attributes: { yearBuilt: 1990 },
-            bbox: [0, 0, 0, 1, 1, 1],
-            lod: "2.2",
-            surfaceCount: 7,
-            roofMetrics: [],
-            footprintAreaSqM: 10,
-            volumeCuM: 20,
-            parents: [],
-            children: [],
-          },
-        ],
-        surfaceAttrKeys: [],
-      } as never,
-      { triangles: 1, bytes: 1 },
-    );
-    useStreamStore.setState({
-      streams: { L: { handle: residentHandle(cache), version: 1 } as never },
-    });
-    useLayerStore.setState({
-      layers: [baseLayer({ isStreaming: true })],
-      activeLayerId: "L",
-    });
+function panel(status: DuckDBStatus = READY_STATUS) {
+  const onRetry = vi.fn();
+  render(
+    <TablePanel
+      duckdbStatus={status}
+      onRetryDuckDB={onRetry}
+      onCollapse={() => {}}
+      onHeightChange={() => {}}
+    />,
+  );
+  return { onRetry };
+}
+
+beforeEach(() => {
+  runQuery.mockReset();
+  runQuery.mockImplementation(async (sql: string) =>
+    sql.includes("COUNT(*)")
+      ? { ok: true, columns: ["n"], rows: [{ n: 2 }] }
+      : {
+          ok: true,
+          columns: [],
+          rows: [
+            { id: "B1", object_type: "Building" },
+            { id: "B2", object_type: "BuildingPart" },
+          ],
+        },
+  );
+  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerTableStore.setState({ tables: {}, tablePanelOpen: false });
+  useQueryStore.setState({ queries: {} });
+  useSelectionStore.setState({ selections: [] });
+});
+
+afterEach(cleanup);
+
+describe("TablePanel states", () => {
+  it("offers a Retry when the engine failed to start", () => {
+    const { onRetry } = panel({ state: "failed", error: "no wasm" });
+    expect(screen.getByText(/no wasm/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
-  it("reads surface_count from ResidentObjectRecord.surfaceCount, not `.surfaces.length`", async () => {
-    render(<TablePanel onCollapse={() => {}} onHeightChange={() => {}} />);
+  it("says so when no layer is selected", () => {
+    panel();
+    expect(
+      screen.getByText("Select a layer to browse its table."),
+    ).toBeTruthy();
+  });
 
-    // The row and its attribute column render once loadPage's async
-    // effect has committed the resident-model read.
-    expect(await screen.findByText("row-a")).toBeTruthy();
-    expect(screen.getByText("7")).toBeTruthy(); // surface_count column
-    expect(screen.getByText("1990")).toBeTruthy(); // yearBuilt attribute column
+  it("does NOT offer a Retry while the engine is still starting", () => {
+    // The cold boot is ~3.5 s. "The analytics engine is not running" with a
+    // Retry button, for three and a half seconds of every session, is a lie.
+    panel({ state: "initializing" });
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(screen.queryByText(/is not running/)).toBeNull();
+  });
+
+  it("shows a DuckDB page error in the BODY, with the filter bar closed", async () => {
+    runQuery.mockResolvedValue({
+      ok: false,
+      message: "Conversion Error: could not convert",
+    });
+    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    panel();
+    // The bar is collapsed by default, so its inline alert is off screen —
+    // without the body copy the grid would simply go stale in silence.
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Conversion Error: could not convert");
+  });
+
+  it("shows a spinner while the table is building", () => {
+    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerTableStore.setState({ tables: { L: { state: "building" } } });
+    panel();
+    expect(screen.getByText("Building this layer's table…")).toBeTruthy();
+  });
+
+  it("shows the build failure and offers no grid", () => {
+    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerTableStore.setState({
+      tables: { L: { state: "failed", message: "Binder Error: nope" } },
+    });
+    panel();
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Binder Error: nope",
+    );
+  });
+
+  it("renders the layer's name and its rows once ready", async () => {
+    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    panel();
+    expect(await screen.findByText("B1")).toBeTruthy();
+    expect(screen.getByText("delft")).toBeTruthy();
+    expect(screen.getByText("1–2 of 2")).toBeTruthy();
+  });
+
+  it("selects a city object when a row is clicked with Sync selection on", async () => {
+    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    panel();
+    fireEvent.click(await screen.findByText("B1"));
+    expect(useSelectionStore.getState().selections).toEqual([
+      { kind: "object", layerId: "L", objectId: "B1" },
+    ]);
+  });
+
+  it("explains an EMPTY filtered result while Filter map is on", async () => {
+    runQuery.mockImplementation(async (sql: string) =>
+      sql.includes("COUNT(*)")
+        ? {
+            ok: true,
+            columns: ["n"],
+            rows: [{ n: sql.includes("WHERE") ? 0 : 2231 }],
+          }
+        : { ok: true, columns: [], rows: [] },
+    );
+    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    useQueryStore.getState().setSyncToMap("L", true);
+    useQueryStore.getState().setFilter("L", {
+      logic: "AND",
+      conditions: [
+        { id: "c", column: "object_type", op: "=", value: "Nothing" },
+      ],
+    });
+    useQueryStore.getState().applyFilter("L");
+
+    panel();
+    expect(
+      await screen.findByText(
+        "0 of 2,231 rows match; the map shows nothing while Filter map is on",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("says the TABLE is empty when there is no filter at all", async () => {
+    runQuery.mockImplementation(async (sql: string) =>
+      sql.includes("COUNT(*)")
+        ? { ok: true, columns: ["n"], rows: [{ n: 0 }] }
+        : { ok: true, columns: [], rows: [] },
+    );
+    useLayerStore.setState({
+      layers: [layer({ isStreaming: true })],
+      activeLayerId: "L",
+    });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    panel();
+    // "No rows match this filter" over a table that has no rows — a streaming
+    // layer whose first cells have not landed — is simply untrue.
+    expect(await screen.findByText("This layer has no rows yet.")).toBeTruthy();
+  });
+
+  it("says only 'no rows match' when the map is NOT being filtered", async () => {
+    runQuery.mockImplementation(async (sql: string) =>
+      sql.includes("COUNT(*)")
+        ? {
+            ok: true,
+            columns: ["n"],
+            rows: [{ n: sql.includes("WHERE") ? 0 : 2231 }],
+          }
+        : { ok: true, columns: [], rows: [] },
+    );
+    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    useQueryStore.getState().setFilter("L", {
+      logic: "AND",
+      conditions: [
+        { id: "c", column: "object_type", op: "=", value: "Nothing" },
+      ],
+    });
+    useQueryStore.getState().applyFilter("L");
+
+    panel();
+    expect(await screen.findByText("No rows match this filter.")).toBeTruthy();
+  });
+
+  it("disables the Filter map toggle for a streaming layer, and says why", () => {
+    useLayerStore.setState({
+      layers: [layer({ isStreaming: true })],
+      activeLayerId: "L",
+    });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    panel();
+    const toggle = screen.getByLabelText("Filter map") as HTMLInputElement;
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.closest("label")!.title).toBe(
+      "Map filtering is not available for streaming layers yet",
+    );
+  });
+
+  it("tells the registry the panel is open, and shut on unmount", async () => {
+    panel();
+    await waitFor(() =>
+      expect(useLayerTableStore.getState().tablePanelOpen).toBe(true),
+    );
+    cleanup();
+    expect(useLayerTableStore.getState().tablePanelOpen).toBe(false);
   });
 });
