@@ -20,7 +20,7 @@
 - **A MISSING VFS name reads back as ONE GARBAGE BYTE with NO error** (`copyFileToBuffer` and `read_blob` alike); a genuinely empty file reads 0 bytes. Every read-back is therefore validated BY CONTENT — `PAR1` magic for Parquet, `JSON.parse` for JSON, a newline-terminated header line for CSV — before it is offered as a download.
 - `spatial` does NOT autoload in wasm and is a CORE extension, not a community one: `INSTALL spatial` (no `FROM community`) then `LOAD spatial`, ~5 s / 23.6 MB. `cityjson` and `three_d` come `FROM community`.
 - `HUGEINT` and `DECIMAL` cells arrive through Arrow as STRINGS, which is why they classify `castText` (`::VARCHAR` makes every such column uniform) and why no formatter may assume a number.
-- `globFiles` works in the browser but lists names that were never created, so it is used for cleanup only — never to discover what a write produced.
+- DuckDB's `glob()` table function works in the browser but lists names that were never created, so it is used for CLEANUP CHECKS only — never to discover what a write produced. There is no glob helper in `analytics/duckdb.ts`; a caller that wants one sends `SELECT file FROM glob('…')` through `runQuery`.
 - Reader schema (identical for `read_cityjson` / `read_cityjsonseq` / `read_flatcitybuf` on 1.5.5): `id, feature_id, object_type, parents VARCHAR[], children VARCHAR[], children_roles VARCHAR[], address STRUCT[], bbox STRUCT, geometry_lod<L> BLOB, geometry_properties_lod<L> STRUCT, material_lod<L>, texture_lod<L>, template STRUCT, other`, then one inferred column per attribute. `id` IS `CityObject.id`; `feature_id` is the root object of the feature. Absent `parents`/`children` are SQL NULL, never `[]`.
 - Every new export from `src/analytics/duckdb.ts` must reach the test files that `vi.mock` it. Seven exist today; Task 4 brings SIX of them up to the new surface — `tests/unit/app/appCatalogEntry.test.tsx`, `tests/unit/app/appRestoreShare.test.tsx`, `tests/unit/app/appEngineBoot.test.tsx`, `tests/unit/app/appCityParquetLayers.test.tsx`, `tests/unit/features/stac/stacItems.test.ts`, `tests/unit/analytics/duckdbStatus.test.ts` — and DELETES the seventh, `tests/unit/analytics/streamingDuckdb.test.ts`, whose subject is removed.
 - Plugin (submodule) changes go on a `duckdb-integration` branch cut from **`2963ddb`** — the gitlink `origin/develop` carries after the Navara 0.1.1 merge, and the head of the plugin repo's `main` — are pushed, and the parent gitlink points at that branch's head. NEVER push onto the plugin repo's `main`. (This branch reaches that pin in Task 23b; before then it is still on `947c980`.)
@@ -3747,9 +3747,22 @@ export function buildAttributeExportSql(input: {
   /** In output order, the fixed prefix included. */
   readonly columns: ReadonlyArray<ColumnInfo>;
   readonly where: string | null;
+  /** The TOP-LEVEL types the user chose. */
+  readonly rootTypes: ReadonlyArray<string>;
+  /** Every top-level type the layer has, so a full selection can be told from
+   *  a partial one and the predicate omitted when it would exclude nothing. */
+  readonly allRootTypes: ReadonlyArray<string>;
   readonly format: AttributeExportFormat;
   readonly outFile: string;
 }): string;
+
+/** `COALESCE("feature_id","id") IN (SELECT "id" FROM t WHERE "parents" IS NULL
+ *  AND "object_type" IN (…))` — a feature scoped by its ROOT's type. Shared by
+ *  the attribute and CityParquet routes. `[]` compiles to `FALSE`. */
+export function buildRootTypeScopeWhere(
+  table: string,
+  types: ReadonlyArray<string>,
+): string;
 
 /** The fixed columns every CityParquet object table must carry. */
 export const CITYPARQUET_REQUIRED_COLUMNS: ReadonlyArray<string>;
@@ -3803,6 +3816,10 @@ const COLUMNS: ReadonlyArray<ColumnInfo> = [
   { name: "b3_h_dak_max", type: "DOUBLE", kind: "scalar" },
 ];
 
+/** Every top-level type the fixture layer has — "all of them are selected" is
+ *  the default the dialog opens on, and the case that must emit no predicate. */
+const ALL_ROOT_TYPES = ["Building", "SolitaryVegetationObject"];
+
 describe("buildAttributeExportSql", () => {
   it("wraps the filtered SELECT in COPY … TO, with the feature scope", () => {
     expect(
@@ -3810,11 +3827,67 @@ describe("buildAttributeExportSql", () => {
         table: "layer_1",
         columns: COLUMNS,
         where: `"b3_h_dak_max" > 10`,
+        rootTypes: ALL_ROOT_TYPES,
+        allRootTypes: ALL_ROOT_TYPES,
         format: "csv",
         outFile: "exp_1.csv",
       }),
     ).toBe(
-      'COPY (SELECT "id", "feature_id", "object_type", to_json("parents") AS "parents", "b3_h_dak_max" FROM "layer_1" WHERE COALESCE("feature_id", "id") IN (SELECT COALESCE("feature_id", "id") FROM "layer_1" WHERE "b3_h_dak_max" > 10)) TO \'exp_1.csv\' (FORMAT csv)',
+      'COPY (SELECT "id", "feature_id", "object_type", to_json("parents") AS "parents", "b3_h_dak_max" FROM "layer_1" WHERE COALESCE("feature_id", "id") IN (SELECT COALESCE("feature_id", "id") FROM "layer_1" WHERE "b3_h_dak_max" > 10)) TO \'exp_1.csv\' (FORMAT csv, HEADER)',
+    );
+  });
+
+  it("ANDs the ROOT-TYPE scope when only some types are chosen", () => {
+    // Spec §3.6: a feature is exported iff its ROOT's type is selected — for
+    // every format, not only for the package. A CSV that ignored the type
+    // tick-boxes would disagree with the package the same dialog writes from
+    // the same choices.
+    expect(
+      buildAttributeExportSql({
+        table: "layer_1",
+        columns: [{ name: "id", type: "VARCHAR", kind: "scalar" }],
+        where: `"b3_h_dak_max" > 10`,
+        rootTypes: ["Building"],
+        allRootTypes: ALL_ROOT_TYPES,
+        format: "csv",
+        outFile: "x.csv",
+      }),
+    ).toBe(
+      'COPY (SELECT "id" FROM "layer_1" WHERE COALESCE("feature_id", "id") IN (SELECT COALESCE("feature_id", "id") FROM "layer_1" WHERE "b3_h_dak_max" > 10) AND COALESCE("feature_id", "id") IN (SELECT "id" FROM "layer_1" WHERE "parents" IS NULL AND "object_type" IN (\'Building\'))) TO \'x.csv\' (FORMAT csv, HEADER)',
+    );
+  });
+
+  it("OMITS the root-type scope when every type is chosen", () => {
+    // A `WHERE … IN (<every type>)` excludes nothing and costs a subquery, a
+    // scan, and a line of noise in any error message.
+    expect(
+      buildAttributeExportSql({
+        table: "layer_1",
+        columns: [{ name: "id", type: "VARCHAR", kind: "scalar" }],
+        where: null,
+        rootTypes: ALL_ROOT_TYPES,
+        allRootTypes: ALL_ROOT_TYPES,
+        format: "csv",
+        outFile: "x.csv",
+      }),
+    ).toBe(
+      'COPY (SELECT "id" FROM "layer_1") TO \'x.csv\' (FORMAT csv, HEADER)',
+    );
+  });
+
+  it("scopes to NOTHING when no type is chosen", () => {
+    expect(
+      buildAttributeExportSql({
+        table: "layer_1",
+        columns: [{ name: "id", type: "VARCHAR", kind: "scalar" }],
+        where: null,
+        rootTypes: [],
+        allRootTypes: ALL_ROOT_TYPES,
+        format: "csv",
+        outFile: "x.csv",
+      }),
+    ).toBe(
+      'COPY (SELECT "id" FROM "layer_1" WHERE FALSE) TO \'x.csv\' (FORMAT csv, HEADER)',
     );
   });
 
@@ -3824,6 +3897,8 @@ describe("buildAttributeExportSql", () => {
         table: "layer_1",
         columns: COLUMNS,
         where: null,
+        rootTypes: ALL_ROOT_TYPES,
+        allRootTypes: ALL_ROOT_TYPES,
         format: "parquet",
         outFile: "exp_2.parquet",
       }),
@@ -3840,6 +3915,8 @@ describe("buildAttributeExportSql", () => {
       table: "layer_1",
       columns: COLUMNS,
       where: null,
+      rootTypes: ALL_ROOT_TYPES,
+      allRootTypes: ALL_ROOT_TYPES,
       format: "json",
       outFile: "exp_3.json",
     });
@@ -3860,6 +3937,8 @@ describe("buildAttributeExportSql", () => {
         table: "layer_1",
         columns,
         where: null,
+        rootTypes: ALL_ROOT_TYPES,
+        allRootTypes: ALL_ROOT_TYPES,
         format,
         outFile: `x.${format}`,
       });
@@ -3877,10 +3956,14 @@ describe("buildAttributeExportSql", () => {
           { name: "geometry_lod2_2", type: "BLOB", kind: "blob" },
         ],
         where: null,
+        rootTypes: ALL_ROOT_TYPES,
+        allRootTypes: ALL_ROOT_TYPES,
         format: "csv",
         outFile: "x.csv",
       }),
-    ).toBe('COPY (SELECT "id" FROM "layer_1") TO \'x.csv\' (FORMAT csv)');
+    ).toBe(
+      'COPY (SELECT "id" FROM "layer_1") TO \'x.csv\' (FORMAT csv, HEADER)',
+    );
   });
 });
 
@@ -4062,15 +4145,27 @@ function exportProjection(
     : `to_json(${quoteIdent(column.name)}) AS ${quoteIdent(column.name)}`;
 }
 
-/** `ARRAY true` for JSON: one valid array, not newline-delimited objects. */
+/**
+ * Every `COPY` option this app relies on, spelled out.
+ *
+ * `ARRAY true` for JSON: one valid array, not newline-delimited objects.
+ * `HEADER` for CSV: DuckDB's default is on today, but the read-back VALIDATES
+ * the header line against the projected column names — so leaving it implicit
+ * would make the export depend on a default and the validation depend on the
+ * export agreeing with it.
+ */
 function copyFormatOptions(format: AttributeExportFormat): string {
-  return format === "json" ? "FORMAT json, ARRAY true" : `FORMAT ${format}`;
+  if (format === "json") return "FORMAT json, ARRAY true";
+  if (format === "csv") return "FORMAT csv, HEADER";
+  return "FORMAT parquet";
 }
 
 export function buildAttributeExportSql(input: {
   readonly table: string;
   readonly columns: ReadonlyArray<ColumnInfo>;
   readonly where: string | null;
+  readonly rootTypes: ReadonlyArray<string>;
+  readonly allRootTypes: ReadonlyArray<string>;
   readonly format: AttributeExportFormat;
   readonly outFile: string;
 }): string {
@@ -4078,8 +4173,26 @@ export function buildAttributeExportSql(input: {
     .map((column) => exportProjection(column, input.format))
     .filter((p): p is string => p !== null);
   const select = projections.length === 0 ? "1" : projections.join(", ");
-  const scope = buildFeatureScopeWhere(input.table, input.where);
-  const whereClause = scope === null ? "" : ` WHERE ${scope}`;
+
+  // The ROOT-TYPE scope is not a CityParquet nicety: spec §3.6 says a feature
+  // is exported iff its root's type is selected, for EVERY format. A CSV that
+  // ignored the type tick-boxes would quietly disagree with the package the
+  // same dialog writes from the same choices.
+  //
+  // Added only for a STRICT SUBSET. With every type selected the predicate
+  // excludes nothing, and a `WHERE … IN (<every type>)` on a 2231-row table is
+  // a subquery, a scan and a line of noise in an error message for no effect.
+  const scopedByType =
+    input.allRootTypes.length > 0 &&
+    input.rootTypes.length < input.allRootTypes.length;
+
+  const clauses = [
+    buildFeatureScopeWhere(input.table, input.where),
+    scopedByType ? buildRootTypeScopeWhere(input.table, input.rootTypes) : null,
+  ].filter((c): c is string => c !== null);
+  const whereClause =
+    clauses.length === 0 ? "" : ` WHERE ${clauses.join(" AND ")}`;
+
   return `COPY (SELECT ${select} FROM ${quoteIdent(input.table)}${whereClause}) TO ${quoteLiteral(input.outFile)} (${copyFormatOptions(input.format)})`;
 }
 
@@ -4156,6 +4269,24 @@ export function buildCityParquetSourceSql(input: {
 }
 
 /**
+ * A feature scoped by its ROOT's type.
+ *
+ * The root decides, not the row: a BuildingPart follows its Building into the
+ * export rather than being classified on its own, which is why the subquery
+ * asks the LAYER table (`parents IS NULL`) rather than filtering `object_type`
+ * in place. `[]` is `FALSE`, never `IN ()` — that is a syntax error, not an
+ * empty set.
+ */
+export function buildRootTypeScopeWhere(
+  table: string,
+  types: ReadonlyArray<string>,
+): string {
+  if (types.length === 0) return "FALSE";
+  const list = types.map((v) => quoteLiteral(v)).join(", ");
+  return `COALESCE("feature_id", "id") IN (SELECT "id" FROM ${quoteIdent(table)} WHERE "parents" IS NULL AND "object_type" IN (${list}))`;
+}
+
+/**
  * One `exp.<module>` table, cut from the scratch table.
  *
  * The MODULE predicate asks which table a feature belongs in by its ROOT's
@@ -4170,17 +4301,10 @@ export function buildCityParquetModuleSql(input: {
   readonly table: string;
   readonly moduleTypes: ReadonlyArray<string>;
 }): string {
-  const t = quoteIdent(input.table);
-  // `IN ()` is a syntax error, not an empty set. `groupTypesByModule` never
-  // produces an empty bucket, so this is unreachable through the exporter —
-  // but a builder that emits invalid SQL for an empty array is a trap for the
-  // next caller, and `WHERE FALSE` says exactly what an empty list means.
-  const modulePredicate =
-    input.moduleTypes.length === 0
-      ? "FALSE"
-      : `COALESCE("feature_id", "id") IN (SELECT "id" FROM ${t} WHERE "parents" IS NULL AND "object_type" IN (${input.moduleTypes
-          .map((v) => quoteLiteral(v))
-          .join(", ")}))`;
+  const modulePredicate = buildRootTypeScopeWhere(
+    input.table,
+    input.moduleTypes,
+  );
   return `CREATE TABLE ${quoteIdent(input.schema)}.${quoteIdent(input.module)} AS SELECT * FROM ${quoteIdent(input.scratchSchema)}.${quoteIdent(CITYPARQUET_SOURCE_TABLE)} WHERE ${modulePredicate}`;
 }
 ```
@@ -10405,6 +10529,13 @@ export function TablePanel({
     return () => useLayerTableStore.getState().setTablePanelOpen(false);
   }, []);
 
+  // The dialog is built for ONE layer — its table, its LoDs, its root types —
+  // and switching layers underneath it would leave a modal titled after the
+  // old one writing from the new one's table. Close it instead.
+  useEffect(() => {
+    setExportOpen(false);
+  }, [layerId]);
+
   // MEMOISED: a new Set on every render gives `DataGrid` a new prop identity,
   // which defeats the `React.memo` below — and this component re-renders on
   // every hover, every camera settle and every store touch, while the grid is
@@ -10728,7 +10859,11 @@ In `src/app/app.css`, inside the `TABLE PANEL` block: delete the `.scroll-sentin
 }
 
 .table-message[role="alert"] {
-  color: var(--danger-text, var(--fg));
+  color: #f87171;
+}
+
+[data-theme="light"] .table-message[role="alert"] {
+  color: #c53030;
 }
 
 .table-message p {
@@ -10806,7 +10941,11 @@ In `src/app/app.css`, inside the `TABLE PANEL` block: delete the `.scroll-sentin
 
 .filter-error {
   font-size: 0.65rem;
-  color: var(--danger-text, var(--fg));
+  color: #f87171;
+}
+
+[data-theme="light"] .filter-error {
+  color: #c53030;
 }
 
 /* Footer */
@@ -12286,6 +12425,7 @@ EOF
 - Create: `src/platform/download.ts`
 - Modify: `src/ui/inspector/RuleBuilderTab.tsx`
 - Test: `tests/unit/platform/download.test.ts`
+- Test: `tests/unit/ui/inspector/RuleBuilderExport.test.tsx`
 
 **Interfaces:**
 
@@ -12421,7 +12561,99 @@ export function downloadText(
 }
 ```
 
-- [ ] **Step 4: Use it in `RuleBuilderTab`**
+- [ ] **Step 4: Write the failing test for `RuleBuilderTab`'s use of it**
+
+Create `tests/unit/ui/inspector/RuleBuilderExport.test.tsx`. The refactor is
+the only thing that can break this button, and nothing covers it today:
+
+```tsx
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+
+const downloadText = vi.fn();
+vi.mock("../../../../src/platform/download", () => ({
+  downloadBlob: vi.fn(),
+  downloadText: (text: string, name: string, mime?: string) =>
+    downloadText(text, name, mime),
+}));
+
+const { RuleBuilderTab } =
+  await import("../../../../src/ui/inspector/RuleBuilderTab");
+const { useLayerStore } =
+  await import("../../../../src/features/layers/layerStore");
+import type { Layer } from "../../../../src/features/layers/layerStore";
+import type { CityModel } from "../../../../src/domain/citymodel/types";
+
+const RULE = {
+  id: "r1",
+  name: "flat roofs",
+  color: "#ff0000",
+  conditions: [],
+  logic: "AND" as const,
+  enabled: true,
+};
+
+function layer(): Layer {
+  return {
+    id: "L",
+    name: "delft",
+    model: {
+      sourceEncoding: "cityjson",
+      metadata: {},
+      bbox: null,
+      objects: {},
+      vertexCount: 0,
+    } as unknown as CityModel,
+    modelRef: { type: "url", url: "https://x/a.city.json" },
+    visible: true,
+    rules: [RULE],
+    rulesEnabled: true,
+    selectedLod: null,
+    availableLods: [],
+    lodMode: "auto",
+    cameraSync: true,
+    hiddenTypes: [],
+    availableObjectTypes: [],
+    appearanceThemes: [],
+    selectedAppearance: null,
+    isStreaming: false,
+    visibleObjectIds: null,
+  } as Layer;
+}
+
+beforeEach(() => {
+  downloadText.mockReset();
+  useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+});
+
+afterEach(cleanup);
+
+describe("RuleBuilderTab's rule export", () => {
+  it("hands the serialised rules and the file name to downloadText", () => {
+    render(<RuleBuilderTab layerId="L" />);
+    fireEvent.click(screen.getByRole("button", { name: "Export rules" }));
+
+    expect(downloadText).toHaveBeenCalledTimes(1);
+    const [text, name] = downloadText.mock.calls[0]!;
+    expect(name).toBe("rules.json");
+    // The rules as they are in the STORE, pretty-printed — the behaviour the
+    // hand-rolled anchor had, and the only thing this refactor could lose.
+    expect(JSON.parse(text as string)).toEqual([RULE]);
+    expect(text).toBe(JSON.stringify([RULE], null, 2));
+  });
+});
+```
+
+Check `RuleBuilderTab`'s actual props before writing this — it may take more
+than `layerId` — and match them; the assertion is what matters, not the harness.
+
+- [ ] **Step 5: Run it to verify it fails**
+
+Run: `npx vitest run tests/unit/ui/inspector/RuleBuilderExport.test.tsx`
+Expected: FAIL — `downloadText` is not called; the component still builds its
+own anchor.
+
+- [ ] **Step 6: Use it in `RuleBuilderTab`**
 
 Replace `handleExport`'s body:
 
@@ -12435,7 +12667,7 @@ const handleExport = useCallback(() => {
 
 with `import { downloadText } from "../../platform/download";`.
 
-- [ ] **Step 5: Run the tests and the type check**
+- [ ] **Step 7: Run the tests and the type check**
 
 ```bash
 npx vitest run tests/unit/platform tests/unit/ui/inspector
@@ -12444,10 +12676,10 @@ npx tsc -b --noEmit
 
 Expected: PASS and clean.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/platform/download.ts src/ui/inspector/RuleBuilderTab.tsx tests/unit/platform/download.test.ts
+git add src/platform/download.ts src/ui/inspector/RuleBuilderTab.tsx tests/unit/platform/download.test.ts tests/unit/ui/inspector/RuleBuilderExport.test.tsx
 git commit -m "$(cat <<'EOF'
 refactor(platform): one Blob-and-anchor download helper
 
@@ -12483,6 +12715,9 @@ export interface AttributeExportRequest {
   /** In output order, the fixed prefix included. */
   readonly columns: ReadonlyArray<ColumnInfo>;
   readonly where: string | null;
+  /** The TOP-LEVEL types chosen, and every one the layer has. */
+  readonly rootTypes: ReadonlyArray<string>;
+  readonly allRootTypes: ReadonlyArray<string>;
   /** What the browser saves it as. */
   readonly fileName: string;
 }
@@ -12508,6 +12743,9 @@ export function validateExportBytes(
   name: string,
   format: ExportContentFormat,
   bytes: Uint8Array | null,
+  /** CSV only: the column names the SELECT projected. The header must be
+   *  exactly these, in order. */
+  expectedHeader?: ReadonlyArray<string>,
 ): ReadbackOutcome;
 
 /** Test-only: rewinds the VFS-name counter so a suite's expected names
@@ -12538,7 +12776,10 @@ function sampleBytes(name: string): Uint8Array {
     return new TextEncoder().encode("PAR1......PAR1");
   }
   if (name.endsWith(".json")) return new TextEncoder().encode('[{"id":"B1"}]');
-  return new TextEncoder().encode("id,object_type\nB1,Building\n");
+  // The header the tests' own COLUMNS project — the read-back checks it.
+  return new TextEncoder().encode(
+    "id,feature_id,object_type,b3_h_dak_max\nB1,B1,Building,12.3\n",
+  );
 }
 
 vi.mock("../../../src/analytics/duckdb", () => ({
@@ -12579,6 +12820,10 @@ const COLUMNS: ReadonlyArray<ColumnInfo> = [
   { name: "object_type", type: "VARCHAR", kind: "scalar" },
   { name: "b3_h_dak_max", type: "DOUBLE", kind: "scalar" },
 ];
+
+/** Every root type selected — no root-type predicate, so these assertions are
+ *  about the format and the scope and nothing else. */
+const ALL_ROOT_TYPES = ["Building"];
 
 beforeEach(() => {
   sql.length = 0;
@@ -12650,6 +12895,23 @@ describe("validateExportBytes", () => {
         new TextEncoder().encode("id,type\nB1,Building\n"),
       ).ok,
     ).toBe(true);
+    // And, when the caller says what it asked for, the header must BE that.
+    expect(
+      validateExportBytes(
+        "a.csv",
+        "csv",
+        new TextEncoder().encode("id,type\nB1,Building\n"),
+        ["id", "type"],
+      ).ok,
+    ).toBe(true);
+    expect(
+      validateExportBytes(
+        "a.csv",
+        "csv",
+        new TextEncoder().encode("id,object_type\nB1,Building\n"),
+        ["id", "type"],
+      ),
+    ).toEqual({ ok: false, message: "DuckDB produced no output for a.csv" });
     // A header with no newline is a truncated write, not a one-column file.
     expect(
       validateExportBytes("a.csv", "csv", new TextEncoder().encode("id,type"))
@@ -12679,12 +12941,14 @@ describe("attribute export", () => {
       table: "layer_1",
       columns: COLUMNS,
       where: null,
+      rootTypes: ALL_ROOT_TYPES,
+      allRootTypes: ALL_ROOT_TYPES,
       fileName: "delft.csv",
     });
 
     expect(sql).toHaveLength(1);
     expect(sql[0]).toMatch(
-      /^COPY \(SELECT "id", "feature_id", "object_type", "b3_h_dak_max" FROM "layer_1"\) TO 'export_1\.csv' \(FORMAT csv\)$/,
+      /^COPY \(SELECT "id", "feature_id", "object_type", "b3_h_dak_max" FROM "layer_1"\) TO 'export_1\.csv' \(FORMAT csv, HEADER\)$/,
     );
     expect(dropped).toEqual(["export_1.csv"]);
     expect(result.fileName).toBe("delft.csv");
@@ -12699,6 +12963,8 @@ describe("attribute export", () => {
       table: "layer_1",
       columns: COLUMNS,
       where: null,
+      rootTypes: ALL_ROOT_TYPES,
+      allRootTypes: ALL_ROOT_TYPES,
       fileName: "delft.parquet",
     });
     expect(sql[0]).toContain("'export_1.parquet'");
@@ -12712,6 +12978,8 @@ describe("attribute export", () => {
       table: "layer_1",
       columns: COLUMNS,
       where: `"b3_h_dak_max" > 10`,
+      rootTypes: ALL_ROOT_TYPES,
+      allRootTypes: ALL_ROOT_TYPES,
       fileName: "delft.json",
     });
     expect(sql[0]).toContain(
@@ -12749,6 +13017,8 @@ describe("attribute export", () => {
         table: "layer_1",
         columns: COLUMNS,
         where: null,
+        rootTypes: ALL_ROOT_TYPES,
+        allRootTypes: ALL_ROOT_TYPES,
         fileName: "a.csv",
       }),
     ).rejects.toThrow("IO Error: could not write");
@@ -12764,6 +13034,8 @@ describe("attribute export", () => {
         table: "layer_1",
         columns: COLUMNS,
         where: null,
+        rootTypes: ALL_ROOT_TYPES,
+        allRootTypes: ALL_ROOT_TYPES,
         fileName: "a.csv",
       }),
     ).rejects.toThrow("DuckDB produced no output for export_1.csv");
@@ -12781,6 +13053,8 @@ describe("attribute export", () => {
         table: "layer_1",
         columns: COLUMNS,
         where: null,
+        rootTypes: ALL_ROOT_TYPES,
+        allRootTypes: ALL_ROOT_TYPES,
         fileName: "a.csv",
       }),
     ).rejects.toThrow("DuckDB produced no output for export_1.csv");
@@ -12795,6 +13069,8 @@ describe("attribute export", () => {
         table: "layer_1",
         columns: COLUMNS,
         where: null,
+        rootTypes: ALL_ROOT_TYPES,
+        allRootTypes: ALL_ROOT_TYPES,
         fileName: "a.parquet",
       }),
     ).rejects.toThrow("DuckDB produced no output for export_1.parquet");
@@ -12836,6 +13112,15 @@ export interface AttributeExportRequest {
   readonly table: string;
   readonly columns: ReadonlyArray<ColumnInfo>;
   readonly where: string | null;
+  /**
+   * The TOP-LEVEL types chosen, and every one the layer has.
+   *
+   * EVERY format is root-type scoped, not only the package (spec §3.6): a CSV
+   * that ignored the type tick-boxes would disagree with the package the same
+   * dialog writes from the same choices. A full selection emits no predicate.
+   */
+  readonly rootTypes: ReadonlyArray<string>;
+  readonly allRootTypes: ReadonlyArray<string>;
   readonly fileName: string;
 }
 
@@ -12879,6 +13164,7 @@ export function validateExportBytes(
   name: string,
   format: ExportContentFormat,
   bytes: Uint8Array | null,
+  expectedHeader?: ReadonlyArray<string>,
 ): ReadbackOutcome {
   const fail: ReadbackOutcome = {
     ok: false,
@@ -12915,6 +13201,14 @@ export function validateExportBytes(
   // write; a leading newline means the header itself never arrived.
   const newline = text.indexOf("\n");
   if (newline <= 0) return fail;
+  if (expectedHeader !== undefined) {
+    // And it must be the header we ASKED for. A truncated write and a write of
+    // the wrong query both produce a file with a newline in it, and only the
+    // column names tell them apart — which matters most for the format a user
+    // is most likely to open in a spreadsheet and trust on sight.
+    const header = text.slice(0, newline).replace(/\r$/, "");
+    if (header !== expectedHeader.join(",")) return fail;
+  }
   return { ok: true, bytes };
 }
 
@@ -12952,6 +13246,8 @@ async function exportAttributes(
         table: request.table,
         columns: request.columns,
         where: request.where,
+        rootTypes: request.rootTypes,
+        allRootTypes: request.allRootTypes,
         format: request.format,
         outFile,
       }),
@@ -12962,6 +13258,10 @@ async function exportAttributes(
       outFile,
       request.format,
       await readFile(outFile),
+      // CSV only: the header must name the columns we asked for. A truncated
+      // write and a write of the WRONG query both produce a file with a
+      // newline in it; only the header tells them apart.
+      request.columns.filter((c) => c.kind !== "blob").map((c) => c.name),
     );
     if (!readback.ok) throw new Error(readback.message);
 
@@ -13267,7 +13567,26 @@ describe("CityParquet package export", () => {
     expect(sql).toContain("DROP TABLE IF EXISTS cityparquet_validation");
   });
 
-  it("drops BOTH schemas, the source and every output — always", async () => {
+  it("refuses an EPSG code that is not a code, rather than writing 'EPSG:NaN'", async () => {
+    await expect(runExport(request({ epsg: Number.NaN }))).rejects.toThrow(
+      /does not name an EPSG code/,
+    );
+    expect(sql.some((s) => s.includes("cityparquet_write"))).toBe(false);
+  });
+
+  it("records EVERY written name for cleanup BEFORE validating any of them", async () => {
+    // Interleaving the two would mean a validation failure on the first file
+    // leaves the rest of the write unrecorded — and `finally` can only drop
+    // what it was told about, so those outputs sit in the VFS for the session.
+    badFile = { name: "building.parquet", bytes: new Uint8Array([0x2a]) };
+    await expect(runExport(request())).rejects.toThrow(
+      /DuckDB produced no output for/,
+    );
+    expect(dropped).toContainEqual(expect.stringMatching(/building\.parquet$/));
+    expect(dropped).toContainEqual(expect.stringMatching(/metadata\.json$/));
+  });
+
+  it("drops BOTH schemas, the findings table, the source and every output — always", async () => {
     await runExport(request());
     expect(
       sql.some((s) => /^DROP SCHEMA IF EXISTS "exp_\d+" CASCADE$/.test(s)),
@@ -13275,6 +13594,11 @@ describe("CityParquet package export", () => {
     expect(
       sql.some((s) => /^DROP SCHEMA IF EXISTS "exp_\d+_src" CASCADE$/.test(s)),
     ).toBe(true);
+    // The findings table lives on the CONNECTION, so no `DROP SCHEMA` reaches
+    // it — it has to be named.
+    expect(
+      sql.filter((s) => s === "DROP TABLE IF EXISTS cityparquet_validation"),
+    ).toHaveLength(2);
     expect(dropped).toContainEqual(
       expect.stringMatching(/^exp_\d+_src\.city\.json$/),
     );
@@ -13306,6 +13630,14 @@ describe("CityParquet package export", () => {
       /DuckDB produced no output for exp_\d+\/building\.parquet/,
     );
     expect(sql.some((s) => s.startsWith("DROP SCHEMA"))).toBe(true);
+  });
+
+  it("quotes the schema, the directory and the CRS as LITERALS", async () => {
+    await runExport(request());
+    const write = sql.find((s) => s.includes("cityparquet_write"))!;
+    expect(write).toMatch(
+      /^SELECT \* FROM cityparquet_write\('exp_\d+', 'exp_\d+', crs => 'EPSG:7415'\)$/,
+    );
   });
 
   it("refuses a parquet output without PAR1 magic", async () => {
@@ -13511,8 +13843,10 @@ async function dropWrittenFile(path: string): Promise<void> {
  * end to end): the export schema must hold ORDINARY tables named for CityGML
  * modules, the source has to be read again through the cityjson reader because
  * the browsing table has no geometry, and the write's own RESULT ROWS name the
- * files it produced — so nothing needs `globFiles`, which lists names that were
- * never created and is fit for cleanup only.
+ * files it produced. That is the ONLY discovery mechanism: DuckDB's `glob()`
+ * lists names that were never created, and `analytics/duckdb.ts` exports no
+ * glob helper at all — the browser smoke reaches it as SQL, purely to confirm
+ * that cleanup left nothing behind.
  *
  * The source is read exactly ONCE, into a scratch table in a SEPARATE schema:
  * `cityparquet_init` describes every table in the schema it is handed, so the
@@ -13589,10 +13923,11 @@ async function exportCityParquet(
     );
     if (!written.ok) throw new Error(written.message);
 
-    // The write's own rows name the files. `globFiles` works in the browser but
-    // lists names that were never created, so it is fit for cleanup and not for
-    // discovery. The directory argument carries NO trailing slash: with one,
-    // the writer produces a second, duplicated set of paths.
+    // The write's own rows name the files. DuckDB's `glob()` works in the
+    // browser but lists names that were never created, so it is fit for a
+    // cleanup CHECK and not for discovery — and there is no glob helper here
+    // to reach for. The directory argument carries NO trailing slash: with
+    // one, the writer produces a second, duplicated set of paths.
     const entries: Record<string, Uint8Array> = {};
     for (const row of written.rows) {
       const name = writtenFileName(row, outDir);
@@ -13664,8 +13999,9 @@ into a scratch table in a schema of its own, because cutting each module
 straight from the reader re-parses the whole file per module and
 cityparquet_init describes every table in the schema it is handed.
 
-The write's own result rows name the files (globFiles lists names that were
-never created, so it is cleanup only), and every one of them is read back and
+The write's own result rows name the files (DuckDB's glob() lists names that
+were never created, so it is fit only for a cleanup check), and every one is
+read back and
 validated by content. cityparquet_validate returns NO rows — it materialises a
 temp table on the CONNECTION, dropped first so a previous export's findings are
 not read as this one's — and a validation that could not be run or read is
@@ -13933,14 +14269,120 @@ describe("ExportDialog", () => {
     }
   });
 
-  it("disables Export for a reader-backed layer whose bytes cannot be re-obtained", async () => {
+  it("keeps the ATTRIBUTE formats when the bytes cannot be re-obtained, and says why", async () => {
     open({ table: { ...READER_TABLE, source: null } });
     await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+
+    // Only the PACKAGE needs the source; the other three read the table.
+    expect(screen.queryByLabelText("CityParquet package (.zip)")).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "Export" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+    expect(screen.getByText(/re-link it to export one/)).toBeTruthy();
+  });
+
+  it("waits, and says so, while a streaming refresh is rebuilding the table", async () => {
+    useLayerTableStore.setState({
+      tables: {
+        L: { state: "ready", info: READER_TABLE, rebuilding: true },
+      },
+    });
+    open();
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
     const button = screen.getByRole("button", {
-      name: "Export",
+      name: "Refreshing table…",
     }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
-    expect(button.title).toBe("Re-link the file to export this layer");
+  });
+
+  it("reports a failed object-type probe instead of an empty list", async () => {
+    // Silence here disables Export (nothing selected) with no reason on screen.
+    runQuery.mockResolvedValue({ ok: false, message: "Binder Error: nope" });
+    open();
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "The layer's object types could not be read: Binder Error: nope",
+    );
+  });
+
+  it("exports the WHOLE layer when 'Whole layer' is chosen with a filter applied", async () => {
+    useQueryStore.getState().setFilter("L", {
+      logic: "AND",
+      conditions: [{ id: "c", column: "b3_h_dak_max", op: ">", value: 10 }],
+    });
+    useQueryStore.getState().applyFilter("L");
+    open();
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+
+    fireEvent.click(screen.getByLabelText("Whole layer"));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => expect(runExport).toHaveBeenCalled());
+    expect(
+      (runExport.mock.calls[0]![0] as { where: string | null }).where,
+    ).toBeNull();
+  });
+
+  it("sends the LoD the user picked, not the default", async () => {
+    open();
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    fireEvent.change(screen.getByLabelText("Level of detail"), {
+      target: { value: "1_2" },
+    });
+    fireEvent.click(screen.getByLabelText("CityParquet package (.zip)"));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => expect(runExport).toHaveBeenCalled());
+    expect(
+      (runExport.mock.calls[0]![0] as { lodSuffix: string }).lodSuffix,
+    ).toBe("1_2");
+  });
+
+  it("disables Export — and the close button — while a write is in flight", async () => {
+    let finish!: () => void;
+    runExport.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = () =>
+            resolve({ blob: new Blob(["x"]), fileName: "d.csv", warnings: [] });
+        }),
+    );
+    open();
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    const busyButton = (await screen.findByRole("button", {
+      name: "Exporting…",
+    })) as HTMLButtonElement;
+    expect(busyButton.disabled).toBe(true);
+    // Closing mid-write would leave `runExport` reporting into a dead
+    // component and cleaning up under a caller that is gone.
+    expect(
+      (screen.getByRole("button", { name: "Close" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+
+    finish();
+    await waitFor(() => expect(downloadBlob).toHaveBeenCalled());
+  });
+
+  it("scopes EVERY format by the chosen root types", async () => {
+    open();
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    fireEvent.click(screen.getByLabelText("SolitaryVegetationObject"));
+    fireEvent.click(screen.getByLabelText("CSV"));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => expect(runExport).toHaveBeenCalled());
+    const request = runExport.mock.calls[0]![0] as {
+      rootTypes: string[];
+      allRootTypes: string[];
+    };
+    expect(request.rootTypes).toEqual(["Building"]);
+    expect(request.allRootTypes).toEqual([
+      "Building",
+      "SolitaryVegetationObject",
+    ]);
   });
 
   it("forces one table rebuild when it opens on a streaming layer", async () => {
@@ -14202,11 +14644,21 @@ Expected: FAIL — module not found.
  * file is worse than one that is not offered.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { runQuery } from "../../analytics/duckdb";
 import type { LodColumn } from "../../analytics/columnKind";
-import type { LayerTable } from "../../analytics/layerTables";
+import {
+  useLayerTableStore,
+  type LayerTable,
+} from "../../analytics/layerTables";
 import { runExport, type ExportRequest } from "../../analytics/export";
 import { buildRootTypesSql, compileFilter } from "../../analytics/sql";
 import { FLAT_PREFIX_COLUMNS } from "../../analytics/layerRows";
@@ -14278,7 +14730,8 @@ const NO_EPSG_REASON =
 const NO_SOURCE_REASON =
   "This layer has no CityJSON source in DuckDB; geometry formats need one";
 
-const RELINK_REASON = "Re-link the file to export this layer";
+const RELINK_REASON =
+  "This layer's file is no longer available, so a CityParquet package cannot be written — re-link it to export one. The attribute formats read the table and still work.";
 
 /** "delft.city.json" + "csv" -> "delft.csv": the layer's name with every
  *  extension it already carries replaced by the format's own. */
@@ -14307,9 +14760,36 @@ export function ExportDialog({
   onClose,
 }: ExportDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  useModalChrome(dialogRef, onClose);
+  const titleId = useId();
+  const [busy, setBusy] = useState(false);
+
+  /**
+   * Escape, the close button and the backdrop all go through here, and all
+   * three are INERT while a write is in flight: the export has no cancel, so
+   * closing would leave `runExport` running with nowhere to report its result
+   * and its VFS cleanup racing a caller that has gone.
+   */
+  const requestClose = useCallback(() => {
+    if (busy) return;
+    onClose();
+  }, [busy, onClose]);
+
+  useModalChrome(dialogRef, requestClose);
 
   const query = useQueryStore((s) => layerQuery(s, layerId));
+
+  /**
+   * A streaming refresh is in flight over this layer's table.
+   *
+   * The dialog FORCES one when it opens, and the panel schedules more as cells
+   * land — each publishing a new `LayerTable` under a new name. Exporting
+   * across that swap writes from a table that is about to be dropped, so the
+   * button waits rather than racing it.
+   */
+  const rebuilding = useLayerTableStore((s) => {
+    const entry = s.tables[layerId];
+    return entry?.state === "ready" && entry.rebuilding === true;
+  });
 
   const attributeColumns = useMemo(
     () => table.columns.filter((c) => !FIXED_COLUMNS.has(c.name)),
@@ -14318,6 +14798,8 @@ export function ExportDialog({
 
   /** A CityParquet package needs a reader (the geometry comes from the source,
    *  not the browsing table), an LoD, and an EPSG code for its CRS. */
+  // A missing SOURCE removes exactly one option: the attribute formats read
+  // the browsing table and need no source at all.
   const canCityParquet =
     table.reader !== null &&
     table.source !== null &&
@@ -14326,8 +14808,10 @@ export function ExportDialog({
   const formats: ReadonlyArray<Format> = canCityParquet
     ? ["cityparquet", "parquet", "csv", "json"]
     : ["parquet", "csv", "json"];
-  /** A reader-backed layer whose bytes can no longer be obtained: the table is
-   *  browsable, but nothing can be written from a source that is not there. */
+  /** A reader-backed layer whose bytes can no longer be obtained. The table is
+   *  browsable and the ATTRIBUTE formats read it directly, so only the PACKAGE
+   *  is out of reach — gating the whole Export button would refuse three
+   *  exports in order to explain one. */
   const relinkNeeded = table.reader !== null && table.source === null;
 
   const [rootTypes, setRootTypes] = useState<ReadonlyArray<string>>([]);
@@ -14349,6 +14833,17 @@ export function ExportDialog({
   const [scope, setScope] = useState<"all" | "filter">(
     query.applied === null ? "all" : "filter",
   );
+  /**
+   * What the export actually scopes to.
+   *
+   * The stored choice can outlive the filter it names: Clear the filter with
+   * this dialog open and `scope` is still `"filter"` while `applied` is null,
+   * which would tick a radio the user cannot act on and — worse — read as a
+   * filtered export while producing an unfiltered one. Derived, so the radio
+   * and the handler cannot disagree.
+   */
+  const effectiveScope: "all" | "filter" =
+    query.applied === null ? "all" : scope;
   const [chosenFormat, setChosenFormat] = useState<Format>("csv");
   // CLAMPED, not stored blind: `formats` SHRINKS when the table is rebuilt as
   // a fallback (a streaming layer's rebuild), and a `chosenFormat` of
@@ -14378,7 +14873,6 @@ export function ExportDialog({
     // is what makes this run once per table rather than once per render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [table.lods]);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<ReadonlyArray<string>>([]);
 
@@ -14397,7 +14891,18 @@ export function ExportDialog({
     let cancelled = false;
     void (async () => {
       const result = await runQuery(buildRootTypesSql(table.table));
-      if (cancelled || !result.ok) return;
+      if (cancelled) return;
+      if (!result.ok) {
+        // Silence here is the worst outcome: the type list renders EMPTY,
+        // Export is disabled because nothing is selected, and there is no
+        // reason on screen for either.
+        setError(
+          `The layer's object types could not be read: ${result.message}`,
+        );
+        setRootTypes([]);
+        setSelectedTypes(new Set());
+        return;
+      }
       const types = result.rows
         .map((row) => row.value)
         .filter((v): v is string => typeof v === "string");
@@ -14425,7 +14930,7 @@ export function ExportDialog({
     setBusy(true);
     try {
       let where: string | null = null;
-      if (scope === "filter" && query.applied !== null) {
+      if (effectiveScope === "filter" && query.applied !== null) {
         const compiled = compileFilter(query.applied, table.columns);
         if (!compiled.ok) throw new Error(compiled.message);
         where = compiled.where;
@@ -14482,6 +14987,9 @@ export function ExportDialog({
             ...attributeColumns.filter((c) => selectedAttributes.has(c.name)),
           ],
           where,
+          // Every format is root-type scoped, not only the package.
+          rootTypes: rootTypes.filter((t) => selectedTypes.has(t)),
+          allRootTypes: rootTypes,
           fileName: exportFileName(layerName, EXTENSIONS[format]),
         };
       }
@@ -14513,23 +15021,36 @@ export function ExportDialog({
     <div
       className="modal-backdrop"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) {
-          e.preventDefault();
-          onClose();
-        }
+        if (e.target !== e.currentTarget) return;
+        e.preventDefault();
+        requestClose();
       }}
     >
+      {/* `.modal` + `.modal-header` / `.modal-title` / `.modal-close` /
+          `.modal-body` — the classes `AddLayerDialog`, `StacBrowserDialog` and
+          `ShareDialog` already wear, and the only ones `app.css` defines.
+          `.modal-wide` is deliberately NOT used: this is a form, and 30 rem is
+          the width every other form modal here has. */}
       <div
-        className="modal-dialog"
+        className="modal export-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label={`Export ${layerName}`}
+        aria-labelledby={titleId}
         tabIndex={-1}
         ref={dialogRef}
       >
         <div className="modal-header">
-          <h2>Export {layerName}</h2>
-          <button type="button" onClick={onClose} aria-label="Close">
+          <h2 className="modal-title" id={titleId}>
+            Export {layerName}
+          </h2>
+          <button
+            type="button"
+            className="modal-close"
+            aria-label="Close"
+            title="Close"
+            disabled={busy}
+            onClick={requestClose}
+          >
             ×
           </button>
         </div>
@@ -14542,7 +15063,7 @@ export function ExportDialog({
                 type="radio"
                 name="export-scope"
                 aria-label="Whole layer"
-                checked={scope === "all"}
+                checked={effectiveScope === "all"}
                 onChange={() => setScope("all")}
               />
               <span>Whole layer</span>
@@ -14553,7 +15074,7 @@ export function ExportDialog({
                 name="export-scope"
                 aria-label="Current filter"
                 disabled={query.applied === null}
-                checked={scope === "filter"}
+                checked={effectiveScope === "filter"}
                 onChange={() => setScope("filter")}
               />
               <span>Current filter</span>
@@ -14652,6 +15173,8 @@ export function ExportDialog({
             <p className="export-note">{NO_EPSG_REASON}</p>
           )}
 
+          {relinkNeeded && <p className="export-note">{RELINK_REASON}</p>}
+
           {warnings.map((warning) => (
             <p className="export-note" key={warning}>
               {warning}
@@ -14666,17 +15189,16 @@ export function ExportDialog({
         </div>
 
         <div className="modal-footer">
-          <button type="button" onClick={onClose} disabled={busy}>
+          <button type="button" onClick={requestClose} disabled={busy}>
             Cancel
           </button>
           <button
             type="button"
-            className="primary"
-            title={relinkNeeded ? RELINK_REASON : undefined}
-            disabled={busy || selectedTypes.size === 0 || relinkNeeded}
+            className="export-submit"
+            disabled={busy || rebuilding || selectedTypes.size === 0}
             onClick={() => void handleExport()}
           >
-            {busy ? "Exporting…" : "Export"}
+            {busy ? "Exporting…" : rebuilding ? "Refreshing table…" : "Export"}
           </button>
         </div>
       </div>
@@ -14792,7 +15314,51 @@ Append to `src/app/app.css`:
 .export-error {
   margin: 0;
   font-size: 0.7rem;
-  color: var(--danger-text, var(--fg));
+  /* The same pair `.share-status.is-error` uses: #f87171 reads on the panel's
+     dark ground, and #c53030 is the stronger colour on light. There is no
+     `--danger-text` token in this stylesheet. */
+  color: #f87171;
+}
+
+[data-theme="light"] .export-error {
+  color: #c53030;
+}
+
+/* `.modal` has a header and a body rule and nothing else — a footer is new
+   here, so it is defined rather than assumed. */
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.6rem 0.9rem;
+  border-top: 1px solid var(--border);
+}
+
+.modal-footer button {
+  font-size: 0.7rem;
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-toolbar);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.modal-footer button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The one affirmative action in the dialog. `.primary` does not exist in this
+   stylesheet; this is the class the export dialog actually wears. */
+.export-submit {
+  border-color: var(--border-accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.export-submit:not(:disabled):hover {
+  background: var(--bg-panel-hover);
 }
 ```
 
@@ -14938,9 +15504,16 @@ head -2 delft.csv
 python3 -c "import zipfile; z=zipfile.ZipFile('delft.cityparquet.zip'); print(z.namelist()); print(z.read('metadata.json')[:80])"
 ```
 
-Expected: `PAR1`; a positive row count; a header line plus one data row; a zip
-naming at least one `*.parquet` and `metadata.json`, whose first bytes are a
-JSON object.
+Expected: `PAR1`; a positive row count; a header line whose columns are the
+ones the dialog's attribute tick-boxes named, plus one data row; and a zip
+whose entry names are REAL FILES — `building.parquet` (or another module's) and
+`metadata.json`, whose first bytes are a JSON object.
+
+Read that last one carefully. The names come from the write's result rows, and
+the rule is "the first STRING-valued column of each row" — a row of
+`file | action | rows | bytes` also contains `"written"`, so a zip listing
+`written` rather than `building.parquet` means the name resolution picked the
+wrong column and every file in the package is misnamed.
 
 - [ ] **Step 6: Check that no export left anything in the VFS**
 
@@ -14952,14 +15525,14 @@ whole package in memory for the rest of the session.
 agent-browser eval '
 (async () => {
   const m = await import("/src/analytics/duckdb.ts");
-  const r = await m.runQuery("SELECT * FROM globFiles(\x27exp_*\x27)");
+  const r = await m.runQuery("SELECT file FROM glob(\x27exp_*\x27)");
   return JSON.stringify(r);
 })()
 '
 ```
 
 Expected: `ok: true` with ZERO rows — after four exports nothing named `exp_*`
-survives. (`globFiles` also lists names that were never created, so a non-empty
+survives. (DuckDB's `glob()` also lists names that were never created, so a non-empty
 result is worth reading rather than trusting: anything it DOES list must at
 least not read back as real bytes.)
 
@@ -15492,7 +16065,7 @@ read afterwards:
 existing ones and in their voice. The whole DuckDB design goes here:
 
 ```
-- **Every city layer gets its OWN DuckDB table, built from bytes, and the source is dropped.** `analytics/layerTables.ts` owns a registry plus ONE async FIFO queue: `addCityLayer` (the single door every static add goes through — a dropped file, a picked folder, a URL, a restore, a share link, a re-link) enqueues a build, and `layerTableLifecycle.ts` diffs the layer store to drop tables and to enqueue a STREAMING layer's (whose rows arrive cell by cell, so it rebuilds on commits, debounced 500 ms, only while the table panel is open; the export dialog forces one rebuild when it opens). The single global `city_objects` table is gone, and with it `shouldUseSourceUrlPath`/`loadModelIntoDuckDB`/`loadCityModelFromMemory`/`loadResidentObjectsIntoDuckDB` — one shared table meant a second layer silently replaced the first one's analytics. A build AWAITS `initDuckDB()` before touching DuckDB and parks its source if the engine is not up (the boot is ~5 s and a restored snapshot lands inside it); `retryEngine()` rebuilds the parked ones. A reader-backed layer hands DuckDB the DECODED BYTES the loader already holds (`loadFromUrl` returns `{model, bytes, encoding}`), never a URL: `read_cityjson` over http is unexercised in wasm and CORS-dependent, and registering bytes means a URL layer is never downloaded twice — `registerBuffer` CONSUMES its array (the worker transfer detaches it), so a re-registration goes through the entry's `SourceProvider`. The build drops `geometry_*`/`geometry_properties_*`/`material_*`/`texture_*`/`template` (53 of 70 columns on Delft, 2.45x less table memory) and then drops the source buffer — probed: a materialised table survives `dropFile`, while the DROPPED NAME resolves to ZERO BYTES forever and fails with a misleading JSON parse error, so VFS names come from a module counter and are NEVER reused. LoDs are DERIVED from the reader's own column names (`{label, suffix}`) and a suffix is never rebuilt from a label: 3D BAG spells LoD 0 `geometry_lod0_0`. CityGML, its ZIP, CityParquet and streaming residents take the FLAT FALLBACK: rows built app-side and loaded through `read_json_auto`, with the column names ALIGNED to the reader's (`id, feature_id, object_type, parents, children`, `parents`/`children` NULL rather than `[]`, `feature_id` from `domain/citymodel/featureId.ts`, and an `ALTER COLUMN … TYPE VARCHAR[]` afterwards because an all-NULL list column infers as JSON) so `parents IS NULL` is the feature-root test on every layer. **Every SQL string is a pure function** in `analytics/sql.ts`, unit-tested against exact strings; `compileFilter` refuses an unknown column, an impossible operator, an empty needle or a non-numeric value BEFORE the query is sent, and `ORDER BY` is table-qualified so a `castText` column sorts on the base column rather than its `::VARCHAR` alias. The map filter (`Layer.visibleObjectIds`, pushed by `handleSync` to the plugin's `setVisibleObjectIds`) expands matches to whole FEATURES — a Building carries the attributes, its BuildingPart the geometry — with `COALESCE("feature_id","id")` on both sides of a POSITIVE `IN`, because one NULL `feature_id` makes a `NOT IN` predicate NULL and hides nothing; `null` means no filter and an EMPTY set means "nothing matched, draw nothing". Streaming layers cannot be map-filtered yet (the id set would have to travel to the FCB worker). Export goes through DuckDB's own writers — `COPY TO parquet|csv|json` (with `ARRAY true` for JSON, and no `::VARCHAR` cast: that one is the grid's), and for a package one read of the source into a scratch schema, a CTAS per CityGML module, `cityparquet_init` as its own statement, then `cityparquet_write` zipped with `fflate` — and **never** `FORMAT cityjson|cityjsonseq|flatcitybuf`, whose sinks bypass DuckDB's VFS entirely (no file is created at all; the same extension writes fine through `cityparquet_write`, which is the upstream pointer). Those three are shown DISABLED in the dialog so the capability is discoverable. **Every read-back is validated BY CONTENT** — `PAR1` magic, `JSON.parse`, a newline-terminated CSV header — because a MISSING VFS name reads back as ONE GARBAGE BYTE with no error at all, while a genuinely empty file reads 0; `globFiles` lists names that were never created, so it is fit for cleanup and not for discovery, and the write's own result rows are what name the output. Filter, sort, page, sync-to-map and `visibleObjectIds` are SESSION state: snapshot schema stays v3.
+- **Every city layer gets its OWN DuckDB table, built from bytes, and the source is dropped.** `analytics/layerTables.ts` owns a registry plus ONE async FIFO queue: `addCityLayer` (the single door every static add goes through — a dropped file, a picked folder, a URL, a restore, a share link, a re-link) enqueues a build, and `layerTableLifecycle.ts` diffs the layer store to drop tables and to enqueue a STREAMING layer's (whose rows arrive cell by cell, so it rebuilds on commits, debounced 500 ms, only while the table panel is open; the export dialog forces one rebuild when it opens). The single global `city_objects` table is gone, and with it `shouldUseSourceUrlPath`/`loadModelIntoDuckDB`/`loadCityModelFromMemory`/`loadResidentObjectsIntoDuckDB` — one shared table meant a second layer silently replaced the first one's analytics. A build AWAITS `initDuckDB()` before touching DuckDB and parks its source if the engine is not up (the boot is ~5 s and a restored snapshot lands inside it); `retryEngine()` rebuilds the parked ones. A reader-backed layer hands DuckDB the DECODED BYTES the loader already holds (`loadFromUrl` returns `{model, bytes, encoding}`), never a URL: `read_cityjson` over http is unexercised in wasm and CORS-dependent, and registering bytes means a URL layer is never downloaded twice — `registerBuffer` CONSUMES its array (the worker transfer detaches it), so a re-registration goes through the entry's `SourceProvider`. The build drops `geometry_*`/`geometry_properties_*`/`material_*`/`texture_*`/`template` (53 of 70 columns on Delft, 2.45x less table memory) and then drops the source buffer — probed: a materialised table survives `dropFile`, while the DROPPED NAME resolves to ZERO BYTES forever and fails with a misleading JSON parse error, so VFS names come from a module counter and are NEVER reused. LoDs are DERIVED from the reader's own column names (`{label, suffix}`) and a suffix is never rebuilt from a label: 3D BAG spells LoD 0 `geometry_lod0_0`. CityGML, its ZIP, CityParquet and streaming residents take the FLAT FALLBACK: rows built app-side and loaded through `read_json_auto`, with the column names ALIGNED to the reader's (`id, feature_id, object_type, parents, children`, `parents`/`children` NULL rather than `[]`, `feature_id` from `domain/citymodel/featureId.ts`, and an `ALTER COLUMN … TYPE VARCHAR[]` afterwards because an all-NULL list column infers as JSON) so `parents IS NULL` is the feature-root test on every layer. **Every SQL string is a pure function** in `analytics/sql.ts`, unit-tested against exact strings; `compileFilter` refuses an unknown column, an impossible operator, an empty needle or a non-numeric value BEFORE the query is sent, and `ORDER BY` is table-qualified so a `castText` column sorts on the base column rather than its `::VARCHAR` alias. The map filter (`Layer.visibleObjectIds`, pushed by `handleSync` to the plugin's `setVisibleObjectIds`) expands matches to whole FEATURES — a Building carries the attributes, its BuildingPart the geometry — with `COALESCE("feature_id","id")` on both sides of a POSITIVE `IN`, because one NULL `feature_id` makes a `NOT IN` predicate NULL and hides nothing; `null` means no filter and an EMPTY set means "nothing matched, draw nothing". Streaming layers cannot be map-filtered yet (the id set would have to travel to the FCB worker). Export goes through DuckDB's own writers — `COPY TO parquet|csv|json` (with `ARRAY true` for JSON, and no `::VARCHAR` cast: that one is the grid's), and for a package one read of the source into a scratch schema, a CTAS per CityGML module, `cityparquet_init` as its own statement, then `cityparquet_write` zipped with `fflate` — and **never** `FORMAT cityjson|cityjsonseq|flatcitybuf`, whose sinks bypass DuckDB's VFS entirely (no file is created at all; the same extension writes fine through `cityparquet_write`, which is the upstream pointer). Those three are shown DISABLED in the dialog so the capability is discoverable. **Every read-back is validated BY CONTENT** — `PAR1` magic, `JSON.parse`, a newline-terminated CSV header — because a MISSING VFS name reads back as ONE GARBAGE BYTE with no error at all, while a genuinely empty file reads 0; DuckDB's `glob()` lists names that were never created, so it is fit only for a cleanup check and never for discovery, and the write's own result rows are what name the output. Filter, sort, page, sync-to-map and `visibleObjectIds` are SESSION state: snapshot schema stays v3.
 ```
 
 And, in whatever Known Issues section `docs/architecture-notes.md` now carries,
@@ -15738,14 +16311,79 @@ git diff main...HEAD --stat
 git -C packages/cityjson-navara-plugins log --oneline 2963ddb..HEAD
 ```
 
-Give the reviewer that diff plus this plan and the spec, at high effort. Address
-every **Critical** finding with its own commit (prefixed `fix:`) before Step 10;
-record anything deliberately not acted on, and why, in the PR description.
+Give the reviewer that diff plus this plan and the spec, at high effort. Run it
+AFTER the develop merge, not before: the reviewer should see the code as it will
+actually land, including whatever the merge changed.
 
-Run it AFTER the develop merge, not before: the reviewer should see the code as
-it will actually land, including whatever the merge changed.
+Hold its findings until Step 10 — both reviews are fixed in ONE wave, so the
+second reviewer sees the same tree the first one did.
 
-- [ ] **Step 10: Push**
+- [ ] **Step 10: Second whole-branch review, through the codex CLI**
+
+A USER REQUIREMENT, and not a duplicate of Step 9: a different model reading the
+same diff finds a different class of thing, and this branch's surface — SQL
+built by string concatenation, an async queue, a VFS whose failure mode is a
+silent garbage byte — is exactly where one reviewer's blind spot is expensive.
+
+Write the review package to a file first. `codex exec` takes the prompt as an
+argument, and a whole branch diff does not belong on a command line:
+
+```bash
+BASE="$(git merge-base origin/develop HEAD)"
+mkdir -p /tmp/duckdb-review
+{
+  echo "# Commits"
+  git log --oneline "$BASE..HEAD"
+  echo
+  echo "# Submodule commits"
+  git -C packages/cityjson-navara-plugins log --oneline 2963ddb..HEAD
+  echo
+  echo "# Diff"
+  git diff "$BASE...HEAD" -- src tests packages/cityjson-navara-plugins/packages
+} > /tmp/duckdb-review/diff.txt
+wc -l /tmp/duckdb-review/diff.txt
+```
+
+Docs are excluded on purpose: they are prose, they are most of the line count,
+and a reviewer spending its attention on a roadmap entry is attention not spent
+on the SQL.
+
+```bash
+timeout 3600 codex exec -m gpt6-astra --sandbox read-only \
+  "Review this branch diff against docs/superpowers/specs/2026-09-04-duckdb-integration-design.md for correctness, races, SQL and quoting holes, and anything that would break existing behaviour. Report ranked findings, each with file:line and a concrete fix. The diff is at /tmp/duckdb-review/diff.txt." \
+  > /tmp/duckdb-review/codex-report.md
+```
+
+**The `timeout` is mandatory.** `codex exec` has hung on this host before, and a
+hung review with no bound is a session that never ends. If the command times out
+or the report comes back EMPTY, fall back to the same prompt through Claude:
+
+```bash
+test -s /tmp/duckdb-review/codex-report.md || \
+  claude -p --model opus \
+    "Review this branch diff against docs/superpowers/specs/2026-09-04-duckdb-integration-design.md for correctness, races, SQL and quoting holes, and anything that would break existing behaviour. Report ranked findings, each with file:line and a concrete fix. The diff is at /tmp/duckdb-review/diff.txt." \
+    > /tmp/duckdb-review/fallback-report.md
+```
+
+- [ ] **Step 11: One fix wave, then re-verify**
+
+Take both reports together. Every **Critical** and **Important** finding is
+fixed — one `fix:` commit per finding, or one per coherent group — and every
+**Minor** one is written into the PR description as a ledger entry saying what
+it is and why it was left. A finding you disagree with is answered there too,
+with the reason; silently dropping it is how the next reviewer finds it again.
+
+Then re-run everything, because a fix wave is still a change:
+
+```bash
+npx tsc -b --noEmit
+npx vitest run
+cd packages/cityjson-navara-plugins && pnpm typecheck && pnpm vitest run
+```
+
+Expected: clean.
+
+- [ ] **Step 12: Push**
 
 ```bash
 git push
@@ -15755,14 +16393,14 @@ git push
 hook that runs `vp check`, `tsc` and the whole test suite before the push is
 allowed — so a `git push` that appears to hang is the hook working, and a
 Ctrl-C is a half-run verification, not a cancelled upload. Everything it runs
-has already passed in Step 7, so it should be a slow yes; if it says no, the
+has already passed in Step 11, so it should be a slow yes; if it says no, the
 answer is to fix what it found, never `--no-verify`.
 
 Nothing is left to push on the submodule — Step 5 confirmed its branch is
 published and Step 6 proved a recursive clone of this commit resolves. The
 ordering the whole task exists to enforce: **submodule branch pushed → fresh
-clone with `npm ci` → merge `develop` and re-verify → code review → parent
-push.**
+clone with `npm ci` → merge `develop` and re-verify → BOTH reviews → one fix
+wave → parent push.**
 
 ---
 
@@ -15773,108 +16411,114 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
 
 ### 1. Spec coverage
 
-| Spec section  | Requirement                                                                                                                                                          | Task(s)                                           |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| §1.1          | Every city-model layer in its own DuckDB table                                                                                                                       | 12, 13, 14, 16, 17                                |
-| §1.2          | Table panel: pagination ≤1000, sort, structured WHERE                                                                                                                | 8, 9, 10, 20, 21, 22, 23                          |
-| §1.3          | A toggle applies the filter to the 3D map                                                                                                                            | 24, 25, 26, 27                                    |
-| §1.4          | Export dialog: format, LoD, object types, attributes                                                                                                                 | 7, 11, 28, 29, 30, 31                             |
-| §1 (breaking) | In-memory branches and `city_objects` REMOVED, not kept                                                                                                              | 18, 23                                            |
-| §2            | duckdb-wasm pinned to dev64 / DuckDB 1.5.5, arrow 17                                                                                                                 | 1                                                 |
-| §2            | Never `latest`; the city-format writers never offered as usable                                                                                                      | Global Constraints; 11, 29, 31                    |
-| §2            | A dropped VFS name never reused                                                                                                                                      | 13 (counter), 29, 30                              |
-| §2            | Reader schema; `id`/`feature_id` semantics                                                                                                                           | 6, 12, 13, 33                                     |
-| §2            | Drop `geometry_*`/`material_*`/`texture_*`/`template`                                                                                                                | 5, 13                                             |
-| §2            | Cell types: `to_json`, `::VARCHAR`, BigInt                                                                                                                           | 5, 10, 12                                         |
-| §2            | **HUGEINT / DECIMAL arrive as STRINGS → `castText`, no `toFixed`**                                                                                                   | 5, 22                                             |
-| §2            | CityParquet write: schema, module tables, init (own statement), validate, write                                                                                      | 7, 11, 30                                         |
-| §2            | Directory argument with NO trailing slash                                                                                                                            | 30                                                |
-| §2            | **A MISSING VFS name reads back as ONE garbage byte, no error → validate by content**                                                                                | 29 (`validateExportBytes`), 30                    |
-| §2            | `globFiles` lists never-created names → cleanup only, never discovery                                                                                                | 30                                                |
-| §2            | `cityparquet_write` browser-verified; table survives `dropFile`                                                                                                      | 13 (doc), 30, 32                                  |
-| §2            | `cityparquet_read` / `cityjson_geoparquet_geo` unusable                                                                                                              | Global Constraints (never called)                 |
-| §2            | **`spatial` does not autoload and is CORE (`INSTALL spatial`)**                                                                                                      | 2 (`installStatement`), 34                        |
-| §3.1          | Per-extension status, `ensureExtension`, `runQuery`, `formatDuckDBError`                                                                                             | 2                                                 |
-| §3.1          | `registerBuffer`/`dropBuffer`/`readFile`/`ddl`                                                                                                                       | 2                                                 |
-| §3.1          | **Init failure terminates the Worker, then resets the memo**                                                                                                         | 2                                                 |
-| §3.1          | StatusBar labels + **`PRAGMA platform`** + `duckdb_extensions()` tooltip                                                                                             | 2, 3                                              |
-| §3.2          | `LayerTable`/`ColumnInfo` shape, `classifyColumnType`                                                                                                                | 5, 13                                             |
-| §3.2          | Source table (file/URL/CityGML/CityParquet/streaming)                                                                                                                | 15, 16, 17                                        |
-| §3.2          | `shouldUseSourceUrlPath` deleted; `loadFromUrl` returns bytes                                                                                                        | 15, 18                                            |
-| §3.2          | Reader-backed creation SQL, then `dropBuffer`                                                                                                                        | 13                                                |
-| §3.2          | **A REBUILD keeps the old table until the new one exists; a FAILED rebuild keeps it for good**                                                                       | 13, 14                                            |
-| §3.2          | **Cancellation is a monotonic SEQUENCE, not a flag: a drop supersedes only what was enqueued before it**                                                             | 13, 14                                            |
-| §3.2          | **A build cancelled MID-FLIGHT publishes nothing and retires its own table; the drop re-clears the store unless a newer enqueue owns the id**                        | 13, 14                                            |
-| §3.2          | **A build AWAITS `initDuckDB` before touching DuckDB, and a source refused for want of the engine is kept and rebuilt by `retryEngine`**                             | 13, 14, 18, 23                                    |
-| §3.2          | **`retryEngine` RE-PARKS a source it could not read, so a transient provider failure does not cost the layer its last chance at a table**                            | 17                                                |
-| §3.2          | **`LayerTable.rowCount` is `number \| null` — a count nobody could take is not zero rows, and every consumer says so**                                               | 13, 19, 22, 23                                    |
-| §2            | **LoDs are DERIVED from the reader's own column names (`LodColumn` = label + suffix); a suffix is never rebuilt from a label — 3D BAG's LoD 0 is `geometry_lod0_0`** | 5, 11, 13, 30, 31, 32, 33                         |
-| §3.3          | **An empty LIKE needle and an empty / mis-typed `IN` element are refused, never compiled to `LIKE '%%'` or `IN ('10')` on a DOUBLE**                                 | 9                                                 |
-| §3.3          | **The LIKE family is offered on `castText` columns by casting the LEFT side — the same rendering the grid shows**                                                    | 9, 21                                             |
-| §3.6          | **Exports do NOT cast `castText` columns: that cast is the grid's, and a Parquet file whose year is a string is not the export asked for**                           | 11                                                |
-| §3.6          | **`FORMAT json` carries `ARRAY true`, so the download is one valid JSON array (probe P7)**                                                                           | 11                                                |
-| §3.3          | **`ORDER BY` is TABLE-QUALIFIED, so a `castText` column sorts on the base column and not on its `::VARCHAR` alias**                                                  | 10, 33                                            |
-| §3.2          | **One BigInt-safe JSON replacer for both the attribute columns and the row encoding**                                                                                | 12                                                |
-| §3.2          | **The flat fallback ALTERs `parents`/`children` to `VARCHAR[]` — `read_json_auto` types an all-NULL column as JSON**                                                 | 12, 13, 33                                        |
-| §3.2          | **`registerBuffer` CONSUMES its array; no needless second copy anywhere**                                                                                            | 2, 13, 15, 16                                     |
-| §3.2          | **`SourceProvider` returns DECODED bytes for file AND url**                                                                                                          | 15 (`fetchModelBytes`, gunzip test), 16           |
-| §3.2          | **A restored file layer has no provider → export refused with that reason**                                                                                          | 13/16 (`provider: null`), 31 (`RELINK_REASON`)    |
-| §3.2          | Flat fallback aligned to the reader's names; `featureId.ts`                                                                                                          | 6, 12, 13                                         |
-| §3.2          | Lifecycle: enqueue/drop, FIFO, skip-if-removed, rebuild, counter                                                                                                     | 13, 14, 17                                        |
-| §3.2          | **Streaming debounce gated on the PANEL; the export dialog forces one rebuild**                                                                                      | 17 (`refreshStreamingTable`), 31                  |
-| §3.2          | Failures recorded, never thrown into the loader                                                                                                                      | 13, 16                                            |
-| §3.2          | `layerTableStore` mirror                                                                                                                                             | 13                                                |
-| §3.2          | App loses its DuckDB effect and flags; StatsTab on `object_type`                                                                                                     | 18, 19                                            |
-| §3.3          | Filter AST, `LayerQuery`, `queryStore`, session-only                                                                                                                 | 8                                                 |
-| §3.3          | `quoteIdent`/`quoteLiteral`/`compileFilter`/LIKE escaping                                                                                                            | 9                                                 |
-| §3.3          | `projectColumn`, `buildPageSql`, `buildCountSql`                                                                                                                     | 10                                                |
-| §3.3          | `buildFeatureIdsSql` with COALESCE + positive IN                                                                                                                     | 10, 27                                            |
-| §3.3          | `buildDistinctSql` — deliberately NOT built (see the gaps note); `buildRootTypesSql` added for §3.6                                                                  | 10                                                |
-| §3.4          | `TablePanel`→`FilterBar`→`DataGrid`→`Pagination`, `useLayerQuery`                                                                                                    | 20, 21, 22, 23                                    |
-| §3.4          | Header: Sync selection, Filter map, Export, collapse                                                                                                                 | 23, 31                                            |
-| §3.4          | IntersectionObserver removed; 320 px default, 120–800 clamp                                                                                                          | 22, 23                                            |
-| §3.4          | States: engine failed+Retry, queued/building, failed, no layer, zero rows                                                                                            | 20, 23                                            |
-| §3.4          | **`initializing` is published BEFORE the 3.5 s boot, so the panel never offers Retry over a healthy engine**                                                         | 23                                                |
-| §3.4          | **A DuckDB page error / compile refusal is shown in the panel BODY, not only in the collapsed bar**                                                                  | 23                                                |
-| §3.4          | **Values are kept RAW in the condition and coerced at compile time — a fractional threshold can be typed**                                                           | 9, 21                                             |
-| §3.4          | **Zero rows + Filter map on → "0 of N rows match; the map shows nothing…"**                                                                                          | 22 (`emptyMessage`), 23                           |
-| §3.5          | `syncToMap` → ids → `setVisibleObjectIds`; null vs empty                                                                                                             | 26, 27                                            |
-| §3.5          | `buildCityMeshArrays` visible-id parameter, slot invariant                                                                                                           | 24                                                |
-| §3.5          | `CityModelMesh.setVisibleObjectIds` + handle + registry                                                                                                              | 25                                                |
-| §3.5          | `Layer.visibleObjectIds` session-only; `handleSync` push                                                                                                             | 26                                                |
-| §3.5          | **`setVisibleObjectIds` is a no-op on identity; the sync returns early when there is nothing to clear**                                                              | 26, 27                                            |
-| §3.5          | **`syncFilterToMap` carries a per-layer generation: a slow earlier query cannot rebuild the geometry over a newer one**                                              | 27                                                |
-| §3.5          | Streaming disabled with the exact reason string                                                                                                                      | 23                                                |
-| §3.6          | Dialog: scope, object types, attributes, LoD, format                                                                                                                 | 31                                                |
-| §3.6          | **The chosen format is clamped to what is offered, and the attribute list re-seeds when the table changes**                                                          | 31                                                |
-| §3.6          | CityParquet: schema, re-register, CTAS, init, validate, write, zip, cleanup                                                                                          | 30                                                |
-| §3.6          | **Every file the write names must be in the zip**                                                                                                                    | 30                                                |
-| §3.6          | **The output name is the FIRST string column of the write's result row, with a repeated dir prefix stripped**                                                        | 30                                                |
-| §3.6          | **The source is read ONCE into a scratch schema; N modules is not N parses**                                                                                         | 11, 30                                            |
-| §3.6          | **`cityparquet_validate` returns no rows — the temp table is dropped first, and a run/read failure is a VISIBLE warning**                                            | 30                                                |
-| §3.6          | **`dropBuffer` over a writer-created file is unverified: try/catch + warn, checked by the smoke**                                                                    | 30, 32                                            |
-| §3.6          | `cityGmlModuleOf`                                                                                                                                                    | 7                                                 |
-| §3.6          | Parquet/CSV/JSON via `COPY`                                                                                                                                          | 29                                                |
-| §3.6          | **City formats shown DISABLED with the exact title**                                                                                                                 | 31                                                |
-| §3.6          | **Fallback layers: attribute formats only, plus the "no CityJSON source" sentence**                                                                                  | 31                                                |
-| §3.6          | `platform/download.ts` factored from `RuleBuilderTab`                                                                                                                | 28                                                |
-| §3.6          | Busy state, cancel-safe `finally`, inline errors                                                                                                                     | 30, 31                                            |
-| §3.7          | Snapshot stays v3; nothing new persisted                                                                                                                             | 8, 26 (no `persistence/types.ts` change at all)   |
-| §4            | Unit tests for every pure module and store                                                                                                                           | 5–14, 20–22, 26–31                                |
-| §4            | Plugin unit tests                                                                                                                                                    | 24, 25                                            |
-| §4            | Opt-in Node integration behind `DUCKDB_INTEGRATION`                                                                                                                  | 33                                                |
-| §4            | **Reader `id` set == `parseCityJSON().objects` key set**                                                                                                             | 33                                                |
-| §4            | Browser smoke: boot, table, filter, map sync, all four exports                                                                                                       | 32                                                |
-| §5            | Submodule branch from **`2963ddb`** (was `947c980` before the develop merge), pushed, gitlink bump                                                                   | 23b, 24, 25, 26, 34                               |
-| §5            | **`origin/develop`'s Navara 0.1.1 merge is taken BEFORE the plugin work, and again immediately before the push**                                                     | 23b, 34                                           |
-| §5            | **The docs land where develop's restructure put their equivalents — hard rules in CLAUDE.md, the decision record and Known Issues in `docs/architecture-notes.md`**  | 34                                                |
-| §3.5          | **The spec's own signature line is CORRECTED in place (`appearance` sixth, `visibleObjectIds` seventh), and records that the id test is raw**                        | 34                                                |
-| §4            | **The smoke proves the map filter is a REBUILD: excluded objects stop occluding AND stop answering a click**                                                         | 32                                                |
-| §5            | Lockfile regenerated; `npm ci` verified in a fresh clone                                                                                                             | 1, 34                                             |
-| §5            | The seven mocking test files                                                                                                                                         | 4                                                 |
-| §5            | `duckdb.ts` the only importer of `@duckdb/duckdb-wasm`                                                                                                               | Global Constraints; 13, 29, 30 all import from it |
-| §6            | `spatial`/`three_d` loadable but with nothing to operate on in v1                                                                                                    | 34                                                |
-| §6            | The two `three_d` traps recorded for the follow-up                                                                                                                   | 34                                                |
+| Spec section  | Requirement                                                                                                                                                                  | Task(s)                                           |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| §1.1          | Every city-model layer in its own DuckDB table                                                                                                                               | 12, 13, 14, 16, 17                                |
+| §1.2          | Table panel: pagination ≤1000, sort, structured WHERE                                                                                                                        | 8, 9, 10, 20, 21, 22, 23                          |
+| §1.3          | A toggle applies the filter to the 3D map                                                                                                                                    | 24, 25, 26, 27                                    |
+| §1.4          | Export dialog: format, LoD, object types, attributes                                                                                                                         | 7, 11, 28, 29, 30, 31                             |
+| §1 (breaking) | In-memory branches and `city_objects` REMOVED, not kept                                                                                                                      | 18, 23                                            |
+| §2            | duckdb-wasm pinned to dev64 / DuckDB 1.5.5, arrow 17                                                                                                                         | 1                                                 |
+| §2            | Never `latest`; the city-format writers never offered as usable                                                                                                              | Global Constraints; 11, 29, 31                    |
+| §2            | A dropped VFS name never reused                                                                                                                                              | 13 (counter), 29, 30                              |
+| §2            | Reader schema; `id`/`feature_id` semantics                                                                                                                                   | 6, 12, 13, 33                                     |
+| §2            | Drop `geometry_*`/`material_*`/`texture_*`/`template`                                                                                                                        | 5, 13                                             |
+| §2            | Cell types: `to_json`, `::VARCHAR`, BigInt                                                                                                                                   | 5, 10, 12                                         |
+| §2            | **HUGEINT / DECIMAL arrive as STRINGS → `castText`, no `toFixed`**                                                                                                           | 5, 22                                             |
+| §2            | CityParquet write: schema, module tables, init (own statement), validate, write                                                                                              | 7, 11, 30                                         |
+| §2            | Directory argument with NO trailing slash                                                                                                                                    | 30                                                |
+| §2            | **A MISSING VFS name reads back as ONE garbage byte, no error → validate by content**                                                                                        | 29 (`validateExportBytes`), 30                    |
+| §2            | DuckDB's `glob()` lists never-created names → a cleanup CHECK only, never discovery; no glob helper exists in `src/`                                                         | 30, 32                                            |
+| §2            | `cityparquet_write` browser-verified; table survives `dropFile`                                                                                                              | 13 (doc), 30, 32                                  |
+| §2            | `cityparquet_read` / `cityjson_geoparquet_geo` unusable                                                                                                                      | Global Constraints (never called)                 |
+| §2            | **`spatial` does not autoload and is CORE (`INSTALL spatial`)**                                                                                                              | 2 (`installStatement`), 34                        |
+| §3.1          | Per-extension status, `ensureExtension`, `runQuery`, `formatDuckDBError`                                                                                                     | 2                                                 |
+| §3.1          | `registerBuffer`/`dropBuffer`/`readFile`/`ddl`                                                                                                                               | 2                                                 |
+| §3.1          | **Init failure terminates the Worker, then resets the memo**                                                                                                                 | 2                                                 |
+| §3.1          | StatusBar labels + **`PRAGMA platform`** + `duckdb_extensions()` tooltip                                                                                                     | 2, 3                                              |
+| §3.2          | `LayerTable`/`ColumnInfo` shape, `classifyColumnType`                                                                                                                        | 5, 13                                             |
+| §3.2          | Source table (file/URL/CityGML/CityParquet/streaming)                                                                                                                        | 15, 16, 17                                        |
+| §3.2          | `shouldUseSourceUrlPath` deleted; `loadFromUrl` returns bytes                                                                                                                | 15, 18                                            |
+| §3.2          | Reader-backed creation SQL, then `dropBuffer`                                                                                                                                | 13                                                |
+| §3.2          | **A REBUILD keeps the old table until the new one exists; a FAILED rebuild keeps it for good**                                                                               | 13, 14                                            |
+| §3.2          | **Cancellation is a monotonic SEQUENCE, not a flag: a drop supersedes only what was enqueued before it**                                                                     | 13, 14                                            |
+| §3.2          | **A build cancelled MID-FLIGHT publishes nothing and retires its own table; the drop re-clears the store unless a newer enqueue owns the id**                                | 13, 14                                            |
+| §3.2          | **A build AWAITS `initDuckDB` before touching DuckDB, and a source refused for want of the engine is kept and rebuilt by `retryEngine`**                                     | 13, 14, 18, 23                                    |
+| §3.2          | **`retryEngine` RE-PARKS a source it could not read, so a transient provider failure does not cost the layer its last chance at a table**                                    | 17                                                |
+| §3.2          | **`LayerTable.rowCount` is `number \| null` — a count nobody could take is not zero rows, and every consumer says so**                                                       | 13, 19, 22, 23                                    |
+| §2            | **LoDs are DERIVED from the reader's own column names (`LodColumn` = label + suffix); a suffix is never rebuilt from a label — 3D BAG's LoD 0 is `geometry_lod0_0`**         | 5, 11, 13, 30, 31, 32, 33                         |
+| §3.3          | **An empty LIKE needle and an empty / mis-typed `IN` element are refused, never compiled to `LIKE '%%'` or `IN ('10')` on a DOUBLE**                                         | 9                                                 |
+| §3.3          | **The LIKE family is offered on `castText` columns by casting the LEFT side — the same rendering the grid shows**                                                            | 9, 21                                             |
+| §3.6          | **Exports do NOT cast `castText` columns: that cast is the grid's, and a Parquet file whose year is a string is not the export asked for**                                   | 11                                                |
+| §3.6          | **`FORMAT json` carries `ARRAY true`, so the download is one valid JSON array (probe P7)**                                                                                   | 11                                                |
+| §3.3          | **`ORDER BY` is TABLE-QUALIFIED, so a `castText` column sorts on the base column and not on its `::VARCHAR` alias**                                                          | 10, 33                                            |
+| §3.2          | **One BigInt-safe JSON replacer for both the attribute columns and the row encoding**                                                                                        | 12                                                |
+| §3.2          | **The flat fallback ALTERs `parents`/`children` to `VARCHAR[]` — `read_json_auto` types an all-NULL column as JSON**                                                         | 12, 13, 33                                        |
+| §3.2          | **`registerBuffer` CONSUMES its array; no needless second copy anywhere**                                                                                                    | 2, 13, 15, 16                                     |
+| §3.2          | **`SourceProvider` returns DECODED bytes for file AND url**                                                                                                                  | 15 (`fetchModelBytes`, gunzip test), 16           |
+| §3.2          | **A restored file layer has no provider → export refused with that reason**                                                                                                  | 13/16 (`provider: null`), 31 (`RELINK_REASON`)    |
+| §3.2          | Flat fallback aligned to the reader's names; `featureId.ts`                                                                                                                  | 6, 12, 13                                         |
+| §3.2          | Lifecycle: enqueue/drop, FIFO, skip-if-removed, rebuild, counter                                                                                                             | 13, 14, 17                                        |
+| §3.2          | **Streaming debounce gated on the PANEL; the export dialog forces one rebuild**                                                                                              | 17 (`refreshStreamingTable`), 31                  |
+| §3.2          | Failures recorded, never thrown into the loader                                                                                                                              | 13, 16                                            |
+| §3.2          | `layerTableStore` mirror                                                                                                                                                     | 13                                                |
+| §3.2          | App loses its DuckDB effect and flags; StatsTab on `object_type`                                                                                                             | 18, 19                                            |
+| §3.3          | Filter AST, `LayerQuery`, `queryStore`, session-only                                                                                                                         | 8                                                 |
+| §3.3          | `quoteIdent`/`quoteLiteral`/`compileFilter`/LIKE escaping                                                                                                                    | 9                                                 |
+| §3.3          | `projectColumn`, `buildPageSql`, `buildCountSql`                                                                                                                             | 10                                                |
+| §3.3          | `buildFeatureIdsSql` with COALESCE + positive IN                                                                                                                             | 10, 27                                            |
+| §3.3          | `buildDistinctSql` — deliberately NOT built (see the gaps note); `buildRootTypesSql` added for §3.6                                                                          | 10                                                |
+| §3.4          | `TablePanel`→`FilterBar`→`DataGrid`→`Pagination`, `useLayerQuery`                                                                                                            | 20, 21, 22, 23                                    |
+| §3.4          | Header: Sync selection, Filter map, Export, collapse                                                                                                                         | 23, 31                                            |
+| §3.4          | IntersectionObserver removed; 320 px default, 120–800 clamp                                                                                                                  | 22, 23                                            |
+| §3.4          | States: engine failed+Retry, queued/building, failed, no layer, zero rows                                                                                                    | 20, 23                                            |
+| §3.4          | **`initializing` is published BEFORE the 3.5 s boot, so the panel never offers Retry over a healthy engine**                                                                 | 23                                                |
+| §3.4          | **A DuckDB page error / compile refusal is shown in the panel BODY, not only in the collapsed bar**                                                                          | 23                                                |
+| §3.4          | **Values are kept RAW in the condition and coerced at compile time — a fractional threshold can be typed**                                                                   | 9, 21                                             |
+| §3.4          | **Zero rows + Filter map on → "0 of N rows match; the map shows nothing…"**                                                                                                  | 22 (`emptyMessage`), 23                           |
+| §3.5          | `syncToMap` → ids → `setVisibleObjectIds`; null vs empty                                                                                                                     | 26, 27                                            |
+| §3.5          | `buildCityMeshArrays` visible-id parameter, slot invariant                                                                                                                   | 24                                                |
+| §3.5          | `CityModelMesh.setVisibleObjectIds` + handle + registry                                                                                                                      | 25                                                |
+| §3.5          | `Layer.visibleObjectIds` session-only; `handleSync` push                                                                                                                     | 26                                                |
+| §3.5          | **`setVisibleObjectIds` is a no-op on identity; the sync returns early when there is nothing to clear**                                                                      | 26, 27                                            |
+| §3.5          | **`syncFilterToMap` carries a per-layer generation: a slow earlier query cannot rebuild the geometry over a newer one**                                                      | 27                                                |
+| §3.5          | Streaming disabled with the exact reason string                                                                                                                              | 23                                                |
+| §3.6          | Dialog: scope, object types, attributes, LoD, format                                                                                                                         | 31                                                |
+| §3.6          | **The chosen format is clamped to what is offered, and the attribute list re-seeds when the table changes**                                                                  | 31                                                |
+| §3.6          | CityParquet: schema, re-register, CTAS, init, validate, write, zip, cleanup                                                                                                  | 30                                                |
+| §3.6          | **Every file the write names must be in the zip**                                                                                                                            | 30                                                |
+| §3.6          | **The output name is the FIRST string column of the write's result row, with a repeated dir prefix stripped**                                                                | 30                                                |
+| §3.6          | **The source is read ONCE into a scratch schema; N modules is not N parses**                                                                                                 | 11, 30                                            |
+| §3.6          | **`cityparquet_validate` returns no rows — the temp table is dropped first, and a run/read failure is a VISIBLE warning**                                                    | 30                                                |
+| §3.6          | **`dropBuffer` over a writer-created file is unverified: try/catch + warn, checked by the smoke**                                                                            | 30, 32                                            |
+| §3.6          | `cityGmlModuleOf`                                                                                                                                                            | 7                                                 |
+| §3.6          | Parquet/CSV/JSON via `COPY`                                                                                                                                                  | 29                                                |
+| §3.6          | **City formats shown DISABLED with the exact title**                                                                                                                         | 31                                                |
+| §3.6          | **Fallback layers: attribute formats only, plus the "no CityJSON source" sentence**                                                                                          | 31                                                |
+| §3.6          | `platform/download.ts` factored from `RuleBuilderTab`                                                                                                                        | 28                                                |
+| §3.6          | Busy state, cancel-safe `finally`, inline errors                                                                                                                             | 30, 31                                            |
+| §3.7          | Snapshot stays v3; nothing new persisted                                                                                                                                     | 8, 26 (no `persistence/types.ts` change at all)   |
+| §4            | Unit tests for every pure module and store                                                                                                                                   | 5–14, 20–22, 26–31                                |
+| §4            | Plugin unit tests                                                                                                                                                            | 24, 25                                            |
+| §4            | Opt-in Node integration behind `DUCKDB_INTEGRATION`                                                                                                                          | 33                                                |
+| §4            | **Reader `id` set == `parseCityJSON().objects` key set**                                                                                                                     | 33                                                |
+| §4            | Browser smoke: boot, table, filter, map sync, all four exports                                                                                                               | 32                                                |
+| §5            | Submodule branch from **`2963ddb`** (was `947c980` before the develop merge), pushed, gitlink bump                                                                           | 23b, 24, 25, 26, 34                               |
+| §5            | **`origin/develop`'s Navara 0.1.1 merge is taken BEFORE the plugin work, and again immediately before the push**                                                             | 23b, 34                                           |
+| §5            | **The docs land where develop's restructure put their equivalents — hard rules in CLAUDE.md, the decision record and Known Issues in `docs/architecture-notes.md`**          | 34                                                |
+| §5            | **TWO whole-branch reviews before the push — `feature-dev:code-reviewer` and `codex exec -m gpt6-astra` (timeout-bounded, with a `claude -p` fallback) — then ONE fix wave** | 34                                                |
+| §3.6          | **EVERY format is root-type scoped, not only the package; the predicate is omitted when every type is selected**                                                             | 11, 29, 31                                        |
+| §3.6          | **`COPY … (FORMAT csv, HEADER)` is explicit, and the read-back checks the header against the projected columns**                                                             | 11, 29                                            |
+| §3.6          | **Schema names, the output directory and the CRS go through `quoteLiteral`, behind a `Number.isInteger(epsg)` gate**                                                         | 30                                                |
+| §3.6          | **Every written name reaches the cleanup list BEFORE any file is validated, and the findings table is dropped in `finally`**                                                 | 30                                                |
+| §3.6          | **The dialog wears the codebase's real modal classes (`.modal`, `.modal-title` + `aria-labelledby`, `.modal-close`)**                                                        | 31                                                |
+| §3.5          | **The spec's own signature line is CORRECTED in place (`appearance` sixth, `visibleObjectIds` seventh), and records that the id test is raw**                                | 34                                                |
+| §4            | **The smoke proves the map filter is a REBUILD: excluded objects stop occluding AND stop answering a click**                                                                 | 32                                                |
+| §5            | Lockfile regenerated; `npm ci` verified in a fresh clone                                                                                                                     | 1, 34                                             |
+| §5            | The seven mocking test files                                                                                                                                                 | 4                                                 |
+| §5            | `duckdb.ts` the only importer of `@duckdb/duckdb-wasm`                                                                                                                       | Global Constraints; 13, 29, 30 all import from it |
+| §6            | `spatial`/`three_d` loadable but with nothing to operate on in v1                                                                                                            | 34                                                |
+| §6            | The two `three_d` traps recorded for the follow-up                                                                                                                           | 34                                                |
 
 **Gaps found and closed while writing (both drafts):**
 
@@ -15953,6 +16597,17 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
   "contains 3412" on an identifier-shaped BIGINT are questions the data invites
   and the filter refused. Tasks 9 and 21 cast the LEFT side and offer the three
   operators; `nested` and `blob` stay refused, because there is no text there.
+- §3.6's object-type rule ("a feature is exported iff its root's type is
+  selected") sits under the CityParquet heading, and the first draft applied it
+  there only — so a CSV from the same dialog, with the same tick-boxes, would
+  have ignored them. It applies to every format now, through one shared
+  predicate, and is omitted when every type is selected because a predicate
+  that excludes nothing is a subquery and a scan for no effect.
+- The plan's dialog was written with `.modal-dialog`, `.modal-footer` and
+  `.primary`. Only the second of those is even plausible: this codebase's
+  modals wear `.modal` / `.modal-header` / `.modal-title` / `.modal-close` /
+  `.modal-body`, and `.primary` does not exist at all. Task 31 uses the real
+  classes and DEFINES the two it adds.
 - §3.6 says nested columns are exported "as-is for Parquet and via `to_json`
   for CSV/JSON" and is silent on `castText`, so the first draft reused
   `projectColumn` — which casts them to VARCHAR for the GRID's benefit, and
@@ -16099,6 +16754,23 @@ Every name that crosses a task boundary, re-checked after the edits:
   function (Task 2), and REFERENCED — not restated differently — on
   `LayerTableSource.bytes` and `SourceProvider` (Task 13), `modelTableSource`
   and both providers (Task 16), and `loadFromUrl`'s `bytes` field (Task 15).
+- `buildRootTypeScopeWhere` (Task 11) has exactly two callers —
+  `buildAttributeExportSql` and `buildCityParquetModuleSql` — so the two routes
+  cannot drift on what "a feature whose root's type is selected" means.
+  `AttributeExportRequest` carries `rootTypes` AND `allRootTypes` (Task 29),
+  and `ExportDialog` fills both from the same probe (Task 31).
+- `validateExportBytes` gained an optional fourth parameter
+  (`expectedHeader`), passed only on the attribute route and only used by the
+  CSV branch; the CityParquet route calls it with three arguments.
+- `requestClose` (Task 31) is the single close path — `useModalChrome`, the
+  backdrop, the close button and Cancel all go through it — and `busy` is what
+  makes all four inert. `rebuilding` is read from the store and gates only the
+  submit button's label and disabled state.
+- The dialog's classes are the ones `app.css` actually defines: `.modal`,
+  `.modal-header`, `.modal-title` (+ `aria-labelledby`), `.modal-close`,
+  `.modal-body`. `.modal-footer` and `.export-submit` are NEW and are defined
+  in Task 31's CSS block; `.modal-dialog` and `.primary` never existed and no
+  longer appear anywhere in the plan.
 - `projectColumn` (Task 10) and `exportProjection` (Task 11) are deliberately
   DIFFERENT functions with different rules — the first casts `castText` for the
   grid, the second never does — and neither calls the other. `buildPageSql` is
