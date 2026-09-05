@@ -16,7 +16,11 @@
  * `@cityjson/navara-cityjson` barrel never reaches an `@navaramap/*` module
  * (NODE_IMPORT_SAFE = false — see Global Constraints).
  */
-import { compileRuleEvaluator } from "@cityjson/navara-core";
+import {
+  appearanceThemesEqual,
+  compileRuleEvaluator,
+  type AppearanceTheme,
+} from "@cityjson/navara-core";
 import type {
   CityModelHandle,
   EcefRay,
@@ -55,6 +59,10 @@ export interface LiveLayer {
    *  (`DEFAULT_THEME_STYLE`). Pushing is NOT cheap: `setThemeStyle` re-extracts
    *  every structural edge of the layer. */
   themeStyle?: ThemeStyle;
+  /** The appearance theme last pushed (or seeded at add time), compared by
+   *  VALUE — the store may hand out a fresh but equal object on restore.
+   *  Unset reads as `null` (plain colours), the mesh's own default. */
+  appearance?: AppearanceTheme | null;
 }
 
 /**
@@ -120,6 +128,9 @@ export function syncLayers(
           lod: layer.selectedLod,
           visible: layer.visible,
           hiddenTypes: layer.hiddenTypes,
+          // Seeded, not pushed: `registry.add` builds the handle already
+          // drawing this theme.
+          appearance: layer.selectedAppearance,
         };
         live.set(layer.id, entry);
         handle.setVisible(layer.visible);
@@ -140,6 +151,10 @@ export function syncLayers(
     if (entry.hiddenTypes !== layer.hiddenTypes) {
       entry.hiddenTypes = layer.hiddenTypes;
       entry.handle.setHiddenTypes(layer.hiddenTypes);
+    }
+    if (!appearanceThemesEqual(entry.appearance, layer.selectedAppearance)) {
+      entry.appearance = layer.selectedAppearance;
+      entry.handle.setAppearance(layer.selectedAppearance);
     }
     if (themeStyle !== undefined && entry.themeStyle !== themeStyle) {
       entry.themeStyle = themeStyle;
@@ -252,6 +267,9 @@ export interface StreamInteractionHandle extends InteractionHandle {
   /** First-level object groups to stream without geometry. Forces a commit,
    *  so every affected cell is refetched — the same cost as a LoD change. */
   setHiddenTypes(types: ReadonlyArray<string>): void;
+  /** Bakes the theme into every resident cell on the next commit (a swap,
+   *  like a hidden-type change); `null` for plain colours. */
+  setAppearance(theme: AppearanceTheme | null): void;
   /** Fires after each cell commit; returns its own unsubscribe. Cells arrive
    *  long after any store change, so this — not a React dependency — is what
    *  tells the app to re-count triangles and re-apply the highlight. */
@@ -289,6 +307,8 @@ export interface StreamSyncMemo {
   /** The scene theme's style last pushed, by identity — see
    *  {@link LiveLayer.themeStyle}. */
   themeStyle?: ThemeStyle;
+  /** Compared by VALUE, like the static path's `LiveLayer.appearance`. */
+  appearance?: AppearanceTheme | null;
 }
 
 /**
@@ -352,6 +372,10 @@ export function syncStreamState(
   if (memo.hiddenTypes !== layer.hiddenTypes) {
     memo.hiddenTypes = layer.hiddenTypes;
     handle.setHiddenTypes(layer.hiddenTypes);
+  }
+  if (!appearanceThemesEqual(memo.appearance, layer.selectedAppearance)) {
+    memo.appearance = layer.selectedAppearance;
+    handle.setAppearance(layer.selectedAppearance);
   }
   // Same optional-means-"no theme to push" contract as `syncLayers`, and the
   // same identity comparison: one frozen style object per theme.
@@ -445,9 +469,10 @@ export function layerHeightOffset(
  * engine pick — `PickedFeature.properties` is null for custom meshes, Task B7
  * review), and finally the engine's own `layerId` field.
  *
- * Unwired in Part B by design: `PICK_PATH = "own-raycast"` (Task B1), so no
- * `view.on("pick")` listener exists and clicks travel the screen-point path
- * above. It is kept — and tested — because it is the contract Task C10b's
+ * Unwired in Part B by design: `PICK_PATH = "own-raycast"` (Task B1), so the
+ * viewport's `view.on("featureClick")` listener never commits a CITY pick (it
+ * only stashes geo picks) and clicks travel the screen-point path above. It is
+ * kept — and tested — because it is the contract Task C10b's
  * streaming router and any future per-triangle-batch-id engine plug into.
  */
 export function resolvePickedFeature(

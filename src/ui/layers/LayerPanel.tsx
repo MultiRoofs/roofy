@@ -35,6 +35,8 @@ import { closeStreamingLayer } from "../../features/streaming/openStreamingLayer
 import { getStreamPlugin } from "../../features/streaming/streamPlugin";
 import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
 import { LodSelector } from "../sidebar/LodSelector";
+import { AppearanceSelector } from "../sidebar/AppearanceSelector";
+import type { AppearanceTheme } from "@cityjson/navara-core";
 import { StreamingLodControl } from "./StreamingLodControl";
 import { LayerTypeToggles } from "./LayerTypeToggles";
 import { GeoLayerRow } from "./GeoLayerRow";
@@ -62,6 +64,14 @@ export function LayerPanel({
   onFlyToGeoLayer,
 }: LayerPanelProps) {
   const layers = useLayerStore((s) => s.layers);
+  // A streaming layer's themes are LEARNED (its model is a stub), so the
+  // row reads them from the stream store, like the streaming LoD ladder.
+  const streams = useStreamStore((s) => s.streams);
+  const streamThemes: Record<string, ReadonlyArray<AppearanceTheme>> = {};
+  for (const [id, st] of Object.entries(streams)) {
+    const themes = st.appearanceThemes ?? [];
+    if (themes.length > 0) streamThemes[id] = themes;
+  }
   const activeLayerId = useLayerStore((s) => s.activeLayerId);
   const setActiveLayer = useLayerStore((s) => s.setActiveLayer);
   const updateLayer = useLayerStore((s) => s.updateLayer);
@@ -180,29 +190,45 @@ export function LayerPanel({
                 choice that IS per-layer: whether to keep following the
                 camera. */}
             {layer.isStreaming ? (
-              <button
-                className={`layer-sync-btn ${layer.cameraSync ? "is-on" : ""}`}
-                aria-pressed={layer.cameraSync}
-                title={
-                  layer.cameraSync
-                    ? "Following the camera — click to freeze this extract"
-                    : "Frozen — click to follow the camera again"
-                }
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setCameraSync(layer.id, !layer.cameraSync);
-                }}
-              >
-                {layer.cameraSync ? "SYNC" : "FROZEN"}
-              </button>
+              <>
+                <AppearanceSelector
+                  layerId={layer.id}
+                  themes={streamThemes[layer.id] ?? []}
+                  selected={layer.selectedAppearance}
+                  texturesResolvable={layer.modelRef.type === "url"}
+                />
+                <button
+                  className={`layer-sync-btn ${layer.cameraSync ? "is-on" : ""}`}
+                  aria-pressed={layer.cameraSync}
+                  title={
+                    layer.cameraSync
+                      ? "Following the camera — click to freeze this extract"
+                      : "Frozen — click to follow the camera again"
+                  }
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCameraSync(layer.id, !layer.cameraSync);
+                  }}
+                >
+                  {layer.cameraSync ? "SYNC" : "FROZEN"}
+                </button>
+              </>
             ) : (
-              <LodSelector
-                layerId={layer.id}
-                availableLods={layer.availableLods}
-                selectedLod={layer.selectedLod}
-                isStreaming={layer.isStreaming}
-                lodMode={layer.lodMode}
-              />
+              <>
+                <LodSelector
+                  layerId={layer.id}
+                  availableLods={layer.availableLods}
+                  selectedLod={layer.selectedLod}
+                  isStreaming={layer.isStreaming}
+                  lodMode={layer.lodMode}
+                />
+                <AppearanceSelector
+                  layerId={layer.id}
+                  themes={layer.appearanceThemes}
+                  selected={layer.selectedAppearance}
+                  texturesResolvable={layer.modelRef.type === "url"}
+                />
+              </>
             )}
 
             <div className="layer-actions">

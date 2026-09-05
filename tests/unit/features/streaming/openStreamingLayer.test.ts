@@ -10,6 +10,7 @@
  * `@navaramap/*`, which crashes at module scope under Node (Global
  * Constraints -> NODE_IMPORT_SAFE = false).
  */
+import type { AppearanceTheme } from "@cityjson/navara-core";
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
@@ -42,6 +43,7 @@ interface FakeHandle {
   readonly handle: FcbStreamLayerHandle;
   emitStatus: (status: StreamStatus, message: string | null) => void;
   emitLadder: (ladder: ReadonlyArray<string>) => void;
+  emitAppearance: (themes: ReadonlyArray<AppearanceTheme>) => void;
   emitTypes: (types: ReadonlyArray<string>) => void;
   emitCommit: (level: number | null) => void;
   /** How many subscribers each fan-out still has — the observable form of
@@ -60,6 +62,7 @@ function fakeHandle(id: string): FakeHandle {
   const statusCbs: Array<(s: StreamStatus, m: string | null) => void> = [];
   const ladderCbs: Array<(l: ReadonlyArray<string>) => void> = [];
   const typesCbs: Array<(t: ReadonlyArray<string>) => void> = [];
+  const appearanceCbs: Array<(t: ReadonlyArray<AppearanceTheme>) => void> = [];
   const commitCbs: Array<(v: number) => void> = [];
   const state = { level: null as number | null, version: 0 };
   const handle = {
@@ -91,6 +94,11 @@ function fakeHandle(id: string): FakeHandle {
       typesCbs.push(cb);
       return () => drop(typesCbs, cb);
     },
+    appearanceThemes: [] as ReadonlyArray<AppearanceTheme>,
+    onAppearanceThemes: (cb: (t: ReadonlyArray<AppearanceTheme>) => void) => {
+      appearanceCbs.push(cb);
+      return () => drop(appearanceCbs, cb);
+    },
     onCommit: (cb: (v: number) => void) => {
       commitCbs.push(cb);
       return () => drop(commitCbs, cb);
@@ -100,10 +108,15 @@ function fakeHandle(id: string): FakeHandle {
   return {
     handle,
     listenerCount: () =>
-      statusCbs.length + ladderCbs.length + typesCbs.length + commitCbs.length,
+      statusCbs.length +
+      ladderCbs.length +
+      typesCbs.length +
+      commitCbs.length +
+      appearanceCbs.length,
     deleted,
     emitStatus: (s, m) => statusCbs.forEach((cb) => cb(s, m)),
     emitLadder: (l) => ladderCbs.forEach((cb) => cb(l)),
+    emitAppearance: (t) => appearanceCbs.forEach((cb) => cb(t)),
     emitTypes: (t) => typesCbs.forEach((cb) => cb(t)),
     emitCommit: (level) => {
       state.level = level;
@@ -393,7 +406,7 @@ describe("closeStreamingLayer", () => {
     expect(plugin.remove).not.toHaveBeenCalled();
   });
 
-  it("runs the three event disposers, so a closed layer stops reaching the store", async () => {
+  it("runs the event disposers (status, ladder, types, commit, appearance), so a closed layer stops reaching the store", async () => {
     // `handle.delete()` does not clear the handle's listener sets, so without
     // these the store's closures stay reachable from the handle for as long as
     // anything holds it — and `NavaraViewport`'s `streamsRef` holds it.
@@ -405,7 +418,7 @@ describe("closeStreamingLayer", () => {
       name: "a.fcb",
       modelRef: { type: "url", url: "https://x/a.fcb" },
     });
-    expect(handles[0]!.listenerCount()).toBe(4);
+    expect(handles[0]!.listenerCount()).toBe(5);
 
     closeStreamingLayer(plugin, layerId);
     expect(handles[0]!.listenerCount()).toBe(0);
@@ -429,5 +442,64 @@ describe("closeStreamingLayer", () => {
     expect(handles[0]!.deleted).toHaveBeenCalledTimes(1);
     expect(handles[0]!.listenerCount()).toBe(0);
     expect(useStreamStore.getState().streams[layerId]).toBeUndefined();
+  });
+});
+
+describe("openStreamingLayer appearance", () => {
+  const rgb: AppearanceTheme = { kind: "texture", name: "rgb" };
+
+  it("adopts the first texture theme the stream reports, once", async () => {
+    const handles: FakeHandle[] = [];
+    const plugin = fakePlugin(handles);
+    const layerId = await openStreamingLayer({
+      plugin,
+      source: { url: "https://x/a.fcb" },
+      name: "a.fcb",
+      modelRef: { type: "url", url: "https://x/a.fcb" },
+    });
+    expect(plugin.openStream.mock.calls[0]![0].appearance).toBeNull();
+    const find = () =>
+      useLayerStore.getState().layers.find((l) => l.id === layerId)!;
+    expect(find().selectedAppearance).toBeNull();
+    handles[0]!.emitAppearance([{ kind: "material", name: "m" }]);
+    expect(find().selectedAppearance).toBeNull();
+    handles[0]!.emitAppearance([{ kind: "material", name: "m" }, rgb]);
+    expect(find().selectedAppearance).toEqual(rgb);
+    expect(useStreamStore.getState().get(layerId)!.appearanceThemes).toEqual([
+      { kind: "material", name: "m" },
+      rgb,
+    ]);
+    // The user's later choice is never overridden by another discovery.
+    useLayerStore.getState().setLayerAppearance(layerId, null);
+    handles[0]!.emitAppearance([rgb, { kind: "texture", name: "night" }]);
+    expect(find().selectedAppearance).toBeNull();
+  });
+
+  it("seeds a restored choice into the plugin and never auto-picks over it", async () => {
+    const handles: FakeHandle[] = [];
+    const plugin = fakePlugin(handles);
+    const layerId = await openStreamingLayer({
+      plugin,
+      source: { url: "https://x/a.fcb" },
+      name: "a.fcb",
+      modelRef: { type: "url", url: "https://x/a.fcb" },
+      selectedAppearance: null,
+    });
+    expect(plugin.openStream.mock.calls[0]![0].appearance).toBeNull();
+    handles[0]!.emitAppearance([rgb]);
+    const layer = useLayerStore
+      .getState()
+      .layers.find((l) => l.id === layerId)!;
+    expect(layer.selectedAppearance).toBeNull();
+
+    const plugin2 = fakePlugin(handles);
+    await openStreamingLayer({
+      plugin: plugin2,
+      source: { url: "https://x/b.fcb" },
+      name: "b.fcb",
+      modelRef: { type: "url", url: "https://x/b.fcb" },
+      selectedAppearance: rgb,
+    });
+    expect(plugin2.openStream.mock.calls[0]![0].appearance).toEqual(rgb);
   });
 });

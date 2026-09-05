@@ -1,3 +1,4 @@
+import type { AppearanceTheme } from "@cityjson/navara-core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./app.css";
 import "./brand.css";
@@ -118,6 +119,16 @@ function streamSourceSnapshot(
  *  reload — no Blob/File is ever persisted. Rendered as a persistent
  *  (not auto-dismissing) prompt, distinct from the transient `toast`, so
  *  the user can re-select the file rather than the layer silently vanishing. */
+/** A snapshot's `appearance` field, or `undefined` for anything malformed. */
+function readAppearanceTheme(raw: unknown): AppearanceTheme | null | undefined {
+  if (raw === null) return null;
+  if (typeof raw !== "object") return undefined;
+  const { kind, name } = raw as { kind?: unknown; name?: unknown };
+  return (kind === "texture" || kind === "material") && typeof name === "string"
+    ? { kind, name }
+    : undefined;
+}
+
 interface UnavailableLayer {
   readonly id: string;
   readonly name: string;
@@ -131,6 +142,7 @@ interface UnavailableLayer {
   readonly lodMode: "auto" | "manual";
   readonly selectedLod: string | null;
   readonly hiddenTypes: readonly string[];
+  readonly appearance: AppearanceTheme | null | undefined;
 }
 
 interface AppProps {
@@ -713,6 +725,7 @@ export function App({
         selectedLod: l.selectedLod,
         lodMode: l.lodMode,
         hiddenTypes: [...l.hiddenTypes],
+        appearance: l.selectedAppearance,
         ...(l.isStreaming ? { stream: streamSourceSnapshot(l.modelRef) } : {}),
       })),
       // Stripped of anything that cannot survive a reload — an inline GeoJSON
@@ -831,6 +844,8 @@ export function App({
             const selectedLod = (sl.selectedLod as string | null) ?? null;
             // Already defaulted to [] by `normalizeLayers`.
             const hiddenTypes = sl.hiddenTypes;
+            // `undefined` (older snapshot) lets the load default decide.
+            const appearance = readAppearanceTheme(sl.appearance);
 
             if (modelRef.type === "file" || sl.unavailable) {
               const fileName =
@@ -845,6 +860,7 @@ export function App({
                 lodMode,
                 selectedLod,
                 hiddenTypes,
+                appearance,
               });
               continue;
             }
@@ -863,6 +879,7 @@ export function App({
                   rulesEnabled,
                   visible,
                   hiddenTypes,
+                  selectedAppearance: appearance,
                 }),
               );
             } else if (isCityParquetUrl(modelRef.url)) {
@@ -881,6 +898,7 @@ export function App({
                 rules,
                 rulesEnabled,
                 hiddenTypes,
+                selectedAppearance: appearance,
               });
             } else {
               const parsed = await loadFromUrl(modelRef.url);
@@ -893,6 +911,7 @@ export function App({
                 rules,
                 rulesEnabled,
                 hiddenTypes,
+                selectedAppearance: appearance,
               });
             }
             if (lodMode === "manual") {
@@ -1238,6 +1257,7 @@ export function App({
                 lodMode: entry.lodMode,
                 selectedLod: entry.selectedLod,
                 hiddenTypes: entry.hiddenTypes,
+                selectedAppearance: entry.appearance,
               }
             : undefined,
         ),

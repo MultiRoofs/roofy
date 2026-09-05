@@ -292,6 +292,7 @@ function makeHandle(id: string, bounds: unknown = null) {
     setLod: vi.fn(),
     setStyle: vi.fn(),
     setThemeStyle: vi.fn(),
+    setAppearance: vi.fn(),
     setHiddenTypes: vi.fn(),
     setHighlight: vi.fn(),
     resolvePick: vi.fn(),
@@ -824,10 +825,10 @@ describe("scene theme -> the volumetric neon (fogLight)", () => {
     // `geodeticToVector3` echoes its input scaled, so the transform is visible.
     const seen = new Set<string>();
     for (const light of lights) {
-      // The viewport hands `geodeticToVector3` RADIANS (as the engine wants),
-      // and the mock echoes them scaled — so degrees come back out here.
-      const lng = ((light.position.x / 1e6) * 180) / Math.PI;
-      const lat = ((light.position.y / 1e6) * 180) / Math.PI;
+      // The viewport hands `geodeticToVector3` DEGREES (the engine's unit
+      // since 0.1.0; 0.0.5 wanted radians), and the mock echoes them scaled.
+      const lng = light.position.x / 1e6;
+      const lat = light.position.y / 1e6;
       expect(lng).toBeGreaterThanOrEqual(LAYER_BOUNDS.west);
       expect(lng).toBeLessThanOrEqual(LAYER_BOUNDS.east);
       expect(lat).toBeGreaterThanOrEqual(LAYER_BOUNDS.south);

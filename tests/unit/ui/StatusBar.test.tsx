@@ -45,6 +45,8 @@ function layerWithCrs(id: string, referenceSystem?: string): Layer {
     cameraSync: true,
     hiddenTypes: [],
     availableObjectTypes: [],
+    appearanceThemes: [],
+    selectedAppearance: null,
     isStreaming: false,
   };
 }

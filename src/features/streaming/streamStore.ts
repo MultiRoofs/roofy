@@ -24,6 +24,7 @@
  * never `useLayerStore.getState().layers` — verified in
  * streamStore.test.ts by reference equality (`toBe`), not deep equality.
  */
+import type { AppearanceTheme } from "@cityjson/navara-core";
 import { create } from "zustand";
 import type {
   FcbHeaderModel,
@@ -71,6 +72,10 @@ export interface StreamState {
    *  toggles read this instead of `Layer.availableObjectTypes`. */
   readonly types: ReadonlyArray<string>;
   readonly typesVersion: number;
+  /** The appearance themes the stream has seen so far (texture themes first),
+   *  from `handle.onAppearanceThemes` — learned like the ladder, and what the
+   *  layer row's appearance dropdown offers for a streaming layer. */
+  readonly appearanceThemes: ReadonlyArray<AppearanceTheme>;
   readonly status: StreamStatus;
   readonly message: string | null;
   /** Bumped on every cell commit. The ONLY thing that changes on a commit —
@@ -104,6 +109,10 @@ export interface StreamStoreActions {
    *  across every commit so far (`handle.onTypes`). Same race tolerance as
    *  `setLadder`: a no-op for an unregistered layer id. */
   setTypes: (layerId: string, types: ReadonlyArray<string>) => void;
+  setAppearanceThemes: (
+    layerId: string,
+    themes: ReadonlyArray<AppearanceTheme>,
+  ) => void;
   /** Mirrors `handle.level` after a commit. Separate from `bumpVersion`
    *  because the two have different audiences — `LodSelector` re-renders on
    *  the level, everything else on the version — and Zustand notifies per
@@ -186,6 +195,18 @@ export const useStreamStore = create<StreamStore>((set, getState) => ({
             types,
             typesVersion: entry.typesVersion + 1,
           },
+        },
+      };
+    }),
+
+  setAppearanceThemes: (layerId, themes) =>
+    set((s) => {
+      const entry = s.streams[layerId];
+      if (!entry) return s;
+      return {
+        streams: {
+          ...s.streams,
+          [layerId]: { ...entry, appearanceThemes: themes },
         },
       };
     }),

@@ -153,6 +153,8 @@ function loadedLayer(): Layer {
     cameraSync: true,
     hiddenTypes: [],
     availableObjectTypes: ["Building"],
+    appearanceThemes: [],
+    selectedAppearance: null,
     isStreaming: false,
   };
 }

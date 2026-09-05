@@ -30,6 +30,7 @@ function fakeHandle(id: string, triangles = 100) {
     triangleCount: () => triangles,
     heightOffset: vi.fn(() => 0),
     setHiddenTypes: vi.fn(),
+    setAppearance: vi.fn(),
     delete: vi.fn(),
   };
 }
@@ -56,6 +57,8 @@ function layer(patch: Partial<Layer> & { id: string }): Layer {
     cameraSync: true,
     hiddenTypes: [],
     availableObjectTypes: [],
+    appearanceThemes: [],
+    selectedAppearance: null,
     isStreaming: false,
     ...patch,
   } as Layer;
@@ -835,6 +838,7 @@ describe("syncStreamState", () => {
       setVisible: vi.fn(),
       setCameraSync: vi.fn(),
       setHiddenTypes: vi.fn(),
+      setAppearance: vi.fn(),
     };
   }
 
@@ -996,6 +1000,7 @@ describe("theme styles", () => {
       setVisible: vi.fn(),
       setCameraSync: vi.fn(),
       setHiddenTypes: vi.fn(),
+      setAppearance: vi.fn(),
       setThemeStyle: vi.fn(),
     };
   }
