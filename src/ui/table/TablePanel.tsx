@@ -67,6 +67,13 @@ export function TablePanel({
   const [filterOpen, setFilterOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
 
+  // The dialog is about ONE layer — its table, its types, its LoD ladder — and
+  // the layer under it can change while it is open (the sidebar is live). It
+  // closes rather than silently re-pointing at a different layer's data.
+  useEffect(() => {
+    setExportOpen(false);
+  }, [layerId]);
+
   // The registry cannot see the UI, and a streaming layer's table is only
   // worth rebuilding while somebody is looking at it.
   useEffect(() => {

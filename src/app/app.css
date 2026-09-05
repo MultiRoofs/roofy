@@ -4735,8 +4735,67 @@ button.file-label:disabled {
   color: var(--fg-muted);
 }
 
+/* The same red the landing page's `.error-message` wears — `--danger-text` is
+   not a token this app defines, so the fallback was doing all the work and an
+   export failure read as ordinary body text. */
 .export-error {
   margin: 0;
   font-size: 0.7rem;
-  color: var(--danger-text, var(--fg));
+  color: #f87171;
+}
+
+[data-theme="light"] .export-error {
+  color: #c53030;
+}
+
+/* The dialog's own footer. `.modal` has no footer rule of its own (the Add
+   Layer dialog's actions live inside its body), so without this the two
+   buttons sit flush against the body with no separator and no alignment. */
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.6rem 0.9rem;
+  border-top: 1px solid var(--border);
+}
+
+.export-cancel {
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.export-cancel:hover:not(:disabled) {
+  background: var(--bg-panel-hover);
+}
+
+/* The primary action, in the app's own idiom (see `.share-copy-btn`). Scoped
+   to this dialog rather than a global `.primary`, which nothing else here
+   defines or expects. */
+.export-submit {
+  padding: 0.4rem 0.95rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--bg-panel);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.export-submit:hover:not(:disabled) {
+  background: var(--accent-text);
+}
+
+.export-cancel:disabled,
+.export-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

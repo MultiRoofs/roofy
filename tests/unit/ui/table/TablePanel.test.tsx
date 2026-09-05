@@ -134,6 +134,31 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+describe("TablePanel — the export dialog", () => {
+  it("closes it when the active layer changes under it", async () => {
+    // The dialog is about ONE layer: its table, its types, its LoD ladder. A
+    // layer switch behind an open dialog would leave it pointed at the old
+    // table while its heading named the new layer.
+    useLayerStore.setState({
+      layers: [layer(), layer({ id: "L2", name: "rotterdam" })],
+      activeLayerId: "L",
+    });
+    useLayerTableStore.setState({
+      tables: {
+        L: { state: "ready", info: TABLE },
+        L2: { state: "ready", info: { ...TABLE, table: "layer_2" } },
+      },
+    });
+    panel();
+
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+
+    useLayerStore.setState({ activeLayerId: "L2" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+});
+
 describe("TablePanel states", () => {
   it("offers a Retry when the engine failed to start", () => {
     const { onRetry } = panel({ state: "failed", error: "no wasm" });

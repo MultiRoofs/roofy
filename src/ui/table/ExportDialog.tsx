@@ -15,7 +15,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { runQuery } from "../../analytics/duckdb";
 import type { LodColumn } from "../../analytics/columnKind";
-import type { LayerTable } from "../../analytics/layerTables";
+import {
+  useLayerTableStore,
+  type LayerTable,
+} from "../../analytics/layerTables";
 import { runExport, type ExportRequest } from "../../analytics/export";
 import { buildRootTypesSql, compileFilter } from "../../analytics/sql";
 import { FLAT_PREFIX_COLUMNS } from "../../analytics/layerRows";
@@ -110,7 +113,8 @@ export function ExportDialog({
   onClose,
 }: ExportDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  useModalChrome(dialogRef, onClose);
+  // `useModalChrome` is called further down, once `requestClose` exists: the
+  // dialog must not dismiss itself out from under an export in flight.
 
   const query = useQueryStore((s) => layerQuery(s, layerId));
 
@@ -129,8 +133,14 @@ export function ExportDialog({
   const formats: ReadonlyArray<Format> = canCityParquet
     ? ["cityparquet", "parquet", "csv", "json"]
     : ["parquet", "csv", "json"];
-  /** A reader-backed layer whose bytes can no longer be obtained: the table is
-   *  browsable, but nothing can be written from a source that is not there. */
+  /**
+   * A reader-backed layer whose bytes can no longer be obtained.
+   *
+   * It costs the CityParquet package and NOTHING else: the attribute formats
+   * are written from the browsing table, which is right there. Gating the
+   * whole Export button on this is what made a re-opened session unable to
+   * take a CSV out of a table it was busily browsing.
+   */
   const relinkNeeded = table.reader !== null && table.source === null;
 
   const [rootTypes, setRootTypes] = useState<ReadonlyArray<string>>([]);
@@ -184,6 +194,15 @@ export function ExportDialog({
     // is what makes this run once per table rather than once per render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [table.lods]);
+  // A streaming layer's table is REBUILT under this dialog (below), and the
+  // registry keeps the old table readable while it runs — which is right for
+  // the grid and wrong for an export: writing the previous resident set is
+  // exactly what the rebuild exists to prevent. So the button waits, and says
+  // why rather than looking broken.
+  const rebuilding = useLayerTableStore((s) => {
+    const entry = s.tables[layerId];
+    return entry?.state === "ready" && entry.rebuilding === true;
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<ReadonlyArray<string>>([]);
@@ -203,7 +222,14 @@ export function ExportDialog({
     let cancelled = false;
     void (async () => {
       const result = await runQuery(buildRootTypesSql(table.table));
-      if (cancelled || !result.ok) return;
+      if (cancelled) return;
+      if (!result.ok) {
+        // Without this the type list is simply empty, which disables Export
+        // with no explanation anywhere on screen — indistinguishable from a
+        // layer that genuinely holds no objects.
+        setError(result.message);
+        return;
+      }
       const types = result.rows
         .map((row) => row.value)
         .filter((v): v is string => typeof v === "string");
@@ -225,13 +251,36 @@ export function ExportDialog({
     [],
   );
 
+  /**
+   * The scope actually in force.
+   *
+   * `scope` is seeded when the dialog opens and the filter can be cleared
+   * under it (the filter bar is still live behind this modal). A stale
+   * "filter" would then compile nothing and export the whole layer while the
+   * radio still claimed otherwise — so "there is no applied filter" resolves
+   * to "whole layer" everywhere, in the radio and in the request alike.
+   */
+  const effectiveScope: "all" | "filter" =
+    query.applied === null ? "all" : scope;
+
+  /** Escape and a backdrop click are dismissals; an export in flight is not
+   *  something to dismiss — closing would throw away the warnings or the error
+   *  it is about to produce, with the write already gone to DuckDB. */
+  const requestClose = useCallback(() => {
+    if (!busy) onClose();
+  }, [busy, onClose]);
+
+  // Focus trap, scroll lock and Escape — Escape through `requestClose`, so an
+  // export in flight ignores it exactly as the backdrop and the × do.
+  useModalChrome(dialogRef, requestClose);
+
   const handleExport = useCallback(async () => {
     setError(null);
     setWarnings([]);
     setBusy(true);
     try {
       let where: string | null = null;
-      if (scope === "filter" && query.applied !== null) {
+      if (effectiveScope === "filter" && query.applied !== null) {
         const compiled = compileFilter(query.applied, table.columns);
         if (!compiled.ok) throw new Error(compiled.message);
         where = compiled.where;
@@ -314,9 +363,9 @@ export function ExportDialog({
     format,
     layerName,
     lod,
+    effectiveScope,
     query.applied,
     rootTypes,
-    scope,
     selectedAttributes,
     selectedTypes,
     table,
@@ -326,23 +375,38 @@ export function ExportDialog({
     <div
       className="modal-backdrop"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) {
-          e.preventDefault();
-          onClose();
-        }
+        if (e.target !== e.currentTarget) return;
+        // preventDefault, or the browser's own mousedown behaviour moves focus
+        // to <body> after the chrome has already restored it to the trigger —
+        // the same reason `AddLayerDialog` does it.
+        e.preventDefault();
+        requestClose();
       }}
     >
+      {/* `modal`, not a spelling of its own: the panel background, the width
+          bound and the max-height scroll all live on that class, and the
+          `modal-dialog` this used to name exists in no stylesheet here — the
+          dialog rendered as unstyled text over the viewport. */}
       <div
-        className="modal-dialog"
+        className="modal export-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label={`Export ${layerName}`}
+        aria-labelledby="export-dialog-title"
         tabIndex={-1}
         ref={dialogRef}
       >
         <div className="modal-header">
-          <h2>Export {layerName}</h2>
-          <button type="button" onClick={onClose} aria-label="Close">
+          <h2 className="modal-title" id="export-dialog-title">
+            Export {layerName}
+          </h2>
+          <button
+            type="button"
+            className="modal-close"
+            aria-label="Close"
+            title="Close"
+            disabled={busy}
+            onClick={requestClose}
+          >
             ×
           </button>
         </div>
@@ -355,7 +419,7 @@ export function ExportDialog({
                 type="radio"
                 name="export-scope"
                 aria-label="Whole layer"
-                checked={scope === "all"}
+                checked={effectiveScope === "all"}
                 onChange={() => setScope("all")}
               />
               <span>Whole layer</span>
@@ -366,7 +430,7 @@ export function ExportDialog({
                 name="export-scope"
                 aria-label="Current filter"
                 disabled={query.applied === null}
-                checked={scope === "filter"}
+                checked={effectiveScope === "filter"}
                 onChange={() => setScope("filter")}
               />
               <span>Current filter</span>
@@ -442,6 +506,8 @@ export function ExportDialog({
             <p className="export-note">{NO_SOURCE_REASON}</p>
           )}
 
+          {relinkNeeded && <p className="export-note">{RELINK_REASON}</p>}
+
           {table.lods.length > 0 && (
             <label className="export-field">
               <span>Level of detail</span>
@@ -479,17 +545,25 @@ export function ExportDialog({
         </div>
 
         <div className="modal-footer">
-          <button type="button" onClick={onClose} disabled={busy}>
+          <button
+            type="button"
+            className="export-cancel"
+            onClick={requestClose}
+            disabled={busy}
+          >
             Cancel
           </button>
           <button
             type="button"
-            className="primary"
-            title={relinkNeeded ? RELINK_REASON : undefined}
-            disabled={busy || selectedTypes.size === 0 || relinkNeeded}
+            className="export-submit"
+            // NOT gated on `relinkNeeded`: the attribute formats are written
+            // from the browsing table and need no source at all. The missing
+            // source costs the CityParquet option, which `canCityParquet`
+            // already withholds, and says so in a sentence above.
+            disabled={busy || rebuilding || selectedTypes.size === 0}
             onClick={() => void handleExport()}
           >
-            {busy ? "Exporting…" : "Export"}
+            {busy ? "Exporting…" : rebuilding ? "Refreshing table…" : "Export"}
           </button>
         </div>
       </div>

@@ -216,14 +216,150 @@ describe("ExportDialog", () => {
     }
   });
 
-  it("disables Export for a reader-backed layer whose bytes cannot be re-obtained", async () => {
+  it("still exports ATTRIBUTES when the layer's bytes cannot be re-obtained", async () => {
+    // A missing source costs the CityParquet package and nothing else: CSV,
+    // JSON and Parquet are written from the browsing table, which is right
+    // there. Disabling the whole button left a re-opened session unable to
+    // take a CSV out of a table it was busily browsing.
     open({ table: { ...READER_TABLE, source: null } });
     await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
     const button = screen.getByRole("button", {
       name: "Export",
     }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    expect(screen.queryByLabelText("CityParquet package (.zip)")).toBeNull();
+    expect(
+      screen.getByText("Re-link the file to export this layer"),
+    ).toBeTruthy();
+  });
+
+  it("wears the app's real modal chrome", async () => {
+    // `modal-dialog`, a bare <h2> and a bare × exist in NO stylesheet here, so
+    // the dialog rendered as unstyled text over the viewport: no panel, no
+    // width bound, no max-height scroll.
+    open();
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.className.split(" ")).toContain("modal");
+    expect(dialog.getAttribute("aria-labelledby")).toBe("export-dialog-title");
+    expect(document.getElementById("export-dialog-title")?.className).toBe(
+      "modal-title",
+    );
+    expect(screen.getByRole("button", { name: "Close" }).className).toBe(
+      "modal-close",
+    );
+  });
+
+  it("sends the LoD the user picked, not the one it opened on", async () => {
+    open();
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    fireEvent.change(screen.getByLabelText("Level of detail"), {
+      target: { value: "1_2" },
+    });
+    fireEvent.click(screen.getByLabelText("CityParquet package (.zip)"));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => expect(runExport).toHaveBeenCalled());
+    expect(
+      (runExport.mock.calls[0]![0] as { lodSuffix: string }).lodSuffix,
+    ).toBe("1_2");
+  });
+
+  it("exports the WHOLE layer when that is the choice, filter or no filter", async () => {
+    useQueryStore.getState().setFilter("L", {
+      logic: "AND",
+      conditions: [{ id: "c", column: "b3_h_dak_max", op: ">", value: 10 }],
+    });
+    useQueryStore.getState().applyFilter("L");
+    open();
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    fireEvent.click(screen.getByLabelText("Whole layer"));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => expect(runExport).toHaveBeenCalled());
+    expect(
+      (runExport.mock.calls[0]![0] as { where: string | null }).where,
+    ).toBeNull();
+  });
+
+  it("falls back to the whole layer when the filter is cleared under it", async () => {
+    // The filter bar is still live behind this modal. A stale "filter" scope
+    // would compile nothing and export everything while the radio still
+    // claimed otherwise.
+    useQueryStore.getState().setFilter("L", {
+      logic: "AND",
+      conditions: [{ id: "c", column: "b3_h_dak_max", op: ">", value: 10 }],
+    });
+    useQueryStore.getState().applyFilter("L");
+    open();
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    expect(
+      (screen.getByLabelText("Current filter") as HTMLInputElement).checked,
+    ).toBe(true);
+
+    useQueryStore.getState().clearFilter("L");
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("Whole layer") as HTMLInputElement).checked,
+      ).toBe(true),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    await waitFor(() => expect(runExport).toHaveBeenCalled());
+    expect(
+      (runExport.mock.calls[0]![0] as { where: string | null }).where,
+    ).toBeNull();
+  });
+
+  it("says why the button is dead while the table is being rebuilt", async () => {
+    useLayerTableStore.setState({
+      tables: {
+        L: {
+          state: "ready",
+          info: READER_TABLE as never,
+          rebuilding: true,
+        },
+      },
+    });
+    open();
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    const button = screen.getByRole("button", {
+      name: "Refreshing table…",
+    }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
-    expect(button.title).toBe("Re-link the file to export this layer");
+  });
+
+  it("shows the reason a type probe failed instead of a silently dead button", async () => {
+    runQuery.mockResolvedValue({
+      ok: false,
+      message: "Catalog Error: Table with name layer_1 does not exist!",
+    });
+    open();
+    expect(
+      await screen.findByText(
+        "Catalog Error: Table with name layer_1 does not exist!",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("ignores Escape and the backdrop while an export is in flight", async () => {
+    let finish: (result: unknown) => void = () => {};
+    runExport.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { onClose } = open();
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    const button = await screen.findByRole("button", { name: "Exporting…" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+
+    finish({ blob: new Blob(["x"]), fileName: "delft.csv", warnings: [] });
+    await waitFor(() => expect(downloadBlob).toHaveBeenCalled());
   });
 
   it("forces one table rebuild when it opens on a streaming layer", async () => {
