@@ -114,13 +114,13 @@ describe("RenderingPanel", () => {
   // Grouped by SUBJECT, not by which store or pass a control happens to come
   // from. Two sections since weather left for the toolbar: how the scene is
   // drawn, and what the viewer will tell you about itself.
-  it("groups the controls into Rendering and Diagnostics", () => {
+  it("groups the controls into Light & passes and Diagnostics", () => {
     const { container } = render(<RenderingPanel onClose={() => {}} />);
 
     const titles = [...container.querySelectorAll(".attr-section-title")].map(
       (el) => el.textContent,
     );
-    expect(titles).toEqual(["Rendering", "Diagnostics"]);
+    expect(titles).toEqual(["Light & passes", "Diagnostics"]);
 
     const sections = [...container.querySelectorAll(".attr-section")];
     const sectionAt = (index: number): Element => {

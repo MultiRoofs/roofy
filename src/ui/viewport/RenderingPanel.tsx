@@ -29,6 +29,7 @@
  * The `advanced-*` class names are historical and kept as they are.
  */
 
+import { useEffect } from "react";
 import { useAtmosphereStore } from "../../features/atmosphere/atmosphereStore";
 import {
   EXPOSURE_RANGE,
@@ -90,6 +91,27 @@ export function RenderingPanel({ onClose }: RenderingPanelProps) {
     resetAtmosphere();
   };
 
+  // A floating panel closes on Escape like every other popover (the toolbar
+  // menus listen the same way), unless a modal is open above it — the modal's
+  // own trap owns the key then.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (document.querySelector(".modal-backdrop")) return;
+      onClose();
+      // Never strand the focus ring on a node that has just unmounted: put it
+      // back on the toolbar button this panel opened from (the panel does not
+      // own that button's ref, so it is found by its label).
+      document
+        .querySelector<HTMLElement>('[aria-label="Rendering settings"]')
+        ?.focus();
+    };
+    // Capture phase, so the check above sees the modal BEFORE its own Escape
+    // handler has closed it and React has flushed the backdrop away.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [onClose]);
+
   return (
     <div className="advanced-settings-panel">
       <div className="advanced-settings-header">
@@ -101,9 +123,10 @@ export function RenderingPanel({ onClose }: RenderingPanelProps) {
         </button>
       </div>
       <div className="advanced-settings-body">
-        {/* Rendering — how bright the scene reads and which passes draw it. */}
+        {/* Light — how bright the scene reads and which passes draw it. Named
+            for its subject, not "Rendering" again under a "Rendering" header. */}
         <div className="attr-section">
-          <div className="attr-section-title">Rendering</div>
+          <div className="attr-section-title">Light &amp; passes</div>
           <div className="attr-row">
             <span className="attr-key">Exposure</span>
             <span className="attr-value">{exposure.toFixed(1)}</span>
