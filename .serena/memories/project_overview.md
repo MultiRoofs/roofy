@@ -1,8 +1,8 @@
-# MultiRoof Viewer — Project Overview
+# Roofy — Project Overview
 
 ## Purpose
 
-MultiRoof Viewer is a web-based viewer and analysis workspace for 3D city models, built for the MultiRoofs project at TU Delft. The focus is urban rooftop analysis for planning, simulation, and communication.
+Roofy is a web-based viewer and analysis workspace for 3D city models, built for the MultiRoofs project at TU Delft. The focus is urban rooftop analysis for planning, simulation, and communication.
 
 ## Current Phase
 

@@ -308,7 +308,7 @@ interface RuleFormProps {
 
 function RuleForm({ initial, fields, onSave, onCancel }: RuleFormProps) {
   const [name, setName] = useState(initial?.name ?? "");
-  const [color, setColor] = useState(initial?.color ?? "#4ec84e");
+  const [color, setColor] = useState(initial?.color ?? "#7cb518");
   const [logic, setLogic] = useState<LogicMode>(initial?.logic ?? "AND");
   const [conditions, setConditions] = useState<Condition[]>(
     initial

@@ -1,46 +1,54 @@
 /* ═══════════════════════════════════════════════════════════════
-   DESIGN TOKENS — from wireframe, maps to future shadcn/ui vars
+   DESIGN TOKENS — derived from the Roofy brand tokens in brand.css, which
+   is loaded FIRST. Surfaces (--bg-root/--bg-panel/--bg-raised), text
+   (--fg/--fg-muted/--fg-dim), borders, the brand hues, the --layer-* legend
+   colours, type and radii are owned THERE; this block only maps them onto
+   the app's own vocabulary (--accent, --danger, …) and adds the surfaces
+   the kit does not name. Nothing below restates a brand value.
    ═══════════════════════════════════════════════════════════════ */
 
 :root {
-  /* surfaces */
-  --bg-root: #0c0e14;
-  --bg-panel: #12151e;
-  --bg-panel-hover: #181c28;
-  --bg-toolbar: #10131b;
-  --bg-viewport: #0a0c12;
-  --bg-input: #1a1e2a;
-  --bg-muted: #1e2230;
+  /* app surfaces, derived */
+  --bg-panel-hover: var(--bg-raised);
+  --bg-muted: var(--bg-raised);
+  --bg-toolbar: #10141c;
+  --bg-viewport: #080a0e;
+  --bg-input: #161b24;
 
-  /* borders */
-  --border: rgba(255, 255, 255, 0.06);
-  --border-accent: rgba(255, 255, 255, 0.1);
+  --border-accent: var(--border-strong);
 
-  /* text */
-  --fg: #e8eaf0;
-  --fg-muted: #6b7280;
-  --fg-dim: #4b5060;
-  --fg-label: #8b92a0;
+  /* a label sits between muted and full ink */
+  --fg-label: #a3abb7;
 
-  /* accent — warm amber for selection/interactive */
-  --accent: #e8973f;
-  --accent-soft: rgba(232, 151, 63, 0.12);
-  --accent-text: #f0b060;
+  /* accent — the brand's lime, for everything interactive. `--accent` is
+     the TINT (icons, borders, active states) and darkens on the light sheet
+     with --brand-primary; `--accent-fill` is the FILLED button and stays
+     lime-500 with dark ink (`--on-accent`) in both themes, because that is
+     how the brand's own buttons read. `--accent-text` is lime used AS TEXT
+     on a panel, which on paper needs the darker lime-900. */
+  --accent: var(--brand-primary);
+  --accent-soft: color-mix(in srgb, var(--brand-primary) 13%, transparent);
+  --accent-text: var(--lime-500);
+  --accent-fill: var(--lime-500);
+  --accent-fill-hover: var(--lime-300);
+  --on-accent: #14181e;
 
-  /* secondary — teal for data highlights */
-  --teal: #3ecfcf;
-  --teal-soft: rgba(62, 207, 207, 0.1);
+  /* tertiary — the brand's blue, for data highlights and loading states */
+  --tertiary: var(--brand-tertiary);
+  --tertiary-soft: color-mix(in srgb, var(--brand-tertiary) 14%, transparent);
 
-  /* status colors */
-  --roof: #cc4444;
-  --wall: #8899aa;
-  --ground: #886644;
-  --selection: #e8973f;
+  /* danger — the brand's orange accent (its own light value holds 4.5:1 on
+     paper, so no per-theme red override is needed); warn — its amber */
+  --danger: var(--brand-accent);
+  --danger-soft: color-mix(in srgb, var(--brand-accent) 12%, transparent);
+  --warn: var(--brand-secondary);
 
-  /* radii */
-  --radius-sm: 0.375rem;
-  --radius: 0.5rem;
-  --radius-lg: 0.75rem;
+  /* radii — the kit's 6 / 9 / 14 / 20 */
+  --radius-sm: var(--r-sm);
+  --radius: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-xl: var(--r-xl);
+  --radius-pill: var(--r-pill);
 
   /* spacing */
   --toolbar-h: 2.75rem;
@@ -50,32 +58,15 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   LIGHT THEME
+   LIGHT THEME — only what brand.css does not already flip
    ═══════════════════════════════════════════════════════════════ */
 
 [data-theme="light"] {
-  --bg-root: #f5f6f8;
-  --bg-panel: #ffffff;
-  --bg-panel-hover: #f0f1f4;
-  --bg-toolbar: #f9fafb;
-  --bg-viewport: #e8eaee;
-  --bg-input: #f0f1f4;
-  --bg-muted: #e8eaee;
-
-  --border: rgba(0, 0, 0, 0.08);
-  --border-accent: rgba(0, 0, 0, 0.14);
-
-  --fg: #1a1d24;
-  --fg-muted: #5f6672;
-  --fg-dim: #8891a0;
-  --fg-label: #5f6672;
-
-  --accent: #d07830;
-  --accent-soft: rgba(208, 120, 48, 0.1);
-  --accent-text: #b5601a;
-
-  --teal: #178080;
-  --teal-soft: rgba(23, 128, 128, 0.08);
+  --bg-toolbar: #fbfcf8;
+  --bg-viewport: #e9ebe4;
+  --bg-input: #f3f4ee;
+  --fg-label: #4f5661;
+  --accent-text: var(--lime-900);
 }
 
 [data-theme="light"] .legend-toggle,
@@ -113,23 +104,6 @@
   color: var(--fg);
 }
 
-/* Error red, theme-aware. These all sit on a `--bg-root`/`--bg-panel` ground
-   (the landing page, and the full-page error boundary): #c53030 is ~5.5:1 on
-   the light sheet but only ~3.3:1 on the dark one, under AA. The base rules
-   therefore carry the lighter #f87171 for the dark theme and this block
-   restores #c53030 where it is the stronger colour.
-   Position matters: kept up here with the other light overrides so the hint's
-   override cannot outrank `.source-picker-panel .drop-zone p.source-picker-hint`
-   (equal specificity, later in the file) and change the dialog. */
-[data-theme="light"] .error-message,
-[data-theme="light"] .error-detail,
-[data-theme="light"] .drop-zone p.source-picker-hint,
-[data-theme="light"] .snapshot-btn-delete:hover:not(:disabled),
-[data-theme="light"] .table-message[role="alert"],
-[data-theme="light"] .filter-error {
-  color: #c53030;
-}
-
 /* ═══════════════════════════════════════════════════════════════
    RESET & BASE
    ═══════════════════════════════════════════════════════════════ */
@@ -147,19 +121,18 @@
    The ambient wash lives HERE rather than on `.app-shell` for the same reason:
    the shell's own radial stopped dead at the 960px column edge, so a wide
    window showed a lit column on a flat black frame. Two large, low-opacity
-   ellipses on the shared tokens — warm `--accent-soft` from the top left, cool
-   `--teal-soft` from the bottom right — read as one surface across gutters and
-   column. They are ambience, not a spotlight: both are ~1000px across with a
-   long fade, so nothing reaches the hero's text contrast (`--accent-soft` is
-   12% of the accent, `--teal-soft` 10% of the teal). Both themes share them;
-   on the light sheet the same tokens land as a faint warm/cool tint. The teal
-   here is the UI data token, not the logo — the brand kit's "no teal" rule is
-   about the mark, not the page. */
+   ellipses on the shared tokens — lime `--accent-soft` from the top left, blue
+   `--tertiary-soft` from the bottom right — read as one surface across gutters
+   and column. They are ambience, not a spotlight: both are ~1000px across with
+   a long fade, so nothing reaches the hero's text contrast (each is a ~13%
+   tint of its hue). Both themes share them; on the light sheet the same tokens
+   land as a faint tint. Lime and blue are two of the mark's own four colours,
+   so the page reads as Roofy before the lockup does. */
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  font-family: var(--font-ui);
   line-height: 1.5;
   background:
     radial-gradient(
@@ -169,7 +142,7 @@ body {
     ),
     radial-gradient(
       1000px 750px at 95% 105%,
-      var(--teal-soft),
+      var(--tertiary-soft),
       transparent 55%
     ),
     var(--bg-root);
@@ -200,39 +173,25 @@ body {
   gap: 1rem;
 }
 
+/* Only the lockup's wrapper now — it keeps the hero's grid rhythm. */
 .eyebrow {
   margin: 0;
-  font-size: 0.85rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--accent-text);
 }
 
-/* The hero wears the toolbar's lockup one size up: a 28px mark (vs 20px in the
-   toolbar) with the wordmark scaled by the same 1.4x. `text-transform` is the
-   one `.eyebrow` property that reaches the wordmark — it sets its own weight,
-   tracking and colour but not transform — and the brand kit forbids
-   re-spacing or re-weighting the wordmark, so the inherited uppercase is
-   turned off here rather than shipped as "URBIS". The gap is re-stated in px
-   for the same reason: the kit's `0.4em` default resolves against the
-   INHERITED font size, which here is `.eyebrow`'s 0.85rem, so it would land at
-   ~5.4px — 0.19x the mark instead of the documented 0.34x, visibly tighter
-   than the toolbar's. */
-.hero .eyebrow .urbis-lockup {
-  --urbis-mark-size: 28px;
-  --urbis-lockup-gap: 9.5px; /* = 0.34 x 28px */
-}
-
-.hero .eyebrow .urbis-wordmark {
-  font-size: 1.1rem;
-  text-transform: none;
+/* The hero wears the toolbar's lockup one size up: the lockup scales from its
+   font-size (mark = 1.15em), so 1.5rem lands the mark at ~28px against the
+   toolbar's fixed 20px. */
+.hero .eyebrow .roofy-lockup {
+  font-size: 1.5rem;
 }
 
 .hero h1 {
   margin: 0;
   max-width: 16ch;
+  font-family: var(--font-display);
   font-size: clamp(2.8rem, 8vw, 5rem);
+  font-weight: 600;
+  letter-spacing: var(--tracking-display);
   line-height: 0.95;
   color: var(--fg);
 }
@@ -240,7 +199,8 @@ body {
 .summary {
   margin: 0;
   max-width: 42rem;
-  font-size: 1.1rem;
+  font-size: 1.05rem;
+  line-height: 1.6;
   color: var(--fg-muted);
 }
 
@@ -275,9 +235,12 @@ body {
 
 .entry-path-title {
   margin: 0;
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--fg-label);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--fg-muted);
 }
 
 /* Equal weight to the drop zone beside it: same radius, same padding, same
@@ -292,7 +255,7 @@ body {
   gap: 0.75rem;
   padding: 3rem 2rem;
   border: 2px solid var(--border-accent);
-  border-radius: 1.25rem;
+  border-radius: var(--radius-xl);
   background: var(--bg-panel);
   text-align: center;
   color: var(--fg-muted);
@@ -314,18 +277,18 @@ body {
 .catalog-entry-btn {
   padding: 0.5rem 1.25rem;
   border: none;
-  border-radius: 0.5rem;
-  background: var(--accent);
-  color: var(--bg-panel);
-  font-family: inherit;
+  border-radius: var(--radius);
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  font-family: var(--font-display);
   font-size: 0.9rem;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
   transition: background 0.15s;
 }
 
 .catalog-entry-btn:hover:not(:disabled) {
-  background: var(--accent-text);
+  background: var(--accent-fill-hover);
 }
 
 .catalog-entry-btn:disabled {
@@ -370,7 +333,7 @@ body {
   width: min(100%, 34rem);
   padding: 3rem 2rem;
   border: 2px dashed var(--border-accent);
-  border-radius: 1.25rem;
+  border-radius: var(--radius-xl);
   background: var(--bg-panel);
   text-align: center;
   transition:
@@ -405,17 +368,18 @@ body {
 .file-label {
   display: inline-block;
   padding: 0.5rem 1.25rem;
-  background: var(--accent);
-  color: var(--bg-panel);
-  border-radius: 0.5rem;
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  border-radius: var(--radius);
   cursor: pointer;
+  font-family: var(--font-display);
   font-size: 0.9rem;
-  font-weight: 500;
+  font-weight: 600;
   transition: background 0.15s;
 }
 
 .file-label:hover {
-  background: var(--accent-text);
+  background: var(--accent-fill-hover);
 }
 
 .fcb-url-form {
@@ -439,7 +403,7 @@ body {
   flex: 1;
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--border-accent);
-  border-radius: 0.5rem;
+  border-radius: var(--radius);
   font-size: 0.9rem;
   background: var(--bg-input);
   color: var(--fg);
@@ -451,18 +415,19 @@ body {
 
 .fcb-url-btn {
   padding: 0.5rem 1.25rem;
-  background: var(--accent);
-  color: var(--bg-panel);
+  background: var(--accent-fill);
+  color: var(--on-accent);
   border: none;
-  border-radius: 0.5rem;
+  border-radius: var(--radius);
   cursor: pointer;
+  font-family: var(--font-display);
   font-size: 0.9rem;
-  font-weight: 500;
+  font-weight: 600;
   transition: background 0.15s;
 }
 
 .fcb-url-btn:hover:not(:disabled) {
-  background: var(--accent-text);
+  background: var(--accent-fill-hover);
 }
 
 .fcb-url-btn:disabled {
@@ -476,9 +441,12 @@ body {
 }
 
 .snapshot-list-title {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--fg-label);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--fg-muted);
   margin-bottom: 0.5rem;
 }
 
@@ -488,7 +456,7 @@ body {
   justify-content: space-between;
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: var(--radius);
   background: var(--bg-panel);
   margin-bottom: 0.4rem;
 }
@@ -517,17 +485,19 @@ body {
 
 .snapshot-btn {
   padding: 0.3rem 0.75rem;
-  background: var(--accent);
-  color: var(--bg-panel);
+  background: var(--accent-fill);
+  color: var(--on-accent);
   border: none;
-  border-radius: 0.35rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  font-family: var(--font-display);
   font-size: 0.8rem;
+  font-weight: 600;
   transition: background 0.15s;
 }
 
 .snapshot-btn:hover:not(:disabled) {
-  background: var(--accent-text);
+  background: var(--accent-fill-hover);
 }
 
 .snapshot-btn:disabled {
@@ -538,23 +508,24 @@ body {
 .snapshot-btn-delete {
   background: transparent;
   color: var(--fg-muted);
+  font-weight: 500;
   border: 1px solid var(--border-accent);
 }
 
 .snapshot-btn-delete:hover:not(:disabled) {
-  background: rgba(197, 48, 48, 0.08);
-  color: #f87171;
-  border-color: rgba(197, 48, 48, 0.2);
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 25%, transparent);
 }
 
-/* The red TEXT is theme-aware (see the `[data-theme="light"]` block near the
-   top of the file); the soft rgba(197, 48, 48, …) wash and border read
-   correctly on both grounds and stay unconditional. */
+/* `--danger` is the brand's orange accent and carries its own light value,
+   so the text, the soft wash and the border all follow the theme from the
+   token. */
 .error-message {
-  color: #f87171;
-  background: rgba(197, 48, 48, 0.08);
+  color: var(--danger);
+  background: var(--danger-soft);
   padding: 0.75rem 1rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius);
   width: min(100%, 34rem);
 }
 
@@ -621,8 +592,14 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-/* `.toolbar-brand` (the uppercase "URBIS" text label) is gone — the toolbar now
-   renders the `.urbis-lockup` from brand.css, which carries its own type. */
+/* The brand lockup (`RoofyLockup`, styled by `.roofy-lockup` in brand.css).
+   The kit's toolbar sizing: a fixed 20px mark beside 15px type, which is why
+   the mark size is pinned here instead of following the 1.15em default. */
+.toolbar .roofy-lockup {
+  --roofy-mark-size: 20px;
+  margin-right: 0.15rem;
+  font-size: 0.9375rem;
+}
 
 .toolbar-sep {
   width: 1px;
@@ -771,10 +748,10 @@ body {
   top: 1rem;
   z-index: 20;
   padding: 0.75rem 1rem;
-  border: 1px solid rgba(197, 48, 48, 0.4);
-  border-radius: var(--radius, 0.5rem);
-  background: rgba(90, 29, 29, 0.92);
-  color: #ffdede;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--danger) 22%, rgb(11 14 19 / 92%));
+  color: var(--fg);
   font-size: 0.8rem;
   backdrop-filter: blur(8px);
 }
@@ -791,9 +768,9 @@ body {
   justify-content: flex-end;
   gap: 0.75rem;
   padding: 0.25rem 0.5rem;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: rgb(0 0 0 / 45%);
-  color: #f0f0f0;
+  color: #f2f4ef;
   font-size: 0.7rem;
   line-height: 1.4;
   pointer-events: auto;
@@ -817,7 +794,7 @@ body {
   align-items: center;
   gap: 0.5rem;
   padding: 0.4rem 0.75rem;
-  background: rgba(12, 14, 20, 0.85);
+  background: rgba(11, 14, 19, 0.85);
   backdrop-filter: blur(12px);
   border: 1px solid var(--border-accent);
   border-radius: var(--radius);
@@ -834,7 +811,7 @@ body {
 
 .pick-tooltip .obj-id {
   color: var(--fg-muted);
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.7rem;
 }
 
@@ -954,7 +931,7 @@ body {
   width: 260px;
   background: var(--bg-panel);
   border: 1px solid var(--border-accent);
-  border-radius: var(--radius-lg, 0.75rem);
+  border-radius: var(--radius-lg, 14px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   z-index: 20;
   overflow: hidden;
@@ -966,7 +943,8 @@ body {
   justify-content: space-between;
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--border);
-  font-size: 0.8rem;
+  font-family: var(--font-display);
+  font-size: 0.85rem;
   font-weight: 600;
   color: var(--fg);
 }
@@ -1039,7 +1017,7 @@ body {
   width: 250px;
   background: var(--bg-panel);
   border: 1px solid var(--border-accent);
-  border-radius: var(--radius-lg, 0.75rem);
+  border-radius: var(--radius-lg, 14px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   z-index: 20;
   overflow: hidden;
@@ -1060,7 +1038,7 @@ body {
   align-items: center;
   gap: 0.3rem;
   color: var(--fg-muted);
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.62rem;
   font-weight: 400;
   letter-spacing: 0;
@@ -1069,7 +1047,8 @@ body {
 
 .solar-scrubber-title {
   color: var(--fg);
-  font-size: 0.78rem;
+  font-family: var(--font-display);
+  font-size: 0.82rem;
   font-weight: 600;
 }
 
@@ -1081,7 +1060,7 @@ body {
   gap: 0.35rem;
   margin-left: auto;
   color: var(--fg-muted);
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.68rem;
 }
 
@@ -1130,7 +1109,7 @@ body {
   width: 3.9rem;
   flex: none;
   color: var(--fg);
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -1177,7 +1156,7 @@ body {
   border-radius: var(--radius-sm);
   background: var(--bg-input);
   color: var(--fg-muted);
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.66rem;
 }
 
@@ -1205,7 +1184,8 @@ body {
 
 .inspector-header h3 {
   margin: 0;
-  font-size: 0.82rem;
+  font-family: var(--font-display);
+  font-size: 0.88rem;
   font-weight: 600;
 }
 
@@ -1223,7 +1203,8 @@ body {
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--fg-dim);
-  font-size: 0.75rem;
+  font-family: var(--font-display);
+  font-size: 0.78rem;
   font-weight: 500;
   cursor: pointer;
   transition:
@@ -1274,12 +1255,13 @@ body {
   align-items: baseline;
   justify-content: space-between;
   gap: 0.5rem;
-  font-size: 0.65rem;
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--fg-dim);
-  margin-bottom: 0.4rem;
+  letter-spacing: var(--tracking-label);
+  color: var(--fg-muted);
+  margin-bottom: 0.45rem;
 }
 
 /* The `+` a Layers section heading carries to open the Add Layer dialog on its
@@ -1307,7 +1289,7 @@ body {
 
 .attr-value {
   font-size: 0.75rem;
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
   color: var(--fg);
   text-align: right;
   overflow: hidden;
@@ -1316,7 +1298,7 @@ body {
 }
 
 .attr-value.highlight {
-  color: var(--teal);
+  color: var(--tertiary);
 }
 
 /* Surface breakdown */
@@ -1347,7 +1329,7 @@ body {
 
 .surface-item .count {
   margin-left: auto;
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
   color: var(--fg-muted);
 }
 
@@ -1367,7 +1349,7 @@ body {
   background: var(--bg-toolbar);
   border-top: 1px solid var(--border);
   font-size: 0.7rem;
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
 }
 
 .status-item {
@@ -1380,7 +1362,7 @@ body {
   width: 0.4rem;
   height: 0.4rem;
   border-radius: 50%;
-  background: #34d399;
+  background: var(--accent);
 }
 
 .status-label {
@@ -1396,24 +1378,24 @@ body {
 }
 
 .status-dot.dot-ready {
-  background: #34d399;
+  background: var(--accent);
 }
 
 .status-dot.dot-partial {
-  background: #fbbf24;
+  background: var(--warn);
 }
 
 .status-dot.dot-loading {
-  background: #60a5fa;
+  background: var(--tertiary);
   animation: pulse-dot 1.2s ease-in-out infinite;
 }
 
 .status-dot.dot-failed {
-  background: #6b7280;
+  background: var(--fg-dim);
 }
 
 .status-dot.dot-error {
-  background: #f87171;
+  background: var(--danger);
 }
 
 @keyframes pulse-dot {
@@ -1499,9 +1481,11 @@ body {
 }
 
 .rule-target-label {
-  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-label);
   color: var(--fg-muted);
 }
 
@@ -1536,9 +1520,11 @@ body {
 }
 
 .rule-toggle-label {
-  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-label);
 }
 
 .rule-empty {
@@ -1583,7 +1569,7 @@ body {
 .rule-summary {
   font-size: 0.65rem;
   color: var(--fg-dim);
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1689,7 +1675,7 @@ body {
   border-radius: var(--radius-sm);
   color: var(--fg);
   font-size: 0.68rem;
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
   flex: 1;
 }
 
@@ -1727,9 +1713,11 @@ body {
   padding: 0.25rem 0.5rem;
   border: none;
   border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: #fff;
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  font-family: var(--font-display);
   font-size: 0.7rem;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -1834,7 +1822,7 @@ body {
   height: 1.75rem;
   border: 1px solid var(--border-accent);
   border-radius: var(--radius-sm);
-  background: rgba(12, 14, 20, 0.85);
+  background: rgba(11, 14, 19, 0.85);
   backdrop-filter: blur(12px);
   color: var(--fg-muted);
   cursor: pointer;
@@ -1847,7 +1835,7 @@ body {
 
 .legend-card {
   padding: 0.5rem 0.6rem;
-  background: rgba(12, 14, 20, 0.9);
+  background: rgba(11, 14, 19, 0.9);
   backdrop-filter: blur(12px);
   border: 1px solid var(--border-accent);
   border-radius: var(--radius);
@@ -1855,11 +1843,12 @@ body {
 }
 
 .legend-title {
-  font-weight: 600;
-  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--fg-label);
+  letter-spacing: var(--tracking-label);
+  color: var(--fg-muted);
   margin-bottom: 0.35rem;
 }
 
@@ -1967,7 +1956,7 @@ body {
 }
 
 .sun-trigger-label {
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.68rem;
   white-space: nowrap;
 }
@@ -1997,7 +1986,7 @@ body {
   padding: 0.25rem 0;
   background: var(--bg-panel);
   border: 1px solid var(--border-accent);
-  border-radius: var(--radius-lg, 0.75rem);
+  border-radius: var(--radius-lg, 14px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   z-index: 30;
 }
@@ -2012,7 +2001,7 @@ body {
   padding: 0.25rem 0;
   background: var(--bg-panel);
   border: 1px solid var(--border-accent);
-  border-radius: var(--radius-lg, 0.75rem);
+  border-radius: var(--radius-lg, 14px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   z-index: 30;
 }
@@ -2043,7 +2032,7 @@ body {
   padding: 0.25rem 0;
   background: var(--bg-panel);
   border: 1px solid var(--border-accent);
-  border-radius: var(--radius-lg, 0.75rem);
+  border-radius: var(--radius-lg, 14px);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   z-index: 30;
 }
@@ -2063,7 +2052,7 @@ body {
   text-align: left;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--radius, 0.5rem);
+  border-radius: var(--radius, 9px);
   color: var(--fg);
   cursor: pointer;
 }
@@ -2083,7 +2072,8 @@ body {
 }
 
 .scene-theme-name {
-  font-size: 0.78rem;
+  font-family: var(--font-display);
+  font-size: 0.82rem;
   font-weight: 600;
 }
 
@@ -2119,21 +2109,15 @@ body {
 
 /* On the design tokens, like every other surface: the ground is `--bg-root` and
    the card is `--bg-panel`, so the crash screen follows the theme instead of
-   staying the app's last parchment sheet. The red-tinted `rgba(197, 48, 48, …)`
-   wash and border read correctly on both grounds and stay unconditional; only
-   the message TEXT is theme-aware (see the `[data-theme="light"]` block near
-   the top of the file), on the same idiom as `.error-message`. */
+   staying the app's last parchment sheet. The wash, border and message text
+   all come from `--danger`, on the same idiom as `.error-message`. */
 .error-fullpage {
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 100vh;
   background:
-    radial-gradient(
-      circle at top left,
-      rgba(197, 48, 48, 0.12),
-      transparent 35%
-    ),
+    radial-gradient(circle at top left, var(--danger-soft), transparent 35%),
     var(--bg-root);
   padding: 2rem;
 }
@@ -2142,22 +2126,25 @@ body {
   max-width: 28rem;
   padding: 2rem;
   background: var(--bg-panel);
-  border-radius: 1rem;
-  border: 1px solid rgba(197, 48, 48, 0.25);
+  border-radius: var(--radius-lg);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
   text-align: center;
 }
 
 .error-card h2 {
   margin: 0 0 0.75rem;
-  font-size: 1.4rem;
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: var(--tracking-h1);
   color: var(--fg);
 }
 
 .error-detail {
   margin: 0 0 1.5rem;
   font-size: 0.9rem;
-  color: #f87171;
-  font-family: "Geist Mono", monospace;
+  color: var(--danger);
+  font-family: var(--font-mono);
   word-break: break-word;
 }
 
@@ -2171,7 +2158,8 @@ body {
 .error-reload-btn {
   padding: 0.5rem 1.25rem;
   border: none;
-  border-radius: 0.5rem;
+  border-radius: var(--radius);
+  font-family: var(--font-display);
   font-size: 0.9rem;
   font-weight: 500;
   cursor: pointer;
@@ -2179,12 +2167,13 @@ body {
 }
 
 .error-reset-btn {
-  background: var(--accent);
-  color: var(--bg-panel);
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  font-weight: 600;
 }
 
 .error-reset-btn:hover {
-  background: var(--accent-text);
+  background: var(--accent-fill-hover);
 }
 
 .error-reload-btn {
@@ -2211,24 +2200,24 @@ body {
 
 .error-inline-msg {
   font-size: 0.75rem;
-  color: var(--fg-muted, #6b7280);
-  font-family: "Geist Mono", monospace;
+  color: var(--fg-muted, #8a93a0);
+  font-family: var(--font-mono);
   word-break: break-word;
 }
 
 .error-inline-btn {
   padding: 0.25rem 0.75rem;
-  border: 1px solid var(--border-accent, rgba(255, 255, 255, 0.1));
-  border-radius: var(--radius-sm, 0.375rem);
+  border: 1px solid var(--border-accent, rgba(255, 255, 255, 0.16));
+  border-radius: var(--radius-sm, 6px);
   background: transparent;
-  color: var(--fg-muted, #6b7280);
+  color: var(--fg-muted, #8a93a0);
   font-size: 0.72rem;
   cursor: pointer;
 }
 
 .error-inline-btn:hover {
-  color: var(--fg, #e8eaf0);
-  border-color: var(--accent, #e8973f);
+  color: var(--fg, #f2f4ef);
+  border-color: var(--accent, #a7e32b);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -2273,11 +2262,11 @@ body {
   left: 50%;
   transform: translateX(-50%);
   padding: 0.5rem 1rem;
-  background: rgba(12, 14, 20, 0.9);
+  background: rgba(11, 14, 19, 0.9);
   backdrop-filter: blur(12px);
-  border: 1px solid var(--border-accent, rgba(255, 255, 255, 0.1));
-  border-radius: var(--radius, 0.5rem);
-  color: var(--fg, #e8eaf0);
+  border: 1px solid var(--border-accent, rgba(255, 255, 255, 0.16));
+  border-radius: var(--radius, 9px);
+  color: var(--fg, #f2f4ef);
   font-size: 0.8rem;
   z-index: 100;
   animation: toast-in 0.2s ease-out;
@@ -2306,11 +2295,11 @@ body {
   transform: translateX(-50%);
   width: min(90vw, 28rem);
   padding: 0.75rem 1rem;
-  background: rgba(12, 14, 20, 0.95);
+  background: rgba(11, 14, 19, 0.95);
   backdrop-filter: blur(12px);
-  border: 1px solid var(--border-accent, rgba(255, 255, 255, 0.1));
-  border-radius: var(--radius, 0.5rem);
-  color: var(--fg, #e8eaf0);
+  border: 1px solid var(--border-accent, rgba(255, 255, 255, 0.16));
+  border-radius: var(--radius, 9px);
+  color: var(--fg, #f2f4ef);
   font-size: 0.8rem;
   z-index: 100;
   display: flex;
@@ -2319,8 +2308,9 @@ body {
 }
 
 .unavailable-layers-title {
+  font-family: var(--font-display);
   font-weight: 600;
-  color: var(--fg-label, #8b92a0);
+  color: var(--fg-label, #a3abb7);
 }
 
 .unavailable-layer-row {
@@ -2338,8 +2328,8 @@ body {
 
 .unavailable-layer-choose {
   padding: 0.25rem 0.6rem;
-  border: 1px solid var(--border-accent, rgba(255, 255, 255, 0.1));
-  border-radius: var(--radius-sm, 0.375rem);
+  border: 1px solid var(--border-accent, rgba(255, 255, 255, 0.16));
+  border-radius: var(--radius-sm, 6px);
   cursor: pointer;
   font-size: 0.75rem;
 }
@@ -2347,7 +2337,7 @@ body {
 .unavailable-layer-dismiss {
   background: none;
   border: none;
-  color: var(--fg-muted, #6b7280);
+  color: var(--fg-muted, #8a93a0);
   cursor: pointer;
   font-size: 1rem;
   line-height: 1;
@@ -2476,7 +2466,7 @@ body {
   letter-spacing: 0.03em;
   color: var(--accent);
   border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-pill);
 }
 
 .lod-selector-streaming {
@@ -2652,7 +2642,7 @@ body {
   letter-spacing: 0.03em;
   color: var(--fg-muted);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-pill);
 }
 
 /* Sized for the narrow case and widened in the inspector below. The base
@@ -2777,9 +2767,8 @@ body {
 .geo-source-error {
   width: 100%;
   margin: 0;
-  /* The same red the status bar's error dot uses — legible on both themes'
-     panel background, where the landing page's darker #c53030 is not. */
-  color: #f87171;
+  /* The same danger colour the status bar's error dot uses. */
+  color: var(--danger);
   font-size: 0.65rem;
   line-height: 1.4;
 }
@@ -2872,11 +2861,11 @@ body {
    ═══════════════════════════════════════════════════════════════ */
 
 .status-value.warn {
-  color: #f59e0b;
+  color: var(--warn);
 }
 
 .status-value-mono {
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.65rem;
   letter-spacing: -0.01em;
 }
@@ -2892,7 +2881,7 @@ body {
 .box-select-rect {
   position: absolute;
   border: 1.5px dashed var(--accent);
-  background: rgba(232, 151, 63, 0.08);
+  background: var(--accent-soft);
   pointer-events: none;
   z-index: 10;
 }
@@ -2902,12 +2891,12 @@ body {
    ═══════════════════════════════════════════════════════════════ */
 
 .measure-label {
-  background: rgba(0, 170, 255, 0.9);
+  background: color-mix(in srgb, var(--tertiary) 92%, transparent);
   color: #fff;
   padding: 2px 8px;
   border-radius: var(--radius-sm);
   font-size: 0.75rem;
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
   white-space: nowrap;
   pointer-events: none;
@@ -2950,11 +2939,12 @@ body {
 }
 
 .attribute-panel-title {
-  font-size: 0.7rem;
-  font-weight: 600;
-  color: var(--fg-label);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-label);
+  color: var(--fg-muted);
 }
 
 .attribute-panel-toggle {
@@ -3031,11 +3021,12 @@ body {
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border-accent);
   color: var(--fg-label);
+  font-family: var(--font-mono);
   font-size: 0.62rem;
-  font-weight: 600;
+  font-weight: 500;
   text-align: left;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   white-space: nowrap;
 }
 
@@ -3075,7 +3066,7 @@ body {
 
 .attr-table tbody .attr-table-value-col {
   color: var(--fg);
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
 }
 
 .attr-table .attr-table-mixed {
@@ -3097,9 +3088,11 @@ body {
 }
 
 .agg-mode-select label {
-  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.1em;
 }
 
 .agg-mode-select select {
@@ -3119,15 +3112,6 @@ body {
 
 [data-theme="light"] .attribute-panel {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-[data-theme="light"] .measure-label {
-  background: rgba(0, 130, 200, 0.9);
-}
-
-[data-theme="light"] .box-select-rect {
-  background: rgba(208, 120, 48, 0.08);
-  border-color: var(--accent);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -3166,14 +3150,16 @@ body {
 }
 
 .table-panel-title {
-  font-size: 0.7rem;
-  font-weight: 600;
-  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-label);
+  color: var(--fg);
 }
 
 .table-count {
+  font-family: var(--font-ui);
   font-weight: 400;
   color: var(--fg-muted);
   text-transform: none;
@@ -3217,7 +3203,7 @@ body {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.7rem;
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
   table-layout: auto;
 }
 
@@ -3227,11 +3213,11 @@ body {
   background: var(--bg-toolbar);
   padding: 0.3rem 0.5rem;
   text-align: left;
-  font-weight: 600;
+  font-weight: 500;
   font-size: 0.65rem;
   color: var(--fg-label);
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.06em;
   border-bottom: 1px solid var(--border-accent);
   cursor: pointer;
   user-select: none;
@@ -3291,8 +3277,10 @@ body {
   text-align: center;
 }
 
+/* `--danger` carries its own light value, so this needs no `[data-theme]`
+   override — the block that used to hold ours is gone. */
 .table-message[role="alert"] {
-  color: #f87171;
+  color: var(--danger);
 }
 
 .table-message p {
@@ -3380,7 +3368,7 @@ body {
 
 .filter-error {
   font-size: 0.65rem;
-  color: #f87171;
+  color: var(--danger);
 }
 
 /* Footer */
@@ -3461,7 +3449,7 @@ body {
   padding: 0.4rem 0.55rem;
   border: 1px solid var(--border-accent);
   border-radius: var(--radius);
-  background: rgb(12 14 20 / 82%);
+  background: rgb(11 14 19 / 82%);
   color: var(--fg-muted);
   font-size: 0.65rem;
   line-height: 1.5;
@@ -3546,7 +3534,7 @@ body {
    reach). Buttons bring their own border, font and centring. */
 button.file-label {
   border: none;
-  font-family: inherit;
+  font-family: var(--font-display);
   line-height: 1.4;
 }
 
@@ -3556,7 +3544,8 @@ button.file-label:disabled {
 }
 
 /* A gesture the picker cannot honour (dropping a folder), explained where it
-   was attempted. Same red as `.error-message`, quieter, and inside the zone.
+   was attempted. Same danger colour as `.error-message`, quieter, and inside
+   the zone.
 
    The `p.` is load-bearing: `.drop-zone p` (and, in the dialog, the still more
    specific `.source-picker-panel .drop-zone p`) sets a muted colour on every
@@ -3568,21 +3557,18 @@ button.file-label:disabled {
   max-width: 32rem;
   font-size: 0.78rem;
   line-height: 1.4;
-  color: #f87171;
+  color: var(--danger);
 }
 
-/* The same red the dialog's other inline errors use. Unconditional, unlike the
-   base rule above, which now swaps with the theme — matching the dialog's
-   siblings is worth more here than the contrast it loses on the light panel.
-   That light-theme weakness is known and deliberately parked. */
+/* The dialog's inline errors, one size down. */
 .source-picker-panel .drop-zone p.source-picker-hint {
-  color: #f87171;
+  color: var(--danger);
   font-size: 0.72rem;
 }
 
 .source-picker-formats {
   margin: 0.15rem 0 0;
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.68rem;
   letter-spacing: 0.02em;
   color: var(--fg-dim);
@@ -3670,14 +3656,14 @@ button.file-label:disabled {
 .source-picker-panel .fcb-url-btn {
   padding: 0.4rem 0.95rem;
   border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: var(--bg-panel);
+  background: var(--accent-fill);
+  color: var(--on-accent);
   font-size: 0.78rem;
   font-weight: 600;
 }
 
 .source-picker-panel .fcb-url-btn:hover:not(:disabled) {
-  background: var(--accent-text);
+  background: var(--accent-fill-hover);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -3742,7 +3728,8 @@ button.file-label:disabled {
 .modal-title {
   margin: 0;
   color: var(--fg);
-  font-size: 0.85rem;
+  font-family: var(--font-display);
+  font-size: 0.95rem;
   font-weight: 600;
 }
 
@@ -3792,8 +3779,9 @@ button.file-label:disabled {
   margin-bottom: -1px;
   background: transparent;
   color: var(--fg-muted);
-  font-family: inherit;
-  font-size: 0.75rem;
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  font-weight: 500;
   cursor: pointer;
   transition:
     color 0.15s,
@@ -3841,7 +3829,7 @@ button.file-label:disabled {
   border-radius: var(--radius-sm);
   background: var(--bg-input);
   color: var(--fg);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 0.72rem;
   text-overflow: ellipsis;
 }
@@ -3856,9 +3844,9 @@ button.file-label:disabled {
   padding: 0.4rem 0.95rem;
   border: none;
   border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: var(--bg-panel);
-  font-family: inherit;
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  font-family: var(--font-display);
   font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
@@ -3866,7 +3854,7 @@ button.file-label:disabled {
 }
 
 .share-copy-btn:hover {
-  background: var(--accent-text);
+  background: var(--accent-fill-hover);
 }
 
 /* Always in the DOM (the live region has to exist before the answer lands in
@@ -3880,13 +3868,9 @@ button.file-label:disabled {
   line-height: 1.45;
 }
 
-/* The same red the landing page's `.error-message` wears. */
+/* The same danger orange the landing page's `.error-message` wears. */
 .share-status.is-error {
-  color: #f87171;
-}
-
-[data-theme="light"] .share-status.is-error {
-  color: #c53030;
+  color: var(--danger);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -3953,7 +3937,8 @@ button.file-label:disabled {
 }
 
 .stac-card-title {
-  font-size: 0.8rem;
+  font-family: var(--font-display);
+  font-size: 0.88rem;
   font-weight: 600;
 }
 
@@ -3975,7 +3960,7 @@ button.file-label:disabled {
 .stac-badge {
   font-size: 0.6rem;
   padding: 0.1rem 0.4rem;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   color: var(--fg-muted);
 }
@@ -3986,8 +3971,8 @@ button.file-label:disabled {
 }
 
 .stac-badge-feature {
-  color: var(--teal);
-  border-color: var(--teal-soft);
+  color: var(--tertiary);
+  border-color: var(--tertiary-soft);
 }
 
 /* `margin-top: auto` pins the footer to the bottom of whichever card is
@@ -4005,7 +3990,8 @@ button.file-label:disabled {
 }
 
 .stac-items-title {
-  font-size: 0.8rem;
+  font-family: var(--font-display);
+  font-size: 0.9rem;
   font-weight: 600;
   color: var(--fg);
 }
@@ -4154,7 +4140,7 @@ button.file-label:disabled {
 
 .stac-download-link {
   font-size: 0.7rem;
-  color: var(--teal);
+  color: var(--tertiary);
 }
 
 .stac-status {
@@ -4193,7 +4179,9 @@ button.file-label:disabled {
    `.stac-status`'s muted grey, which is the colour of "loading" — this one is
    the user's item not arriving. */
 .stac-add-error {
-  color: #c53030; /* the same red as `.error-message` on the landing page */
+  color: var(
+    --danger
+  ); /* the same colour as `.error-message` on the landing page */
   font-size: 0.75rem;
 }
 
@@ -4246,7 +4234,7 @@ button.file-label:disabled {
   padding: 0;
   border: 1px solid var(--border-accent);
   border-radius: 50%;
-  background: rgba(12, 14, 20, 0.7);
+  background: rgba(11, 14, 19, 0.7);
   backdrop-filter: blur(8px);
   color: var(--fg-muted);
   cursor: pointer;
@@ -4294,8 +4282,8 @@ button.file-label:disabled {
   gap: 0.15rem;
   padding: 0 0.2rem;
   border-radius: 3px;
-  background: rgba(12, 14, 20, 0.82);
-  font-family: "Geist Mono", monospace;
+  background: rgba(11, 14, 19, 0.82);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
   pointer-events: none;
@@ -4330,7 +4318,7 @@ button.file-label:disabled {
   height: 1.85rem;
   border: 1px solid var(--border-accent);
   border-radius: var(--radius-sm);
-  background: rgba(12, 14, 20, 0.7);
+  background: rgba(11, 14, 19, 0.7);
   backdrop-filter: blur(8px);
   color: var(--fg-muted);
   cursor: pointer;
@@ -4364,7 +4352,7 @@ button.file-label:disabled {
 .camera-ctl-readout {
   padding-top: 0.1rem;
   color: var(--fg-muted);
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.56rem;
   font-variant-numeric: tabular-nums;
   text-align: center;
@@ -4416,10 +4404,11 @@ button.file-label:disabled {
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--fg-dim);
-  font-family: "Geist Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.55rem;
   font-weight: 600;
   letter-spacing: 0.04em;
+  border-radius: var(--radius-pill);
   cursor: pointer;
   transition:
     background 0.15s,
@@ -4462,7 +4451,7 @@ button.file-label:disabled {
   padding: 0;
   border: 1px solid var(--border-accent);
   border-radius: var(--radius-sm);
-  background: rgba(12, 14, 20, 0.85);
+  background: rgba(11, 14, 19, 0.85);
   backdrop-filter: blur(12px);
   color: var(--fg-muted);
   cursor: pointer;
@@ -4495,7 +4484,7 @@ button.file-label:disabled {
   padding: 0 0.4rem;
   border: 1px solid var(--border-accent);
   border-radius: var(--radius-sm);
-  background: rgba(12, 14, 20, 0.9);
+  background: rgba(11, 14, 19, 0.9);
   backdrop-filter: blur(12px);
   box-shadow: 0 4px 14px rgb(0 0 0 / 30%);
 }
@@ -4651,10 +4640,10 @@ button.file-label:disabled {
   align-items: flex-start;
   gap: 0.15rem;
   padding: 0.2rem 0.4rem;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: rgb(0 0 0 / 45%);
-  color: #f0f0f0;
-  font-family: "Geist Mono", monospace;
+  color: #f2f4ef;
+  font-family: var(--font-mono);
   font-size: 0.65rem;
   line-height: 1.2;
   pointer-events: none;
@@ -4671,7 +4660,7 @@ button.file-label:disabled {
 
 [data-theme="light"] .scale-bar {
   background: rgb(255 255 255 / 80%);
-  color: #1a1d24;
+  color: var(--fg);
 }
 
 [data-theme="light"] .address-search-list {
@@ -4735,17 +4724,12 @@ button.file-label:disabled {
   color: var(--fg-muted);
 }
 
-/* The same red the landing page's `.error-message` wears — `--danger-text` is
-   not a token this app defines, so the fallback was doing all the work and an
-   export failure read as ordinary body text. */
+/* The same danger orange the landing page's `.error-message` wears. It carries
+   its own light value, so there is no `[data-theme="light"]` override here. */
 .export-error {
   margin: 0;
   font-size: 0.7rem;
-  color: #f87171;
-}
-
-[data-theme="light"] .export-error {
-  color: #c53030;
+  color: var(--danger);
 }
 
 /* The dialog's own footer. `.modal` has no footer rule of its own (the Add

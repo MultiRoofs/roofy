@@ -106,7 +106,7 @@ export const useRenderDebugStore = create<RenderDebugStore>((set) => ({
     set({ aerialPerspectiveEnabled }),
   setSunShadowsEnabled: (sunShadowsEnabled) => set({ sunShadowsEnabled }),
   // Clamped in the STORE, not at the slider: the dev-console handle
-  // (`window.__urbisRenderDebug`) writes here too, and an exposure of NaN
+  // (`window.__roofyRenderDebug`) writes here too, and an exposure of NaN
   // makes the engine render a black frame with no error anywhere.
   setExposure: (exposure) =>
     set({ exposure: clamp(exposure, EXPOSURE_RANGE.min, EXPOSURE_RANGE.max) }),
@@ -117,10 +117,10 @@ export const useRenderDebugStore = create<RenderDebugStore>((set) => ({
 
 declare global {
   interface Window {
-    __urbisRenderDebug?: typeof useRenderDebugStore;
+    __roofyRenderDebug?: typeof useRenderDebugStore;
   }
 }
 
 if (import.meta.env.DEV && typeof window !== "undefined") {
-  window.__urbisRenderDebug = useRenderDebugStore;
+  window.__roofyRenderDebug = useRenderDebugStore;
 }

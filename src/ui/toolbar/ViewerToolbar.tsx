@@ -17,6 +17,7 @@ import { SolarMenu } from "./SolarMenu";
 import { WeatherMenu } from "./WeatherMenu";
 import { ViewModeToggle } from "./ViewModeToggle";
 import { SceneThemeMenu } from "./SceneThemeMenu";
+import { RoofyLockup } from "../RoofyLockup";
 
 /**
  * Tooltip suffix for the tools the Navara viewport does not implement yet.
@@ -71,30 +72,12 @@ export function ViewerToolbar({
 }: ViewerToolbarProps) {
   return (
     <header className="toolbar">
-      {/* The brand lockup from `public/brand/README.md`, verbatim: the mark's
-          two strokes take --urbis-ink / --urbis-accent from brand.css, which
-          re-points both under [data-theme="light"], so the logo follows the
-          theme toggle with no JS. The SVG is decorative — the wordmark beside
-          it is the accessible name. */}
-      <span className="urbis-lockup">
-        <svg className="urbis-mark" viewBox="0 0 48 48" aria-hidden="true">
-          <path
-            className="urbis-mark-u"
-            d="M14 12 V25 a10 10 0 0 0 20 0 V16"
-            fill="none"
-            strokeWidth="9"
-            strokeLinecap="round"
-          />
-          <path
-            className="urbis-mark-pitch"
-            d="M34 16 L41 9"
-            fill="none"
-            strokeWidth="9"
-            strokeLinecap="round"
-          />
-        </svg>
-        <span className="urbis-wordmark">Urbis</span>
-      </span>
+      {/* The brand lockup: the mark's four fills are the --layer-* tokens
+          from brand.css, which re-point under [data-theme="light"], so the
+          logo follows the theme toggle with no JS. `small` picks the kit's
+          ≤20px geometry for the toolbar's 20px mark. The SVG is decorative —
+          the wordmark beside it is the accessible name. */}
+      <RoofyLockup small />
 
       {/* Left sidebar toggle */}
       <button

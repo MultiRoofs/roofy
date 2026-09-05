@@ -19,7 +19,8 @@ import type {
   Surface,
 } from "../../domain/citymodel/types";
 import type { Selection } from "../../domain/selection/types";
-import { SURFACE_COLOR_HEX, computeFootprintArea } from "@cityjson/navara-core";
+import { computeFootprintArea } from "@cityjson/navara-core";
+import { SURFACE_COLOR_HEX } from "../../scene/cityColors";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
 import { resolveInheritedAttributes } from "../../domain/citymodel/inheritedAttributes";

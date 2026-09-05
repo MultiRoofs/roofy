@@ -472,7 +472,7 @@ describe("App share-hash restore", () => {
     render(<App persistenceStore={storeWith(null)} />);
 
     await waitFor(() =>
-      expect(screen.getByText(/older version of Urbis/)).toBeInTheDocument(),
+      expect(screen.getByText(/older version of Roofy/)).toBeInTheDocument(),
     );
     // Nothing was opened from a link whose camera cannot be trusted...
     expect(loadFromUrl).not.toHaveBeenCalled();
@@ -643,7 +643,7 @@ describe("App save success", () => {
     // Silence used to be the only signal that a save had worked.
     await waitFor(() =>
       expect(
-        screen.getByText(/Workspace saved.*next time you open Urbis/),
+        screen.getByText(/Workspace saved.*next time you open Roofy/),
       ).toBeInTheDocument(),
     );
   });

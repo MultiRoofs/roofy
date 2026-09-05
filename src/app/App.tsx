@@ -1,7 +1,7 @@
 import type { AppearanceTheme } from "@cityjson/navara-core";
 import { useCallback, useEffect, useRef, useState } from "react";
-import "./app.css";
 import "./brand.css";
+import "./app.css";
 import { detectEncoding } from "../domain/citymodel/detectEncoding";
 import {
   loadFromUrl,
@@ -73,6 +73,7 @@ import type { AddUrlResult } from "../ui/stac/StacBrowser";
 import { ShareDialog } from "../ui/ShareDialog";
 import { StatusBar } from "../ui/StatusBar";
 import { ThemeToggleButton } from "../ui/ThemeToggleButton";
+import { RoofyLockup } from "../ui/RoofyLockup";
 import { LegendOverlay } from "../ui/viewport/LegendOverlay";
 import { AttributePanel } from "../ui/viewport/AttributePanel";
 import { RenderingPanel } from "../ui/viewport/RenderingPanel";
@@ -681,7 +682,7 @@ export function App({
       // nobody discovers that by guessing — so it gets the explanatory
       // duration, not the 3 s status one.
       showToast(
-        "Workspace saved — you'll find it here next time you open Urbis.",
+        "Workspace saved — you'll find it here next time you open Roofy.",
         EXPLANATION_TOAST_MS,
       );
     } catch (e) {
@@ -1439,30 +1440,12 @@ export function App({
 
       <div className="hero">
         {/* The same lockup the toolbar wears, one size up — see the LANDING
-            section of app.css for the `--urbis-mark-size` override. The
+            section of app.css for the `.hero .eyebrow .roofy-lockup` size. The
             `.eyebrow` wrapper stays so the hero's grid rhythm is unchanged. */}
         <p className="eyebrow">
-          <span className="urbis-lockup">
-            <svg className="urbis-mark" viewBox="0 0 48 48" aria-hidden="true">
-              <path
-                className="urbis-mark-u"
-                d="M14 12 V25 a10 10 0 0 0 20 0 V16"
-                fill="none"
-                strokeWidth="9"
-                strokeLinecap="round"
-              />
-              <path
-                className="urbis-mark-pitch"
-                d="M34 16 L41 9"
-                fill="none"
-                strokeWidth="9"
-                strokeLinecap="round"
-              />
-            </svg>
-            <span className="urbis-wordmark">Urbis</span>
-          </span>
+          <RoofyLockup />
         </p>
-        <h1>Your city, in 3D.</h1>
+        <h1>Your city, roof by roof.</h1>
         <p className="summary">
           Drop a city model or pick one from the open catalog.
         </p>

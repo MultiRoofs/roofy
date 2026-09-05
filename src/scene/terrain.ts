@@ -17,7 +17,7 @@
  * members `color`/`wireframe` freeze frame presentation (Known Issue (i)), so
  * it is not written; the terrain layer stays the normals supplier. That is
  * exactly the resource the aerial-perspective pass wants in `irradiance` mode;
- * see Known Issue (e) in CLAUDE.md.
+ * see Known Issue (e) in docs/architecture-notes.md.
  *
  * Engine-free on purpose, exactly like `basemaps.ts` and `googleTiles.ts`: pure
  * data, unit-testable under Node where `@navaramap/three` cannot even be

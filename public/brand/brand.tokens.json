@@ -1,48 +1,88 @@
 {
-  "name": "Urbis",
+  "name": "Roofy",
+  "version": "1.0.0",
   "logo": {
-    "concept": "Monogram u whose right stem breaks into a roof pitch at 45 degrees",
-    "geometry": {
-      "viewBox": "0 0 48 48",
-      "u": "M15 14 V25 a9 9 0 0 0 18 0 V18",
-      "pitch": "M33 18 L38.5 12.5",
-      "strokeWidth": 5,
-      "strokeLinecap": "round",
-      "bowlRadius": 9,
-      "pitchAngleDeg": 45
+    "concept": "Two roof planes over a slab; the sun-facing plane splits at mid-pitch into amber and orange.",
+    "grid": "48 x 48",
+    "pitch": "45deg",
+    "ridgeX": 24,
+    "eaves": [3, 45],
+    "splitY": 20,
+    "splitYSmall": 17,
+    "slab": {
+      "x": 3,
+      "y": 34,
+      "width": 42,
+      "height": 10,
+      "radius": 2.5
     },
-    "smallSize": {
-      "note": "Use at 16-20px: heavier stroke, wider bowl",
-      "u": "M14 12 V25 a10 10 0 0 0 20 0 V16",
-      "pitch": "M34 16 L41 9",
-      "strokeWidth": 9
-    },
-    "minSizePx": 16,
-    "clearSpacePercentOfMark": 25
+    "clearSpace": "10 grid units (= slab height) on all sides",
+    "minSize": "16px (use roofy-mark-small.svg at 20px and below)"
   },
-  "color": {
+  "brand": {
+    "primary": "#A7E32B",
+    "primaryLight": "#7CB518",
+    "secondary": "#FFC530",
+    "secondaryLight": "#F0A800",
+    "tertiary": "#3B82F6",
+    "tertiaryLight": "#1E5FD8",
+    "accent": "#F2683C",
+    "accentLight": "#D9481C"
+  },
+  "lime": {
+    "100": "#EDFBC8",
+    "300": "#CDF176",
+    "500": "#A7E32B",
+    "700": "#7CB518",
+    "900": "#4A7A0F"
+  },
+  "layers": {
+    "nature": "#A7E32B",
+    "energy": "#FFC530",
+    "water": "#3B82F6",
+    "social": "#F2683C",
+    "unassigned": "#8B93A3"
+  },
+  "theme": {
     "dark": {
-      "ink": "#e8eaf0",
-      "accent": "#e8973f",
-      "plate": "#10131b",
-      "plateBorder": "rgba(255,255,255,0.08)"
+      "bgRoot": "#0B0E13",
+      "bgPanel": "#12161E",
+      "bgRaised": "#1D222C",
+      "fg": "#F2F4EF",
+      "fgMuted": "#8A93A0",
+      "fgDim": "#5A6270",
+      "border": "rgba(255,255,255,.09)"
     },
     "light": {
-      "ink": "#1a1d24",
-      "accent": "#d07830",
-      "plate": "#f9fafb",
-      "plateBorder": "rgba(0,0,0,0.08)"
-    },
-    "reserved": {
-      "teal": "#3ecfcf",
-      "note": "data highlights only — never in the logo"
+      "bgRoot": "#F6F7F2",
+      "bgPanel": "#FFFFFF",
+      "bgRaised": "#EDEFE7",
+      "fg": "#14181E",
+      "fgMuted": "#5C636E",
+      "fgDim": "#8B93A3",
+      "border": "rgba(20,24,30,.10)"
     }
   },
-  "wordmark": {
-    "family": "IBM Plex Sans",
-    "weight": 500,
-    "tracking": "0.11em",
-    "casing": "Urbis",
-    "lockupGap": "0.34 x mark height"
+  "type": {
+    "display": "Outfit, system-ui, sans-serif",
+    "ui": "'IBM Plex Sans', system-ui, sans-serif",
+    "mono": "'IBM Plex Mono', ui-monospace, monospace",
+    "scale": {
+      "display": "48/1.0/600/-0.03em",
+      "h1": "32/1.15/600/-0.02em",
+      "h2": "22/1.25/500/-0.01em",
+      "body": "15/1.6/400",
+      "small": "13/1.5/400",
+      "label": "11/1.2/500/0.16em uppercase mono",
+      "data": "13 mono"
+    }
+  },
+  "radius": {
+    "sm": "6px",
+    "md": "9px",
+    "lg": "14px",
+    "xl": "20px",
+    "icon": "18px",
+    "pill": "999px"
   }
 }

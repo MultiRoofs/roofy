@@ -83,6 +83,7 @@ import {
   closeAllStreamingLayers,
   closeStreamingLayer,
 } from "../features/streaming/openStreamingLayer";
+import { CITY_COLORS } from "./cityColors";
 import {
   allInteractionHandles,
   interactionHandles,
@@ -172,7 +173,7 @@ import { StreamQueryBoxOverlay } from "../ui/viewport/StreamQueryBoxOverlay";
  * `.setHex()` rather than a constructor argument: the engine's `Color`
  * declares NO constructor parameters, and the documented forms are
  * `new Color().setHex(...)` / `.setStyle(...)` — the same class every mesh desc
- * insists on (CLAUDE.md, Known Issue (i): a bare hex makes `addMesh` throw).
+ * insists on (docs/architecture-notes.md, Known Issue (i): a bare hex makes `addMesh` throw).
  *
  * A module-level BINDING but not a module-level INSTANCE: the six viewport test
  * suites mock `@navaramap/three`, and a `new Color()` evaluated at import time
@@ -665,7 +666,7 @@ function createThemeEnvironmentState(): ThemeEnvironmentState {
 /**
  * Add a theme-owned mesh ONCE, then toggle and update it.
  *
- * Never added and deleted per switch, for the reason CLAUDE.md's Known Issue
+ * Never added and deleted per switch, for the reason docs/architecture-notes.md's Known Issue
  * (f) records for effects and which applies just as well here: a create/destroy
  * cycle per theme change is a cost (and a potential leak) paid every time the
  * user tries the menu, where `visible` is a flag flip.
@@ -1454,7 +1455,11 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           // holds the view before init has started, so the ordered list is the
           // ONLY registration point.
           const defaultPlugin = new DefaultPlugin();
-          const cityPlugin = new CityJSONPlugin();
+          // Both plugins take the SAME brand colours, so a picked surface is
+          // painted identically whether it came from a file or a stream.
+          const cityPlugin = new CityJSONPlugin({
+            colors: CITY_COLORS,
+          });
           // Streaming is the one OPTIONAL capability of the three: a build (or
           // a browser) in which this constructor throws must still show static
           // layers, so the failure is recorded and re-raised only at the point
@@ -1471,6 +1476,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
                 width: container.clientWidth,
                 height: container.clientHeight,
               }),
+              colors: CITY_COLORS,
             });
             flatPluginErrorRef.current = null;
           } catch (error) {
