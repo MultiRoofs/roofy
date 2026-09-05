@@ -1,0 +1,3 @@
+vp check
+tsc -b --noEmit
+vp test run
