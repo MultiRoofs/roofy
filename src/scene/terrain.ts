@@ -11,10 +11,13 @@
  *
  * `requestVertexNormals` is the load-bearing option, and not only for shading
  * the hills: the skill notes that the globe has no normals of its own unless a
- * terrain or hillshade layer supplies them (the `useNormal` view option that
- * would otherwise provide them does not exist in 0.0.5 — its `Options` type has
- * no such field). That is exactly the resource the aerial-perspective pass
- * wants in `irradiance` mode; see Known Issue (e) in CLAUDE.md.
+ * terrain or hillshade layer supplies them. The `useNormal` switch that would
+ * otherwise provide them is absent from 0.0.5 altogether and, on 0.1.1, exists
+ * only as a live `view.globe.useNormal` setter — the globe-setter family whose
+ * members `color`/`wireframe` freeze frame presentation (Known Issue (i)), so
+ * it is not written; the terrain layer stays the normals supplier. That is
+ * exactly the resource the aerial-perspective pass wants in `irradiance` mode;
+ * see Known Issue (e) in CLAUDE.md.
  *
  * Engine-free on purpose, exactly like `basemaps.ts` and `googleTiles.ts`: pure
  * data, unit-testable under Node where `@navaramap/three` cannot even be

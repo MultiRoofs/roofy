@@ -1,8 +1,8 @@
 /**
  * Extent of a geospatial layer, for "Zoom to layer".
  *
- * ENGINE-FREE and computed from the layer's OWN data, because Navara 0.0.5
- * exposes no bounds/fit API on Layer or Source — the engine draws a geo layer
+ * ENGINE-FREE and computed from the layer's OWN data, because Navara (0.0.5,
+ * and still 0.1.1) exposes no bounds/fit API on Layer or Source — the engine draws a geo layer
  * but cannot say where it is. GeoJSON is walked coordinate by coordinate; a
  * 3D Tiles tileset answers from its root bounding volume; an XYZ raster
  * template names no extent at all, so a raster layer has none (null).

@@ -326,6 +326,14 @@ const POLICIES: Record<SceneTheme, SceneThemePolicy> = {
       glowGlobe: Object.freeze({ glowColor: 0x00e5ff, opacity: 0.55 }),
       // The DIFFUSION half of the look: light bleeding into the air, which is
       // what separates neon-noir photography from a flat neon drawing.
+      //
+      // Navara 0.1.1 rewrote the fog-light pass: `radius` is now the light's
+      // TRUE volumetric extent (`min(radius, hMax)`, honoured by the tile
+      // culling too) and a `haloFalloff` attenuation exists (engine default
+      // 0.1, not set here). A/B'd against 0.0.5 on the Delft sample on
+      // 2026-09-05: the look is unchanged, so the values stay. A model a few
+      // tens of metres across washes out pink under these sixteen lights on
+      // BOTH versions — that is the light placement, not the engine bump.
       fogLights: Object.freeze({
         count: 16,
         colors: Object.freeze([

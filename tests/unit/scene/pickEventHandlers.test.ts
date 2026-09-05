@@ -5,6 +5,7 @@ import {
   acceptsPointer,
   applyPickIntent,
   canvasPointOf,
+  CLICK_DRAG_TOLERANCE_PX,
   createClickGate,
   narrowToMode,
   pickIntentFor,
@@ -204,9 +205,9 @@ describe("createClickGate", () => {
   });
 
   it("blocks a click that ended a camera DRAG", () => {
-    // The engine's `click` is the raw DOM click, which fires after a drag too.
-    // Without this gate, orbiting the camera would clear the selection on every
-    // mouseup — the engine's own pick event guards the same way.
+    // Since Navara 0.1.1 the engine gates its own `click` (never emitted after
+    // a drag), so this is defence in depth: a drag this gate saw must never be
+    // reported clean, whatever the engine chooses to emit.
     const gate = createClickGate(3);
     gate.down({ x: 100, y: 100 });
     gate.move({ x: 140, y: 100 });
@@ -227,6 +228,37 @@ describe("createClickGate", () => {
     // A hover across the canvas must not disarm the next click.
     const gate = createClickGate(3);
     gate.move({ x: 400, y: 400 });
+    expect(gate.isClean()).toBe(true);
+  });
+
+  it("mirrors the engine's click tolerance by default (5 px, Navara 0.1.1)", () => {
+    // The engine gates both its `click` and its `featureClick` pick at
+    // `CLICK_PIXEL_TOLERANCE = 5`; a different number here would let the city
+    // path and the geo path disagree about whether a jittery press was a
+    // click. A 4 px travel passes, 6 px does not.
+    expect(CLICK_DRAG_TOLERANCE_PX).toBe(5);
+    const passes = createClickGate();
+    passes.down({ x: 100, y: 100 });
+    passes.move({ x: 104, y: 100 });
+    expect(passes.isClean()).toBe(true);
+    const drags = createClickGate();
+    drags.down({ x: 100, y: 100 });
+    drags.move({ x: 106, y: 100 });
+    expect(drags.isClean()).toBe(false);
+  });
+
+  it("refuses a click after a pointercancel, until the next press", () => {
+    // The browser took the gesture over (scroll, app switch); the engine drops
+    // its pending click and the gate must not let a later `click` ride on the
+    // press it saw before the cancellation.
+    const gate = createClickGate();
+    gate.down({ x: 10, y: 10 });
+    gate.cancel();
+    expect(gate.isClean()).toBe(false);
+    // A move after the cancel has no origin to measure from and changes nothing.
+    gate.move({ x: 11, y: 10 });
+    expect(gate.isClean()).toBe(false);
+    gate.down({ x: 20, y: 20 });
     expect(gate.isClean()).toBe(true);
   });
 });

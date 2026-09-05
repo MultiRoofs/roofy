@@ -469,9 +469,10 @@ export function layerHeightOffset(
  * engine pick — `PickedFeature.properties` is null for custom meshes, Task B7
  * review), and finally the engine's own `layerId` field.
  *
- * Unwired in Part B by design: `PICK_PATH = "own-raycast"` (Task B1), so no
- * `view.on("pick")` listener exists and clicks travel the screen-point path
- * above. It is kept — and tested — because it is the contract Task C10b's
+ * Unwired in Part B by design: `PICK_PATH = "own-raycast"` (Task B1), so the
+ * viewport's `view.on("featureClick")` listener never commits a CITY pick (it
+ * only stashes geo picks) and clicks travel the screen-point path above. It is
+ * kept — and tested — because it is the contract Task C10b's
  * streaming router and any future per-triangle-batch-id engine plug into.
  */
 export function resolvePickedFeature(
