@@ -4685,3 +4685,58 @@ button.file-label:disabled {
 [data-theme="light"] .address-search-open {
   background: rgba(255, 255, 255, 0.9);
 }
+
+/* Export dialog */
+
+.export-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.export-group {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+}
+
+.export-group legend {
+  font-size: 0.65rem;
+  color: var(--fg-label);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.export-group label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+}
+
+.export-group-scroll {
+  max-height: 9rem;
+  overflow-y: auto;
+}
+
+.export-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+}
+
+.export-note {
+  margin: 0;
+  font-size: 0.65rem;
+  color: var(--fg-muted);
+}
+
+.export-error {
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--danger-text, var(--fg));
+}

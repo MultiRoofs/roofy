@@ -16,8 +16,10 @@ import { useLayerStore } from "../../features/layers/layerStore";
 import { syncFilterToMap } from "../../features/query/mapFilterSync";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 import { useSelectionStore } from "../../features/selection/selectionStore";
+import { extractCrsCode } from "../toolbar/crsCode";
 import type { Selection } from "../../domain/selection/types";
 import { DataGrid } from "./DataGrid";
+import { ExportDialog } from "./ExportDialog";
 import { FilterBar } from "./FilterBar";
 import { Pagination } from "./Pagination";
 // ONE pinned `en-US` formatter for the whole panel, and the empty-grid
@@ -63,6 +65,7 @@ export function TablePanel({
     new Set(),
   );
   const [filterOpen, setFilterOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
 
   // The registry cannot see the UI, and a streaming layer's table is only
   // worth rebuilding while somebody is looking at it.
@@ -209,6 +212,15 @@ export function TablePanel({
         </button>
 
         <button
+          type="button"
+          className="tb-btn table-action-btn"
+          disabled={view.status !== "ready"}
+          onClick={() => setExportOpen(true)}
+        >
+          Export
+        </button>
+
+        <button
           className="tb-btn table-action-btn"
           title="Unselect all"
           onClick={handleUnselectAll}
@@ -337,8 +349,30 @@ export function TablePanel({
           }
         />
       )}
+
+      {exportOpen && view.table !== null && activeLayer !== undefined && (
+        <ExportDialog
+          layerId={activeLayer.id}
+          layerName={activeLayer.name}
+          table={view.table}
+          epsg={epsgOf(activeLayer.model.metadata.referenceSystem)}
+          selectedLod={activeLayer.selectedLod}
+          isStreaming={activeLayer.isStreaming}
+          onClose={() => setExportOpen(false)}
+        />
+      )}
     </div>
   );
+}
+
+/** The layer's EPSG code as a number, or null. The CityParquet writer takes
+ *  `crs => 'EPSG:NNNN'` and nothing else, so a layer whose reference system
+ *  names no code cannot be written as a package. */
+function epsgOf(referenceSystem: string | undefined): number | null {
+  const code = extractCrsCode(referenceSystem);
+  if (code === null) return null;
+  const n = Number(code);
+  return Number.isInteger(n) && n > 0 ? n : null;
 }
 
 function TableResizeHandle({
