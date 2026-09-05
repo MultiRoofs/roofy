@@ -97,6 +97,12 @@ export interface CityModelRegistry {
  *   changed. A LoD or hidden-types change is `handle.setLod`/`setHiddenTypes`,
  *   which rebuilds the geometry in place — the handle (and therefore its mesh
  *   registration, style and highlight) is never recreated;
+ * - the visible-object-id set is pushed on the FIRST pass as well as on every
+ *   change, because — unlike `hiddenTypes` — it is NOT an `addCityModel`
+ *   option, so a handle built while a filter is on would otherwise draw
+ *   everything. The first push is free in the common case: it sends `null`,
+ *   which is already the mesh's own state, and the mesh drops it without
+ *   rebuilding. See {@link LiveLayer.visibleObjectIds};
  * - the active scene theme's mesh style is pushed on the same beat, so a layer
  *   added while a theme is on comes up themed rather than photoreal for a
  *   frame. See {@link LiveLayer.themeStyle} for why it is compared by identity.
