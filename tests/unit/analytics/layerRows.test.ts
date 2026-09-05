@@ -125,6 +125,32 @@ describe("a dropped reserved attribute name", () => {
     );
   });
 
+  it("catches a collision in ANY CASE — DuckDB identifiers are not case-sensitive", () => {
+    // `ID` passing the check is not a cosmetic miss: `read_json_auto` infers
+    // BOTH an `ID` and an `id` column, DuckDB renames the second to `id_1`,
+    // and `"id"` then resolves to the SOURCE ATTRIBUTE. Selection, map
+    // filtering and every export lose the real object id.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const m = model();
+    (m.objects.B1 as { attributes: Record<string, unknown> }).attributes = {
+      ID: "SPOOF",
+      Parents: "SPOOF",
+      ok: 1,
+    };
+    const [row] = flatRowsFromModel(m);
+    expect(row!.ID).toBeUndefined();
+    expect(row!.Parents).toBeUndefined();
+    expect(row!.id).toBe("B1");
+    expect(row!.ok).toBe(1);
+    // The OFFENDING SPELLING is named, not the fixed column it collided with:
+    // "an attribute named id was dropped" sends someone looking for a key
+    // their file does not contain.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      "Flat table: source attributes named ID, Parents were dropped because they collide with the fixed columns.",
+    );
+  });
+
   it("says nothing when no attribute collides", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     flatRowsFromModel(model());

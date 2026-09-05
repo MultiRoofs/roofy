@@ -37,7 +37,18 @@ export const FLAT_PREFIX_COLUMNS: ReadonlyArray<string> = [
   "children",
 ];
 
-const RESERVED = new Set(FLAT_PREFIX_COLUMNS);
+/**
+ * The reserved names, LOWERCASED — because a DuckDB identifier is not
+ * case-sensitive and this check decides what DuckDB will see.
+ *
+ * An attribute spelled `ID` passes a case-sensitive test, and then
+ * `read_json_auto` infers BOTH an `ID` column and our `id` column, DuckDB
+ * disambiguates by renaming the second to `id_1`, and every `"id"` in the app's
+ * SQL — the map filter's id set, the export's identity projection, the
+ * selection join — silently resolves to the source's attribute instead of the
+ * object id. The columns look right in the grid and nothing joins.
+ */
+const RESERVED = new Set(FLAT_PREFIX_COLUMNS.map((name) => name.toLowerCase()));
 
 /**
  * `JSON.stringify`'s replacer for everything this module serialises.
@@ -54,16 +65,18 @@ function bigintSafe(_key: string, value: unknown): unknown {
 }
 
 /** An object's attributes as columns. A key that collides with a prefix
- *  column is DROPPED, not renamed: a file whose attribute is called `id`
- *  would otherwise silently replace the identity every join depends on. Each
- *  such key is recorded in `dropped` so the table can report it ONCE. */
+ *  column — IN ANY CASE, see {@link RESERVED} — is DROPPED, not renamed: a
+ *  file whose attribute is called `id` would otherwise silently replace the
+ *  identity every join depends on. The key is recorded in `dropped` AS THE
+ *  FILE SPELLS IT, so the table can report it ONCE and name something the
+ *  user can find. */
 function attributeColumns(
   attributes: Readonly<Record<string, unknown>>,
   dropped: Set<string>,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(attributes)) {
-    if (RESERVED.has(key)) {
+    if (RESERVED.has(key.toLowerCase())) {
       dropped.add(key);
       continue;
     }
@@ -82,12 +95,21 @@ function attributeColumns(
  * predicate depends on cannot be overwritten by a third party's column name —
  * but doing it silently means an attribute the user can see in the source file
  * is simply absent from the grid with nothing to explain it. Reported in the
- * fixed vocabulary's own order, so the sentence does not depend on which
- * object happened to be read first.
+ * fixed vocabulary's own order — and alphabetically within one fixed column,
+ * since `ID` and `Id` collide with the same one — so the sentence does not
+ * depend on which object happened to be read first.
+ *
+ * The names are the FILE'S OWN SPELLINGS, never the fixed columns they hit: a
+ * sentence about "an attribute named id" over a file whose key is `ID` sends
+ * the reader looking for something that is not in their data.
  */
 function warnDroppedAttributes(dropped: ReadonlySet<string>): void {
   if (dropped.size === 0) return;
-  const names = FLAT_PREFIX_COLUMNS.filter((c) => dropped.has(c)).join(", ");
+  const rank = (name: string) =>
+    FLAT_PREFIX_COLUMNS.indexOf(name.toLowerCase());
+  const names = [...dropped]
+    .sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0))
+    .join(", ");
   console.warn(
     `Flat table: source attributes named ${names} were dropped because they collide with the fixed columns.`,
   );
