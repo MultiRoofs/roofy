@@ -70,6 +70,7 @@ function addCityLayer(name: string): void {
     lodMode: "auto",
     cameraSync: true,
     hiddenTypes: [],
+    visibleObjectIds: null,
     // Two groups, so the object-types disclosure renders — it hides itself for
     // a layer with nothing to choose between.
     availableObjectTypes: ["Building", "Bridge"],

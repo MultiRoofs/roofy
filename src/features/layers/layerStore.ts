@@ -66,6 +66,18 @@ export interface Layer {
    */
   readonly hiddenTypes: ReadonlyArray<string>;
   /**
+   * Only these objects are DRAWN, or `null` for all of them — the table
+   * panel's "Filter map" toggle, pushed to the plugin by `handleSync`.
+   *
+   * An EMPTY set is a real, distinct value: it means the filter matched
+   * nothing, and nothing is what must be drawn. `null` means there is no
+   * filter at all.
+   *
+   * SESSION state, like the query it comes from: never captured in a snapshot
+   * or a share link, and reset to `null` whenever the layer's table is rebuilt.
+   */
+  readonly visibleObjectIds: ReadonlySet<string> | null;
+  /**
    * The first-level groups present in the model, sorted — what the layer's
    * type toggles list.
    *
@@ -107,6 +119,7 @@ export interface LayerStoreActions {
       | "isStreaming"
       | "cameraSync"
       | "hiddenTypes"
+      | "visibleObjectIds"
       | "availableObjectTypes"
       | "appearanceThemes"
       | "selectedAppearance"
@@ -148,6 +161,12 @@ export interface LayerStoreActions {
   /** Replaces {@link Layer.hiddenTypes} — never mutates it, because the sync
    *  layer's "did this change?" test is array identity. */
   setHiddenTypes: (layerId: string, types: ReadonlyArray<string>) => void;
+  /** Replaces {@link Layer.visibleObjectIds} — never mutates it, because the
+   *  sync layer's "did this change?" test is set IDENTITY. */
+  setVisibleObjectIds: (
+    layerId: string,
+    ids: ReadonlySet<string> | null,
+  ) => void;
 
   // Per-layer rule actions
   addRule: (layerId: string, rule: Rule) => void;
@@ -265,6 +284,9 @@ export const useLayerStore = create<LayerStore>((set) => ({
           cameraSync: true,
           isStreaming: input.isStreaming ?? false,
           hiddenTypes: input.hiddenTypes ?? [],
+          // Session state, and never an add-time input: a fresh layer is
+          // unfiltered until a query says otherwise.
+          visibleObjectIds: null,
           // A streaming layer's `model` is a stub (bbox only), so there is
           // nothing to fold here; `useStreamStore`'s `types` carries its
           // groups instead.
@@ -333,6 +355,24 @@ export const useLayerStore = create<LayerStore>((set) => ({
         l.id === layerId ? { ...l, hiddenTypes: types } : l,
       ),
     })),
+
+  setVisibleObjectIds: (layerId, ids) =>
+    set((state) => {
+      // No-op on IDENTITY (null over null, or the same Set again). The map
+      // filter recomputes on every Apply, every toggle and every table
+      // rebuild, and the common answer is "still null" — without this guard
+      // each of those mints a fresh `layers` array, re-renders every
+      // subscriber, and re-runs `syncLayers`, whose test for this field is
+      // reference identity: a churned identical set rebuilds the mesh's
+      // geometry for nothing.
+      const layer = state.layers.find((l) => l.id === layerId);
+      if (layer === undefined || layer.visibleObjectIds === ids) return state;
+      return {
+        layers: state.layers.map((l) =>
+          l.id === layerId ? { ...l, visibleObjectIds: ids } : l,
+        ),
+      };
+    }),
 
   // --- Per-layer rule actions ---
 

@@ -152,6 +152,7 @@ function loadedLayer(): Layer {
     lodMode: "manual",
     cameraSync: true,
     hiddenTypes: [],
+    visibleObjectIds: null,
     availableObjectTypes: ["Building"],
     appearanceThemes: [],
     selectedAppearance: null,

@@ -44,6 +44,7 @@ function layerWithCrs(id: string, referenceSystem?: string): Layer {
     lodMode: "auto",
     cameraSync: true,
     hiddenTypes: [],
+    visibleObjectIds: null,
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,

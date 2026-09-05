@@ -30,6 +30,7 @@ function fakeHandle(id: string, triangles = 100) {
     triangleCount: () => triangles,
     heightOffset: vi.fn(() => 0),
     setHiddenTypes: vi.fn(),
+    setVisibleObjectIds: vi.fn(),
     setAppearance: vi.fn(),
     delete: vi.fn(),
   };
@@ -1000,6 +1001,7 @@ describe("theme styles", () => {
       setVisible: vi.fn(),
       setCameraSync: vi.fn(),
       setHiddenTypes: vi.fn(),
+      setVisibleObjectIds: vi.fn(),
       setAppearance: vi.fn(),
       setThemeStyle: vi.fn(),
     };

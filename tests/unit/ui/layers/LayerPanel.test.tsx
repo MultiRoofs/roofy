@@ -66,6 +66,7 @@ function baseLayer(overrides: Partial<Layer>): Layer {
     lodMode: "auto",
     cameraSync: true,
     hiddenTypes: [],
+    visibleObjectIds: null,
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,

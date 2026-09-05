@@ -27,6 +27,7 @@ function makeLayer(id: string, isStreaming: boolean): Layer {
     lodMode: "auto",
     cameraSync: true,
     hiddenTypes: [],
+    visibleObjectIds: null,
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,

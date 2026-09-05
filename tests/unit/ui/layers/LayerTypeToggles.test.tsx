@@ -46,6 +46,7 @@ function makeLayer(overrides: Partial<Layer> = {}): Layer {
     lodMode: "auto",
     cameraSync: true,
     hiddenTypes: [],
+    visibleObjectIds: null,
     availableObjectTypes: ["Building", "Road"],
     appearanceThemes: [],
     selectedAppearance: null,

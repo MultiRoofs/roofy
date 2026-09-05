@@ -260,6 +260,7 @@ function makeLayer(id: string): Layer {
     lodMode: "auto",
     cameraSync: true,
     hiddenTypes: [],
+    visibleObjectIds: null,
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,
@@ -272,6 +273,7 @@ function makeHandle(id: string) {
     id,
     setVisible: vi.fn(),
     setLod: vi.fn(),
+    setVisibleObjectIds: vi.fn(),
     setStyle: vi.fn(),
     // The real `CityModelHandle` gained this with the scene themes; the
     // viewport pushes the active theme's style on the same beat as LoD.

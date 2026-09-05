@@ -45,6 +45,12 @@ export interface LiveLayer {
    *  it on every edit. Recorded (not pushed) on the add path: `registry.add`
    *  passes it to `addCityModel`, so a new handle is built filtered. */
   hiddenTypes: ReadonlyArray<string>;
+  /** The `visibleObjectIds` set last pushed, by IDENTITY — `layerStore`
+   *  replaces it on every apply. `undefined` means "never pushed", which is
+   *  why the first pass always pushes: unlike `hiddenTypes`, this is NOT an
+   *  `addCityModel` option, so a handle built while a filter is on would
+   *  otherwise draw everything. */
+  visibleObjectIds?: ReadonlySet<string> | null;
   /** The `rules` array last compiled into `handle.setStyle`, by IDENTITY —
    *  `undefined` means "this handle has never been styled". `layerStore`
    *  replaces the array on every rule edit, so reference equality is an exact
@@ -151,6 +157,10 @@ export function syncLayers(
     if (entry.hiddenTypes !== layer.hiddenTypes) {
       entry.hiddenTypes = layer.hiddenTypes;
       entry.handle.setHiddenTypes(layer.hiddenTypes);
+    }
+    if (entry.visibleObjectIds !== layer.visibleObjectIds) {
+      entry.visibleObjectIds = layer.visibleObjectIds;
+      entry.handle.setVisibleObjectIds(layer.visibleObjectIds);
     }
     if (!appearanceThemesEqual(entry.appearance, layer.selectedAppearance)) {
       entry.appearance = layer.selectedAppearance;
