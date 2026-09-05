@@ -23,13 +23,13 @@
 - `globFiles` works in the browser but lists names that were never created, so it is used for cleanup only — never to discover what a write produced.
 - Reader schema (identical for `read_cityjson` / `read_cityjsonseq` / `read_flatcitybuf` on 1.5.5): `id, feature_id, object_type, parents VARCHAR[], children VARCHAR[], children_roles VARCHAR[], address STRUCT[], bbox STRUCT, geometry_lod<L> BLOB, geometry_properties_lod<L> STRUCT, material_lod<L>, texture_lod<L>, template STRUCT, other`, then one inferred column per attribute. `id` IS `CityObject.id`; `feature_id` is the root object of the feature. Absent `parents`/`children` are SQL NULL, never `[]`.
 - Every new export from `src/analytics/duckdb.ts` must reach the test files that `vi.mock` it. Seven exist today; Task 4 brings SIX of them up to the new surface — `tests/unit/app/appCatalogEntry.test.tsx`, `tests/unit/app/appRestoreShare.test.tsx`, `tests/unit/app/appEngineBoot.test.tsx`, `tests/unit/app/appCityParquetLayers.test.tsx`, `tests/unit/features/stac/stacItems.test.ts`, `tests/unit/analytics/duckdbStatus.test.ts` — and DELETES the seventh, `tests/unit/analytics/streamingDuckdb.test.ts`, whose subject is removed.
-- Plugin (submodule) changes go on a `duckdb-integration` branch cut from the parent's current pin `947c980`, are pushed, and the parent gitlink points at that branch's head. NEVER push onto the plugin repo's `main` from the detached pin.
+- Plugin (submodule) changes go on a `duckdb-integration` branch cut from **`2963ddb`** — the gitlink `origin/develop` carries after the Navara 0.1.1 merge, and the head of the plugin repo's `main` — are pushed, and the parent gitlink points at that branch's head. NEVER push onto the plugin repo's `main`. (This branch reaches that pin in Task 23b; before then it is still on `947c980`.)
 - Snapshot schema stays at **v3**. Filter, sort, page, sync-to-map and `visibleObjectIds` are SESSION state and are never persisted.
 - Tests import from `"vitest"`, never `"vite-plus/test"`. React tests use `@testing-library/react`.
 - Every commit message ends with:
   ```
   Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-  Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+  Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
   ```
 - The pre-commit hook runs `vp check --fix` in the parent repo. The submodule has no hooks — run its checks by hand.
 - After ANY app-side `npm install`, re-run `pnpm install` inside `packages/cityjson-navara-plugins`.
@@ -162,7 +162,7 @@ artifact for; 1.4.4 (dev20) had none, so INSTALL cityjson FROM community
 always failed and the app silently ran on its fallback.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -1005,7 +1005,7 @@ its memo so a retry really retries, and the status pill's tooltip lists
 duckdb_extensions() because the community slot can be rebuilt under us.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -1231,7 +1231,7 @@ goes: its subject (shouldUseSourceUrlPath, loadResidentObjectsIntoDuckDB) is
 deleted, not moved.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -1613,7 +1613,7 @@ travel raw. isDroppedColumn names the geometry/material/texture/template
 columns a browsing table never wants — 2.45x less table memory on Delft.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -1778,7 +1778,7 @@ the FIRST parent (a second is a cross-reference, not containment) and is
 cycle-safe, because a viewer of third-party data must not hang on a bad file.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -2026,7 +2026,7 @@ unrecognised lands in generics rather than being dropped: an export that
 silently loses objects is worse than a wide generics table.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -2493,7 +2493,7 @@ predicate, because the two differ for the map sync — null means "no filter",
 an empty result set means "hide everything".
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -3278,7 +3278,7 @@ BEFORE the query is sent — a DuckDB bind error is worded about SQL, not about
 the row the user was editing.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -3720,7 +3720,7 @@ draw nothing. Always the positive IN form with COALESCE on both sides: one
 NULL feature_id makes a NOT IN predicate NULL and hides nothing.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -4212,7 +4212,7 @@ table a feature lands in. No `lod :=` — the explicit column list already names
 one LoD's geometry pair, and that is the route probed end to end.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -4585,7 +4585,7 @@ parents/children with the reader's exact semantics — parents NULL rather than
 The old lod/surface_count columns go: app-side derivations, not data.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -5665,7 +5665,7 @@ flat rows aligned to the reader's column names. A build failure is recorded on
 the entry, never thrown into the loader.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -6098,7 +6098,7 @@ A rebuild mints a fresh name (names are never reused) and retires the table it
 replaces.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -6614,7 +6614,7 @@ fetchModelBytes is the same fetch without the parse, for the export's
 SourceProvider.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -7205,7 +7205,7 @@ enqueue is fire-and-forget: a DuckDB failure shows in the panel and must never
 fail a layer add.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -7733,7 +7733,7 @@ here, rebuilt on commits only while the panel is open or an export is pending
 reading is pure cost.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -7936,7 +7936,7 @@ loadModelIntoDuckDB, loadCityModelFromMemory and loadResidentObjectsIntoDuckDB
 are deleted, not deprecated.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -8223,7 +8223,7 @@ been empty for every extension-backed layer, and with one shared table a
 second layer replaced the first one's numbers outright.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -8745,7 +8745,7 @@ overwrites a fast second one. The filter is compiled before anything is sent,
 so an unknown column is a sentence in the bar rather than a bind error.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -9310,7 +9310,7 @@ tests. compileFilter still refuses one (a draft that outlived a table rebuild),
 but the common case is prevented rather than reported.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -9943,7 +9943,7 @@ total: one number that silently changes meaning when a filter is applied is
 how a user comes to believe a filter deleted their data.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -10869,7 +10869,156 @@ differently-shaped answer to the same question — which is exactly how the
 no-layer and zero-rows each get a sentence.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
+EOF
+)"
+```
+
+---
+
+## Task 23b: Merge `origin/develop` before the plugin work
+
+**Files:**
+
+- Modify: `package.json`, `package-lock.json` (conflict resolution)
+- Modify: `packages/cityjson-navara-plugins` (gitlink → `2963ddb`)
+- Merge in whatever `origin/develop` brings: `src/scene/*` (including
+  `handleSync.ts`), `CLAUDE.md`, and the Navara 0.1.1 dependency pins
+
+**Interfaces:**
+
+- Consumes: nothing.
+- Produces: a branch whose submodule pin is `2963ddb` and whose `package.json`
+  carries BOTH `@duckdb/duckdb-wasm@1.33.1-dev64.0` and develop's Navara 0.1.1
+  pins. Tasks 24–26 cut the plugin branch from that pin.
+
+**Why here, and not later.** `origin/develop` (`7736d0e`) has merged the Navara
+0.1.1 upgrade, which moves the plugin gitlink from `947c980` to `2963ddb` and
+rewrites parts of `src/scene/`. Task 24 cuts a plugin branch from the pin this
+repo is on, and Task 26 bumps the gitlink to its head — so doing the merge
+AFTERWARDS would mean either abandoning that branch or reconciling two plugin
+histories by hand. Merging first costs one conflict resolution; merging after
+costs a rebuild of the submodule work. It also lands before Task 26 touches
+`handleSync.ts`, which develop has changed.
+
+- [ ] **Step 1: Fetch and see what is coming**
+
+```bash
+git fetch origin
+git log --oneline HEAD..origin/develop
+git diff --stat HEAD...origin/develop
+```
+
+Expected: the Navara 0.1.1 merge, `src/scene/*`, `CLAUDE.md`, `package.json`,
+`package-lock.json` and the submodule pointer.
+
+- [ ] **Step 2: Merge — a real merge, never a squash**
+
+```bash
+git merge origin/develop
+```
+
+A squash would flatten develop's history into one commit on this branch and
+leave `origin/develop` looking un-merged forever, so the next person to try it
+gets the same conflicts again.
+
+Expected: conflicts in `package.json` and `package-lock.json`, and a submodule
+conflict on `packages/cityjson-navara-plugins`. Anything else — a conflict in
+`src/scene/handleSync.ts`, say — is real and resolved on its merits; this branch
+has not touched `handleSync.ts` yet (Task 26 does), so it should come across
+cleanly.
+
+- [ ] **Step 3: Resolve `package.json` — BOTH sides survive**
+
+This is not "take theirs". The two sides changed different dependencies, and
+dropping either breaks a whole milestone:
+
+- `@duckdb/duckdb-wasm` stays at **`1.33.1-dev64.0`** (Task 1's exact pin — the
+  first duckdb-wasm whose community slot serves a `cityjson` artifact at all);
+- every `@navaramap/*`, `three` and `postprocessing` pin takes **develop's**
+  value (the 0.1.1 upgrade moves them together, and CLAUDE.md's Known Issues
+  say they are bumped only together with a Navara upgrade).
+
+```bash
+git diff --diff-filter=U --name-only
+# edit package.json by hand, then:
+grep -n '"@duckdb/duckdb-wasm"\|"@navaramap/\|"three"\|"postprocessing"' package.json
+```
+
+Expected: dev64 on one line, develop's Navara/three/postprocessing versions on
+the others.
+
+- [ ] **Step 4: Regenerate the lockfile rather than merging it**
+
+A three-way merge of `package-lock.json` produces a file npm did not write.
+Take either side to clear the conflict, then let npm rebuild it from the
+resolved `package.json`:
+
+```bash
+git checkout --theirs package-lock.json
+npm install
+```
+
+- [ ] **Step 5: Move the submodule to develop's pin**
+
+```bash
+git -C packages/cityjson-navara-plugins fetch origin
+git -C packages/cityjson-navara-plugins checkout 2963ddb
+git -C packages/cityjson-navara-plugins rev-parse HEAD
+git -C packages/cityjson-navara-plugins rev-parse origin/main
+```
+
+Expected: the last two hashes match — `2963ddb` is the plugin repo's `main`,
+which is exactly why Task 24 can cut a branch from it and push.
+
+Then restore pnpm's workspace links, which npm's install just overwrote:
+
+```bash
+cd packages/cityjson-navara-plugins && pnpm install
+git -C packages/cityjson-navara-plugins status --short
+```
+
+Expected: clean. If `pnpm-lock.yaml` moved, commit it on the plugin side or
+discard it — never leave the submodule dirty (Task 1, Step 4).
+
+- [ ] **Step 6: Verify, in both repos**
+
+```bash
+npx tsc -b --noEmit
+cd packages/cityjson-navara-plugins && pnpm typecheck && pnpm vitest run
+```
+
+Then, back in the parent:
+
+```bash
+npx vitest run
+```
+
+Expected: all clean. A failure here is the 0.1.1 upgrade meeting this branch's
+work — most plausibly in `src/scene/`, where both sides have been — and it is
+fixed now, in the merge commit, not left for Task 26 to trip over.
+
+- [ ] **Step 7: Commit the merge**
+
+```bash
+git add package.json package-lock.json packages/cityjson-navara-plugins
+git add -A
+git commit -m "$(cat <<'EOF'
+merge: origin/develop (Navara 0.1.1) into the DuckDB integration branch
+
+develop moved the plugin gitlink to 2963ddb and rewrote parts of src/scene/.
+Taking it now rather than at the end: the plugin branch for the map-filter work
+is cut from the gitlink this repo carries, so merging afterwards would mean
+either abandoning that branch or reconciling two plugin histories by hand.
+
+package.json keeps BOTH sides — duckdb-wasm stays at the exact 1.33.1-dev64.0
+pin (the first build whose community slot serves a cityjson artifact) and
+@navaramap/three/postprocessing take develop's 0.1.1 values, which CLAUDE.md
+requires to move together. package-lock.json is regenerated by npm rather than
+three-way merged.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -10906,10 +11055,23 @@ export function buildCityMeshArrays(
 
 ```bash
 git -C packages/cityjson-navara-plugins fetch origin
-git -C packages/cityjson-navara-plugins checkout -b duckdb-integration 947c980
+git -C packages/cityjson-navara-plugins checkout -b duckdb-integration 2963ddb
 ```
 
-(`origin/main` is ahead of the pin — a Navara 0.1.1 bump the app is not on — so the branch is cut from `947c980`, the commit the parent's gitlink names, and never from `main`.)
+(`2963ddb` is BOTH the plugin repo's `origin/main` and the gitlink this branch
+now carries, because Task 23b merged `origin/develop` and took its Navara 0.1.1
+upgrade. Cutting a branch rather than committing on `main` directly is still the
+rule: the parent gitlink must name a commit that is published, and a branch is
+what makes that reviewable. Verify before cutting:
+
+```bash
+git -C packages/cityjson-navara-plugins rev-parse HEAD          # 2963ddb…
+git -C packages/cityjson-navara-plugins rev-parse origin/main   # the same
+```
+
+`buildCityMeshArrays`' signature is UNCHANGED at `2963ddb` — the 0.1.1 upgrade
+did not touch it — so `appearance` is still the sixth parameter and
+`visibleObjectIds` still goes at position 7.)
 
 - [ ] **Step 2: Write the failing test**
 
@@ -11093,7 +11255,7 @@ objectKeys slot invariant holds — a filtered object still takes its index, or
 every consumer that maps an index back through objectKeys shifts.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -11333,7 +11495,7 @@ occlude and still answer a raycast. null clears the filter; an empty set draws
 nothing, and the two never compare equal.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 git -C packages/cityjson-navara-plugins push -u origin duckdb-integration
@@ -11716,7 +11878,7 @@ sync always pushes, because unlike hiddenTypes this is not an addCityModel
 option, so a handle built while a filter is on would otherwise draw everything.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -12110,7 +12272,7 @@ An empty result writes an EMPTY set, which draws nothing — that is what
 "nothing matched" has to look like.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -12294,7 +12456,7 @@ revoking the object URL, and that leak is invisible until a session has
 exported a few hundred megabytes.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -12841,7 +13003,7 @@ wasm, silently, and a format that hands back an empty file is worse than one
 that is absent.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -13511,7 +13673,7 @@ REPORTED, because "no warnings" and "we never looked" must not look alike. Both
 schemas, the source buffer and every output go in a finally.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -14658,7 +14820,7 @@ produce zero bytes silently, and CityParquet is offered only where there is a
 reader, an LoD and an EPSG code.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -14809,7 +14971,7 @@ not a jsdom test. cityparquet_write itself was verified separately in Chrome
 with PAR1 magic); this covers the finished UI over it.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -15252,7 +15414,7 @@ rebuilt under us, and a column that changed name or type would sail through
 every mocked test in the repo.
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
@@ -15359,28 +15521,70 @@ cd packages/cityjson-navara-plugins && pnpm typecheck && pnpm vitest run
 
 Expected: all clean, 0 failed files in both.
 
-- [ ] **Step 4: Verify a fresh clone installs (CI runs `npm ci`)**
+- [ ] **Step 4: Make sure the submodule branch really is published**
 
-`--recursive` resolves the gitlink from GITHUB, not from this checkout, so this
-only works once the plugin branch is published — which Task 25 already did
-(`git push -u origin duckdb-integration`). Confirm that first, then clone into a
-throwaway directory:
+Everything below depends on it: a recursive clone resolves the gitlink from
+GITHUB, not from this checkout, and a parent commit whose gitlink names an
+unpublished plugin commit is a repository nobody else can clone. Task 25 pushed
+it; confirm rather than assume.
 
 ```bash
+git -C packages/cityjson-navara-plugins push -u origin duckdb-integration
 git -C packages/cityjson-navara-plugins rev-parse HEAD
 git -C packages/cityjson-navara-plugins rev-parse origin/duckdb-integration
+```
+
+Expected: the push is a no-op ("Everything up-to-date") and the two hashes
+match.
+
+- [ ] **Step 5: Verify a fresh clone installs (CI runs `npm ci`)**
+
+Now that the branch is up, clone into a throwaway directory:
+
+```bash
 cd "$(mktemp -d)"
 git clone --recursive /data2/hideba/multiroof-viewer-integration-of-duckdb-wasm-and-relevant-extensio ci-check
 cd ci-check && npm ci
 ```
 
-Expected: the two hashes match, the recursive clone resolves the submodule, and
-`npm ci` completes with no `EUSAGE` lockfile-mismatch error. If `npm ci` fails,
-re-run `npm install` in the worktree, commit the regenerated
-`package-lock.json`, and repeat. If the SUBMODULE step fails, the branch was
-never pushed — go back and push it before anything else.
+Expected: the recursive clone resolves the submodule, and `npm ci` completes
+with no `EUSAGE` lockfile-mismatch error. If `npm ci` fails, re-run
+`npm install` in the worktree, commit the regenerated `package-lock.json`, and
+repeat.
 
-- [ ] **Step 5: Commit the docs**
+- [ ] **Step 6: Merge `origin/develop` again, and re-run both suites**
+
+A USER INSTRUCTION, and a standing one: this branch is merged up to date with
+`develop` immediately before it is pushed. Task 23b took the Navara 0.1.1
+upgrade; days of work have passed since, and whatever landed on `develop` in
+between is cheaper to reconcile here than in a pull request.
+
+```bash
+git fetch origin
+git merge origin/develop
+```
+
+Resolve on the same rules as Task 23b — `@duckdb/duckdb-wasm` keeps its exact
+`1.33.1-dev64.0` pin, the `@navaramap/*` / `three` / `postprocessing` set moves
+together and takes develop's values, and `package-lock.json` is REGENERATED
+(`git checkout --theirs package-lock.json && npm install`) rather than three-way
+merged. If the submodule pointer conflicts, keep THIS branch's
+`duckdb-integration` head unless develop has moved the plugin again, in which
+case merge develop's plugin commit into that branch first and push it before
+going on.
+
+Then everything, in both repos:
+
+```bash
+npx tsc -b --noEmit
+npx vitest run
+cd packages/cityjson-navara-plugins && pnpm typecheck && pnpm vitest run
+```
+
+Expected: all clean. A merge that needed no resolution still gets the full run —
+develop can break this branch without touching a line of it.
+
+- [ ] **Step 7: Commit the docs**
 
 ```bash
 git add CLAUDE.md docs/roadmap.md
@@ -15388,12 +15592,12 @@ git commit -m "$(cat <<'EOF'
 docs: record the DuckDB integration architecture and milestone 11
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01S9dC69EMBn9vK84Mvd6KKp
+Claude-Session: https://claude.ai/code/session_016E9ZwoCwM6fWHf2JyifAEi
 EOF
 )"
 ```
 
-- [ ] **Step 6: Code review before the push**
+- [ ] **Step 8: Code review before the push**
 
 CLAUDE.md requires it: "When completing a major feature or milestone, use the
 `feature-dev:code-reviewer` agent with high effort to review changes. Run the
@@ -15405,24 +15609,27 @@ commit:
 ```bash
 git log --oneline main..HEAD
 git diff main...HEAD --stat
-git -C packages/cityjson-navara-plugins log --oneline 947c980..HEAD
+git -C packages/cityjson-navara-plugins log --oneline 2963ddb..HEAD
 ```
 
 Give the reviewer that diff plus this plan and the spec, at high effort. Address
-every **Critical** finding with its own commit (prefixed `fix:`) before Step 7;
+every **Critical** finding with its own commit (prefixed `fix:`) before Step 9;
 record anything deliberately not acted on, and why, in the PR description.
 
-- [ ] **Step 7: Push**
+Run it AFTER the develop merge, not before: the reviewer should see the code as
+it will actually land, including whatever the merge changed.
+
+- [ ] **Step 9: Push**
 
 ```bash
 git push
 ```
 
-The submodule branch went up in Task 25, and Step 4 has just proved a recursive
-clone of this commit resolves — so there is nothing left to push there. (If Task
-25's push was somehow skipped, `git -C packages/cityjson-navara-plugins push -u
-origin duckdb-integration` must go first: a parent gitlink naming an unpublished
-commit leaves a repository nobody else can clone.)
+Nothing is left to push on the submodule — Step 4 confirmed its branch is
+published and Step 5 proved a recursive clone of this commit resolves. The
+ordering the whole task exists to enforce: **submodule branch pushed → fresh
+clone with `npm ci` → merge `develop` and re-verify → code review → parent
+push.**
 
 ---
 
@@ -15525,7 +15732,8 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
 | §4            | Opt-in Node integration behind `DUCKDB_INTEGRATION`                                                                                                                  | 33                                                |
 | §4            | **Reader `id` set == `parseCityJSON().objects` key set**                                                                                                             | 33                                                |
 | §4            | Browser smoke: boot, table, filter, map sync, all four exports                                                                                                       | 32                                                |
-| §5            | Submodule branch from `947c980`, pushed, gitlink bump                                                                                                                | 24, 25, 26, 34                                    |
+| §5            | Submodule branch from **`2963ddb`** (was `947c980` before the develop merge), pushed, gitlink bump                                                                   | 23b, 24, 25, 26, 34                               |
+| §5            | **`origin/develop`'s Navara 0.1.1 merge is taken BEFORE the plugin work, and again immediately before the push**                                                     | 23b, 34                                           |
 | §5            | Lockfile regenerated; `npm ci` verified in a fresh clone                                                                                                             | 1, 34                                             |
 | §5            | The seven mocking test files                                                                                                                                         | 4                                                 |
 | §5            | `duckdb.ts` the only importer of `@duckdb/duckdb-wasm`                                                                                                               | Global Constraints; 13, 29, 30 all import from it |
@@ -15561,6 +15769,15 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
   file that can be hundreds of megabytes. Task 11 splits it into one scratch
   read plus N cheap cuts, the scratch table in a schema of its own because
   `cityparquet_init` describes every table in the schema it is handed.
+- §5's delivery constraint says the plugin branch is cut from `947c980` because
+  "`origin/main` is ahead of the parent's pin (a Navara 0.1.1 bump the app is
+  not on)". That stopped being true: `origin/develop` (`7736d0e`) has merged
+  the upgrade, so the pin the app is on IS `2963ddb`, which is also the plugin
+  repo's `main`. Task 23b takes that merge before any plugin work, because
+  cutting a branch from the old pin and merging afterwards would mean either
+  abandoning the branch or reconciling two plugin histories by hand — and Task
+  34 merges `develop` once more immediately before the push, which is a
+  standing user instruction rather than anything the spec asks for.
 - §3.4's filter bar parses its value input as the user types, which cannot
   work: `Number("1.")` is 1, so the decimal point is deleted the instant it is
   typed and no fractional threshold can be entered at all. Task 21 keeps the
@@ -15749,6 +15966,10 @@ Every name that crosses a task boundary, re-checked after the edits:
   31, which stores `chosenLodSuffix` and matches `selectedLod` against
   `label`). `lodColumnSuffix` is DELETED — no task references it, and
   `sql.ts` no longer imports anything from `columnKind` for LoD purposes.
+- The submodule pin is `2963ddb` everywhere it appears after Task 23b: the
+  Global Constraints line, Task 24's `checkout -b`, Task 34's reviewer diff and
+  the coverage table. `947c980` survives only where the text says explicitly
+  that it is the pin this branch carried BEFORE the merge.
 - `LayerTable.rowCount` is `number | null` in both of the plan's copies of the
   interface, and `countRows` returns `null` rather than 0 for a failed COUNT
   (Task 13). Its consumers match: `DuckDBStats.rowCount` and the "Rows loaded"
