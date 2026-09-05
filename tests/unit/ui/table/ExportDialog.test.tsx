@@ -159,6 +159,13 @@ describe("exportFileName", () => {
       "Rotterdam_centrum.csv",
     );
     expect(exportFileName("a:b*c?", "csv")).toBe("a_b_c.csv");
+    // …but a LETTER is a letter in any script. `\w` is ASCII, so it used to
+    // spell Zürich "Z_rich" and leave 東京 with no stem at all — a PLATEAU
+    // extract downloaded as "export.csv".
+    expect(exportFileName("Zürich Altstadt", "csv")).toBe(
+      "Zürich_Altstadt.csv",
+    );
+    expect(exportFileName("東京.city.json", "csv")).toBe("東京.csv");
     // Nothing but an extension leaves no stem — better than a file called
     // ".csv", which most browsers will not save at all.
     expect(exportFileName(".city.json", "csv")).toBe("export.csv");

@@ -28,9 +28,17 @@ const KNOWN_EXTENSIONS: ReadonlyArray<string> = [
   ".zip",
 ];
 
-/** Anything a file name should not carry. Replaced rather than dropped, so two
- *  layers whose names differ only in punctuation do not collapse into one. */
-const UNSAFE = /[^\w.-]+/g;
+/**
+ * Anything a file name should not carry. Replaced rather than dropped, so two
+ * layers whose names differ only in punctuation do not collapse into one.
+ *
+ * UNICODE-AWARE (`\p{L}\p{N}` under `/u`), not `\w`, which is ASCII: `\w` turned
+ * "Zürich" into "Z_rich" and left "東京.city.json" with no stem at all, so a
+ * PLATEAU or Swiss extract downloaded as `export.csv`. Every filesystem this
+ * app's downloads land on takes non-ASCII letters; what has to go is the
+ * separator and shell metacharacter set, which this still removes.
+ */
+const UNSAFE = /[^\p{L}\p{N}._-]+/gu;
 
 function stripKnownExtensions(name: string): string {
   let stem = name;
