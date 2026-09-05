@@ -46,7 +46,12 @@ import {
   FLAT_PREFIX_COLUMNS,
   type FlatRow,
 } from "./layerRows";
-import { buildCountSql, quoteIdent, quoteLiteral } from "./sql";
+import {
+  buildCountSql,
+  quoteIdent,
+  quoteLiteral,
+  READ_JSON_OPTIONS,
+} from "./sql";
 
 /**
  * Re-registers a layer's source bytes for an export.
@@ -442,12 +447,6 @@ const FLAT_COLUMN_TYPES: Readonly<Record<string, string>> = {
   children: "VARCHAR[]",
 };
 
-/** The flat columns that must end up as `VARCHAR[]` — the ones `read_json_auto`
- *  can mistype, and the ones an empty table declares as lists. */
-const FLAT_LIST_COLUMNS: ReadonlyArray<string> = FLAT_PREFIX_COLUMNS.filter(
-  (name) => FLAT_COLUMN_TYPES[name] === "VARCHAR[]",
-);
-
 /** The columns an empty fallback table is declared with — the vocabulary every
  *  other layer publishes, so a streaming layer with no cells yet still has a
  *  browsable (empty) table rather than a failure. */
@@ -475,24 +474,32 @@ async function buildFromRows(
       }
       scratch.add(sourceName);
       const created = await ddl(
-        `CREATE OR REPLACE TABLE ${quoteIdent(table)} AS SELECT * FROM read_json_auto(${quoteLiteral(sourceName)})`,
+        `CREATE OR REPLACE TABLE ${quoteIdent(table)} AS SELECT * FROM read_json_auto(${quoteLiteral(sourceName)}, ${READ_JSON_OPTIONS})`,
       );
       if (!created.ok) throw new BuildError(created.message);
 
-      // `read_json_auto` infers from the DATA, and a layer of nothing but root
-      // objects has `parents` NULL in every row — which it types as JSON, not
-      // VARCHAR[]. That is a real divergence from the reader schema: a JSON
-      // column classifies `castText` instead of `nested`, so the filter bar
-      // would offer it comparisons it cannot honour and `parents IS NULL`
-      // would stop meaning the same thing on the two kinds of table.
+      // EVERY fixed column is forced to its declared type, because
+      // `read_json_auto` infers from the DATA and gets two of them wrong in
+      // ways that break different things (both measured, DuckDB 1.5.5):
       //
-      // Probed (2026-09-04, DuckDB 1.5.5): `sample_size = -1` and
-      // `union_by_name` do NOT help — an all-NULL column stays JSON — and a
-      // PARTIAL `columns = {...}` option DROPS every column it does not name,
-      // which would throw the layer's attributes away. `ALTER COLUMN … TYPE`
-      // is the route that works: it is a no-op when the inference was already
-      // right, and it preserves both the list values and the NULLs.
-      for (const column of FLAT_LIST_COLUMNS) {
+      //  - a layer of nothing but root objects has `parents` NULL in every row,
+      //    which it types as JSON rather than VARCHAR[]. A JSON column
+      //    classifies `castText` instead of `nested`, so the filter bar offers
+      //    it comparisons it cannot honour and `parents IS NULL` stops meaning
+      //    the same thing on the two kinds of table.
+      //  - a DATE-SHAPED id types as DATE (`"2024-01-01"` → DATE, measured),
+      //    and the map sync then reads back epoch-millisecond strings that
+      //    match no key in the model. The same hazard is BIGINT for a numeric
+      //    id. `id`, `feature_id` and `object_type` are strings in the domain
+      //    and must be strings in the table.
+      //
+      // `ALTER COLUMN … TYPE` is the route that works, and it is what the
+      // options above cannot do: a PARTIAL `columns = {...}` option DROPS every
+      // column it does not name, which would throw the layer's attributes away.
+      // The ALTER is a no-op when the inference was already right, and it
+      // preserves the list values, the NULLs and the DATE's own spelling
+      // (`2024-01-01`, not an epoch).
+      for (const column of FLAT_PREFIX_COLUMNS) {
         const altered = await ddl(
           `ALTER TABLE ${quoteIdent(table)} ALTER COLUMN ${quoteIdent(column)} TYPE ${FLAT_COLUMN_TYPES[column]}`,
         );
@@ -525,7 +532,8 @@ async function buildFromRows(
  * Tear down whatever a FAILED build left behind.
  *
  * A build is several statements, and the `CREATE` is not the last of them: the
- * fallback route runs two `ALTER COLUMN`s and a `DESCRIBE` after it, and any
+ * fallback route runs one `ALTER COLUMN` per fixed column and a `DESCRIBE`
+ * after it, and any
  * of those can fail over a table that now exists. Without this the layer is
  * `failed` while a fully materialised table of its rows sits in the database
  * under a name nothing will ever use again — memory held for the life of the

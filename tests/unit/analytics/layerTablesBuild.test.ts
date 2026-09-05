@@ -287,15 +287,15 @@ describe("reader-backed layer table", () => {
 
 describe("a failed build leaves nothing behind", () => {
   it("DROPs the table when a step AFTER the CREATE fails", async () => {
-    // The fallback route runs two ALTERs and a DESCRIBE after its CREATE, so a
-    // failure there strands a fully materialised table under a name nothing
+    // The fallback route runs five ALTERs and a DESCRIBE after its CREATE, so
+    // a failure there strands a fully materialised table under a name nothing
     // will ever use again — memory held for the life of the page.
     describeRows = FALLBACK_DESCRIBE;
     failures = { 'DESCRIBE SELECT * FROM "layer_1"': "Catalog Error: boom" };
     await enqueueLayerTable("L1", { kind: "model", model: model() });
 
     expect(sql).toContain(
-      "CREATE OR REPLACE TABLE \"layer_1\" AS SELECT * FROM read_json_auto('layer_1.json')",
+      "CREATE OR REPLACE TABLE \"layer_1\" AS SELECT * FROM read_json_auto('layer_1.json', sample_size = -1, field_appearance_threshold = 0, map_inference_threshold = -1)",
     );
     expect(sql).toContain('DROP TABLE IF EXISTS "layer_1"');
     expect(stateOf("L1")).toEqual({
@@ -788,18 +788,21 @@ describe("flat-fallback layer table", () => {
 
     expect(registered[0]!.name).toBe("layer_1.json");
     expect(sql[0]).toBe(
-      "CREATE OR REPLACE TABLE \"layer_1\" AS SELECT * FROM read_json_auto('layer_1.json')",
+      "CREATE OR REPLACE TABLE \"layer_1\" AS SELECT * FROM read_json_auto('layer_1.json', sample_size = -1, field_appearance_threshold = 0, map_inference_threshold = -1)",
     );
-    // read_json_auto types an all-NULL `parents` as JSON, not VARCHAR[], so
-    // the fallback schema would diverge from the reader's without these. Both
-    // are no-ops when the inference was already right.
-    expect(sql[1]).toBe(
+    // EVERY fixed column is forced, in the published vocabulary's order.
+    // `read_json_auto` types an all-NULL `parents` as JSON rather than
+    // VARCHAR[], and a DATE-SHAPED id as DATE — either one silently diverges
+    // the fallback schema from the reader's. Each ALTER is a no-op when the
+    // inference was already right.
+    expect(sql.slice(1, 6)).toEqual([
+      'ALTER TABLE "layer_1" ALTER COLUMN "id" TYPE VARCHAR',
+      'ALTER TABLE "layer_1" ALTER COLUMN "feature_id" TYPE VARCHAR',
+      'ALTER TABLE "layer_1" ALTER COLUMN "object_type" TYPE VARCHAR',
       'ALTER TABLE "layer_1" ALTER COLUMN "parents" TYPE VARCHAR[]',
-    );
-    expect(sql[2]).toBe(
       'ALTER TABLE "layer_1" ALTER COLUMN "children" TYPE VARCHAR[]',
-    );
-    expect(sql[3]).toBe('DESCRIBE SELECT * FROM "layer_1"');
+    ]);
+    expect(sql[6]).toBe('DESCRIBE SELECT * FROM "layer_1"');
     expect(dropped).toEqual(["layer_1.json"]);
 
     const info = getLayerTable("L1");

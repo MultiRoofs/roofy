@@ -47,6 +47,38 @@ export function quoteLiteral(value: string | number | boolean): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+/**
+ * `read_json_auto`'s inference options for the FLAT-FALLBACK table, pinned so
+ * a real file cannot lose columns.
+ *
+ * Here rather than beside the `CREATE` that uses it because this module is the
+ * one the integration suite can import: the SQL a Node harness runs against a
+ * real DuckDB has to be the app's own text, and `layerTables.ts` reaches the
+ * engine at module scope.
+ *
+ * Every option is a MEASURED failure on DuckDB 1.5.5, not a precaution:
+ *
+ *  - `field_appearance_threshold = 0` — the default collapses rows whose keys
+ *    vary into ONE `MAP(VARCHAR, JSON)` column. Measured: 300 rows each
+ *    carrying a different attribute name produced a table of a SINGLE column
+ *    called `json`, with no `id` to join on and nothing for the grid, the
+ *    filter bar or the export to name; with the option, the same rows produce
+ *    305 real columns. A CityGML or CityParquet layer whose objects carry
+ *    heterogeneous attributes is exactly that shape.
+ *  - `map_inference_threshold = -1` — the other door to the same MAP collapse,
+ *    shut for the same reason.
+ *  - `sample_size = -1` — read every row before deciding. An attribute that
+ *    appears only on the last object of a large layer is otherwise absent from
+ *    the schema, and a column the user can see in their file is simply not in
+ *    the table.
+ *
+ * A TEXT fragment, not a builder: it is spliced into the one `read_json_auto`
+ * call there is, and the exact-SQL test in `layerTablesBuild` is what pins the
+ * spelling.
+ */
+export const READ_JSON_OPTIONS =
+  "sample_size = -1, field_appearance_threshold = 0, map_inference_threshold = -1";
+
 /** `%`, `_` and the escape character itself, neutralised inside a LIKE
  *  needle. Without this, typing "50%" in a "contains" box matches everything
  *  starting "50". */

@@ -40,6 +40,7 @@ import {
   exportColumnNames,
   quoteIdent,
   quoteLiteral,
+  READ_JSON_OPTIONS,
 } from "../../../src/analytics/sql";
 import { groupTypesByModule } from "../../../src/analytics/cityGmlModule";
 import {
@@ -300,6 +301,32 @@ describe.skipIf(!enabled)("layer tables over real fixtures", () => {
     expect(types).toEqual(["Building"]);
   });
 
+  /** A model of nothing but root Buildings with the given ids — the flat
+   *  fallback's most common shape, and the one that shows every inference
+   *  hazard the ALTERs exist for. */
+  function allRootModel(ids: ReadonlyArray<string>): CityModel {
+    const objects: Record<string, CityModel["objects"][string]> = {};
+    for (const id of ids) {
+      objects[id] = {
+        id,
+        objectType: "Building",
+        attributes: {},
+        surfaces: [],
+        bbox: null,
+        children: [],
+        parents: [],
+        lod: null,
+      };
+    }
+    return {
+      sourceEncoding: "cityjson",
+      metadata: {},
+      bbox: null,
+      vertexCount: 0,
+      objects,
+    };
+  }
+
   it("types an ALL-NULL parents column as VARCHAR[] on the flat-fallback path", () => {
     // The fallback's schema must match the reader's, and `read_json_auto`
     // types an all-NULL column as JSON. The ALTER in `buildFromRows` is what
@@ -334,8 +361,10 @@ describe.skipIf(!enabled)("layer tables over real fixtures", () => {
     };
     db.registerBytes("flat.json", encodeRowsAsJson(flatRowsFromModel(model)));
     db.query(
-      "CREATE OR REPLACE TABLE \"flat_t33\" AS SELECT * FROM read_json_auto('flat.json')",
+      `CREATE OR REPLACE TABLE "flat_t33" AS SELECT * FROM read_json_auto('flat.json', ${READ_JSON_OPTIONS})`,
     );
+    // The options do NOT fix this one — they are about which COLUMNS exist,
+    // not about the type an all-NULL one is given. The ALTER is the only fix.
     const inferred = db
       .query('DESCRIBE "flat_t33"')
       .find((r) => r.column_name === "parents");
@@ -362,6 +391,110 @@ describe.skipIf(!enabled)("layer tables over real fixtures", () => {
       ["Building"],
     );
     db.query('DROP TABLE "flat_t33"');
+  });
+
+  it("keeps a DATE-SHAPED or numeric id readable AS THE MODEL SPELLS IT", () => {
+    // The bug: `read_json_auto` infers `"2024-01-01"` as DATE, and the map sync
+    // then reads back epoch-millisecond strings that match no key in the model
+    // — selection, map filtering and every export lose the layer's ids, with
+    // the grid still showing something that looks like a date. The ALTER to
+    // VARCHAR is what makes the round trip exact.
+    const ids = ["2024-01-01", "2024-02-03"];
+    const model = allRootModel(ids);
+    db.registerBytes("flatid.json", encodeRowsAsJson(flatRowsFromModel(model)));
+    db.query(
+      `CREATE OR REPLACE TABLE "flat_id" AS SELECT * FROM read_json_auto('flatid.json', ${READ_JSON_OPTIONS})`,
+    );
+    const before = db
+      .query('DESCRIBE "flat_id"')
+      .filter((r) => r.column_name === "id" || r.column_name === "feature_id")
+      .map((r) => r.column_type);
+    // The finding itself, pinned: without the ALTER these are not strings.
+    expect(before).toEqual(["DATE", "DATE"]);
+
+    for (const column of ["id", "feature_id", "object_type"]) {
+      db.query(
+        `ALTER TABLE "flat_id" ALTER COLUMN ${quoteIdent(column)} TYPE VARCHAR`,
+      );
+    }
+    expect(
+      db
+        .query('DESCRIBE "flat_id"')
+        .filter((r) => r.column_name === "id" || r.column_name === "feature_id")
+        .map((r) => r.column_type),
+    ).toEqual(["VARCHAR", "VARCHAR"]);
+    expect(
+      db.query('SELECT "id" FROM "flat_id" ORDER BY 1').map((r) => r.id),
+    ).toEqual(ids);
+    db.query('DROP TABLE "flat_id"');
+
+    // A numeric-looking id survives the same route. It arrives as a JSON
+    // STRING (an object key always is), so the inference already gets it
+    // right — the ALTER is the no-op it is meant to be here.
+    db.registerBytes(
+      "flatnum.json",
+      encodeRowsAsJson(flatRowsFromModel(allRootModel(["42", "7"]))),
+    );
+    db.query(
+      `CREATE OR REPLACE TABLE "flat_num" AS SELECT * FROM read_json_auto('flatnum.json', ${READ_JSON_OPTIONS})`,
+    );
+    db.query('ALTER TABLE "flat_num" ALTER COLUMN "id" TYPE VARCHAR');
+    expect(
+      db.query('SELECT "id" FROM "flat_num" ORDER BY 1').map((r) => r.id),
+    ).toEqual(["42", "7"]);
+    db.query('DROP TABLE "flat_num"');
+  });
+
+  it("keeps every attribute as its OWN column, however heterogeneous", () => {
+    // Without `READ_JSON_OPTIONS` this is catastrophic rather than untidy:
+    // rows whose keys vary collapse into ONE `MAP(VARCHAR, JSON)` column, so
+    // the table has no `id` at all and nothing the app names exists.
+    const objects: Record<string, CityModel["objects"][string]> = {};
+    for (let i = 0; i < 300; i++) {
+      objects[`o${i}`] = {
+        id: `o${i}`,
+        objectType: "Building",
+        attributes: { [`attr_${i}`]: i },
+        surfaces: [],
+        bbox: null,
+        children: [],
+        parents: [],
+        lod: null,
+      };
+    }
+    const bytes = encodeRowsAsJson(
+      flatRowsFromModel({
+        sourceEncoding: "cityjson",
+        metadata: {},
+        bbox: null,
+        vertexCount: 0,
+        objects,
+      }),
+    );
+
+    db.registerBytes("wide_plain.json", bytes.slice());
+    db.query(
+      `CREATE OR REPLACE TABLE "wide_plain" AS SELECT * FROM read_json_auto('wide_plain.json')`,
+    );
+    const collapsed = db.query('DESCRIBE "wide_plain"');
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0]!.column_type).toBe("MAP(VARCHAR, JSON)");
+    db.query('DROP TABLE "wide_plain"');
+
+    db.registerBytes("wide_opts.json", bytes);
+    db.query(
+      `CREATE OR REPLACE TABLE "wide_opts" AS SELECT * FROM read_json_auto('wide_opts.json', ${READ_JSON_OPTIONS})`,
+    );
+    const kept = db.query('DESCRIBE "wide_opts"').map((r) => r.column_name);
+    // Five fixed columns plus one per attribute, none lost or merged.
+    expect(kept).toHaveLength(305);
+    for (const fixed of ["id", "feature_id", "object_type"]) {
+      expect(kept).toContain(fixed);
+    }
+    expect(kept).toContain("attr_0");
+    expect(kept).toContain("attr_299");
+    expect(db.query('SELECT count(*) AS n FROM "wide_opts"')[0]!.n).toBe(300);
+    db.query('DROP TABLE "wide_opts"');
   });
 
   it("sorts a BIGINT (castText) column NUMERICALLY, not lexicographically", () => {
