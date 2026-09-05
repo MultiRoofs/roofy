@@ -207,6 +207,71 @@ function csvFields(line: string): string[] {
 }
 
 /**
+ * The first COMPLETE CSV record in `text`, or `null` if it holds none.
+ *
+ * A record terminator counts only OUTSIDE a quoted field. A CityJSON attribute
+ * name is free text and may contain a newline, and DuckDB writes such a header
+ * as `"roof\nheight",id` — reading up to the first `\n` truncates it mid-field
+ * and the file is refused for having the wrong columns, which is a lie about a
+ * perfectly good export.
+ *
+ * `\r\n` and a lone `\r` both terminate; the returned record keeps whatever is
+ * inside its quotes, newlines included, for {@link csvFields} to split.
+ */
+function firstCsvRecord(text: string): string | null {
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (quoted) {
+      // A doubled quote is an escaped one and does not close the field.
+      if (char !== '"') continue;
+      if (text[i + 1] === '"') i++;
+      else quoted = false;
+      continue;
+    }
+    if (char === '"') quoted = true;
+    else if (char === "\n") return text.slice(0, i).replace(/\r$/, "");
+    else if (char === "\r") return text.slice(0, i);
+  }
+  return null;
+}
+
+/** How much of the file is decoded before looking for the header's end. A
+ *  header longer than this is possible (a table of thousands of columns), so
+ *  the scan DOUBLES rather than giving up — but the common case pays for one
+ *  small slice instead of decoding a 700 MB export to read its first line. */
+const CSV_HEADER_SCAN_BYTES = 64 * 1024;
+
+/**
+ * The header record, decoding as little of the file as will do.
+ *
+ * `{ stream: true }` on every partial slice: a fixed-size cut through UTF-8
+ * lands mid-sequence sooner or later, and a non-streaming decode would put a
+ * replacement character into a column name and report a mismatch that is
+ * entirely the reader's own doing.
+ */
+function decodeFirstCsvRecord(bytes: Uint8Array): string | null {
+  const decoder = new TextDecoder();
+  let text = "";
+  let offset = 0;
+  let chunk = CSV_HEADER_SCAN_BYTES;
+  while (offset < bytes.length) {
+    const end = Math.min(bytes.length, offset + chunk);
+    text += decoder.decode(bytes.subarray(offset, end), {
+      stream: end < bytes.length,
+    });
+    offset = end;
+    // Rescans from the start each time. Geometric growth, so the total work is
+    // linear in the header's length, and it is the only way to see a quote
+    // opened in one slice and closed in the next.
+    const record = firstCsvRecord(text);
+    if (record !== null) return record;
+    chunk *= 2;
+  }
+  return null;
+}
+
+/**
  * Does the CSV DuckDB wrote carry the columns we asked for?
  *
  * `validateExportBytes` proves there IS a header line; this proves it is the
@@ -222,8 +287,13 @@ function csvHeaderMismatch(
   // A projection of nothing writes `SELECT 1`, whose header is "1" and names
   // no column of ours — there is nothing to compare it against.
   if (expected.length === 0) return null;
-  const text = new TextDecoder().decode(bytes);
-  const firstLine = text.slice(0, text.indexOf("\n")).replace(/\r$/, "");
+  const firstLine = decodeFirstCsvRecord(bytes);
+  if (firstLine === null) {
+    // Every byte was read and no record ever closed: the write is truncated,
+    // or a quote was opened and never shut. Either way there is no header to
+    // compare, and saying so beats comparing a fragment.
+    return "The CSV DuckDB wrote has no complete header row.";
+  }
   const actual = csvFields(firstLine);
   const same =
     actual.length === expected.length &&
@@ -393,18 +463,56 @@ async function dropWrittenFile(path: string): Promise<void> {
 }
 
 /**
+ * Everything sitting in the package's output directory, as paths.
+ *
+ * For CLEANUP ONLY, and the distinction is the whole reason this is safe:
+ * `glob()` also lists names that were never created (the same probe finding
+ * {@link validateExportBytes} exists for), so it is useless for deciding what
+ * the writer produced — but dropping a name that was never there is harmless,
+ * and MISSING a name that was is a leak for the life of the page.
+ *
+ * The gap it closes: `cityparquet_write` can fail AFTER creating
+ * `exp_1/building.parquet` (a disk error, an unwritable schema on the second
+ * module), and it then throws before its result rows have been read — so
+ * `writtenFiles`, which is filled from those rows, is still empty and the
+ * `finally` removes nothing at all.
+ *
+ * Never throws and never reports: it runs inside a `finally` that must not
+ * mask the export's own outcome, and `runQuery` answers with `ok: false`
+ * rather than rejecting.
+ */
+async function globWrittenFiles(outDir: string): Promise<string[]> {
+  const listed = await runQuery(
+    `SELECT file FROM glob(${quoteLiteral(`${outDir}/*`)})`,
+  );
+  if (!listed.ok) return [];
+  const paths: string[] = [];
+  for (const row of listed.rows) {
+    const path = row.file;
+    if (typeof path === "string" && path !== "") paths.push(path);
+  }
+  return paths;
+}
+
+/**
  * A CityParquet package, written by the extension and zipped here.
  *
  * The shape is dictated by what `cityparquet_write` actually accepts (probed
  * end to end): the export schema must hold ORDINARY tables named for CityGML
  * modules, the source has to be read again through the cityjson reader because
  * the browsing table has no geometry, and the write's own RESULT ROWS name the
- * files it produced — which is the ONLY list of them there is. Listing the VFS
- * is no help: a name that was never created still resolves, to one garbage
- * byte and no error (the same probe finding {@link validateExportBytes} exists
- * for), so a directory listing cannot tell a written file from an imaginary
- * one. Cleanup therefore uses the names the write rows gave us, and nothing
- * else.
+ * files it produced — which is the only DISCOVERY of them there is. Listing
+ * the VFS is no help for that: a name that was never created still resolves,
+ * to one garbage byte and no error (the same probe finding
+ * {@link validateExportBytes} exists for), so a directory listing cannot tell
+ * a written file from an imaginary one.
+ *
+ * CLEANUP is the opposite problem and takes the opposite answer. The write can
+ * fail after producing some of its files, and it then throws before those rows
+ * have been read at all — so the reported names are the one list guaranteed to
+ * be INCOMPLETE exactly when it matters. The `finally` therefore drops the
+ * union of the reported names and {@link globWrittenFiles}: over-dropping is
+ * free, under-dropping leaks a half-written package for the life of the page.
  *
  * The source is read exactly ONCE, into a scratch table in a SEPARATE schema:
  * `cityparquet_init` describes every table in the schema it is handed, so the
@@ -544,7 +652,14 @@ async function exportCityParquet(
     await ddl(`DROP SCHEMA IF EXISTS ${quoteIdent(schema)} CASCADE`);
     await ddl(`DROP SCHEMA IF EXISTS ${quoteIdent(scratchSchema)} CASCADE`);
     await dropBuffer(sourceName);
-    for (const path of writtenFiles) await dropWrittenFile(path);
+    // The UNION of what the write reported and what is actually in the output
+    // directory. `writtenFiles` is empty whenever the write threw part-way —
+    // which is precisely the case that leaves files behind.
+    const leftovers = new Set([
+      ...writtenFiles,
+      ...(await globWrittenFiles(outDir)),
+    ]);
+    for (const path of leftovers) await dropWrittenFile(path);
   }
 }
 

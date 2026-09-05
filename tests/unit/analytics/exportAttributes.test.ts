@@ -402,4 +402,86 @@ describe("attribute export", () => {
     });
     expect(result.blob.size).toBeGreaterThan(0);
   });
+
+  it("reads a quoted header field containing a NEWLINE as one column", async () => {
+    // A CityJSON attribute name is free text and may hold a newline. Reading
+    // up to the first `\n` truncated the header mid-field, so a perfectly good
+    // export was refused for having the wrong columns.
+    fileBytes = new TextEncoder().encode('"roof\nheight",id\r\n1,2\r\n');
+    const result = await runExport({
+      kind: "attributes",
+      format: "csv",
+      table: "layer_1",
+      columns: [
+        { name: "roof\nheight", type: "VARCHAR", kind: "scalar" },
+        { name: "id", type: "VARCHAR", kind: "scalar" },
+      ],
+      rootTypes: ROOT_TYPES,
+      allRootTypes: ROOT_TYPES,
+      where: null,
+      fileName: "a.csv",
+    });
+    expect(result.blob.size).toBeGreaterThan(0);
+  });
+
+  it("still catches a MISMATCH whose header carries a quoted newline", async () => {
+    // The quoting must not become a way to smuggle a wrong header past the
+    // check — the record is parsed in full, then compared in full.
+    fileBytes = new TextEncoder().encode('"roof\nheight",elsewhere\n1,2\n');
+    await expect(
+      runExport({
+        kind: "attributes",
+        format: "csv",
+        table: "layer_1",
+        columns: [
+          { name: "roof\nheight", type: "VARCHAR", kind: "scalar" },
+          { name: "id", type: "VARCHAR", kind: "scalar" },
+        ],
+        rootTypes: ROOT_TYPES,
+        allRootTypes: ROOT_TYPES,
+        where: null,
+        fileName: "a.csv",
+      }),
+    ).rejects.toThrow(/not the roof\nheight, id that were asked for/);
+  });
+
+  it("refuses a header whose quote is never closed", async () => {
+    // No record ever terminates, so there is nothing to compare — saying so
+    // beats comparing the fragment before the first newline.
+    fileBytes = new TextEncoder().encode('"id,feature_id\n1,2\n');
+    await expect(
+      runExport({
+        kind: "attributes",
+        format: "csv",
+        table: "layer_1",
+        columns: COLUMNS,
+        rootTypes: ROOT_TYPES,
+        allRootTypes: ROOT_TYPES,
+        where: null,
+        fileName: "a.csv",
+      }),
+    ).rejects.toThrow("The CSV DuckDB wrote has no complete header row.");
+  });
+
+  it("finds a header longer than one scan chunk", async () => {
+    // The scan starts at 64 KiB and doubles; a table of thousands of columns
+    // must not be refused for the reader's own convenience.
+    const names = Array.from({ length: 12_000 }, (_, i) => `column_${i}`);
+    fileBytes = new TextEncoder().encode(`${names.join(",")}\n1\n`);
+    const result = await runExport({
+      kind: "attributes",
+      format: "csv",
+      table: "layer_1",
+      columns: names.map((name) => ({
+        name,
+        type: "VARCHAR" as const,
+        kind: "scalar" as const,
+      })),
+      rootTypes: ROOT_TYPES,
+      allRootTypes: ROOT_TYPES,
+      where: null,
+      fileName: "a.csv",
+    });
+    expect(result.blob.size).toBeGreaterThan(0);
+  });
 });

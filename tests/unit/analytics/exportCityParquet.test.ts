@@ -12,6 +12,12 @@ let validationReadFails = false;
 let failOn: string | null = null;
 /** Override a single read-back to exercise the validators. */
 let badFile: { name: string; bytes: Uint8Array | null } | null = null;
+/**
+ * What `glob('<outDir>/*')` answers, as BARE names — the cleanup's second
+ * source of truth. It matters only when the write itself failed part-way, so
+ * it is empty for every other test and the union is a no-op.
+ */
+let globNames: string[] = [];
 
 /** What the writer really produces, in miniature. */
 function sampleBytes(path: string): Uint8Array {
@@ -25,6 +31,14 @@ vi.mock("../../../src/analytics/duckdb", () => {
     sql.push(statement);
     if (failOn !== null && statement.includes(failOn)) {
       return { ok: false as const, message: "Binder Error: bad module" };
+    }
+    if (statement.startsWith("SELECT file FROM glob(")) {
+      const dir = /glob\('([^']+)\/\*'\)/.exec(statement)?.[1] ?? "";
+      return {
+        ok: true as const,
+        columns: ["file"],
+        rows: globNames.map((name) => ({ file: `${dir}/${name}` })),
+      };
     }
     if (statement.includes("cityparquet_write")) {
       return { ok: true as const, columns: [], rows: writeRows };
@@ -101,6 +115,7 @@ beforeEach(() => {
   validationReadFails = false;
   failOn = null;
   badFile = null;
+  globNames = [];
   // Module state; the `exp_<n>` names in the regexes below are per-run.
   resetExportCounterForTests();
   writeRows = [
@@ -245,6 +260,34 @@ describe("CityParquet package export", () => {
       sql.filter((s) => s.startsWith("DROP SCHEMA IF EXISTS")),
     ).toHaveLength(2);
     expect(dropped).toContainEqual(expect.stringMatching(/_src\.city\.json$/));
+  });
+
+  it("removes a PARTIAL package the failed write left behind", async () => {
+    // The gap: `cityparquet_write` throws after creating
+    // `exp_N/building.parquet`, so it never returns the rows `writtenFiles` is
+    // filled from — the `finally` had nothing on its list and the file stayed
+    // in the VFS for the life of the page. The glob is what finds it.
+    failOn = "cityparquet_write";
+    globNames = ["building.parquet"];
+    await expect(runExport(request())).rejects.toThrow(
+      "Binder Error: bad module",
+    );
+    expect(sql).toContainEqual(
+      expect.stringMatching(/^SELECT file FROM glob\('exp_\d+\/\*'\)$/),
+    );
+    expect(dropped).toContainEqual(
+      expect.stringMatching(/^exp_\d+\/building\.parquet$/),
+    );
+  });
+
+  it("drops each leftover ONCE when the glob and the write rows agree", async () => {
+    // Both sources name the same two files; the union must not drop them
+    // twice, which would log a warning per file for nothing.
+    globNames = ["building.parquet", "metadata.json"];
+    await runExport(request());
+    const packageDrops = dropped.filter((d) => /^exp_\d+\//.test(d));
+    expect(packageDrops).toHaveLength(2);
+    expect(new Set(packageDrops).size).toBe(2);
   });
 
   it("refuses when the write named no files", async () => {
