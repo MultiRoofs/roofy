@@ -302,6 +302,99 @@ describe("useLayerQuery", () => {
     );
   });
 
+  it("keeps a REBUILDING layer's page and counts until the new one lands", async () => {
+    // A streaming layer rebuilds on every camera settle while the panel is
+    // open, and each rebuild mints a fresh `layer_<n>`. Blanking on the new
+    // NAME flashed "no rows yet", dropped the header count and flipped the
+    // footer to "of ?" several times a pan.
+    const gate: Array<() => void> = [];
+    runQuery.mockImplementation(
+      (sql: string) =>
+        new Promise((resolve) => {
+          if (sql.includes("COUNT(*)")) {
+            resolve({ ok: true, columns: ["n"], rows: [{ n: 42 }] });
+            return;
+          }
+          gate.push(() =>
+            resolve({
+              ok: true,
+              columns: [],
+              rows: sql.includes('"layer_1"')
+                ? [{ id: "old" }]
+                : [{ id: "new-a" }, { id: "new-b" }],
+            }),
+          );
+        }),
+    );
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    render(<Probe layerId="L" />);
+    await waitFor(() => expect(gate).toHaveLength(1));
+    await act(async () => {
+      gate[0]!();
+    });
+    expect(screen.getByTestId("rows").textContent).toBe("1");
+    expect(screen.getByTestId("total").textContent).toBe("42");
+
+    // The settle: same layer, brand-new table name.
+    act(() => {
+      useLayerTableStore.setState({
+        tables: {
+          L: { state: "ready", info: { ...TABLE, table: "layer_2" } },
+        },
+      });
+    });
+
+    // Still the old page and the old counts, dimmed by `loading` — not a
+    // blank grid and not "of ?".
+    expect(screen.getByTestId("rows").textContent).toBe("1");
+    expect(screen.getByTestId("total").textContent).toBe("42");
+    expect(screen.getByTestId("unfiltered").textContent).toBe("42");
+    expect(screen.getByTestId("loading").textContent).toBe("true");
+
+    await waitFor(() => expect(gate).toHaveLength(2));
+    await act(async () => {
+      gate[1]!();
+    });
+    expect(screen.getByTestId("rows").textContent).toBe("2");
+    expect(screen.getByTestId("loading").textContent).toBe("false");
+  });
+
+  it("clears the page when the LAYER changes, before the new one answers", async () => {
+    const gate: Array<() => void> = [];
+    runQuery.mockImplementation(
+      (sql: string) =>
+        new Promise((resolve) => {
+          if (sql.includes("COUNT(*)")) {
+            resolve({ ok: true, columns: ["n"], rows: [{ n: 42 }] });
+            return;
+          }
+          gate.push(() =>
+            resolve({ ok: true, columns: [], rows: [{ id: "from-L" }] }),
+          );
+        }),
+    );
+    useLayerTableStore.setState({
+      tables: {
+        L: { state: "ready", info: TABLE },
+        M: { state: "ready", info: { ...TABLE, table: "layer_9" } },
+      },
+    });
+    const { rerender } = render(<Probe layerId="L" />);
+    await waitFor(() => expect(gate).toHaveLength(1));
+    await act(async () => {
+      gate[0]!();
+    });
+    expect(screen.getByTestId("rows").textContent).toBe("1");
+
+    // M is READY too, so the ready branch would happily paint L's rows under
+    // M's columns if the reset did not fire.
+    rerender(<Probe layerId="M" />);
+    expect(screen.getByTestId("rows").textContent).toBe("0");
+    expect(screen.getByTestId("total").textContent).toBe("");
+  });
+
   it("drops the old layer's rows the instant the table changes", async () => {
     runQuery.mockImplementation(async (sql: string) =>
       sql.includes("COUNT(*)")

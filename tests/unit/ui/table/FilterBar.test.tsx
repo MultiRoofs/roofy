@@ -189,15 +189,42 @@ describe("FilterBar", () => {
     );
   });
 
-  it("disables every control while disabled", () => {
-    setup({ disabled: true });
+  it("disables APPLY ALONE while a query is in flight", () => {
+    // Not the whole bar. A disabled element loses focus, so freezing the
+    // inputs on Enter-to-apply blurs the box that was just typed into and
+    // sends the next keystroke nowhere. Editing the draft sends no query, and
+    // the hook's generation counter already discards a stale answer.
+    setup({
+      disabled: true,
+      filter: {
+        logic: "AND",
+        conditions: [{ id: "c1", column: "id", op: "=", value: "a" }],
+      },
+    });
+    expect(
+      (screen.getByRole("button", { name: "Apply" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByLabelText("Filter value") as HTMLInputElement).disabled,
+    ).toBe(false);
+    expect(
+      (screen.getByLabelText("Filter column") as HTMLSelectElement).disabled,
+    ).toBe(false);
+    expect(
+      (screen.getByLabelText("Filter operator") as HTMLSelectElement).disabled,
+    ).toBe(false);
     expect(
       (
         screen.getByRole("button", {
           name: "Add condition",
         }) as HTMLButtonElement
       ).disabled,
-    ).toBe(true);
+    ).toBe(false);
+    expect(
+      (screen.getByRole("button", { name: "Clear" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
   });
 });
 

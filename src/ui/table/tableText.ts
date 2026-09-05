@@ -128,9 +128,15 @@ export function rawCellTitle(value: unknown): string {
  *  - a filter applied, map sync ON → the same, plus why the globe went empty,
  *    with both numbers so "too narrow" is distinguishable from "broken".
  *
- * The `unfilteredRows === null` arm is live, not defensive: a COUNT can fail on
- * its own while the page query succeeds, and the hook reports that as an
- * unknown total rather than as a zero.
+ * The `unfilteredRows === null` arm is live, but NOT for the reason it is
+ * tempting to give. A COUNT that fails does leave the total unknown — and it
+ * also sets `message`, which makes the panel render the error INSTEAD of the
+ * grid, so this function is never asked. What actually reaches it is the
+ * window before the first answer: a table that is `ready` with a filter
+ * already applied renders once with no rows, no counts and no message while
+ * the page and count queries are still out — on mount, on `reload()`, and on
+ * a switch to another layer. Brief, dimmed by the loading state, and still a
+ * sentence somebody can read.
  */
 export function emptyGridMessage(
   filtered: boolean,

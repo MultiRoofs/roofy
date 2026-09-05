@@ -80,8 +80,8 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
   const [loading, setLoading] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const generation = useRef(0);
-  /** Which table the rows on screen came from — see the reset in the effect. */
-  const shownTable = useRef<string | null>(null);
+  /** Which LAYER the rows on screen came from — see the reset in the effect. */
+  const shownLayer = useRef<string | null>(null);
 
   const reload = useCallback(() => setReloadToken((t) => t + 1), []);
 
@@ -112,16 +112,25 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
     // nothing asked for.
     const gen = ++generation.current;
 
-    // A DIFFERENT table means the columns changed under the rows. Keyed on the
-    // SQL table name rather than object identity: a name is never reused
-    // (`layerTables` counts up), so this is exactly "these rows came from
-    // somewhere else" — and it does not blank the grid for a re-render that
-    // merely handed us an equal `LayerTable`. A page step or a sort, which
-    // keep the name, deliberately keep the old page on screen until the new
-    // one lands rather than flashing empty.
-    const tableName = table?.table ?? null;
-    if (shownTable.current !== tableName) {
-      shownTable.current = tableName;
+    // A DIFFERENT LAYER means the columns changed under the rows, and nothing
+    // on screen belongs to what is now selected.
+    //
+    // Keyed on the layer id and NOT on the SQL table name, which was the
+    // first attempt and was wrong in a way only a streaming layer shows: the
+    // lifecycle rebuilds a streaming table on every camera settle while the
+    // panel is open, and a rebuild mints a NEW `layer_<n>` (it builds the
+    // replacement before retiring the old one, so the names cannot collide).
+    // Keyed on the name, every settle therefore blanked the grid to "This
+    // layer has no rows yet.", dropped the header count and flipped the
+    // footer to "of ?" until the new page landed — several times a pan.
+    //
+    // A same-layer rebuild keeps the page and both counts on screen and only
+    // raises `loading`, which dims the body: the previous page is still the
+    // truthful answer to the same question, and it is replaced when the new
+    // one lands rather than being withdrawn while nothing is ready to take
+    // its place. A page step and a sort keep it for the same reason.
+    if (shownLayer.current !== layerId) {
+      shownLayer.current = layerId;
       setRows(NO_ROWS);
       setTotalRows(null);
       setUnfilteredRows(null);
@@ -198,7 +207,7 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
       );
       setLoading(false);
     })();
-  }, [table, applied, sort, page, pageSize, reloadToken]);
+  }, [layerId, table, applied, sort, page, pageSize, reloadToken]);
 
   if (layerId === null) {
     return {

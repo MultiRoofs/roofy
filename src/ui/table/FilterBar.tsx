@@ -40,6 +40,17 @@ export interface FilterBarProps {
   readonly onApply: () => void;
   readonly onClear: () => void;
   readonly error: string | null;
+  /**
+   * A query is in flight, so APPLY is unavailable — and nothing else is.
+   *
+   * Deliberately narrow. Disabling the whole bar blurs the value input the
+   * moment Enter fires (a disabled element loses focus), so the one gesture
+   * that submits the filter also destroys the caret that typed it, and the
+   * next keystroke goes nowhere. There is nothing to protect by freezing the
+   * inputs anyway: editing the draft sends no query, and the hook's
+   * generation counter already makes a second Apply landing over a first one
+   * safe — a stale answer is discarded, not painted.
+   */
   readonly disabled: boolean;
 }
 
@@ -109,7 +120,6 @@ export function FilterBar({
               <select
                 className="filter-select"
                 aria-label="Filter column"
-                disabled={disabled}
                 value={condition.column}
                 onChange={(e) => {
                   const nextColumn = byName.get(e.target.value);
@@ -138,7 +148,6 @@ export function FilterBar({
               <select
                 className="filter-select filter-select-op"
                 aria-label="Filter operator"
-                disabled={disabled}
                 value={condition.op}
                 onChange={(e) =>
                   patch(condition.id, {
@@ -163,7 +172,6 @@ export function FilterBar({
                 <input
                   className="filter-value"
                   aria-label="Filter value"
-                  disabled={disabled}
                   value={valueText(condition.value)}
                   placeholder={condition.op === "in" ? "a, b, c" : "value"}
                   // The RAW string, for every operator. Parsing as the user
@@ -176,6 +184,8 @@ export function FilterBar({
                     patch(condition.id, { value: e.target.value })
                   }
                   onKeyDown={(e) => {
+                    // Enter IS Apply, so it waits with Apply — but the
+                    // input keeps its focus and its caret either way.
                     if (e.key === "Enter" && !disabled) handleApply();
                   }}
                 />
@@ -186,7 +196,6 @@ export function FilterBar({
                 className="filter-remove"
                 aria-label="Remove condition"
                 title="Remove this condition"
-                disabled={disabled}
                 onClick={() =>
                   replace(
                     filter.conditions.filter((c) => c.id !== condition.id),
@@ -204,7 +213,7 @@ export function FilterBar({
         <button
           type="button"
           className="tb-btn table-action-btn"
-          disabled={disabled || columns.length === 0}
+          disabled={columns.length === 0}
           onClick={addCondition}
         >
           Add condition
@@ -213,7 +222,6 @@ export function FilterBar({
           <button
             type="button"
             className="tb-btn table-action-btn filter-logic-btn"
-            disabled={disabled}
             aria-label={`Match ${filter.logic === "AND" ? "ALL" : "ANY"} conditions`}
             title="Switch between matching all and any conditions"
             onClick={() =>
@@ -237,7 +245,6 @@ export function FilterBar({
         <button
           type="button"
           className="tb-btn table-action-btn"
-          disabled={disabled}
           onClick={onClear}
         >
           Clear
