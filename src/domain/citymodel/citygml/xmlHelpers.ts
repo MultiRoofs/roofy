@@ -54,7 +54,27 @@ export function parsePosList(raw: string, srsDimension = 3): Vec3[] {
  * Resolve a gml:LinearRing node to an array of Vec3.
  * Handles both gml:posList (preferred) and multiple gml:pos elements.
  */
+/**
+ * GML rings repeat their first vertex as the last one. The triangulator
+ * (`ShapeUtils.triangulateShape`) strips that duplicate from the PROJECTED
+ * copies it works on while the 3D vertex list would keep it, which puts every
+ * hole's indices off by one — so the duplicate is dropped here, at the
+ * boundary, and `gmlSurfaceAppearance` drops the matching texture coordinate.
+ */
+function dropClosingVertex(ring: Vec3[]): Vec3[] {
+  if (ring.length < 4) return ring;
+  const first = ring[0]!;
+  const last = ring[ring.length - 1]!;
+  return first[0] === last[0] && first[1] === last[1] && first[2] === last[2]
+    ? ring.slice(0, -1)
+    : ring;
+}
+
 export function parseLinearRing(ring: GMLLinearRing): Vec3[] {
+  return dropClosingVertex(parseLinearRingVertices(ring));
+}
+
+function parseLinearRingVertices(ring: GMLLinearRing): Vec3[] {
   // gml:posList — may be a string or an object with #text
   const posList = ring["gml:posList"];
   if (posList != null) {
@@ -101,6 +121,18 @@ export function parseLinearRing(ring: GMLLinearRing): Vec3[] {
 export function parsePolygon(
   poly: GMLPolygon,
 ): ReadonlyArray<ReadonlyArray<Vec3>> | null {
+  return parsePolygonWithIds(poly)?.rings ?? null;
+}
+
+export interface ParsedPolygon {
+  readonly rings: ReadonlyArray<ReadonlyArray<Vec3>>;
+  /** `gml:id` of each ring, paired with `rings` — what an appearance's
+   *  `app:textureCoordinates ring="#id"` names. */
+  readonly ringIds: ReadonlyArray<string | undefined>;
+}
+
+/** {@link parsePolygon}, keeping each ring's `gml:id` for appearance lookup. */
+export function parsePolygonWithIds(poly: GMLPolygon): ParsedPolygon | null {
   const extLinearRing = poly["gml:exterior"]?.["gml:LinearRing"];
   if (!extLinearRing) return null;
 
@@ -108,8 +140,8 @@ export function parsePolygon(
   if (exterior.length < 3) return null;
 
   const rings: Vec3[][] = [exterior];
+  const ringIds: Array<string | undefined> = [extLinearRing["@_gml:id"]];
 
-  // Interior rings (holes)
   const interior = poly["gml:interior"];
   if (interior != null) {
     const interiors = Array.isArray(interior) ? interior : [interior];
@@ -119,12 +151,23 @@ export function parsePolygon(
         const holeRing = parseLinearRing(lr);
         if (holeRing.length >= 3) {
           rings.push(holeRing);
+          ringIds.push(lr["@_gml:id"]);
         }
       }
     }
   }
 
-  return rings;
+  return { rings, ringIds };
+}
+
+/** The `gml:id`s of a solid and of the shell/composite surface inside it —
+ *  what an `app:X3DMaterial` names when it colours a whole solid. */
+export function solidContainerIds(solid: GMLSolid): string[] {
+  const ids: string[] = [];
+  if (solid["@_gml:id"]) ids.push(solid["@_gml:id"]);
+  const cs = solid["gml:exterior"]?.["gml:CompositeSurface"];
+  if (cs?.["@_gml:id"]) ids.push(cs["@_gml:id"]);
+  return ids;
 }
 
 // ---------------------------------------------------------------------------

@@ -43,6 +43,7 @@ function makeStreamState(overrides: Partial<StreamState> = {}): StreamState {
     ladderVersion: 0,
     types: [],
     typesVersion: 0,
+    appearanceThemes: [],
     status: "idle",
     message: null,
     version: 0,

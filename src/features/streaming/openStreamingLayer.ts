@@ -29,6 +29,7 @@
  * A `File` already IS a `Blob`, so passing it straight through (as this
  * module and its callers do) satisfies that without any extra step.
  */
+import type { AppearanceTheme } from "@cityjson/navara-core";
 import { useStreamStore } from "./streamStore";
 import type { StreamPlugin } from "./streamPlugin";
 import { useLayerStore } from "../layers/layerStore";
@@ -52,6 +53,9 @@ export interface OpenStreamingLayerInput {
    *  then already filtered, rather than fetching what it must immediately
    *  refetch without. */
   readonly hiddenTypes?: ReadonlyArray<string>;
+  /** A restored choice. `undefined` (a fresh open) means "the first texture
+   *  theme the stream reports"; `null` means plain colours, deliberately. */
+  readonly selectedAppearance?: AppearanceTheme | null;
 }
 
 export async function openStreamingLayer(
@@ -68,6 +72,9 @@ export async function openStreamingLayer(
     rulesEnabled: input.rulesEnabled ?? true,
     visible: input.visible ?? true,
     hiddenTypes: input.hiddenTypes ?? [],
+    // Seeded before the first commit, so a restored textured layer's first
+    // cells are already baked with images.
+    appearance: input.selectedAppearance ?? null,
   });
 
   const model: CityModel = {
@@ -88,7 +95,13 @@ export async function openStreamingLayer(
     rulesEnabled: input.rulesEnabled ?? true,
     hiddenTypes: input.hiddenTypes ?? [],
     isStreaming: true,
+    // A streaming layer's model is a stub, so the store cannot pick a load
+    // default here; `onAppearanceThemes` below does, once themes are known.
+    selectedAppearance: input.selectedAppearance ?? null,
   });
+  // A fresh open (no restored choice) adopts the first texture theme the
+  // stream reports, exactly as a static textured layer opens textured.
+  let autoPicked = input.selectedAppearance !== undefined;
 
   // The plugin owns the streaming state machine and only REPORTS; the store
   // mirrors what the UI reads (LodSelector, LayerPanel, StatusBar, Inspector).
@@ -110,6 +123,19 @@ export async function openStreamingLayer(
     handle.onTypes((types) =>
       useStreamStore.getState().setTypes(layerId, types),
     ),
+    handle.onAppearanceThemes((themes) => {
+      useStreamStore.getState().setAppearanceThemes(layerId, themes);
+      if (autoPicked) return;
+      const texture = themes.find((t) => t.kind === "texture");
+      if (!texture) return;
+      autoPicked = true;
+      const layer = useLayerStore
+        .getState()
+        .layers.find((l) => l.id === layerId);
+      if (layer && layer.selectedAppearance === null) {
+        useLayerStore.getState().setLayerAppearance(layerId, texture);
+      }
+    }),
     handle.onCommit(() => {
       const store = useStreamStore.getState();
       // Level first: `LodSelector` reads it alongside the ladder, and updating
@@ -138,6 +164,7 @@ export async function openStreamingLayer(
     ladderVersion: 0,
     types: handle.typesSeen,
     typesVersion: 0,
+    appearanceThemes: handle.appearanceThemes,
     status: handle.status,
     message: handle.message,
     version: handle.version,

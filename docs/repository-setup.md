@@ -146,3 +146,27 @@ Future-compatible abstractions should make it straightforward to add:
 - The feature state can be serialized if it belongs to persisted workspace state.
 - The feature does not leak storage or parsing concerns into UI components.
 - The feature includes at least minimal documentation when it changes architecture.
+
+## Preview deployments (Cloudflare Workers)
+
+Production is the `multiroof-viewer` Worker, deployed by `.github/workflows/deploy.yml`
+on every push to `main`. Previews come from `.github/workflows/preview.yml`:
+
+- **When**: every pull request from this repository (forks have no secrets), every
+  push to `develop`, or by hand (`workflow_dispatch`).
+- **What**: `npm run build`, then `wrangler versions upload --preview-alias <branch>` —
+  an _undeployed_ version of the same Worker. Production traffic never reaches it.
+- **Where**: two URLs, both printed by wrangler and posted as a sticky comment on the
+  pull request (and in the run summary):
+  - `<version-prefix>-multiroof-viewer.<account>.workers.dev` — this commit only;
+  - `<branch>-multiroof-viewer.<account>.workers.dev` — stable for the branch
+    (the branch name made DNS-safe: lowercase, dashes, starts with a letter).
+- **Secrets**: the same three `deploy.yml` uses — `CLOUDFLARE_API_TOKEN` (Workers
+  Scripts: Edit), `CLOUDFLARE_ACCOUNT_ID`, `DOTENV_PRIVATE_KEY`.
+- **Config**: `wrangler.jsonc` sets `workers_dev: true` and `preview_urls: true`
+  explicitly. If Preview URLs are toggled in the dashboard, the next wrangler run
+  resets them to the file's value.
+- **Locally**: `npm run build && npx wrangler versions upload --preview-alias me`
+  after `npx wrangler login`.
+- **Promote**: previews are never promoted directly; merge to `main` and `deploy.yml`
+  builds and deploys it.

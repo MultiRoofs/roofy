@@ -47,6 +47,8 @@ function makeLayer(overrides: Partial<Layer> = {}): Layer {
     cameraSync: true,
     hiddenTypes: [],
     availableObjectTypes: ["Building", "Road"],
+    appearanceThemes: [],
+    selectedAppearance: null,
     isStreaming: false,
     ...overrides,
   };
@@ -70,6 +72,7 @@ function streamState(types: ReadonlyArray<string>): StreamState {
     ladderVersion: 0,
     types,
     typesVersion: types.length === 0 ? 0 : 1,
+    appearanceThemes: [],
     status: "idle",
     message: null,
     version: 0,

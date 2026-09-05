@@ -266,6 +266,7 @@ function makeStaticHandle(id: string, triangles = 10) {
     // The real `CityModelHandle` gained this with the scene themes; the
     // viewport pushes the active theme's style on the same beat as LoD.
     setThemeStyle: vi.fn(),
+    setAppearance: vi.fn(),
     setHighlight: vi.fn(),
     resolvePick: vi.fn(() => null as unknown),
     resolveRaycast: vi.fn(() => null as unknown),
@@ -334,6 +335,7 @@ function makeFakeStreamHandle(
     // The real `FcbStreamLayerHandle` gained this with the scene themes: the
     // viewport pushes the active theme's mesh style on the same beat as rules.
     setThemeStyle: vi.fn(),
+    setAppearance: vi.fn(),
     delete: vi.fn(),
     onStatus: vi.fn(() => () => undefined),
     onLadder: vi.fn(() => () => undefined),
@@ -753,7 +755,7 @@ describe("NavaraViewport streaming wiring", () => {
     await waitFor(() =>
       expect(on.mock.calls.some((c) => c[0] === "click")).toBe(true),
     );
-    emitViewEvent("mousedown", mouse(100, 100));
+    emitViewEvent("pointerdown", mouse(100, 100));
     emitViewEvent("click", mouse(100, 100));
     await waitFor(() =>
       expect(useSelectionStore.getState().selections[0]?.objectId).toBe("B4"),

@@ -1,6 +1,7 @@
 /**
  * How Roofy colours a city: the brand's answer to the plugins' `appearance`
- * parameter (`CityAppearance` in `@cityjson/navara-cityjson`).
+ * parameter (`CityColors` in `@cityjson/navara-cityjson` — not to be confused
+ * with a CityJSON *appearance*, the textures and materials a file carries).
  *
  * The plugins ship neutral defaults and never see the brand; this ONE object
  * is what both plugin constructors receive (`NavaraViewport`), so a picked
@@ -21,12 +22,9 @@
  * lime-700 while the selection owns lime-500, and why the roof is the darker
  * orange rather than the accent the geo default wears.
  */
-import {
-  resolveCityAppearance,
-  type CityAppearance,
-} from "@cityjson/navara-cityjson";
+import { resolveCityColors, type CityColors } from "@cityjson/navara-cityjson";
 
-export const CITY_APPEARANCE: CityAppearance = {
+export const CITY_COLORS: CityColors = {
   /** lime-500 — the brand primary: "selected" is the same colour as the
    *  chrome's active states. */
   highlightColor: "#a7e32b",
@@ -52,7 +50,7 @@ export const CITY_APPEARANCE: CityAppearance = {
   },
 };
 
-const resolved = resolveCityAppearance(CITY_APPEARANCE);
+const resolved = resolveCityColors(CITY_COLORS);
 
 /** The selection colour as the `0xRRGGBB` number the engine's geo layers
  *  take — one "selected" colour across city and geospatial features. */

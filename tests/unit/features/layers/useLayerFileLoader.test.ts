@@ -76,6 +76,8 @@ function installPlugin(): void {
       onStatus: () => () => undefined,
       onLadder: () => () => undefined,
       onTypes: () => () => undefined,
+      onAppearanceThemes: () => () => {},
+      appearanceThemes: [],
       onCommit: () => () => undefined,
     } as unknown as FcbStreamLayerHandle),
   );

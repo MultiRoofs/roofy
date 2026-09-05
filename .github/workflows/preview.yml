@@ -1,0 +1,115 @@
+name: Preview deploy
+
+# A preview of every pull request and of `develop`, as an UNDEPLOYED version
+# of the production Worker: `wrangler versions upload` builds a version that
+# production traffic never sees, and Cloudflare serves it at two URLs —
+#   <version-prefix>-multiroof-viewer.<account>.workers.dev  (this commit)
+#   <branch-alias>-multiroof-viewer.<account>.workers.dev    (stable per branch)
+# Production (`deploy.yml`) is untouched until a push to main promotes it.
+# Both URLs need `preview_urls: true` in wrangler.jsonc.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+# One preview per branch at a time; a newer push supersedes an older run.
+concurrency:
+  group: preview-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  preview:
+    name: Build and upload a preview version
+    runs-on: ubuntu-latest
+    # A fork's pull request has no access to the Cloudflare secrets.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch plugin submodule
+        run: git submodule update --init --recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # AFTER npm ci, always: npm rewrites the linked packages' node_modules
+      # and destroys pnpm's workspace links (CLAUDE.md).
+      - name: Install plugin workspace dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+        working-directory: packages/cityjson-navara-plugins
+
+      - name: Build
+        run: npm run build
+        env:
+          DOTENV_PRIVATE_KEY: ${{ secrets.DOTENV_PRIVATE_KEY }}
+
+      # The alias is the branch name made DNS-safe: lowercase letters, digits
+      # and dashes, starting with a letter, and short enough that
+      # "<alias>-multiroof-viewer" stays under the 63-character label limit.
+      - name: Derive the preview alias from the branch
+        id: alias
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          alias="$(printf '%s' "$BRANCH" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9-]+/-/g; s/^[^a-z]+//; s/-+/-/g' | cut -c1-46 | sed -E 's/-+$//')"
+          if [ -z "$alias" ]; then alias="preview"; fi
+          echo "alias=$alias" >> "$GITHUB_OUTPUT"
+          echo "Preview alias: $alias"
+
+      - name: Upload a preview version to Cloudflare Workers
+        id: upload
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: versions upload --preview-alias ${{ steps.alias.outputs.alias }}
+
+      # Wrangler prints the preview URLs; read them back from its output
+      # rather than guessing the account subdomain.
+      - name: Report the preview URLs
+        uses: actions/github-script@v7
+        env:
+          UPLOAD_OUTPUT: ${{ steps.upload.outputs.command-output }}
+          PREVIEW_ALIAS: ${{ steps.alias.outputs.alias }}
+        with:
+          script: |
+            const output = process.env.UPLOAD_OUTPUT ?? "";
+            const urls = [...new Set(output.match(/https:\/\/[a-z0-9.-]+\.workers\.dev\S*/gi) ?? [])];
+            const alias = process.env.PREVIEW_ALIAS;
+            const aliasUrl = urls.find((u) => u.includes(`://${alias}-`)) ?? null;
+            const versionUrl = urls.find((u) => u !== aliasUrl) ?? null;
+            const lines = [
+              "<!-- multiroof-preview -->",
+              "### Cloudflare Workers preview",
+              "",
+              versionUrl ? `- This commit: ${versionUrl}` : "- This commit: (no URL in wrangler output — check the run log)",
+              aliasUrl ? `- Branch alias \`${alias}\`: ${aliasUrl}` : `- Branch alias \`${alias}\`: (no URL in wrangler output)`,
+              "",
+              `Built from ${context.sha.slice(0, 7)}. Preview versions never receive production traffic; a push to \`main\` deploys.`,
+            ];
+            const body = lines.join("\n");
+            core.summary.addRaw(body).write();
+            if (!context.payload.pull_request) return;
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.rest.issues.listComments({ owner, repo, issue_number, per_page: 100 });
+            const mine = comments.data.find((c) => c.body?.includes("<!-- multiroof-preview -->"));
+            if (mine) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }

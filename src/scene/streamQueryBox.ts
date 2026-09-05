@@ -79,9 +79,10 @@ export function queryBoxMeshConfig(
       points: region.ring.map(([lng, lat]) => ({
         lng,
         lat,
-        // The engine converts these with `degreeToRadian` itself
-        // (`SmoothLine.updatePointsData` in the 0.0.5 bundle), so DEGREES go
-        // in — the same units `flyTo` and `camera.positionGeographic` use.
+        // DEGREES go in — the same units `flyTo` and
+        // `camera.positionGeographic` use. On 0.0.5 the engine converted them
+        // with `degreeToRadian` inside `SmoothLine.updatePointsData`; since
+        // 0.1.0 every geodetic entry point takes degrees outright.
         height: region.heightM + QUERY_BOX_LIFT_M,
       })),
       closed: true,

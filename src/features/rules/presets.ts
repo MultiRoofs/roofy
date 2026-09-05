@@ -7,7 +7,7 @@
  * Colours are the brand's rooftop-function hues (`--layer-*` in brand.css):
  * flat roofs take the water blue, the two sun-facing presets the energy
  * ambers, steep roofs the social orange and large roofs lime-700 — lime-500
- * itself is the SELECTION colour (`scene/cityAppearance.ts`), and a preset
+ * itself is the SELECTION colour (`scene/cityColors.ts`), and a preset
  * equal to it would make a selected surface look unselected.
  */
 

@@ -6,6 +6,7 @@
  * Tauri-native implementations without changing feature-level code.
  */
 
+import type { AppearanceTheme } from "@cityjson/navara-core";
 import type { Rule } from "../features/rules/types";
 import type { PickMode } from "../domain/selection/types";
 import type { ViewMode } from "../features/viewMode/viewModeStore";
@@ -66,6 +67,10 @@ export interface LayerSnapshot {
    *  `availableObjectTypes` is NOT saved: it is derived from the model on
    *  load, and rediscovered cell by cell for a streaming layer. */
   readonly hiddenTypes?: readonly string[];
+  /** The appearance theme drawn (texture or material), `null` for plain
+   *  colours. Absent in older snapshots — restore then picks the model's
+   *  load default, exactly like a fresh load. Additive; version stays "3". */
+  readonly appearance?: AppearanceTheme | null;
   /** Present only for a streaming layer. */
   readonly stream?: StreamSourceSnapshot;
 }

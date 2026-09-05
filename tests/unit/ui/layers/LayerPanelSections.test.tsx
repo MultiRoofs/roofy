@@ -73,6 +73,8 @@ function addCityLayer(name: string): void {
     // Two groups, so the object-types disclosure renders — it hides itself for
     // a layer with nothing to choose between.
     availableObjectTypes: ["Building", "Bridge"],
+    appearanceThemes: [],
+    selectedAppearance: null,
     isStreaming: false,
   };
   useLayerStore.setState({ layers: [layer], activeLayerId: layer.id });

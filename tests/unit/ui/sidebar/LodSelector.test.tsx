@@ -52,6 +52,8 @@ function baseLayer(overrides: Partial<Layer>): Layer {
     cameraSync: true,
     hiddenTypes: [],
     availableObjectTypes: [],
+    appearanceThemes: [],
+    selectedAppearance: null,
     isStreaming: false,
     ...overrides,
   };
@@ -72,6 +74,7 @@ function baseStream(overrides: Partial<StreamState> = {}): StreamState {
     ladderVersion: 1,
     types: [],
     typesVersion: 0,
+    appearanceThemes: [],
     status: "idle",
     message: null,
     version: 1,

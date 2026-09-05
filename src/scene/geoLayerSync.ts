@@ -6,8 +6,8 @@
  * and belong in a module a test can drive with a fake view instead of a live
  * Navara. `NavaraViewport` supplies the real `view` and owns the registry.
  *
- * Three engine facts shape everything below (all audited against
- * `@navaramap/three` 0.0.5):
+ * Three engine facts shape everything below (audited against `@navaramap/three`
+ * 0.0.5 and re-checked unchanged on 0.1.1):
  *
  *  1. `Layer.update()` REPLACES the whole description. A visibility, opacity or
  *     style change therefore re-sends a description rebuilt from scratch out of
@@ -31,7 +31,7 @@ import {
   hexColorToNumber,
   styleColorNumber,
 } from "../features/geoLayers/geoLayerStyle";
-import { CITY_HIGHLIGHT_COLOR_HEX } from "./cityAppearance";
+import { CITY_HIGHLIGHT_COLOR_HEX } from "./cityColors";
 import type { GeoLayer } from "../features/geoLayers/geoLayerStore";
 import {
   geoLayerDescription,
@@ -89,7 +89,7 @@ export interface GeoLayerHandle {
 /**
  * The accent a picked geospatial feature is drawn in — the SAME colour the
  * city meshes highlight a selected surface with, read from the one brand
- * appearance both plugins are constructed with (`scene/cityAppearance.ts`).
+ * colours both plugins are constructed with (`scene/cityColors.ts`).
  * Deliberately shared: a user selects a building and a GeoJSON polygon in the
  * same viewport, and two different "this is selected" colours would read as two
  * different states.

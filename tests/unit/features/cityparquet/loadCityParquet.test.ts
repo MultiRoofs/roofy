@@ -246,7 +246,7 @@ describe("loadCityParquetFromUrl", () => {
     ]);
   });
 
-  it("drops sidecar tables, with a warning (storage-dir)", async () => {
+  it("keeps sidecars out of the object tables but fetches them as appearance (storage-dir)", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { http, fetched } = await bucketHttp([
       "delft/building.parquet",
@@ -254,7 +254,12 @@ describe("loadCityParquetFromUrl", () => {
       "delft/textures.parquet",
     ]);
     await loadCityParquetFromUrl("gs://bkt/delft/", http);
-    expect(fetched).toHaveLength(1);
+    // The sidecars are not object TABLES (the warning still counts the two
+    // dropped from that list) — but they are fetched, as appearance.
+    expect(fetched).toHaveLength(3);
+    expect(fetched[0]).toBe(
+      "https://storage.googleapis.com/bkt/delft/building.parquet",
+    );
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("2"));
     warn.mockRestore();
   });
@@ -279,10 +284,14 @@ describe("loadCityParquetFromUrl", () => {
       http,
     );
     expect(Object.keys(model.objects).length).toBe(3);
-    expect(fetched).toEqual([
+    expect(fetched.slice(0, 2)).toEqual([
       "https://storage.googleapis.com/bkt/tiles/a/building.parquet",
       "https://storage.googleapis.com/bkt/tiles/b/building.parquet",
     ]);
+    // The materials sidecar listed beside the matches rides along.
+    expect(fetched).toContain(
+      "https://storage.googleapis.com/bkt/tiles/b/materials.parquet",
+    );
   });
 
   it("errors when a wildcard matches nothing", async () => {

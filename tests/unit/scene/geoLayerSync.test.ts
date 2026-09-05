@@ -27,7 +27,7 @@ import {
   DEFAULT_GEO_LAYER_STYLE,
   hexColorToNumber,
 } from "../../../src/features/geoLayers/geoLayerStyle";
-import { CITY_HIGHLIGHT_COLOR_HEX } from "../../../src/scene/cityAppearance";
+import { CITY_HIGHLIGHT_COLOR_HEX } from "../../../src/scene/cityColors";
 
 /** A feature-set listener the fake layer handle recorded, so a test can play
  *  the engine and fire `featureCreated`/`featureUpdated` itself. */
