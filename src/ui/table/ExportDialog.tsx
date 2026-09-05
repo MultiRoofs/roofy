@@ -93,6 +93,15 @@ const NO_SOURCE_REASON =
 
 const RELINK_REASON = "Re-link the file to export this layer";
 
+/**
+ * Why Export is withheld after a refresh that did not land.
+ *
+ * Named up front, with the engine's own sentence appended: "could not be
+ * rebuilt" says what happened to the table, and DuckDB's message says why.
+ */
+const REFRESH_FAILED_PREFIX =
+  "This layer's table could not be rebuilt, so an export would write an out-of-date set of objects. ";
+
 export interface ExportDialogProps {
   readonly layerId: string;
   readonly layerName: string;
@@ -207,13 +216,33 @@ export function ExportDialog({
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<ReadonlyArray<string>>([]);
 
+  /**
+   * The refresh this dialog asked for and did not get.
+   *
+   * A failed rebuild leaves the PREVIOUS table `ready` — right for the grid,
+   * and the reason the store cannot answer this question. Without the outcome
+   * the dialog simply stopped showing "Refreshing table…" and exported the
+   * resident set from whenever the last successful build was, with nothing on
+   * screen to say so.
+   */
+  const [refreshFailure, setRefreshFailure] = useState<string | null>(null);
+
   // A streaming layer's table is only as fresh as its last rebuild, and the
   // panel gates those on being open. Opening this dialog is a promise that the
   // export reflects what is resident NOW, so force one rebuild; the new table
   // arrives as a new `table` prop and re-runs the type probe below.
   useEffect(() => {
     if (!isStreaming) return;
-    void refreshStreamingTable(layerId);
+    let cancelled = false;
+    setRefreshFailure(null);
+    void (async () => {
+      const outcome = await refreshStreamingTable(layerId);
+      if (cancelled) return;
+      setRefreshFailure(outcome.ok ? null : outcome.message);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [isStreaming, layerId]);
 
   // The top-level types come from the table, not from the model: a streaming
@@ -537,6 +566,16 @@ export function ExportDialog({
             </p>
           ))}
 
+          {/* A REFUSAL, not a warning: what is in the table is not what is on
+              screen, so exporting it would hand back a file of stale
+              residents with nothing to mark it as such. */}
+          {refreshFailure !== null && (
+            <p className="export-error" role="alert">
+              {REFRESH_FAILED_PREFIX}
+              {refreshFailure}
+            </p>
+          )}
+
           {error !== null && (
             <p className="export-error" role="alert">
               {error}
@@ -560,7 +599,15 @@ export function ExportDialog({
             // from the browsing table and need no source at all. The missing
             // source costs the CityParquet option, which `canCityParquet`
             // already withholds, and says so in a sentence above.
-            disabled={busy || rebuilding || selectedTypes.size === 0}
+            // `refreshFailure` gates it for the same reason `rebuilding`
+            // does — the table is not the one this dialog promised — except
+            // that waiting will not fix this one, so the message says so.
+            disabled={
+              busy ||
+              rebuilding ||
+              refreshFailure !== null ||
+              selectedTypes.size === 0
+            }
             onClick={() => void handleExport()}
           >
             {busy ? "Exporting…" : rebuilding ? "Refreshing table…" : "Export"}

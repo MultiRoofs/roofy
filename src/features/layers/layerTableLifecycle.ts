@@ -25,6 +25,7 @@ import {
   dropLayerTable,
   enqueueLayerTable,
   useLayerTableStore,
+  type LayerTableOutcome,
   type LayerTableSource,
 } from "../../analytics/layerTables";
 import { useLayerStore } from "./layerStore";
@@ -59,11 +60,18 @@ export function residentTableSource(layerId: string): LayerTableSource {
  * The export dialog's door. The debounced rebuild above only runs while the
  * table panel is open, so a user who opens Export straight from a collapsed
  * panel would otherwise write whatever was resident the last time anyone
- * looked. Awaits the build so the caller can show a busy state; a failure is
- * recorded on the entry, as always, and never thrown.
+ * looked.
+ *
+ * RETURNS THE OUTCOME, and the caller is expected to read it. A failed rebuild
+ * deliberately restores the previous table as `ready` — right for a grid, and
+ * indistinguishable in the store from a refresh that worked, which is exactly
+ * the confusion that let an export write a stale resident set. Nothing is
+ * thrown: a failure is still recorded on the entry as always.
  */
-export async function refreshStreamingTable(layerId: string): Promise<void> {
-  await enqueueLayerTable(layerId, residentTableSource(layerId));
+export async function refreshStreamingTable(
+  layerId: string,
+): Promise<LayerTableOutcome> {
+  return await enqueueLayerTable(layerId, residentTableSource(layerId));
 }
 
 export function installLayerTableLifecycle(): () => void {

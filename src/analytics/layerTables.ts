@@ -324,10 +324,18 @@ export function getLayerTable(layerId: string): LayerTable | null {
 }
 
 /** Append `task` to the single queue. One queue, not one per layer, so a drop
- *  enqueued behind a create can never race the `CREATE` it must follow. */
-function enqueue(task: () => Promise<void>): Promise<void> {
+ *  enqueued behind a create can never race the `CREATE` it must follow.
+ *  GENERIC in the task's result, so a build can report its outcome to the
+ *  caller that awaited it without a second channel. */
+function enqueue<T>(task: () => Promise<T>): Promise<T> {
   const next = chain.then(task, task);
-  chain = next.catch(() => {});
+  // The TAIL discards both the value and the rejection: `chain` is only ever a
+  // "when is it my turn" marker, and a `.catch` alone would carry `T` forward
+  // into the next task's link for no purpose.
+  chain = next.then(
+    () => {},
+    () => {},
+  );
   return next;
 }
 
@@ -670,16 +678,41 @@ async function retire(info: LayerTable): Promise<void> {
 }
 
 /**
+ * What a settled build actually did.
+ *
+ * A REBUILD that fails is deliberately invisible in the store — the previous
+ * table is still `ready` and still answers every query, which is right for the
+ * grid (see {@link LayerTableState}) and WRONG for a caller that asked for a
+ * refresh because it is about to write the result out. Reading the store back
+ * cannot tell "the new table landed" from "the old one is still here", so the
+ * build says so itself.
+ */
+export type LayerTableOutcome =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly message: string };
+
+const OK: LayerTableOutcome = { ok: true };
+
+/** A build a DROP overtook. Not a failure of the table — there is no layer to
+ *  have one — but not a refresh anybody may act on either. */
+const SUPERSEDED: LayerTableOutcome = {
+  ok: false,
+  message: "The layer was removed before its table was rebuilt.",
+};
+
+/**
  * Build (or rebuild) `layerId`'s table.
  *
  * Resolves when the build has SETTLED, success or failure — a DuckDB failure
  * is recorded on the entry and shown in the panel, never thrown into the
  * loader: an analytics engine that could not start must not fail a layer add.
+ * The OUTCOME is returned for the callers that need to know (the export
+ * dialog); every other caller ignores it exactly as before.
  */
 export function enqueueLayerTable(
   layerId: string,
   source: LayerTableSource,
-): Promise<void> {
+): Promise<LayerTableOutcome> {
   const seq = ++seqCounter;
   lastEnqueueSeq.set(layerId, seq);
   // A REBUILD keeps the table it is replacing ON SCREEN. Only a layer with no
@@ -705,7 +738,7 @@ export function enqueueLayerTable(
   return enqueue(async () => {
     // Checked SYNCHRONOUSLY, before the first await: a build still WAITING
     // when the drop arrived is skipped outright and never touches DuckDB.
-    if (superseded()) return;
+    if (superseded()) return SUPERSEDED;
     // Re-read at RUN time, not at enqueue time: a drop or an earlier rebuild
     // may have landed in between, so a build that was queued over nothing can
     // turn out to be a rebuild by the time it runs (and vice versa).
@@ -726,7 +759,7 @@ export function enqueueLayerTable(
     // failure in the status), and it is memoised, so this is one await for the
     // first build and free for every one after.
     await initDuckDB();
-    if (superseded()) return;
+    if (superseded()) return SUPERSEDED;
     if (getDuckDBStatus().state !== "ready") {
       // PARK the source: nothing has been handed to DuckDB, so a `bytes`
       // array is still intact — but a provider is preferred over it anyway,
@@ -743,7 +776,7 @@ export function enqueueLayerTable(
       } else {
         setState(layerId, { state: "failed", message: ENGINE_NOT_RUNNING });
       }
-      return;
+      return { ok: false, message: ENGINE_NOT_RUNNING };
     }
     // Past this point the engine is up, so this attempt is not a candidate for
     // the retry queue any more.
@@ -777,7 +810,7 @@ export function enqueueLayerTable(
         // nothing. Any `previous` is left alone: the drop's own queued task
         // is right behind us and will retire it.
         await retire(info);
-        return;
+        return SUPERSEDED;
       }
       registry.set(layerId, info);
       setState(layerId, { state: "ready", info });
@@ -785,6 +818,7 @@ export function enqueueLayerTable(
       // the layer with NO table for the length of the build — several times a
       // pan, on a streaming layer — and with none at all if the build failed.
       if (previous) await retire(previous);
+      return OK;
     } catch (error) {
       const message =
         error instanceof Error
@@ -799,7 +833,7 @@ export function enqueueLayerTable(
         // Same reason as the success path: the drop owns the store entry now,
         // and a failed build of a removed layer has nothing to report to a
         // panel that is no longer showing it.
-        return;
+        return SUPERSEDED;
       }
       if (getDuckDBStatus().state !== "ready") {
         // The engine DIED mid-build — `registerBuffer` and `ddl` both start
@@ -817,7 +851,7 @@ export function enqueueLayerTable(
               ? { state: "ready", info: previous, rebuilding: false }
               : { state: "failed", message: ENGINE_NOT_RUNNING },
           );
-          return;
+          return { ok: false, message: ENGINE_NOT_RUNNING };
         }
       }
       if (previous) {
@@ -834,6 +868,11 @@ export function enqueueLayerTable(
         registry.delete(layerId);
         setState(layerId, { state: "failed", message });
       }
+      // The SAME message on both branches, and this is the whole point of the
+      // outcome: the `previous` branch leaves a perfectly `ready` entry in the
+      // store, so a caller reading the store back would be told the refresh it
+      // asked for had succeeded.
+      return { ok: false, message };
     }
   });
 }

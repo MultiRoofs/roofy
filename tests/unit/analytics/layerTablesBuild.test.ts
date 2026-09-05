@@ -390,6 +390,39 @@ describe("rebuilding a layer that already has a table", () => {
     expect(sql).toContain('DROP TABLE IF EXISTS "layer_2"');
   });
 
+  it("REPORTS a failed rebuild that the store deliberately hides", async () => {
+    // The store keeps the previous table `ready` so the grid does not blank —
+    // which means a caller that asked for a refresh (the export dialog, about
+    // to write the result out) cannot learn from the store that it did not
+    // happen. The build says so itself.
+    await enqueueLayerTable("L1", readerSource());
+    const first = getLayerTable("L1")!;
+    expect(stateOf("L1")).toEqual({ state: "ready", info: first });
+
+    failures = {
+      "DESCRIBE SELECT * FROM read_cityjson('layer_2.city.json')":
+        "IO Error: boom",
+    };
+    const outcome = await enqueueLayerTable("L1", readerSource());
+    expect(outcome).toEqual({ ok: false, message: "IO Error: boom" });
+    // …while the entry itself still reads as a working table, as designed.
+    expect(stateOf("L1")).toEqual({
+      state: "ready",
+      info: first,
+      rebuilding: false,
+    });
+  });
+
+  it("reports a build that SUCCEEDED, and one the engine refused", async () => {
+    expect(await enqueueLayerTable("L1", readerSource())).toEqual({ ok: true });
+
+    engineReady = false;
+    expect(await enqueueLayerTable("L2", readerSource())).toEqual({
+      ok: false,
+      message: "The analytics engine is not running.",
+    });
+  });
+
   it("keeps the old table and parks the source when the engine goes down under a rebuild", async () => {
     await enqueueLayerTable("L1", readerSource());
     const first = getLayerTable("L1")!;

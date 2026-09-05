@@ -36,8 +36,14 @@ vi.mock("../../../../src/platform/download", () => ({
 }));
 
 // TYPED parameter: an argument-less `vi.fn` is not callable with the layer id,
-// and the assertion below reads the id it was called with.
-const refreshStreamingTable = vi.fn(async (_layerId: string) => {});
+// and the assertion below reads the id it was called with. It resolves an
+// OUTCOME, because the dialog reads one — a refresh that did not land must not
+// leave Export offering a stale resident set.
+const refreshStreamingTable = vi.fn(
+  async (_layerId: string): Promise<{ ok: boolean; message?: string }> => ({
+    ok: true,
+  }),
+);
 vi.mock(
   "../../../../src/features/layers/layerTableLifecycle",
   async (importOriginal) => ({
@@ -118,6 +124,7 @@ beforeEach(() => {
   });
   downloadBlob.mockReset();
   refreshStreamingTable.mockClear();
+  refreshStreamingTable.mockResolvedValue({ ok: true });
   useQueryStore.setState({ queries: {} });
   useLayerTableStore.setState({ tables: {}, tablePanelOpen: false });
 });
@@ -373,6 +380,37 @@ describe("ExportDialog", () => {
     open();
     await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
     expect(refreshStreamingTable).not.toHaveBeenCalled();
+  });
+
+  it("REFUSES to export when the refresh it asked for did not land", async () => {
+    // A failed rebuild restores the PREVIOUS table as `ready` — correct for
+    // the grid, and the reason the store cannot be asked this. Without the
+    // outcome the dialog just stopped saying "Refreshing table…" and wrote
+    // whatever was resident at the last successful build.
+    refreshStreamingTable.mockResolvedValue({
+      ok: false,
+      message: "IO Error: boom",
+    });
+    open({ table: FALLBACK_TABLE, isStreaming: true });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("could not be rebuilt");
+    // The ENGINE'S own sentence, not a canned one: "IO Error" and "the layer
+    // was removed" want different next moves.
+    expect(alert.textContent).toContain("IO Error: boom");
+    const button = screen.getByRole("button", { name: "Export" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(runExport).not.toHaveBeenCalled();
+  });
+
+  it("exports normally when the refresh succeeded", async () => {
+    open({ table: FALLBACK_TABLE, isStreaming: true });
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "Export" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
   });
 
   it("defaults the scope to the whole layer when nothing is applied", async () => {
