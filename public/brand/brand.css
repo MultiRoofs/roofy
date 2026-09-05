@@ -1,59 +1,135 @@
-/* Urbis brand tokens — logo + wordmark.
-   Colour tokens here are the BRAND subset of src/app/app.css's :root, repeated
-   so the logo can be used outside the app (docs, slides, favicon). Values are
-   identical: change one, change both. */
+/* Roofy brand tokens — v1.0. The kit's own copy, for use outside the app
+   (docs, slides). The app loads src/app/brand.css, which carries the same
+   values plus the app's derived tokens. */
 
 :root {
-  /* ink / accent — dark theme (default) */
-  --urbis-ink: #e8eaf0;
-  --urbis-accent: #e8973f;
-  --urbis-plate: #10131b;
-  --urbis-plate-border: rgba(255, 255, 255, 0.08);
+  /* Brand */
+  --brand-primary: #a7e32b;
+  --brand-secondary: #ffc530;
+  --brand-tertiary: #3b82f6;
+  --brand-accent: #f2683c;
 
-  /* wordmark type */
-  --urbis-wordmark-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-  --urbis-wordmark-weight: 500;
-  --urbis-wordmark-tracking: 0.11em;
+  /* Lime ramp */
+  --lime-100: #edfbc8;
+  --lime-300: #cdf176;
+  --lime-500: #a7e32b;
+  --lime-700: #7cb518;
+  --lime-900: #4a7a0f;
 
-  /* logo geometry */
-  --urbis-mark-size: 20px; /* toolbar default */
-  --urbis-lockup-gap: 0.4em; /* = 0.34 x mark height */
-  --urbis-plate-radius: 0.22em; /* of plate size */
+  /* Rooftop layer legend — same four hues as the mark */
+  --layer-nature: #a7e32b;
+  --layer-energy: #ffc530;
+  --layer-water: #3b82f6;
+  --layer-social: #f2683c;
+  --layer-unassigned: #8b93a3;
+
+  /* Dark theme (default) */
+  --bg-root: #0b0e13;
+  --bg-panel: #12161e;
+  --bg-raised: #1d222c;
+  --fg: #f2f4ef;
+  --fg-muted: #8a93a0;
+  --fg-dim: #5a6270;
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  /* Type */
+  --font-display: Outfit, system-ui, sans-serif;
+  --font-ui: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --text-display: 600 48px/1 var(--font-display);
+  --text-h1: 600 32px/1.15 var(--font-display);
+  --text-h2: 500 22px/1.25 var(--font-display);
+  --text-body: 400 15px/1.6 var(--font-ui);
+  --text-small: 400 13px/1.5 var(--font-ui);
+  --text-data: 400 13px/1.4 var(--font-mono);
+  --tracking-display: -0.03em;
+  --tracking-h1: -0.02em;
+  --tracking-label: 0.16em;
+
+  /* Radius */
+  --r-sm: 6px;
+  --r-md: 9px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --r-icon: 18px;
+  --r-pill: 999px;
 }
 
 [data-theme="light"] {
-  --urbis-ink: #1a1d24;
-  --urbis-accent: #d07830;
-  --urbis-plate: #f9fafb;
-  --urbis-plate-border: rgba(0, 0, 0, 0.08);
+  /* Brand hues darken so icons and text hold contrast on paper */
+  --brand-primary: #7cb518;
+  --brand-secondary: #f0a800;
+  --brand-tertiary: #1e5fd8;
+  --brand-accent: #d9481c;
+
+  --layer-nature: #7cb518;
+  --layer-energy: #f0a800;
+  --layer-water: #1e5fd8;
+  --layer-social: #d9481c;
+  --layer-unassigned: #8b93a3;
+
+  --bg-root: #f6f7f2;
+  --bg-panel: #ffffff;
+  --bg-raised: #edefe7;
+  --fg: #14181e;
+  --fg-muted: #5c636e;
+  --fg-dim: #8b93a3;
+  --border: rgba(20, 24, 30, 0.1);
+  --border-strong: rgba(20, 24, 30, 0.18);
 }
 
-/* The toolbar lockup: replaces .toolbar-brand's uppercase text label. */
-.urbis-lockup {
+/* Logo -------------------------------------------------------- */
+
+.roofy-lockup {
   display: inline-flex;
   align-items: center;
-  gap: var(--urbis-lockup-gap);
+  gap: 0.375em; /* mark-height-relative */
+  font: 600 1em/1 var(--font-display);
+  letter-spacing: -0.03em;
+  color: var(--fg);
+  text-decoration: none;
+}
+.roofy-lockup > svg {
+  height: 1.15em;
+  width: auto;
   flex-shrink: 0;
 }
 
-.urbis-mark {
-  width: var(--urbis-mark-size);
-  height: var(--urbis-mark-size);
-  flex-shrink: 0;
+/* Clear space = slab height (10/48 of the mark) */
+.roofy-mark {
+  --roofy-clear: calc(var(--roofy-size, 48px) * 10 / 48);
 }
 
-.urbis-mark .urbis-mark-u {
-  stroke: var(--urbis-ink);
-}
-.urbis-mark .urbis-mark-pitch {
-  stroke: var(--urbis-accent);
-}
+/* Buttons ----------------------------------------------------- */
 
-.urbis-wordmark {
-  font-family: var(--urbis-wordmark-family);
-  font-weight: var(--urbis-wordmark-weight);
-  font-size: 0.78rem;
-  letter-spacing: var(--urbis-wordmark-tracking);
-  color: var(--urbis-ink);
-  white-space: nowrap;
+.btn {
+  font: 500 14px/1 var(--font-display);
+  border-radius: var(--r-md);
+  padding: 11px 20px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.btn--primary {
+  font-weight: 600;
+  color: #14181e;
+  background: var(--lime-500);
+}
+.btn--primary:hover {
+  background: var(--lime-300);
+}
+.btn--secondary {
+  color: var(--fg);
+  background: transparent;
+  border-color: var(--border-strong);
+}
+.btn--secondary:hover {
+  color: var(--brand-primary);
+  border-color: var(--brand-primary);
+}
+.btn--danger {
+  color: var(--brand-accent);
+  background: color-mix(in srgb, var(--brand-accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--brand-accent) 32%, transparent);
 }

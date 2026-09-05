@@ -1,19 +1,19 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="public/brand/urbis-mark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="public/brand/urbis-mark-light.svg">
-    <img alt="" src="public/brand/urbis-mark-light.svg" width="72" height="72">
+    <source media="(prefers-color-scheme: dark)" srcset="public/brand/roofy-mark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="public/brand/roofy-mark-light.svg">
+    <img alt="" src="public/brand/roofy-mark-light.svg" width="72" height="72">
   </picture>
 </p>
 
-<h1 align="center">Urbis</h1>
+<h1 align="center">Roofy</h1>
 
 <p align="center"><strong>Your city, in 3D.</strong><br>
 A browser-based 3D city model viewer and analyser, rendered on a real globe with photorealistic terrain.</p>
 
 <p align="center">Use the deployed app at <strong><a href="https://urbis.open3d.city">urbis.open3d.city</a></strong></p>
 
-<!-- The lockup SVGs set the wordmark as live text in IBM Plex Sans, which GitHub's
+<!-- The lockup SVGs set the wordmark as live text in Outfit, which GitHub's
      sandboxed image rendering cannot load — so the README follows the brand kit's
      rule for font-unguaranteed contexts: bare mark + real text. -->
 
@@ -55,6 +55,6 @@ npm run dev        # via dotenvx — .env is encrypted, see CLAUDE.md
 
 ## About
 
-Urbis is developed within the MultiRoofs European project at TU Delft, with a product focus on rooftop-centric urban planning — but it is a general-purpose city model viewer first.
+Roofy is developed within the MultiRoofs European project at TU Delft, with a product focus on rooftop-centric urban planning — but it is a general-purpose city model viewer first.
 
 Licensed under the [MIT License](LICENSE).

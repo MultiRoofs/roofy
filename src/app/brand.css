@@ -1,59 +1,115 @@
-/* Urbis brand tokens — logo + wordmark.
-   Colour tokens here are the BRAND subset of src/app/app.css's :root, repeated
-   so the logo can be used outside the app (docs, slides, favicon). Values are
-   identical: change one, change both. */
+/* Roofy brand tokens — v1.0. Loaded BEFORE app.css, which derives every
+   interactive colour (--accent, --danger, --tertiary, …) from these and never
+   restates them. The kit's own copy for docs and slides is
+   public/brand/brand.css; the values are identical — change one, change both.
+
+   Two themes: `:root` is dark (the default), `[data-theme="light"]` re-points
+   the same tokens. On the light sheet the brand hues DARKEN (lime-500 →
+   lime-700 and so on) so icons, borders and text hold contrast on paper; the
+   filled primary button stays lime-500 with dark ink in both themes, which is
+   why app.css carries a separate `--accent-fill`. */
 
 :root {
-  /* ink / accent — dark theme (default) */
-  --urbis-ink: #e8eaf0;
-  --urbis-accent: #e8973f;
-  --urbis-plate: #10131b;
-  --urbis-plate-border: rgba(255, 255, 255, 0.08);
+  /* Brand */
+  --brand-primary: #a7e32b;
+  --brand-secondary: #ffc530;
+  --brand-tertiary: #3b82f6;
+  --brand-accent: #f2683c;
 
-  /* wordmark type */
-  --urbis-wordmark-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-  --urbis-wordmark-weight: 500;
-  --urbis-wordmark-tracking: 0.11em;
+  /* Lime ramp */
+  --lime-100: #edfbc8;
+  --lime-300: #cdf176;
+  --lime-500: #a7e32b;
+  --lime-700: #7cb518;
+  --lime-900: #4a7a0f;
 
-  /* logo geometry */
-  --urbis-mark-size: 20px; /* toolbar default */
-  --urbis-lockup-gap: 0.4em; /* = 0.34 x mark height */
-  --urbis-plate-radius: 0.22em; /* of plate size */
+  /* Rooftop layer legend — the same four hues as the mark, in legend order:
+     nature, energy, social, water. RoofyLockup.tsx paints the mark with these. */
+  --layer-nature: #a7e32b;
+  --layer-energy: #ffc530;
+  --layer-water: #3b82f6;
+  --layer-social: #f2683c;
+  --layer-unassigned: #8b93a3;
+
+  /* Surfaces, text, borders — dark theme */
+  --bg-root: #0b0e13;
+  --bg-panel: #12161e;
+  --bg-raised: #1d222c;
+  --fg: #f2f4ef;
+  --fg-muted: #8a93a0;
+  --fg-dim: #5a6270;
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  /* Type. Outfit ships as a variable font from @fontsource-variable, which
+     registers it as "Outfit Variable"; the bare name is kept second for a
+     host that has the static family installed. */
+  --font-display: "Outfit Variable", Outfit, system-ui, sans-serif;
+  --font-ui: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --tracking-display: -0.03em;
+  --tracking-h1: -0.02em;
+  --tracking-label: 0.16em;
+
+  /* Radius */
+  --r-sm: 6px;
+  --r-md: 9px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --r-icon: 18px;
+  --r-pill: 999px;
 }
 
 [data-theme="light"] {
-  --urbis-ink: #1a1d24;
-  --urbis-accent: #d07830;
-  --urbis-plate: #f9fafb;
-  --urbis-plate-border: rgba(0, 0, 0, 0.08);
+  --brand-primary: #7cb518;
+  --brand-secondary: #f0a800;
+  --brand-tertiary: #1e5fd8;
+  --brand-accent: #d9481c;
+
+  --layer-nature: #7cb518;
+  --layer-energy: #f0a800;
+  --layer-water: #1e5fd8;
+  --layer-social: #d9481c;
+  --layer-unassigned: #8b93a3;
+
+  --bg-root: #f6f7f2;
+  --bg-panel: #ffffff;
+  --bg-raised: #edefe7;
+  --fg: #14181e;
+  --fg-muted: #5c636e;
+  --fg-dim: #8b93a3;
+  --border: rgba(20, 24, 30, 0.1);
+  --border-strong: rgba(20, 24, 30, 0.18);
 }
 
-/* The toolbar lockup: replaces .toolbar-brand's uppercase text label. */
-.urbis-lockup {
+/* ---- Logo ---------------------------------------------------------------
+   Rendered by src/ui/RoofyLockup.tsx. The host sets `font-size`; the gap
+   and the mark scale with it (the mark is 1.15× the wordmark's em by default,
+   `--roofy-mark-size` overrides that where a host wants the kit's fixed 20px
+   toolbar mark beside 15px type). */
+
+.roofy-lockup {
   display: inline-flex;
   align-items: center;
-  gap: var(--urbis-lockup-gap);
+  gap: 0.375em; /* mark-height-relative */
   flex-shrink: 0;
-}
-
-.urbis-mark {
-  width: var(--urbis-mark-size);
-  height: var(--urbis-mark-size);
-  flex-shrink: 0;
-}
-
-.urbis-mark .urbis-mark-u {
-  stroke: var(--urbis-ink);
-}
-.urbis-mark .urbis-mark-pitch {
-  stroke: var(--urbis-accent);
-}
-
-.urbis-wordmark {
-  font-family: var(--urbis-wordmark-family);
-  font-weight: var(--urbis-wordmark-weight);
-  font-size: 0.78rem;
-  letter-spacing: var(--urbis-wordmark-tracking);
-  color: var(--urbis-ink);
+  font: 600 1em/1 var(--font-display);
+  letter-spacing: -0.03em;
+  color: var(--fg);
+  text-decoration: none;
   white-space: nowrap;
+}
+
+.roofy-lockup > .roofy-mark {
+  height: var(--roofy-mark-size, 1.15em);
+  width: auto;
+  flex-shrink: 0;
+}
+
+/* The wordmark inherits the lockup's type. `text-transform: none` is
+   load-bearing: the landing hero wraps the lockup in `.eyebrow`, and the
+   brand rule against re-spacing or re-casing the wordmark means an inherited
+   uppercase would ship it as "ROOFY". */
+.roofy-wordmark {
+  text-transform: none;
 }
