@@ -99,6 +99,12 @@ export function RenderingPanel({ onClose }: RenderingPanelProps) {
       if (e.key !== "Escape") return;
       if (document.querySelector(".modal-backdrop")) return;
       onClose();
+      // Never strand the focus ring on a node that has just unmounted: put it
+      // back on the toolbar button this panel opened from (the panel does not
+      // own that button's ref, so it is found by its label).
+      document
+        .querySelector<HTMLElement>('[aria-label="Rendering settings"]')
+        ?.focus();
     };
     // Capture phase, so the check above sees the modal BEFORE its own Escape
     // handler has closed it and React has flushed the backdrop away.
