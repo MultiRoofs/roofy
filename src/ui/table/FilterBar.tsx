@@ -12,95 +12,26 @@
  * predicate cannot be built in the first place — `compileFilter` still refuses
  * one (a restored draft, a rebuilt table with different columns), but the
  * common case is prevented rather than reported.
+ *
+ * The DRAFT holds raw strings, never parsed values — see
+ * `normalizeFilterForApply` in `tableText.ts` for why "is one of" is split at
+ * Apply and not as the user types.
  */
 
 import { useCallback } from "react";
-import { isTextColumn, type ColumnInfo } from "../../analytics/columnKind";
+import type { ColumnInfo } from "../../analytics/columnKind";
 import {
   isNullaryOp,
   type FilterCondition,
   type FilterGroup,
   type FilterOp,
 } from "../../features/query/types";
-
-const COMPARISON_OPS: ReadonlyArray<FilterOp> = [
-  "=",
-  "!=",
-  "<",
-  "<=",
-  ">",
-  ">=",
-];
-const NULL_OPS: ReadonlyArray<FilterOp> = ["isNull", "isNotNull"];
-const TEXT_OPS: ReadonlyArray<FilterOp> = [
-  "contains",
-  "startsWith",
-  "endsWith",
-];
-
-const OP_LABELS: Readonly<Record<FilterOp, string>> = {
-  "=": "=",
-  "!=": "≠",
-  "<": "<",
-  "<=": "≤",
-  ">": ">",
-  ">=": "≥",
-  contains: "contains",
-  startsWith: "starts with",
-  endsWith: "ends with",
-  isNull: "is empty",
-  isNotNull: "is not empty",
-  in: "is one of",
-};
-
-/**
- * What a column can be asked.
- *
- * A LIST, STRUCT or BLOB has no ordering and no equality a user could mean, so
- * only the null tests survive for it. The LIKE family is offered for VARCHAR
- * AND for `castText` — `compileFilter` casts the left side for the latter, so
- * "starts with 2024" on a DATE and "contains 3412" on a BIGINT both work, and
- * against exactly the rendering the grid is showing.
- */
-export function operatorsFor(
-  column: ColumnInfo | undefined,
-): ReadonlyArray<FilterOp> {
-  if (!column) return [];
-  if (column.kind === "nested" || column.kind === "blob") return NULL_OPS;
-  return isTextColumn(column) || column.kind === "castText"
-    ? [...COMPARISON_OPS, ...TEXT_OPS, "in", ...NULL_OPS]
-    : [...COMPARISON_OPS, "in", ...NULL_OPS];
-}
-
-/** A value the input can show. A list is joined for the "is one of" box. */
-function valueText(value: FilterCondition["value"]): string {
-  if (Array.isArray(value)) return value.join(", ");
-  return typeof value === "boolean" ? String(value) : String(value ?? "");
-}
-
-/**
- * What a text input contributes to the condition.
- *
- * The RAW STRING, for everything but "is one of" — and that is deliberate.
- * Parsing as the user types cannot work: `Number("1.")` is 1, so the decimal
- * point is deleted the instant it is typed and no fractional threshold can
- * ever be entered; `Number("-")` is NaN, so a negative number cannot be
- * started either. The column's type decides what the string MEANS at compile
- * time (`literalFor` in `analytics/sql.ts`), where nothing is being retyped
- * and a bad value can be refused with a sentence.
- *
- * "is one of" is the exception: a list is not something a single string can
- * hold, so the commas are split here.
- */
-function parseValue(raw: string, op: FilterOp): FilterCondition["value"] {
-  if (op === "in") {
-    return raw
-      .split(",")
-      .map((part) => part.trim())
-      .filter((part) => part !== "");
-  }
-  return raw;
-}
+import {
+  normalizeFilterForApply,
+  operatorsFor,
+  OP_LABELS,
+  valueText,
+} from "./tableText";
 
 export interface FilterBarProps {
   readonly columns: ReadonlyArray<ColumnInfo>;
@@ -147,6 +78,20 @@ export function FilterBar({
     [filter.conditions, replace],
   );
 
+  /**
+   * Apply COMMITS the draft, and committing is what turns "a, b" into a list.
+   *
+   * The store's `applyFilter` copies whatever draft it finds, so the
+   * normalisation has to happen first — and `setFilter` is a synchronous
+   * zustand write, so the `onApply` on the next line reads the reshaped draft
+   * rather than the one the user was typing into.
+   */
+  const handleApply = useCallback(() => {
+    const normalized = normalizeFilterForApply(filter);
+    if (normalized !== filter) onChange(normalized);
+    onApply();
+  }, [filter, onChange, onApply]);
+
   return (
     <div className="filter-bar">
       <div className="filter-bar-rows">
@@ -176,6 +121,10 @@ export function FilterBar({
                     op: allowed.includes(condition.op)
                       ? condition.op
                       : (allowed[0] ?? "isNull"),
+                    // Back to the raw string the boxes hold, so a value that
+                    // arrived as a list cannot outlive the operator that
+                    // asked for one.
+                    value: valueText(condition.value),
                   });
                 }}
               >
@@ -192,7 +141,15 @@ export function FilterBar({
                 disabled={disabled}
                 value={condition.op}
                 onChange={(e) =>
-                  patch(condition.id, { op: e.target.value as FilterOp })
+                  patch(condition.id, {
+                    op: e.target.value as FilterOp,
+                    // RESHAPED on every operator change, in both directions:
+                    // "is one of" leaves a list behind in a draft that was
+                    // applied, and `=` against a list is refused for shape by
+                    // `compileFilter` — so `=` -> `in` -> `=` would be stuck
+                    // on an error the user cannot see the cause of.
+                    value: valueText(condition.value),
+                  })
                 }
               >
                 {ops.map((op) => (
@@ -209,13 +166,17 @@ export function FilterBar({
                   disabled={disabled}
                   value={valueText(condition.value)}
                   placeholder={condition.op === "in" ? "a, b, c" : "value"}
+                  // The RAW string, for every operator. Parsing as the user
+                  // types cannot work: `Number("1.")` is 1, so a decimal point
+                  // is eaten as fast as it is typed, and `"a,".split(",")` is
+                  // `["a"]`, so a comma is too. The column's type (and, for
+                  // "is one of", `normalizeFilterForApply`) decides what the
+                  // string MEANS at the moment it is committed.
                   onChange={(e) =>
-                    patch(condition.id, {
-                      value: parseValue(e.target.value, condition.op),
-                    })
+                    patch(condition.id, { value: e.target.value })
                   }
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && !disabled) onApply();
+                    if (e.key === "Enter" && !disabled) handleApply();
                   }}
                 />
               )}
@@ -269,7 +230,7 @@ export function FilterBar({
           type="button"
           className="tb-btn table-action-btn filter-apply"
           disabled={disabled || filter.conditions.length === 0}
-          onClick={onApply}
+          onClick={handleApply}
         >
           Apply
         </button>

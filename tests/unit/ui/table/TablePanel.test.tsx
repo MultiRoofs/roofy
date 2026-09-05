@@ -171,6 +171,24 @@ describe("TablePanel states", () => {
     // without the body copy the grid would simply go stale in silence.
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("Conversion Error: could not convert");
+    // And it replaces the empty-grid sentence rather than sitting above it:
+    // a page error is not a claim about the layer's contents.
+    expect(screen.queryByText("This layer has no rows yet.")).toBeNull();
+    expect(screen.queryByText("No rows match this filter.")).toBeNull();
+    expect(document.querySelector(".data-table")).toBeNull();
+  });
+
+  it("shows the engine starting, over a table left failed by the outage", () => {
+    // A Retry sets the status back to `initializing` while every table is
+    // still `failed` from the outage. "This layer's table could not be built"
+    // over a retry in progress reads as a Retry that did nothing.
+    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerTableStore.setState({
+      tables: { L: { state: "failed", message: "Binder Error: nope" } },
+    });
+    panel({ state: "initializing" });
+    expect(screen.getByText("Starting the analytics engine…")).toBeTruthy();
+    expect(screen.queryByText(/could not be built/)).toBeNull();
   });
 
   it("shows a spinner while the table is building", () => {
@@ -200,6 +218,42 @@ describe("TablePanel states", () => {
     expect(await screen.findByText("B1")).toBeTruthy();
     expect(screen.getByText("delft")).toBeTruthy();
     expect(screen.getByText("1–2 of 2")).toBeTruthy();
+    // The header counts the LAYER, before any filter — see (D).
+    expect(document.querySelector(".table-count")!.getAttribute("title")).toBe(
+      "Rows in this layer's table, before any filter",
+    );
+  });
+
+  it("heads with the UNFILTERED size while the footer counts the matches", async () => {
+    runQuery.mockImplementation(async (sql: string) =>
+      sql.includes("COUNT(*)")
+        ? {
+            ok: true,
+            columns: ["n"],
+            rows: [{ n: sql.includes("WHERE") ? 1 : 2231 }],
+          }
+        : {
+            ok: true,
+            columns: [],
+            rows: [{ id: "B1", object_type: "Building" }],
+          },
+    );
+    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    useQueryStore.getState().setFilter("L", {
+      logic: "AND",
+      conditions: [
+        { id: "c", column: "object_type", op: "=", value: "Building" },
+      ],
+    });
+    useQueryStore.getState().applyFilter("L");
+    panel();
+
+    expect(await screen.findByText("(2,231 rows)")).toBeTruthy();
+    expect(screen.getByText("1–1 of 1")).toBeTruthy();
+    expect(screen.getByText("filtered from 2,231")).toBeTruthy();
   });
 
   it("selects a city object when a row is clicked with Sync selection on", async () => {

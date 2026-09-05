@@ -12,7 +12,7 @@
  * error in the console.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { runQuery } from "../../analytics/duckdb";
 import type { ColumnInfo } from "../../analytics/columnKind";
 import {
@@ -31,12 +31,27 @@ export interface LayerQueryView {
   /** `"no-layer"` means NOTHING is selected. A selected layer whose registry
    *  entry has not been written yet is `"queued"`, never `"no-layer"`. */
   readonly status: "no-layer" | "queued" | "building" | "failed" | "ready";
+  /** A build failure, a compile refusal, or DuckDB's own message — from the
+   *  page query OR from a COUNT that failed on its own. */
   readonly message: string | null;
   readonly table: LayerTable | null;
+  /** The columns the grid renders, blobs already dropped. Referentially
+   *  STABLE while the table's own column list is, because `DataGrid` is
+   *  memoised and a fresh array every render would defeat it. */
   readonly columns: ReadonlyArray<ColumnInfo>;
   readonly rows: ReadonlyArray<Record<string, unknown>>;
-  readonly totalRows: number;
-  readonly unfilteredRows: number;
+  /**
+   * Rows matching the applied filter, or `null` when the COUNT could not be
+   * taken.
+   *
+   * NULL rather than 0, for the same reason `LayerTable.rowCount` is: the
+   * count is a SEPARATE statement from the page query, so it can fail while
+   * real rows are on screen, and "0 rows" under a full grid is a plain
+   * contradiction. The footer renders an unknown total as "of ?".
+   */
+  readonly totalRows: number | null;
+  /** Rows in the table, filter or no filter. Same provenance, same `null`. */
+  readonly unfilteredRows: number | null;
   readonly loading: boolean;
   readonly reload: () => void;
 }
@@ -59,12 +74,14 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
 
   const [rows, setRows] =
     useState<ReadonlyArray<Record<string, unknown>>>(NO_ROWS);
-  const [totalRows, setTotalRows] = useState(0);
-  const [unfilteredRows, setUnfilteredRows] = useState(0);
+  const [totalRows, setTotalRows] = useState<number | null>(null);
+  const [unfilteredRows, setUnfilteredRows] = useState<number | null>(null);
   const [queryMessage, setQueryMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const generation = useRef(0);
+  /** Which table the rows on screen came from — see the reset in the effect. */
+  const shownTable = useRef<string | null>(null);
 
   const reload = useCallback(() => setReloadToken((t) => t + 1), []);
 
@@ -74,20 +91,47 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
   const page = query?.page ?? 0;
   const pageSize = query?.pageSize ?? 100;
 
+  /**
+   * MEMOISED on the table's own column list.
+   *
+   * `gridColumns` filters, so it returns a fresh array every call — and this
+   * value is a prop of the memoised `DataGrid`, which would then re-render up
+   * to 1000 rows of DOM on every keystroke in the filter bar.
+   */
+  const tableColumns = table?.columns ?? null;
+  const columns = useMemo(
+    () => (tableColumns === null ? NO_COLUMNS : gridColumns(tableColumns)),
+    [tableColumns],
+  );
+
   useEffect(() => {
-    if (table === null) {
+    // Bumped FIRST, before EITHER early return: a page query from the previous
+    // effect run may still be in flight, and a run that bails — on a compile
+    // refusal, or because the table went away — without invalidating it would
+    // let that older answer land afterwards and replace the rows with a page
+    // nothing asked for.
+    const gen = ++generation.current;
+
+    // A DIFFERENT table means the columns changed under the rows. Keyed on the
+    // SQL table name rather than object identity: a name is never reused
+    // (`layerTables` counts up), so this is exactly "these rows came from
+    // somewhere else" — and it does not blank the grid for a re-render that
+    // merely handed us an equal `LayerTable`. A page step or a sort, which
+    // keep the name, deliberately keep the old page on screen until the new
+    // one lands rather than flashing empty.
+    const tableName = table?.table ?? null;
+    if (shownTable.current !== tableName) {
+      shownTable.current = tableName;
       setRows(NO_ROWS);
-      setTotalRows(0);
-      setUnfilteredRows(0);
-      setQueryMessage(null);
-      return;
+      setTotalRows(null);
+      setUnfilteredRows(null);
     }
 
-    // Bumped FIRST, before any early return: a page query from the previous
-    // effect run may still be in flight, and if this run bails on a compile
-    // refusal without invalidating it, that older answer lands afterwards and
-    // replaces the rows with a page the refused filter never asked for.
-    const gen = ++generation.current;
+    if (table === null) {
+      setQueryMessage(null);
+      setLoading(false);
+      return;
+    }
 
     const compiled =
       applied === null
@@ -105,12 +149,11 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
     setQueryMessage(null);
 
     void (async () => {
-      const columns = gridColumns(table.columns);
       const [pageResult, filteredCount, totalCount] = await Promise.all([
         runQuery(
           buildPageSql(
             table.table,
-            columns,
+            gridColumns(table.columns),
             compiled.where,
             sort,
             page,
@@ -127,18 +170,31 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
       if (!pageResult.ok) {
         setQueryMessage(pageResult.message);
         setRows(NO_ROWS);
+        setTotalRows(null);
+        setUnfilteredRows(null);
         setLoading(false);
         return;
       }
       setRows(pageResult.rows);
-      const filtered = filteredCount.ok ? countOf(filteredCount.rows) : 0;
+
+      // A COUNT that failed is an UNKNOWN total, never a zero — and it is
+      // reported, because a footer quietly reading "of ?" is a symptom nobody
+      // can act on without the engine's own sentence.
+      const filtered = filteredCount.ok ? countOf(filteredCount.rows) : null;
       setTotalRows(filtered);
       setUnfilteredRows(
         totalCount === null
           ? filtered
           : totalCount.ok
             ? countOf(totalCount.rows)
-            : filtered,
+            : null,
+      );
+      setQueryMessage(
+        !filteredCount.ok
+          ? filteredCount.message
+          : totalCount !== null && !totalCount.ok
+            ? totalCount.message
+            : null,
       );
       setLoading(false);
     })();
@@ -151,8 +207,8 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
       table: null,
       columns: NO_COLUMNS,
       rows: NO_ROWS,
-      totalRows: 0,
-      unfilteredRows: 0,
+      totalRows: null,
+      unfilteredRows: null,
       loading: false,
       reload,
     };
@@ -169,8 +225,8 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
       table: null,
       columns: NO_COLUMNS,
       rows: NO_ROWS,
-      totalRows: 0,
-      unfilteredRows: 0,
+      totalRows: null,
+      unfilteredRows: null,
       loading: false,
       reload,
     };
@@ -182,8 +238,8 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
       table: null,
       columns: NO_COLUMNS,
       rows: NO_ROWS,
-      totalRows: 0,
-      unfilteredRows: 0,
+      totalRows: null,
+      unfilteredRows: null,
       loading: false,
       reload,
     };
@@ -195,8 +251,8 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
       table: null,
       columns: NO_COLUMNS,
       rows: NO_ROWS,
-      totalRows: 0,
-      unfilteredRows: 0,
+      totalRows: null,
+      unfilteredRows: null,
       loading: false,
       reload,
     };
@@ -205,7 +261,7 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
     status: "ready",
     message: queryMessage,
     table: tableState.info,
-    columns: gridColumns(tableState.info.columns),
+    columns,
     rows,
     totalRows,
     unfilteredRows,

@@ -8,41 +8,7 @@
 
 import { memo } from "react";
 import type { ColumnInfo } from "../../analytics/columnKind";
-
-/**
- * A cell as text.
- *
- * `String(unknown)` is not good enough: a value out of DuckDB or a CityJSON
- * file can be a plain object, which `String` renders as the useless
- * "[object Object]" — every distinct object displaying identically. Every
- * branch narrows first, so `String` only ever sees a primitive.
- *
- * The `typeof value === "number"` guard on the rounding branch is load-bearing:
- * HUGEINT and DECIMAL cells arrive through Arrow as STRINGS (and `castText`
- * columns arrive as `::VARCHAR` text by construction), so an unguarded
- * `toFixed` would throw on them — and rounding a 38-digit DECIMAL to two
- * places would misreport the value DuckDB actually holds.
- */
-export function formatCell(value: unknown): string {
-  if (value === null || value === undefined) return "—";
-  if (typeof value === "string") return value;
-  if (typeof value === "number") {
-    return Number.isInteger(value) ? String(value) : value.toFixed(2);
-  }
-  if (typeof value === "boolean" || typeof value === "bigint") {
-    return String(value);
-  }
-  return JSON.stringify(value) ?? "";
-}
-
-/** The unrounded value, for the cell's `title`. Null renders as the same em
- *  dash the text does — there is nothing more to reveal about a null. */
-export function rawCellTitle(value: unknown): string {
-  if (value === null || value === undefined) return "—";
-  if (typeof value === "string") return value;
-  if (typeof value === "object") return JSON.stringify(value) ?? "";
-  return String(value);
-}
+import { formatCell, rawCellTitle } from "./tableText";
 
 /** The id a row is selected by. Every layer table has an `id` column, but a
  *  hand-built one may not, so the index is the fallback. */

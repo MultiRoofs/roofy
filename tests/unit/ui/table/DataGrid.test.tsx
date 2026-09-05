@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { DataGrid, formatCell } from "../../../../src/ui/table/DataGrid";
+import { DataGrid } from "../../../../src/ui/table/DataGrid";
+import { formatCell } from "../../../../src/ui/table/tableText";
 import type { ColumnInfo } from "../../../../src/analytics/columnKind";
 
 const COLUMNS: ReadonlyArray<ColumnInfo> = [

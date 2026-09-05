@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { Pagination, rangeLabel } from "../../../../src/ui/table/Pagination";
+import { Pagination } from "../../../../src/ui/table/Pagination";
+import { rangeLabel } from "../../../../src/ui/table/tableText";
 
 afterEach(cleanup);
 

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { FilterBar, operatorsFor } from "../../../../src/ui/table/FilterBar";
+import { useRef, useState } from "react";
+import { FilterBar } from "../../../../src/ui/table/FilterBar";
+import { operatorsFor } from "../../../../src/ui/table/tableText";
 import type { ColumnInfo } from "../../../../src/analytics/columnKind";
 import type { FilterGroup } from "../../../../src/features/query/types";
 
@@ -196,5 +198,84 @@ describe("FilterBar", () => {
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(true);
+  });
+});
+
+/**
+ * A CONTROLLED harness, because the bug this covers only exists across
+ * renders: the draft goes out through `onChange` and comes back as the input's
+ * value, so a parse-on-keystroke eats its own separator on the way back in.
+ */
+function Typed({ initial }: { readonly initial: FilterGroup }) {
+  const [filter, setFilter] = useState(initial);
+  // The REF is what makes this a faithful stand-in for the store: zustand's
+  // `setFilter` is a synchronous write and `applyFilter` reads it back with
+  // `getState()`, so Apply sees the draft this same click just reshaped —
+  // which a `useState` closure, frozen at the last render, would not.
+  const draft = useRef(filter);
+  const [applied, setApplied] = useState<FilterGroup | null>(null);
+  const change = (next: FilterGroup) => {
+    draft.current = next;
+    setFilter(next);
+  };
+  return (
+    <>
+      <FilterBar
+        columns={COLUMNS}
+        filter={filter}
+        onChange={change}
+        onApply={() => setApplied(draft.current)}
+        onClear={() => change(EMPTY)}
+        error={null}
+        disabled={false}
+      />
+      <output data-testid="applied">{JSON.stringify(applied)}</output>
+    </>
+  );
+}
+
+describe('FilterBar "is one of" values', () => {
+  it("keeps the comma while typing, and splits only at Apply", () => {
+    render(
+      <Typed
+        initial={{
+          logic: "AND",
+          conditions: [{ id: "c1", column: "id", op: "in", value: "" }],
+        }}
+      />,
+    );
+    const input = screen.getByLabelText("Filter value") as HTMLInputElement;
+
+    // Typed one character at a time: a per-keystroke split turns "a," back
+    // into "a", so the comma can never be followed by anything.
+    for (const text of ["a", "a,", "a,b"]) {
+      fireEvent.change(input, { target: { value: text } });
+      expect(
+        (screen.getByLabelText("Filter value") as HTMLInputElement).value,
+      ).toBe(text);
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    const applied = JSON.parse(
+      screen.getByTestId("applied").textContent!,
+    ) as FilterGroup;
+    expect(applied.conditions[0]!.value).toEqual(["a", "b"]);
+  });
+
+  it("reshapes an applied list back to text when the operator leaves 'in'", () => {
+    // `=` against a list is refused for SHAPE by compileFilter, so a draft
+    // that came back from an apply must not keep the array.
+    const { onChange } = setup({
+      filter: {
+        logic: "AND",
+        conditions: [{ id: "c1", column: "id", op: "in", value: ["a", "b"] }],
+      },
+    });
+    fireEvent.change(screen.getByLabelText("Filter operator"), {
+      target: { value: "=" },
+    });
+    const next = onChange.mock.calls[0]![0] as FilterGroup;
+    expect(next.conditions[0]!.op).toBe("=");
+    expect(next.conditions[0]!.value).toBe("a, b");
   });
 });

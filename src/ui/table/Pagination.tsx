@@ -8,45 +8,7 @@
  */
 
 import { PAGE_SIZES, type PageSize } from "../../features/query/types";
-
-/**
- * Row counts, grouped, in ONE locale.
- *
- * Explicitly `en-US`, not the host's: a bare `toLocaleString()` renders 2231 as
- * "2.231" on a de_DE machine and "2 231" on fr_FR, so every test asserting
- * "2,231" would fail on a developer's laptop and pass in CI, or the reverse.
- * The app has no localisation for this to be consistent with, so the formatter
- * is pinned and SHARED — `TablePanel` imports this one rather than growing a
- * second.
- */
-const COUNT_FORMAT = new Intl.NumberFormat("en-US");
-
-export function formatCount(n: number): string {
-  return COUNT_FORMAT.format(n);
-}
-
-/**
- * "1–100 of 2,231". Counts from ONE: nobody reads a row range zero-based.
- *
- * A NULL total means the COUNT could not be taken (`LayerTable.rowCount`),
- * which is NOT the same as zero: the page query is a separate statement and
- * its rows are on screen, so the range is real and only the total is missing.
- * "0 rows" over a full grid would be a plain contradiction.
- */
-export function rangeLabel(
-  page: number,
-  pageSize: number,
-  totalRows: number | null,
-): string {
-  if (totalRows === null) {
-    const from = page * pageSize + 1;
-    return `${formatCount(from)}–${formatCount(from + pageSize - 1)} of ?`;
-  }
-  if (totalRows === 0) return "0 rows";
-  const first = page * pageSize + 1;
-  const last = Math.min((page + 1) * pageSize, totalRows);
-  return `${formatCount(first)}–${formatCount(last)} of ${formatCount(totalRows)}`;
-}
+import { formatCount, rangeLabel } from "./tableText";
 
 export interface PaginationProps {
   readonly page: number;

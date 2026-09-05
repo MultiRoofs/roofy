@@ -124,7 +124,9 @@
 [data-theme="light"] .error-message,
 [data-theme="light"] .error-detail,
 [data-theme="light"] .drop-zone p.source-picker-hint,
-[data-theme="light"] .snapshot-btn-delete:hover:not(:disabled) {
+[data-theme="light"] .snapshot-btn-delete:hover:not(:disabled),
+[data-theme="light"] .table-message[role="alert"],
+[data-theme="light"] .filter-error {
   color: #c53030;
 }
 
@@ -3290,11 +3292,21 @@ body {
 }
 
 .table-message[role="alert"] {
-  color: var(--danger-text, var(--fg));
+  color: #f87171;
 }
 
 .table-message p {
   margin: 0;
+}
+
+/* A page in flight. Dimmed rather than blanked: the previous page is still
+   the truthful answer to the previous question, and a grid that empties on
+   every sort click flashes harder than one that fades. Pointer events stay
+   live — a second sort click while the first is still running is legitimate,
+   and the hook's generation counter is what makes it safe. */
+.table-loading {
+  opacity: 0.55;
+  transition: opacity 0.12s ease-out;
 }
 
 /* Filter bar */
@@ -3368,7 +3380,7 @@ body {
 
 .filter-error {
   font-size: 0.65rem;
-  color: var(--danger-text, var(--fg));
+  color: #f87171;
 }
 
 /* Footer */

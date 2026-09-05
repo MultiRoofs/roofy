@@ -18,8 +18,10 @@ import { useSelectionStore } from "../../features/selection/selectionStore";
 import type { Selection } from "../../domain/selection/types";
 import { DataGrid } from "./DataGrid";
 import { FilterBar } from "./FilterBar";
-// ONE pinned `en-US` formatter for the whole panel — see Pagination.tsx.
-import { formatCount, Pagination } from "./Pagination";
+import { Pagination } from "./Pagination";
+// ONE pinned `en-US` formatter for the whole panel, and the empty-grid
+// sentences — see tableText.ts for why they do not live in a component.
+import { emptyGridMessage, formatCount } from "./tableText";
 import { useLayerQuery } from "./useLayerQuery";
 
 /** The panel's height limits. Raised from 100–600: a filter bar, a header row
@@ -30,33 +32,6 @@ export const DEFAULT_TABLE_HEIGHT = 320;
 
 const STREAMING_FILTER_REASON =
   "Map filtering is not available for streaming layers yet";
-
-/**
- * What the grid says with no rows to show.
- *
- * Three different situations, three different sentences — "No rows match this
- * filter" over a table that HAS no rows is simply wrong, and an empty viewport
- * with no explanation reads as a rendering bug rather than as a filter doing
- * its job:
- *
- *  - no filter applied → the table itself is empty (a streaming layer whose
- *    first cells have not landed);
- *  - a filter applied, map sync off → the ordinary "nothing matched";
- *  - a filter applied, map sync ON → the same, plus why the globe went empty,
- *    with both numbers so "too narrow" is distinguishable from "broken".
- */
-function emptyGridMessage(
-  filtered: boolean,
-  syncToMap: boolean,
-  unfilteredRows: number | null,
-): string {
-  if (!filtered) return "This layer has no rows yet.";
-  if (!syncToMap) return "No rows match this filter.";
-  if (unfilteredRows === null) {
-    return "Nothing matches this filter; the map shows nothing while Filter map is on";
-  }
-  return `0 of ${formatCount(unfilteredRows)} rows match; the map shows nothing while Filter map is on`;
-}
 
 export interface TablePanelProps {
   readonly duckdbStatus: DuckDBStatus;
@@ -137,8 +112,28 @@ export function TablePanel({
     else setTableSelection(new Set());
   }, [syncSelection]);
 
+  // A CALLBACK, like `selectedIds` is a memo: an inline arrow is a new prop
+  // identity every render, which is all it takes to defeat `DataGrid`'s memo.
+  const handleSort = useCallback(
+    (column: string) => {
+      if (layerId !== null)
+        useQueryStore.getState().toggleSort(layerId, column);
+    },
+    [layerId],
+  );
+
   const engineDown =
     duckdbStatus.state === "failed" || duckdbStatus.state === "uninitialized";
+
+  /**
+   * The message explains an ABSENT grid, not a stale one.
+   *
+   * With rows still on screen a page error is an annotation over the last good
+   * page. With none, it is the reason there is nothing — and `DataGrid` would
+   * otherwise answer "This layer has no rows yet.", which turns an engine
+   * failure into a claim about the data.
+   */
+  const pageError = view.message !== null && view.rows.length === 0;
 
   return (
     <div className="table-panel">
@@ -147,10 +142,17 @@ export function TablePanel({
       <div className="table-panel-header">
         <span className="table-panel-title">
           {activeLayer?.name ?? "Objects"}
-          {view.status === "ready" && (
-            <span className="table-count">
+          {view.status === "ready" && view.unfilteredRows !== null && (
+            /* The LAYER's size, not the filtered count: a heading number that
+               silently changes meaning when a filter is applied is how a user
+               comes to believe a filter deleted their data. How much matched
+               is the footer's job, beside the range it belongs to. */
+            <span
+              className="table-count"
+              title="Rows in this layer's table, before any filter"
+            >
               {" "}
-              ({formatCount(view.totalRows)} rows)
+              ({formatCount(view.unfilteredRows)} rows)
             </span>
           )}
         </span>
@@ -230,8 +232,10 @@ export function TablePanel({
           <FilterBar
             columns={view.columns}
             filter={query.filter}
-            error={view.message}
-            disabled={false}
+            // The body renders it instead when it is the reason the grid is
+            // empty — see `pageError` — so it is never said twice.
+            error={pageError ? null : view.message}
+            disabled={view.loading}
             onChange={(filter) =>
               useQueryStore.getState().setFilter(layerId, filter)
             }
@@ -240,8 +244,19 @@ export function TablePanel({
           />
         )}
 
-      <div className="table-panel-body">
-        {engineDown ? (
+      <div
+        className={`table-panel-body ${view.loading ? "table-loading" : ""}`}
+      >
+        {duckdbStatus.state === "initializing" ? (
+          /* BEFORE the table state, deliberately. A Retry sets the status back
+             to `initializing` while every table is still `failed` from the
+             outage, and "This layer's table could not be built" over a retry
+             in progress reads as a Retry that did nothing. */
+          <div className="table-message">
+            <span className="loading-spinner" />
+            <span>Starting the analytics engine…</span>
+          </div>
+        ) : engineDown ? (
           <div className="table-message" role="alert">
             <p>
               The analytics engine is not running
@@ -276,28 +291,26 @@ export function TablePanel({
                 default, so a DuckDB page error or a compile refusal would
                 otherwise leave a stale grid with no explanation anywhere on
                 screen. */}
-            {view.message !== null && !filterOpen && (
+            {view.message !== null && (pageError || !filterOpen) && (
               <div className="table-message" role="alert">
                 {view.message}
               </div>
             )}
-            <DataGrid
-              columns={view.columns}
-              rows={view.rows}
-              sort={query?.sort ?? null}
-              selectedIds={selectedIds}
-              emptyMessage={emptyGridMessage(
-                (query?.applied ?? null) !== null,
-                query?.syncToMap ?? false,
-                view.unfilteredRows,
-              )}
-              onSort={(column) => {
-                if (layerId !== null) {
-                  useQueryStore.getState().toggleSort(layerId, column);
-                }
-              }}
-              onRowClick={handleRowClick}
-            />
+            {!pageError && (
+              <DataGrid
+                columns={view.columns}
+                rows={view.rows}
+                sort={query?.sort ?? null}
+                selectedIds={selectedIds}
+                emptyMessage={emptyGridMessage(
+                  (query?.applied ?? null) !== null,
+                  query?.syncToMap ?? false,
+                  view.unfilteredRows,
+                )}
+                onSort={handleSort}
+                onRowClick={handleRowClick}
+              />
+            )}
           </>
         )}
       </div>
