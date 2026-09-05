@@ -241,6 +241,11 @@ export function ExportDialog({
         .filter((c) => selectedAttributes.has(c.name))
         .map((c) => c.name);
 
+      // ONE selection, both routes. The type tick-boxes used to reach the
+      // CityParquet request only, so a CSV of "Buildings" came back holding
+      // every other object type in the layer.
+      const chosenTypes = rootTypes.filter((t) => selectedTypes.has(t));
+
       let request: ExportRequest;
       if (format === "cityparquet") {
         // A real guard, not `!`. `canCityParquet` gates the option, but the
@@ -269,7 +274,7 @@ export function ExportDialog({
           lodSuffix: lod.suffix,
           attributes,
           where,
-          rootTypes: rootTypes.filter((t) => selectedTypes.has(t)),
+          rootTypes: chosenTypes,
           epsg,
           fileName: exportFileName(layerName, EXTENSIONS.cityparquet),
         };
@@ -287,6 +292,8 @@ export function ExportDialog({
             ),
             ...attributeColumns.filter((c) => selectedAttributes.has(c.name)),
           ],
+          rootTypes: chosenTypes,
+          allRootTypes: rootTypes,
           where,
           fileName: exportFileName(layerName, EXTENSIONS[format]),
         };

@@ -291,6 +291,27 @@ describe("ExportDialog", () => {
     expect(request.fileName).toBe("delft.csv");
   });
 
+  it("carries the type selection into an ATTRIBUTE export too", async () => {
+    open();
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    fireEvent.click(screen.getByLabelText("SolitaryVegetationObject"));
+    fireEvent.click(screen.getByLabelText("CSV"));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => expect(runExport).toHaveBeenCalled());
+    const request = runExport.mock.calls[0]![0] as {
+      rootTypes: string[];
+      allRootTypes: string[];
+    };
+    expect(request.rootTypes).toEqual(["Building"]);
+    // The full set travels beside it, so the exporter can tell "all of them"
+    // (no predicate) from a strict subset.
+    expect(request.allRootTypes).toEqual([
+      "Building",
+      "SolitaryVegetationObject",
+    ]);
+  });
+
   it("carries the compiled filter as the export scope", async () => {
     useQueryStore.getState().setFilter("L", {
       logic: "AND",

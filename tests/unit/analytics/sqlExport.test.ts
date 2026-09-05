@@ -3,6 +3,8 @@ import {
   buildAttributeExportSql,
   buildCityParquetModuleSql,
   buildCityParquetSourceSql,
+  buildRootTypeWhere,
+  exportColumnNames,
 } from "../../../src/analytics/sql";
 import type { ColumnInfo } from "../../../src/analytics/columnKind";
 
@@ -23,9 +25,10 @@ describe("buildAttributeExportSql", () => {
         where: `"b3_h_dak_max" > 10`,
         format: "csv",
         outFile: "exp_1.csv",
+        rootTypes: null,
       }),
     ).toBe(
-      'COPY (SELECT "id", "feature_id", "object_type", to_json("parents") AS "parents", "b3_h_dak_max" FROM "layer_1" WHERE COALESCE("feature_id", "id") IN (SELECT COALESCE("feature_id", "id") FROM "layer_1" WHERE "b3_h_dak_max" > 10)) TO \'exp_1.csv\' (FORMAT csv)',
+      'COPY (SELECT "id", "feature_id", "object_type", to_json("parents") AS "parents", "b3_h_dak_max" FROM "layer_1" WHERE COALESCE("feature_id", "id") IN (SELECT COALESCE("feature_id", "id") FROM "layer_1" WHERE "b3_h_dak_max" > 10)) TO \'exp_1.csv\' (FORMAT csv, HEADER)',
     );
   });
 
@@ -37,6 +40,7 @@ describe("buildAttributeExportSql", () => {
         where: null,
         format: "parquet",
         outFile: "exp_2.parquet",
+        rootTypes: null,
       }),
     ).toBe(
       'COPY (SELECT "id", "feature_id", "object_type", "parents", "b3_h_dak_max" FROM "layer_1") TO \'exp_2.parquet\' (FORMAT parquet)',
@@ -57,6 +61,7 @@ describe("buildAttributeExportSql", () => {
         where: null,
         format,
         outFile: `x.${format}`,
+        rootTypes: null,
       });
       expect(sql).toContain('SELECT "id", "bouwjaar" FROM "layer_1"');
       expect(sql).not.toContain("::VARCHAR");
@@ -71,8 +76,55 @@ describe("buildAttributeExportSql", () => {
         where: null,
         format: "json",
         outFile: "exp_3.json",
+        rootTypes: null,
       }),
     ).toContain("(FORMAT json, ARRAY true)");
+  });
+
+  it("ANDs the root-type predicate onto the feature scope", () => {
+    // The type selection is the SAME predicate the CityParquet module tables
+    // are cut with — it was simply ignored here, so a CSV of "Buildings only"
+    // came back holding the vegetation too.
+    expect(
+      buildAttributeExportSql({
+        table: "layer_1",
+        columns: [{ name: "id", type: "VARCHAR", kind: "scalar" }],
+        where: `"b3_h_dak_max" > 10`,
+        format: "csv",
+        outFile: "x.csv",
+        rootTypes: ["Building"],
+      }),
+    ).toBe(
+      'COPY (SELECT "id" FROM "layer_1" WHERE COALESCE("feature_id", "id") IN (SELECT COALESCE("feature_id", "id") FROM "layer_1" WHERE "b3_h_dak_max" > 10) AND COALESCE("feature_id", "id") IN (SELECT "id" FROM "layer_1" WHERE "parents" IS NULL AND "object_type" IN (\'Building\'))) TO \'x.csv\' (FORMAT csv, HEADER)',
+    );
+  });
+
+  it("carries the root types with no filter of their own", () => {
+    expect(
+      buildAttributeExportSql({
+        table: "layer_1",
+        columns: [{ name: "id", type: "VARCHAR", kind: "scalar" }],
+        where: null,
+        format: "json",
+        outFile: "x.json",
+        rootTypes: ["Building", "Bridge"],
+      }),
+    ).toBe(
+      'COPY (SELECT "id" FROM "layer_1" WHERE COALESCE("feature_id", "id") IN (SELECT "id" FROM "layer_1" WHERE "parents" IS NULL AND "object_type" IN (\'Building\', \'Bridge\'))) TO \'x.json\' (FORMAT json, ARRAY true)',
+    );
+  });
+
+  it("emits no predicate at all for `null` — every type, no self-join", () => {
+    expect(
+      buildAttributeExportSql({
+        table: "layer_1",
+        columns: [{ name: "id", type: "VARCHAR", kind: "scalar" }],
+        where: null,
+        format: "csv",
+        outFile: "x.csv",
+        rootTypes: null,
+      }),
+    ).not.toContain("WHERE");
   });
 
   it("drops a blob column from every format", () => {
@@ -86,8 +138,11 @@ describe("buildAttributeExportSql", () => {
         where: null,
         format: "csv",
         outFile: "x.csv",
+        rootTypes: null,
       }),
-    ).toBe('COPY (SELECT "id" FROM "layer_1") TO \'x.csv\' (FORMAT csv)');
+    ).toBe(
+      'COPY (SELECT "id" FROM "layer_1") TO \'x.csv\' (FORMAT csv, HEADER)',
+    );
   });
 });
 
@@ -216,5 +271,48 @@ describe("buildCityParquetModuleSql", () => {
         moduleTypes: ["O'dd"],
       }),
     ).toContain(`IN ('O''dd')`);
+  });
+});
+
+describe("exportColumnNames", () => {
+  it("names exactly the columns the projection keeps, in order", () => {
+    expect(exportColumnNames(COLUMNS, "csv")).toEqual([
+      "id",
+      "feature_id",
+      "object_type",
+      "parents",
+      "b3_h_dak_max",
+    ]);
+  });
+
+  it("omits a blob, which no format writes", () => {
+    expect(
+      exportColumnNames(
+        [
+          { name: "id", type: "VARCHAR", kind: "scalar" },
+          { name: "geometry_lod2_2", type: "BLOB", kind: "blob" },
+        ],
+        "csv",
+      ),
+    ).toEqual(["id"]);
+  });
+});
+
+describe("buildRootTypeWhere", () => {
+  it("is the SAME predicate both export routes use", () => {
+    const predicate = buildRootTypeWhere("layer_1", ["Building"]);
+    expect(predicate).toBe(
+      'COALESCE("feature_id", "id") IN (SELECT "id" FROM "layer_1" WHERE "parents" IS NULL AND "object_type" IN (\'Building\'))',
+    );
+    // The module SQL is built from it, so the two cannot drift apart.
+    expect(
+      buildCityParquetModuleSql({
+        schema: "exp_1",
+        module: "building",
+        scratchSchema: "exp_1_src",
+        table: "layer_1",
+        moduleTypes: ["Building"],
+      }),
+    ).toContain(predicate);
   });
 });

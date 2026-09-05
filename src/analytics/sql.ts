@@ -433,6 +433,33 @@ export function buildRootTypesSql(table: string): string {
   return `SELECT DISTINCT "object_type" AS "value" FROM ${quoteIdent(table)} WHERE "parents" IS NULL AND "object_type" IS NOT NULL ORDER BY 1`;
 }
 
+/**
+ * The rows whose FEATURE ROOT is one of `types`, as a WHERE predicate.
+ *
+ * Feature-scoped for the same reason every other predicate here is: a
+ * BuildingPart carries the geometry and no `object_type` worth filtering on,
+ * so asking each ROW what it is would drop every part of every building the
+ * user did ask for. The question is asked of the row's ROOT — `parents IS
+ * NULL` — and answered for the whole feature.
+ *
+ * ONE definition, used by both export routes: the attribute formats AND the
+ * CityParquet module tables. They were written twice and diverged immediately
+ * — the attribute path simply ignored the type selection — and two spellings
+ * of "these types" is how a CSV and a package of the same choice come back
+ * holding different objects.
+ *
+ * `types` must be non-empty: `IN ()` is a SYNTAX error, and the callers each
+ * have a better answer for the empty case than a broken statement (a refusal
+ * in the exporter, `WHERE FALSE` for an empty module table).
+ */
+export function buildRootTypeWhere(
+  table: string,
+  types: ReadonlyArray<string>,
+): string {
+  const list = types.map((v) => quoteLiteral(v)).join(", ");
+  return `COALESCE("feature_id", "id") IN (SELECT "id" FROM ${quoteIdent(table)} WHERE "parents" IS NULL AND "object_type" IN (${list}))`;
+}
+
 // ---------------------------------------------------------------------------
 // Export
 // ---------------------------------------------------------------------------
@@ -473,9 +500,33 @@ function exportProjection(
  * JSON needs `ARRAY true`: without it DuckDB writes newline-delimited objects
  * (JSONL), which `JSON.parse` and every "load this JSON" tool reject, and the
  * user asked for a `.json` file.
+ *
+ * CSV spells `HEADER` even though it is the current default: the header line
+ * is what the read-back is CHECKED against ({@link exportColumnNames}), so a
+ * default that changed under us would turn every CSV export into a refusal
+ * with a message about columns. An option we depend on is an option we write.
  */
 function copyFormatOptions(format: AttributeExportFormat): string {
-  return format === "json" ? "FORMAT json, ARRAY true" : `FORMAT ${format}`;
+  if (format === "json") return "FORMAT json, ARRAY true";
+  if (format === "csv") return "FORMAT csv, HEADER";
+  return `FORMAT ${format}`;
+}
+
+/**
+ * The column names the file will carry, in order.
+ *
+ * Derived through {@link exportProjection} itself rather than re-stating its
+ * rules, so the SELECT and the header check cannot drift: whatever the
+ * projection drops (a BLOB) is absent here too, and a `to_json(x) AS x` still
+ * names `x`.
+ */
+export function exportColumnNames(
+  columns: ReadonlyArray<ColumnInfo>,
+  format: AttributeExportFormat,
+): ReadonlyArray<string> {
+  return columns
+    .filter((column) => exportProjection(column, format) !== null)
+    .map((column) => column.name);
 }
 
 /**
@@ -492,13 +543,32 @@ export function buildAttributeExportSql(input: {
   readonly where: string | null;
   readonly format: AttributeExportFormat;
   readonly outFile: string;
+  /**
+   * The object types to keep, or `null` for every type in the layer.
+   *
+   * `null` rather than "the full list" on purpose: a predicate naming every
+   * type the layer has is a self-join that filters nothing, and the caller
+   * ({@link runExport}) is the only place that knows whether the selection is
+   * a strict subset. An EMPTY array is not accepted — `IN ()` is a syntax
+   * error and "export none of it" is a refusal, not a query.
+   */
+  readonly rootTypes: ReadonlyArray<string> | null;
 }): string {
   const projections = input.columns
     .map((column) => exportProjection(column, input.format))
     .filter((p): p is string => p !== null);
   const select = projections.length === 0 ? "1" : projections.join(", ");
   const scope = buildFeatureScopeWhere(input.table, input.where);
-  const whereClause = scope === null ? "" : ` WHERE ${scope}`;
+  // Both halves are feature-scoped, so they AND cleanly: the filter says which
+  // features matched, the type list says which kinds are wanted, and a part
+  // follows its root through either.
+  const types =
+    input.rootTypes === null || input.rootTypes.length === 0
+      ? null
+      : buildRootTypeWhere(input.table, input.rootTypes);
+  const predicates = [scope, types].filter((p): p is string => p !== null);
+  const whereClause =
+    predicates.length === 0 ? "" : ` WHERE ${predicates.join(" AND ")}`;
   return `COPY (SELECT ${select} FROM ${quoteIdent(input.table)}${whereClause}) TO ${quoteLiteral(input.outFile)} (${copyFormatOptions(input.format)})`;
 }
 
@@ -592,8 +662,6 @@ export function buildCityParquetModuleSql(input: {
   readonly table: string;
   readonly moduleTypes: ReadonlyArray<string>;
 }): string {
-  const t = quoteIdent(input.table);
-  const types = input.moduleTypes.map((v) => quoteLiteral(v)).join(", ");
   // `IN ()` is a SYNTAX error, so an empty module would take the whole export
   // down at the first statement. `WHERE FALSE` is the honest reading of "no
   // types belong to this module": an empty table, and the package still
@@ -601,6 +669,6 @@ export function buildCityParquetModuleSql(input: {
   const modulePredicate =
     input.moduleTypes.length === 0
       ? "FALSE"
-      : `COALESCE("feature_id", "id") IN (SELECT "id" FROM ${t} WHERE "parents" IS NULL AND "object_type" IN (${types}))`;
+      : buildRootTypeWhere(input.table, input.moduleTypes);
   return `CREATE TABLE ${quoteIdent(input.schema)}.${quoteIdent(input.module)} AS SELECT * FROM ${quoteIdent(input.scratchSchema)}.${quoteIdent(CITYPARQUET_SOURCE_TABLE)} WHERE ${modulePredicate}`;
 }

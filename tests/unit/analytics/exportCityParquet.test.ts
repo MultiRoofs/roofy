@@ -302,6 +302,48 @@ describe("CityParquet package export", () => {
     ]);
   });
 
+  it("puts EVERY named output on the cleanup list BEFORE validating any", async () => {
+    // A validation failure on the first file used to throw with the rest of
+    // the package still in the VFS and nothing left holding their names, so a
+    // FAILED export of a large city leaked more than a successful one did.
+    badFile = { name: "building.parquet", bytes: new Uint8Array([0x2a]) };
+    await expect(runExport(request())).rejects.toThrow(
+      /DuckDB produced no output for/,
+    );
+    expect(dropped).toContainEqual(expect.stringMatching(/building\.parquet$/));
+    expect(dropped).toContainEqual(expect.stringMatching(/metadata\.json$/));
+    // …and the one that failed was never read past.
+    expect(readFiles).toHaveLength(1);
+  });
+
+  it("drops the findings table on the way OUT as well", async () => {
+    await runExport(request());
+    expect(
+      sql.filter((s) => s === "DROP TABLE IF EXISTS cityparquet_validation"),
+    ).toHaveLength(2);
+  });
+
+  it("refuses an EPSG code that is not a whole number", async () => {
+    await expect(runExport(request({ epsg: 7415.5 }))).rejects.toThrow(
+      '"7415.5" is not an EPSG code',
+    );
+    // Refused before the first statement: nothing to clean up.
+    expect(sql).toEqual([]);
+    expect(registered).toEqual([]);
+  });
+
+  it("quotes the schema, the output directory and the CRS as literals", async () => {
+    await runExport(request());
+    expect(sql).toContainEqual(
+      expect.stringMatching(/^PRAGMA cityparquet_init\('exp_\d+'\)$/),
+    );
+    expect(sql).toContainEqual(
+      expect.stringMatching(
+        /^SELECT \* FROM cityparquet_write\('exp_\d+', 'exp_\d+', crs => 'EPSG:7415'\)$/,
+      ),
+    );
+  });
+
   it("zips EVERY file the write named — a package missing one is not a package", async () => {
     writeRows = [
       { file: "building.parquet", action: "written", rows: 1, bytes: 10 },

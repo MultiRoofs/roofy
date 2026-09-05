@@ -16,7 +16,7 @@
  * does.
  */
 import { useState } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
   fireEvent,
@@ -25,12 +25,22 @@ import {
   within,
 } from "@testing-library/react";
 import { RuleBuilderTab } from "../../../../src/ui/inspector/RuleBuilderTab";
+import { downloadText } from "../../../../src/platform/download";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import { CellCache } from "@cityjson/navara-flatcitybuf";
 import { buildResidentModel } from "@cityjson/navara-flatcitybuf";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
+
+// The one download seam. Mocked rather than stubbing `URL.createObjectURL` and
+// an anchor: what this tab owes the user is "the rules, as rules.json", and
+// that is exactly the call — `platform/download` has its own test for the
+// anchor.
+vi.mock("../../../../src/platform/download", () => ({
+  downloadBlob: vi.fn(),
+  downloadText: vi.fn(),
+}));
 
 /** The streaming layer's plugin handle, reduced to the one method the UI
  *  reaches: the resident-model merge (which the plugin owns and memoises on
@@ -211,6 +221,42 @@ function TargetHarness({
     />
   );
 }
+
+describe("RuleBuilderTab — exporting rules", () => {
+  it("hands the layer's rules to the one download helper", () => {
+    const rules = [
+      {
+        id: "r1",
+        name: "Tall",
+        enabled: true,
+        logic: "AND" as const,
+        conditions: [],
+        color: "#ff0000",
+      },
+    ];
+    useLayerStore.setState({
+      layers: [baseLayer({ rules })],
+      activeLayerId: "L",
+    });
+
+    render(
+      <RuleBuilderTab
+        model={emptyModel()}
+        layerId="L"
+        layerOptions={[{ id: "L", name: "test layer" }]}
+        onSelectLayer={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByText("Export rules"));
+
+    // The STORE's rules, not the prop's, and pretty-printed — the file is
+    // meant to be read and edited by hand.
+    expect(downloadText).toHaveBeenCalledWith(
+      JSON.stringify(rules, null, 2),
+      "rules.json",
+    );
+  });
+});
 
 describe("RuleBuilderTab — target layer picker", () => {
   const twoLayerOptions = [

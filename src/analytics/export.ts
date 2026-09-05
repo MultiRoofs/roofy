@@ -23,7 +23,9 @@ import {
   buildAttributeExportSql,
   buildCityParquetModuleSql,
   buildCityParquetSourceSql,
+  exportColumnNames,
   quoteIdent,
+  quoteLiteral,
   type AttributeExportFormat,
 } from "./sql";
 
@@ -33,6 +35,14 @@ export interface AttributeExportRequest {
   readonly table: string;
   readonly columns: ReadonlyArray<ColumnInfo>;
   readonly where: string | null;
+  /** The TOP-LEVEL types the user chose. Parts follow their root, exactly as
+   *  in the CityParquet route — the two selections are one choice in the
+   *  dialog and must mean one thing here. */
+  readonly rootTypes: ReadonlyArray<string>;
+  /** Every root type the layer has. Only the COMPARISON is interesting: a
+   *  selection equal to this needs no predicate, and emitting one anyway is a
+   *  self-join over the whole table for no filtering at all. */
+  readonly allRootTypes: ReadonlyArray<string>;
   readonly fileName: string;
 }
 
@@ -139,9 +149,94 @@ export function resetExportCounterForTests(): void {
   exportCounter = 0;
 }
 
+/**
+ * The types to name in the SQL, or `null` for "no predicate".
+ *
+ * A selection covering every type the layer has filters nothing, so it is
+ * emitted as nothing: the predicate is a correlated subquery over the whole
+ * table, and paying for it to keep every row is the sort of cost that turns a
+ * 700 k-row export into a slow one for no reason. An EMPTY selection is a
+ * refusal rather than `IN ()` — a syntax error — or an empty file, which the
+ * user would have to open to discover.
+ */
+function rootTypePredicateTypes(
+  request: AttributeExportRequest,
+): ReadonlyArray<string> | null {
+  const chosen = [...new Set(request.rootTypes)];
+  if (chosen.length === 0) {
+    throw new Error("Choose at least one object type to export.");
+  }
+  const all = new Set(request.allRootTypes);
+  const everyType =
+    chosen.length >= all.size && chosen.every((t) => all.has(t));
+  return everyType ? null : chosen;
+}
+
+/**
+ * One CSV line's fields, respecting RFC 4180 quoting.
+ *
+ * A column name may legitimately hold a comma or a quote (a CityJSON
+ * attribute name is free text), and DuckDB then writes `"a,b"` — splitting on
+ * commas would read that as two columns and refuse a perfectly good file.
+ */
+function csvFields(line: string): string[] {
+  const fields: string[] = [];
+  let field = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (quoted) {
+      if (char !== '"') {
+        field += char;
+      } else if (line[i + 1] === '"') {
+        field += '"';
+        i++;
+      } else {
+        quoted = false;
+      }
+      continue;
+    }
+    if (char === '"') quoted = true;
+    else if (char === ",") {
+      fields.push(field);
+      field = "";
+    } else field += char;
+  }
+  fields.push(field);
+  return fields;
+}
+
+/**
+ * Does the CSV DuckDB wrote carry the columns we asked for?
+ *
+ * `validateExportBytes` proves there IS a header line; this proves it is the
+ * RIGHT one. The pair matters because the `COPY` target is a VFS name and the
+ * VFS is shared: a stale file under a name we thought was fresh reads back as
+ * a perfectly valid CSV of the wrong columns, and the user would only find out
+ * in whatever they opened it with.
+ */
+function csvHeaderMismatch(
+  bytes: Uint8Array,
+  expected: ReadonlyArray<string>,
+): string | null {
+  // A projection of nothing writes `SELECT 1`, whose header is "1" and names
+  // no column of ours — there is nothing to compare it against.
+  if (expected.length === 0) return null;
+  const text = new TextDecoder().decode(bytes);
+  const firstLine = text.slice(0, text.indexOf("\n")).replace(/\r$/, "");
+  const actual = csvFields(firstLine);
+  const same =
+    actual.length === expected.length &&
+    actual.every((name, i) => name === expected[i]);
+  return same
+    ? null
+    : `The CSV DuckDB wrote has the columns ${actual.join(", ")}, not the ${expected.join(", ")} that were asked for.`;
+}
+
 async function exportAttributes(
   request: AttributeExportRequest,
 ): Promise<ExportResult> {
+  const rootTypes = rootTypePredicateTypes(request);
   const outFile = `${nextExportName()}.${request.format}`;
   try {
     const written = await ddl(
@@ -151,6 +246,7 @@ async function exportAttributes(
         where: request.where,
         format: request.format,
         outFile,
+        rootTypes,
       }),
     );
     if (!written.ok) throw new Error(written.message);
@@ -161,6 +257,14 @@ async function exportAttributes(
       await readFile(outFile),
     );
     if (!readback.ok) throw new Error(readback.message);
+
+    if (request.format === "csv") {
+      const mismatch = csvHeaderMismatch(
+        readback.bytes,
+        exportColumnNames(request.columns, "csv"),
+      );
+      if (mismatch !== null) throw new Error(mismatch);
+    }
 
     return {
       blob: new Blob([readback.bytes as BlobPart], {
@@ -245,7 +349,9 @@ export interface CityParquetExportRequest {
 async function validationWarnings(schema: string): Promise<string[]> {
   await ddl("DROP TABLE IF EXISTS cityparquet_validation");
 
-  const validated = await ddl(`PRAGMA cityparquet_validate('${schema}')`);
+  const validated = await ddl(
+    `PRAGMA cityparquet_validate(${quoteLiteral(schema)})`,
+  );
   if (!validated.ok) {
     return [`Validation could not be run: ${validated.message}`];
   }
@@ -293,8 +399,12 @@ async function dropWrittenFile(path: string): Promise<void> {
  * end to end): the export schema must hold ORDINARY tables named for CityGML
  * modules, the source has to be read again through the cityjson reader because
  * the browsing table has no geometry, and the write's own RESULT ROWS name the
- * files it produced — so nothing needs `globFiles`, which lists names that were
- * never created and is fit for cleanup only.
+ * files it produced — which is the ONLY list of them there is. Listing the VFS
+ * is no help: a name that was never created still resolves, to one garbage
+ * byte and no error (the same probe finding {@link validateExportBytes} exists
+ * for), so a directory listing cannot tell a written file from an imaginary
+ * one. Cleanup therefore uses the names the write rows gave us, and nothing
+ * else.
  *
  * The source is read exactly ONCE, into a scratch table in a SEPARATE schema:
  * `cityparquet_init` describes every table in the schema it is handed, so the
@@ -304,6 +414,16 @@ async function dropWrittenFile(path: string): Promise<void> {
 async function exportCityParquet(
   request: CityParquetExportRequest,
 ): Promise<ExportResult> {
+  // An EPSG code reaches the SQL as part of a literal, and `crs =>
+  // 'EPSG:7415.5'` is not a CRS the writer can resolve — nor is `EPSG:NaN`,
+  // which is what a `Number("")` upstream would spell. Refused here, in the
+  // one place that knows the writer's argument shape.
+  if (!Number.isInteger(request.epsg) || request.epsg <= 0) {
+    throw new Error(
+      `"${String(request.epsg)}" is not an EPSG code, so a CityParquet package cannot be written for this layer.`,
+    );
+  }
+
   const base = nextExportName().replace("export_", "exp_");
   const schema = base;
   const scratchSchema = `${base}_src`;
@@ -361,26 +481,39 @@ async function exportCityParquet(
     // ITS OWN STATEMENT, never batched with another: `cityparquet_init` is
     // what stamps the schema's `__cityparquet` bookkeeping, and a batched
     // PRAGMA is not reliably applied before the statement beside it runs.
-    const initialised = await ddl(`PRAGMA cityparquet_init('${schema}')`);
+    const initialised = await ddl(
+      `PRAGMA cityparquet_init(${quoteLiteral(schema)})`,
+    );
     if (!initialised.ok) throw new Error(initialised.message);
 
     const warnings = await validationWarnings(schema);
 
     const written = await runQuery(
-      `SELECT * FROM cityparquet_write('${schema}', '${outDir}', crs => 'EPSG:${request.epsg}')`,
+      `SELECT * FROM cityparquet_write(${quoteLiteral(schema)}, ${quoteLiteral(outDir)}, crs => ${quoteLiteral(`EPSG:${request.epsg}`)})`,
     );
     if (!written.ok) throw new Error(written.message);
 
-    // The write's own rows name the files. `globFiles` works in the browser but
-    // lists names that were never created, so it is fit for cleanup and not for
-    // discovery. The directory argument carries NO trailing slash: with one,
-    // the writer produces a second, duplicated set of paths.
-    const entries: Record<string, Uint8Array> = {};
+    // TWO passes, and the order matters. EVERY name the write reported is put
+    // on the cleanup list FIRST, before a single byte is read: a validation
+    // failure on the first output would otherwise throw with the rest of the
+    // package still sitting in the VFS, and nothing would ever remove it —
+    // a failed export of a large city would leak more memory than a successful
+    // one. The directory argument carries NO trailing slash: with one, the
+    // writer produces a second, duplicated set of paths.
+    const names: string[] = [];
     for (const row of written.rows) {
       const name = writtenFileName(row, outDir);
       if (name === null) continue;
+      names.push(name);
+      writtenFiles.push(`${outDir}/${name}`);
+    }
+    if (names.length === 0) {
+      throw new Error("The CityParquet writer produced no files.");
+    }
+
+    const entries: Record<string, Uint8Array> = {};
+    for (const name of names) {
       const path = `${outDir}/${name}`;
-      writtenFiles.push(path);
       // EVERY named file must read back and validate: a package missing one of
       // its object tables — or carrying a `metadata.json` that does not parse —
       // is not a package, and the missing-name read gives back one garbage byte
@@ -393,9 +526,6 @@ async function exportCityParquet(
       if (!readback.ok) throw new Error(readback.message);
       entries[name] = readback.bytes;
     }
-    if (Object.keys(entries).length === 0) {
-      throw new Error("The CityParquet writer produced no files.");
-    }
 
     return {
       blob: new Blob([zipSync(entries) as BlobPart], {
@@ -406,7 +536,11 @@ async function exportCityParquet(
     };
   } finally {
     // ALWAYS: a half-built schema, a scratch copy of the whole model and a
-    // multi-megabyte source buffer must not outlive a failed export.
+    // multi-megabyte source buffer must not outlive a failed export. The
+    // findings table is dropped at BOTH ends — before the validation so a
+    // previous run's rows are not read as this one's, and here so a failed
+    // export does not leave rows on the connection for the next one to find.
+    await ddl("DROP TABLE IF EXISTS cityparquet_validation");
     await ddl(`DROP SCHEMA IF EXISTS ${quoteIdent(schema)} CASCADE`);
     await ddl(`DROP SCHEMA IF EXISTS ${quoteIdent(scratchSchema)} CASCADE`);
     await dropBuffer(sourceName);

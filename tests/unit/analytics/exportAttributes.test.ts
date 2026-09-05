@@ -13,7 +13,9 @@ function sampleBytes(name: string): Uint8Array {
     return new TextEncoder().encode("PAR1......PAR1");
   }
   if (name.endsWith(".json")) return new TextEncoder().encode('[{"id":"B1"}]');
-  return new TextEncoder().encode("id,object_type\nB1,Building\n");
+  return new TextEncoder().encode(
+    "id,feature_id,object_type,b3_h_dak_max\nB1,B1,Building,12.5\n",
+  );
 }
 
 vi.mock("../../../src/analytics/duckdb", () => ({
@@ -47,6 +49,12 @@ vi.mock("../../../src/analytics/duckdb", () => ({
 const { resetExportCounterForTests, runExport, validateExportBytes } =
   await import("../../../src/analytics/export");
 import type { ColumnInfo } from "../../../src/analytics/columnKind";
+
+/** The layer's whole set — a selection equal to it needs no predicate. */
+const ROOT_TYPES: ReadonlyArray<string> = [
+  "Building",
+  "SolitaryVegetationObject",
+];
 
 const COLUMNS: ReadonlyArray<ColumnInfo> = [
   { name: "id", type: "VARCHAR", kind: "scalar" },
@@ -153,13 +161,15 @@ describe("attribute export", () => {
       format: "csv",
       table: "layer_1",
       columns: COLUMNS,
+      rootTypes: ROOT_TYPES,
+      allRootTypes: ROOT_TYPES,
       where: null,
       fileName: "delft.csv",
     });
 
     expect(sql).toHaveLength(1);
     expect(sql[0]).toMatch(
-      /^COPY \(SELECT "id", "feature_id", "object_type", "b3_h_dak_max" FROM "layer_1"\) TO 'export_1\.csv' \(FORMAT csv\)$/,
+      /^COPY \(SELECT "id", "feature_id", "object_type", "b3_h_dak_max" FROM "layer_1"\) TO 'export_1\.csv' \(FORMAT csv, HEADER\)$/,
     );
     expect(dropped).toEqual(["export_1.csv"]);
     expect(result.fileName).toBe("delft.csv");
@@ -173,6 +183,8 @@ describe("attribute export", () => {
       format: "parquet",
       table: "layer_1",
       columns: COLUMNS,
+      rootTypes: ROOT_TYPES,
+      allRootTypes: ROOT_TYPES,
       where: null,
       fileName: "delft.parquet",
     });
@@ -186,6 +198,8 @@ describe("attribute export", () => {
       format: "json",
       table: "layer_1",
       columns: COLUMNS,
+      rootTypes: ROOT_TYPES,
+      allRootTypes: ROOT_TYPES,
       where: `"b3_h_dak_max" > 10`,
       fileName: "delft.json",
     });
@@ -200,6 +214,8 @@ describe("attribute export", () => {
       format: "csv",
       table: "layer_1",
       columns: COLUMNS,
+      rootTypes: ROOT_TYPES,
+      allRootTypes: ROOT_TYPES,
       where: null,
       fileName: "a.csv",
     });
@@ -209,6 +225,8 @@ describe("attribute export", () => {
       format: "csv",
       table: "layer_1",
       columns: COLUMNS,
+      rootTypes: ROOT_TYPES,
+      allRootTypes: ROOT_TYPES,
       where: null,
       fileName: "b.csv",
     });
@@ -223,6 +241,8 @@ describe("attribute export", () => {
         format: "csv",
         table: "layer_1",
         columns: COLUMNS,
+        rootTypes: ROOT_TYPES,
+        allRootTypes: ROOT_TYPES,
         where: null,
         fileName: "a.csv",
       }),
@@ -238,6 +258,8 @@ describe("attribute export", () => {
         format: "csv",
         table: "layer_1",
         columns: COLUMNS,
+        rootTypes: ROOT_TYPES,
+        allRootTypes: ROOT_TYPES,
         where: null,
         fileName: "a.csv",
       }),
@@ -255,6 +277,8 @@ describe("attribute export", () => {
         format: "csv",
         table: "layer_1",
         columns: COLUMNS,
+        rootTypes: ROOT_TYPES,
+        allRootTypes: ROOT_TYPES,
         where: null,
         fileName: "a.csv",
       }),
@@ -269,9 +293,113 @@ describe("attribute export", () => {
         format: "parquet",
         table: "layer_1",
         columns: COLUMNS,
+        rootTypes: ROOT_TYPES,
+        allRootTypes: ROOT_TYPES,
         where: null,
         fileName: "a.parquet",
       }),
     ).rejects.toThrow("DuckDB produced no output for export_1.parquet");
+  });
+
+  it("carries a STRICT SUBSET of the types into the SQL", async () => {
+    // The whole point of the fix: the dialog's type tick-boxes used to reach
+    // the CityParquet route only, so a CSV of "Buildings" quietly held the
+    // vegetation as well.
+    await runExport({
+      kind: "attributes",
+      format: "csv",
+      table: "layer_1",
+      columns: COLUMNS,
+      rootTypes: ["Building"],
+      allRootTypes: ROOT_TYPES,
+      where: null,
+      fileName: "a.csv",
+    });
+    expect(sql[0]).toContain(
+      'WHERE COALESCE("feature_id", "id") IN (SELECT "id" FROM "layer_1" WHERE "parents" IS NULL AND "object_type" IN (\'Building\'))',
+    );
+  });
+
+  it("emits NO type predicate when every type is chosen", async () => {
+    await runExport({
+      kind: "attributes",
+      format: "csv",
+      table: "layer_1",
+      columns: COLUMNS,
+      rootTypes: [...ROOT_TYPES],
+      allRootTypes: ROOT_TYPES,
+      where: null,
+      fileName: "a.csv",
+    });
+    expect(sql[0]).not.toContain('"parents" IS NULL');
+  });
+
+  it("refuses an EMPTY selection rather than writing `IN ()`", async () => {
+    await expect(
+      runExport({
+        kind: "attributes",
+        format: "csv",
+        table: "layer_1",
+        columns: COLUMNS,
+        rootTypes: [],
+        allRootTypes: ROOT_TYPES,
+        where: null,
+        fileName: "a.csv",
+      }),
+    ).rejects.toThrow("Choose at least one object type to export.");
+    // Refused before anything was written, so no VFS name was burned.
+    expect(sql).toEqual([]);
+  });
+
+  it("spells HEADER, and checks the header it gets back", async () => {
+    await runExport({
+      kind: "attributes",
+      format: "csv",
+      table: "layer_1",
+      columns: COLUMNS,
+      rootTypes: ROOT_TYPES,
+      allRootTypes: ROOT_TYPES,
+      where: null,
+      fileName: "a.csv",
+    });
+    expect(sql[0]).toContain("(FORMAT csv, HEADER)");
+  });
+
+  it("refuses a CSV whose header is not the columns asked for", async () => {
+    // A stale file under a name we believed was fresh reads back as a
+    // perfectly valid CSV — of the wrong columns.
+    fileBytes = new TextEncoder().encode("wrong,columns\n1,2\n");
+    await expect(
+      runExport({
+        kind: "attributes",
+        format: "csv",
+        table: "layer_1",
+        columns: COLUMNS,
+        rootTypes: ROOT_TYPES,
+        allRootTypes: ROOT_TYPES,
+        where: null,
+        fileName: "a.csv",
+      }),
+    ).rejects.toThrow(
+      "The CSV DuckDB wrote has the columns wrong, columns, not the id, feature_id, object_type, b3_h_dak_max that were asked for.",
+    );
+    expect(dropped).toEqual(["export_1.csv"]);
+  });
+
+  it("reads a quoted header field as ONE column", async () => {
+    // An attribute name may hold a comma; DuckDB quotes it, and splitting on
+    // commas would refuse a good file.
+    fileBytes = new TextEncoder().encode('"a,b"\n1\n');
+    const result = await runExport({
+      kind: "attributes",
+      format: "csv",
+      table: "layer_1",
+      columns: [{ name: "a,b", type: "VARCHAR", kind: "scalar" }],
+      rootTypes: ROOT_TYPES,
+      allRootTypes: ROOT_TYPES,
+      where: null,
+      fileName: "a.csv",
+    });
+    expect(result.blob.size).toBeGreaterThan(0);
   });
 });
