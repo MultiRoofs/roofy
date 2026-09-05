@@ -409,7 +409,7 @@ export interface ProjectSnapshot {
 export class UnsupportedSnapshotVersionError extends Error {
   constructor(readonly found: string) {
     super(
-      `This saved workspace was created by an older version of Urbis (v${found}) and can no longer be restored. Saved cameras changed from scene coordinates to geographic coordinates; please re-save from the current version.`,
+      `This saved workspace was created by an older version of Roofy (v${found}) and can no longer be restored. Saved cameras changed from scene coordinates to geographic coordinates; please re-save from the current version.`,
     );
     this.name = "UnsupportedSnapshotVersionError";
   }

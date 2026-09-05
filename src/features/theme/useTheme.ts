@@ -10,7 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 
 export type Theme = "dark" | "light";
 
-const STORAGE_KEY = "urbis-theme";
+const STORAGE_KEY = "roofy-theme";
 
 function getInitialTheme(): Theme {
   const stored = localStorage.getItem(STORAGE_KEY);
