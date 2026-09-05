@@ -85,6 +85,7 @@ import {
   closeAllStreamingLayers,
   closeStreamingLayer,
 } from "../features/streaming/openStreamingLayer";
+import { CITY_APPEARANCE } from "./cityAppearance";
 import {
   allInteractionHandles,
   interactionHandles,
@@ -1437,7 +1438,11 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           // holds the view before init has started, so the ordered list is the
           // ONLY registration point.
           const defaultPlugin = new DefaultPlugin();
-          const cityPlugin = new CityJSONPlugin();
+          // Both plugins take the SAME brand appearance, so a picked surface is
+          // painted identically whether it came from a file or a stream.
+          const cityPlugin = new CityJSONPlugin({
+            appearance: CITY_APPEARANCE,
+          });
           // Streaming is the one OPTIONAL capability of the three: a build (or
           // a browser) in which this constructor throws must still show static
           // layers, so the failure is recorded and re-raised only at the point
@@ -1454,6 +1459,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
                 width: container.clientWidth,
                 height: container.clientHeight,
               }),
+              appearance: CITY_APPEARANCE,
             });
             flatPluginErrorRef.current = null;
           } catch (error) {

@@ -27,7 +27,11 @@
  * registry, no throw). One bad URL must not take the viewport down, and
  * leaving the entry absent means the next pass retries it.
  */
-import { styleColorNumber } from "../features/geoLayers/geoLayerStyle";
+import {
+  hexColorToNumber,
+  styleColorNumber,
+} from "../features/geoLayers/geoLayerStyle";
+import { CITY_HIGHLIGHT_COLOR_HEX } from "./cityAppearance";
 import type { GeoLayer } from "../features/geoLayers/geoLayerStore";
 import {
   geoLayerDescription,
@@ -83,14 +87,16 @@ export interface GeoLayerHandle {
 }
 
 /**
- * The accent a picked geospatial feature is drawn in — the SAME orange the
- * city meshes highlight a selected surface with
- * (`HIGHLIGHT_COLOR_HEX` in `navara-cityjson/src/surfaceColorLayers.ts`).
+ * The accent a picked geospatial feature is drawn in — the SAME colour the
+ * city meshes highlight a selected surface with, read from the one brand
+ * appearance both plugins are constructed with (`scene/cityAppearance.ts`).
  * Deliberately shared: a user selects a building and a GeoJSON polygon in the
  * same viewport, and two different "this is selected" colours would read as two
  * different states.
  */
-export const GEO_HIGHLIGHT_COLOR_HEX = 0xe8973f;
+export const GEO_HIGHLIGHT_COLOR_HEX = hexColorToNumber(
+  CITY_HIGHLIGHT_COLOR_HEX,
+) as number;
 
 /** Engine `Color` factory. `EvaluatedValue.color` must be a `Color` INSTANCE
  *  and this module is engine-free, so the viewport passes the constructor in

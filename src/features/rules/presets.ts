@@ -6,8 +6,9 @@
  *
  * Colours are the brand's rooftop-function hues (`--layer-*` in brand.css):
  * flat roofs take the water blue, the two sun-facing presets the energy
- * ambers, steep roofs the social orange and large roofs the nature lime — so
- * a legend of presets reads in the same palette as the mark.
+ * ambers, steep roofs the social orange and large roofs lime-700 — lime-500
+ * itself is the SELECTION colour (`scene/cityAppearance.ts`), and a preset
+ * equal to it would make a selected surface look unselected.
  */
 
 import type { Rule } from "./types";
@@ -65,7 +66,7 @@ export const RULE_PRESETS: ReadonlyArray<RulePreset> = [
     create: () => ({
       id: crypto.randomUUID(),
       name: "Large roofs",
-      color: "#a7e32b",
+      color: "#7cb518",
       logic: "AND",
       conditions: [{ field: "areaSqM", operator: ">", value: 50 }],
       enabled: true,

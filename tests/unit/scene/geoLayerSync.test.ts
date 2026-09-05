@@ -27,7 +27,7 @@ import {
   DEFAULT_GEO_LAYER_STYLE,
   hexColorToNumber,
 } from "../../../src/features/geoLayers/geoLayerStyle";
-import { HIGHLIGHT_COLOR_HEX } from "@cityjson/navara-cityjson";
+import { CITY_HIGHLIGHT_COLOR_HEX } from "../../../src/scene/cityAppearance";
 
 /** A feature-set listener the fake layer handle recorded, so a test can play
  *  the engine and fire `featureCreated`/`featureUpdated` itself. */
@@ -430,7 +430,9 @@ describe("GEO_HIGHLIGHT_COLOR_HEX", () => {
     // silently leave a picked GeoJSON polygon a different orange. The import is
     // engine-free (`@cityjson/navara-cityjson`'s main barrel is Node-safe by
     // construction), and the submodule spells the value as a CSS hex string.
-    expect(GEO_HIGHLIGHT_COLOR_HEX).toBe(hexColorToNumber(HIGHLIGHT_COLOR_HEX));
+    expect(GEO_HIGHLIGHT_COLOR_HEX).toBe(
+      hexColorToNumber(CITY_HIGHLIGHT_COLOR_HEX),
+    );
   });
 });
 
