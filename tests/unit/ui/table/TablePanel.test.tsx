@@ -360,6 +360,21 @@ describe("TablePanel states", () => {
     );
   });
 
+  it("ENABLES the Filter map toggle for a static layer with a ready table", async () => {
+    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    panel();
+    const toggle = screen.getByLabelText("Filter map") as HTMLInputElement;
+    await waitFor(() => expect(toggle.disabled).toBe(false));
+    // No streaming reason on a layer that is not streaming.
+    expect(toggle.closest("label")!.title).toBe("");
+
+    fireEvent.click(toggle);
+    expect(useQueryStore.getState().queries.L?.syncToMap).toBe(true);
+  });
+
   it("tells the registry the panel is open, and shut on unmount", async () => {
     panel();
     await waitFor(() =>

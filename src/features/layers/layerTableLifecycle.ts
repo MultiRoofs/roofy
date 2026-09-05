@@ -96,6 +96,11 @@ export function installLayerTableLifecycle(): () => void {
         // rebuild for a grid nobody is looking at any more is the exact cost
         // this gate exists to avoid.
         if (!rebuildWanted()) return;
+        // The drawn set was computed from the table this rebuild REPLACES.
+        // The panel's own effect recomputes it once the new table lands;
+        // leaving the old ids in place would draw a filter over a table that
+        // no longer exists.
+        useLayerStore.getState().setVisibleObjectIds(layerId, null);
         void enqueueLayerTable(layerId, residentTableSource(layerId));
       }, STREAM_REBUILD_DEBOUNCE_MS),
     );
@@ -154,6 +159,9 @@ export function installLayerTableLifecycle(): () => void {
       // was shut, can still have a timer pending. Its fire-time gate would find
       // the panel open AGAIN and rebuild a second time, moments after this one.
       cancelRebuild(layer.id);
+      // Same reason as `scheduleRebuild`: the ids belong to the table being
+      // replaced.
+      useLayerStore.getState().setVisibleObjectIds(layer.id, null);
       void enqueueLayerTable(layer.id, residentTableSource(layer.id));
     }
   });

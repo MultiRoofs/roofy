@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { DuckDBStatus } from "../../analytics/duckdb";
 import { useLayerTableStore } from "../../analytics/layerTables";
 import { useLayerStore } from "../../features/layers/layerStore";
+import { syncFilterToMap } from "../../features/query/mapFilterSync";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 import { useSelectionStore } from "../../features/selection/selectionStore";
 import type { Selection } from "../../domain/selection/types";
@@ -69,6 +70,14 @@ export function TablePanel({
     useLayerTableStore.getState().setTablePanelOpen(true);
     return () => useLayerTableStore.getState().setTablePanelOpen(false);
   }, []);
+
+  // The applied filter, the toggle and the table identity are the three things
+  // that can change what the map should draw. Re-running on the TABLE object
+  // (not just its name) is what clears a stale set after a rebuild.
+  useEffect(() => {
+    if (layerId === null) return;
+    void syncFilterToMap(layerId);
+  }, [layerId, query?.applied, query?.syncToMap, view.table]);
 
   // MEMOISED: a new Set on every render gives `DataGrid` a new prop identity,
   // which defeats the `React.memo` below — and this component re-renders on
