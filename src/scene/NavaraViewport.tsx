@@ -41,10 +41,8 @@ import {
 import ThreeView, {
   Color,
   ColorMap,
-  degreeToRadian,
   geodeticToVector3,
   getPickRay,
-  radianToDegree,
   TERRARIUM_ELEVATION_DECODER,
   vector3ToGeodetic,
   type PickedFeature,
@@ -447,11 +445,24 @@ function applyToEngine(what: string, mutate: () => void): void {
  * clipped the whole scene to white. See
  * docs/superpowers/research/2026-08-04-overbright-scene-diagnosis.md.
  *
+ * `view.lit = false` is the OTHER HALF of that rule, and it is the engine's own
+ * pairing since 0.1.0 (the realistic-atmosphere guide: "irradiance does not
+ * add a light; it re-lights the G-buffer after geometry is drawn — set
+ * `view.lit = false`, or the scene is lit twice and washes out"). The city
+ * meshes were already unlit by construction; what this switch changes is
+ * everything the ENGINE draws with a lit material — the terrain, the draped
+ * basemap, Google's tiles, vector layers — which on 0.0.5 reached the pass
+ * forward-lit AND were re-lit by it. With `lit = false` their materials output
+ * plain albedo while still writing normals and the shadow buffer, so the whole
+ * frame is one calibration. A per-mesh `lit` override exists (`MeshConfig.lit`)
+ * for anything that must stay forward-lit; nothing here needs it.
+ *
  * `useNormalBuffer: true` DEPENDS ON THE TERRAIN LAYER — do not remove one
  * without the other. In irradiance mode the pass reads a per-fragment normal
- * from the MRT g-buffer's normal attachment, and the globe contributes normals
- * to it only when a terrain (or hillshade) layer supplies them; the `useNormal`
- * view option that would otherwise provide them does not exist in 0.0.5.
+ * from the g-buffer's normal attachment (allocated on demand since 0.1.0: the
+ * aerial-perspective descriptor declares `requiredBuffers = ["normal"]` and
+ * re-binds the texture every frame), and the globe contributes normals to it
+ * only when a terrain (or hillshade) layer supplies them.
  *
  * Before `terrain.ts` was added, that attachment was unusable and this had to
  * be `false`: with a raster basemap on the globe every texel read back as
@@ -470,7 +481,13 @@ function applyToEngine(what: string, mutate: () => void): void {
  * Reported rather than propagated, like every other engine push in this file:
  * an engine build that refuses the update leaves a dim scene, not a dead one.
  */
-function enableAtmosphericLighting(scene: PhotorealScene | undefined): void {
+function enableAtmosphericLighting(
+  view: Pick<ThreeView, "lit">,
+  scene: PhotorealScene | undefined,
+): void {
+  applyToEngine("the scene-level unlit (deferred lighting) mode", () => {
+    view.lit = false;
+  });
   const aerialPerspective = scene?.aerialPerspective;
   if (!aerialPerspective) return;
   applyToEngine("the atmospheric irradiance lighting mode", () =>
@@ -1502,7 +1519,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
                 // rather than a call next to the constructor. The RETURN VALUE
                 // is kept: those handles are the only way to drive the sky,
                 // the sun and the post chain afterwards (see PhotorealScene).
-                afterInit: () => {
+                afterInit: (liveView) => {
                   const scene = defaultPlugin.addDefaultPhotorealScene() as
                     | PhotorealScene
                     | undefined;
@@ -1515,7 +1532,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
                   // through the previous engine's handles over a live view.
                   if (cancelled) return;
                   photorealRef.current = scene ?? null;
-                  enableAtmosphericLighting(scene);
+                  // The session hands the hook its `NavaraViewLike` slice; it
+                  // IS the `ThreeView` built by `createView` above.
+                  enableAtmosphericLighting(liveView as ThreeView, scene);
                 },
               },
               { key: "cityjson", instance: cityPlugin },
@@ -2158,7 +2177,17 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
      * rejection with no stack pointing here (Task C13 fold-in); the no-plugin
      * branch above, by contrast, throws synchronously into its caller.
      */
-    const withSettleSuppressed = useCallback((move: () => void): void => {
+    // `move` may return the engine's `flyTo` promise, and every flight here
+    // does: since Navara 0.1.0 that promise settles at the END of the flight
+    // (`true`), or when a newer flight or a `setCamera` supersedes it
+    // (`false`, never a rejection), so `suppressSettleThenCommit` holds the
+    // gate for the whole animation and fires the owed commit `FLYTO_QUIET_MS`
+    // after the camera has landed — the destination the user is looking at,
+    // not a point along the way. 0.0.5's `flyTo` returned nothing, so the
+    // quiet window used to start at TAKE-OFF and could expire mid-flight on a
+    // long one. Returning the promise from every site, rather than `void`ing
+    // it at some, is what keeps a search flight and a fit on one timing.
+    const withSettleSuppressed = useCallback((move: () => unknown): void => {
       const plugin = flatPluginRef.current;
       if (!plugin) {
         move();
@@ -2287,7 +2316,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           roll: 0,
         };
         withSettleSuppressed(() =>
-          view.flyTo(next, durationMs ?? SEARCH_FLIGHT_MS),
+          view.flyTo(next, { duration: durationMs ?? SEARCH_FLIGHT_MS }),
         );
       },
       [withSettleSuppressed],
@@ -2658,9 +2687,12 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       let lights: unknown[];
       try {
         lights = sites.map((site) => ({
+          // DEGREES: since Navara 0.1.0 every geodetic helper takes and
+          // returns degrees (`flyTo` and `camera.positionGeographic` always
+          // did); the radian conversion 0.0.5 needed here is gone.
           position: geodeticToVector3({
-            lng: degreeToRadian(site.lng),
-            lat: degreeToRadian(site.lat),
+            lng: site.lng,
+            lat: site.lat,
             height: site.height,
           }),
           color: site.color,
@@ -2740,9 +2772,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       const height = (bounds?.maxHeight ?? 0) + PRECIPITATION_HEIGHT_M;
       let mesh: { delete: () => void } | null = null;
       try {
+        // Degrees in, as everywhere in the 0.1.x API.
         const position = geodeticToVector3({
-          lng: degreeToRadian(latLon.lon),
-          lat: degreeToRadian(latLon.lat),
+          lng: latLon.lon,
+          lat: latLon.lat,
           height,
         });
         mesh = view.addMesh(
@@ -2997,19 +3030,16 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
             onCursorPosition(null);
             return;
           }
+          // DEGREES out. Navara 0.1.0 unified its public API on degrees
+          // (`vector3ToGeodetic`, `geodeticToVector3`, the terrain samplers
+          // and `EllipsoidGeodesic` all changed together); 0.0.5 returned
+          // radians here and this call converted. `crsFromGeodetic` takes
+          // degrees, so the value now passes straight through.
           const lle = vector3ToGeodetic(ecef);
           onCursorPosition(
             crsFromGeodetic(
-              // RADIANS in, degrees out. Evidence, not assumption: the B1 spike
-              // placed its probe mesh with the exact inverse of this call —
-              // `geodeticToVector3({ lng: degreeToRadian(site.lng), lat:
-              // degreeToRadian(site.lat), height })` (`src/spike/
-              // navaraMrtSpike.ts`) — and the mesh rendered at the right place
-              // on the globe in the browser. The engine's `LatLngHeight` is
-              // degrees elsewhere in its own API (`flyTo`,
-              // `camera.positionGeographic`), so this must stay explicit.
-              radianToDegree(lle.lng),
-              radianToDegree(lle.lat),
+              lle.lng,
+              lle.lat,
               // ELLIPSOIDAL -> ORTHOMETRIC. The layer sits `heightOffset`
               // metres up because its geodetic heights were raised by the geoid
               // undulation (Global Constraints -> Vertical datum); subtracting
@@ -3023,14 +3053,18 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       };
 
       /**
-       * The last mousemove the ENGINE reported, by object identity.
+       * The last pointermove the ENGINE reported, by object identity.
        *
-       * `convertMouseEventToMapEvent` `Object.assign`s `{ map }` onto the very
-       * DOM event it received and returns `null` when the screen ray misses the
-       * ellipsoid — so the object the engine emits IS the object our own DOM
-       * listener sees afterwards (the engine binds to the canvas, we bind to its
-       * parent, so bubbling puts the engine first). Comparing them is therefore
-       * an exact "did the engine handle this move?" test.
+       * `convertToMapEvent` `Object.assign`s `{ map }` onto the very DOM
+       * `PointerEvent` it received and returns `null` when the screen ray
+       * misses the ellipsoid — so the object the engine emits IS the object our
+       * own DOM listener sees afterwards (the engine binds to the canvas, we
+       * bind to its parent, so bubbling puts the engine first). Comparing them
+       * is therefore an exact "did the engine handle this move?" test — which
+       * is also why the container MUST listen to `pointermove`, not
+       * `mousemove`: the compatibility mouse event the browser synthesises
+       * after a pointer event is a DIFFERENT object, and comparing against it
+       * would read every move as "sky".
        */
       let lastEngineMove: unknown = null;
 
@@ -3066,13 +3100,13 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
               };
       };
 
-      const onMouseDown = (e: MouseEvent) => {
+      const onPointerDown = (e: PointerEvent) => {
         // A new gesture: whatever the last one picked is no longer the answer.
         geoPickStashRef.current = null;
         clickGate.down(canvasPointOf(e));
       };
 
-      const onMouseMove = (e: MouseEvent) => {
+      const onPointerMove = (e: PointerEvent) => {
         lastEngineMove = e;
         const point = canvasPointOf(e);
         clickGate.move(point);
@@ -3096,12 +3130,15 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         reportCursor(point, hit?.layerId);
       };
 
-      const onClick = (e: MouseEvent) => {
+      const onClick = (e: PointerEvent) => {
         const store = useSelectionStore.getState();
         if (!acceptsPointer(store.toolMode, "click")) return;
-        // The engine's `click` is the raw DOM click and fires at the end of a
-        // camera orbit too; without this, every gesture would clear the
-        // selection on mouseup.
+        // Since 0.1.1 the engine's `click` is a GESTURE (a primary-pointer
+        // press and release within `CLICK_PIXEL_TOLERANCE`), no longer the raw
+        // DOM click that used to fire at the end of every camera orbit. The
+        // gate mirrors that tolerance and is kept as defence in depth: a click
+        // whose press this component never saw (a `pointercancel` in between,
+        // a gesture begun over the sky) must not commit a selection.
         if (!clickGate.isClean()) return;
         const hit = narrowToMode(pickAt(canvasPointOf(e)), store.mode);
         // CONSUMED, whatever happens next: one engine pick belongs to one
@@ -3133,20 +3170,23 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       };
 
       /**
-       * SKY DETECTOR, and the reason the two listeners below exist at all.
+       * SKY DETECTOR, and the reason the DOM listeners below exist at all.
        *
-       * The engine emits NO pointer event — not `mousemove`, not even
-       * `mouseleave` — when the screen ray misses the ellipsoid, because
-       * `convertMouseEventToMapEvent` returns null and the emit is skipped.
-       * Relying on engine events alone therefore freezes the hover highlight
-       * and the status bar at their last on-globe values the moment the cursor
-       * moves onto the sky, and leaves them frozen if the pointer exits the
-       * canvas across a sky pixel.
+       * The engine emits NO pointer event — not `pointermove`, not even
+       * `pointerleave` — when the screen ray misses the ellipsoid, because
+       * `convertToMapEvent` returns null and the emit is skipped (still true on
+       * 0.1.1). Relying on engine events alone therefore freezes the hover
+       * highlight and the status bar at their last on-globe values the moment
+       * the cursor moves onto the sky, and leaves them frozen if the pointer
+       * exits the canvas across a sky pixel.
        *
        * The DOM always fires, so the container listens too: a move the engine
-       * did NOT claim is a move over the sky.
+       * did NOT claim is a move over the sky. POINTER events, for the identity
+       * test documented on `lastEngineMove` — and because the engine itself
+       * moved to pointer events in 0.1.1 (touch included), so listening to
+       * the mouse compatibility events here would miss every touch gesture.
        */
-      const onDomMouseMove = (e: MouseEvent) => {
+      const onDomPointerMove = (e: PointerEvent) => {
         // Feed the drag gate from here as well: a gesture that starts or moves
         // over the sky is invisible to the engine, and a stale gate would let
         // the click that ends it commit a selection.
@@ -3154,13 +3194,21 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         if (lastEngineMove === e) return;
         clearCursorState();
       };
-      const onDomMouseDown = (e: MouseEvent) => {
+      const onDomPointerDown = (e: PointerEvent) => {
         geoPickStashRef.current = null;
         clickGate.down(canvasPointOf(e));
       };
       // Leaving the canvas: unconditional, and the one case the engine's own
-      // `mouseleave` cannot be trusted for.
-      const onDomMouseLeave = () => clearCursorState();
+      // `pointerleave` cannot be trusted for.
+      const onDomPointerLeave = () => clearCursorState();
+      // The browser took the gesture over (a scroll, a system gesture, an app
+      // switch): the engine drops its pending click, and so must the gate —
+      // otherwise the next `click` the engine emits could ride on a press this
+      // component saw before the cancellation.
+      const onDomPointerCancel = () => {
+        geoPickStashRef.current = null;
+        clickGate.cancel();
+      };
 
       // The two pick paths are COMPLEMENTARY, and each covers what the other
       // cannot.
@@ -3170,35 +3218,42 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       // engine's pick could only ever name a layer, never the surface inside
       // it. Geospatial layers are the mirror image — the engine draws them, the
       // app has no geometry to raycast, and the engine's per-feature batch id
-      // is exactly the granularity they need. So `pick` is subscribed, but only
-      // ever STASHED: the click below decides, and a city hit wins outright.
+      // is exactly the granularity they need. So `featureClick` (0.1.0's name
+      // for the old `pick`; the hover variants are deliberately NOT subscribed
+      // — each costs a GPU pick per frame and re-bakes the draped atlases) is
+      // subscribed, but only ever STASHED: the click below decides, and a city
+      // hit wins outright.
       //
-      // Known, accepted asymmetry: the engine skips its pick pass on ANY
-      // mousemove between mousedown and mouseup (zero tolerance), while
-      // `createClickGate` allows CLICK_DRAG_TOLERANCE_PX. A click with a 1 px
-      // jitter therefore still selects a city object but CLEARS instead of
-      // selecting a geo feature. That threshold is the engine's, not ours, and
-      // 0.0.5 exposes no way to widen it.
-      view.on("pick", onEnginePick);
-      view.on("mousedown", onMouseDown);
-      view.on("mousemove", onMouseMove);
+      // ORDER, which the stash depends on: the engine's `PickHelper` binds its
+      // `pointerup` listener before the view's own, and its click pick is
+      // synchronous, so `featureClick` always arrives BEFORE the `click` of
+      // the same gesture. Both are gated by the same `CLICK_PIXEL_TOLERANCE`
+      // (5 px; 30 for touch), which `CLICK_DRAG_TOLERANCE_PX` mirrors — the
+      // 0.0.5 asymmetry, where the engine's pick had zero tolerance and a 1 px
+      // jitter cleared a geo selection while still selecting a city object, is
+      // gone.
+      view.on("featureClick", onEnginePick);
+      view.on("pointerdown", onPointerDown);
+      view.on("pointermove", onPointerMove);
       view.on("click", onClick);
 
       const host = containerRef.current;
-      host?.addEventListener("mousemove", onDomMouseMove);
-      host?.addEventListener("mousedown", onDomMouseDown);
-      host?.addEventListener("mouseleave", onDomMouseLeave);
+      host?.addEventListener("pointermove", onDomPointerMove);
+      host?.addEventListener("pointerdown", onDomPointerDown);
+      host?.addEventListener("pointerleave", onDomPointerLeave);
+      host?.addEventListener("pointercancel", onDomPointerCancel);
 
       return () => {
-        // `pick` included: this effect re-runs on every city-layer edit, and a
-        // handler left behind would accumulate one per edit.
-        view.off("pick", onEnginePick);
-        view.off("mousedown", onMouseDown);
-        view.off("mousemove", onMouseMove);
+        // `featureClick` included: this effect re-runs on every city-layer
+        // edit, and a handler left behind would accumulate one per edit.
+        view.off("featureClick", onEnginePick);
+        view.off("pointerdown", onPointerDown);
+        view.off("pointermove", onPointerMove);
         view.off("click", onClick);
-        host?.removeEventListener("mousemove", onDomMouseMove);
-        host?.removeEventListener("mousedown", onDomMouseDown);
-        host?.removeEventListener("mouseleave", onDomMouseLeave);
+        host?.removeEventListener("pointermove", onDomPointerMove);
+        host?.removeEventListener("pointerdown", onDomPointerDown);
+        host?.removeEventListener("pointerleave", onDomPointerLeave);
+        host?.removeEventListener("pointercancel", onDomPointerCancel);
       };
     }, [engineReady, layers, onCursorPosition]);
 
@@ -3338,7 +3393,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       if (current === null) return;
       const entry = entryCameraFor(policy, current);
       if (entry === null) return;
-      withSettleSuppressed(() => view.flyTo(entry, VIEW_MODE_ENTRY_MS));
+      withSettleSuppressed(() =>
+        view.flyTo(entry, { duration: VIEW_MODE_ENTRY_MS }),
+      );
     }, [engineReady, viewMode, getCameraState, withSettleSuppressed]);
 
     /**

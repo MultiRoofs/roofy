@@ -755,7 +755,7 @@ describe("NavaraViewport streaming wiring", () => {
     await waitFor(() =>
       expect(on.mock.calls.some((c) => c[0] === "click")).toBe(true),
     );
-    emitViewEvent("mousedown", mouse(100, 100));
+    emitViewEvent("pointerdown", mouse(100, 100));
     emitViewEvent("click", mouse(100, 100));
     await waitFor(() =>
       expect(useSelectionStore.getState().selections[0]?.objectId).toBe("B4"),
