@@ -15425,7 +15425,10 @@ EOF
 
 **Files:**
 
-- Modify: `CLAUDE.md`
+- Modify: `CLAUDE.md` (the Tech Stack line and the hard rules — `a1682d9`
+  restructured this file, so read it before editing)
+- Modify: `docs/architecture-notes.md` (the decision record and the Known
+  Issues, which `a1682d9` moved out of CLAUDE.md)
 - Modify: `docs/roadmap.md`
 
 **Interfaces:**
@@ -15433,33 +15436,57 @@ EOF
 - Consumes: everything.
 - Produces: nothing.
 
-- [ ] **Step 1: Update CLAUDE.md's Analytics line and add the architecture bullet**
+- [ ] **Step 1: Put the DuckDB material where its equivalents now live**
 
-**READ `CLAUDE.md` FIRST, and edit what is there.** `origin/develop` merged the
-Navara 0.1.1 upgrade (Task 23b, and again in Step 6 below), and that merge
-REWROTE this file: the Tech Stack pins now say `@navaramap/* 0.1.1` with
-`three@0.183.2` kept deliberately, and the Known Issues section has moved on
-from the 0.0.5 wording this plan was drafted against. Nothing below is a
-snapshot of CLAUDE.md to paste over it — every block is an INSERTION beside
-whatever the merge left, and any 0.0.5-era sentence you see quoted in this plan
-is stale by definition.
+**Do this AFTER Step 6's re-merge, and READ BOTH FILES FIRST.** `origin/develop`
+has restructured the documentation twice since this plan was drafted: the Navara
+0.1.1 upgrade rewrote CLAUDE.md's pins, and `a1682d9` then split the file in
+two — **CLAUDE.md** is now commands, workflow and HARD RULES, while the decision
+records and Known Issues moved to **`docs/architecture-notes.md`**. Nothing
+below is a snapshot to paste over either file. Read them as they are, find where
+their equivalents live, and INSERT beside them. Any 0.0.5-era wording quoted
+anywhere in this plan is stale by definition.
 
-Find the **Analytics** entry in the Tech Stack list — one line, currently along
-the lines of "DuckDB-wasm with cityjson extension" — and replace THAT LINE ONLY
-with:
+Three destinations:
 
-```
-- **Analytics**: `@duckdb/duckdb-wasm@1.33.1-dev64.0` (DuckDB **1.5.5**, `wasm_eh`) with the `cityjson` community extension v0.4.0; `spatial` and `three_d` are loadable on demand via `ensureExtension` but have NOTHING TO OPERATE ON in v1 — the layer table is attribute-only, and a geometry predicate needs either materialised geometry columns (the memory the design exists to avoid) or a computed-columns feature that re-reads the source. Neither extension autoloads in wasm, and `spatial` is a CORE extension: `INSTALL spatial` (~5 s / 23.6 MB), never `FROM community`, which is what `cityjson` and `three_d` use. Two `three_d` traps for the follow-up: `ST_3DFromWKB` throws on a MultiPolygon Z row and ONE such row poisons a whole column query (use `ST_3DTryFromWKB`), and `ST_3DVolume` raises "solid is not manifold" on an unguarded aggregate (guard with `ST_3DValidationReport(...).is_valid`). Pinned EXACTLY — npm `latest` (dev57 / 1.5.4) serves a stale 4-function `cityjson` and a `three_d` that breaks `LOAD spatial`, silently, and 1.4.4 (dev20) has no `cityjson` wasm artifact at all. **Known staleness, deliberately not fixed here:** `App` takes ONE copy of `getDuckDBStatus()` after `retryEngine()` resolves and holds it as React state, so the status pill and its tooltip never see a later change — and `ensureExtension` publishes one every time it loads `spatial` or `three_d`. Nothing in this milestone calls `ensureExtension`, so nothing is stale yet; the first analysis feature that loads an extension lazily will show a tooltip that omits it. The fix is a `subscribeDuckDBStatus(listener)` in `duckdb.ts` that `publishReady` notifies, with `App` subscribing instead of snapshotting — one function, deferred only because there is nothing to observe until that feature exists.
-```
-
-Then ADD this bullet to **Key Architecture Decisions**, after the CityParquet
-one — added beside the existing bullets, never replacing any of them, and in
-particular never touching whatever the 0.1.1 merge wrote about Navara, the
-engine pins or the Known Issues:
+**(a) CLAUDE.md — Tech Stack.** Whatever one-line Analytics entry survives the
+restructure is replaced by this one line, and nothing else in that list is
+touched:
 
 ```
-- **Every city layer gets its OWN DuckDB table, built from bytes, and the source is dropped.** `analytics/layerTables.ts` owns a registry plus ONE async FIFO queue: `addCityLayer` (the single door every static add goes through — a dropped file, a picked folder, a URL, a restore, a share link, a re-link) enqueues a build, and `layerTableLifecycle.ts` diffs the layer store to drop tables and to enqueue a STREAMING layer's (whose rows arrive cell by cell, so it rebuilds on commits, debounced 500 ms, only while the panel is open or an export is pending). The single global `city_objects` table is gone, and with it `shouldUseSourceUrlPath`/`loadModelIntoDuckDB`/`loadCityModelFromMemory`/`loadResidentObjectsIntoDuckDB` — one shared table meant a second layer silently replaced the first one's analytics. A reader-backed layer hands DuckDB the DECODED BYTES the loader already holds (`loadFromUrl` returns `{model, bytes, encoding}`), never a URL: `read_cityjson` over http is unexercised in wasm and CORS-dependent, and registering bytes means a URL layer is never downloaded twice. The build drops `geometry_*`/`geometry_properties_*`/`material_*`/`texture_*`/`template` (53 of 70 columns on Delft, 2.45x less table memory) and then drops the source buffer — probed: a materialised table survives `dropFile`, while the DROPPED NAME resolves to ZERO BYTES forever and fails with a misleading JSON parse error, so VFS names come from a module counter and are NEVER reused; an export re-registers the bytes under a fresh name through the entry's `SourceProvider` (a `File` is a reference, a URL is re-fetched). CityGML, its ZIP, CityParquet and streaming residents take the FLAT FALLBACK: rows built app-side and loaded through `read_json_auto`, with the column names ALIGNED to the reader's (`id, feature_id, object_type, parents, children`, `parents`/`children` NULL rather than `[]`, `feature_id` from `domain/citymodel/featureId.ts`) so `parents IS NULL` is the feature-root test on every layer and one filter vocabulary covers all of them. The old `lod`/`surface_count` columns are gone — app-side derivations, not data. **Every SQL string is a pure function** in `analytics/sql.ts`, unit-tested against exact strings; `compileFilter` refuses an unknown column or an impossible operator BEFORE the query is sent. The map filter (`Layer.visibleObjectIds`, pushed by `handleSync` to the plugin's new `setVisibleObjectIds`) expands matches to whole FEATURES — a Building carries the attributes, its BuildingPart the geometry — with `COALESCE("feature_id","id")` on both sides of a POSITIVE `IN`, because one NULL `feature_id` makes a `NOT IN` predicate NULL and hides nothing; `null` means no filter and an EMPTY set means "nothing matched, draw nothing". Streaming layers cannot be map-filtered yet (the id set would have to travel to the FCB worker). Export goes through DuckDB's own writers — `COPY TO parquet|csv|json`, and `cityparquet_write` for a package zipped with `fflate` — and **never** `FORMAT cityjson|cityjsonseq|flatcitybuf`, whose sinks bypass DuckDB's VFS entirely (no file is created at all; the same extension writes fine through `cityparquet_write`, which is the upstream pointer). Those three are shown DISABLED in the dialog so the capability is discoverable. **Every read-back is validated BY CONTENT** — `PAR1` magic, `JSON.parse`, a newline-terminated CSV header — because a MISSING VFS name reads back as ONE GARBAGE BYTE with no error at all, while a genuinely empty file reads 0; `globFiles` lists names that were never created, so it is fit for cleanup and not for discovery, and the write's own result rows are what name the output. Filter, sort, page, sync-to-map and `visibleObjectIds` are SESSION state: snapshot schema stays v3.
+- **Analytics**: `@duckdb/duckdb-wasm@1.33.1-dev64.0` (DuckDB **1.5.5**, `wasm_eh`) with the `cityjson` community extension v0.4.0; `spatial` and `three_d` loadable on demand via `ensureExtension`, unused in v1. See `docs/architecture-notes.md` for the per-layer table design and the verified engine facts.
 ```
+
+**(b) CLAUDE.md — the hard-rules section.** Four rules, in the imperative voice
+that section uses. These are the ones a future change can break silently, so
+they belong where someone reads before touching the code, not in a record they
+read afterwards:
+
+```
+- `src/analytics/duckdb.ts` is the ONLY module under `src/` that may import `@duckdb/duckdb-wasm`. Everything else — `layerTables`, `export`, `sql`, every UI module — takes the engine through its exported functions, which is what makes them mockable.
+- `@duckdb/duckdb-wasm` is pinned EXACTLY, never a range and never `latest`: npm `latest` (dev57 / DuckDB 1.5.4) serves a stale 4-function `cityjson` and a `three_d` that breaks `LOAD spatial`, both silently.
+- ONE writer of the DuckDB status: `App` owns the `duckdbStatus` state, and `duckdb.ts` owns the value. Nothing else calls `setDuckdbStatus`, and nothing reads `getDuckDBStatus()` into a second copy.
+- `retryEngine()` is the door to the engine on boot and on Retry — not `initDuckDB()`. It awaits the same memoised boot AND rebuilds the tables that were refused while the engine was still coming up; calling `initDuckDB` directly leaves those layers permanently table-less.
+```
+
+**(c) `docs/architecture-notes.md` — a new decision record**, beside the
+existing ones and in their voice. The whole DuckDB design goes here:
+
+```
+- **Every city layer gets its OWN DuckDB table, built from bytes, and the source is dropped.** `analytics/layerTables.ts` owns a registry plus ONE async FIFO queue: `addCityLayer` (the single door every static add goes through — a dropped file, a picked folder, a URL, a restore, a share link, a re-link) enqueues a build, and `layerTableLifecycle.ts` diffs the layer store to drop tables and to enqueue a STREAMING layer's (whose rows arrive cell by cell, so it rebuilds on commits, debounced 500 ms, only while the table panel is open; the export dialog forces one rebuild when it opens). The single global `city_objects` table is gone, and with it `shouldUseSourceUrlPath`/`loadModelIntoDuckDB`/`loadCityModelFromMemory`/`loadResidentObjectsIntoDuckDB` — one shared table meant a second layer silently replaced the first one's analytics. A build AWAITS `initDuckDB()` before touching DuckDB and parks its source if the engine is not up (the boot is ~5 s and a restored snapshot lands inside it); `retryEngine()` rebuilds the parked ones. A reader-backed layer hands DuckDB the DECODED BYTES the loader already holds (`loadFromUrl` returns `{model, bytes, encoding}`), never a URL: `read_cityjson` over http is unexercised in wasm and CORS-dependent, and registering bytes means a URL layer is never downloaded twice — `registerBuffer` CONSUMES its array (the worker transfer detaches it), so a re-registration goes through the entry's `SourceProvider`. The build drops `geometry_*`/`geometry_properties_*`/`material_*`/`texture_*`/`template` (53 of 70 columns on Delft, 2.45x less table memory) and then drops the source buffer — probed: a materialised table survives `dropFile`, while the DROPPED NAME resolves to ZERO BYTES forever and fails with a misleading JSON parse error, so VFS names come from a module counter and are NEVER reused. LoDs are DERIVED from the reader's own column names (`{label, suffix}`) and a suffix is never rebuilt from a label: 3D BAG spells LoD 0 `geometry_lod0_0`. CityGML, its ZIP, CityParquet and streaming residents take the FLAT FALLBACK: rows built app-side and loaded through `read_json_auto`, with the column names ALIGNED to the reader's (`id, feature_id, object_type, parents, children`, `parents`/`children` NULL rather than `[]`, `feature_id` from `domain/citymodel/featureId.ts`, and an `ALTER COLUMN … TYPE VARCHAR[]` afterwards because an all-NULL list column infers as JSON) so `parents IS NULL` is the feature-root test on every layer. **Every SQL string is a pure function** in `analytics/sql.ts`, unit-tested against exact strings; `compileFilter` refuses an unknown column, an impossible operator, an empty needle or a non-numeric value BEFORE the query is sent, and `ORDER BY` is table-qualified so a `castText` column sorts on the base column rather than its `::VARCHAR` alias. The map filter (`Layer.visibleObjectIds`, pushed by `handleSync` to the plugin's `setVisibleObjectIds`) expands matches to whole FEATURES — a Building carries the attributes, its BuildingPart the geometry — with `COALESCE("feature_id","id")` on both sides of a POSITIVE `IN`, because one NULL `feature_id` makes a `NOT IN` predicate NULL and hides nothing; `null` means no filter and an EMPTY set means "nothing matched, draw nothing". Streaming layers cannot be map-filtered yet (the id set would have to travel to the FCB worker). Export goes through DuckDB's own writers — `COPY TO parquet|csv|json` (with `ARRAY true` for JSON, and no `::VARCHAR` cast: that one is the grid's), and for a package one read of the source into a scratch schema, a CTAS per CityGML module, `cityparquet_init` as its own statement, then `cityparquet_write` zipped with `fflate` — and **never** `FORMAT cityjson|cityjsonseq|flatcitybuf`, whose sinks bypass DuckDB's VFS entirely (no file is created at all; the same extension writes fine through `cityparquet_write`, which is the upstream pointer). Those three are shown DISABLED in the dialog so the capability is discoverable. **Every read-back is validated BY CONTENT** — `PAR1` magic, `JSON.parse`, a newline-terminated CSV header — because a MISSING VFS name reads back as ONE GARBAGE BYTE with no error at all, while a genuinely empty file reads 0; `globFiles` lists names that were never created, so it is fit for cleanup and not for discovery, and the write's own result rows are what name the output. Filter, sort, page, sync-to-map and `visibleObjectIds` are SESSION state: snapshot schema stays v3.
+```
+
+And, in whatever Known Issues section `docs/architecture-notes.md` now carries,
+two entries:
+
+```
+- **The DuckDB status pill holds a SNAPSHOT.** `App` reads `getDuckDBStatus()` once, after `retryEngine()` resolves, and keeps it in React state — but `ensureExtension` publishes a fresh status every time it loads `spatial` or `three_d`, and nothing re-reads it. Nothing calls `ensureExtension` today, so the pill is never wrong; the first analysis feature that loads an extension lazily will leave the tooltip listing the boot-time extensions and omitting the one it just fetched — exactly the drift the tooltip exists to make visible. The fix is a `subscribeDuckDBStatus(listener)` in `duckdb.ts` which `publishReady` notifies, with `App` subscribing rather than snapshotting.
+- **`spatial` and `three_d` are loadable but have nothing to operate on.** The layer table is attribute-only; a geometry predicate needs either geometry columns materialised (the memory the design exists to avoid) or a computed-columns feature that reads the re-registered source. Neither extension autoloads in wasm, and `spatial` is a CORE extension — `INSTALL spatial` (~5 s / 23.6 MB), never `FROM community`, which is what `cityjson` and `three_d` use. Two `three_d` traps for that follow-up: `ST_3DFromWKB` throws on a MultiPolygon Z row and ONE such row poisons a whole column query (use `ST_3DTryFromWKB`), and `ST_3DVolume` raises "solid is not manifold" on an unguarded aggregate (guard with `ST_3DValidationReport(...).is_valid`).
+```
+
+If the restructure has left these sections under different names, follow the
+FILE, not this plan: the rule is "hard rules where the hard rules are, decision
+records where the decision records are".
 
 - [ ] **Step 2: Add the milestone to `docs/roadmap.md`**
 
@@ -15584,10 +15611,42 @@ Resolve on the same rules as Task 23b — `@duckdb/duckdb-wasm` keeps its exact
 `1.33.1-dev64.0` pin, the `@navaramap/*` / `three` / `postprocessing` set moves
 together and takes develop's values, and `package-lock.json` is REGENERATED
 (`git checkout --theirs package-lock.json && npm install`) rather than three-way
-merged. If the submodule pointer conflicts, keep THIS branch's
-`duckdb-integration` head unless develop has moved the plugin again, in which
-case merge develop's plugin commit into that branch first and push it before
-going on.
+merged.
+
+Expect the documentation restructure to arrive here: `a1682d9` turned CLAUDE.md
+into commands, workflow and hard rules and moved the decision records and Known
+Issues to `docs/architecture-notes.md`. Take develop's version of both files
+whole and re-place the DuckDB material afterwards (Step 1) — a three-way merge
+of a file that has been reorganised produces something neither side wrote.
+
+**Check the submodule pin explicitly. It is not enough that the merge did not
+conflict:**
+
+```bash
+git ls-tree origin/develop packages/cityjson-navara-plugins
+git ls-tree HEAD packages/cityjson-navara-plugins
+git -C packages/cityjson-navara-plugins rev-parse HEAD
+```
+
+Today develop's pin is still `2963ddb`, the commit Task 23b took, so our
+`duckdb-integration` head (which contains it) is strictly ahead and there is
+nothing to do. Note that the plugin repo's own `origin/main` HAS moved past it
+— to `ec65845`, which changes a `colors` parameter — but develop has not
+adopted that, and neither do we: taking an upgrade nobody asked for, in the
+last step before a push, is how a merge becomes a debugging session.
+
+If develop's pin HAS moved to something our branch does not contain, that pin
+wins and it has to reach the plugin branch before the parent can name it:
+
+```bash
+git -C packages/cityjson-navara-plugins merge <develop's pin>
+cd packages/cityjson-navara-plugins && pnpm typecheck && pnpm vitest run
+git -C packages/cityjson-navara-plugins push origin duckdb-integration
+git add packages/cityjson-navara-plugins
+```
+
+Do that BEFORE finishing the parent merge commit, so the gitlink it records is
+the new, published head — not one this branch is about to leave behind.
 
 Then everything, in both repos:
 
@@ -15640,6 +15699,13 @@ it will actually land, including whatever the merge changed.
 ```bash
 git push
 ```
+
+**This takes MINUTES, and must not be interrupted.** `develop` added a pre-push
+hook that runs `vp check`, `tsc` and the whole test suite before the push is
+allowed — so a `git push` that appears to hang is the hook working, and a
+Ctrl-C is a half-run verification, not a cancelled upload. Everything it runs
+has already passed in Step 6, so it should be a slow yes; if it says no, the
+answer is to fix what it found, never `--no-verify`.
 
 Nothing is left to push on the submodule — Step 4 confirmed its branch is
 published and Step 5 proved a recursive clone of this commit resolves. The
@@ -15750,6 +15816,7 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
 | §4            | Browser smoke: boot, table, filter, map sync, all four exports                                                                                                       | 32                                                |
 | §5            | Submodule branch from **`2963ddb`** (was `947c980` before the develop merge), pushed, gitlink bump                                                                   | 23b, 24, 25, 26, 34                               |
 | §5            | **`origin/develop`'s Navara 0.1.1 merge is taken BEFORE the plugin work, and again immediately before the push**                                                     | 23b, 34                                           |
+| §5            | **The docs land where develop's restructure put their equivalents — hard rules in CLAUDE.md, the decision record and Known Issues in `docs/architecture-notes.md`**  | 34                                                |
 | §5            | Lockfile regenerated; `npm ci` verified in a fresh clone                                                                                                             | 1, 34                                             |
 | §5            | The seven mocking test files                                                                                                                                         | 4                                                 |
 | §5            | `duckdb.ts` the only importer of `@duckdb/duckdb-wasm`                                                                                                               | Global Constraints; 13, 29, 30 all import from it |
@@ -15785,6 +15852,14 @@ draft; §2, §3.1, §3.2, §3.4, §3.6, §4 and §6 all moved).
   file that can be hundreds of megabytes. Task 11 splits it into one scratch
   read plus N cheap cuts, the scratch table in a schema of its own because
   `cityparquet_init` describes every table in the schema it is handed.
+- The plan was drafted against a CLAUDE.md that no longer exists: `a1682d9`
+  split it into commands, workflow and hard rules, with the decision records and
+  Known Issues moved to `docs/architecture-notes.md`. Task 34's Step 1 therefore
+  stopped quoting the old file at all — it names three destinations (the Tech
+  Stack one-liner, four hard rules, and one decision record plus two Known
+  Issues) and says to follow the FILE rather than this plan if the sections have
+  been renamed again. Step 6 takes develop's version of both documents whole
+  rather than three-way merging a file that has been reorganised.
 - §5's delivery constraint says the plugin branch is cut from `947c980` because
   "`origin/main` is ahead of the parent's pin (a Navara 0.1.1 bump the app is
   not on)". That stopped being true: `origin/develop` (`7736d0e`) has merged
