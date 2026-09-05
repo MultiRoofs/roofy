@@ -43,7 +43,7 @@ npm install
 npm run dev        # via dotenvx — .env is encrypted, see CLAUDE.md
 ```
 
-`npm run test` runs the app suite; the submodule has its own (`pnpm vitest run` inside it). See [CLAUDE.md](CLAUDE.md) for architecture notes and the full development guide.
+`npm run test` runs the app suite; the submodule has its own (`pnpm vitest run` inside it). See [CLAUDE.md](CLAUDE.md) for the development guide and [docs/architecture-notes.md](docs/architecture-notes.md) for the architecture decisions and engine quirks.
 
 ## Documents
 

@@ -81,8 +81,7 @@ Browser smokes use `agent-browser` (Navara needs real WebGL + WASM, so jsdom can
 - **Milestone review.** When a milestone is finished, have it reviewed by Codex CLI with model `gpt-6-astra` before merging, for example:
 
   ```bash
-  git diff main...develop > /tmp/milestone.diff
-  codex exec -m gpt-6-astra "Review this diff for correctness, regressions and missing tests: $(cat /tmp/milestone.diff)"
+  git diff main...develop | codex exec -m gpt-6-astra "Review the piped diff for correctness, regressions and missing tests"
   ```
 
   Address critical findings before the merge. If Codex is unavailable, `claude -p --model opus` is the fallback reviewer.
