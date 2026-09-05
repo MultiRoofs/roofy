@@ -11,7 +11,7 @@ This document describes the target repository structure and the conventions that
 The repository does not need all of these folders on day one, but this is the intended layout to grow into:
 
 ```text
-multiroof-viewer/
+roofy/
   .devcontainer/
     devcontainer.json
     post-create.sh

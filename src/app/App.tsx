@@ -1479,7 +1479,7 @@ export function App({
         <p className="eyebrow">
           <RoofyLockup />
         </p>
-        <h1>Your city, in 3D.</h1>
+        <h1>Your city, roof by roof.</h1>
         <p className="summary">
           Drop a city model or pick one from the open catalog.
         </p>

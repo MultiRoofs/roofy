@@ -10,7 +10,7 @@ Milestones 1–4 are complete. M3: solar/shading with suncalc, proj4, shadow map
 
 ## Project Context
 
-Roofy (repository `multiroof-viewer`) is being designed as a web-based viewer and analysis workspace for 3D city models in support of the MultiRoofs project. The product focus is urban rooftop analysis for planning, simulation, and communication.
+Roofy (GitHub `MultiRoofs/roofy`) is being designed as a web-based viewer and analysis workspace for 3D city models in support of the MultiRoofs project. The product focus is urban rooftop analysis for planning, simulation, and communication.
 
 ## Product Direction
 

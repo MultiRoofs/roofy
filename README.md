@@ -8,10 +8,10 @@
 
 <h1 align="center">Roofy</h1>
 
-<p align="center"><strong>Your city, in 3D.</strong><br>
+<p align="center"><strong>Your city, roof by roof.</strong><br>
 A browser-based 3D city model viewer and analyser, rendered on a real globe with photorealistic terrain.</p>
 
-<p align="center">Use the deployed app at <strong><a href="https://urbis.open3d.city">urbis.open3d.city</a></strong></p>
+<p align="center">Use the deployed app at <strong><a href="https://roofy.open3d.city">roofy.open3d.city</a></strong></p>
 
 <!-- The lockup SVGs set the wordmark as live text in Outfit, which GitHub's
      sandboxed image rendering cannot load — so the README follows the brand kit's
@@ -36,8 +36,8 @@ The CityJSON/FlatCityBuf/CityParquet engine plugins live in a submodule: [`cityj
 ## Development
 
 ```bash
-git clone --recursive git@github.com:MultiRoofs/multiroof-viewer.git
-cd multiroof-viewer
+git clone --recursive git@github.com:MultiRoofs/roofy.git
+cd roofy
 npm install
 (cd packages/cityjson-navara-plugins && pnpm install)
 npm run dev        # via dotenvx — .env is encrypted, see CLAUDE.md

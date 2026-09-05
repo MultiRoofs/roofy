@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Roofy** (repository name `multiroof-viewer`) is a browser-based 3D city model viewer and rooftop analysis tool for the MultiRoofs European project. It visualizes CityJSON/CityJSONSeq/FlatCityBuf data with rule-based colorization, solar/shading analysis, and layer management, rendered on a real globe with photorealistic terrain.
+**Roofy** (GitHub `MultiRoofs/roofy`) is a browser-based 3D city model viewer and rooftop analysis tool for the MultiRoofs European project. It visualizes CityJSON/CityJSONSeq/FlatCityBuf data with rule-based colorization, solar/shading analysis, and layer management, rendered on a real globe with photorealistic terrain.
 
 ## Tech Stack
 
