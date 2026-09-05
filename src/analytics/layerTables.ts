@@ -291,8 +291,6 @@ function parkConsumed(source: LayerTableSource): PendingSource | null {
       };
 }
 
-/** The source a parked entry stands for, calling the provider for a FRESH
- *  array. May reject — a deleted file, a URL that has since gone. */
 /**
  * The entry to park AGAIN after a retry build that did not land — `null` when
  * the source cannot be replayed.
@@ -308,6 +306,8 @@ function reparkable(entry: PendingSource): PendingSource | null {
   return entry.kind === "reader" ? entry : parkConsumed(entry.source);
 }
 
+/** The source a parked entry stands for, calling the provider for a FRESH
+ *  array. May reject — a deleted file, a URL that has since gone. */
 async function reviveSource(pending: PendingSource): Promise<LayerTableSource> {
   if (pending.kind === "raw") return pending.source;
   return {

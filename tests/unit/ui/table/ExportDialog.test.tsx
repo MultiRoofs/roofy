@@ -139,6 +139,31 @@ describe("exportFileName", () => {
       "delft.cityparquet.zip",
     );
   });
+
+  it("strips only a TRAILING known extension, never at the first dot", () => {
+    // Splitting at the first dot deleted the part of the name that said which
+    // extract the file was.
+    expect(exportFileName("Delft LoD 2.2", "csv")).toBe("Delft_LoD_2.2.csv");
+    expect(exportFileName("3dbag.v2024.city.json", "csv")).toBe(
+      "3dbag.v2024.csv",
+    );
+    // A chain: 3D BAG serves `.city.json.gz` and both halves have to go.
+    expect(exportFileName("tile.city.json.gz", "parquet")).toBe("tile.parquet");
+    expect(exportFileName("archive.zip", "json")).toBe("archive.json");
+    // An extension we do not know is part of the name, not something to eat.
+    expect(exportFileName("model.xyz", "csv")).toBe("model.xyz.csv");
+  });
+
+  it("replaces what a file name has no business holding", () => {
+    expect(exportFileName("Rotterdam / centrum", "csv")).toBe(
+      "Rotterdam_centrum.csv",
+    );
+    expect(exportFileName("a:b*c?", "csv")).toBe("a_b_c.csv");
+    // Nothing but an extension leaves no stem — better than a file called
+    // ".csv", which most browsers will not save at all.
+    expect(exportFileName(".city.json", "csv")).toBe("export.csv");
+    expect(exportFileName("   ", "csv")).toBe("export.csv");
+  });
 });
 
 describe("ExportDialog", () => {

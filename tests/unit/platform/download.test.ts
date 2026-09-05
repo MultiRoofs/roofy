@@ -1,7 +1,16 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { downloadBlob, downloadText } from "../../../src/platform/download";
 
+// The revoke is on a `setTimeout(…, 0)`, so the timer has to be driven — and
+// the two `downloadText` cases would otherwise leave a real timer pending on a
+// stubbed `URL` global that has already been unstubbed.
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+
 afterEach(() => {
+  vi.runAllTimers();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -39,6 +48,12 @@ describe("downloadBlob", () => {
     expect(anchor.href).toBe("blob:fake");
     expect(anchor.download).toBe("rules.json");
     expect(click).toHaveBeenCalledTimes(1);
+    // DEFERRED, not synchronous: the click dispatches at once, but the browser
+    // does not necessarily have the blob's bytes by the time the handler
+    // returns, and revoking in the same turn can hand back a zero-byte
+    // download — likelier the larger the blob.
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+    vi.runAllTimers();
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:fake");
     vi.unstubAllGlobals();
   });

@@ -92,7 +92,14 @@ Three things the CDP route wants and the obvious spelling does not give:
   (record `{name: this.download, blob}` and _suppress_ the real click), then
   read the bytes back through `blob.arrayBuffer()` → base64. Fighting
   `Browser.setDownloadBehavior` buys nothing, and the bytes have to be read
-  back anyway.
+  back anyway. **Note what this therefore does NOT prove.** Because the driver
+  REPLACES `anchor.click` for download anchors, the smoke exercises the blob
+  the app built and nothing past it: Chrome's own download machinery, the
+  `download` attribute's effect on the saved file name, and the object URL's
+  lifetime (`downloadBlob` revokes on a `setTimeout(…, 0)`, and a premature
+  revoke shows up as a zero-byte SAVED file, never as a bad blob) are all
+  outside what a green run says anything about. They need a real download in a
+  real browser.
 - React inputs ignore a bare `el.value = x`. Use the prototype's native value
   setter plus `input`/`change` events.
 

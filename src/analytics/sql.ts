@@ -581,11 +581,17 @@ export function buildAttributeExportSql(input: {
    * `null` rather than "the full list" on purpose: a predicate naming every
    * type the layer has is a self-join that filters nothing, and the caller
    * ({@link runExport}) is the only place that knows whether the selection is
-   * a strict subset. An EMPTY array is not accepted — `IN ()` is a syntax
-   * error and "export none of it" is a refusal, not a query.
+   * a strict subset. An EMPTY array THROWS — `IN ()` is a syntax error, and
+   * "export none of it" is a refusal, not a query. It must not read as `null`:
+   * the two are opposite intentions ("every type" against "no type at all"),
+   * and treating `[]` as `null` wrote the WHOLE LAYER out for a caller that
+   * had asked for none of it.
    */
   readonly rootTypes: ReadonlyArray<string> | null;
 }): string {
+  if (input.rootTypes !== null && input.rootTypes.length === 0) {
+    throw new Error("Choose at least one object type to export.");
+  }
   const projections = input.columns
     .map((column) => exportProjection(column, input.format))
     .filter((p): p is string => p !== null);
@@ -595,7 +601,7 @@ export function buildAttributeExportSql(input: {
   // features matched, the type list says which kinds are wanted, and a part
   // follows its root through either.
   const types =
-    input.rootTypes === null || input.rootTypes.length === 0
+    input.rootTypes === null
       ? null
       : buildRootTypeWhere(input.table, input.rootTypes);
   const predicates = [scope, types].filter((p): p is string => p !== null);

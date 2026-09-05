@@ -265,7 +265,7 @@ Current limitations (documented for future work):
 - **Building types only**: Only Building and BuildingPart are parsed. Other CityGML types (Transportation, Vegetation, WaterBody, LandUse, Relief, CityFurniture) will be added in M7.2.
 - **DOM-based parser**: Uses fast-xml-parser which loads the entire XML document into memory. For files >100MB, a SAX streaming parser (e.g. sax-wasm) should be implemented.
 - **XLink resolution**: Solid geometry that uses xlink:href references to polygons defined elsewhere is skipped. Only inline polygons in semantic surfaces are extracted.
-- **No DuckDB integration**: CityGML data is not imported into the DuckDB analytics engine (CityJSON only for now).
+- **DuckDB analytics via the flat fallback**: CityGML (and a ZIP of it) has no DuckDB reader, so its layer's table is built app-side from the parsed model and loaded through `read_json_auto` — browsable, filterable and exportable as attributes, but with no `read_cityjson` source behind it and so no CityParquet package to export. See Milestone 11.
 - **Axis order**: Coordinates are passed through as-is, relying on CRS metadata. No axis-order normalization for CRS with lat/lon order.
 
 ### M7.2: Non-Building CityGML Types (Planned)

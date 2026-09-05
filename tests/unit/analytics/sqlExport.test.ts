@@ -114,6 +114,23 @@ describe("buildAttributeExportSql", () => {
     );
   });
 
+  it("REFUSES an empty selection rather than reading it as `null`", () => {
+    // `[]` and `null` are opposite intentions — "no type at all" against
+    // "every type" — and treating the first as the second wrote the WHOLE
+    // LAYER out for a caller that had asked for none of it. `IN ()` is not an
+    // option either: it is a syntax error.
+    expect(() =>
+      buildAttributeExportSql({
+        table: "layer_1",
+        columns: [{ name: "id", type: "VARCHAR", kind: "scalar" }],
+        where: null,
+        format: "csv",
+        outFile: "x.csv",
+        rootTypes: [],
+      }),
+    ).toThrow("Choose at least one object type to export.");
+  });
+
   it("emits no predicate at all for `null` — every type, no self-join", () => {
     expect(
       buildAttributeExportSql({
