@@ -572,12 +572,16 @@ describe("NavaraViewport lifecycle", () => {
       (_model: unknown, opts: { id: string }) => makeHandle(opts.id),
     );
     useLayerStore.setState({ layers: [] });
+    // The auto-fit is keyed on the whole workspace, so a geo layer left behind
+    // by another test would silently make a later one "not empty".
+    useGeoLayerStore.setState({ layers: [] });
     useWorkspaceStore.setState({ activeLayerId: null });
   });
 
   afterEach(() => {
     cleanup();
     useLayerStore.setState({ layers: [] });
+    useGeoLayerStore.setState({ layers: [] });
     useWorkspaceStore.setState({ activeLayerId: null });
     useSelectionStore.setState({
       toolMode: "select",
@@ -965,7 +969,12 @@ describe("NavaraViewport lifecycle", () => {
     await waitFor(() => expect(onTriangleCount).toHaveBeenLastCalledWith(10));
   });
 
-  it("fits the camera when a layer is ADDED, and not when one is merely toggled", async () => {
+  // Task 6 (M12.1). The automatic fit is an ORIENTATION for a workspace that
+  // had nothing to look at, not a reaction to every add: once the user has
+  // framed a view, a second file must arrive without stealing the camera.
+  // "Empty" is the whole workspace — city layers (static AND streaming) plus
+  // the geo overlays — not the static handles alone.
+  it("fits when the first layer of an empty workspace lands, and not when one is merely toggled", async () => {
     useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
     render(<NavaraViewport onTriangleCount={() => {}} />);
     await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(1));
@@ -988,12 +997,81 @@ describe("NavaraViewport lifecycle", () => {
       ).toHaveBeenCalledWith(false),
     );
     expect(flyTo).toHaveBeenCalledTimes(1);
+  });
 
-    // A second layer IS a new fit.
+  it("does not fit when a SECOND static layer lands", async () => {
+    useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(1));
+
     useLayerStore.setState({
-      layers: [makeLayer({ id: "a", visible: false }), makeLayer({ id: "b" })],
+      layers: [makeLayer({ id: "a" }), makeLayer({ id: "b" })],
     });
-    await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(2));
+
+    // The layer really was added — the camera simply stayed where the user
+    // left it, and "Zoom to layer" is how they go and look at it.
+    await waitFor(() =>
+      expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(2),
+    );
+    expect(flyTo).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fit when a static layer joins a workspace that already has a streaming layer", async () => {
+    // `syncLayers` skips streaming layers, so `liveRef` is still empty here —
+    // which is exactly why the old "no static handles yet" test was wrong: the
+    // workspace is NOT empty, and the .fcb the user is looking at must not be
+    // left behind when a CityJSON file lands beside it.
+    useLayerStore.setState({
+      layers: [makeLayer({ id: "streamed", isStreaming: true })],
+    });
+    // `onTriangleCount` is the sync effect's own footprint — it is called at
+    // the end of every pass, and only past the `engineReady` gate. Waiting on
+    // `init` instead would race it: the effect is several microtasks behind
+    // that, and a layer set in between would look like the first of an empty
+    // workspace.
+    const onTriangleCount = vi.fn();
+    render(<NavaraViewport onTriangleCount={onTriangleCount} />);
+    await waitFor(() => expect(onTriangleCount).toHaveBeenCalled());
+    expect(cityPluginInstance.addCityModel).not.toHaveBeenCalled();
+
+    useLayerStore.setState({
+      layers: [
+        makeLayer({ id: "streamed", isStreaming: true }),
+        makeLayer({ id: "a" }),
+      ],
+    });
+
+    await waitFor(() =>
+      expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(1),
+    );
+    expect(flyTo).not.toHaveBeenCalled();
+  });
+
+  it("does not fit when a city layer joins a geo-only workspace", async () => {
+    // Geo layers never reach `liveRef` either (they are engine source+layer
+    // pairs, reconciled by `geoLayerSync`), and they are just as much a view
+    // the user has arranged.
+    act(() => {
+      useGeoLayerStore.getState().addGeoLayer({
+        name: "overlay",
+        kind: "raster-xyz",
+        config: { urlTemplate: "https://tile.example/{z}/{x}/{y}.png" },
+      });
+    });
+    // The sync effect's own footprint, not `init` — see the streaming case
+    // above.
+    const onTriangleCount = vi.fn();
+    render(<NavaraViewport onTriangleCount={onTriangleCount} />);
+    await waitFor(() => expect(onTriangleCount).toHaveBeenCalled());
+
+    act(() => {
+      useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
+    });
+
+    await waitFor(() =>
+      expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(1),
+    );
+    expect(flyTo).not.toHaveBeenCalled();
   });
 
   it("fits WITHIN the active view mode: a 2D fit stays a plan view", async () => {
@@ -1061,11 +1139,15 @@ describe("NavaraViewport lifecycle", () => {
 
     release();
 
-    // A layer added AFTER the restore is an ordinary user action and still
-    // earns its fit — the suppression is scoped, not a permanent opt-out.
-    useLayerStore.setState({
-      layers: [makeLayer({ id: "a" }), makeLayer({ id: "b" })],
-    });
+    // The suppression is scoped, not a permanent opt-out: once the user has
+    // cleared the workspace, the next layer they open is again the first layer
+    // of an empty workspace and still earns its fit. Two steps, because a
+    // workspace that never goes empty never fits again (Task 6).
+    const handle = cityPluginInstance.addCityModel.mock.results[0]!.value;
+    useLayerStore.setState({ layers: [] });
+    await waitFor(() => expect(handle.delete).toHaveBeenCalledTimes(1));
+
+    useLayerStore.setState({ layers: [makeLayer({ id: "b" })] });
     await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(1));
   });
 

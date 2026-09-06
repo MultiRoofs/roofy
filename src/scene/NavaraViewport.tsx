@@ -1282,6 +1282,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     /** The user's own GeoJSON / XYZ / 3D-Tiles layers. Reconciled into engine
      *  source+layer pairs by `geoLayerSync.ts`. */
     const geoLayers = useGeoLayerStore((s) => s.layers);
+    /** Pulled out as a scalar so the layer-sync effect can count the workspace
+     *  (and re-run when a geo layer comes or goes) without depending on the
+     *  array itself. */
+    const geoLayerCount = geoLayers.length;
     /** 2D / 2.5D / 3D. What it MEANS is `viewModePolicy.ts`; this component
      *  only applies it to the engine (controller flags + one entry flight). */
     const viewMode = useViewModeStore((s) => s.mode);
@@ -1329,12 +1333,23 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     /** The coverage the pass should be BORN with. A ref, so the add effect
      *  below can read the current value without depending on it. */
     const cloudCoverageRef = useRef(cloudCoverage);
-    /** Bumped by the sync effect when a layer was newly added, which is the
-     *  only thing that triggers an automatic fit. */
+    /** Bumped by the sync effect when the FIRST layer of an empty workspace
+     *  was added, which is the only thing that triggers an automatic fit. */
     const [fitToken, setFitToken] = useState(0);
     /** The last `fitToken` the fit effect below acted on (or deliberately
      *  dropped), so one token can never be served twice. */
     const handledFitTokenRef = useRef(0);
+    /**
+     * How many layers the workspace held at the end of the last sync — city
+     * rows (static AND streaming) plus geo overlays.
+     *
+     * This, not `liveRef.size`, is what "an empty workspace" means. `liveRef`
+     * holds static handles only: a workspace whose first layer is a `.fcb` or
+     * a GeoJSON overlay has NO live handle, so keying the fit on that count
+     * would yank the camera away from what the user is already looking at the
+     * moment their first CityJSON file lands beside it (Task 6, M12.1).
+     */
+    const previousLayerCountRef = useRef(0);
     const layers = useLayerStore((s) => s.layers);
     /**
      * Which layer ids currently have a stream registered, as one string.
@@ -1630,6 +1645,11 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         // mount re-adds every layer from the store instead of trusting stale
         // entries whose meshes have been disposed.
         live.clear();
+        // With them, the workspace size the fit is keyed on: refs survive a
+        // remount of the same instance, and a rebuilt view comes up on the
+        // default globe camera. Those re-added layers are the first content of
+        // the new scene and must earn their one fit (Task 6).
+        previousLayerCountRef.current = 0;
         // Same reasoning for the geospatial pairs, but they are DELETED rather
         // than merely forgotten: they are ordinary engine layers and sources,
         // and this runs before `session.dispose()` (which only happens once
@@ -2335,6 +2355,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       const plugin = cityPluginRef.current;
       if (!engineReady || !plugin) return;
       const before = liveRef.current.size;
+      // Read BEFORE the sync updates it below: this is the workspace as it was
+      // when this effect last ran.
+      const workspaceWasEmpty = previousLayerCountRef.current === 0;
       syncLayers(
         {
           get: (id) => plugin.getHandle(id),
@@ -2375,21 +2398,36 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       onTriangleCount(
         totalTriangles(layers, liveRef.current, streamsRef.current),
       );
-      // Only a NEW layer earns a camera move: a visibility toggle, a LoD
-      // change or a rule edit must not yank the camera out from under the user.
-      if (liveRef.current.size > before) setFitToken((t) => t + 1);
+      // The workspace count as of THIS pass, for the next one to compare
+      // against. Streaming layers are rows of `layerStore` like any other
+      // (`openStreamingLayer` mints one), so `layers.length` already counts
+      // them — `streamsRef` would double-count.
+      previousLayerCountRef.current = layers.length + geoLayerCount;
+      // Only the FIRST layer of an empty workspace earns a camera move. A
+      // visibility toggle, a LoD change or a rule edit adds no handle; a second
+      // file adds one, but the user has already framed a view and an automatic
+      // flight would steal it — "Zoom to layer" is how they go and look at the
+      // new one (Task 6, M12.1). Both halves matter: `> before` is what makes
+      // this an ADD, and `workspaceWasEmpty` is what makes it the first.
+      if (liveRef.current.size > before && workspaceWasEmpty) {
+        setFitToken((t) => t + 1);
+      }
       // `themePolicy.meshStyle` is a dependency, not a ref read: a theme change
       // has to bring this effect back so the live handles are re-styled.
+      // `geoLayerCount` likewise: the count above has to stay current, or a
+      // city layer landing in a geo-only workspace would read it as empty.
     }, [
       engineReady,
       layers,
+      geoLayerCount,
       onTriangleCount,
       onLayerError,
       themePolicy.meshStyle,
     ]);
 
-    // Fit once whenever a layer is newly added. Separate from the sync effect
-    // so the fit runs after the handles exist and `boundsOf` can see them.
+    // Fit once whenever the first layer of an empty workspace is added.
+    // Separate from the sync effect so the fit runs after the handles exist
+    // and `boundsOf` can see them.
     useEffect(() => {
       if (fitToken === 0) return;
       // ONCE per token, and consumed even when the fit is skipped below. Two
