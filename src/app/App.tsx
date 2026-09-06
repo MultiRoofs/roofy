@@ -52,6 +52,15 @@ import { loadCityParquetFromUrl } from "../features/cityparquet/loadCityParquet"
 import { isCityParquetUrl } from "../features/cityparquet/sourceClassify";
 import { useFileDropGuard } from "../features/layers/useFileDropGuard";
 import { useEscapeClearsSelection } from "../features/selection/useEscapeClearsSelection";
+import {
+  useActiveCityLayer,
+  resolveActiveLayer,
+} from "../features/workspace/activeLayer";
+import {
+  activateLayer,
+  installWorkspaceInvariants,
+} from "../features/workspace/layerCoordination";
+import { useWorkspaceStore } from "../features/workspace/workspaceStore";
 import { useStreamStore } from "../features/streaming/streamStore";
 import { useTotalObjectCount } from "../features/streaming/useTotalObjectCount";
 import {
@@ -251,7 +260,11 @@ export function App({
 
   // Layer store
   const layers = useLayerStore((s) => s.layers);
-  const activeLayerId = useLayerStore((s) => s.activeLayerId);
+  /** The workspace's one active layer, when it is a city model. The shell's
+   *  streaming readout and its save label are CITY facts, so a geo layer being
+   *  active reads here as "none" rather than as some other layer's. */
+  const activeCityLayer = useActiveCityLayer();
+  const activeCityLayerId = activeCityLayer?.id ?? null;
   const hasLayers = layers.length > 0;
 
   /**
@@ -280,10 +293,10 @@ export function App({
   // `layers`, and why consumers that DO need to react to one select
   // narrowly rather than subscribing to the whole entry.
   const activeStreamStatus = useStreamStore((s) =>
-    activeLayerId ? s.streams[activeLayerId]?.status : undefined,
+    activeCityLayerId ? s.streams[activeCityLayerId]?.status : undefined,
   );
   const activeStreamMessage = useStreamStore((s) =>
-    activeLayerId ? s.streams[activeLayerId]?.message : undefined,
+    activeCityLayerId ? s.streams[activeCityLayerId]?.message : undefined,
   );
 
   /** Static layers' parsed objects PLUS streaming layers' resident features —
@@ -505,16 +518,11 @@ export function App({
   const geoSelection = useSelectionStore((s) => s.geoSelection);
   const selectGeoFeature = useSelectionStore((s) => s.selectGeoFeature);
   const geoLayers = useGeoLayerStore((s) => s.layers);
-  const setActiveGeoLayer = useGeoLayerStore((s) => s.setActiveGeoLayer);
 
-  // The inspector follows viewport picks on both sides: a picked geo feature
-  // selects its layer; a picked city object hands the panel back.
-  useEffect(() => {
-    if (geoSelection) setActiveGeoLayer(geoSelection.geoLayerId);
-  }, [geoSelection, setActiveGeoLayer]);
-  useEffect(() => {
-    if (selections.length > 0) setActiveGeoLayer(null);
-  }, [selections, setActiveGeoLayer]);
+  // The two effects that used to steer the geo store's own active id from the
+  // selection are gone: `installWorkspaceInvariants` holds that rule now (a
+  // pick activates the layer it landed on, whichever kind it is), for every
+  // way a selection can be made rather than only the ones this shell saw.
 
   /** The `config` the selected geo layer had when the feature was picked.
    *  Captured rather than derived because the comparison below has to be
@@ -556,6 +564,16 @@ export function App({
   useEffect(() => {
     void refreshSnapshots();
   }, [refreshSnapshots]);
+
+  /**
+   * The workspace's coordination rules, installed ONCE.
+   *
+   * Declared above every effect that can populate a store — the share-hash
+   * read, the DuckDB boot's table lifecycle — because effects run in body
+   * order: a first layer that landed before this ran would never be activated,
+   * and a restored selection would have nothing holding it to its layer.
+   */
+  useEffect(() => installWorkspaceInvariants(), []);
 
   // Initialize DuckDB-wasm on mount, and subscribe the layer-table registry to
   // the stores. One install, torn down with the app: the subscriptions are
@@ -652,9 +670,17 @@ export function App({
     const { mode: viewMode } = useViewModeStore.getState();
     const { theme: sceneTheme } = useSceneThemeStore.getState();
 
-    const activeLayer =
-      allLayers.find((l) => l.id === activeLayerId) ?? allLayers[0];
-    const label = activeLayer?.name ?? "Untitled";
+    // The ACTIVE layer names the snapshot, with no fallback to the first: a
+    // save labelled "Delft" because Delft happened to be added first, while
+    // the user was looking at Rotterdam, is a label that lies in the list of
+    // saved workspaces. Read from the store rather than from the render, so
+    // the callback does not have to be rebuilt on every activation.
+    const activeLayer = resolveActiveLayer(
+      useWorkspaceStore.getState().activeLayerId,
+      allLayers,
+      useGeoLayerStore.getState().layers,
+    );
+    const label = activeLayer?.layer.name ?? "Untitled";
 
     const snapshot = captureSnapshot({
       label,
@@ -698,7 +724,7 @@ export function App({
         STATUS_TOAST_MS,
       );
     }
-  }, [activeLayerId, persistenceStore, refreshSnapshots, showToast]);
+  }, [persistenceStore, refreshSnapshots, showToast]);
 
   const handleRestore = useCallback(
     async (id: string) => {
@@ -1180,12 +1206,14 @@ export function App({
     setCursorPosition(null);
     setUnavailableLayers([]);
     clearSelection();
-    // Geo layers SURVIVE "Close file" (only city layers are removed), but the
-    // active geo layer is what the inspector shows: leaving it set means the
-    // next city model opens onto the geospatial view of a layer nobody just
-    // picked. Clearing the selection alone does not cover it — the active geo
-    // layer is also set by clicking a row, which no selection state records.
-    useGeoLayerStore.getState().setActiveGeoLayer(null);
+    // "Close" empties the workspace, geospatial context included. Keeping the
+    // geo layers used to leave the next city model opening onto the
+    // geospatial view of a layer nobody had just picked — and a "Close file"
+    // that visibly leaves half the map behind is not what the word promises.
+    useGeoLayerStore.getState().removeAllGeoLayers();
+    // Last, and after both removals: the invariants hand the active id over to
+    // whatever survives each one, and nothing survives this.
+    activateLayer(null);
   }, [clearSelection]);
 
   // Re-selecting a file for an "unavailable" (restored-but-file-backed)
@@ -1313,7 +1341,6 @@ export function App({
   // optional-chained, so an empty workspace renders an empty globe rather than
   // throwing.
   if (hasLayers || engineBooting) {
-    const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
     const hasUrlLayers = layers.some((l) => l.modelRef.type === "url");
 
     const shellClasses = [
@@ -1359,6 +1386,8 @@ export function App({
           loading={loading}
           onFlyToLayer={(id) => sceneRef.current?.fitLayer(id)}
           onFlyToGeoLayer={handleFlyToGeoLayer}
+          tableOpen={tableOpen}
+          onToggleTable={() => setTableOpen((o) => !o)}
         />
 
         <div className="viewport">
@@ -1403,13 +1432,11 @@ export function App({
           duckdbStatus={duckdbStatus}
           fps={fps}
           cursorPosition={cursorPosition}
-          tableOpen={tableOpen}
-          onToggleTable={() => setTableOpen((o) => !o)}
           streamStatus={
-            activeLayer?.isStreaming ? (activeStreamStatus ?? "idle") : null
+            activeCityLayer?.isStreaming ? (activeStreamStatus ?? "idle") : null
           }
           streamMessage={
-            activeLayer?.isStreaming ? (activeStreamMessage ?? null) : null
+            activeCityLayer?.isStreaming ? (activeStreamMessage ?? null) : null
           }
         />
 

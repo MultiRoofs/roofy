@@ -18,10 +18,12 @@ import { StatusBar } from "../../../src/ui/StatusBar";
 import { useLayerStore } from "../../../src/features/layers/layerStore";
 import type { Layer } from "../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../src/domain/citymodel/types";
+import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
 
 afterEach(() => {
   cleanup();
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
 });
 
 function layerWithCrs(id: string, referenceSystem?: string): Layer {
@@ -125,14 +127,21 @@ describe("StatusBar — streaming status", () => {
   });
 });
 
+describe("StatusBar — no table toggle", () => {
+  it("carries no Table button: the table is opened from the layer row", () => {
+    render(<StatusBar {...baseProps} />);
+    expect(screen.queryByRole("button", { name: /table/i })).toBeNull();
+  });
+});
+
 describe("StatusBar — CRS", () => {
   it("shows the active layer's EPSG code", () => {
     useLayerStore.setState({
       layers: [
         layerWithCrs("a", "https://www.opengis.net/def/crs/EPSG/0/7415"),
       ],
-      activeLayerId: "a",
     });
+    useWorkspaceStore.setState({ activeLayerId: "a" });
     render(<StatusBar {...baseProps} />);
     expect(screen.getByText("CRS")).toBeTruthy();
     expect(screen.getByText("EPSG:7415")).toBeTruthy();
@@ -144,11 +153,24 @@ describe("StatusBar — CRS", () => {
         layerWithCrs("a", "https://www.opengis.net/def/crs/EPSG/0/7415"),
         layerWithCrs("b", "EPSG:3414"),
       ],
-      activeLayerId: "b",
     });
+    useWorkspaceStore.setState({ activeLayerId: "b" });
     render(<StatusBar {...baseProps} />);
     expect(screen.getByText("EPSG:3414")).toBeTruthy();
     expect(screen.queryByText("EPSG:7415")).toBeNull();
+  });
+
+  it("renders no CRS segment when a layer exists but none is active", () => {
+    // The bar used to fall back to `layers[0]`, so it announced an EPSG code
+    // for a layer nothing else on screen was pointing at.
+    useLayerStore.setState({
+      layers: [
+        layerWithCrs("a", "https://www.opengis.net/def/crs/EPSG/0/7415"),
+      ],
+    });
+    useWorkspaceStore.setState({ activeLayerId: null });
+    render(<StatusBar {...baseProps} />);
+    expect(screen.queryByText("CRS")).toBeNull();
   });
 
   it("renders no CRS segment when there are no layers", () => {
@@ -159,8 +181,8 @@ describe("StatusBar — CRS", () => {
   it("renders no CRS segment for a layer whose model declares none", () => {
     useLayerStore.setState({
       layers: [layerWithCrs("a")],
-      activeLayerId: "a",
     });
+    useWorkspaceStore.setState({ activeLayerId: "a" });
     render(<StatusBar {...baseProps} />);
     expect(screen.queryByText("CRS")).toBeNull();
   });

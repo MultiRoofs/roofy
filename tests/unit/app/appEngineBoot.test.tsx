@@ -36,6 +36,7 @@ import type {
 import type { StreamPlugin } from "../../../src/features/streaming/streamPlugin";
 import type { StreamState } from "../../../src/features/streaming/streamStore";
 import { ENGINE_BOOT_TIMEOUT_MS } from "../../../src/app/App";
+import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
 
 // jsdom ships no `matchMedia`, which `useTheme` reads on its first render.
 window.matchMedia ??= ((query: string) =>
@@ -203,7 +204,8 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
       return "stream-1";
     };
     loadFromUrl.mockReset();
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
   });
 
   afterEach(() => {
@@ -327,7 +329,8 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
 
 describe("App object count across static and streaming layers", () => {
   beforeEach(() => {
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useStreamStore.setState({ streams: {} });
   });
   afterEach(cleanup);
@@ -380,15 +383,16 @@ describe("App object count across static and streaming layers", () => {
 
 /**
  * The inspector follows VIEWPORT picks, not just clicks in the layer panel:
- * a picked geo feature makes its layer the active geo layer (so the panel
- * shows that layer's config), and a picked city object hands the panel back
- * by clearing it. Both directions are `App`-level effects with no UI of their
- * own, so they are driven through the selection store directly.
+ * a pick activates the layer it landed on, whichever kind that is. The rule
+ * lives in `installWorkspaceInvariants`, which `App` installs on mount — so
+ * what this proves is that the shell really installs it, driven through the
+ * selection store directly because the picks have no UI of their own.
  */
 describe("App inspector follows viewport picks across the geo/city split", () => {
   const resetStores = () => {
-    useLayerStore.setState({ layers: [], activeLayerId: null });
-    useGeoLayerStore.setState({ layers: [], activeGeoLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useGeoLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useSelectionStore.getState().clear();
   };
 
@@ -398,7 +402,7 @@ describe("App inspector follows viewport picks across the geo/city split", () =>
     resetStores();
   });
 
-  it("activates the picked feature's geo layer, then clears it on a city pick", async () => {
+  it("activates the picked feature's geo layer, then the city layer on a city pick", async () => {
     useLayerStore.getState().addLayer({
       id: "city-1",
       name: "delft.city.json",
@@ -427,7 +431,7 @@ describe("App inspector follows viewport picks across the geo/city split", () =>
         properties: { name: "A13" },
       });
     });
-    expect(useGeoLayerStore.getState().activeGeoLayerId).toBe(geoLayerId);
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(geoLayerId);
 
     act(() => {
       useSelectionStore.getState().select({
@@ -436,6 +440,44 @@ describe("App inspector follows viewport picks across the geo/city split", () =>
         objectId: "NL.IMBAG.Pand.1",
       });
     });
-    expect(useGeoLayerStore.getState().activeGeoLayerId).toBeNull();
+    // Not merely "no longer the geo layer": the city layer the pick landed on
+    // is now THE active layer, so the inspector, the legend and the highlight
+    // are all describing the same thing.
+    expect(useWorkspaceStore.getState().activeLayerId).toBe("city-1");
+    expect(useSelectionStore.getState().geoSelection).toBeNull();
+  });
+
+  it("Close empties the workspace — geospatial layers included — and leaves nothing active", async () => {
+    // Geo layers used to SURVIVE Close, so the next city model opened onto
+    // somebody else's roads with a geospatial inspector over it. "Close" now
+    // means the whole workspace.
+    useLayerStore.getState().addLayer({
+      id: "city-1",
+      name: "delft.city.json",
+      model,
+      modelRef: { type: "url", url: JSON_URL },
+      visible: true,
+      rules: [],
+      rulesEnabled: true,
+      isStreaming: false,
+    });
+    useGeoLayerStore.getState().addGeoLayer({
+      name: "roads",
+      kind: "geojson",
+      config: { url: "https://x/roads.geojson" },
+    });
+
+    render(<App persistenceStore={emptyStore} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Close file" }));
+    });
+
+    expect(useLayerStore.getState().layers).toEqual([]);
+    expect(useGeoLayerStore.getState().layers).toEqual([]);
+    expect(useWorkspaceStore.getState().activeLayerId).toBeNull();
   });
 });

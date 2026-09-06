@@ -20,6 +20,7 @@ import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import { CellCache } from "@cityjson/navara-flatcitybuf";
 import { buildResidentModel } from "@cityjson/navara-flatcitybuf";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 
 /** The streaming layer's plugin handle, reduced to the one method the UI
  *  reaches: the resident-model merge (which the plugin owns and memoises on
@@ -34,7 +35,8 @@ function residentHandle(cache: unknown) {
 
 afterEach(() => {
   cleanup();
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
   useStreamStore.setState({ streams: {} });
   // getResidentModel's memo is module-global and keyed by (layerId,
   // version) — several tests below reuse layerId "L" at version 1 with
@@ -106,8 +108,8 @@ describe("LayerPanel — static layer", () => {
           model: { ...emptyModel(), objects: { a: {}, b: {} } as never },
         }),
       ],
-      activeLayerId: "L",
     });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
 
     const { container } = render(
       <LayerPanel
@@ -115,6 +117,8 @@ describe("LayerPanel — static layer", () => {
         onAddFiles={noop}
         onAddUrl={noopUrl}
         loading={false}
+        tableOpen={false}
+        onToggleTable={noop}
       />,
     );
 
@@ -144,8 +148,8 @@ describe("LayerPanel — streaming layer", () => {
     });
     useLayerStore.setState({
       layers: [baseLayer({ isStreaming: true })],
-      activeLayerId: "L",
     });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
 
     render(
       <LayerPanel
@@ -153,6 +157,8 @@ describe("LayerPanel — streaming layer", () => {
         onAddFiles={noop}
         onAddUrl={noopUrl}
         loading={false}
+        tableOpen={false}
+        onToggleTable={noop}
       />,
     );
 
@@ -175,8 +181,8 @@ describe("LayerPanel — streaming layer", () => {
     });
     useLayerStore.setState({
       layers: [baseLayer({ isStreaming: true })],
-      activeLayerId: "L",
     });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
 
     render(
       <LayerPanel
@@ -184,6 +190,8 @@ describe("LayerPanel — streaming layer", () => {
         onAddFiles={noop}
         onAddUrl={noopUrl}
         loading={false}
+        tableOpen={false}
+        onToggleTable={noop}
       />,
     );
 
@@ -206,8 +214,8 @@ describe("LayerPanel — streaming layer", () => {
     });
     useLayerStore.setState({
       layers: [baseLayer({ isStreaming: true })],
-      activeLayerId: "L",
     });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
 
     render(
       <LayerPanel
@@ -215,6 +223,8 @@ describe("LayerPanel — streaming layer", () => {
         onAddFiles={noop}
         onAddUrl={noopUrl}
         loading={false}
+        tableOpen={false}
+        onToggleTable={noop}
       />,
     );
     expect(screen.getByText("1 feature")).toBeTruthy();

@@ -8,8 +8,8 @@
  *
  * Drawing config (the layer opacity and a vector layer's colour, point size,
  * line width and fill opacity) is NOT here: it lives in `GeoLayerInspector`,
- * which follows `activeGeoLayerId` and has the width to lay six controls out
- * as a form. Squeezed into a 240 px row they had to hide behind a disclosure
+ * which follows the workspace's active layer and has the width to lay six
+ * controls out as a form. Squeezed into a 240 px row they had to hide behind a disclosure
  * and still trebled its height; a row that stays one line is the point.
  *
  * Its own component (rather than a branch inside `LayerPanel.map`) because the
@@ -25,6 +25,8 @@ import {
   type GeoLayer,
 } from "../../features/geoLayers/geoLayerStore";
 import { parseGeoJsonText } from "../../features/geoLayers/classifyGeoSource";
+import { useWorkspaceStore } from "../../features/workspace/workspaceStore";
+import { activateLayer } from "../../features/workspace/layerCoordination";
 import { KIND_BADGE, KIND_LABEL, sourceOf } from "./geoLayerMeta";
 import { VisibilityIcon } from "./VisibilityIcon";
 import { TrashIcon } from "./TrashIcon";
@@ -40,10 +42,11 @@ export function GeoLayerRow({
   const updateGeoLayer = useGeoLayerStore((s) => s.updateGeoLayer);
   const removeGeoLayer = useGeoLayerStore((s) => s.removeGeoLayer);
   const relinkGeoJsonLayer = useGeoLayerStore((s) => s.relinkGeoJsonLayer);
-  const activeGeoLayerId = useGeoLayerStore((s) => s.activeGeoLayerId);
-  const setActiveGeoLayer = useGeoLayerStore((s) => s.setActiveGeoLayer);
+  // The SAME id a city row reads: a geo layer and a city model take turns
+  // being the one layer the inspector, the legend and the highlight describe.
+  const activeLayerId = useWorkspaceStore((s) => s.activeLayerId);
 
-  const isActive = layer.id === activeGeoLayerId;
+  const isActive = layer.id === activeLayerId;
 
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(layer.name);
@@ -77,7 +80,7 @@ export function GeoLayerRow({
     <div
       className={`layer-item geo-layer-item ${isActive ? "layer-active" : ""} ${layer.visible ? "" : "layer-hidden"}`}
       data-testid="geo-layer-row"
-      onClick={() => setActiveGeoLayer(layer.id)}
+      onClick={() => activateLayer(layer.id)}
     >
       <button
         className="layer-vis-btn"

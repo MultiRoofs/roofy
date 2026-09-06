@@ -43,6 +43,8 @@ function renderPanel(
       onAddFiles={noop}
       onAddUrl={onAddUrl}
       loading={false}
+      tableOpen={false}
+      onToggleTable={noop}
     />,
   );
 }

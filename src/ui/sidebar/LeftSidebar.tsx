@@ -26,6 +26,10 @@ interface LeftSidebarProps {
   readonly loading: boolean;
   readonly onFlyToLayer?: (layerId: string) => void;
   readonly onFlyToGeoLayer?: (geoLayerId: string) => void;
+  /** Threaded straight through to `LayerPanel`'s active-row table toggle, and
+   *  THROWAWAY with it — 12.2 deletes this sidebar. */
+  readonly tableOpen: boolean;
+  readonly onToggleTable: () => void;
 }
 
 export function LeftSidebar({
@@ -38,6 +42,8 @@ export function LeftSidebar({
   loading,
   onFlyToLayer,
   onFlyToGeoLayer,
+  tableOpen,
+  onToggleTable,
 }: LeftSidebarProps) {
   const draggingRef = useRef(false);
   const startXRef = useRef(0);
@@ -102,6 +108,8 @@ export function LeftSidebar({
           loading={loading}
           onFlyToLayer={onFlyToLayer}
           onFlyToGeoLayer={onFlyToGeoLayer}
+          tableOpen={tableOpen}
+          onToggleTable={onToggleTable}
         />
       </div>
       <div className="left-sidebar-handle" onPointerDown={handlePointerDown} />

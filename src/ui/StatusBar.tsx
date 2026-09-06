@@ -6,7 +6,7 @@
 
 import type { DuckDBStatus } from "../insights/duckdb";
 import type { StreamStatus } from "../features/streaming/streamStore";
-import { useLayerStore } from "../features/layers/layerStore";
+import { useActiveCityLayer } from "../features/workspace/activeLayer";
 import { extractCrsCode } from "./toolbar/crsCode";
 import { duckdbDotClass, duckdbLabel, duckdbTooltip } from "./duckdbStatusText";
 
@@ -17,8 +17,6 @@ interface StatusBarProps {
   readonly duckdbStatus?: DuckDBStatus;
   readonly fps?: number;
   readonly cursorPosition?: readonly [number, number, number] | null;
-  readonly tableOpen?: boolean;
-  readonly onToggleTable?: () => void;
   /** The active layer's viewport-streaming status, or `null`/`undefined`
    *  when the active layer isn't streaming. `"idle"` (nothing pending) is
    *  deliberately not surfaced — there's nothing notable to tell the user
@@ -38,17 +36,15 @@ export function StatusBar({
   duckdbStatus,
   fps,
   cursorPosition,
-  tableOpen,
-  onToggleTable,
   streamStatus,
   streamMessage,
 }: StatusBarProps) {
   // Read straight from the store rather than through a prop: the CRS is a
   // property of the active layer, not of anything `App` already computes, and
-  // threading it would put a fact nobody else needs through the shell.
-  const layers = useLayerStore((s) => s.layers);
-  const activeLayerId = useLayerStore((s) => s.activeLayerId);
-  const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
+  // threading it would put a fact nobody else needs through the shell. No
+  // fallback to the first layer — an EPSG code for a layer nothing else on
+  // screen points at is worse than no code at all.
+  const activeLayer = useActiveCityLayer();
   const crs = activeLayer
     ? extractCrsCode(activeLayer.model.metadata.referenceSystem)
     : null;
@@ -59,20 +55,6 @@ export function StatusBar({
         <span className="status-dot" />
         <span className="status-label">Ready</span>
       </div>
-
-      {onToggleTable && (
-        <button
-          className={`tb-btn table-toggle-btn ${tableOpen ? "active" : ""}`}
-          title={tableOpen ? "Hide table" : "Show table"}
-          onClick={onToggleTable}
-        >
-          <svg viewBox="0 0 24 24" width="14" height="14">
-            <rect x="3" y="3" width="18" height="18" rx="2" fill="none" />
-            <path d="M3 9h18M3 15h18M9 3v18" />
-          </svg>
-          <span>Table</span>
-        </button>
-      )}
 
       {fps !== undefined && (
         <div className="status-item">

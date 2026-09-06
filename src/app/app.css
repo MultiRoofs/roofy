@@ -2687,8 +2687,8 @@ body {
   line-height: 1.4;
 }
 
-/* Clickable like a city-model row: the inspector follows the active
-   geospatial layer (geoLayerStore.activeGeoLayerId). */
+/* Clickable like a city-model row: the inspector follows the workspace's one
+   active layer, whichever section it lives in (features/workspace). */
 .geo-layer-item {
   cursor: pointer;
 }
@@ -3464,28 +3464,6 @@ body {
 
 .data-th-static {
   cursor: default;
-}
-
-/* Table toggle button in toolbar */
-
-.table-toggle-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.65rem;
-  color: var(--fg-muted);
-  /* Sized to its own content, overriding `.tb-btn`'s 2rem × 2rem toolbar
-     square. That square is 4px TALLER than the `--statusbar-h` (1.75rem) row
-     it sits in, and the row centres it, so it hung 2px below the shell — which
-     is the bottom of the page. `.statusbar` does not clip, so those 2px made
-     the whole document scrollable. */
-  width: auto;
-  height: auto;
-  padding: 0.25rem 0.375rem;
-}
-
-.table-toggle-btn.active {
-  color: var(--accent);
 }
 
 /* ═══════════════════════════════════════════════════════════════

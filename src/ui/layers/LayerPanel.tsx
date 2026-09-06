@@ -34,6 +34,8 @@ import { getResidentModel } from "../../features/streaming/residentModel";
 import { closeStreamingLayer } from "../../features/streaming/openStreamingLayer";
 import { getStreamPlugin } from "../../features/streaming/streamPlugin";
 import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
+import { useWorkspaceStore } from "../../features/workspace/workspaceStore";
+import { activateLayer } from "../../features/workspace/layerCoordination";
 import { LodSelector } from "../sidebar/LodSelector";
 import { AppearanceSelector } from "../sidebar/AppearanceSelector";
 import type { AppearanceTheme } from "@cityjson/navara-core";
@@ -53,6 +55,12 @@ interface LayerPanelProps {
   readonly loading: boolean;
   readonly onFlyToLayer?: (layerId: string) => void;
   readonly onFlyToGeoLayer?: (geoLayerId: string) => void;
+  /** THROWAWAY, and deliberately so: 12.2 replaces this pane with an action
+   *  row that owns the data drawer. Until then the table has to stay
+   *  reachable from somewhere, and the active city row is the only place that
+   *  already knows which layer's table it would be. */
+  readonly tableOpen: boolean;
+  readonly onToggleTable: () => void;
 }
 
 export function LayerPanel({
@@ -62,6 +70,8 @@ export function LayerPanel({
   loading,
   onFlyToLayer,
   onFlyToGeoLayer,
+  tableOpen,
+  onToggleTable,
 }: LayerPanelProps) {
   const layers = useLayerStore((s) => s.layers);
   // A streaming layer's themes are LEARNED (its model is a stub), so the
@@ -72,13 +82,12 @@ export function LayerPanel({
     const themes = st.appearanceThemes ?? [];
     if (themes.length > 0) streamThemes[id] = themes;
   }
-  const activeLayerId = useLayerStore((s) => s.activeLayerId);
-  const setActiveLayer = useLayerStore((s) => s.setActiveLayer);
+  // ONE active id for both sections — see features/workspace.
+  const activeLayerId = useWorkspaceStore((s) => s.activeLayerId);
   const updateLayer = useLayerStore((s) => s.updateLayer);
   const removeLayer = useLayerStore((s) => s.removeLayer);
   const setCameraSync = useLayerStore((s) => s.setCameraSync);
   const geoLayers = useGeoLayerStore((s) => s.layers);
-  const setActiveGeoLayer = useGeoLayerStore((s) => s.setActiveGeoLayer);
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -125,12 +134,7 @@ export function LayerPanel({
           <div
             key={layer.id}
             className={`layer-item ${isActive ? "layer-active" : ""} ${!layer.visible ? "layer-hidden" : ""}`}
-            onClick={() => {
-              setActiveLayer(layer.id);
-              // One selection across both sections: a city pick hands the
-              // inspector back to the city view.
-              setActiveGeoLayer(null);
-            }}
+            onClick={() => activateLayer(layer.id)}
           >
             <button
               className="layer-vis-btn"
@@ -232,6 +236,36 @@ export function LayerPanel({
             )}
 
             <div className="layer-actions">
+              {isActive && (
+                <button
+                  className="rule-action-btn"
+                  aria-label={tableOpen ? "Close table" : "Open table"}
+                  aria-pressed={tableOpen}
+                  data-tooltip={tableOpen ? "Close table" : "Open table"}
+                  data-tooltip-pos="top"
+                  data-tooltip-align="end"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleTable();
+                  }}
+                >
+                  {/* Attributes carried here, like `TrashIcon`'s:
+                      `.rule-action-btn` styles no `svg` of its own. */}
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="12"
+                    height="12"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <path d="M3 9h18M3 15h18M9 3v18" />
+                  </svg>
+                </button>
+              )}
               {onFlyToLayer && (
                 <button
                   className="rule-action-btn"

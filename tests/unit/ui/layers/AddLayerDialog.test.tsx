@@ -55,6 +55,8 @@ function renderPanel(
       onAddFiles={overrides.onAddFiles ?? noop}
       onAddUrl={overrides.onAddUrl ?? noopUrl}
       loading={overrides.loading ?? false}
+      tableOpen={false}
+      onToggleTable={noop}
     />,
   );
 }

@@ -23,18 +23,23 @@ import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import { useGeoLayerStore } from "../../../../src/features/geoLayers/geoLayerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 
 afterEach(() => {
   cleanup();
-  useLayerStore.setState({ layers: [], activeLayerId: null });
-  useGeoLayerStore.setState({ layers: [], activeGeoLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
+  useGeoLayerStore.setState({ layers: [] });
 });
 
 const noop = () => {};
 /** The URL path now reports whether a layer landed; these suites never look. */
 const noopUrl = async () => ({ ok: true }) as const;
 
-function renderPanel(onFlyToGeoLayer?: (id: string) => void) {
+function renderPanel(
+  onFlyToGeoLayer?: (id: string) => void,
+  extra: { tableOpen?: boolean; onToggleTable?: () => void } = {},
+) {
   return render(
     <LayerPanel
       onAddFile={noop}
@@ -42,6 +47,8 @@ function renderPanel(onFlyToGeoLayer?: (id: string) => void) {
       onAddUrl={noopUrl}
       loading={false}
       onFlyToGeoLayer={onFlyToGeoLayer}
+      tableOpen={extra.tableOpen ?? false}
+      onToggleTable={extra.onToggleTable ?? noop}
     />,
   );
 }
@@ -78,7 +85,8 @@ function addCityLayer(name: string): void {
     selectedAppearance: null,
     isStreaming: false,
   };
-  useLayerStore.setState({ layers: [layer], activeLayerId: layer.id });
+  useLayerStore.setState({ layers: [layer] });
+  useWorkspaceStore.setState({ activeLayerId: layer.id });
 }
 
 const geoStore = () => useGeoLayerStore.getState();
@@ -280,27 +288,74 @@ describe("LayerPanel — zoom to a geospatial layer", () => {
   });
 });
 
-describe("LayerPanel — selecting a geospatial layer", () => {
+describe("LayerPanel — one active layer across both sections", () => {
   it("activates the layer on row click and marks the row", () => {
     const id = addGeoJson();
     renderPanel();
 
     fireEvent.click(geoRows()[0]!);
 
-    expect(geoStore().activeGeoLayerId).toBe(id);
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(id);
     expect(geoRows()[0]!.className).toContain("layer-active");
   });
 
-  it("clicking a city row hands the selection back to the city side", () => {
+  it("clicking a city row hands the active layer back to the city side", () => {
     addCityLayer("Delft");
     const id = addGeoJson();
     renderPanel();
 
     fireEvent.click(geoRows()[0]!);
-    expect(geoStore().activeGeoLayerId).toBe(id);
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(id);
 
     fireEvent.click(screen.getByText("Delft"));
-    expect(geoStore().activeGeoLayerId).toBeNull();
+    expect(useWorkspaceStore.getState().activeLayerId).toBe("city-Delft");
+  });
+
+  it("a city row is marked active from the workspace store, not the layer store", () => {
+    addCityLayer("Delft");
+    useWorkspaceStore.setState({ activeLayerId: null });
+    const { container } = renderPanel();
+    const row = container.querySelector(".layer-item:not(.geo-layer-item)")!;
+    expect(row.className).not.toContain("layer-active");
+
+    fireEvent.click(screen.getByText("Delft"));
+    expect(useWorkspaceStore.getState().activeLayerId).toBe("city-Delft");
+  });
+});
+
+describe("LayerPanel — the table toggle on the active city row", () => {
+  it("offers it on the ACTIVE city row only", () => {
+    addCityLayer("Delft");
+    useLayerStore.setState({
+      layers: [
+        ...useLayerStore.getState().layers,
+        { ...useLayerStore.getState().layers[0]!, id: "city-R", name: "Rott" },
+      ],
+    });
+    useWorkspaceStore.setState({ activeLayerId: "city-Delft" });
+    renderPanel();
+
+    expect(screen.getAllByRole("button", { name: "Open table" })).toHaveLength(
+      1,
+    );
+  });
+
+  it("calls back, and says Close table while the table is open", () => {
+    addCityLayer("Delft");
+    const onToggleTable = vi.fn();
+    renderPanel(undefined, { tableOpen: true, onToggleTable });
+
+    const btn = screen.getByRole("button", { name: "Close table" });
+    fireEvent.click(btn);
+    expect(onToggleTable).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers none on a geospatial row — there is no table behind it", () => {
+    addGeoJson();
+    useWorkspaceStore.setState({ activeLayerId: null });
+    renderPanel();
+    fireEvent.click(geoRows()[0]!);
+    expect(screen.queryByRole("button", { name: /table/i })).toBeNull();
   });
 });
 

@@ -3,7 +3,7 @@
  * SQL builders, the filter bar and the tests all read one vocabulary.
  *
  * SESSION state, deliberately: none of this is in the v3 snapshot or a share
- * link, for the same reason `activeGeoLayerId` is not. A restored workspace
+ * link, for the same reason the active-layer id is not. A restored workspace
  * opens on an unfiltered table, which is the honest starting point — a
  * restored filter would also have to restore the map filtering it drives, and
  * a saved predicate can name a column a re-linked file does not have.
