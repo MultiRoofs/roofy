@@ -826,9 +826,11 @@ Rulings that amend the outlines above:
 - Workspace name: `useWorkspaceStore` gains `name: string` (default `"Untitled workspace"`) and `setName`; Save writes it as the snapshot `label`; Restore sets it from the label; the header shows it. No new persistence field.
 - Interface appearance: `useTheme` gains a preference `"system" | "light" | "dark"` (storage key stays `roofy-theme`; the stored value `"system"` or absent means follow `prefers-color-scheme`; the effective theme is what `data-theme` shows). The header's theme toggle goes; Preferences owns it.
 
+Deferred or dropped by the 12.2 plan review (recorded in the design spec's Deferred section): workspace Duplicate / Delete and layer Duplicate (12.5's header polish, or dropped if unused); Preferences → Units and Reduce motion (dropped: metric only, reduced motion honoured by CSS); raster colormap (no engine support); streaming "Refresh visible" (12.5).
+
 ### Execution order for 12.2
 
-**T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9 → T10 → T11 → T12**, one at a time, each commit green. T2 (shell grid) mounts the OLD `LeftSidebar` and `InspectorPanel` inside the new grid so the app keeps working; T7 swaps in the new left panel; T11 deletes the old modules.
+**T13 → T14 → T15 → T16 → T17 → T18 → T19 → T20 → T21 → T22 → T23 → T24** (12.2's tasks are numbered 13–24 so `task-brief` can address them), one at a time, each commit green. T14 (shell grid) mounts the OLD `LeftSidebar` and `InspectorPanel` inside the new grid so the app keeps working; T19 swaps in the new left panel; T23 deletes the old modules.
 
 ### File map for 12.2
 
@@ -836,10 +838,12 @@ Rulings that amend the outlines above:
 - Create `src/ui/header/WorkspaceHeader.tsx`, `src/ui/header/WorkspaceMenu.tsx`, `src/ui/header/PreferencesMenu.tsx`, `src/ui/header/SceneControlsTemp.tsx`.
 - Create `src/features/layers/layerPresentation.ts`.
 - Create `src/ui/layers/LayerList.tsx`, `src/ui/layers/LayerRow.tsx`, `src/ui/layers/LayerRowMenu.tsx`, `src/ui/layers/ActiveLayerPanel.tsx`, `src/ui/layers/StyleSection.tsx`, `src/ui/layers/FilterSection.tsx`, `src/ui/layers/DetailsSection.tsx`, `src/ui/sidebar/LeftPanel.tsx`.
-- Modify `src/features/workspace/workspaceStore.ts` (name), `src/features/theme/useTheme.ts` (preference), `src/app/App.tsx` (shell, header, landing condition, geo-first fit, workspace name), `src/scene/NavaraViewport.tsx` (stream predicate geo term), `src/ui/inspector/InspectorPanel.tsx` (no Rules tab, no geo override, hidden when the selection is empty), `src/ui/table/TablePanel.tsx` (height/open from `shellStore`), `src/ui/layers/AddLayerDialog.tsx` + `SourcePicker.tsx` + `GeospatialSourceForm.tsx` (File / URL / Catalog with detection), `src/app/app.css` (new sections `VIEWER SHELL`, `HEADER`, `LEFT PANEL`, `LAYER LIST`, `ACTIVE LAYER`; old `TOOLBAR`, `LEFT SIDEBAR`, `LAYER PANEL`, `THEME TOGGLE`, `VIEW MODE TOGGLE (toolbar)` sections removed in T11).
-- Delete (T11) `src/ui/toolbar/ViewerToolbar.tsx`, `src/ui/ThemeToggleButton.tsx`, `src/ui/sidebar/LeftSidebar.tsx`, `src/ui/layers/LayerPanel.tsx`, `src/ui/layers/GeoLayerRow.tsx`, `src/ui/inspector/GeoLayerInspector.tsx` (its style form moves into `StyleSection`), and their tests; `LodSelector`, `AppearanceSelector`, `LayerTypeToggles`, `StreamingLodControl`, `BasemapPanel`, `GoogleTilesPanel` are reused, not deleted.
+- Modify `src/features/workspace/workspaceStore.ts` (name), `src/features/theme/useTheme.ts` (preference), `src/app/App.tsx` (shell, header, landing condition, geo-first fit, workspace name), `src/scene/NavaraViewport.tsx` (stream predicate geo term), `src/ui/inspector/InspectorPanel.tsx` (no Rules tab, no geo override, hidden when the selection is empty), `src/ui/table/TablePanel.tsx` (height/open from `shellStore`), `src/ui/layers/AddLayerDialog.tsx` + `SourcePicker.tsx` + `GeospatialSourceForm.tsx` (File / URL / Catalog with detection), `src/app/app.css` (new sections `VIEWER SHELL`, `HEADER`, `LEFT PANEL`, `LAYER LIST`, `ACTIVE LAYER`; old `TOOLBAR`, `LEFT SIDEBAR`, `LAYER PANEL`, `THEME TOGGLE`, `VIEW MODE TOGGLE (toolbar)` sections removed in T23).
+- Delete (T23) `src/ui/toolbar/ViewerToolbar.tsx`, `src/ui/ThemeToggleButton.tsx`, `src/ui/sidebar/LeftSidebar.tsx`, `src/ui/layers/LayerPanel.tsx`, `src/ui/layers/GeoLayerRow.tsx`, `src/ui/inspector/GeoLayerInspector.tsx` (its style form moves into `StyleSection`), and their tests; `LodSelector`, `AppearanceSelector`, `LayerTypeToggles`, `StreamingLodControl`, `BasemapPanel`, `GoogleTilesPanel` are reused, not deleted.
 
-### Task 1: shellStore and workspace name
+### Task 13: shellStore and workspace name
+
+**Review rulings (binding, 2026-09-06 plan review):** `ShellState` also carries `rightCollapsed: boolean` (default false) with `setRightCollapsed` / `toggleRightCollapsed` — collapsing the details panel is NOT clearing the selection. `openSections` is PER LAYER: `Readonly<Record<string, ReadonlyArray<PanelSection>>>`, default `["style"]` for an unknown layer id, `toggleSection(layerId, s)`. `requestedSection` is `{ layerId: string; section: PanelSection } | null`; `requestSection(layerId, section)` activates that layer (`activateLayer`), sets `leftCollapsed = false`, opens the section for that layer and stores the request; `ActiveLayerPanel` consumes it. Defaults come from the viewport: `defaultShellState(innerWidth, innerHeight)` — left 300 / right 340 (272 / 320 below 1360px), drawer 280 (220 below 800px tall); `clampDrawerHeight(px, innerHeight)` = `min(max(px, 160), min(800, innerHeight - 200))`, pure and tested. `workspaceStore` gains `resetName()`; "New workspace" calls it.
 
 **Files:** create `src/ui/shell/shellStore.ts`; modify `src/features/workspace/workspaceStore.ts`; tests `tests/unit/ui/shell/shellStore.test.ts`, extend `tests/unit/features/workspace/workspaceStore.test.ts`.
 
@@ -877,7 +881,9 @@ Tests: defaults; clamping at each limit; `toggleSection` adds/removes; `requestS
 
 - [ ] Steps: failing tests → implement (plain `create<T>()`) → green → commit `feat(shell): shell store for panel, drawer and section state; workspace name`.
 
-### Task 2: ViewerShell grid with the old regions inside
+### Task 14: ViewerShell grid with the old regions inside
+
+**Review rulings (binding):** the right column is `0` when `right === null || rightCollapsed`; when `rightCollapsed && right !== null` the shell renders a glass pill on the map's right edge (`Details · {rightTitle}`, prop `rightTitle: string`) that calls `setRightCollapsed(false)`; the right panel's left edge carries a `ResizeHandle` writing `setRightWidth`. `drawerExpanded` gets NO UI in this slice (12.4 adds Expand together with the attribution mirror; the map is never hidden in 12.2). `App` keeps rendering, as siblings after `<ViewerShell>` exactly as today: `UnavailableLayersBanner`, `ShareDialog`, the toast, `AddLayerDialog` / `StacBrowserDialog` portals; `RenderingPanel` stays inside the map slot; `TablePanel`'s mount/unmount `setTablePanelOpen` registration and its DuckDB props are unchanged. Tests assert real sizing (computed `--left-w`/`--right-w`/`--drawer-h` values), not only class names.
 
 **Files:** create `src/ui/shell/ViewerShell.tsx`, `src/ui/shell/ResizeHandle.tsx`; modify `src/app/App.tsx` (viewer branch), `src/ui/table/TablePanel.tsx` (reads `drawerHeight`/`setDrawerHeight`/`closeDrawer` from `shellStore` instead of props; `onCollapse`/`onHeightChange` props removed), `src/app/app.css` (`VIEWER SHELL` section rewritten); tests `tests/unit/ui/shell/ViewerShell.test.tsx`, update `tests/unit/ui/table/TablePanel.test.tsx`, `tests/unit/app/*` for the removed `App` state.
 
@@ -900,7 +906,9 @@ Tests: renders the six regions in the right areas (class names); `right === null
 
 - [ ] Steps: failing tests → implement → `App` viewer branch returns `<ViewerShell header={<ViewerToolbar …/>} left={<LeftSidebar …/>} map={viewport + overlays} drawer={drawerOpen ? <TablePanel …/> : null} right={selections.length > 0 || geoSelection ? <InspectorPanel …/> : null} status={<StatusBar …/>}/>` (the inspector-open toggle and `inspectorOpen` state are removed: the right column follows the selection) → suite green → commit `feat(shell): grid with the drawer under the map column and a selection-driven right column`.
 
-### Task 3: WorkspaceHeader, menus, Preferences, theme preference
+### Task 15: WorkspaceHeader, menus, Preferences, theme preference
+
+**Review rulings (binding):** the theme preference becomes a store, `src/features/theme/themeStore.ts` (`preference: ThemePreference`, `theme: Theme` effective, `setPreference`; `installThemeListener()` installed once by `App` subscribes to `matchMedia("(prefers-color-scheme: dark)")` and writes `document.documentElement.dataset.theme` — the effective theme is ALWAYS stamped, "system" only means it follows the OS; storage key stays `roofy-theme` and legacy stored values `"dark"`/`"light"` read as explicit preferences); `useTheme()` becomes a thin selector hook. The landing page's `ThemeToggleButton` is replaced by the same `PreferencesMenu` and `ThemeToggleButton` + its test are deleted in THIS task. Tests: OS change while System updates the stamp; an explicit override ignores OS changes; legacy stored values; landing → viewer keeps the theme. `onSave(): Promise<boolean>` — "Saved · just now" shows only on `true`; New workspace resets the workspace name; the name button truncates with an ellipsis at `max-width: 240px`; `SceneControlsTemp` is icon-only with tooltips; the header also carries the right-collapse button (`Collapse details panel` / `Expand details panel`, disabled when there is no selection).
 
 **Files:** create `src/ui/header/{WorkspaceHeader,WorkspaceMenu,PreferencesMenu,SceneControlsTemp}.tsx`; modify `src/features/theme/useTheme.ts`, `src/app/App.tsx` (header mount; Save uses the workspace name as label; Restore sets the name; "New workspace" = `handleClose`; "Open…" lists snapshots via the existing `persistenceStore.list()` and calls `handleRestore(id)`), `src/app/app.css` (`HEADER` section); tests `tests/unit/ui/header/*.test.tsx`, `tests/unit/features/theme/useTheme.test.ts`, update `tests/unit/ui/viewerToolbar.test.tsx` → moved to `tests/unit/ui/header/WorkspaceHeader.test.tsx`.
 
@@ -924,7 +932,9 @@ Tests: header renders name, Save/Share/Preferences; Preferences sets `data-theme
 
 - [ ] Steps: failing tests → implement → suite → commit `feat(header): workspace header with menu, Save, Share and Preferences; interface appearance follows the system by default`.
 
-### Task 4: layerPresentation (pure)
+### Task 16: layerPresentation (pure)
+
+**Review rulings (binding):** `LayerStateInput` gains `counts?: { readonly buildings: number; readonly objects: number }` where `buildings` counts ROOT `Building` objects (BuildingParts excluded — use the model's parent links / `toplevelCityObjectType` from `@cityjson/navara-core`) and `objects` counts root objects of every type; the line reads "1,204 buildings · LoD 2.2" when every root object is a Building, else "2,231 objects · LoD 2.2". Streaming reads "Streaming · 1,240 currently loaded" (the words "currently loaded" are mandatory). Loading / error / unavailable rows get their inputs from T17's row sources; `layerStateLine` only formats.
 
 **Files:** create `src/features/layers/layerPresentation.ts`; test `tests/unit/features/layers/layerPresentation.test.ts`.
 
@@ -950,7 +960,9 @@ Tests: one per example line; `layerKindOf` for all five kinds.
 
 - [ ] Steps: failing tests → implement → commit `feat(layers): one presentation function for a layer's kind and state line`.
 
-### Task 5: LayerList and LayerRow
+### Task 17: LayerList and LayerRow
+
+**Review rulings (binding):** the list renders three extra non-activatable row kinds besides store rows: (a) unavailable placeholders from `App`'s `unavailableLayers` (prop `extraRows`), state "Needs re-link", action `Re-link` (calls the existing `handleResolveUnavailableLayer` path) and `Dismiss`; (b) loading rows — `useLayerFileLoader` gains `pending: ReadonlyArray<{ id: string; name: string }>` (one entry per in-flight add), state "Loading…"; (c) error rows — the loader gains `failed: ReadonlyArray<{ id: string; name: string; message: string; retry(): void }>`, state "Error · <message>", actions `Retry` and `Dismiss` (`dismissFailed(id)`). A failed add therefore always leaves a visible row (design scenario 9). Tests for each row kind and for "an error row is not activatable".
 
 **Files:** create `src/ui/layers/{LayerList,LayerRow,LayerRowMenu}.tsx`; `src/app/app.css` (`LAYER LIST` section); tests `tests/unit/ui/layers/{LayerList,LayerRow}.test.tsx`.
 
@@ -970,7 +982,9 @@ Tests: renders city, streaming, vector, raster rows with the right state lines; 
 
 - [ ] Steps: failing tests → implement → commit `feat(layers): one layer list for every layer kind`.
 
-### Task 6: ActiveLayerPanel with Style (relocated rules), Filter (summary) and Details
+### Task 18: ActiveLayerPanel with Style (relocated rules), Filter (summary) and Details
+
+**Review rulings (binding):** this task moves `src/ui/inspector/RuleBuilderTab.tsx` to `src/ui/layers/RulesEditor.tsx` AND updates `InspectorPanel`'s import (and the moved test's imports/mocks) in the SAME commit — the inspector keeps its Rules tab until T20 so every commit compiles. Per-layer `openSections` and the `{ layerId, section }` request (T13) are consumed here: on mount and whenever `requestedSection.layerId` is the active layer, open the section, `scrollIntoView`, then `requestSection(null)`. Vector style is the EXISTING model only — one `color`, `fillOpacity`, `lineWidthPx`, `pointSizePx` (no separate stroke colour); raster → opacity only (a colormap is deferred, no engine support); tiles → "No style options". Details gains an Extent row (from `model.metadata.geographicalExtent` when present, else the model bbox, formatted with the CRS) and labels the reused control "Streaming level of detail (applies to every streaming layer)" because it is global. Streaming subscriptions stay inside the components that need them (render-cost split).
 
 **Files:** create `src/ui/layers/{ActiveLayerPanel,StyleSection,FilterSection,DetailsSection}.tsx`; `src/app/app.css` (`ACTIVE LAYER` section); modify `src/ui/inspector/RuleBuilderTab.tsx` → renamed/moved to `src/ui/layers/RulesEditor.tsx` (same content, no tab chrome; props `{ model: CityModel; layerId: string }` unchanged) with its test moved; tests `tests/unit/ui/layers/{ActiveLayerPanel,StyleSection,FilterSection,DetailsSection}.test.tsx`.
 
@@ -982,7 +996,7 @@ Tests: renders city, streaming, vector, raster rows with the right state lines; 
 
 - [ ] Steps: failing tests → implement → commit `feat(layers): the active layer's Style, Filter and Details under the list; rules leave the inspector`.
 
-### Task 7: LeftPanel + LeftRail replace LeftSidebar/LayerPanel
+### Task 19: LeftPanel + LeftRail replace LeftSidebar/LayerPanel
 
 **Files:** create `src/ui/sidebar/LeftPanel.tsx`, `src/ui/shell/LeftRail.tsx`; modify `src/app/App.tsx` (mount; `onZoomToLayer` → `fitLayer` / `handleFlyToGeoLayer`; `onOpenTable` → `shellStore.openDrawer` + `activateLayer`); `src/app/app.css` (`LEFT PANEL` section); tests `tests/unit/ui/sidebar/LeftPanel.test.tsx`, `tests/unit/ui/shell/LeftRail.test.tsx`.
 `LeftPanel`: "LAYERS" mono label + ghost `+ Add layer` (opens `AddLayerDialog`), `<LayerList/>`, hairline, `<ActiveLayerPanel/>` in its own scroll container; the right-edge `ResizeHandle` writing `setLeftWidth`. `LeftRail` (40px): a `Layers` icon button with the layer-count badge that expands the panel, and the active layer's kind icon. Empty list state: "No layers yet" + the Add layer button.
@@ -990,14 +1004,16 @@ Tests: renders list + active panel; rail expands; Add layer opens the dialog.
 
 - [ ] Steps: failing tests → implement → suite → commit `feat(shell): left panel with the layer list and the active layer's configuration; rail when collapsed`.
 
-### Task 8: Inspector trimmed to the selection
+### Task 20: Inspector trimmed to the selection
 
-**Files:** modify `src/ui/inspector/InspectorPanel.tsx` (delete the Rules tab and `RuleBuilderTab` import, the geo-override branch, the `activeTab === "rules"` paths; the panel renders selection content only; `onClose` = `useSelectionStore.clear`), `src/app/App.tsx` (right region null when no selection — done in T2; the geo feature selection renders `GeoFeatureDetailsTemp` = the old `GeoAttributes` list from the deleted overlay recreated minimally inside the inspector as a `Feature` tab until 12.3), tests `tests/unit/ui/inspector/InspectorPanel.test.tsx`.
+**Files:** modify `src/ui/inspector/InspectorPanel.tsx` (delete the Rules tab and `RuleBuilderTab` import, the geo-override branch, the `activeTab === "rules"` paths; the panel renders selection content only; `onClose` = `useSelectionStore.clear`), `src/app/App.tsx` (right region null when no selection — done in T14; the geo feature selection renders `GeoFeatureDetailsTemp` = the old `GeoAttributes` list from the deleted overlay recreated minimally inside the inspector as a `Feature` tab until 12.3), tests `tests/unit/ui/inspector/InspectorPanel.test.tsx`.
 Tests: no "Rules" tab; a geo selection shows the feature's properties; empty selection → App renders no inspector.
 
 - [ ] Steps: failing tests → implement → commit `refactor(inspector): selection only — rules and layer style live under the layer`.
 
-### Task 9: Add layer dialog — File / URL / Catalog with detection
+### Task 21: Add layer dialog — File / URL / Catalog with detection
+
+**Review rulings (binding):** the correction must reach the loader. Contract: `onAddFile(file: File, override?: DetectedSource)`, `onAddFiles(files, override?)`, `onAddUrl(url: string, override?: DetectedSource)`; `useLayerFileLoader`'s existing `LayerOverrides` gains `encoding?: CityModelEncoding` and every branch that today calls `detectEncoding` / `isCityParquetUrl` on the name honours the override first; the geo path calls `geoLayerFromUrl(url, { kind: override.geoKind })` (extend its signature) instead of reclassifying. End-to-end tests: a URL ending `.json` overridden to FlatCityBuf takes the streaming route (`openStreamingLayer` called); a `.txt` URL overridden to GeoJSON calls `addGeoLayer` with `kind: "geojson"`; a `.city.json` file with no override still routes as CityJSON.
 
 **Files:** modify `src/ui/layers/AddLayerDialog.tsx` (`SourceTab = "file" | "url" | "catalog"`), `src/ui/layers/SourcePicker.tsx` (split: the drop zone + Browse/Choose folder stays for the file tab; the URL form becomes `src/ui/layers/UrlSourceForm.tsx`), `src/ui/layers/GeospatialSourceForm.tsx` (its URL kinds fold into `UrlSourceForm` through detection; its name field stays), create `src/features/layers/detectSource.ts`:
 
@@ -1018,23 +1034,29 @@ export function detectSourceFromName(nameOrUrl: string): DetectedSource; // comp
 export const SOURCE_OVERRIDES: ReadonlyArray<DetectedSource>; // the options for "Change…"
 ```
 
-Dialog: tabs File | URL | Catalog; the File tab shows the drop zone; after a file is chosen or dropped (do not add yet) show `Detected: <label> [Change…]` and the filled `Add layer` button; URL tab: input + `Detect` (on blur / Enter) → same line; Catalog tab: `StacBrowser` unchanged. `Add layer` routes by the (possibly overridden) detection: city → the existing `onAddFile` / `onAddUrl`; geo → `addGeoLayer` through `geoLayerFromUrl` / `parseGeoJsonText`. A geo add returns to the viewer (T10). Tests: `detectSourceFromName` for every extension; the dialog shows the detection line and the override select; adding a `.geojson` URL calls `addGeoLayer`.
+Dialog: tabs File | URL | Catalog; the File tab shows the drop zone; after a file is chosen or dropped (do not add yet) show `Detected: <label> [Change…]` and the filled `Add layer` button; URL tab: input + `Detect` (on blur / Enter) → same line; Catalog tab: `StacBrowser` unchanged. `Add layer` routes by the (possibly overridden) detection: city → the existing `onAddFile` / `onAddUrl`; geo → `addGeoLayer` through `geoLayerFromUrl` / `parseGeoJsonText`. A geo add returns to the viewer (T22). Tests: `detectSourceFromName` for every extension; the dialog shows the detection line and the override select; adding a `.geojson` URL calls `addGeoLayer`.
 
 - [ ] Steps: failing tests → implement → commit `feat(layers): one Add layer dialog — File, URL, Catalog — with format detection and a correction control`.
 
-### Task 10: Geo-only workspaces enter the viewer; fit producers revisited
+### Task 22: Geo-only workspaces enter the viewer; fit producers revisited
+
+**Review rulings (binding):** ONE authoritative predicate for both fit producers — workspace ROWS, not live registries. Stream: fit iff `useLayerStore.getState().layers.length === 1 && layers[0].id === <this stream's layer id> && useGeoLayerStore.getState().layers.length === 0` at registration (the stream's own row already exists then; any other city row — registered or not — means the workspace was not empty). Static: unchanged (`previousLayerCountRef` over rows). Tests: a stream joining an existing-but-not-yet-registered static row does not fit; geo-first then static does not fit; static-first then stream does not fit; the first stream of an empty workspace fits once; Task 6's "geo rows outlived the last scene" test is deleted with a comment (the viewport no longer unmounts while geo rows exist). First-geo fit: an `App` effect keyed on `unifiedLayerOrder(...).length` going 0 → 1 with a geo layer, running only when `!isAutoFitSuppressed()`; it awaits the scene handle (`awaitSceneHandle`), re-checks that the layer is still in the store (else cancels), and calls `fitBounds(bounds)` when `resolveGeoLayerBounds(layer)` returns bounds. Read the bounds helper first (it lives with `handleFlyToGeoLayer` in `App.tsx` / `src/scene/geoLayerSync.ts`) and state in the report what it returns for inline GeoJSON (bounds), URL GeoJSON before its fetch (none → no fit; acceptable, documented), raster and tiles (none → no fit). Restore keeps its saved camera (suppression covers the effect). Tests: inline geo fits once; raster does not fit; removal before `ready` cancels; a restore does not fit.
 
 **Files:** modify `src/app/App.tsx` (`hasWorkspace = layers.length > 0 || geoLayers.length > 0`; the viewer branch condition `hasWorkspace || engineBooting`; on `addGeoLayer` from the dialog or the landing page, when the unified order had length 0 before the add → `sceneRef.current?.fitBounds(resolveGeoLayerBounds(layer))` once the scene is ready via `applyCameraWhenReady`-style gating), `src/scene/NavaraViewport.tsx` (stream predicate: `workspaceWasEmpty = streams.size === 0 && liveRef.current.size === 0 && useGeoLayerStore.getState().layers.length === 0` — the geo term returns because the viewport no longer unmounts while geo rows exist; update the comment and the Task 6 test "fits the first stream of a scene even when geo rows outlived the last one" → replaced by "does not fit when a stream joins a geo-only workspace"), the landing page's `SourcePicker` gets the same detection so a dropped `.geojson` enters the viewer; tests `tests/unit/app/appGeoOnly.test.tsx` (a GeoJSON add from the landing page shows the viewer with the geo row active and fits once; adding a city layer afterwards does not fit), update `tests/unit/scene/navaraViewportStreaming.test.tsx`.
 
 - [ ] Steps: failing tests → implement → commit `feat(app): a geospatial-only workspace enters the viewer; the first content of a scene fits once, whatever its kind`.
 
-### Task 11: Delete the old shell modules and CSS
+### Task 23: Delete the old shell modules and CSS
+
+**Review rulings (binding):** delete CSS BY SURVIVING CONSUMER, not by section banner: keep `ViewModeToggle`'s rules, the `.tb-btn` family used by `SceneControlsTemp`, the geo style rules now used by `StyleSection` (move them under `ACTIVE LAYER`), `.layer-type-toggles`; `ThemeToggleButton` is already gone (T15). For every deleted selector, grep `src` for its consumers first and list the audit in the report. T24 checks each temporary popover visually in both themes.
 
 **Files:** delete `src/ui/toolbar/ViewerToolbar.tsx`, `src/ui/ThemeToggleButton.tsx`, `src/ui/sidebar/LeftSidebar.tsx`, `src/ui/layers/LayerPanel.tsx`, `src/ui/layers/GeoLayerRow.tsx`, `src/ui/inspector/GeoLayerInspector.tsx` and their tests; remove the CSS sections `TOOLBAR`, `TOOL RAIL`, `LEFT SIDEBAR`, `LAYER PANEL` (keep the `.layer-type-toggles` rules used by `LayerTypeToggles`; move them under `ACTIVE LAYER`), `THEME TOGGLE`, `PICK MODE TOGGLE` (if `SceneControlsTemp` has its own), `INSPECTOR PANEL` rules for the removed tabs; gate `grep -rn "left-sidebar\|layer-item\|tb-btn\|theme-toggle" src` returns only what `SceneControlsTemp` still uses (list them in the report). Tests green; `npx vp check` clean.
 
 - [ ] Steps: delete → fix references → suite → commit `refactor(shell): remove the old toolbar, sidebar and layer panel`.
 
-### Task 12: Slice gate
+### Task 24: Slice gate
+
+**Review rulings (binding):** the smoke also covers: the header at 1280px with a 60-character workspace name (ellipsis, no overflow); every temporary popover (`SceneControlsTemp`) in both themes; right panel collapse → pill → expand with the selection preserved; a failed URL add showing an error row with Retry; Escape clearing the selection versus the collapse button keeping it.
 
 - [ ] `npx vp check src tests`, `npx tsc -b --noEmit`, `npx vitest run`, submodule `pnpm typecheck` + `pnpm vitest run` unchanged.
 - [ ] Browser smoke (Delft + a GeoJSON URL) at 1440×900 and 1280×720: layer rows for both kinds; row click activates without moving the camera; Open table opens the drawer UNDER the map with the left panel still full height; collapse both panels (right collapses with Escape/clear); resize the left panel; Add layer dialog detection line for `.fcb`, `.geojson`, `.city.json`; geo-only workspace from the landing page enters the viewer and fits; Preferences switches appearance; Save → New workspace → Open… restores with the name.

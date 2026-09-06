@@ -466,3 +466,9 @@ after ~1.5 s. A geospatial-only add (GeoJSON) opens the viewer just the same.
 - Rules for vector layers.
 - Measure and box select.
 - Mobile layout (desktop-first per PRODUCT.md).
+- Workspace Duplicate / Delete, layer Duplicate (revisit in 12.5).
+- Preferences → Units and Reduce motion (dropped: metric only; reduced motion
+  is honoured by CSS `prefers-reduced-motion`).
+- Raster colormap selection (no engine support today).
+- Streaming "Refresh visible" (12.5).
+- Expressive scene backgrounds (Day sky / Dusk / Night) — no engine support.
