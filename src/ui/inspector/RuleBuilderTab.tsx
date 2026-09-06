@@ -5,10 +5,11 @@
  * (`compileRuleEvaluator`) and pushes the result into
  * `CityModelHandle.setStyle`.
  *
- * Rules are per-layer, so the tab always edits exactly one layer — and says
- * which, in a target-layer `<select>` at the top. The tab is CONTROLLED:
- * the target lives in `InspectorPanel` (which defaults it to the selected
- * or active layer), so picking a layer here only calls `onSelectLayer`.
+ * Rules are per-layer, so the tab always edits exactly one layer — the
+ * workspace's active one — and says which, in its heading. It used to carry a
+ * target-layer `<select>` of its own, which let the Rules tab point at a
+ * DIFFERENT layer from the one the rest of the inspector was describing; the
+ * layer list is now the only place a layer is chosen.
  */
 
 import { useCallback, useRef, useState } from "react";
@@ -28,11 +29,9 @@ import type {
 import { RULE_PRESETS } from "../../features/rules/presets";
 import { downloadText } from "../../platform/download";
 
-interface RuleBuilderTabProps {
+export interface RuleBuilderTabProps {
   readonly model: CityModel;
   readonly layerId: string;
-  readonly layerOptions: ReadonlyArray<{ id: string; name: string }>;
-  readonly onSelectLayer: (id: string) => void;
 }
 
 // Metric fields always available for conditions
@@ -45,12 +44,7 @@ const METRIC_FIELDS = [
 
 const OPERATORS: ConditionOperator[] = [">", "<", "=", ">=", "<="];
 
-export function RuleBuilderTab({
-  model,
-  layerId,
-  layerOptions,
-  onSelectLayer,
-}: RuleBuilderTabProps) {
+export function RuleBuilderTab({ model, layerId }: RuleBuilderTabProps) {
   const layer = useLayerStore((s) => s.layers.find((l) => l.id === layerId));
   const rules = layer?.rules ?? [];
   const enabled = layer?.rulesEnabled ?? true;
@@ -120,23 +114,6 @@ export function RuleBuilderTab({
   return (
     <>
       <div className="attr-section">
-        <div className="rule-target-row">
-          <span className="rule-target-label">Layer</span>
-          <select
-            id="rule-target-layer"
-            className="rule-select"
-            aria-label="Rules target layer"
-            value={layerId}
-            onChange={(e) => onSelectLayer(e.target.value)}
-          >
-            {layerOptions.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
         {textureThemeActive && (
           <p className="rule-appearance-note" role="note">
             Texture theme active: rule colours show only on untextured surfaces.
@@ -146,7 +123,12 @@ export function RuleBuilderTab({
         )}
 
         <div className="rule-header">
-          <div className="attr-section-title">Colorization Rules</div>
+          {/* The layer is NAMED here rather than assumed: rules are per-layer,
+              and a tab that showed one layer's rules under a generic heading is
+              how a user comes to apply Delft's colours to Rotterdam. */}
+          <div className="attr-section-title">
+            Rules &middot; {layer?.name ?? "no layer"}
+          </div>
           <label className="rule-toggle">
             <input
               type="checkbox"

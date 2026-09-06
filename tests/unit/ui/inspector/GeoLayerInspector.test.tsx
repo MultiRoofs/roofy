@@ -12,7 +12,7 @@ import type { GeoLayer } from "../../../../src/features/geoLayers/geoLayerStore"
 
 afterEach(() => {
   cleanup();
-  useGeoLayerStore.setState({ layers: [], activeGeoLayerId: null });
+  useGeoLayerStore.setState({ layers: [] });
 });
 
 const geoStore = () => useGeoLayerStore.getState();

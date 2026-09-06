@@ -11,7 +11,7 @@
  * panel is about the current selection.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type {
   BBox3,
   BuildingSurfaceType,
@@ -22,7 +22,7 @@ import type { Selection } from "../../domain/selection/types";
 import { computeFootprintArea } from "@cityjson/navara-core";
 import { SURFACE_COLOR_HEX } from "../../scene/cityColors";
 import { useLayerStore } from "../../features/layers/layerStore";
-import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
+import { useActiveLayer } from "../../features/workspace/activeLayer";
 import { resolveInheritedAttributes } from "../../domain/citymodel/inheritedAttributes";
 import { useStreamStore } from "../../features/streaming/streamStore";
 import { getResidentModel } from "../../features/streaming/residentModel";
@@ -126,40 +126,34 @@ export function InspectorPanel({ selections, onClose }: InspectorPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>("object");
 
   const layers = useLayerStore((s) => s.layers);
-  const activeLayerId = useLayerStore((s) => s.activeLayerId);
 
   // Subscribed unconditionally, alongside the other store reads, and branched
   // on only in the returned JSX: every hook below this point must keep running
-  // in the same order whether a geo layer is active or not. The active id is
-  // resolved through the list rather than trusted on its own, so an id left
-  // behind by a removed layer reads as "nothing active".
-  const geoLayers = useGeoLayerStore((s) => s.layers);
-  const activeGeoLayerId = useGeoLayerStore((s) => s.activeGeoLayerId);
-  const activeGeoLayer =
-    geoLayers.find((l) => l.id === activeGeoLayerId) ?? null;
+  // in the same order whether a geo layer is active or not.
+  const active = useActiveLayer();
+  const activeGeoLayer = active?.kind === "geo" ? active.layer : null;
 
   const selection = selections.length > 0 ? selections[0]! : null;
   const isMultiSelect = selections.length > 1;
 
-  // Derive the model to display based on selection or active layer
+  /**
+   * The layer this panel describes: the selection's owner, else the
+   * workspace's active city layer.
+   *
+   * The two agree in every case the invariants allow — a pick activates its
+   * layer, and activating a layer ends a foreign selection — so the ordering
+   * only matters for the instant between the two store writes.
+   *
+   * There is NO `?? layers[0]` fallback any more, and no per-tab override:
+   * the Rules tab used to carry a target of its own, so it could edit one
+   * layer's colours while the Object tab described another's building. An
+   * inspector with nothing to inspect says so.
+   */
   const selectedLayer = selection
     ? layers.find((l) => l.id === selection.layerId)
     : undefined;
-  const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
-  const displayLayer = selectedLayer ?? activeLayer;
-
-  // Rules are per-layer, but the rest of this panel follows the SELECTION —
-  // so the Rules tab lets its target be steered independently. The override
-  // is deliberately transient: it resets whenever the panel's own layer
-  // changes, so the tab's default target is always the layer being inspected.
-  const [ruleTargetOverride, setRuleTargetOverride] = useState<string | null>(
-    null,
-  );
-  useEffect(() => {
-    setRuleTargetOverride(null);
-  }, [displayLayer?.id]);
-  const ruleTargetLayer =
-    layers.find((l) => l.id === ruleTargetOverride) ?? displayLayer;
+  const displayLayer =
+    selectedLayer ?? (active?.kind === "city" ? active.layer : undefined);
 
   const model = displayLayer?.model;
   const isStreaming = displayLayer?.isStreaming ?? false;
@@ -327,15 +321,10 @@ export function InspectorPanel({ selections, onClose }: InspectorPanelProps) {
           <div className="inspector-body">
             <ErrorBoundary fallback="inline" key={activeTab}>
               {activeTab === "rules" ? (
-                ruleTargetLayer ? (
+                displayLayer ? (
                   <RuleBuilderTab
-                    model={ruleTargetLayer.model}
-                    layerId={ruleTargetLayer.id}
-                    layerOptions={layers.map((l) => ({
-                      id: l.id,
-                      name: l.name,
-                    }))}
-                    onSelectLayer={setRuleTargetOverride}
+                    model={displayLayer.model}
+                    layerId={displayLayer.id}
                   />
                 ) : (
                   <div className="inspector-placeholder">No layer selected</div>

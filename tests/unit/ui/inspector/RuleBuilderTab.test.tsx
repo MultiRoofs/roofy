@@ -9,21 +9,11 @@
  * precomputed `surfaceAttrKeys`) — never from a `CityModel`, since a
  * streaming layer's `model` prop has no real objects.
  *
- * Second, the target-layer picker: the tab edits ONE layer's rules and must
- * say which, so it renders a controlled `<select>` naming its target. The
- * selection lives in the parent (InspectorPanel), so the picker tests drive
- * it through a harness that owns the override state exactly as the panel
- * does.
+ * Second, that the tab NAMES the layer it edits and offers no way to re-point
+ * itself: rules are per-layer, and the layer is the workspace's active one.
  */
-import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  within,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { RuleBuilderTab } from "../../../../src/ui/inspector/RuleBuilderTab";
 import { downloadText } from "../../../../src/platform/download";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
@@ -32,6 +22,7 @@ import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import { CellCache } from "@cityjson/navara-flatcitybuf";
 import { buildResidentModel } from "@cityjson/navara-flatcitybuf";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 
 // The one download seam. Mocked rather than stubbing `URL.createObjectURL` and
 // an anchor: what this tab owes the user is "the rules, as rules.json", and
@@ -55,7 +46,8 @@ function residentHandle(cache: unknown) {
 
 afterEach(() => {
   cleanup();
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
   useStreamStore.setState({ streams: {} });
 });
 
@@ -132,19 +124,12 @@ describe("RuleBuilderTab — streaming field source", () => {
     });
     useLayerStore.setState({
       layers: [baseLayer({ isStreaming: true })],
-      activeLayerId: "L",
     });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
   });
 
   it("sources condition fields from the resident model, not the (empty) CityModel prop", () => {
-    render(
-      <RuleBuilderTab
-        model={emptyModel()}
-        layerId="L"
-        layerOptions={[{ id: "L", name: "test layer" }]}
-        onSelectLayer={() => {}}
-      />,
-    );
+    render(<RuleBuilderTab model={emptyModel()} layerId="L" />);
     fireEvent.click(screen.getByText("+ Add Rule"));
 
     const options = fieldOptionTexts();
@@ -179,17 +164,10 @@ describe("RuleBuilderTab — static field source (unchanged)", () => {
     };
     useLayerStore.setState({
       layers: [baseLayer({ model, isStreaming: false })],
-      activeLayerId: "L",
     });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
 
-    render(
-      <RuleBuilderTab
-        model={model}
-        layerId="L"
-        layerOptions={[{ id: "L", name: "test layer" }]}
-        onSelectLayer={() => {}}
-      />,
-    );
+    render(<RuleBuilderTab model={model} layerId="L" />);
     fireEvent.click(screen.getByText("+ Add Rule"));
 
     const options = fieldOptionTexts();
@@ -201,26 +179,6 @@ describe("RuleBuilderTab — static field source (unchanged)", () => {
 // ---------------------------------------------------------------------------
 // Target-layer picker
 // ---------------------------------------------------------------------------
-
-/** Owns the target-layer override exactly as InspectorPanel does: the tab
- *  itself is controlled, so the picker can only be exercised through a
- *  parent that re-targets it on `onSelectLayer`. */
-function TargetHarness({
-  layers,
-}: {
-  layers: ReadonlyArray<{ id: string; name: string; model: CityModel }>;
-}) {
-  const [override, setOverride] = useState<string | null>(null);
-  const target = layers.find((l) => l.id === override) ?? layers[0]!;
-  return (
-    <RuleBuilderTab
-      model={target.model}
-      layerId={target.id}
-      layerOptions={layers.map((l) => ({ id: l.id, name: l.name }))}
-      onSelectLayer={setOverride}
-    />
-  );
-}
 
 describe("RuleBuilderTab — exporting rules", () => {
   it("hands the layer's rules to the one download helper", () => {
@@ -236,17 +194,10 @@ describe("RuleBuilderTab — exporting rules", () => {
     ];
     useLayerStore.setState({
       layers: [baseLayer({ rules })],
-      activeLayerId: "L",
     });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
 
-    render(
-      <RuleBuilderTab
-        model={emptyModel()}
-        layerId="L"
-        layerOptions={[{ id: "L", name: "test layer" }]}
-        onSelectLayer={() => {}}
-      />,
-    );
+    render(<RuleBuilderTab model={emptyModel()} layerId="L" />);
     fireEvent.click(screen.getByText("Export rules"));
 
     // The STORE's rules, not the prop's, and pretty-printed — the file is
@@ -258,43 +209,40 @@ describe("RuleBuilderTab — exporting rules", () => {
   });
 });
 
-describe("RuleBuilderTab — target layer picker", () => {
-  const twoLayerOptions = [
-    { id: "L", name: "Delft", model: emptyModel() },
-    { id: "R", name: "Rotterdam", model: emptyModel() },
-  ];
+describe("RuleBuilderTab — the layer it edits", () => {
+  it("names its target layer in the heading", () => {
+    useLayerStore.setState({ layers: [baseLayer({ name: "Delft" })] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
+    render(<RuleBuilderTab model={emptyModel()} layerId="L" />);
+    expect(screen.getByText("Rules \u00b7 Delft")).toBeTruthy();
+  });
 
-  function seedTwoLayers() {
+  it("offers no picker: the tab follows the workspace's active layer", () => {
+    // It used to carry a target `<select>` that let the Rules tab point at a
+    // DIFFERENT layer from the one the rest of the inspector described.
     useLayerStore.setState({
       layers: [
         baseLayer({ id: "L", name: "Delft" }),
         baseLayer({ id: "R", name: "Rotterdam" }),
       ],
-      activeLayerId: "L",
     });
-  }
-
-  function targetSelect(): HTMLElement {
-    return screen.getByRole("combobox", { name: /rules target layer/i });
-  }
-
-  it("names its target layer and lists the alternatives", () => {
-    seedTwoLayers();
-    render(<TargetHarness layers={twoLayerOptions} />);
-
-    const select = targetSelect();
-    expect(select).toHaveValue("L");
+    useWorkspaceStore.setState({ activeLayerId: "L" });
+    render(<RuleBuilderTab model={emptyModel()} layerId="L" />);
     expect(
-      within(select).getByRole("option", { name: "Rotterdam" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("combobox", { name: /rules target layer/i }),
+    ).toBeNull();
+    expect(screen.queryByText("Rotterdam")).toBeNull();
   });
 
-  it("edits land on the layer the dropdown names", () => {
-    seedTwoLayers();
-    render(<TargetHarness layers={twoLayerOptions} />);
-
-    fireEvent.change(targetSelect(), { target: { value: "R" } });
-    expect(targetSelect()).toHaveValue("R");
+  it("edits land on the layer it was given", () => {
+    useLayerStore.setState({
+      layers: [
+        baseLayer({ id: "L", name: "Delft" }),
+        baseLayer({ id: "R", name: "Rotterdam" }),
+      ],
+    });
+    useWorkspaceStore.setState({ activeLayerId: "R" });
+    render(<RuleBuilderTab model={emptyModel()} layerId="R" />);
 
     fireEvent.click(screen.getByRole("button", { name: "Flat roofs" }));
 

@@ -46,6 +46,8 @@ import type {
   CityObject,
 } from "../../../../src/domain/citymodel/types";
 import type { Selection } from "../../../../src/domain/selection/types";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
+import { activateLayer } from "../../../../src/features/workspace/layerCoordination";
 
 /** The streaming layer's plugin handle, reduced to the one method the UI
  *  reaches: the resident-model merge (which the plugin owns and memoises on
@@ -60,9 +62,10 @@ function residentHandle(cache: unknown) {
 
 afterEach(() => {
   cleanup();
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
   useStreamStore.setState({ streams: {} });
-  useGeoLayerStore.setState({ layers: [], activeGeoLayerId: null });
+  useGeoLayerStore.setState({ layers: [] });
 });
 
 function emptyModel(): CityModel {
@@ -154,8 +157,8 @@ describe("InspectorPanel — static layer", () => {
     };
     useLayerStore.setState({
       layers: [baseLayer({ model, isStreaming: false })],
-      activeLayerId: "L",
     });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
   });
 
   it("renders Object tab geometry synchronously from CityObject", () => {
@@ -260,8 +263,8 @@ describe("InspectorPanel — streaming layer", () => {
     });
     useLayerStore.setState({
       layers: [baseLayer({ isStreaming: true })],
-      activeLayerId: "L",
     });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
   });
 
   it("renders Object tab geometry from the ResidentObjectRecord's precomputed fields, without fetching rings", () => {
@@ -362,6 +365,58 @@ describe("InspectorPanel — streaming layer", () => {
 // surfaces or rules to tab between).
 // ---------------------------------------------------------------------------
 
+describe("InspectorPanel — the layer it describes", () => {
+  it("describes NOTHING when no layer is active and nothing is selected", () => {
+    // It used to fall back to `layers[0]`, so the Rules tab happily edited the
+    // first layer in the list while the sidebar highlighted none of them.
+    useLayerStore.setState({ layers: [baseLayer({ id: "L", name: "Delft" })] });
+    useWorkspaceStore.setState({ activeLayerId: null });
+
+    render(<InspectorPanel selections={[]} onClose={() => {}} />);
+
+    fireEvent.click(tabButton("Rules"));
+    expect(screen.getByText("No layer selected")).toBeTruthy();
+  });
+
+  it("names the ACTIVE layer in the Rules tab, and offers no picker", () => {
+    useLayerStore.setState({
+      layers: [
+        baseLayer({ id: "L", name: "Delft" }),
+        baseLayer({ id: "R", name: "Rotterdam" }),
+      ],
+    });
+    useWorkspaceStore.setState({ activeLayerId: "R" });
+
+    render(<InspectorPanel selections={[]} onClose={() => {}} />);
+
+    fireEvent.click(tabButton("Rules"));
+    expect(screen.getByText("Rules \u00b7 Rotterdam")).toBeTruthy();
+    expect(
+      screen.queryByRole("combobox", { name: /rules target layer/i }),
+    ).toBeNull();
+  });
+
+  it("follows the SELECTION's layer when one is selected", () => {
+    useLayerStore.setState({
+      layers: [
+        baseLayer({ id: "L", name: "Delft" }),
+        baseLayer({ id: "R", name: "Rotterdam" }),
+      ],
+    });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
+
+    render(
+      <InspectorPanel
+        selections={[{ kind: "object", layerId: "R", objectId: "x" }]}
+        onClose={() => {}}
+      />,
+    );
+
+    fireEvent.click(tabButton("Rules"));
+    expect(screen.getByText("Rules \u00b7 Rotterdam")).toBeTruthy();
+  });
+});
+
 describe("InspectorPanel — geo layer mode", () => {
   it("shows the geo layer view instead of the city tabs while a geo layer is active", () => {
     const id = useGeoLayerStore.getState().addGeoLayer({
@@ -369,7 +424,7 @@ describe("InspectorPanel — geo layer mode", () => {
       kind: "geojson",
       config: { url: "https://x/roads.geojson" },
     });
-    useGeoLayerStore.getState().setActiveGeoLayer(id);
+    activateLayer(id);
 
     render(<InspectorPanel selections={[]} onClose={() => {}} />);
 
@@ -385,11 +440,11 @@ describe("InspectorPanel — geo layer mode", () => {
       kind: "geojson",
       config: { url: "https://x/roads.geojson" },
     });
-    useGeoLayerStore.getState().setActiveGeoLayer(id);
+    activateLayer(id);
     render(<InspectorPanel selections={[]} onClose={() => {}} />);
 
     act(() => {
-      useGeoLayerStore.getState().setActiveGeoLayer(null);
+      activateLayer(null);
     });
 
     expect(screen.queryByLabelText("Layer color")).toBeNull();
@@ -397,7 +452,7 @@ describe("InspectorPanel — geo layer mode", () => {
   });
 
   it("ignores a stale active id that no longer names a layer", () => {
-    useGeoLayerStore.getState().setActiveGeoLayer("gone");
+    activateLayer("gone");
 
     render(<InspectorPanel selections={[]} onClose={() => {}} />);
 
