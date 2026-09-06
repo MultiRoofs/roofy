@@ -20,6 +20,10 @@
  */
 
 import { create } from "zustand";
+import {
+  DEFAULT_SHADOW_QUALITY,
+  type ShadowQuality,
+} from "../../scene/shadowQuality";
 
 /**
  * The exposure Navara's own getting-started sets (`view.toneMappingExposure =
@@ -50,6 +54,14 @@ export interface RenderDebugState {
   readonly cloudsEnabled: boolean;
   readonly aerialPerspectiveEnabled: boolean;
   readonly sunShadowsEnabled: boolean;
+  /** Which row of `src/scene/shadowQuality.ts` the sun's cascaded shadow
+   *  maps run at: a level, not a map size, so the table stays the one place
+   *  that knows what a level costs (GPU memory, fill) and buys (shadows that
+   *  attach closer to their casters). Its engine counterpart is the
+   *  `shadowMapSize` / `shadowBias` pair `NavaraViewport` writes with every
+   *  `castShadow` write. The panel control for it is pending (see
+   *  docs/roadmap.md); until then the dev-console handle is the way in. */
+  readonly shadowQuality: ShadowQuality;
   /** `view.toneMappingExposure`. */
   readonly exposure: number;
   /**
@@ -71,6 +83,7 @@ export interface RenderDebugActions {
   setCloudsEnabled: (value: boolean) => void;
   setAerialPerspectiveEnabled: (value: boolean) => void;
   setSunShadowsEnabled: (value: boolean) => void;
+  setShadowQuality: (value: ShadowQuality) => void;
   setExposure: (value: number) => void;
   setStreamQueryBoxEnabled: (value: boolean) => void;
   reset: () => void;
@@ -87,6 +100,7 @@ export const DEFAULT_RENDER_DEBUG_STATE: RenderDebugState = {
   cloudsEnabled: false,
   aerialPerspectiveEnabled: true,
   sunShadowsEnabled: true,
+  shadowQuality: DEFAULT_SHADOW_QUALITY,
   exposure: DEFAULT_EXPOSURE,
   streamQueryBoxEnabled: false,
 };
@@ -105,6 +119,7 @@ export const useRenderDebugStore = create<RenderDebugStore>((set) => ({
   setAerialPerspectiveEnabled: (aerialPerspectiveEnabled) =>
     set({ aerialPerspectiveEnabled }),
   setSunShadowsEnabled: (sunShadowsEnabled) => set({ sunShadowsEnabled }),
+  setShadowQuality: (shadowQuality) => set({ shadowQuality }),
   // Clamped in the STORE, not at the slider: the dev-console handle
   // (`window.__roofyRenderDebug`) writes here too, and an exposure of NaN
   // makes the engine render a black frame with no error anywhere.
