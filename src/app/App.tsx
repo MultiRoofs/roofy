@@ -51,6 +51,7 @@ import {
 import { loadCityParquetFromUrl } from "../features/cityparquet/loadCityParquet";
 import { isCityParquetUrl } from "../features/cityparquet/sourceClassify";
 import { useFileDropGuard } from "../features/layers/useFileDropGuard";
+import { useEscapeClearsSelection } from "../features/selection/useEscapeClearsSelection";
 import { useStreamStore } from "../features/streaming/streamStore";
 import { useTotalObjectCount } from "../features/streaming/useTotalObjectCount";
 import {
@@ -213,6 +214,12 @@ export function App({
   // browser's default is to navigate to it, which would throw the whole
   // session away. See useFileDropGuard.
   useFileDropGuard();
+
+  // Escape drops the selection. Installed at the top level rather than inside
+  // the viewer branch — a hook cannot be conditional — which costs nothing on
+  // the landing page, where there is no selection to clear. See the hook for
+  // who else listens for Escape and in what order.
+  useEscapeClearsSelection();
 
   /** The dismissal timer of the toast currently on screen, so a NEW message
    *  cannot be wiped by the OLD one's expiry — an 8 s explanation raised one
