@@ -527,6 +527,41 @@ omitting the one it just fetched — exactly the drift the tooltip exists to mak
 visible. The fix is a `subscribeDuckDBStatus(listener)` in `duckdb.ts` which
 `publishReady` notifies, with `App` subscribing rather than snapshotting.
 
+## Milestone 12: UI Redesign — One Active Layer, One Selection (In Progress)
+
+Approved design: `docs/superpowers/specs/2026-09-06-ui-redesign-design.md`
+(from the interactive prototype required by `docs/ui-redesign-handoff.md`).
+Plan: `docs/superpowers/plans/2026-09-06-ui-redesign.md`. Breaking UI changes,
+no compatibility shims; saved workspaces migrate to schema v4.
+
+- 12.1 Shared context: selection belongs to exactly one layer; activating
+  another layer, hiding or removing the owner, or a filter that excludes it
+  clears it; picking a feature activates its layer. Attribute overlay,
+  `Sync selection`, the inspector's rule-target override, the status-bar
+  table entrance and the fit-all flight on every added layer are removed.
+  Persistence v4 with an explicit v3 migration.
+- 12.2 Shell and layers: header (workspace, Save, Share, Preferences), full-
+  height left and right panels, the data drawer under the map column only,
+  collapse and resize; one layer list for every layer type with one Add
+  layer dialog (File / URL / Catalog, detection with correction); the active
+  layer's configuration (Style / Filter / Details) under the list.
+- 12.3 Styling and inspection: Rules under the active layer's Style as
+  `Color by`, presets first, per-layer drafts; legend grouped by layer;
+  the right details panel with the identity trail, summary and roof metrics,
+  rule match, raw attributes, parts, geometry, multi-selection aggregates.
+- 12.4 Linked data and filtering: Records / Summary drawer titled by the
+  active layer, building-oriented rows with part expansion and Raw objects,
+  column chooser, counts total · matching · selected, Show selected records
+  as a view, export scopes with the same numbers, `Table only` for streaming
+  layers, filter indicators with Clear when the drawer is closed, Expand.
+- 12.5 Scene controls: Select Feature / Surface on the map, camera cluster
+  with Top-down / Angled / Free 3D and explicit Zoom to layer / selection,
+  Sun & shade and Scene settings as nonmodal sheets, interface appearance
+  under Preferences, Cyber under Presentation looks, weather as a visual
+  effect.
+- 12.6 Verification: browser smokes for the nine acceptance scenarios at
+  1440×900 and 1280×720, Codex review of the milestone, docs.
+
 ## Cross-Cutting Workstreams
 
 - Data quality and semantic assumptions
