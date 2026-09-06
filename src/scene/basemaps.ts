@@ -227,9 +227,9 @@ export const BASEMAPS: readonly BasemapOption[] = [
 /**
  * What a fresh session shows: imagery, so the globe is never blank.
  *
- * SATELLITE, not the cartographic OSM sheet. Under the physical-atmosphere
- * calibration the globe is unlit albedo lit by the aerial-perspective pass at
- * exposure ~10, and OSM's tiles are essentially white paper: they blow out
+ * SATELLITE, not the cartographic OSM sheet. The globe is lit by the
+ * atmosphere's sun and sky at exposure ~10 (the engine's forward-lit
+ * calibration), and OSM's tiles are essentially white paper: they blow out
  * where photographic imagery reads naturally (measured in the 2026-08-04
  * overbright-scene diagnosis). OSM and Positron stay in the picker; they are
  * just not what a fresh session opens on.

@@ -15,9 +15,10 @@
  * otherwise provide them is absent from 0.0.5 altogether and, on 0.1.1, exists
  * only as a live `view.globe.useNormal` setter — the globe-setter family whose
  * members `color`/`wireframe` freeze frame presentation (Known Issue (i)), so
- * it is not written; the terrain layer stays the normals supplier. That is
- * exactly the resource the aerial-perspective pass wants in `irradiance` mode;
- * see Known Issue (e) in docs/architecture-notes.md.
+ * it is not written; the terrain layer stays the normals supplier — for the
+ * relief itself, for the sun's shadows (`castShadow`/`receiveShadow` below)
+ * and for any effect that reads the normal G-buffer; see Known Issue (e) in
+ * docs/architecture-notes.md.
  *
  * Engine-free on purpose, exactly like `basemaps.ts` and `googleTiles.ts`: pure
  * data, unit-testable under Node where `@navaramap/three` cannot even be
