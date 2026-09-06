@@ -534,12 +534,13 @@ Approved design: `docs/superpowers/specs/2026-09-06-ui-redesign-design.md`
 Plan: `docs/superpowers/plans/2026-09-06-ui-redesign.md`. Breaking UI changes,
 no compatibility shims; saved workspaces migrate to schema v4.
 
-- 12.1 Shared context: selection belongs to exactly one layer; activating
-  another layer, hiding or removing the owner, or a filter that excludes it
-  clears it; picking a feature activates its layer. Attribute overlay,
-  `Sync selection`, the inspector's rule-target override, the status-bar
-  table entrance and the fit-all flight on every added layer are removed.
-  Persistence v4 with an explicit v3 migration.
+- 12.1 Shared context (COMPLETE, bc2d1d9..f06e325): selection belongs to
+  exactly one layer; activating another layer, hiding or removing the owner
+  clears it (a filter that excludes it clears it in 12.4); picking a feature
+  activates its layer; Escape clears. Attribute overlay, `Sync selection`,
+  the inspector's rule-target override, the status-bar table entrance and
+  the fit-all flight on every added layer are removed. Persistence v4 with an
+  explicit v3 migration (`persistence/migrateSnapshot.ts`).
 - 12.2 Shell and layers: header (workspace, Save, Share, Preferences), full-
   height left and right panels, the data drawer under the map column only,
   collapse and resize; one layer list for every layer type with one Add

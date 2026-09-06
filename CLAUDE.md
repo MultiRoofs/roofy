@@ -32,7 +32,7 @@ src/
                 #   googleTiles, sunWriter, bloomEffect, sceneThemePolicy
   ui/           # React UI: sidebar, toolbar, inspector, layers, stac, table,
                 #   viewport overlays, StatusBar, ErrorBoundary
-  persistence/  # Save/restore/share (localStorage, URL hash) — schema v3
+  persistence/  # Save/restore/share (localStorage, URL hash) — schema v4 (v3 migrates)
   insights/     # DuckDB-wasm, stats
   platform/     # Browser/Tauri adapters
 packages/cityjson-navara-plugins/packages/
