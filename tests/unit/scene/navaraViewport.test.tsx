@@ -375,8 +375,10 @@ vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
   }),
 }));
 
-const { NavaraViewport, SUN_SHADOW_TUNING } =
-  await import("../../../src/scene/NavaraViewport");
+const { NavaraViewport } = await import("../../../src/scene/NavaraViewport");
+const { shadowTuningFor } = await import("../../../src/scene/shadowQuality");
+/** What the viewport writes for the store's default shadow quality. */
+const SUN_SHADOW_TUNING = shadowTuningFor("medium");
 // The mocked engine export the elevation-heatmap source's marker resolves to.
 // DYNAMIC, like the component above: a static import would evaluate the
 // `@navaramap/three` mock factory before the stubs it closes over exist.
@@ -2369,6 +2371,29 @@ describe("NavaraViewport render settings", () => {
     );
     // Never `visible`: the sun is the scene's only key light.
     expect(photorealHandles.sun.visible).toBe(true);
+  });
+
+  // Shadow acne is the shadow map's texel showing through a grazing sun, so
+  // the cure is a finer map and a bias sized to its texel — both live in the
+  // same `sun` block as the switch, and a quality change re-writes the block
+  // whole so the two can never drift apart.
+  it("re-tunes the cascades when the shadow quality changes", async () => {
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() =>
+      expect(photorealHandles.sun.update).toHaveBeenCalledWith({
+        sun: { castShadow: true, ...shadowTuningFor("medium") },
+      }),
+    );
+
+    act(() => useRenderDebugStore.getState().setShadowQuality("high"));
+    await waitFor(() =>
+      expect(photorealHandles.sun.update).toHaveBeenLastCalledWith({
+        sun: { castShadow: true, ...shadowTuningFor("high") },
+      }),
+    );
+    expect(shadowTuningFor("high").shadowMapSize).toBeGreaterThan(
+      shadowTuningFor("medium").shadowMapSize,
+    );
   });
 
   // THE lighting model: the engine's own FORWARD-LIT default. `SunLightDesc`

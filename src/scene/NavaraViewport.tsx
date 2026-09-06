@@ -155,6 +155,7 @@ import {
 } from "./viewModePolicy";
 import { googleTilesConfig } from "./googleTiles";
 import { useSceneThemeStore } from "../features/sceneTheme/sceneThemeStore";
+import { shadowTuningFor } from "./shadowQuality";
 import { sceneThemePolicy, type ThemeEnvironment } from "./sceneThemePolicy";
 import { bloomEffectConfig, registerBloomEffect } from "./bloomEffect";
 import { basemapById, type BasemapOption } from "./basemaps";
@@ -491,53 +492,9 @@ const PHOTOREAL_SKY_LIGHT_PROBE_INTENSITY = 1;
 /** `SunLightOptions.intensity`'s default in `@navaramap/three-default-descs`. */
 const PHOTOREAL_SUN_INTENSITY = 1;
 
-/**
- * The cascaded shadow maps' bias, pushed with every `castShadow` write.
- *
- * The engine's defaults (`shadowBias: 0.0001`, `shadowNormalBias: 0`) were
- * tuned for its own sample scenes; on a city of large flat roofs and tall
- * flat walls, lit at a low sun through four cascades spanning 50 km, they
- * left every lit face covered in a fine checker of SELF-shadowing (shadow
- * acne — browser-seen on the Delft sample, roofs and sunlit walls alike).
- *
- * A DEPTH bias, not a normal bias, and that is a finding: `shadowNormalBias`
- * (metres along the VERTEX normal that the lookup is moved off the surface)
- * cleared the big roofs and turned every mis-wound one — a face whose
- * normal points into its own building, which real CityJSON is full of (see
- * `createCityMaterial` in the plugin) — solid dark, because it pushed the
- * lookup INSIDE the roof. The fragment shader flips a back face's normal
- * for lighting; the vertex-stage bias cannot. `shadowBias` is added to the
- * fragment's depth in the cascade's own clip space (three's `getShadow`, the
- * CSM passes it through per cascade), so a NEGATIVE value moves every
- * fragment a little towards the sun regardless of its winding. The value is
- * ONE number for all four cascades (`CascadedShadowMaps.bias` fans it out
- * unscaled), and each cascade's ortho camera spans its frustum slice plus
- * `shadowMargin` on either side, so the bias's worth in metres is the
- * cascade's depth range times 0.0005: a caster closer than that to its
- * receiver casts nothing on it (peter-panning).
- *
- * `shadowMargin` is the lever on that range. The engine's 5 km (room for a
- * mountain outside the frustum to shadow the valley in view) put the nearest
- * cascade's depth range at 8.3 km, so about four metres of bias at street
- * level; 500 m — still five times any building — brings it to 3.8 km and
- * under two metres (probed at the 200 m camera, cascade fars 8328/11929/
- * 18865/83085 → 3828/7429/14365/78585), with no acne returning. The far
- * cascades stay coarse regardless: at the layer-fit view (2.2 km up) the
- * buildings sit in cascades whose depth range is tens of kilometres, so
- * their shadows reach the ground but not each other, and no bias fixes
- * that — a smaller one only brings the acne back (browser-swept: 1e-4 and
- * 2e-5 stripe the roofs). A per-cascade bias would need the engine to
- * expose one. Browser-checked at a street-level camera (shadows attached to
- * their bases, no acne) and at the layer-fit view (shadows present beside
- * the blocks); a lower sun over a far cascade is the untested case. Kept in
- * one constant and written together with `castShadow` so the pieces can
- * never drift apart across the toggle.
- */
-export const SUN_SHADOW_TUNING = Object.freeze({
-  shadowBias: -0.0005,
-  shadowNormalBias: 0,
-  shadowMargin: 500,
-});
+/** The sun's cascaded-shadow-map tuning lives in `shadowQuality.ts` (one
+ *  row per quality level; the store picks the level) and is written together
+ *  with `castShadow` below. */
 
 /** `DEFAULT_TONE_MAPPING_OPTIONS.mode` in the same bundle. */
 const PHOTOREAL_TONE_MAPPING_MODE = ToneMappingMode.AGX;
@@ -1321,6 +1278,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       (s) => s.aerialPerspectiveEnabled,
     );
     const sunShadowsEnabled = useRenderDebugStore((s) => s.sunShadowsEnabled);
+    const shadowQuality = useRenderDebugStore((s) => s.shadowQuality);
     const exposure = useRenderDebugStore((s) => s.exposure);
     /** The exposure actually written to the engine: the theme's, or — when the
      *  theme names none — the user's Advanced Settings slider. The store is
@@ -2012,19 +1970,24 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     // `SunLightDesc` owns the cascaded shadow maps, so the switch is a config
     // update on its handle (`{ sun: { castShadow } }`) rather than a `visible`
     // — hiding the light would take the scene's only key light with it. The
-    // bias rides along (see `SUN_SHADOW_TUNING`); the theme's `intensity` is
+    // quality row (map size, bias, margin — see `shadowQuality.ts`) rides
+    // along, re-written whole on a level change; the theme's `intensity` is
     // a separate write, which is safe because the descriptor MERGES partial
-    // `sun` blocks.
+    // `sun` blocks. The engine re-allocates the maps on a live `shadowMapSize`
+    // write (browser-probed: the render-time lights' `shadow.map` follows).
     useEffect(() => {
       const scene = photorealRef.current;
       if (!engineReady || scene?.sun === undefined) return;
       const sun = scene.sun;
       applyToEngine("the sun shadow toggle", () =>
         sun.update({
-          sun: { castShadow: sunShadowsEnabled, ...SUN_SHADOW_TUNING },
+          sun: {
+            castShadow: sunShadowsEnabled,
+            ...shadowTuningFor(shadowQuality),
+          },
         }),
       );
-    }, [engineReady, sunShadowsEnabled]);
+    }, [engineReady, sunShadowsEnabled, shadowQuality]);
 
     // --- Container resize -> engine resize ---
     //

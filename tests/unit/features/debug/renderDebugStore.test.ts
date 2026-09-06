@@ -38,6 +38,17 @@ describe("renderDebugStore", () => {
     expect(useRenderDebugStore.getState().streamQueryBoxEnabled).toBe(false);
   });
 
+  // The knob behind the (pending) shadow-quality UI: a level, not a map
+  // size, so the tuning table in `src/scene/shadowQuality.ts` stays the one
+  // place that knows what a level costs and buys.
+  it("starts at the default shadow quality and moves between levels", () => {
+    expect(useRenderDebugStore.getState().shadowQuality).toBe("medium");
+    useRenderDebugStore.getState().setShadowQuality("high");
+    expect(useRenderDebugStore.getState().shadowQuality).toBe("high");
+    useRenderDebugStore.getState().setShadowQuality("low");
+    expect(useRenderDebugStore.getState().shadowQuality).toBe("low");
+  });
+
   it("updates each render flag independently", () => {
     useRenderDebugStore.getState().setPostProcessingEnabled(false);
     useRenderDebugStore.getState().setCloudsEnabled(false);
@@ -45,6 +56,7 @@ describe("renderDebugStore", () => {
     useRenderDebugStore.getState().setSunShadowsEnabled(false);
     useRenderDebugStore.getState().setStreamQueryBoxEnabled(true);
     useRenderDebugStore.getState().setExposure(4);
+    useRenderDebugStore.getState().setShadowQuality("high");
 
     expect(useRenderDebugStore.getState()).toMatchObject({
       postProcessingEnabled: false,
@@ -53,6 +65,7 @@ describe("renderDebugStore", () => {
       sunShadowsEnabled: false,
       streamQueryBoxEnabled: true,
       exposure: 4,
+      shadowQuality: "high",
     });
   });
 
