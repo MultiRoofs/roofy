@@ -88,25 +88,32 @@ const HEADER: FcbHeaderModel = {
  *  Constraints -> NODE_IMPORT_SAFE = false). */
 let openStream: ReturnType<typeof vi.fn>;
 
+/** The handle `openStream` resolves with. Named so a test that has to control
+ *  WHEN the open resolves (the pending-row tests) can hand back the same shape
+ *  the default fake would have. */
+function fakeHandle(id: string): FcbStreamLayerHandle {
+  return {
+    id,
+    grid: { originX: 0, originY: 0, rootCell: 100, maxLevel: 3 },
+    header: HEADER,
+    level: null,
+    ladder: [],
+    typesSeen: [],
+    status: "idle",
+    message: null,
+    version: 0,
+    onStatus: () => () => undefined,
+    onLadder: () => () => undefined,
+    onTypes: () => () => undefined,
+    onAppearanceThemes: () => () => {},
+    appearanceThemes: [],
+    onCommit: () => () => undefined,
+  } as unknown as FcbStreamLayerHandle;
+}
+
 function installPlugin(): void {
   openStream = vi.fn((opts: { id: string }) =>
-    Promise.resolve({
-      id: opts.id,
-      grid: { originX: 0, originY: 0, rootCell: 100, maxLevel: 3 },
-      header: HEADER,
-      level: null,
-      ladder: [],
-      typesSeen: [],
-      status: "idle",
-      message: null,
-      version: 0,
-      onStatus: () => () => undefined,
-      onLadder: () => () => undefined,
-      onTypes: () => () => undefined,
-      onAppearanceThemes: () => () => {},
-      appearanceThemes: [],
-      onCommit: () => () => undefined,
-    } as unknown as FcbStreamLayerHandle),
+    Promise.resolve(fakeHandle(opts.id)),
   );
   setStreamPlugin({ openStream, remove: vi.fn() } as unknown as StreamPlugin);
 }
@@ -571,5 +578,122 @@ describe("useLayerFileLoader — CityGML ZIP routing", () => {
       "The archive contains no CityGML (.gml) file.",
     );
     expect(useLayerStore.getState().layers).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// In-flight and failed adds — the layer list's own rows (Task 17).
+//
+// A failed add used to leave nothing on screen but a transient banner: the
+// row the user was expecting simply never appeared. `pending` and `failed`
+// give the list something to render for both halves of an add's life, so a
+// failure always leaves a visible row with a Retry on it.
+// ---------------------------------------------------------------------------
+
+describe("useLayerFileLoader — pending and failed adds", () => {
+  it("lists an in-flight add in `pending`, and drops it when the add settles", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+
+    let release!: (handle: FcbStreamLayerHandle) => void;
+    openStream.mockReturnValueOnce(
+      new Promise<FcbStreamLayerHandle>((resolve) => {
+        release = resolve;
+      }),
+    );
+
+    let add!: Promise<string | null>;
+    act(() => {
+      add = result.current.addLayerFromUrl("https://x/delft.fcb");
+    });
+
+    expect(result.current.pending.map((p) => p.name)).toEqual(["delft.fcb"]);
+    expect(result.current.loading).toBe(true);
+
+    await act(async () => {
+      release(fakeHandle("l1"));
+      await add;
+    });
+
+    expect(result.current.pending).toHaveLength(0);
+    expect(result.current.failed).toHaveLength(0);
+    expect(result.current.loading).toBe(false);
+  });
+
+  it("leaves a failed add in `failed`, carrying the reason, with nothing left pending", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    openStream.mockRejectedValueOnce(new Error("refused: degrees"));
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/degrees.fcb");
+    });
+
+    expect(result.current.pending).toHaveLength(0);
+    expect(result.current.failed).toHaveLength(1);
+    expect(result.current.failed[0]!.name).toBe("degrees.fcb");
+    expect(result.current.failed[0]!.message).toMatch(/refused: degrees/);
+    // The old surface is untouched: App and the landing page read these.
+    expect(result.current.error).toMatch(/refused: degrees/);
+    expect(result.current.loading).toBe(false);
+  });
+
+  it("`retry()` re-runs the same add, and a second success clears the failed row", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    openStream.mockRejectedValueOnce(new Error("network down"));
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/delft.fcb");
+    });
+    expect(result.current.failed).toHaveLength(1);
+
+    await act(async () => {
+      result.current.failed[0]!.retry();
+    });
+
+    // The SAME source, asked for again.
+    expect(
+      (openStream.mock.calls.at(-1)![0] as { source: unknown }).source,
+    ).toEqual({ url: "https://x/delft.fcb" });
+    expect(result.current.failed).toHaveLength(0);
+    expect(useLayerStore.getState().layers).toHaveLength(1);
+  });
+
+  it("`retry()` on a failed FILE add re-reads the same file", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    openStream.mockRejectedValueOnce(new Error("network down"));
+    const file = new File(["fake fcb bytes"], "local.fcb");
+
+    await act(async () => {
+      await result.current.addLayerFromFile(file);
+    });
+    expect(result.current.failed).toHaveLength(1);
+
+    await act(async () => {
+      result.current.failed[0]!.retry();
+    });
+
+    const source = (
+      openStream.mock.calls.at(-1)![0] as { source: { blob: Blob } }
+    ).source;
+    expect(source.blob).toBe(file);
+    expect(result.current.failed).toHaveLength(0);
+  });
+
+  it("`dismissFailed(id)` drops just that row", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    openStream.mockRejectedValueOnce(new Error("one"));
+    openStream.mockRejectedValueOnce(new Error("two"));
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/one.fcb");
+      await result.current.addLayerFromUrl("https://x/two.fcb");
+    });
+    expect(result.current.failed).toHaveLength(2);
+
+    const first = result.current.failed[0]!.id;
+    act(() => {
+      result.current.dismissFailed(first);
+    });
+
+    expect(result.current.failed.map((f) => f.name)).toEqual(["two.fcb"]);
   });
 });

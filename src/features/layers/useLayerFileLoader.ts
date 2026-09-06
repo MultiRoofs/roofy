@@ -129,6 +129,45 @@ export interface LayerFileLoader {
    */
   lastError: (source?: string) => string | null;
   clearError: () => void;
+  /**
+   * The adds that are still in flight, oldest first — one entry per call,
+   * added BEFORE the parse starts and removed when it settles either way.
+   *
+   * The layer list renders these as loading rows. Without them a dropped
+   * file is invisible for as long as it takes to parse: the row the user is
+   * waiting for only exists once the layer store has a layer, which is the
+   * very last step.
+   */
+  pending: ReadonlyArray<PendingAdd>;
+  /**
+   * The adds that failed and have not been dismissed.
+   *
+   * A failure used to leave nothing behind but a transient banner and a row
+   * that never appeared. Each entry keeps its own message and its own
+   * {@link FailedAdd.retry}, which re-runs THAT add (the same file, the same
+   * url) — so several failures in one drop can each be retried on their own.
+   */
+  failed: ReadonlyArray<FailedAdd>;
+  /** Drop one {@link failed} row. Retrying removes its row itself. */
+  dismissFailed: (id: string) => void;
+}
+
+/** One in-flight add. `id` is internal to this hook (a React key and the
+ *  handle {@link LayerFileLoader.dismissFailed} takes), never a layer id —
+ *  an add that fails never gets one. */
+export interface PendingAdd {
+  readonly id: string;
+  readonly name: string;
+}
+
+export interface FailedAdd {
+  readonly id: string;
+  readonly name: string;
+  readonly message: string;
+  /** Re-runs the same add. Removes this row first, so the retry shows as a
+   *  {@link LayerFileLoader.pending} row while it runs and a new failed row
+   *  only if it fails again. */
+  retry(): void;
 }
 
 export interface LayerFileLoaderOptions {
@@ -151,7 +190,9 @@ const defaultResolveStreamPlugin = async (): Promise<StreamPlugin> =>
 export function useLayerFileLoader(
   options: LayerFileLoaderOptions = {},
 ): LayerFileLoader {
-  const [loading, setLoading] = useState(false);
+  const [pending, setPending] = useState<ReadonlyArray<PendingAdd>>([]);
+  const [failed, setFailed] = useState<ReadonlyArray<FailedAdd>>([]);
+  const nextAddId = useRef(0);
   const [error, setErrorState] = useState<string | null>(null);
   // A per-source MAP, not a mirror of the single error state: the catalog
   // fires several adds concurrently, and with one shared slot either add B's
@@ -174,6 +215,58 @@ export function useLayerFileLoader(
     },
     [],
   );
+  /**
+   * The one place an add is BOOKED: it opens a pending row, runs the attempt,
+   * and on a throw records the message once — into the visible `error`, into
+   * the per-source map behind `lastError`, and as a failed row carrying a
+   * `retry` that re-runs this very attempt.
+   *
+   * The three adds below therefore have no `try`/`catch`/`finally` of their
+   * own: each of them used to repeat the same three-line catch with its own
+   * fallback sentence, and `loading` was a separate boolean two concurrent
+   * adds raced to clear. `loading` is now derived from `pending`, so it is
+   * true exactly while something is in flight.
+   *
+   * Explicitly typed rather than inferred because it names itself (the retry
+   * closure), which TypeScript cannot infer through.
+   */
+  const runTracked: (
+    entry: { name: string; source: string; fallback: string },
+    attempt: () => Promise<string | null>,
+  ) => Promise<string | null> = useCallback(
+    async (entry, attempt) => {
+      const id = `add-${(nextAddId.current += 1)}`;
+      setError(null);
+      setPending((rows) => [...rows, { id, name: entry.name }]);
+      try {
+        return await attempt();
+      } catch (e) {
+        const message = e instanceof Error ? e.message : entry.fallback;
+        setError(message, entry.source);
+        setFailed((rows) => [
+          ...rows,
+          {
+            id,
+            name: entry.name,
+            message,
+            retry: () => {
+              setFailed((current) => current.filter((r) => r.id !== id));
+              void runTracked(entry, attempt);
+            },
+          },
+        ]);
+        return null;
+      } finally {
+        setPending((rows) => rows.filter((r) => r.id !== id));
+      }
+    },
+    [setError],
+  );
+
+  const dismissFailed = useCallback((id: string): void => {
+    setFailed((rows) => rows.filter((r) => r.id !== id));
+  }, []);
+
   // Through a ref, so an inline `resolveStreamPlugin={() => …}` cannot change
   // the identity of the two loaders below — `App.tsx` lists them in dependency
   // arrays, and a new function per render would re-run those effects.
@@ -184,202 +277,190 @@ export function useLayerFileLoader(
     options.resolveStreamPlugin ?? defaultResolveStreamPlugin;
 
   const addLayerFromFile = useCallback(
-    async (file: File, overrides?: LayerOverrides): Promise<string | null> => {
-      setError(null);
-      setLoading(true);
-      try {
-        let layerId: string;
-        const encoding = detectEncoding(file.name);
-        if (encoding === "flatcitybuf") {
-          // A `File` IS a `Blob` — passed straight through, never read into
-          // an ArrayBuffer first (see openStreamingLayer.ts's doc comment
-          // on why fromBytes' copy would OOM a multi-GB local file).
-          layerId = await openStreamingLayer({
-            plugin: await resolveStreamPlugin.current(),
-            source: { blob: file },
-            name: file.name,
-            modelRef: { type: "file", fileName: file.name },
-            rules: overrides?.rules,
-            rulesEnabled: overrides?.rulesEnabled,
-            visible: overrides?.visible,
-            hiddenTypes: overrides?.hiddenTypes,
-            selectedAppearance: overrides?.selectedAppearance,
-          });
-        } else if (encoding === "cityparquet") {
-          // A lone `.parquet` drop is a one-table package — the same loader as
-          // a picked folder, given a selection of one.
-          const model = await loadCityParquetFromFiles([file]);
-          await ensureModelCrsLoadable(model);
-          layerId = addCityLayer({
-            name: file.name,
-            model,
-            modelRef: { type: "file", fileName: file.name },
-            visible: overrides?.visible,
-            rules: overrides?.rules,
-            rulesEnabled: overrides?.rulesEnabled,
-            hiddenTypes: overrides?.hiddenTypes,
-            selectedAppearance: overrides?.selectedAppearance,
-            // The parser produces the model and nothing else — a CityParquet
-            // table is not something a cityjson reader can read.
-            duckdb: { kind: "model", model },
-          });
-        } else {
-          // Bytes, not `file.text()`: a dropped `.city.json.gz` — the form 3D
-          // BAG ships in, and therefore the form a user saves off the catalog
-          // — would otherwise reach the parser as mojibake. `decodeModelBytes`
-          // decides on the MAGIC BYTES, so an uncompressed file still takes the
-          // plain UTF-8 path.
-          const bytes = new Uint8Array(await file.arrayBuffer());
-          // A dropped ZIP of CityGML takes the same container path as a
-          // catalog `application/zip` asset, decided the same way — on the
-          // magic bytes, since this path already holds them.
-          const zipped = isZipBytes(bytes);
-          const gzipped = !zipped && isGzipBytes(bytes);
-          const text = zipped ? "" : await decodeModelBytes(bytes);
-          const parsed: CityModel = zipped
-            ? parseCityGmlArchive(bytes, file.name)
-            : parseText(file.name, text);
-          // Fetch-and-gate the CRS while we are still async — a refusal here
-          // reads as a load error instead of a dead layer in the scene sync.
-          await ensureModelCrsLoadable(parsed);
-          layerId = addCityLayer({
-            name: file.name,
-            model: parsed,
-            modelRef: { type: "file", fileName: file.name },
-            visible: overrides?.visible,
-            rules: overrides?.rules,
-            rulesEnabled: overrides?.rulesEnabled,
-            hiddenTypes: overrides?.hiddenTypes,
-            selectedAppearance: overrides?.selectedAppearance,
-            duckdb: modelTableSource({
+    (file: File, overrides?: LayerOverrides): Promise<string | null> =>
+      runTracked(
+        {
+          name: file.name,
+          source: file.name,
+          fallback: "Failed to parse file.",
+        },
+        async () => {
+          let layerId: string;
+          const encoding = detectEncoding(file.name);
+          if (encoding === "flatcitybuf") {
+            // A `File` IS a `Blob` — passed straight through, never read into
+            // an ArrayBuffer first (see openStreamingLayer.ts's doc comment
+            // on why fromBytes' copy would OOM a multi-GB local file).
+            layerId = await openStreamingLayer({
+              plugin: await resolveStreamPlugin.current(),
+              source: { blob: file },
+              name: file.name,
+              modelRef: { type: "file", fileName: file.name },
+              rules: overrides?.rules,
+              rulesEnabled: overrides?.rulesEnabled,
+              visible: overrides?.visible,
+              hiddenTypes: overrides?.hiddenTypes,
+              selectedAppearance: overrides?.selectedAppearance,
+            });
+          } else if (encoding === "cityparquet") {
+            // A lone `.parquet` drop is a one-table package — the same loader as
+            // a picked folder, given a selection of one.
+            const model = await loadCityParquetFromFiles([file]);
+            await ensureModelCrsLoadable(model);
+            layerId = addCityLayer({
+              name: file.name,
+              model,
+              modelRef: { type: "file", fileName: file.name },
+              visible: overrides?.visible,
+              rules: overrides?.rules,
+              rulesEnabled: overrides?.rulesEnabled,
+              hiddenTypes: overrides?.hiddenTypes,
+              selectedAppearance: overrides?.selectedAppearance,
+              // The parser produces the model and nothing else — a CityParquet
+              // table is not something a cityjson reader can read.
+              duckdb: { kind: "model", model },
+            });
+          } else {
+            // Bytes, not `file.text()`: a dropped `.city.json.gz` — the form 3D
+            // BAG ships in, and therefore the form a user saves off the catalog
+            // — would otherwise reach the parser as mojibake. `decodeModelBytes`
+            // decides on the MAGIC BYTES, so an uncompressed file still takes the
+            // plain UTF-8 path.
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            // A dropped ZIP of CityGML takes the same container path as a
+            // catalog `application/zip` asset, decided the same way — on the
+            // magic bytes, since this path already holds them.
+            const zipped = isZipBytes(bytes);
+            const gzipped = !zipped && isGzipBytes(bytes);
+            const text = zipped ? "" : await decodeModelBytes(bytes);
+            const parsed: CityModel = zipped
+              ? parseCityGmlArchive(bytes, file.name)
+              : parseText(file.name, text);
+            // Fetch-and-gate the CRS while we are still async — a refusal here
+            // reads as a load error instead of a dead layer in the scene sync.
+            await ensureModelCrsLoadable(parsed);
+            layerId = addCityLayer({
+              name: file.name,
               model: parsed,
-              // The array we ALREADY READ when nothing was gunzipped: a
-              // re-encode would duplicate the whole file in the JS heap, and
-              // `registerBuffer` is about to consume whichever array it gets.
-              bytes:
-                zipped || encoding === "citygml"
-                  ? null
-                  : gzipped
-                    ? new TextEncoder().encode(text)
-                    : bytes,
-              encoding:
-                encoding === "cityjsonseq"
-                  ? "cityjsonseq"
-                  : encoding === "citygml"
-                    ? "citygml"
-                    : "cityjson",
-              refetch: fileSourceProvider(file),
-            }),
-          });
-        }
-        applyPostCreateOverrides(layerId, overrides);
-        return layerId;
-      } catch (e) {
-        setError(
-          e instanceof Error ? e.message : "Failed to parse file.",
-          file.name,
-        );
-        return null;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [setError],
+              modelRef: { type: "file", fileName: file.name },
+              visible: overrides?.visible,
+              rules: overrides?.rules,
+              rulesEnabled: overrides?.rulesEnabled,
+              hiddenTypes: overrides?.hiddenTypes,
+              selectedAppearance: overrides?.selectedAppearance,
+              duckdb: modelTableSource({
+                model: parsed,
+                // The array we ALREADY READ when nothing was gunzipped: a
+                // re-encode would duplicate the whole file in the JS heap, and
+                // `registerBuffer` is about to consume whichever array it gets.
+                bytes:
+                  zipped || encoding === "citygml"
+                    ? null
+                    : gzipped
+                      ? new TextEncoder().encode(text)
+                      : bytes,
+                encoding:
+                  encoding === "cityjsonseq"
+                    ? "cityjsonseq"
+                    : encoding === "citygml"
+                      ? "citygml"
+                      : "cityjson",
+                refetch: fileSourceProvider(file),
+              }),
+            });
+          }
+          applyPostCreateOverrides(layerId, overrides);
+          return layerId;
+        },
+      ),
+    [runTracked],
   );
 
   const addLayerFromFiles = useCallback(
-    async (
+    (
       files: ReadonlyArray<File>,
       overrides?: LayerOverrides,
-    ): Promise<string | null> => {
-      setError(null);
-      setLoading(true);
-      try {
-        const name = packageNameFromFiles(files);
-        const model = await loadCityParquetFromFiles(files);
-        await ensureModelCrsLoadable(model);
-        const layerId = addCityLayer({
-          name,
-          model,
-          // The FOLDER is the source, so that is what a snapshot records as
-          // needing re-selection — no single file could re-link this layer.
-          modelRef: { type: "file", fileName: name },
-          visible: overrides?.visible,
-          rules: overrides?.rules,
-          rulesEnabled: overrides?.rulesEnabled,
-          hiddenTypes: overrides?.hiddenTypes,
-          selectedAppearance: overrides?.selectedAppearance,
-          duckdb: { kind: "model", model },
-        });
-        applyPostCreateOverrides(layerId, overrides);
-        return layerId;
-      } catch (e) {
-        setError(
-          e instanceof Error ? e.message : "Failed to load the picked files.",
-          packageNameFromFiles(files),
-        );
-        return null;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [setError],
+    ): Promise<string | null> =>
+      runTracked(
+        {
+          name: packageNameFromFiles(files),
+          source: packageNameFromFiles(files),
+          fallback: "Failed to load the picked files.",
+        },
+        async () => {
+          const name = packageNameFromFiles(files);
+          const model = await loadCityParquetFromFiles(files);
+          await ensureModelCrsLoadable(model);
+          const layerId = addCityLayer({
+            name,
+            model,
+            // The FOLDER is the source, so that is what a snapshot records as
+            // needing re-selection — no single file could re-link this layer.
+            modelRef: { type: "file", fileName: name },
+            visible: overrides?.visible,
+            rules: overrides?.rules,
+            rulesEnabled: overrides?.rulesEnabled,
+            hiddenTypes: overrides?.hiddenTypes,
+            selectedAppearance: overrides?.selectedAppearance,
+            duckdb: { kind: "model", model },
+          });
+          applyPostCreateOverrides(layerId, overrides);
+          return layerId;
+        },
+      ),
+    [runTracked],
   );
 
   const addLayerFromUrl = useCallback(
-    async (url: string): Promise<string | null> => {
-      setError(null);
-      setLoading(true);
-      try {
-        if (detectEncoding(url) === "flatcitybuf") {
-          return await openStreamingLayer({
-            plugin: await resolveStreamPlugin.current(),
-            source: { url },
-            name: fileNameFromUrl(url),
-            modelRef: { type: "url", url },
-          });
-        }
-
-        // `isCityParquetUrl`, not `detectEncoding`: a bucket pattern or a
-        // package directory has no extension to detect. The predicate is TOTAL
-        // and answers true for an unlistable https wildcard as well, so the
-        // classifier's explanation of why it cannot be served is thrown from
-        // the load below and lands in `error` — which is the point.
-        if (isCityParquetUrl(url)) {
-          const model = await loadCityParquetFromUrl(url);
-          await ensureModelCrsLoadable(model);
-          return addCityLayer({
-            name: cityParquetLayerNameFromUrl(url),
-            model,
-            modelRef: { type: "url", url },
-            duckdb: { kind: "model", model },
-          });
-        }
-
-        const parsed = await loadFromUrl(url);
-        await ensureModelCrsLoadable(parsed.model);
-        return addCityLayer({
+    (url: string): Promise<string | null> =>
+      runTracked(
+        {
           name: fileNameFromUrl(url),
-          model: parsed.model,
-          modelRef: { type: "url", url },
-          duckdb: modelTableSource({
+          source: url,
+          fallback: "Failed to load remote file.",
+        },
+        async () => {
+          if (detectEncoding(url) === "flatcitybuf") {
+            return await openStreamingLayer({
+              plugin: await resolveStreamPlugin.current(),
+              source: { url },
+              name: fileNameFromUrl(url),
+              modelRef: { type: "url", url },
+            });
+          }
+
+          // `isCityParquetUrl`, not `detectEncoding`: a bucket pattern or a
+          // package directory has no extension to detect. The predicate is TOTAL
+          // and answers true for an unlistable https wildcard as well, so the
+          // classifier's explanation of why it cannot be served is thrown from
+          // the load below and lands in `error` — which is the point.
+          if (isCityParquetUrl(url)) {
+            const model = await loadCityParquetFromUrl(url);
+            await ensureModelCrsLoadable(model);
+            return addCityLayer({
+              name: cityParquetLayerNameFromUrl(url),
+              model,
+              modelRef: { type: "url", url },
+              duckdb: { kind: "model", model },
+            });
+          }
+
+          const parsed = await loadFromUrl(url);
+          await ensureModelCrsLoadable(parsed.model);
+          return addCityLayer({
+            name: fileNameFromUrl(url),
             model: parsed.model,
-            bytes: parsed.bytes,
-            encoding: parsed.encoding,
-            refetch: urlSourceProvider(url),
-          }),
-        });
-      } catch (e) {
-        setError(
-          e instanceof Error ? e.message : "Failed to load remote file.",
-          url,
-        );
-        return null;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [setError],
+            modelRef: { type: "url", url },
+            duckdb: modelTableSource({
+              model: parsed.model,
+              bytes: parsed.bytes,
+              encoding: parsed.encoding,
+              refetch: urlSourceProvider(url),
+            }),
+          });
+        },
+      ),
+    [runTracked],
   );
 
   const clearError = useCallback(() => setError(null), [setError]);
@@ -398,9 +479,15 @@ export function useLayerFileLoader(
     addLayerFromFile,
     addLayerFromFiles,
     addLayerFromUrl,
-    loading,
+    // Derived, never its own boolean: two concurrent adds used to race the
+    // one `setLoading(false)`, so the first to settle cleared the spinner
+    // the second was still using.
+    loading: pending.length > 0,
     error,
     lastError,
     clearError,
+    pending,
+    failed,
+    dismissFailed,
   };
 }
