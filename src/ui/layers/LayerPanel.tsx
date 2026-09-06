@@ -83,7 +83,7 @@ export function LayerPanel({
     if (themes.length > 0) streamThemes[id] = themes;
   }
   // ONE active id for both sections — see features/workspace.
-  const activeLayerId = useWorkspaceStore((s) => s.activeLayerId);
+  const workspaceActiveId = useWorkspaceStore((s) => s.activeLayerId);
   const updateLayer = useLayerStore((s) => s.updateLayer);
   const removeLayer = useLayerStore((s) => s.removeLayer);
   const setCameraSync = useLayerStore((s) => s.setCameraSync);
@@ -128,7 +128,7 @@ export function LayerPanel({
       </div>
 
       {layers.map((layer) => {
-        const isActive = layer.id === activeLayerId;
+        const isActive = layer.id === workspaceActiveId;
 
         return (
           <div

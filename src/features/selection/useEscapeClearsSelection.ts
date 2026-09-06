@@ -16,9 +16,11 @@
  *  2. A text field with the focus — Escape there means "abandon what I am
  *     typing" (the inline rename inputs read it that way), never "throw away
  *     the selection behind the field".
- *  3. Everything else. The rendering panel closes AND the selection clears on
- *     the same press; both are "step back", and neither hides the other's
- *     effect, so making them take turns would only mean pressing Escape twice.
+ *  3. Everything else, all at once. The rendering panel and the three toolbar
+ *     popovers (scene theme, solar, weather) close on the same press that
+ *     clears the selection. That is the intended reading, not an oversight:
+ *     every one of them is "step back", none hides another's effect, and
+ *     making them take turns would only mean pressing Escape twice.
  *
  * Installed once, by the app shell.
  */

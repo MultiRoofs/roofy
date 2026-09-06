@@ -44,9 +44,9 @@ export function GeoLayerRow({
   const relinkGeoJsonLayer = useGeoLayerStore((s) => s.relinkGeoJsonLayer);
   // The SAME id a city row reads: a geo layer and a city model take turns
   // being the one layer the inspector, the legend and the highlight describe.
-  const activeLayerId = useWorkspaceStore((s) => s.activeLayerId);
+  const workspaceActiveId = useWorkspaceStore((s) => s.activeLayerId);
 
-  const isActive = layer.id === activeLayerId;
+  const isActive = layer.id === workspaceActiveId;
 
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(layer.name);
