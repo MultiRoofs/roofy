@@ -4,7 +4,7 @@
 
 **Goal:** Rebuild the viewer shell around one active layer and one shared selection: a unified layer list with the active layer's Style / Filter / Details under it, a details panel that exists only while something is selected, a data drawer under the map that follows the active layer, and scene controls on the map.
 
-**Architecture:** The stores keep their split (layer, geo-layer, selection, query, stream) and gain one small workspace store that owns the single `activeLayerId` for both layer kinds, plus a coordination module that enforces the cross-store rules (activate clears a foreign selection, a pick activates its owner, hide/remove/filter clear the selection). The React shell is rebuilt region by region (header, left panel, map overlays, details panel, drawer) as new modules under `src/ui/*`, and the old modules are deleted in the slice that replaces them. Engine bindings (`NavaraViewport`, `handleSync`, plugins) change only where the design needs a new capability (no fit-all on add, camera-cluster methods on the handle, per-object bounds).
+**Architecture:** The stores keep their split (layer, geo-layer, selection, query, stream) and gain one small workspace store that owns the single `activeLayerId` for both layer kinds, plus a coordination module that enforces the cross-store rules (activate clears a foreign selection, a pick activates its owner, hide/remove clear the selection; a filter that excludes a selected feature clears it in 12.4's `mapFilterSync`, the one owner of that rule). The React shell is rebuilt region by region (header, left panel, map overlays, details panel, drawer) as new modules under `src/ui/*`, and the old modules are deleted in the slice that replaces them. Engine bindings (`NavaraViewport`, `handleSync`, plugins) change only where the design needs a new capability (no fit-all on add, camera-cluster methods on the handle, per-object bounds).
 
 **Tech Stack:** React 19, Zustand 5, Vitest 4 + Testing Library (jsdom), DuckDB-wasm (`src/insights`), Navara 0.1.1 through the `@cityjson/navara-*` plugins, vite-plus (`vp check`, `vp test run`).
 
@@ -19,19 +19,19 @@
 - Brand: tokens only from `src/app/brand.css`; readable text on `--fg` / `--fg-muted`, never `--fg-dim`; one filled lime button per view; lime is the only interactive colour; glass only over the map.
 - No `activeLayerId ?? layers[0]` fallbacks anywhere: the active layer is the workspace store's id or nothing.
 - Streaming layers keep `useStreamStore` separate from `useLayerStore` (render-cost split), and their counts always read "currently loaded".
-- Persistence: schema v4; v3 migrates; v1/v2 keep the explicit unsupported-version error. No silent data loss.
+- Persistence: schema v4; v3 migrates; v1/v2 keep the explicit unsupported-version error. No silent data loss. v4 is this milestone's only version bump: 12.3 (`colorBy`, `singleColor`, `unmatchedColor` on `LayerSnapshot`) and 12.5 (`timeZone`) add OPTIONAL fields under v4, the codebase's precedent (`geoLayers?` joined v3 without a bump).
 - Desktop-first: verify at 1440×900 and 1280×720 in the real browser (`scripts/smoke/driver.mjs` or `agent-browser` with a hand-launched Chromium, see `host-tooling-quirks`).
 
 ## Slices
 
-| Slice | Title                                                           | Depends on                    | Detailed tasks          |
-| ----- | --------------------------------------------------------------- | ----------------------------- | ----------------------- |
-| 12.1  | Shared context: one active layer, one selection, v4 persistence | —                             | in this document        |
-| 12.2  | Shell and layer management                                      | 12.1                          | written when 12.1 lands |
-| 12.3  | Styling and inspection                                          | 12.2                          | written when 12.2 lands |
-| 12.4  | Linked data and filtering                                       | 12.2 (12.3 for legend counts) | written when 12.3 lands |
-| 12.5  | Scene controls and remaining capabilities                       | 12.2                          | written when 12.4 lands |
-| 12.6  | Verification, review, docs                                      | all                           | written when 12.5 lands |
+| Slice | Title                                                           | Depends on | Detailed tasks          |
+| ----- | --------------------------------------------------------------- | ---------- | ----------------------- |
+| 12.1  | Shared context: one active layer, one selection, v4 persistence | —          | in this document        |
+| 12.2  | Shell and layer management                                      | 12.1       | written when 12.1 lands |
+| 12.3  | Styling and inspection                                          | 12.2       | written when 12.2 lands |
+| 12.4  | Linked data and filtering                                       | 12.2, 12.3 | written when 12.3 lands |
+| 12.5  | Scene controls and remaining capabilities                       | 12.2       | written when 12.4 lands |
+| 12.6  | Verification, review, docs                                      | all        | written when 12.5 lands |
 
 Each later slice gets its own task-level section appended to this document (same format as 12.1) immediately before it starts, written against the code as it then exists. The slice outlines below fix the scope, the module boundaries and the interfaces so that 12.1 does not paint later slices into a corner.
 
@@ -39,7 +39,7 @@ Each later slice gets its own task-level section appended to this document (same
 
 ## Slice 12.1 — Shared context (detailed)
 
-Outcome: the app behaves by the design's interaction rules 1, 2, 4 and 5 with the OLD panels still on screen. Nothing visual changes except the removals. Every existing test still passes or is rewritten for the new rule.
+Outcome: the app behaves by the design's interaction rules 1, 2, 4 and the single-layer + Escape parts of rule 5 (the right panel that hides when empty is 12.2) with the OLD panels still on screen. Nothing visual changes except the removals. Every existing test still passes or is rewritten for the new rule.
 
 ### Execution order for 12.1
 
@@ -319,15 +319,19 @@ Expected: green. Task 4 already moved every reader and every test to the workspa
   export function selectionLayerId(
     state: Pick<SelectionState, "selections" | "geoSelection">,
   ): string | null;
-  /** Rule 1: sets the active layer; clears the selection first when it belongs to another layer. Never moves the camera. */
+  /** Rule 1: sets the active layer; clears the selection first when it belongs to another layer. Never moves the camera.
+   *  The rule is enforced INSIDE `useWorkspaceStore.setActiveLayerId` (the store imports the selection store and clears a
+   *  foreign selection before writing), so no caller can bypass it; `activateLayer` is the documented entry point and
+   *  delegates to it. Task 3 amends `workspaceStore.ts` accordingly (moving `selectionLayerId` there; `layerCoordination` re-exports it)
+   *  and adds the test to `workspaceStore.test.ts`. */
   export function activateLayer(id: string | null): void;
-  /** Rule 4: next in unified order after the removed one, else the previous, else null. */
+  /** Rule 4: next in unified order after the removed one, else the previous, else null. `removedIndex === -1` (unknown) → the first remaining id. */
   export function nextActiveAfterRemoval(
     order: ReadonlyArray<string>,
     removedId: string,
     removedIndex: number,
   ): string | null;
-  /** Subscribes to the layer, geo-layer and selection stores and enforces: first layer becomes active; a removed active layer hands over per nextActiveAfterRemoval; a selection whose owner is removed or hidden is cleared; a selection activates its owner. Returns a disposer. Idempotent: a second call disposes the first. */
+  /** Subscribes to the layer, geo-layer and selection stores and enforces: first layer becomes active; a removed active layer hands over per nextActiveAfterRemoval; a selection whose owner is removed or hidden is cleared; a selection activates its owner. Returns a disposer that disposes ONLY its own subscriptions and clears the module pointer only when it still points at itself; a second install disposes the first. */
   export function installWorkspaceInvariants(): () => void;
   ```
 
@@ -349,8 +353,12 @@ import {
   selectionLayerId,
 } from "../../../../src/features/workspace/layerCoordination";
 
-// Reuse the `layer()` factory pattern from tests/unit/features/layers/layerStore.test.ts
-// (a minimal CityModel with one object) — copy it here rather than importing across test files.
+// Define two local factories at the top of the file (copy, do not import across test files):
+//   layerInput(name): the `addLayer` input — reuse the shape of the `layer()` factory in
+//     tests/unit/features/layers/layerStore.test.ts (a minimal CityModel with one object, `visible: true`,
+//     `rules: []`, `rulesEnabled: false`, a `modelRef` of `{ type: "url", url: "https://x/" + name }`).
+//   geoInput(name): the `addGeoLayer` input — a GeoJSON layer matching `GeoLayerInput` in
+//     src/features/geoLayers/geoLayerStore.ts (check the exact config fields there).
 
 describe("nextActiveAfterRemoval", () => {
   it("prefers the next id, then the previous, then null", () => {
@@ -449,6 +457,48 @@ describe("activateLayer + invariants", () => {
     expect(useSelectionStore.getState().selections).toEqual([]);
   });
 
+  it("activating the layer that owns the selection keeps the selection", () => {
+    const a = useLayerStore.getState().addLayer(layerInput("A"));
+    useSelectionStore
+      .getState()
+      .select({ kind: "object", layerId: a, objectId: "o1" });
+    activateLayer(a);
+    expect(useSelectionStore.getState().selections).toHaveLength(1);
+  });
+
+  it("hiding a geo layer clears its feature selection", () => {
+    const g = useGeoLayerStore.getState().addGeoLayer(geoInput("G"));
+    useSelectionStore
+      .getState()
+      .selectGeoFeature({ geoLayerId: g, batchId: 0, properties: {} });
+    useGeoLayerStore.getState().updateGeoLayer(g, { visible: false });
+    expect(useSelectionStore.getState().geoSelection).toBeNull();
+  });
+
+  it("closing every city layer while geo layers survive hands the active layer to a geo layer", () => {
+    const a = useLayerStore.getState().addLayer(layerInput("A"));
+    const g = useGeoLayerStore.getState().addGeoLayer(geoInput("G"));
+    activateLayer(a);
+    useLayerStore.getState().removeAllLayers();
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(g);
+  });
+
+  it("no active layer while layers exist is not a durable state: the reconciler picks the first", () => {
+    const a = useLayerStore.getState().addLayer(layerInput("A"));
+    activateLayer(null);
+    useLayerStore.getState().updateLayer(a, { name: "renamed" });
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(a);
+  });
+
+  it("clear() also ends a geo selection (what keeps activate and pick from fighting)", () => {
+    const g = useGeoLayerStore.getState().addGeoLayer(geoInput("G"));
+    useSelectionStore
+      .getState()
+      .selectGeoFeature({ geoLayerId: g, batchId: 0, properties: {} });
+    useSelectionStore.getState().clear();
+    expect(useSelectionStore.getState().geoSelection).toBeNull();
+  });
+
   it("a geo layer takes part in the same rules", () => {
     const a = useLayerStore.getState().addLayer(layerInput("A"));
     const g = useGeoLayerStore.getState().addGeoLayer(geoInput("G"));
@@ -510,11 +560,16 @@ export function selectionLayerId(
   return state.geoSelection?.geoLayerId ?? null;
 }
 
+/** Rule 1 lives in the store's own `setActiveLayerId`; this is the documented entry point. */
 export function activateLayer(id: string | null): void {
-  const owner = selectionLayerId(useSelectionStore.getState());
-  if (owner !== null && owner !== id) useSelectionStore.getState().clear();
   useWorkspaceStore.getState().setActiveLayerId(id);
 }
+// In workspaceStore.ts the action becomes (selectionLayerId is defined there and re-exported here):
+//   setActiveLayerId: (id) => {
+//     const owner = selectionLayerId(useSelectionStore.getState());
+//     if (owner !== null && owner !== id) useSelectionStore.getState().clear();
+//     set({ activeLayerId: id });
+//   },
 
 export function nextActiveAfterRemoval(
   order: ReadonlyArray<string>,
@@ -523,6 +578,7 @@ export function nextActiveAfterRemoval(
 ): string | null {
   const remaining = order.filter((id) => id !== removedId);
   if (remaining.length === 0) return null;
+  if (removedIndex < 0) return remaining[0]!;
   const next = remaining[removedIndex];
   return (
     next ??
@@ -589,11 +645,12 @@ export function installWorkspaceInvariants(): () => void {
   ];
   reconcileLayers();
   reconcileSelection();
-  disposeInstalled = () => {
+  const dispose = () => {
     unsubs.forEach((u) => u());
-    disposeInstalled = null;
+    if (disposeInstalled === dispose) disposeInstalled = null;
   };
-  return disposeInstalled;
+  disposeInstalled = dispose;
+  return dispose;
 }
 ```
 
@@ -621,19 +678,26 @@ Note `nextActiveAfterRemoval` receives the order BEFORE removal and the removed 
 
 - [ ] **Step 5: Commit** — `feat(workspace): coordination rules — activate clears foreign selection, picks activate, removal hands over`
 
+Ruling recorded 2026-09-06 (plan review C1): `handleClose` removes geo layers as well as city layers from Task 4 on — "Close" means "new workspace"; the old "geo layers survive close" behaviour existed only because the landing page could not show a geo-only workspace, which 12.2 fixes. Cost if wrong: a user loses geo layers on Close in 12.1; 12.2 replaces Close with New workspace.
+
 ### Task 4: Wire the shell to the workspace store and remove the duplicate paths
 
 **Files:**
 
-- Modify: `src/app/App.tsx` (:247, :276-279, :500-510, :649, :694, :1309; install the invariants in the mount effect next to the DuckDB boot; `handleClose` :1163-1181 sets `activateLayer(null)` instead of `setActiveGeoLayer(null)`)
+- Modify: `src/app/App.tsx` (:247, :276-279, :500-510, :694, :1309; install the invariants in the mount effect next to the DuckDB boot; `:649-650` is the SAVE LABEL fallback `allLayers.find(...) ?? allLayers[0]` — replace it with `resolveActiveLayer(activeLayerId, layers, geoLayers)?.layer.name ?? "Untitled"`, no fallback to the first layer)
 - Modify: `src/ui/layers/LayerPanel.tsx:75, :122, :128-133` → `useWorkspaceStore` + `activateLayer(layer.id)`
 - Modify: `src/ui/layers/GeoLayerRow.tsx:43-46` → same
 - Modify: `src/ui/inspector/InspectorPanel.tsx:129-162, :287, :334-338` → `displayLayer` is the active city layer or the selection's layer (no `?? layers[0]`); the geo branch renders when the active layer is geo; delete `ruleTargetOverride`; `RuleBuilderTab` gets only `{ model, layerId }`
 - Modify: `src/ui/inspector/RuleBuilderTab.tsx:31-36, :125-137` → delete `layerOptions`, `onSelectLayer` and the `<select>`; the tab title reads "Rules · <layer name>"
 - Modify: `src/ui/table/TablePanel.tsx:53-55, :63-64, :96-131, :179-186` → layer from `useActiveCityLayer()`; delete `syncSelection`, `tableSelection` and the checkbox; row click always writes the global selection
 - Modify: `src/ui/StatusBar.tsx:50-51, :63-75` → delete the table toggle and its props; active layer from `useActiveCityLayer()`
-- Modify: `src/ui/layers/LayerPanel.tsx` → add an `Open table` / `Close table` ghost button on the ACTIVE city row's actions (props `tableOpen`, `onToggleTable` threaded from `App` through `LeftSidebar`), so the table stays reachable until 12.2 builds the action row
-- Tests: `tests/unit/ui/layers/LayerPanelSections.test.tsx`, `tests/unit/ui/inspector/InspectorPanel.test.tsx`, `tests/unit/ui/inspector/RuleBuilderTab.test.tsx`, `tests/unit/ui/inspector/GeoLayerInspector.test.tsx`, `tests/unit/ui/table/TablePanel.test.tsx`, `tests/unit/ui/StatusBar.test.tsx` (create if absent), `tests/unit/app/appEngineBoot.test.tsx`
+- Modify: `src/ui/layers/LayerPanel.tsx` → add an `Open table` / `Close table` ghost button on the ACTIVE city row's actions (props `tableOpen`, `onToggleTable` threaded from `App` through `LeftSidebar`), so the table stays reachable until 12.2 builds the action row THROWAWAY by design: 12.2 deletes `LeftSidebar` and `LayerPanel`; do not defend the threading in review.
+- Modify: `src/app/App.tsx` `handleClose` :1163-1181 → also `removeAllGeoLayers()`; then `activateLayer(null)` (ruling C1 above)
+- Create: `src/features/selection/useEscapeClearsSelection.ts` — a hook installed once in `App`'s viewer branch: a capture-phase `keydown` listener on `window`; `Escape` calls `useSelectionStore.getState().clear()` unless a modal is open (`document.querySelector(".modal-backdrop")`) or the event target is an input, textarea or select. Test: `tests/unit/features/selection/useEscapeClearsSelection.test.tsx`.
+- Modify: `src/features/workspace/activeLayer.ts` → tighten the selectors to `useLayerStore((s) => s.layers.find((l) => l.id === activeLayerId) ?? null)` (same for geo) and `useMemo` the `{ kind, layer }` wrapper on `[layer, geoLayer]` so the hook's return is a stable dependency; add a test for `useActiveCityLayer` returning null when the active layer is geo.
+- Status bar streaming readout stays scoped to the active CITY layer (today's behaviour); when the active layer is geo the streaming row is absent. 12.5 trims the status bar.
+- TEST SWEEP (the largest part of this task): `grep -rln "activeLayerId\|activeGeoLayerId\|setActiveLayer\|setActiveGeoLayer" tests` lists about 33 files. Every `useLayerStore.setState({ layers, activeLayerId })` becomes `useLayerStore.setState({ layers }); useWorkspaceStore.setState({ activeLayerId })`; every `activeGeoLayerId` setup becomes a workspace-store write; `setActiveLayer` / `setActiveGeoLayer` calls become `activateLayer`. Do the sweep with a script, then read every changed test for meaning. Files include all `tests/unit/scene/navaraViewport*.test.tsx`, `tests/unit/features/layers/*.test.ts`, `tests/unit/features/query/mapFilterSync.test.ts`, `tests/unit/ui/viewport/{LegendOverlay,StreamQueryBoxOverlay}.test.tsx`, `tests/unit/ui/sidebar/*.test.tsx`, `tests/unit/ui/layers/*.test.tsx`, `tests/unit/ui/viewerToolbar.test.tsx`, `tests/unit/ui/StatusBar.test.tsx` and `StatusBarDuckdb.test.tsx` (both exist), `tests/unit/app/*.test.tsx`.
+- Tests: `tests/unit/ui/layers/LayerPanelSections.test.tsx`, `tests/unit/ui/inspector/InspectorPanel.test.tsx`, `tests/unit/ui/inspector/RuleBuilderTab.test.tsx`, `tests/unit/ui/inspector/GeoLayerInspector.test.tsx`, `tests/unit/ui/table/TablePanel.test.tsx`, `tests/unit/ui/StatusBar.test.tsx`, `tests/unit/app/appEngineBoot.test.tsx`
 
 **Interfaces:**
 
@@ -651,10 +715,10 @@ Note `nextActiveAfterRemoval` receives the order BEFORE removal and the removed 
 **Files:**
 
 - Delete: `src/ui/viewport/AttributePanel.tsx`, `tests/unit/ui/viewport/AttributePanel.test.tsx`
-- Modify: `src/app/App.tsx:1270-1300, :1366-1370` (the `selectedObjects` / `geoFeature` resolution and the mount), `src/app/app.css` sections `ATTRIBUTE PANEL` (:2965) and `AGGREGATION MODE SELECT` (:3136)
+- Modify: `src/app/App.tsx:1270-1300, :1366-1370` (the `selectedObjects` / `geoFeature` resolution and the mount), `src/app/app.css` — delete ONLY the AttributePanel rules: the `ATTRIBUTE PANEL` section (:2965-3135), `.agg-mode-compact` (:3166) and `[data-theme="light"] .attribute-panel` (:3171). KEEP `.agg-mode-select` (:3140-3164): `InspectorPanel.tsx:486` still renders it
 - Test: `tests/unit/app/appEngineBoot.test.tsx` — add "a selection renders exactly one attribute table": assert `document.querySelector(".attribute-panel")` is null and `screen.getAllByRole("table")` (or the inspector's attribute-list role) has length 1
 
-- [ ] Steps: failing app test → delete the module, its mount and CSS → `npx vp check` (dead-class check: `grep -n "attribute-panel\|agg-mode" src` returns nothing) → suite green → commit `refactor(inspector): the details panel is the one attribute view; floating overlay removed`.
+- [ ] Steps: failing app test → delete the module, its mount and CSS → `npx vp check` (dead-class check: `grep -rn "attribute-panel\|agg-mode-compact" src` returns nothing) → suite green → commit `refactor(inspector): the details panel is the one attribute view; floating overlay removed`.
 
 ### Task 6: No fit-all flight on every added layer
 
@@ -686,7 +750,7 @@ Note `nextActiveAfterRemoval` receives the order BEFORE removal and the removed 
   /** v4 passes through; v3 becomes v4 with `activeLayer` omitted (the first layer); anything else is unsupported. */
   export function migrateSnapshot(raw: ProjectSnapshot): MigrationOutcome;
   ```
-- Modify: `src/persistence/restoreSnapshot.ts:22-24` → call `migrateSnapshot`; throw the error outcome; return `viewState` and, additionally, `activeLayer` (change the return type to `{ viewState: ViewState; activeLayer: ProjectSnapshot["activeLayer"] }` and update the two callers in `App.tsx`)
+- Modify: `src/persistence/restoreSnapshot.ts:22-24` → call `migrateSnapshot`; throw the error outcome; return `viewState` and, additionally, `activeLayer` (change the return type to `{ viewState: ViewState; activeLayer: ProjectSnapshot["activeLayer"] }` and update its ONE caller, `App.tsx:711`; the share path goes through `readShareHash`, not `restoreSnapshot`)
 - Modify: `src/persistence/captureSnapshot.ts:20-37, :39` — `CaptureInput` gains `activeLayer?: { kind; index }`; written when defined
 - Modify: `src/app/App.tsx` `handleSave` :627-668 (compute `activeLayer` as `{ kind: "city", index: layers.findIndex(l => l.id === activeLayerId) }` or `{ kind: "geo", index: geoLayers.findIndex(...) }`, omitted when the id resolves to neither), `handleRestore` :696-925 (build `addedCityIds: (string | null)[]` ALIGNED with `snapshot.layers` — `null` for an unavailable placeholder or a failed load — and `addedGeoIds` aligned with `snapshot.geoLayers`; after the loops, resolve `activeLayer` by indexing the aligned array of its kind, and call `activateLayer(id)`; when the slot is `null` or the field is absent, activate the first non-null added id in unified order. Never compact the arrays: a skipped layer must not shift later indexes), `readShareHash` path unchanged (share stays v3; add a comment saying why)
 - Tests: `tests/unit/persistence/snapshotV4.test.ts` (new: round trip with `activeLayer`; v3 document migrates with `migratedFrom: "3"`; v2 is rejected with `UnsupportedSnapshotVersionError`), update `tests/unit/persistence/{snapshotV3,captureRestore}.test.ts` for the version string, `tests/unit/app/appRestoreShare.test.tsx` — "restore activates the saved layer" and "a v3 snapshot restores with the first layer active".
@@ -707,7 +771,7 @@ Scope: the new grid and regions with the OLD contents where the new ones do not 
 
 - New modules: `src/ui/shell/ViewerShell.tsx` (grid: `header / left | map-column | right / status`; map column = viewport + drawer; right column width `0` when there is no selection; props for collapse and widths), `src/ui/shell/shellStore.ts` (`leftCollapsed`, `rightCollapsed`, `leftWidth`, `rightWidth`, `drawer: { open, height, expanded }` — replaces `App`'s `inspectorOpen`, `leftSidebarCollapsed`, `leftSidebarWidth`, `tableOpen`, `tableHeight`), `src/ui/header/WorkspaceHeader.tsx` (lockup, workspace menu, Save, Share, Preferences, collapse buttons; replaces `ViewerToolbar`), `src/ui/header/PreferencesMenu.tsx` (Interface appearance: System / Light / Dark — `useTheme` gains `"system"`), `src/ui/layers/LayerList.tsx` + `LayerRow.tsx` (one row component for `ActiveLayer`-shaped items: eye, type icon, name, state line, chips, overflow menu with Zoom to layer / Open table / Rename / Remove), `src/ui/layers/LeftRail.tsx` (collapsed state), `src/ui/layers/ActiveLayerPanel.tsx` with `StyleSection.tsx`, `FilterSection.tsx`, `DetailsSection.tsx` (Details absorbs `LodSelector`, `AppearanceSelector`, `LayerTypeToggles`, `StreamingLodControl`, the resident-cache tooltip, metadata), `src/features/layers/layerPresentation.ts` (`layerStateLine(layer, stream?, table?)`, `layerTypeOf(active): "city" | "streaming" | "vector" | "raster" | "tiles"`).
 - `AddLayerDialog` reworked: tabs File / URL / Catalog; detection line from `detectEncoding` / `classifyCityParquetUrl` / `classifyGeoUrl` with a `Change…` select that overrides the route; a GeoJSON-only add enters the viewer (the landing branch condition becomes `hasLayers || hasGeoLayers || engineBooting`).
-- Deleted at the end of the slice: `ViewerToolbar` (pick mode, view mode, scene menus move to 12.5's map overlays — until then they are mounted temporarily inside the header's right group), `LeftSidebar`, `LayerPanel`, `GeoLayerRow`, `BasemapPanel` / `GoogleTilesPanel` move to 12.5's Scene settings sheet (temporarily under Details of the active layer? No: temporarily in a `Scene` popover from the header), CSS sections `TOOLBAR`, `LEFT SIDEBAR`, `LAYER PANEL`, `VIEWER SHELL`.
+- Deleted at the end of the slice: (`ViewerToolbar` survives until 12.5 — its pick mode, view mode and scene menus are mounted temporarily inside the header's right group), `LeftSidebar`, `LayerPanel`, `GeoLayerRow`, `BasemapPanel` / `GoogleTilesPanel` move to 12.5's Scene settings sheet (temporarily under Details of the active layer? No: temporarily in a `Scene` popover from the header), CSS sections `TOOLBAR`, `LEFT SIDEBAR`, `LAYER PANEL`, `VIEWER SHELL`.
 - Persistence: none.
 - Tests: shellStore, ViewerShell layout classes at both collapse states, LayerRow for the five layer types, layerPresentation strings, AddLayerDialog detection and override, App landing-vs-viewer branch for a geo-only workspace.
 
@@ -715,7 +779,7 @@ Scope: the new grid and regions with the OLD contents where the new ones do not 
 
 - `StyleSection` for city layers: `Color by` = `Surface type` | `Rules` | `Single colour` (`src/features/rules/colorBy.ts`: `ColorBy` on `Layer` as `colorBy: "surface" | "rules" | "single"` plus `singleColor: string`, compiled to the evaluator `handleSync` already pushes — single colour is a catch-all rule); presets row; `RulesEditor` (from `RuleBuilderTab`, without the target select); per-layer drafts in `src/features/rules/ruleDraftStore.ts`; unmatched colour editable (`Layer.unmatchedColor`, threaded into `compileRuleEvaluator`'s fallback — verify the core API, add a parameter if needed, submodule-first).
 - `StyleSection` for geo layers: fill / stroke / opacity (from `GeoLayerInspector`) and `Color by attribute` (`GeoLayerStyle.colorByAttribute?: { attribute: string; categories: Record<string, string> }` — verify `geoLayerSync` can paint per feature; if not, defer and say so in the section).
-- `LegendOverlay` rebuilt: groups per visible layer (surface types / rules + unmatched / geo fill or categories), heading activates the layer and opens Style (shellStore `openSection: "style"`), presentation size when both panels are collapsed; counts from the layer table when it is ready, else omitted.
+- `LegendOverlay` rebuilt: groups per visible layer (surface types / rules + unmatched / geo fill or categories), heading activates the layer and opens Style (shellStore `openSection: "style"`), presentation size when both panels are collapsed; no counts in 12.3 — 12.4's `useLayerCounts` adds them to the legend rows.
 - `src/ui/details/DetailsPanel.tsx` (+ `IdentityTrail`, `SummarySection`, `RuleMatchSection`, `AttributesSection`, `PartsSection`, `GeometrySection`, `MultiSelectionSummary`, `GeoFeatureDetails`): replaces `InspectorPanel`, `GeoLayerInspector`, `AnalysisTab` (its content becomes an `ANALYSIS` section), `StatsTab` (moves to 12.4's Summary view). Roof metrics through `computeObjectStats`.
 - Tests per component; the rule-match section against a compiled evaluator.
 
