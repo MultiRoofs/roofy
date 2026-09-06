@@ -1295,6 +1295,21 @@ body {
   text-align: center;
 }
 
+/* The sentence behind the badge, for assistive tech only: the glyph says
+   "3", this says "3 layers". Clipped rather than `display: none`, which
+   would take it out of the accessibility tree along with the pixels. */
+.left-rail-count {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .left-rail-kind {
   display: flex;
   align-items: center;

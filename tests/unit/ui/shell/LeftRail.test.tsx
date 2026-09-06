@@ -81,12 +81,59 @@ describe("LeftRail", () => {
     expect(container.querySelector(".left-rail-badge")?.textContent).toBe("2");
   });
 
+  it("counts the rows the stores know nothing about too", () => {
+    // What the PANEL would list, not what one store holds: an add in flight,
+    // one that failed and a layer waiting for its file are all rows behind
+    // the rail, and a badge that ignored them would read `1` over a list of
+    // four.
+    useLayerStore.setState({ layers: [layer("l1", "Delft")] });
+
+    const { container } = render(
+      <LeftRail
+        extraRows={[
+          {
+            id: "u1",
+            name: "houses",
+            kind: "unavailable",
+            onRelink: () => {},
+            onDismiss: () => {},
+          },
+        ]}
+        pending={[{ id: "add-1", name: "rome.city.json" }]}
+        failed={[
+          {
+            id: "add-2",
+            name: "paris.city.json",
+            message: "boom",
+            retry: () => {},
+          },
+        ]}
+      />,
+    );
+
+    expect(container.querySelector(".left-rail-badge")?.textContent).toBe("4");
+  });
+
+  it("says the count out loud for a screen reader", () => {
+    useLayerStore.setState({ layers: [layer("l1", "Delft")] });
+
+    render(<LeftRail />);
+
+    // The badge is a glyph; the DESCRIPTION is the sentence. It is not in the
+    // button's NAME, because a name that changes with every add is a name a
+    // screen-reader user cannot learn.
+    const button = screen.getByRole("button", { name: "Show layers panel" });
+    const described = button.getAttribute("aria-describedby");
+    expect(described).toBeTruthy();
+    expect(document.getElementById(described!)?.textContent).toBe("1 layer");
+  });
+
   it("expands the panel", () => {
     render(<LeftRail />);
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Expand layers panel" }),
-    );
+    // NOT "Expand layers panel": that is the header chevron's name, and two
+    // controls answering to one name is one control the user cannot aim at.
+    fireEvent.click(screen.getByRole("button", { name: "Show layers panel" }));
 
     expect(useShellStore.getState().leftCollapsed).toBe(false);
   });

@@ -1504,7 +1504,13 @@ export function App({
              is why the choice is made here rather than inside the panel. */
           left={
             leftCollapsed ? (
-              <LeftRail />
+              /* The same three row sources the panel gets: the rail's badge
+                 counts what the list WOULD show, not what the stores hold. */
+              <LeftRail
+                extraRows={unavailableRows}
+                pending={pending}
+                failed={failed}
+              />
             ) : (
               <LeftPanel
                 onAddFile={handlePickedFile}

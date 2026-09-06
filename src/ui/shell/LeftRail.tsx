@@ -12,10 +12,17 @@
  * wears — `LayerKindIcon` is exported from `LayerRow` precisely so the rail
  * and the row cannot disagree).
  *
+ * The count is what the PANEL would list, which is more than the stores hold:
+ * an add in flight, an add that failed and a layer waiting for its file are
+ * all rows behind the rail, so they arrive here as the same three props
+ * `LeftPanel` takes. A badge reading `1` over a list of four is worse than no
+ * badge at all.
+ *
  * The empty state is NOT here: "No layers yet" and the Add layer button are
  * the PANEL's, because neither fits in a rail. An empty workspace's rail
  * reads `0` and expands to the panel that can say the rest.
  */
+import { useId } from "react";
 import { useShellStore } from "./shellStore";
 import { LayerKindIcon } from "../layers/LayerRow";
 import { layerKindOf } from "../../features/layers/layerPresentation";
@@ -25,27 +32,54 @@ import {
 } from "../../features/workspace/activeLayer";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
+import type { UnavailableRow } from "../layers/LayerList";
+import type {
+  FailedAdd,
+  PendingAdd,
+} from "../../features/layers/useLayerFileLoader";
 
-export function LeftRail() {
+export interface LeftRailProps {
+  /** The same three the panel takes, for the same reason — see the module
+   *  comment. All optional: a rail with none of them still counts the
+   *  stores. */
+  readonly extraRows?: ReadonlyArray<UnavailableRow>;
+  readonly pending?: ReadonlyArray<PendingAdd>;
+  readonly failed?: ReadonlyArray<FailedAdd>;
+}
+
+const NO_ROWS: ReadonlyArray<never> = [];
+
+export function LeftRail({
+  extraRows = NO_ROWS,
+  pending = NO_ROWS,
+  failed = NO_ROWS,
+}: LeftRailProps = {}) {
   const layers = useLayerStore((s) => s.layers);
   const geoLayers = useGeoLayerStore((s) => s.layers);
   const activeItem = useActiveLayer();
+  const countId = useId();
 
   // Through `unifiedLayerOrder`, like the list itself: the badge counts what
   // the panel would show, not what one store happens to hold.
-  const count = unifiedLayerOrder(layers, geoLayers).length;
+  const count =
+    unifiedLayerOrder(layers, geoLayers).length +
+    extraRows.length +
+    pending.length +
+    failed.length;
 
   return (
     <div className="left-rail">
       <button
         type="button"
         className="left-rail-btn"
-        // The same words the header's chevron uses for the same act. The
-        // COUNT is deliberately not in the name: a label that changes with
-        // every add is a label a screen-reader user cannot learn, and the
-        // number is on screen for anyone who can see the rail.
-        aria-label="Expand layers panel"
-        data-tooltip="Expand layers panel"
+        // NOT the header chevron's "Expand layers panel": both controls
+        // stay, and two of them answering to one name is one control the
+        // user cannot aim at. The COUNT is deliberately not in the name
+        // either — a name that changes with every add is a name a
+        // screen-reader user cannot learn — so it is the DESCRIPTION below.
+        aria-label="Show layers panel"
+        data-tooltip="Show layers panel"
+        aria-describedby={countId}
         onClick={() => useShellStore.getState().setLeftCollapsed(false)}
       >
         <svg viewBox="0 0 24 24" aria-hidden>
@@ -54,8 +88,10 @@ export function LeftRail() {
           <path d="M12 3.5 3.5 8l8.5 4.5L20.5 8z" />
           <path d="m3.5 12.5 8.5 4.5 8.5-4.5" />
         </svg>
-        <span className="left-rail-badge" aria-hidden>
-          {count}
+        <span className="left-rail-badge">{count}</span>
+        {/* The badge is a glyph; this is the sentence behind it. */}
+        <span className="left-rail-count" id={countId}>
+          {count} layer{count === 1 ? "" : "s"}
         </span>
       </button>
 

@@ -23,7 +23,11 @@
  * row's menu would open into a strip four pixels tall. Flipping it upwards
  * only moves the problem: a two-row list is shorter than the popover either
  * way. So the popover goes to `document.body` and is placed against the
- * trigger's rect, measured when it opens.
+ * trigger's rect and its OWN measured box when it opens — right-aligned on
+ * the trigger, and flipped above it when it would otherwise hang off the
+ * bottom of the window. Measured rather than assumed: a width duplicated
+ * here from `app.css` is a width that drifts from it silently, and the
+ * height is not knowable at all (the menu has three items or five).
  *
  * Two consequences the code below has to pay for:
  *  - it is "outside" the menu's root by DOM ancestry, so the dismiss listener
@@ -57,11 +61,6 @@ export interface LayerRowMenuProps {
   readonly onRemove: () => void;
 }
 
-/** The popover's width, in px — `.layer-row-menu-popover` in `app.css`. Read
- *  here because a portalled popover is placed by this module, and a right
- *  edge cannot be computed from a width nobody knows. */
-const POPOVER_WIDTH = 160;
-
 /** The gap between the trigger and the popover, matching `.header-popover`'s
  *  `calc(100% + 0.35rem)`. */
 const POPOVER_GAP = 6;
@@ -83,18 +82,27 @@ export function LayerRowMenu({
   });
 
   // Before paint, so the popover is never painted at the previous row's
-  // position for a frame.
+  // position for a frame. The popover is already mounted by the time this
+  // runs — that is what makes measuring it here possible at all.
   useLayoutEffect(() => {
     if (!menu.open) return;
     const rect = menu.triggerRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    const box = menu.popoverRef.current;
+    if (!rect || !box) return;
+    const { offsetWidth: width, offsetHeight: height } = box;
+    const below = rect.bottom + POPOVER_GAP;
+    // Flipped above the trigger when the menu would hang off the bottom of
+    // the window — the last row of a list is exactly where the `⋯` is
+    // reached most often, and a menu half off screen is a menu with items
+    // nobody can click.
+    const flip = below + height > window.innerHeight;
     setAt({
-      top: rect.bottom + POPOVER_GAP,
+      top: flip ? rect.top - POPOVER_GAP - height : below,
       // Right-aligned on the trigger, as the in-flow version was: the row
       // fills a 240–420 px panel, so a left-anchored popover hangs off it.
-      left: rect.right - POPOVER_WIDTH,
+      left: rect.right - width,
     });
-  }, [menu.open, menu.triggerRef]);
+  }, [menu.open, menu.triggerRef, menu.popoverRef]);
 
   // A popover pinned to the viewport cannot follow the list under it, so a
   // scroll or a resize CLOSES it rather than leaving it hanging beside the

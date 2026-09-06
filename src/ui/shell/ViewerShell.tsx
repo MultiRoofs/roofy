@@ -21,8 +21,7 @@ import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { useShellStore } from "./shellStore";
 import { ResizeHandle } from "./ResizeHandle";
 
-/** The collapsed left panel's rail — a width, not a component, until the
- *  `LeftRail` lands. */
+/** The width of the collapsed left column, which `LeftRail` fills. */
 const LEFT_RAIL_WIDTH = "40px";
 
 export interface ViewerShellProps {

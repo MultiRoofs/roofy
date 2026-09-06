@@ -249,10 +249,10 @@ describe("App viewer shell", () => {
     const shell = renderViewer();
     act(() => useShellStore.getState().setLeftCollapsed(true));
 
-    // Two controls carry this name while the panel is shut — the header's
-    // chevron and the rail's own button. The rail's is the one in the column.
-    const railButton = shell().querySelector(".left-rail-btn");
-    fireEvent.click(railButton as Element);
+    // By ROLE, which is only unambiguous because the rail's button and the
+    // header's chevron are named differently ("Show" vs "Expand") — two
+    // controls answering to one name is one control the user cannot aim at.
+    fireEvent.click(screen.getByRole("button", { name: "Show layers panel" }));
 
     expect(useShellStore.getState().leftCollapsed).toBe(false);
     expect(shell().querySelector(".left-panel")).not.toBeNull();
