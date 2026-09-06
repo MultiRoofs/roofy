@@ -210,6 +210,7 @@ import type { CityModel } from "../../../src/domain/citymodel/types";
 import type { Rule } from "../../../src/features/rules/types";
 import type { Selection } from "../../../src/domain/selection/types";
 import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
+import { useGeoLayerStore } from "../../../src/features/geoLayers/geoLayerStore";
 
 const CRS_URI = "https://www.opengis.net/def/crs/EPSG/0/7415";
 
@@ -442,6 +443,10 @@ describe("NavaraViewport streaming wiring", () => {
     useWorkspaceStore.setState({ activeLayerId: null });
     useStreamStore.setState({ streams: {} });
     useQueryRegionStore.setState({ regions: {} });
+    // Geo records outlive the viewport in production, and so would they here:
+    // one left behind would change what "an empty workspace" means for every
+    // later case.
+    useGeoLayerStore.setState({ layers: [] });
     // The fetch-box diagnostic is OFF by default; the cases that need it turn
     // it on explicitly, which is also what proves the gate works.
     useRenderDebugStore.getState().setStreamQueryBoxEnabled(false);
@@ -461,6 +466,7 @@ describe("NavaraViewport streaming wiring", () => {
     useWorkspaceStore.setState({ activeLayerId: null });
     useStreamStore.setState({ streams: {} });
     useQueryRegionStore.setState({ regions: {} });
+    useGeoLayerStore.setState({ layers: [] });
     useRenderDebugStore.getState().setStreamQueryBoxEnabled(false);
   });
 
@@ -847,6 +853,39 @@ describe("NavaraViewport streaming wiring", () => {
     expect(flatPluginInstance.suppressSettleThenCommit).toHaveBeenCalledTimes(
       1,
     );
+  });
+
+  it("fits the first stream of a scene even when geo rows outlived the last one", async () => {
+    // Geo records survive a viewport that is gone: the layer panel's trash
+    // button removes only the city layer, so closing the last one unmounts the
+    // viewport (App mounts it on `hasLayers || engineBooting`) and leaves the
+    // overlays in their store. Opening a `.fcb` next remounts the scene with
+    // those rows already present — and that stream still has to be framed, or
+    // it never fetches a cell and the user sits on the default globe camera
+    // with nothing on screen (Task 6 review finding).
+    //
+    // The engine mock here has no `addSource`, so the pair build fails and is
+    // caught by `geoLayerSync` (it logs and carries on). Irrelevant to the
+    // fit — what is under test is the STORE row — but the log is muted so the
+    // suite stays readable.
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      useGeoLayerStore.getState().addGeoLayer({
+        name: "overlay",
+        kind: "raster-xyz",
+        config: { urlTemplate: "https://tile.example/{z}/{x}/{y}.png" },
+      });
+      const streamHandle = makeFakeStreamHandle({ triangles: 10 });
+      registerStreamingLayer("S1", streamHandle);
+      render(<NavaraViewport onTriangleCount={() => {}} />);
+
+      await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(1));
+      expect(streamHandle.getBoundsGeodetic).toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("pushes the selection to a streaming handle, hidden or not", async () => {

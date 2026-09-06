@@ -2462,25 +2462,36 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
        *  half of the layer effect's "only a NEW layer earns a camera move". */
       let added = false;
       /**
-       * Whether there was anything in the workspace before this pass — read
-       * from the LIVE REGISTRIES, not from the row count the layer effect
-       * keeps.
+       * Whether this SCENE had any city content before this pass — read from
+       * the two live registries, not from the row count the layer effect keeps
+       * and not from the geo store.
        *
-       * That distinction is the whole trick. `openStreamingLayer` mints the
-       * layer ROW first and registers the handle only when the header lands,
-       * so by the time this effect can see a stream the row-based count has
-       * long since said "not empty" and the very fit a first `.fcb` needs most
-       * would be dropped. The registries answer the question that is actually
-       * being asked — is there anything on screen the user has already framed?
-       * — and they are all still pre-add here: `streams` is written in the
-       * loop below, `liveRef` by the layer effect (which runs first, so a
-       * static layer arriving in the same commit is already counted), and the
-       * geo pairs by `geoLayerSync`.
+       * Not the row count, because `openStreamingLayer` mints the layer ROW
+       * first and registers the handle only when the header lands: by the time
+       * this effect can see a stream, a row-based test has long said "not
+       * empty" and would drop the very fit a first `.fcb` needs most. Both
+       * registries here are still pre-add — `streams` is written in the loop
+       * below, `liveRef` by the layer effect, which is declared first, so a
+       * static layer arriving in the SAME commit is already counted and wins
+       * the single fit.
+       *
+       * Not the geo store, because geo records outlive the scene that framed
+       * them: the layer panel's trash button removes only the city layer, so
+       * closing the last one unmounts the viewport (App mounts it on
+       * `hasLayers || engineBooting`) and leaves the overlays behind. A `.fcb`
+       * opened next would come up in a brand-new scene, see those rows, and
+       * skip its fit — and an unfitted stream fetches NOTHING, so the user
+       * would sit on the default globe camera with an empty viewport. The
+       * layer effect has no such problem: its ref is 0 on a fresh mount. A
+       * mounted geo-only workspace the user has framed is unreachable today,
+       * so the geo term defended a case that cannot happen while breaking one
+       * that can. The asymmetry with the static side is deliberate for the
+       * same reason its comment gives: a static layer that is not fitted is
+       * still fully loaded and findable with "Zoom to layer"; a stream that is
+       * not fitted never loads at all.
        */
       const workspaceWasEmpty =
-        streams.size === 0 &&
-        liveRef.current.size === 0 &&
-        useGeoLayerStore.getState().layers.length === 0;
+        streams.size === 0 && liveRef.current.size === 0;
 
       for (const layer of layers) {
         if (!layer.isStreaming) continue;
