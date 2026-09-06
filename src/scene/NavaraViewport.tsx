@@ -2461,6 +2461,26 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       /** A streaming layer joined the registry on this pass — the streaming
        *  half of the layer effect's "only a NEW layer earns a camera move". */
       let added = false;
+      /**
+       * Whether there was anything in the workspace before this pass — read
+       * from the LIVE REGISTRIES, not from the row count the layer effect
+       * keeps.
+       *
+       * That distinction is the whole trick. `openStreamingLayer` mints the
+       * layer ROW first and registers the handle only when the header lands,
+       * so by the time this effect can see a stream the row-based count has
+       * long since said "not empty" and the very fit a first `.fcb` needs most
+       * would be dropped. The registries answer the question that is actually
+       * being asked — is there anything on screen the user has already framed?
+       * — and they are all still pre-add here: `streams` is written in the
+       * loop below, `liveRef` by the layer effect (which runs first, so a
+       * static layer arriving in the same commit is already counted), and the
+       * geo pairs by `geoLayerSync`.
+       */
+      const workspaceWasEmpty =
+        streams.size === 0 &&
+        liveRef.current.size === 0 &&
+        useGeoLayerStore.getState().layers.length === 0;
 
       for (const layer of layers) {
         if (!layer.isStreaming) continue;
@@ -2518,15 +2538,20 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       }
 
       onTriangleCount(totalTriangles(layers, liveRef.current, streams));
-      // A newly opened stream earns the same one-off fit a newly added static
-      // layer does — and needs it MORE: a streaming layer only fetches cells
-      // once the camera is close enough for the cover to fit the budget, so a
-      // `.fcb` opened as the first layer would otherwise sit on a whole-globe
-      // camera reporting "Zoom in to load features" forever, with nothing on
-      // screen to aim at. `getBoundsGeodetic` answers from the header extent
-      // (plugin, Task C14), so this frames the file before a single cell has
-      // arrived.
-      if (added) setFitToken((t) => t + 1);
+      // The FIRST stream of an empty workspace earns the same one-off fit the
+      // first static layer does — and needs it MORE: a streaming layer only
+      // fetches cells once the camera is close enough for the cover to fit the
+      // budget, so a `.fcb` opened into an empty viewer would otherwise sit on
+      // a whole-globe camera reporting "Zoom in to load features" forever, with
+      // nothing on screen to aim at. `getBoundsGeodetic` answers from the
+      // header extent (plugin, Task C14), so this frames the file before a
+      // single cell has arrived.
+      //
+      // A stream joining a workspace that already has something in it does NOT
+      // fit: the rule is about layers, not formats, and the camera the user
+      // arranged around their first model outranks the new file (Task 6,
+      // M12.1). "Zoom to layer" is how they go and look at it.
+      if (added && workspaceWasEmpty) setFitToken((t) => t + 1);
       return () => {
         for (const off of unsubscribes) off();
       };

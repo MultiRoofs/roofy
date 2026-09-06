@@ -825,6 +825,30 @@ describe("NavaraViewport streaming wiring", () => {
     expect(flyTo).toHaveBeenCalledTimes(1);
   });
 
+  // Task 6 (M12.1), streaming half. "Only the first layer of an empty
+  // workspace fits" is a rule about LAYERS, not about formats: a `.fcb` opened
+  // beside a CityJSON model the user is already looking at must not fly the
+  // camera off to its header extent either.
+  it("does not fit when a streaming layer joins a workspace that already has a static layer", async () => {
+    useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    // The static layer's own fit — the one the workspace was entitled to.
+    await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(1));
+
+    const streamHandle = makeFakeStreamHandle({ triangles: 10 });
+    act(() => registerStreamingLayer("S1", streamHandle));
+
+    // The stream really did register (`onCommit` is subscribed by exactly the
+    // effect under test), and the camera still stayed put.
+    await waitFor(() => expect(streamHandle.onCommit).toHaveBeenCalled());
+    expect(flyTo).toHaveBeenCalledTimes(1);
+    // Nothing flew, so nothing went through the settle bracket either — the
+    // one call is the static layer's own fit from before the stream landed.
+    expect(flatPluginInstance.suppressSettleThenCommit).toHaveBeenCalledTimes(
+      1,
+    );
+  });
+
   it("pushes the selection to a streaming handle, hidden or not", async () => {
     const streamHandle = makeFakeStreamHandle();
     registerStreamingLayer("S1", streamHandle, { visible: false });
