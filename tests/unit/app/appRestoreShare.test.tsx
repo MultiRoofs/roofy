@@ -50,6 +50,7 @@ import type {
 import type { StreamPlugin } from "../../../src/features/streaming/streamPlugin";
 import type { PlatformServices } from "../../../src/platform/types";
 import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
+import { useGeoLayerStore } from "../../../src/features/geoLayers/geoLayerStore";
 
 // jsdom ships no `matchMedia`, which `useTheme` reads on its first render.
 window.matchMedia ??= ((query: string) =>
@@ -216,7 +217,7 @@ const SAVED_AT = "2026-08-01T10:00:00.000Z";
 
 function snapshotWithUrlLayer(): ProjectSnapshot {
   return {
-    version: "3",
+    version: "4",
     savedAt: SAVED_AT,
     label: "delft",
     layers: [
@@ -272,6 +273,7 @@ beforeEach(() => {
   loadFromUrl.mockReset();
   loadFromUrl.mockResolvedValue(loaded);
   useLayerStore.setState({ layers: [] });
+  useGeoLayerStore.setState({ layers: [] });
   useWorkspaceStore.setState({ activeLayerId: null });
   location.hash = "";
 });
@@ -403,6 +405,114 @@ describe("App restore against CitySceneHandle.ready", () => {
     );
     expect(screen.queryByTestId("navara-viewport")).toBeNull();
     expect(setCameraState).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Which layer a restored workspace comes up looking at (snapshot v4).
+ *
+ * The saved index is per-KIND and refers to the position in the SNAPSHOT, not
+ * to the layers that happened to land — and the restore adds geo layers before
+ * the city loop, so the workspace invariants would otherwise hand the active
+ * id to the first geo layer and leave the city model the user was working on
+ * unselected.
+ */
+function urlLayer(
+  name: string,
+): NonNullable<ProjectSnapshot["layers"]>[number] {
+  return {
+    name,
+    modelRef: { type: "url", url: JSON_URL },
+    rules: [],
+    rulesEnabled: true,
+    visible: true,
+  };
+}
+
+describe("App restore and the active layer", () => {
+  it("activates the layer the snapshot saved, not the first one added", async () => {
+    const snapshot: ProjectSnapshot = {
+      ...snapshotWithUrlLayer(),
+      layers: [urlLayer("delft"), urlLayer("rotterdam")],
+      activeLayer: { kind: "city", index: 1 },
+    };
+    render(<App persistenceStore={storeWith(snapshot)} />);
+    await clickRestore();
+
+    await waitFor(() =>
+      expect(useLayerStore.getState().layers).toHaveLength(2),
+    );
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().activeLayerId).toBe(
+        useLayerStore.getState().layers[1]!.id,
+      ),
+    );
+  });
+
+  it("restores a v3 snapshot with geo layers with the first CITY layer active", async () => {
+    // No `activeLayer` field at all — a document written before v4. The
+    // fallback is the first layer in UNIFIED order (city first, then geo), and
+    // the geo layer is added FIRST, so this fails the moment the explicit
+    // activation is dropped.
+    const snapshot: ProjectSnapshot = {
+      ...snapshotWithUrlLayer(),
+      version: "3",
+      layers: [urlLayer("delft")],
+      geoLayers: [
+        {
+          name: "parks",
+          kind: "geojson",
+          visible: true,
+          opacity: 1,
+          // Re-linkable row: no URL, so nothing is fetched in jsdom.
+          config: {},
+        },
+      ],
+    };
+    render(<App persistenceStore={storeWith(snapshot)} />);
+    await clickRestore();
+
+    await waitFor(() =>
+      expect(useLayerStore.getState().layers).toHaveLength(1),
+    );
+    expect(useGeoLayerStore.getState().layers).toHaveLength(1);
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().activeLayerId).toBe(
+        useLayerStore.getState().layers[0]!.id,
+      ),
+    );
+  });
+
+  it("does not let an unavailable placeholder shift the saved index", async () => {
+    // Snapshot index 2 is the THIRD saved layer; the first cannot be reopened
+    // (file-backed) and adds no layer at all. A restore that compacted the
+    // added ids would read index 2 out of range and fall back to the first.
+    const snapshot: ProjectSnapshot = {
+      ...snapshotWithUrlLayer(),
+      layers: [
+        {
+          name: "local",
+          modelRef: { type: "file", fileName: "local.city.json" },
+          rules: [],
+          rulesEnabled: true,
+          visible: true,
+        },
+        urlLayer("delft"),
+        urlLayer("rotterdam"),
+      ],
+      activeLayer: { kind: "city", index: 2 },
+    };
+    render(<App persistenceStore={storeWith(snapshot)} />);
+    await clickRestore();
+
+    await waitFor(() =>
+      expect(useLayerStore.getState().layers).toHaveLength(2),
+    );
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().activeLayerId).toBe(
+        useLayerStore.getState().layers[1]!.id,
+      ),
+    );
   });
 });
 

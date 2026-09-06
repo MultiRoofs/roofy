@@ -34,6 +34,15 @@ export interface CaptureInput {
   /** The scene theme in force. Written only when it is not the default — see
    *  {@link ViewState.sceneTheme}. */
   readonly sceneTheme?: SceneTheme;
+  /**
+   * Where the active layer sits in the two lists above — see
+   * {@link ProjectSnapshot.activeLayer}.
+   *
+   * `undefined` when the workspace has no active layer, or when its id
+   * resolves to neither list; the field is then omitted rather than written
+   * as a placeholder index, and a restore falls back to the first layer.
+   */
+  readonly activeLayer?: ProjectSnapshot["activeLayer"];
 }
 
 export function captureSnapshot(input: CaptureInput): ProjectSnapshot {
@@ -61,5 +70,10 @@ export function captureSnapshot(input: CaptureInput): ProjectSnapshot {
       : {}),
     viewState,
     pickMode: input.pickMode,
+    // Absent means "the first layer in unified order", exactly as an absent
+    // `viewMode` means the default — so nothing active writes nothing.
+    ...(input.activeLayer === undefined
+      ? {}
+      : { activeLayer: input.activeLayer }),
   };
 }

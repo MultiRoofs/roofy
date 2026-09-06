@@ -37,8 +37,15 @@ export interface ShareableViewState {
   /**
    * Schema version. Declared explicitly so a hash states which frame its
    * numbers live in rather than leaving that to be inferred from shape:
-   * a future v4 that reuses the `cam` key with different semantics would
-   * otherwise sail past the structural check below.
+   * a future share v4 that reused the `cam` key with different semantics
+   * would otherwise sail past the structural check below.
+   *
+   * This number is the SHARE schema's, not the snapshot's, and the two have
+   * been allowed to diverge: snapshot v4 added `activeLayer`, and a hash
+   * carries no such field — it is a lightweight subset (camera, datetime,
+   * URL-backed city layers) and stays one. Nothing about a v3 hash's meaning
+   * changed, so every link ever minted still opens, and this stays `3` until
+   * something in the HASH changes.
    */
   readonly v: 3;
   /** Per-layer state. */

@@ -673,12 +673,30 @@ export function App({
     // the user was looking at Rotterdam, is a label that lies in the list of
     // saved workspaces. Read from the store rather than from the render, so
     // the callback does not have to be rebuilt on every activation.
+    const allGeoLayers = useGeoLayerStore.getState().layers;
     const activeLayer = resolveActiveLayer(
       useWorkspaceStore.getState().activeLayerId,
       allLayers,
-      useGeoLayerStore.getState().layers,
+      allGeoLayers,
     );
     const label = activeLayer?.layer.name ?? "Untitled";
+    // ...and it is written down as well as read, as a per-kind INDEX into the
+    // two lists this same call is about to write (see
+    // `ProjectSnapshot.activeLayer`). `undefined` — nothing active, or an id
+    // that resolves to neither list — omits the field, and a restore then
+    // falls back to the first layer.
+    const activeLayerRef =
+      activeLayer === null
+        ? undefined
+        : activeLayer.kind === "city"
+          ? {
+              kind: "city" as const,
+              index: allLayers.indexOf(activeLayer.layer),
+            }
+          : {
+              kind: "geo" as const,
+              index: allGeoLayers.indexOf(activeLayer.layer),
+            };
 
     const snapshot = captureSnapshot({
       label,
@@ -696,12 +714,13 @@ export function App({
       })),
       // Stripped of anything that cannot survive a reload — an inline GeoJSON
       // document above all; see `geoLayerSnapshot`.
-      geoLayers: useGeoLayerStore.getState().layers.map(geoLayerSnapshot),
+      geoLayers: allGeoLayers.map(geoLayerSnapshot),
       camera: cameraState,
       datetime,
       pickMode,
       viewMode,
       sceneTheme,
+      activeLayer: activeLayerRef,
     });
 
     try {
@@ -739,7 +758,8 @@ export function App({
           return;
         }
 
-        const viewState = restoreSnapshot(snapshot);
+        const { viewState, activeLayer: savedActiveLayer } =
+          restoreSnapshot(snapshot);
         // BEFORE the layers and the camera. Entering a mode flies the camera,
         // and the viewport suppresses that flight for a mode that is already
         // set when it mounts — which is exactly this case. Setting it after
@@ -766,8 +786,20 @@ export function App({
         // so its name, visibility and opacity are not lost — and the panel
         // offers to re-link it, exactly as the city-model prompt below does.
         useGeoLayerStore.getState().removeAllGeoLayers();
-        for (const geoLayer of normalizeGeoLayers(snapshot.geoLayers)) {
-          useGeoLayerStore.getState().addGeoLayer(geoLayer);
+        // Index-ALIGNED with `snapshot.geoLayers`, `null` where a row could
+        // not be used: the saved `activeLayer.index` points into the SNAPSHOT,
+        // so a dropped row must leave a hole rather than shift its successors.
+        // That is also why the entries are normalised ONE at a time —
+        // `normalizeGeoLayers` drops what it cannot use, and a batch call
+        // would compact the very positions this array exists to preserve.
+        const addedGeoIds: (string | null)[] = [];
+        for (const raw of snapshot.geoLayers ?? []) {
+          const [input] = normalizeGeoLayers([raw]);
+          addedGeoIds.push(
+            input === undefined
+              ? null
+              : useGeoLayerStore.getState().addGeoLayer(input),
+          );
         }
 
         // Restore layers from snapshot. A v1 single-model save (`modelRef`
@@ -795,7 +827,13 @@ export function App({
         let hasUrlLayer = false;
         let failedCount = 0;
         const newUnavailable: UnavailableLayer[] = [];
+        /** The city half of the same aligned mapping as `addedGeoIds`: one
+         *  entry per SNAPSHOT layer, `null` for an unavailable placeholder or
+         *  a load that failed. The `finally` below is what guarantees the one
+         *  entry per iteration, whichever way the body leaves. */
+        const addedCityIds: (string | null)[] = [];
         for (const sl of normalized) {
+          let addedId: string | null = null;
           try {
             const name = (sl.name as string | undefined) ?? "Untitled layer";
             const modelRef = sl.modelRef as CityModelReference | undefined;
@@ -890,12 +928,35 @@ export function App({
             if (lodMode === "manual") {
               useLayerStore.getState().setLodMode(layerId, "manual");
             }
+            addedId = layerId;
           } catch {
             // Skip this one layer; keep restoring the rest of the workspace.
             failedCount++;
+          } finally {
+            addedCityIds.push(addedId);
           }
         }
         setUnavailableLayers(newUnavailable);
+
+        // The layer the workspace comes up looking at, and the reason this is
+        // explicit rather than left to the invariants: the geo layers went in
+        // BEFORE the city loop, so `installWorkspaceInvariants` has already
+        // handed the active id to the first geo layer. Resolve the saved
+        // per-kind index against the aligned arrays; a slot that is `null`
+        // (nothing landed there) or an absent field — a v3 document, or a
+        // workspace saved with nothing active — falls back to the first layer
+        // that DID land, in unified order (city first, then geo).
+        const savedId =
+          savedActiveLayer === undefined
+            ? null
+            : ((savedActiveLayer.kind === "city" ? addedCityIds : addedGeoIds)[
+                savedActiveLayer.index
+              ] ?? null);
+        activateLayer(
+          savedId ??
+            [...addedCityIds, ...addedGeoIds].find((id) => id !== null) ??
+            null,
+        );
 
         if (!hasUrlLayer && newUnavailable.length === 0 && failedCount === 0) {
           showToast(

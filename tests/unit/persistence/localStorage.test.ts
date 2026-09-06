@@ -13,7 +13,7 @@ function makeSnapshot(
   overrides: Partial<ProjectSnapshot> = {},
 ): ProjectSnapshot {
   return {
-    version: "3",
+    version: "4",
     savedAt: "2025-06-21T12:00:00Z",
     label: "Test snapshot",
     layers: [
@@ -59,7 +59,7 @@ describe("LocalStorageProjectStateStore", () => {
     const loaded = await store.load(id);
     expect(loaded).not.toBeNull();
     expect(loaded!.label).toBe("Test snapshot");
-    expect(loaded!.version).toBe("3");
+    expect(loaded!.version).toBe("4");
     expect(loaded!.layers![0]!.modelRef).toEqual({
       type: "url",
       url: "https://example.com/model.city.json",

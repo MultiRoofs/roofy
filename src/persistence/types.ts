@@ -116,10 +116,11 @@ export interface NormalizedLayerSnapshot extends RawLayerSnapshot {
  * defaults `lodMode` to `"auto"` and `hiddenTypes` to `[]` when absent, and
  * marks a file-backed streaming layer `unavailable`.
  *
- * This is NOT a version migration — snapshot v3 rejects every older document
- * outright (see {@link UnsupportedSnapshotVersionError}). It is the
- * per-layer "default what's optional, flag what cannot survive a reload"
- * pass, which a perfectly current v3 document needs too, because `lodMode`
+ * This is NOT a version migration — that lives in `migrateSnapshot`, which
+ * carries v3 forward and rejects everything older (see
+ * {@link UnsupportedSnapshotVersionError}). It is the per-layer "default
+ * what's optional, flag what cannot survive a reload"
+ * pass, which a perfectly current document needs too, because `lodMode`
  * is optional in {@link LayerSnapshot} and a `File`-backed stream source is
  * unreachable after a reload no matter which version wrote it.
  */
@@ -379,12 +380,17 @@ export function normalizeSceneTheme(theme: SceneTheme | undefined): SceneTheme {
  *
  * v3 (breaking): `viewState.camera` is a {@link GeographicCamera}, replacing
  * v2's `cameraPosition`/`cameraTarget` scene-space tuples.
+ *
+ * v4 (additive): {@link ProjectSnapshot.activeLayer}. A v3 document is a v4
+ * document with that one field absent, which is why `migrateSnapshot` carries
+ * v3 forward rather than rejecting it — and why v1/v2 still cannot be carried
+ * forward at all: their cameras are unconvertible, not merely incomplete.
  */
-export const SNAPSHOT_VERSION = "3";
+export const SNAPSHOT_VERSION = "4";
 
 export interface ProjectSnapshot {
-  /** Always {@link SNAPSHOT_VERSION} when written; anything else is rejected
-   *  on restore. */
+  /** Always {@link SNAPSHOT_VERSION} when written. On restore, `"3"` is
+   *  carried forward by `migrateSnapshot`; anything else is rejected. */
   readonly version: string;
   readonly savedAt: string; // ISO 8601
   readonly label: string;
@@ -401,15 +407,33 @@ export interface ProjectSnapshot {
   readonly geoLayers?: ReadonlyArray<GeoLayerSnapshot>;
   readonly viewState: ViewState;
   readonly pickMode: PickMode;
+  /**
+   * v4: which layer was active. `index` is the position within
+   * `snapshot.layers` when `kind` is "city" and within `snapshot.geoLayers`
+   * when `kind` is "geo". Absent = the first layer in unified order.
+   *
+   * An INDEX rather than an id, for the reason the geo layers regenerate
+   * theirs on restore: a saved id names a live store record, not a saved one.
+   * The index is into the SNAPSHOT, so a layer that could not be reopened (a
+   * file-backed placeholder, a URL that 404s) must not shift it — see
+   * App.tsx's restore loops, which keep their added-id arrays aligned with
+   * these two lists and never compact them.
+   */
+  readonly activeLayer?: {
+    readonly kind: "city" | "geo";
+    readonly index: number;
+  };
 }
 
 /**
- * Thrown by `restoreSnapshot` for any snapshot not written by the current
- * version. There is deliberately no migration shim: v1/v2 stored the camera
- * as Three.js scene coordinates relative to an origin-offset mesh frame that
- * the Navara viewport no longer has, so a "migrated" snapshot could only
- * restore a wrong camera silently. Failing loudly with a re-save instruction
- * is the honest option.
+ * Thrown by `restoreSnapshot` for any snapshot `migrateSnapshot` cannot carry
+ * forward — in practice v1, v2 and a document with no version at all. There
+ * is deliberately no shim for those: v1/v2 stored the camera as Three.js
+ * scene coordinates relative to an origin-offset mesh frame that the Navara
+ * viewport no longer has, so a "migrated" snapshot could only restore a wrong
+ * camera silently. Failing loudly with a re-save instruction is the honest
+ * option — and it is why the message below talks about the camera: every
+ * version this error is raised for is one the camera change stranded.
  */
 export class UnsupportedSnapshotVersionError extends Error {
   constructor(readonly found: string) {
