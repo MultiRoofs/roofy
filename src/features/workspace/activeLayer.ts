@@ -4,6 +4,7 @@
  * `unifiedLayerOrder` are pure (no store reads) so they can be unit-tested
  * without React or Zustand.
  */
+import { useMemo } from "react";
 import { useLayerStore, type Layer } from "../layers/layerStore";
 import { useGeoLayerStore, type GeoLayer } from "../geoLayers/geoLayerStore";
 import { useWorkspaceStore } from "./workspaceStore";
@@ -33,11 +34,28 @@ export function unifiedLayerOrder(
   return [...layers.map((l) => l.id), ...geoLayers.map((l) => l.id)];
 }
 
+/**
+ * The active layer, whichever store it lives in.
+ *
+ * The `find` happens INSIDE each selector — subscribing to the whole `layers`
+ * array would re-render every consumer whenever any other layer is renamed,
+ * hidden or restyled — and the `{ kind, layer }` wrapper is memoised on the
+ * two resolved layers, so the hook's return is a stable dependency for the
+ * effects and memos that hang off it.
+ */
 export function useActiveLayer(): ActiveLayer | null {
   const activeLayerId = useWorkspaceStore((s) => s.activeLayerId);
-  const layers = useLayerStore((s) => s.layers);
-  const geoLayers = useGeoLayerStore((s) => s.layers);
-  return resolveActiveLayer(activeLayerId, layers, geoLayers);
+  const layer = useLayerStore(
+    (s) => s.layers.find((l) => l.id === activeLayerId) ?? null,
+  );
+  const geoLayer = useGeoLayerStore(
+    (s) => s.layers.find((l) => l.id === activeLayerId) ?? null,
+  );
+  return useMemo(() => {
+    if (layer !== null) return { kind: "city", layer };
+    if (geoLayer !== null) return { kind: "geo", layer: geoLayer };
+    return null;
+  }, [layer, geoLayer]);
 }
 
 export function useActiveCityLayer(): Layer | null {

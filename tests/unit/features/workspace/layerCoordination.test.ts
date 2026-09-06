@@ -220,6 +220,43 @@ describe("activateLayer + invariants", () => {
     expect(useWorkspaceStore.getState().activeLayerId).toBe(a);
   });
 
+  it("hiding a different layer leaves the selection and the active id alone", () => {
+    const a = useLayerStore.getState().addLayer(layerInput("A"));
+    const b = useLayerStore.getState().addLayer(layerInput("B"));
+    useSelectionStore
+      .getState()
+      .select({ kind: "object", layerId: a, objectId: "o1" });
+    useLayerStore.getState().updateLayer(b, { visible: false });
+    expect(useSelectionStore.getState().selections).toHaveLength(1);
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(a);
+  });
+
+  it("replacing every layer in one write activates a survivor rather than none", () => {
+    const a = useLayerStore.getState().addLayer(layerInput("A"));
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(a);
+    // One write that removes the active layer AND introduces its replacement:
+    // there is no id in the previous order to hand over to, so only the
+    // post-condition can save the workspace from "layers but nothing active".
+    useLayerStore.setState({
+      layers: [{ ...useLayerStore.getState().layers[0]!, id: "fresh" }],
+    });
+    expect(useWorkspaceStore.getState().activeLayerId).toBe("fresh");
+  });
+
+  it("installing over a selection on a later layer activates its owner, not the first layer", () => {
+    dispose();
+    const a = useLayerStore.getState().addLayer(layerInput("A"));
+    const b = useLayerStore.getState().addLayer(layerInput("B"));
+    useSelectionStore
+      .getState()
+      .select({ kind: "object", layerId: b, objectId: "o1" });
+    useWorkspaceStore.setState({ activeLayerId: null });
+    dispose = installWorkspaceInvariants();
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(b);
+    expect(useSelectionStore.getState().selections).toHaveLength(1);
+    expect(a).not.toBe(b);
+  });
+
   it("a second install disposes the first, and the first disposer is inert", () => {
     const second = installWorkspaceInvariants();
     dispose(); // the first one: already disposed, must not unhook the second

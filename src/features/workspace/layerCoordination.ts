@@ -115,6 +115,18 @@ export function installWorkspaceInvariants(): () => void {
           ),
         );
     }
+    // Post-condition, re-reading the id rather than trusting the value read at
+    // the top: "layers exist but none is active" is never a durable state, and
+    // the hand-over above can legitimately land on `null` when ONE write both
+    // removed the active layer and introduced its replacement (a restore, a
+    // wholesale `setState`) — the survivors were not in the previous order, so
+    // there was nothing to hand over to.
+    if (
+      useWorkspaceStore.getState().activeLayerId === null &&
+      order.length > 0
+    ) {
+      useWorkspaceStore.getState().setActiveLayerId(order[0]!);
+    }
     previousOrder = order;
   };
 
@@ -134,8 +146,12 @@ export function installWorkspaceInvariants(): () => void {
     useGeoLayerStore.subscribe(reconcileLayers),
     useSelectionStore.subscribe(reconcileSelection),
   ];
-  reconcileLayers();
+  // `reconcileSelection` FIRST: installing over a workspace that already has a
+  // selection (a restore, a hot reload) must let that selection name the active
+  // layer. The other order would find no active id, activate the FIRST layer,
+  // and rule 1 would then clear the very selection that should have decided it.
   reconcileSelection();
+  reconcileLayers();
   const dispose = () => {
     unsubs.forEach((u) => u());
     if (disposeInstalled === dispose) disposeInstalled = null;
