@@ -18,7 +18,7 @@ import {
 import { DEFAULT_GEO_LAYER_STYLE } from "../../../../src/features/geoLayers/geoLayerStyle";
 
 afterEach(() => {
-  useGeoLayerStore.setState({ layers: [], activeGeoLayerId: null });
+  useGeoLayerStore.setState({ layers: [] });
 });
 
 const store = () => useGeoLayerStore.getState();
@@ -257,41 +257,6 @@ describe("relinkGeoJsonLayer", () => {
     store().relinkGeoJsonLayer(id, data);
 
     expect(store().layers).toBe(before);
-  });
-});
-
-describe("activeGeoLayerId", () => {
-  it("starts null and never auto-activates on add", () => {
-    expect(store().activeGeoLayerId).toBeNull();
-    addRaster();
-    expect(store().activeGeoLayerId).toBeNull();
-  });
-
-  it("sets and clears through setActiveGeoLayer", () => {
-    const id = addRaster();
-    store().setActiveGeoLayer(id);
-    expect(store().activeGeoLayerId).toBe(id);
-    store().setActiveGeoLayer(null);
-    expect(store().activeGeoLayerId).toBeNull();
-  });
-
-  it("clears when the active layer is removed, and only then", () => {
-    const a = addRaster();
-    const b = addRaster();
-    store().setActiveGeoLayer(a);
-
-    store().removeGeoLayer(b);
-    expect(store().activeGeoLayerId).toBe(a);
-
-    store().removeGeoLayer(a);
-    expect(store().activeGeoLayerId).toBeNull();
-  });
-
-  it("clears on removeAllGeoLayers", () => {
-    const id = addRaster();
-    store().setActiveGeoLayer(id);
-    store().removeAllGeoLayers();
-    expect(store().activeGeoLayerId).toBeNull();
   });
 });
 

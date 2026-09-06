@@ -62,12 +62,12 @@ function makeRule(overrides: Partial<Rule> = {}): Rule {
 
 describe("layerStore", () => {
   beforeEach(() => {
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
   });
 
   describe("addLayer", () => {
-    it("adds a layer and sets it as active when none exist", () => {
-      const id = useLayerStore.getState().addLayer({
+    it("adds a layer", () => {
+      useLayerStore.getState().addLayer({
         name: "Layer 1",
         model: makeModel(),
         modelRef: { type: "file", fileName: "a.city.json" },
@@ -76,33 +76,9 @@ describe("layerStore", () => {
         rulesEnabled: true,
       });
 
-      const { layers, activeLayerId } = useLayerStore.getState();
+      const { layers } = useLayerStore.getState();
       expect(layers).toHaveLength(1);
       expect(layers[0]!.name).toBe("Layer 1");
-      expect(activeLayerId).toBe(id);
-    });
-
-    it("does not change activeLayerId when adding a second layer", () => {
-      const first = useLayerStore.getState().addLayer({
-        name: "First",
-        model: makeModel(),
-        modelRef: { type: "file", fileName: "a.city.json" },
-        visible: true,
-        rules: [],
-        rulesEnabled: true,
-      });
-
-      useLayerStore.getState().addLayer({
-        name: "Second",
-        model: makeModel("m2"),
-        modelRef: { type: "file", fileName: "b.city.json" },
-        visible: true,
-        rules: [],
-        rulesEnabled: true,
-      });
-
-      expect(useLayerStore.getState().activeLayerId).toBe(first);
-      expect(useLayerStore.getState().layers).toHaveLength(2);
     });
   });
 
@@ -119,43 +95,6 @@ describe("layerStore", () => {
 
       useLayerStore.getState().removeLayer(id);
       expect(useLayerStore.getState().layers).toHaveLength(0);
-    });
-
-    it("switches activeLayerId to last remaining layer when active is removed", () => {
-      const first = useLayerStore.getState().addLayer({
-        name: "First",
-        model: makeModel(),
-        modelRef: { type: "file", fileName: "a.city.json" },
-        visible: true,
-        rules: [],
-        rulesEnabled: true,
-      });
-
-      const second = useLayerStore.getState().addLayer({
-        name: "Second",
-        model: makeModel("m2"),
-        modelRef: { type: "file", fileName: "b.city.json" },
-        visible: true,
-        rules: [],
-        rulesEnabled: true,
-      });
-
-      useLayerStore.getState().removeLayer(first);
-      expect(useLayerStore.getState().activeLayerId).toBe(second);
-    });
-
-    it("sets activeLayerId to null when last layer removed", () => {
-      const id = useLayerStore.getState().addLayer({
-        name: "L",
-        model: makeModel(),
-        modelRef: { type: "file", fileName: "a.city.json" },
-        visible: true,
-        rules: [],
-        rulesEnabled: true,
-      });
-
-      useLayerStore.getState().removeLayer(id);
-      expect(useLayerStore.getState().activeLayerId).toBeNull();
     });
   });
 
@@ -190,7 +129,7 @@ describe("layerStore", () => {
   });
 
   describe("removeAllLayers", () => {
-    it("clears all layers and activeLayerId", () => {
+    it("clears all layers", () => {
       useLayerStore.getState().addLayer({
         name: "L1",
         model: makeModel(),
@@ -210,7 +149,6 @@ describe("layerStore", () => {
 
       useLayerStore.getState().removeAllLayers();
       expect(useLayerStore.getState().layers).toHaveLength(0);
-      expect(useLayerStore.getState().activeLayerId).toBeNull();
     });
   });
 
