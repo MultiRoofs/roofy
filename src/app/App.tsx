@@ -37,6 +37,7 @@ import { useViewModeStore } from "../features/viewMode/viewModeStore";
 import { useSceneThemeStore } from "../features/sceneTheme/sceneThemeStore";
 import { suppressAutoFit } from "../scene/autoFitSuppression";
 import { useSelectionStore } from "../features/selection/selectionStore";
+import type { Selection } from "../domain/selection/types";
 import { useLayerStore } from "../features/layers/layerStore";
 import { useGeoLayerStore } from "../features/geoLayers/geoLayerStore";
 import { resolveGeoLayerBounds } from "../features/geoLayers/geoLayerBounds";
@@ -82,11 +83,13 @@ import { StacBrowserDialog } from "../ui/stac/StacBrowserDialog";
 import type { AddUrlResult } from "../ui/stac/StacBrowser";
 import { ShareDialog } from "../ui/ShareDialog";
 import { StatusBar } from "../ui/StatusBar";
+import { ViewerShell } from "../ui/shell/ViewerShell";
+import { useShellStore } from "../ui/shell/shellStore";
 import { ThemeToggleButton } from "../ui/ThemeToggleButton";
 import { RoofyLockup } from "../ui/RoofyLockup";
 import { LegendOverlay } from "../ui/viewport/LegendOverlay";
 import { RenderingPanel } from "../ui/viewport/RenderingPanel";
-import { DEFAULT_TABLE_HEIGHT, TablePanel } from "../ui/table/TablePanel";
+import { TablePanel } from "../ui/table/TablePanel";
 import type { Rule } from "../features/rules/types";
 
 const defaultStore = new LocalStorageProjectStateStore();
@@ -105,6 +108,26 @@ const SAMPLE_DATA_URL =
  * settles.
  */
 export const ENGINE_BOOT_TIMEOUT_MS = 15_000;
+
+/**
+ * What the collapsed-details pill names. One object reads as its id, tail
+ * first (a CityJSON id is a long common prefix and a short distinguishing
+ * suffix); several read as a count; a picked geo feature has no city-object
+ * identity to print.
+ */
+function selectionTitle(
+  selections: ReadonlyArray<Selection>,
+  hasGeoSelection: boolean,
+): string {
+  if (selections.length > 1) return `${selections.length} selected`;
+  const one = selections[0];
+  if (one !== undefined) {
+    return one.objectId.length > 12
+      ? `…${one.objectId.slice(-12)}`
+      : one.objectId;
+  }
+  return hasGeoSelection ? "Feature" : "Selection";
+}
 
 /** How long an explanatory message stays up. Longer than a status toast: these
  *  are full sentences the user has to read, not a "saved" acknowledgement. */
@@ -163,9 +186,6 @@ export function App({
   platform = browserPlatform,
 }: AppProps) {
   const [triangleCount, setTriangleCount] = useState(0);
-  const [inspectorOpen, setInspectorOpen] = useState(true);
-  const [leftSidebarCollapsed, setLeftSidebarCollapsed] = useState(false);
-  const [leftSidebarWidth, setLeftSidebarWidth] = useState(240);
   const [savedSnapshots, setSavedSnapshots] = useState<SnapshotSummary[]>([]);
   const [unavailableLayers, setUnavailableLayers] = useState<
     ReadonlyArray<UnavailableLayer>
@@ -173,8 +193,6 @@ export function App({
   const [duckdbStatus, setDuckdbStatus] = useState<DuckDBStatus>({
     state: "uninitialized",
   });
-  const [tableOpen, setTableOpen] = useState(false);
-  const [tableHeight, setTableHeight] = useState(DEFAULT_TABLE_HEIGHT);
   const [toast, setToast] = useState<string | null>(null);
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
   /**
@@ -516,6 +534,18 @@ export function App({
   const geoSelection = useSelectionStore((s) => s.geoSelection);
   const selectGeoFeature = useSelectionStore((s) => s.selectGeoFeature);
   const geoLayers = useGeoLayerStore((s) => s.layers);
+
+  // The shell's layout state (what `inspectorOpen`, `leftSidebarCollapsed`,
+  // `leftSidebarWidth`, `tableOpen` and `tableHeight` used to be). `App`
+  // reads only what it has to hand to the old region components; the sizes
+  // are `ViewerShell`'s to read.
+  const leftCollapsed = useShellStore((s) => s.leftCollapsed);
+  const leftWidth = useShellStore((s) => s.leftWidth);
+  const setLeftWidth = useShellStore((s) => s.setLeftWidth);
+  const toggleLeftCollapsed = useShellStore((s) => s.toggleLeftCollapsed);
+  const drawerOpen = useShellStore((s) => s.drawerOpen);
+  const toggleDrawer = useShellStore((s) => s.toggleDrawer);
+  const setRightCollapsed = useShellStore((s) => s.setRightCollapsed);
 
   // The two effects that used to steer the geo store's own active id from the
   // selection are gone: `installWorkspaceInvariants` holds that rule now (a
@@ -1260,7 +1290,8 @@ export function App({
     // the exits back to the landing page. Two half-rules for one invariant is
     // what let the sidebar's remove-last-layer path slip through.
     setTriangleCount(0);
-    setTableOpen(false);
+    // The drawer belongs to a workspace that no longer has any layers.
+    useShellStore.getState().closeDrawer();
     setFps(undefined);
     setCursorPosition(null);
     setUnavailableLayers([]);
@@ -1369,95 +1400,102 @@ export function App({
   if (hasLayers || engineBooting) {
     const hasUrlLayers = layers.some((l) => l.modelRef.type === "url");
 
-    const shellClasses = [
-      "viewer-shell",
-      !inspectorOpen && "panel-collapsed",
-      leftSidebarCollapsed && "left-collapsed",
-    ]
-      .filter(Boolean)
-      .join(" ");
-
-    const gridStyle = {
-      "--left-panel-w": `${leftSidebarWidth}px`,
-      ...(tableOpen ? { "--table-h": `${tableHeight}px` } : {}),
-    } as React.CSSProperties;
+    /* The right column follows the SELECTION: there is no inspector toggle
+       any more, and closing the panel collapses it (`rightCollapsed`) without
+       touching what is selected — the pill on the map's edge brings it back. */
+    const hasSelection = selections.length > 0 || geoSelection !== null;
 
     return (
-      <div className={shellClasses} style={gridStyle}>
-        <ViewerToolbar
-          pickMode={mode}
-          toolMode={toolMode}
-          onSetPickMode={setMode}
-          onSetToolMode={setToolMode}
-          onClose={handleClose}
-          onToggleInspector={() => setInspectorOpen((o) => !o)}
-          onToggleLeftSidebar={() => setLeftSidebarCollapsed((o) => !o)}
-          onFitAll={handleFitAll}
-          onSave={handleSave}
-          onShare={handleShare}
-          canShare={hasUrlLayers}
-          theme={theme}
-          onToggleTheme={toggleTheme}
-          advancedSettingsOpen={advancedSettingsOpen}
-          onToggleAdvancedSettings={() => setAdvancedSettingsOpen((o) => !o)}
-        />
-
-        <LeftSidebar
-          width={leftSidebarWidth}
-          onWidthChange={setLeftSidebarWidth}
-          collapsed={leftSidebarCollapsed}
-          onAddFile={handlePickedFile}
-          onAddFiles={handlePickedFiles}
-          onAddUrl={handleAddUrl}
-          loading={loading}
-          onFlyToLayer={(id) => sceneRef.current?.fitLayer(id)}
-          onFlyToGeoLayer={handleFlyToGeoLayer}
-          tableOpen={tableOpen}
-          onToggleTable={() => setTableOpen((o) => !o)}
-        />
-
-        <div className="viewport">
-          <NavaraViewport
-            ref={attachScene}
-            onTriangleCount={setTriangleCount}
-            onFps={setFps}
-            onCursorPosition={setCursorPosition}
-            onLayerError={handleLayerError}
-          />
-          <LegendOverlay />
-          {advancedSettingsOpen && (
-            <RenderingPanel onClose={() => setAdvancedSettingsOpen(false)} />
-          )}
-        </div>
-
-        {inspectorOpen && (
-          <InspectorPanel
-            selections={selections}
-            onClose={() => setInspectorOpen(false)}
-          />
-        )}
-
-        {tableOpen && (
-          <TablePanel
-            duckdbStatus={duckdbStatus}
-            onRetryDuckDB={handleRetryDuckDB}
-            onCollapse={() => setTableOpen(false)}
-            onHeightChange={setTableHeight}
-          />
-        )}
-
-        <StatusBar
-          objectCount={totalObjects}
-          triangleCount={triangleCount}
-          selectedCount={selections.length}
-          duckdbStatus={duckdbStatus}
-          fps={fps}
-          cursorPosition={cursorPosition}
-          streamStatus={
-            activeCityLayer?.isStreaming ? (activeStreamStatus ?? "idle") : null
+      <>
+        <ViewerShell
+          header={
+            <ViewerToolbar
+              pickMode={mode}
+              toolMode={toolMode}
+              onSetPickMode={setMode}
+              onSetToolMode={setToolMode}
+              onClose={handleClose}
+              onToggleLeftSidebar={toggleLeftCollapsed}
+              onFitAll={handleFitAll}
+              onSave={handleSave}
+              onShare={handleShare}
+              canShare={hasUrlLayers}
+              theme={theme}
+              onToggleTheme={toggleTheme}
+              advancedSettingsOpen={advancedSettingsOpen}
+              onToggleAdvancedSettings={() =>
+                setAdvancedSettingsOpen((o) => !o)
+              }
+            />
           }
-          streamMessage={
-            activeCityLayer?.isStreaming ? (activeStreamMessage ?? null) : null
+          left={
+            <LeftSidebar
+              width={leftWidth}
+              onWidthChange={setLeftWidth}
+              collapsed={leftCollapsed}
+              onAddFile={handlePickedFile}
+              onAddFiles={handlePickedFiles}
+              onAddUrl={handleAddUrl}
+              loading={loading}
+              onFlyToLayer={(id) => sceneRef.current?.fitLayer(id)}
+              onFlyToGeoLayer={handleFlyToGeoLayer}
+              tableOpen={drawerOpen}
+              onToggleTable={toggleDrawer}
+            />
+          }
+          map={
+            <div className="viewport">
+              <NavaraViewport
+                ref={attachScene}
+                onTriangleCount={setTriangleCount}
+                onFps={setFps}
+                onCursorPosition={setCursorPosition}
+                onLayerError={handleLayerError}
+              />
+              <LegendOverlay />
+              {advancedSettingsOpen && (
+                <RenderingPanel
+                  onClose={() => setAdvancedSettingsOpen(false)}
+                />
+              )}
+            </div>
+          }
+          drawer={
+            drawerOpen ? (
+              <TablePanel
+                duckdbStatus={duckdbStatus}
+                onRetryDuckDB={handleRetryDuckDB}
+              />
+            ) : null
+          }
+          right={
+            hasSelection ? (
+              <InspectorPanel
+                selections={selections}
+                onClose={() => setRightCollapsed(true)}
+              />
+            ) : null
+          }
+          rightTitle={selectionTitle(selections, geoSelection !== null)}
+          status={
+            <StatusBar
+              objectCount={totalObjects}
+              triangleCount={triangleCount}
+              selectedCount={selections.length}
+              duckdbStatus={duckdbStatus}
+              fps={fps}
+              cursorPosition={cursorPosition}
+              streamStatus={
+                activeCityLayer?.isStreaming
+                  ? (activeStreamStatus ?? "idle")
+                  : null
+              }
+              streamMessage={
+                activeCityLayer?.isStreaming
+                  ? (activeStreamMessage ?? null)
+                  : null
+              }
+            />
           }
         />
 
@@ -1482,7 +1520,7 @@ export function App({
         )}
 
         {toast && <div className="toast">{toast}</div>}
-      </div>
+      </>
     );
   }
 

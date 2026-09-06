@@ -18,6 +18,8 @@ import { useSelectionStore } from "../../features/selection/selectionStore";
 import { useActiveCityLayer } from "../../features/workspace/activeLayer";
 import { extractCrsCode } from "../toolbar/crsCode";
 import type { Selection } from "../../domain/selection/types";
+import { ResizeHandle } from "../shell/ResizeHandle";
+import { useShellStore } from "../shell/shellStore";
 import { DataGrid } from "./DataGrid";
 import { ExportDialog } from "./ExportDialog";
 import { FilterBar } from "./FilterBar";
@@ -27,28 +29,18 @@ import { Pagination } from "./Pagination";
 import { emptyGridMessage, formatCount } from "./tableText";
 import { useLayerQuery } from "./useLayerQuery";
 
-/** The panel's height limits. Raised from 100–600: a filter bar, a header row
- *  and a footer eat ~110 px before a single record is on screen. */
-export const MIN_TABLE_HEIGHT = 120;
-export const MAX_TABLE_HEIGHT = 800;
-export const DEFAULT_TABLE_HEIGHT = 320;
-
 const STREAMING_FILTER_REASON =
   "Map filtering is not available for streaming layers yet";
 
 export interface TablePanelProps {
   readonly duckdbStatus: DuckDBStatus;
   readonly onRetryDuckDB: () => void;
-  readonly onCollapse: () => void;
-  readonly onHeightChange: (height: number) => void;
 }
 
-export function TablePanel({
-  duckdbStatus,
-  onRetryDuckDB,
-  onCollapse,
-  onHeightChange,
-}: TablePanelProps) {
+/** The panel is the shell's drawer: its height and its own closing are
+ *  `shellStore`'s state, not props — the height limits live there too
+ *  (`SHELL_LIMITS`, clamped against the viewport). */
+export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
   // The workspace's one active layer, with no fallback to the first: a table
   // that quietly showed some OTHER layer's rows while the sidebar highlighted
   // a geo layer is exactly the disagreement this milestone removes.
@@ -143,7 +135,17 @@ export function TablePanel({
 
   return (
     <div className="table-panel">
-      <TableResizeHandle onHeightChange={onHeightChange} />
+      {/* Dragging the top edge UP (a negative delta) makes the drawer
+          taller — the drawer grows from its top. */}
+      <ResizeHandle
+        axis="y"
+        label="Resize table"
+        onDelta={(dy) =>
+          useShellStore
+            .getState()
+            .setDrawerHeight(useShellStore.getState().drawerHeight - dy)
+        }
+      />
 
       <div className="table-panel-header">
         <span className="table-panel-title">
@@ -218,7 +220,7 @@ export function TablePanel({
         <button
           className="tb-btn table-action-btn"
           title="Collapse table"
-          onClick={onCollapse}
+          onClick={() => useShellStore.getState().closeDrawer()}
         >
           <svg viewBox="0 0 16 16" width="14" height="14">
             <path
@@ -358,43 +360,4 @@ function epsgOf(referenceSystem: string | undefined): number | null {
   if (code === null) return null;
   const n = Number(code);
   return Number.isInteger(n) && n > 0 ? n : null;
-}
-
-function TableResizeHandle({
-  onHeightChange,
-}: {
-  readonly onHeightChange: (height: number) => void;
-}) {
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      const startY = e.clientY;
-      const panel = (e.target as HTMLElement).closest(
-        ".table-panel",
-      ) as HTMLElement | null;
-      if (!panel) return;
-      const startHeight = panel.getBoundingClientRect().height;
-
-      const onMouseMove = (me: MouseEvent) => {
-        const delta = startY - me.clientY;
-        onHeightChange(
-          Math.max(
-            MIN_TABLE_HEIGHT,
-            Math.min(startHeight + delta, MAX_TABLE_HEIGHT),
-          ),
-        );
-      };
-
-      const onMouseUp = () => {
-        document.removeEventListener("mousemove", onMouseMove);
-        document.removeEventListener("mouseup", onMouseUp);
-      };
-
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
-    },
-    [onHeightChange],
-  );
-
-  return <div className="table-resize-handle" onMouseDown={handleMouseDown} />;
 }

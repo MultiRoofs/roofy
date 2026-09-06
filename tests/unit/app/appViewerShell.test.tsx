@@ -1,0 +1,183 @@
+/**
+ * The viewer branch's shell wiring: the layout state that used to be `App`'s
+ * own (`inspectorOpen`, `leftSidebarCollapsed`, `leftSidebarWidth`,
+ * `tableOpen`, `tableHeight`) now lives in `shellStore`, and the right column
+ * follows the SELECTION rather than a toggle.
+ *
+ * The engine is never imported: `NavaraViewport` is mocked (jsdom has no
+ * WebGL, and `@navaramap/three` crashes at module scope under Node).
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
+import { forwardRef, useImperativeHandle } from "react";
+import type { CitySceneHandle } from "../../../src/scene/NavaraViewport";
+import type {
+  ProjectStateStore,
+  SnapshotSummary,
+} from "../../../src/persistence/types";
+import type { CityObject } from "../../../src/domain/citymodel/types";
+
+// jsdom ships no `matchMedia`, which `useTheme` reads on its first render.
+window.matchMedia ??= ((query: string) =>
+  ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  }) as unknown as MediaQueryList) as typeof window.matchMedia;
+
+vi.mock("../../../src/scene/NavaraViewport", () => ({
+  NavaraViewport: forwardRef<CitySceneHandle, Record<string, unknown>>(
+    function MockNavaraViewport(_props, ref) {
+      useImperativeHandle(ref, () => null as unknown as CitySceneHandle, []);
+      return <div data-testid="navara-viewport" />;
+    },
+  ),
+}));
+
+vi.mock("../../../src/insights/duckdb", () => ({
+  initDuckDB: vi.fn(async () => {}),
+  getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
+  isExtensionLoaded: vi.fn(() => false),
+  ensureExtension: vi.fn(async () => false),
+  formatDuckDBError: (e: unknown) =>
+    e instanceof Error ? e.message : String(e),
+  runQuery: vi.fn(async () => ({ ok: false, message: "no engine" })),
+  ddl: vi.fn(async () => ({ ok: false, message: "no engine" })),
+  registerBuffer: vi.fn(async () => false),
+  dropBuffer: vi.fn(async () => {}),
+  readFile: vi.fn(async () => null),
+  queryDuckDB: vi.fn(async () => null),
+  queryParquetBuffer: vi.fn(async () => null),
+}));
+
+const { App } = await import("../../../src/app/App");
+const { useLayerStore } =
+  await import("../../../src/features/layers/layerStore");
+const { useSelectionStore } =
+  await import("../../../src/features/selection/selectionStore");
+const { useWorkspaceStore } =
+  await import("../../../src/features/workspace/workspaceStore");
+const { useShellStore, defaultShellState } =
+  await import("../../../src/ui/shell/shellStore");
+
+const emptyStore: ProjectStateStore = {
+  list: async (): Promise<SnapshotSummary[]> => [],
+  load: async () => null,
+  save: async () => "snapshot-1",
+  remove: async () => {},
+};
+
+const building: CityObject = {
+  id: "NL.IMBAG.Pand.0503100000025028",
+  objectType: "Building",
+  attributes: { measuredHeight: 12 },
+  surfaces: [],
+  bbox: [0, 0, 0, 10, 5, 3],
+  children: [],
+  parents: [],
+  lod: "2.2",
+};
+
+const model = {
+  sourceEncoding: "cityjson" as const,
+  metadata: { referenceSystem: "EPSG:7415" },
+  bbox: null,
+  objects: { [building.id]: building },
+  vertexCount: 0,
+};
+
+function renderViewer() {
+  useLayerStore.getState().addLayer({
+    id: "city-1",
+    name: "delft.city.json",
+    model,
+    modelRef: { type: "url", url: "https://example.test/delft.city.json" },
+    visible: true,
+    rules: [],
+    rulesEnabled: true,
+    isStreaming: false,
+  });
+  const { container } = render(<App persistenceStore={emptyStore} />);
+  return () => container.querySelector(".viewer-shell") as HTMLElement;
+}
+
+function select(): void {
+  act(() => {
+    useSelectionStore.getState().select({
+      kind: "object",
+      layerId: "city-1",
+      objectId: building.id,
+    });
+  });
+}
+
+beforeEach(() => {
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
+  useSelectionStore.setState({ selections: [], geoSelection: null });
+  // jsdom is 1024×768, below both of `defaultShellState`'s breakpoints.
+  useShellStore.setState(defaultShellState(1440, 900));
+});
+
+afterEach(cleanup);
+
+describe("App viewer shell", () => {
+  it("gives the right column no width until something is selected", () => {
+    const shell = renderViewer();
+
+    expect(shell().style.getPropertyValue("--right-w")).toBe("0");
+    expect(shell().querySelector(".shell-right")).toBeNull();
+
+    select();
+
+    expect(shell().style.getPropertyValue("--right-w")).toBe("340px");
+    expect(shell().querySelector(".inspector")).not.toBeNull();
+  });
+
+  it("keeps the selection when the details panel is closed, and offers it back", () => {
+    const shell = renderViewer();
+    select();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+
+    expect(shell().querySelector(".inspector")).toBeNull();
+    expect(useSelectionStore.getState().selections).toHaveLength(1);
+
+    const pill = screen.getByRole("button", { name: /^Details ·/ });
+    fireEvent.click(pill);
+    expect(shell().querySelector(".inspector")).not.toBeNull();
+  });
+
+  it("collapses the left panel to the rail through the shell store", () => {
+    const shell = renderViewer();
+    expect(shell().style.getPropertyValue("--left-w")).toBe("300px");
+
+    act(() => useShellStore.getState().toggleLeftCollapsed());
+
+    expect(shell().style.getPropertyValue("--left-w")).toBe("40px");
+    expect(shell().querySelector(".left-sidebar")).toBeNull();
+  });
+
+  it("puts the drawer under the map when the shell store opens it", () => {
+    const shell = renderViewer();
+    expect(shell().querySelector(".drawer-area")).toBeNull();
+
+    act(() => useShellStore.getState().openDrawer());
+
+    expect(
+      shell().querySelector(".map-column > .drawer-area .table-panel"),
+    ).not.toBeNull();
+    expect(shell().style.getPropertyValue("--drawer-h")).toBe("280px");
+  });
+});

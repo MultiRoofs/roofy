@@ -41,7 +41,6 @@ interface ViewerToolbarProps {
   readonly onSetPickMode: (mode: PickMode) => void;
   readonly onSetToolMode: (mode: ToolMode) => void;
   readonly onClose: () => void;
-  readonly onToggleInspector: () => void;
   readonly onToggleLeftSidebar: () => void;
   readonly onFitAll: () => void;
   readonly onSave?: () => void;
@@ -59,7 +58,6 @@ export function ViewerToolbar({
   onSetPickMode,
   onSetToolMode,
   onClose,
-  onToggleInspector,
   onToggleLeftSidebar,
   onFitAll,
   onSave,
@@ -253,18 +251,6 @@ export function ViewerToolbar({
           </svg>
         </button>
       )}
-      <button
-        className="tb-btn"
-        aria-label="Toggle inspector"
-        data-tooltip="Toggle inspector"
-        data-tooltip-align="end"
-        onClick={onToggleInspector}
-      >
-        <svg viewBox="0 0 24 24">
-          <rect x="3" y="3" width="18" height="18" rx="2" />
-          <path d="M15 3v18" />
-        </svg>
-      </button>
       <button
         className="tb-btn"
         aria-label="Close file"

@@ -184,7 +184,6 @@ describe("ViewerToolbar sky cluster", () => {
     onSetPickMode: () => undefined,
     onSetToolMode: () => undefined,
     onClose: () => undefined,
-    onToggleInspector: () => undefined,
     onToggleLeftSidebar: () => undefined,
     onFitAll: () => undefined,
     theme: "dark" as const,

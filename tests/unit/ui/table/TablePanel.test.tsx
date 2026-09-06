@@ -38,6 +38,8 @@ const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
 const { useSelectionStore } =
   await import("../../../../src/features/selection/selectionStore");
+const { useShellStore, defaultShellState } =
+  await import("../../../../src/ui/shell/shellStore");
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 import type { DuckDBStatus } from "../../../../src/insights/duckdb";
@@ -102,14 +104,7 @@ function layer(over: Partial<Layer> = {}): Layer {
 
 function panel(status: DuckDBStatus = READY_STATUS) {
   const onRetry = vi.fn();
-  render(
-    <TablePanel
-      duckdbStatus={status}
-      onRetryDuckDB={onRetry}
-      onCollapse={() => {}}
-      onHeightChange={() => {}}
-    />,
-  );
+  render(<TablePanel duckdbStatus={status} onRetryDuckDB={onRetry} />);
   return { onRetry };
 }
 
@@ -132,6 +127,8 @@ beforeEach(() => {
   useLayerTableStore.setState({ tables: {}, tablePanelOpen: false });
   useQueryStore.setState({ queries: {} });
   useSelectionStore.setState({ selections: [] });
+  // jsdom is 1024×768, below both of `defaultShellState`'s breakpoints.
+  useShellStore.setState({ ...defaultShellState(1440, 900), drawerOpen: true });
 });
 
 afterEach(cleanup);
@@ -491,5 +488,24 @@ describe("TablePanel states", () => {
     );
     cleanup();
     expect(useLayerTableStore.getState().tablePanelOpen).toBe(false);
+  });
+});
+
+describe("TablePanel — the shell's drawer", () => {
+  it("closes the drawer itself when Collapse is clicked", () => {
+    panel();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse table" }));
+    expect(useShellStore.getState().drawerOpen).toBe(false);
+  });
+
+  it("resizes the drawer by dragging its top edge UP", () => {
+    panel();
+    const handle = screen.getByRole("separator", { name: "Resize table" });
+    fireEvent.pointerDown(handle, { clientY: 500, pointerId: 1 });
+    window.dispatchEvent(
+      new PointerEvent("pointermove", { clientY: 460, pointerId: 1 }),
+    );
+    expect(useShellStore.getState().drawerHeight).toBe(320);
+    window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 }));
   });
 });

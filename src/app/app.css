@@ -50,11 +50,11 @@
   --radius-xl: var(--r-xl);
   --radius-pill: var(--r-pill);
 
-  /* spacing */
-  --toolbar-h: 2.75rem;
+  /* spacing — the shell's two fixed bands. The column widths and the
+     drawer height are NOT tokens: `ViewerShell` writes them per render from
+     `shellStore`. */
+  --header-h: 2.75rem;
   --statusbar-h: 1.75rem;
-  --left-panel-w: 240px;
-  --panel-w: 320px;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -176,7 +176,9 @@ html {
    so the page reads as Roofy before the lockup does. */
 body {
   margin: 0;
-  min-width: 320px;
+  /* Desktop-first (PRODUCT.md): below this the shell scrolls sideways rather
+     than reflowing into a layout nobody designed. */
+  min-width: 1024px;
   min-height: 100vh;
   font-family: var(--font-ui);
   line-height: 1.5;
@@ -599,30 +601,142 @@ body {
    VIEWER SHELL — CSS Grid layout
    ═══════════════════════════════════════════════════════════════ */
 
+/* Three rows, three columns. The drawer is NOT a fourth row: it lives inside
+   the map column, so opening the table never shortens the layer list or the
+   details panel (the laptop rule from the design spec). Every size below is
+   an inline custom property written by `ViewerShell` from `shellStore` —
+   `--left-w`, `--right-w`, `--drawer-h`. */
 .viewer-shell {
   display: grid;
-  grid-template-rows: var(--toolbar-h) 1fr var(--table-h, 0) var(--statusbar-h);
-  grid-template-columns: var(--left-panel-w) 1fr var(--panel-w);
+  grid-template-rows: var(--header-h) 1fr var(--statusbar-h);
+  grid-template-columns: var(--left-w) 1fr var(--right-w);
   grid-template-areas:
-    "toolbar  toolbar  toolbar"
-    "left     viewport panel"
-    "table    table    table"
-    "status   status   status";
+    "header header header"
+    "left   map    right"
+    "status status status";
   height: 100vh;
   background: var(--bg-root);
   color: var(--fg);
 }
 
-.viewer-shell.panel-collapsed {
-  grid-template-columns: var(--left-panel-w) 1fr 0;
+/* Every region is a flex box holding ONE child, so whatever the app drops in
+   fills the area without knowing it is in a grid. */
+.shell-header,
+.shell-left,
+.shell-right,
+.shell-status {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
 }
 
-.viewer-shell.left-collapsed {
-  grid-template-columns: 0 1fr var(--panel-w);
+.shell-header {
+  grid-area: header;
 }
 
-.viewer-shell.left-collapsed.panel-collapsed {
-  grid-template-columns: 0 1fr 0;
+.shell-left {
+  grid-area: left;
+}
+
+/* The collapsed rail is an empty 40px column until `LeftRail` fills it —
+   the panel that normally paints this edge is not mounted. */
+.viewer-shell.left-collapsed .shell-left {
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+}
+
+.shell-right {
+  grid-area: right;
+  position: relative;
+}
+
+.shell-status {
+  grid-area: status;
+}
+
+.map-column {
+  grid-area: map;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.map-column > .map-area {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+
+.map-column > .drawer-area {
+  flex: 0 0 var(--drawer-h);
+  min-height: 0;
+  display: flex;
+}
+
+/* Expand (12.4): the drawer takes the whole column and the map steps aside.
+   Nothing writes `drawerExpanded` yet. */
+.viewer-shell.drawer-expanded .map-area {
+  display: none;
+}
+
+.viewer-shell.drawer-expanded .drawer-area {
+  flex: 1 1 auto;
+}
+
+/* The one thing left of a collapsed details panel: a glass pill on the map's
+   right edge, so a selection is never invisible. */
+.details-pill {
+  position: absolute;
+  top: 50%;
+  right: 0.75rem;
+  transform: translateY(-50%);
+  z-index: 10;
+  max-width: 14rem;
+  overflow: hidden;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-pill);
+  background: rgba(11, 14, 19, 0.9);
+  backdrop-filter: blur(12px);
+  color: var(--fg);
+  font-size: 0.7rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.details-pill:hover {
+  color: var(--accent);
+}
+
+/* Shared drag handle (`ResizeHandle`): a 4px strip on the edge it resizes. */
+.resize-handle {
+  flex-shrink: 0;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.resize-handle:hover,
+.resize-handle:active {
+  background: var(--accent);
+}
+
+.resize-handle-x {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  z-index: 10;
+  cursor: col-resize;
+}
+
+.resize-handle-y {
+  height: 4px;
+  cursor: ns-resize;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -630,7 +744,8 @@ body {
    ═══════════════════════════════════════════════════════════════ */
 
 .toolbar {
-  grid-area: toolbar;
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -713,7 +828,8 @@ body {
    ═══════════════════════════════════════════════════════════════ */
 
 .left-sidebar {
-  grid-area: left;
+  flex: 1;
+  min-width: 0;
   display: flex;
   position: relative;
   background: var(--bg-panel);
@@ -749,7 +865,8 @@ body {
    ═══════════════════════════════════════════════════════════════ */
 
 .viewport {
-  grid-area: viewport;
+  flex: 1;
+  min-width: 0;
   position: relative;
   overflow: hidden;
   background: var(--bg-viewport);
@@ -1221,7 +1338,8 @@ body {
    ═══════════════════════════════════════════════════════════════ */
 
 .inspector {
-  grid-area: panel;
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg-panel);
@@ -1395,7 +1513,8 @@ body {
    ═══════════════════════════════════════════════════════════════ */
 
 .statusbar {
-  grid-area: status;
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -2998,25 +3117,14 @@ body {
    ═══════════════════════════════════════════════════════════════ */
 
 .table-panel {
-  grid-area: table;
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg-panel);
   border-top: 1px solid var(--border);
   overflow: hidden;
   min-height: 0;
-}
-
-.table-resize-handle {
-  height: 4px;
-  cursor: ns-resize;
-  background: transparent;
-  flex-shrink: 0;
-  transition: background 0.15s;
-}
-
-.table-resize-handle:hover {
-  background: var(--accent);
 }
 
 .table-panel-header {
