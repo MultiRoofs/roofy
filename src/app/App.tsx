@@ -85,10 +85,8 @@ import { StatusBar } from "../ui/StatusBar";
 import { ThemeToggleButton } from "../ui/ThemeToggleButton";
 import { RoofyLockup } from "../ui/RoofyLockup";
 import { LegendOverlay } from "../ui/viewport/LegendOverlay";
-import { AttributePanel } from "../ui/viewport/AttributePanel";
 import { RenderingPanel } from "../ui/viewport/RenderingPanel";
 import { DEFAULT_TABLE_HEIGHT, TablePanel } from "../ui/table/TablePanel";
-import type { CityObject } from "../domain/citymodel/types";
 import type { Rule } from "../features/rules/types";
 
 const defaultStore = new LocalStorageProjectStateStore();
@@ -1301,39 +1299,6 @@ export function App({
     void handleUrl(SAMPLE_DATA_URL);
   }, [handleUrl]);
 
-  // Resolve selected objects for attribute panel
-  const selectedObjects: CityObject[] = [];
-  /** The selected layer's object map, so the attribute panel can resolve the
-   *  attributes a picked BuildingPart inherits from its parent Building. */
-  let selectedObjectsById: Readonly<Record<string, CityObject>> = {};
-  if (selections.length > 0) {
-    const sel0 = selections[0]!;
-    const layer = layers.find((l) => l.id === sel0.layerId);
-    if (layer) {
-      selectedObjectsById = layer.model.objects;
-      for (const sel of selections) {
-        const obj = layer.model.objects[sel.objectId];
-        if (obj) selectedObjects.push(obj);
-      }
-    }
-  }
-
-  /** The picked geo feature, joined with its layer for the panel's title. A
-   *  selection whose layer has vanished resolves to null — the invalidation
-   *  effect clears the store right behind it, but the render in between must
-   *  not name a layer that is gone. */
-  const selectedGeoLayer =
-    geoSelection === null
-      ? undefined
-      : geoLayers.find((l) => l.id === geoSelection.geoLayerId);
-  const geoFeature =
-    geoSelection !== null && selectedGeoLayer !== undefined
-      ? {
-          layerName: selectedGeoLayer.name,
-          properties: geoSelection.properties,
-        }
-      : null;
-
   // Viewer state. `engineBooting` puts the shell up with ZERO layers for the
   // duration of a `.fcb` open — the engine has to be running before a
   // streaming layer can exist at all, so this is the only way a `.fcb` can be
@@ -1399,11 +1364,6 @@ export function App({
             onLayerError={handleLayerError}
           />
           <LegendOverlay />
-          <AttributePanel
-            objects={selectedObjects}
-            objectsById={selectedObjectsById}
-            geoFeature={geoFeature}
-          />
           {advancedSettingsOpen && (
             <RenderingPanel onClose={() => setAdvancedSettingsOpen(false)} />
           )}

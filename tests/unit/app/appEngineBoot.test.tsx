@@ -29,6 +29,7 @@ import {
 } from "@testing-library/react";
 import { forwardRef, useImperativeHandle } from "react";
 import type { CitySceneHandle } from "../../../src/scene/NavaraViewport";
+import type { CityObject } from "../../../src/domain/citymodel/types";
 import type {
   ProjectStateStore,
   SnapshotSummary,
@@ -479,5 +480,66 @@ describe("App inspector follows viewport picks across the geo/city split", () =>
     expect(useLayerStore.getState().layers).toEqual([]);
     expect(useGeoLayerStore.getState().layers).toEqual([]);
     expect(useWorkspaceStore.getState().activeLayerId).toBeNull();
+  });
+});
+
+/**
+ * The floating `AttributePanel` overlay used to duplicate whatever the
+ * inspector already showed for the selection — same attribute, rendered
+ * twice, once floating over the viewport and once in the details panel. The
+ * inspector (`InspectorPanel`) is now the one attribute view.
+ */
+describe("App renders exactly one attribute view for a selection", () => {
+  const resetStores = () => {
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
+    useSelectionStore.getState().clear();
+  };
+
+  beforeEach(resetStores);
+  afterEach(() => {
+    cleanup();
+    resetStores();
+  });
+
+  it("shows the inspector's attribute row once, with no floating overlay", async () => {
+    const selectedObject: CityObject = {
+      id: "building-1",
+      objectType: "Building",
+      attributes: { measuredHeight: 12 },
+      surfaces: [],
+      bbox: [0, 0, 0, 10, 5, 3],
+      children: [],
+      parents: [],
+      lod: "2.2",
+    };
+    useLayerStore.getState().addLayer({
+      id: "city-1",
+      name: "delft.city.json",
+      model: { ...model, objects: { [selectedObject.id]: selectedObject } },
+      modelRef: { type: "url", url: JSON_URL },
+      visible: true,
+      rules: [],
+      rulesEnabled: true,
+      isStreaming: false,
+    });
+
+    render(<App persistenceStore={emptyStore} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
+    );
+
+    act(() => {
+      useSelectionStore.getState().select({
+        kind: "object",
+        layerId: "city-1",
+        objectId: "building-1",
+      });
+    });
+
+    expect(document.querySelector(".attribute-panel")).toBeNull();
+    // The floating overlay used to render this same key a second time —
+    // once in its own `<table>`, once in the inspector's attribute row.
+    expect(screen.getAllByText("measuredHeight")).toHaveLength(1);
   });
 });
