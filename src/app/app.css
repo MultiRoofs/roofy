@@ -103,14 +103,6 @@
   stroke: var(--fg-muted);
 }
 
-[data-theme="light"] .theme-toggle-btn {
-  color: var(--fg-muted);
-}
-
-[data-theme="light"] .theme-toggle-btn:hover {
-  color: var(--fg);
-}
-
 /* ═══════════════════════════════════════════════════════════════
    RESET & BASE
    ═══════════════════════════════════════════════════════════════ */
@@ -585,7 +577,11 @@ body {
 
 /* The landing page's only chrome: the same theme toggle the toolbar renders,
    pinned to the corner so the theme can be flipped before any data loads. */
-.landing-theme-toggle {
+/* The landing page's one chrome affordance: the Preferences gear, parked in
+   the corner so the hero keeps the page to itself. Named for what it holds
+   rather than for the theme toggle it used to hold — appearance is a
+   preference now, not a button. */
+.landing-preferences {
   position: fixed;
   top: 1rem;
   right: 1rem;
@@ -839,6 +835,83 @@ body {
 .toolbar-btn-group {
   display: flex;
   gap: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   HEADER  (WorkspaceHeader + its menus)
+   ═══════════════════════════════════════════════════════════════
+
+   The header is the WORKSPACE's home: identity and the things you do to the
+   whole workspace (name, save, share, preferences) at the ends, the scene's
+   controls in the middle, and the two panel-collapse buttons at the header's
+   inner edges — the shell's own edges, so the button that closes a panel sits
+   above that panel.
+
+   Shell furniture, so it is flat and hairlined (the Three Layers Rule). The
+   only shadow in here belongs to the popovers, which float over the window. */
+
+.header-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* The Menu elevation from DESIGN.md, shared by every popover hanging off the
+   header. One rule, so the workspace menu, the Scene sheet and Preferences
+   can never drift apart. */
+.header-popover {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  padding: 0.25rem 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-lg, 14px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  z-index: 30;
+}
+
+/* Anchored to the trigger's right edge: it is the last control in the header,
+   so a left-anchored popover would hang off the window. */
+.preferences-popover {
+  right: 0;
+  width: 220px;
+}
+
+/* ── Segmented control (System / Light / Dark) ──────────────────────────────
+   Three equal cells in one hairline box, so the choice reads as one control
+   with three states rather than three buttons that happen to sit together. */
+.appearance-segments {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.appearance-segment {
+  padding: 0.3rem 0.2rem;
+  border: none;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.appearance-segment:hover {
+  background: var(--bg-panel-hover);
+  color: var(--fg);
+}
+
+/* Lime Wash plus the accent ink — the same "this one is active" language the
+   active layer row and the active tool wear. */
+.appearance-segment.is-selected {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -3018,31 +3091,6 @@ body {
 .layer-add-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   THEME TOGGLE
-   ═══════════════════════════════════════════════════════════════ */
-
-.theme-toggle-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--fg-muted);
-  cursor: pointer;
-  transition:
-    background 0.15s,
-    color 0.15s;
-}
-
-.theme-toggle-btn:hover {
-  background: var(--bg-panel-hover);
-  color: var(--fg);
 }
 
 /* ═══════════════════════════════════════════════════════════════

@@ -11,8 +11,7 @@
  */
 
 import type { PickMode, ToolMode } from "../../domain/selection/types";
-import type { Theme } from "../../features/theme/useTheme";
-import { ThemeToggleButton } from "../ThemeToggleButton";
+import { PreferencesMenu } from "../header/PreferencesMenu";
 import { SolarMenu } from "./SolarMenu";
 import { WeatherMenu } from "./WeatherMenu";
 import { ViewModeToggle } from "./ViewModeToggle";
@@ -46,8 +45,6 @@ interface ViewerToolbarProps {
   readonly onSave?: () => void;
   readonly onShare?: () => void;
   readonly canShare?: boolean;
-  readonly theme: Theme;
-  readonly onToggleTheme: () => void;
   readonly advancedSettingsOpen?: boolean;
   readonly onToggleAdvancedSettings?: () => void;
 }
@@ -63,8 +60,6 @@ export function ViewerToolbar({
   onSave,
   onShare,
   canShare,
-  theme,
-  onToggleTheme,
   advancedSettingsOpen,
   onToggleAdvancedSettings,
 }: ViewerToolbarProps) {
@@ -216,7 +211,7 @@ export function ViewerToolbar({
         </button>
       )}
 
-      <ThemeToggleButton theme={theme} onToggle={onToggleTheme} tooltip />
+      <PreferencesMenu tooltip />
 
       {onSave && (
         <button

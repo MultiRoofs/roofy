@@ -1,36 +1,26 @@
 /**
- * Theme management hook.
+ * The selector hook over `themeStore`.
  *
- * Reads the initial theme from localStorage or OS preference,
- * applies it to the <html> element via data-theme attribute,
- * and persists changes to localStorage.
+ * Thin on purpose: the theme used to BE this hook's local state, which meant
+ * every consumer had its own copy and the two surfaces that offer the setting
+ * (the landing page and the viewer header) could disagree. The state lives in
+ * the store now; this is the read.
+ *
+ * `theme` is the effective theme — already resolved, never "system" — and is
+ * what UI should branch on. `preference` is what the Preferences popover
+ * shows as selected.
  */
+import { useThemeStore, type Theme, type ThemePreference } from "./themeStore";
 
-import { useCallback, useEffect, useState } from "react";
+export type { Theme, ThemePreference };
 
-export type Theme = "dark" | "light";
-
-const STORAGE_KEY = "roofy-theme";
-
-function getInitialTheme(): Theme {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored === "light" || stored === "dark") return stored;
-  return window.matchMedia("(prefers-color-scheme: light)").matches
-    ? "light"
-    : "dark";
-}
-
-export function useTheme(): { theme: Theme; toggleTheme: () => void } {
-  const [theme, setTheme] = useState<Theme>(getInitialTheme);
-
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem(STORAGE_KEY, theme);
-  }, [theme]);
-
-  const toggleTheme = useCallback(() => {
-    setTheme((t) => (t === "dark" ? "light" : "dark"));
-  }, []);
-
-  return { theme, toggleTheme };
+export function useTheme(): {
+  theme: Theme;
+  preference: ThemePreference;
+  setPreference(p: ThemePreference): void;
+} {
+  const theme = useThemeStore((s) => s.theme);
+  const preference = useThemeStore((s) => s.preference);
+  const setPreference = useThemeStore((s) => s.setPreference);
+  return { theme, preference, setPreference };
 }

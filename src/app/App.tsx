@@ -73,7 +73,6 @@ import {
   requireStreamPlugin,
   type StreamPlugin,
 } from "../features/streaming/streamPlugin";
-import { useTheme } from "../features/theme/useTheme";
 import { useSolarStore } from "../features/solar/solarStore";
 import { InspectorPanel } from "../ui/inspector/InspectorPanel";
 import { ViewerToolbar } from "../ui/toolbar/ViewerToolbar";
@@ -85,7 +84,8 @@ import { ShareDialog } from "../ui/ShareDialog";
 import { StatusBar } from "../ui/StatusBar";
 import { ViewerShell } from "../ui/shell/ViewerShell";
 import { useShellStore } from "../ui/shell/shellStore";
-import { ThemeToggleButton } from "../ui/ThemeToggleButton";
+import { PreferencesMenu } from "../ui/header/PreferencesMenu";
+import { installThemeListener } from "../features/theme/themeStore";
 import { RoofyLockup } from "../ui/RoofyLockup";
 import { LegendOverlay } from "../ui/viewport/LegendOverlay";
 import { RenderingPanel } from "../ui/viewport/RenderingPanel";
@@ -232,8 +232,6 @@ export function App({
    *  not a boolean, so two concurrent opens (a restored workspace) cannot have
    *  the first one to finish unmount the engine under the second. */
   const bootHoldsRef = useRef(0);
-
-  const { theme, toggleTheme } = useTheme();
 
   // A file dropped anywhere OTHER than a drop zone must do nothing — the
   // browser's default is to navigate to it, which would throw the whole
@@ -602,6 +600,18 @@ export function App({
    * and a restored selection would have nothing holding it to its layer.
    */
   useEffect(() => installWorkspaceInvariants(), []);
+
+  /**
+   * The interface appearance, installed ONCE — the same shape as the
+   * invariants above, and for the same reason: it is a subscription to
+   * something outside React (the OS's colour-scheme query), not per-render
+   * state.
+   *
+   * It stamps `<html data-theme>` immediately and re-stamps whenever the OS
+   * flips while the preference is "System". Nothing else may write that
+   * attribute.
+   */
+  useEffect(() => installThemeListener(), []);
 
   // Initialize DuckDB-wasm on mount, and subscribe the layer-table registry to
   // the stores. One install, torn down with the app: the subscriptions are
@@ -1420,8 +1430,6 @@ export function App({
               onSave={handleSave}
               onShare={handleShare}
               canShare={hasUrlLayers}
-              theme={theme}
-              onToggleTheme={toggleTheme}
               advancedSettingsOpen={advancedSettingsOpen}
               onToggleAdvancedSettings={() =>
                 setAdvancedSettingsOpen((o) => !o)
@@ -1527,8 +1535,8 @@ export function App({
   // Landing / drop zone
   return (
     <main className="app-shell">
-      <div className="landing-theme-toggle">
-        <ThemeToggleButton theme={theme} onToggle={toggleTheme} />
+      <div className="landing-preferences">
+        <PreferencesMenu />
       </div>
 
       <div className="hero">
