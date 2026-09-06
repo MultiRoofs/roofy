@@ -509,10 +509,17 @@ const PHOTOREAL_SUN_INTENSITY = 1;
  * for lighting; the vertex-stage bias cannot. `shadowBias` is added to the
  * fragment's depth in the cascade's own clip space (three's `getShadow`, the
  * CSM passes it through per cascade), so a NEGATIVE value moves every
- * fragment a little towards the sun regardless of its winding. At the
- * cascades' depth ranges this is a metre or two, well under any feature
- * these models carry. Kept in one constant and written together with
- * `castShadow` so the two can never drift apart across the toggle.
+ * fragment a little towards the sun regardless of its winding. The value is
+ * ONE number for all four cascades (`CascadedShadowMaps.bias` fans it out
+ * unscaled), and each cascade's ortho camera spans its frustum slice plus
+ * `shadowMargin` (5 km), so 0.0005 of that range is about five metres in the
+ * nearest cascade and tens of metres in the far ones: a thin caster that
+ * close to its receiver casts nothing (peter-panning). Browser-checked at a
+ * street-level camera (shadows attached to their bases, no acne) and at the
+ * layer-fit view (2.2 km up: shadows present beside the blocks); a lower
+ * sun over a far cascade is the untested case, and a per-cascade bias would
+ * need the engine to expose one. Kept in one constant and written together
+ * with `castShadow` so the two can never drift apart across the toggle.
  */
 export const SUN_SHADOW_TUNING = Object.freeze({
   shadowBias: -0.0005,
