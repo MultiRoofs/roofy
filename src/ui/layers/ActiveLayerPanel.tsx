@@ -147,8 +147,11 @@ export function ActiveLayerPanel({ onZoomToLayer }: ActiveLayerPanelProps) {
                   headers.current[id] = el;
                 }}
                 className="active-layer-section-header"
+                // `aria-expanded` alone: the body is the header's immediate
+                // sibling, and an `aria-controls` naming an id that exists
+                // only while the section is open points at nothing exactly
+                // when a reader follows it.
                 aria-expanded={open}
-                aria-controls={`active-layer-section-${id}`}
                 onClick={() => shell().toggleSection(layerId, id)}
               >
                 <svg
@@ -161,10 +164,7 @@ export function ActiveLayerPanel({ onZoomToLayer }: ActiveLayerPanelProps) {
                 <span className="active-layer-section-title">{label}</span>
               </button>
               {open && (
-                <div
-                  className="active-layer-section-body"
-                  id={`active-layer-section-${id}`}
-                >
+                <div className="active-layer-section-body">
                   <SectionBody section={id} item={item} />
                 </div>
               )}

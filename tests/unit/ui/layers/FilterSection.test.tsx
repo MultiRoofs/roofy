@@ -109,15 +109,21 @@ describe("FilterSection — a filter applied", () => {
     expect(screen.getByText("height is empty")).toBeTruthy();
   });
 
-  it("sends 'Edit in table' to the drawer and consumes the pending request", () => {
+  it("sends 'Edit in table' to the drawer, and touches nothing else", () => {
     applyFilter("L", TWO_CONDITIONS);
+    // A request aimed at ANOTHER layer, still waiting for that layer's panel
+    // to consume it. Clearing requests is `ActiveLayerPanel`'s job, and a
+    // blind `requestSection(null)` here would swallow this one.
     useShellStore.setState({
-      requestedSection: { layerId: "L", section: "filter" },
+      requestedSection: { layerId: "OTHER", section: "filter" },
     });
     render(<FilterSection item={city()} />);
     fireEvent.click(screen.getByRole("button", { name: "Edit in table" }));
     expect(useShellStore.getState().drawerOpen).toBe(true);
-    expect(useShellStore.getState().requestedSection).toBeNull();
+    expect(useShellStore.getState().requestedSection).toEqual({
+      layerId: "OTHER",
+      section: "filter",
+    });
   });
 
   it("clears the query AND the drawn set — a stale id set is worse than none", () => {

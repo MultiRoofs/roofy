@@ -183,6 +183,25 @@ describe("DetailsSection — what a static city layer is", () => {
     expect(screen.getByText("Building")).toBeTruthy();
     expect(screen.getByText("2")).toBeTruthy();
     expect(screen.getByText("Road")).toBeTruthy();
+    // The part is not a row of its own AND not a second building: it has a
+    // parent, so it counts toward nothing.
+    expect(screen.queryByText("BuildingPart")).toBeNull();
+  });
+
+  it("mounts the object-type toggles and the appearance selector", () => {
+    // Both controls decide for THEMSELVES whether they have anything to
+    // offer — one group is nothing to choose between, and a model with no
+    // appearance has no themes — so the fixture gives each something to show.
+    render(
+      <DetailsSection
+        item={city({
+          availableObjectTypes: ["Building", "Road"],
+          appearanceThemes: [{ kind: "material", name: "default" }],
+        })}
+      />,
+    );
+    expect(screen.getByLabelText("Object types")).toBeTruthy();
+    expect(screen.getByLabelText("Appearance")).toBeTruthy();
   });
 
   it("offers the per-layer LoD dropdown, not the global streaming one", () => {

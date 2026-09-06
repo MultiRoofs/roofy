@@ -30,10 +30,6 @@ export function FilterSection({ item }: { readonly item: ActiveLayer }) {
   // notification, and no re-render loop.
   const applied = useQueryStore((s) => layerQuery(s, layerId).applied);
   const clearFilter = useQueryStore((s) => s.clearFilter);
-  // Through `getState()` rather than a selector: the shell's actions never
-  // change identity, and `ShellActions` declares them as method shorthand,
-  // which `unbound-method` refuses when one is captured as a reference.
-  const shell = () => useShellStore.getState();
 
   if (item.kind === "geo") {
     return <p className="active-layer-note">This layer cannot be filtered.</p>;
@@ -68,17 +64,19 @@ export function FilterSection({ item }: { readonly item: ActiveLayer }) {
       </ul>
 
       <div className="active-layer-actions">
-        {/* The drawer, not a panel-local editor. The request is cleared on the
-            way out: this section has just satisfied whatever asked for it, and
-            a request left standing re-opens on the next render. 12.4 focuses
-            the filter bar itself. */}
+        {/* The drawer, not a panel-local editor — 12.4 focuses the filter bar
+            itself. It opens the drawer and NOTHING else: consuming a pending
+            `requestedSection` belongs to `ActiveLayerPanel`'s effect, and a
+            blind `requestSection(null)` here would also swallow a request
+            aimed at a DIFFERENT layer that has not been rendered yet.
+            Through `getState()` rather than a selector: the shell's actions
+            never change identity, and `ShellActions` declares them as method
+            shorthand, which `unbound-method` refuses as a captured
+            reference. */}
         <button
           type="button"
           className="active-layer-action"
-          onClick={() => {
-            shell().openDrawer();
-            shell().requestSection(null);
-          }}
+          onClick={() => useShellStore.getState().openDrawer()}
         >
           Edit in table
         </button>

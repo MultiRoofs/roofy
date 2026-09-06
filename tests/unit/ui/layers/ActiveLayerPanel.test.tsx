@@ -11,7 +11,7 @@
  * (the legend, "Edit in table") is CONSUMED here: opened, scrolled to, and
  * cleared, so the request cannot fire a second time on the next render.
  */
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 /** The map-filter bridge reaches DuckDB; the Filter section only needs its
@@ -35,8 +35,27 @@ const { useShellStore, defaultShellState } =
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 
+/**
+ * jsdom implements NO `scrollIntoView`, so there is no method to `vi.spyOn`
+ * — the property is defined for the duration of a test and DELETED again
+ * afterwards, rather than assigned once and left on `Element.prototype` for
+ * whatever runs next. The panel calls it as `?.()`, so its absence is the
+ * normal case and stays exercised everywhere else.
+ */
+let scrollIntoView: ReturnType<typeof vi.fn>;
+
+beforeEach(() => {
+  scrollIntoView = vi.fn();
+  Object.defineProperty(Element.prototype, "scrollIntoView", {
+    value: scrollIntoView,
+    writable: true,
+    configurable: true,
+  });
+});
+
 afterEach(() => {
   cleanup();
+  delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
   useLayerStore.setState({ layers: [] });
   useGeoLayerStore.setState({ layers: [] });
   useStreamStore.setState({ streams: {} });
@@ -191,9 +210,32 @@ describe("ActiveLayerPanel — the three disclosures", () => {
 });
 
 describe("ActiveLayerPanel — consuming a section request", () => {
-  it("opens the requested section, scrolls to it and clears the request", () => {
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
+  it("leaves the section the request already opened OPEN, scrolls to it and clears the request", () => {
+    activateCity({ id: "L" });
+    // Through the store's OWN entry point — what the legend and a filter chip
+    // call — rather than a hand-written `requestedSection`: `requestSection`
+    // activates the layer and opens the section itself, so what the panel
+    // still owes is the scroll and the clear. Written this way because
+    // `toggleSection` TOGGLES: an unguarded effect would close the very
+    // section the request had just opened, and a test that seeded a CLOSED
+    // section could never see that.
+    useShellStore.getState().requestSection("L", "details");
+    expect(useShellStore.getState().openSections["L"]).toContain("details");
+
+    render(<ActiveLayerPanel onZoomToLayer={noZoom} />);
+
+    expect(useShellStore.getState().openSections["L"]).toContain("details");
+    expect(scrollIntoView).toHaveBeenCalled();
+    // Cleared, so a later unrelated re-render cannot re-open a section the
+    // user has since closed.
+    expect(useShellStore.getState().requestedSection).toBeNull();
+  });
+
+  it("opens a requested section that is somehow still closed", () => {
+    // The defensive half of the same effect. `requestSection` always opens
+    // the section itself, so this state is not reachable through it — the
+    // request is seeded directly to prove the panel does not simply ASSUME
+    // the section is open.
     activateCity({ id: "L" });
     useShellStore.setState({
       requestedSection: { layerId: "L", section: "details" },
@@ -202,9 +244,6 @@ describe("ActiveLayerPanel — consuming a section request", () => {
     render(<ActiveLayerPanel onZoomToLayer={noZoom} />);
 
     expect(useShellStore.getState().openSections["L"]).toContain("details");
-    expect(scrollIntoView).toHaveBeenCalled();
-    // Cleared, so a later unrelated re-render cannot re-open a section the
-    // user has since closed.
     expect(useShellStore.getState().requestedSection).toBeNull();
   });
 

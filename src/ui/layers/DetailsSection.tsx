@@ -272,7 +272,13 @@ function DefinitionRow({
   return (
     <div className="active-layer-row">
       <dt className="active-layer-key">{label}</dt>
-      <dd className="active-layer-value" title={title ?? value}>
+      {/* A tooltip only where it ADDS something: the full text behind a
+          middle-truncated source, or a caller's own explanation. A tooltip
+          repeating a row that is already fully visible is noise. */}
+      <dd
+        className="active-layer-value"
+        title={title ?? (truncate ? value : undefined)}
+      >
         {truncate ? truncateMiddle(value, SOURCE_MAX) : value}
       </dd>
     </div>
