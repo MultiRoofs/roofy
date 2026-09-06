@@ -16,10 +16,10 @@ import type { Selection } from "../../domain/selection/types";
 import {
   computeModelStats,
   computeObjectStats,
-} from "../../analytics/computeStats";
-import { runQuery } from "../../analytics/duckdb";
-import { useLayerTableStore } from "../../analytics/layerTables";
-import { quoteIdent } from "../../analytics/sql";
+} from "../../insights/computeStats";
+import { runQuery } from "../../insights/duckdb";
+import { useLayerTableStore } from "../../insights/layerTables";
+import { quoteIdent } from "../../insights/sql";
 
 interface StatsTabProps {
   readonly model: CityModel;

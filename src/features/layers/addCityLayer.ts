@@ -25,7 +25,7 @@ import {
   enqueueLayerTable,
   type LayerTableSource,
   type SourceProvider,
-} from "../../analytics/layerTables";
+} from "../../insights/layerTables";
 import type { Rule } from "../rules/types";
 import { useLayerStore } from "./layerStore";
 

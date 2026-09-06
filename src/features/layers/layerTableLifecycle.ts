@@ -27,7 +27,7 @@ import {
   useLayerTableStore,
   type LayerTableOutcome,
   type LayerTableSource,
-} from "../../analytics/layerTables";
+} from "../../insights/layerTables";
 import { useLayerStore } from "./layerStore";
 
 /**

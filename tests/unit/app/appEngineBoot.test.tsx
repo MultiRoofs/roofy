@@ -94,7 +94,7 @@ vi.mock("../../../src/scene/NavaraViewport", () => ({
 }));
 
 // DuckDB-wasm is irrelevant here and expensive to even import.
-vi.mock("../../../src/analytics/duckdb", () => ({
+vi.mock("../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
   isExtensionLoaded: vi.fn(() => false),

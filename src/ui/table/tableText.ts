@@ -13,7 +13,7 @@
  * No React import, no engine import, no I/O.
  */
 
-import { isTextColumn, type ColumnInfo } from "../../analytics/columnKind";
+import { isTextColumn, type ColumnInfo } from "../../insights/columnKind";
 import type {
   FilterCondition,
   FilterGroup,

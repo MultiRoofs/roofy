@@ -27,7 +27,7 @@ roofy/
       citymodel/
     features/
     scene/
-    analytics/
+    insights/
     persistence/
     platform/
     shared/
@@ -60,7 +60,7 @@ User-facing workflows such as city-model loading, rule authoring, selection insp
 
 Three.js runtime, view controls, picking, layers, and scene graph composition.
 
-### `src/analytics`
+### `src/insights`
 
 Geometry-derived metrics, suitability logic, solar helpers, and DuckDB-oriented analytical transforms.
 

@@ -4,7 +4,7 @@
  * information pills for.
  */
 
-import type { DuckDBStatus } from "../analytics/duckdb";
+import type { DuckDBStatus } from "../insights/duckdb";
 import type { StreamStatus } from "../features/streaming/streamStore";
 import { useLayerStore } from "../features/layers/layerStore";
 import { extractCrsCode } from "./toolbar/crsCode";

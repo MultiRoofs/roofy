@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 
 const runQuery = vi.fn();
-vi.mock("../../../../src/analytics/duckdb", () => ({
+vi.mock("../../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
   isExtensionLoaded: vi.fn(() => false),
@@ -21,7 +21,7 @@ vi.mock("../../../../src/analytics/duckdb", () => ({
 
 const { StatsTab } = await import("../../../../src/ui/inspector/StatsTab");
 const { useLayerTableStore } =
-  await import("../../../../src/analytics/layerTables");
+  await import("../../../../src/insights/layerTables");
 
 const model = {
   sourceEncoding: "cityjson",

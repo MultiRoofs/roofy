@@ -14,7 +14,7 @@ import {
   readFile,
   registerBuffer,
   runQuery,
-} from "../../../src/analytics/duckdb";
+} from "../../../src/insights/duckdb";
 
 describe("formatDuckDBError", () => {
   it("keeps the first useful line and strips the LINE/caret block", () => {
@@ -75,7 +75,7 @@ describe("init failure", () => {
     // Imported BEFORE `URL` is stubbed: vitest's own module runner calls
     // `new URL(...)` while resolving a dynamic import, and the object stub
     // below is not constructible.
-    const engine = await import("../../../src/analytics/duckdb");
+    const engine = await import("../../../src/insights/duckdb");
     vi.stubGlobal("URL", {
       ...URL,
       createObjectURL: () => "blob:fake",
@@ -111,7 +111,7 @@ function arrow(rows: ReadonlyArray<Record<string, unknown>>) {
 }
 
 interface EngineHarness {
-  readonly engine: typeof import("../../../src/analytics/duckdb");
+  readonly engine: typeof import("../../../src/insights/duckdb");
   /** Every statement the engine sent, in order. */
   readonly sql: string[];
   /** Make matching statements throw, e.g. the next INSTALL. */
@@ -181,7 +181,7 @@ async function bootEngine(): Promise<EngineHarness> {
   // Imported before `URL` is stubbed, and unstubbed again the moment init is
   // done — see the init-failure test for why the object stub cannot be live
   // across a dynamic import.
-  const engine = await import("../../../src/analytics/duckdb");
+  const engine = await import("../../../src/insights/duckdb");
   vi.stubGlobal("URL", {
     ...URL,
     createObjectURL: () => "blob:fake",

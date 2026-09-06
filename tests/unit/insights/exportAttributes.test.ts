@@ -18,7 +18,7 @@ function sampleBytes(name: string): Uint8Array {
   );
 }
 
-vi.mock("../../../src/analytics/duckdb", () => ({
+vi.mock("../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
   isExtensionLoaded: vi.fn(() => true),
@@ -47,8 +47,8 @@ vi.mock("../../../src/analytics/duckdb", () => ({
 }));
 
 const { resetExportCounterForTests, runExport, validateExportBytes } =
-  await import("../../../src/analytics/export");
-import type { ColumnInfo } from "../../../src/analytics/columnKind";
+  await import("../../../src/insights/export");
+import type { ColumnInfo } from "../../../src/insights/columnKind";
 
 /** The layer's whole set — a selection equal to it needs no predicate. */
 const ROOT_TYPES: ReadonlyArray<string> = [

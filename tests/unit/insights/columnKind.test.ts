@@ -4,7 +4,7 @@ import {
   isDroppedColumn,
   isTextColumn,
   lodsFromColumnNames,
-} from "../../../src/analytics/columnKind";
+} from "../../../src/insights/columnKind";
 
 describe("classifyColumnType", () => {
   it("calls a list, a struct and a map nested", () => {

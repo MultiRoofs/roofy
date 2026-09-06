@@ -22,7 +22,7 @@ let initGate: Promise<void> | null = null;
  */
 let registerAccepts = true;
 
-vi.mock("../../../src/analytics/duckdb", () => {
+vi.mock("../../../src/insights/duckdb", () => {
   const run = async (statement: string) => {
     sql.push(statement);
     for (const [needle, message] of Object.entries(failures)) {
@@ -84,9 +84,9 @@ const {
   resetLayerTablesForTest,
   retryEngine,
   useLayerTableStore,
-} = await import("../../../src/analytics/layerTables");
-import type { SourceProvider } from "../../../src/analytics/layerTables";
-import { FLAT_PREFIX_COLUMNS } from "../../../src/analytics/layerRows";
+} = await import("../../../src/insights/layerTables");
+import type { SourceProvider } from "../../../src/insights/layerTables";
+import { FLAT_PREFIX_COLUMNS } from "../../../src/insights/layerRows";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 
 const READER_DESCRIBE = [

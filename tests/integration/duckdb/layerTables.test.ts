@@ -27,7 +27,7 @@ import {
   isDroppedColumn,
   lodsFromColumnNames,
   type ColumnInfo,
-} from "../../../src/analytics/columnKind";
+} from "../../../src/insights/columnKind";
 import {
   buildAttributeExportSql,
   buildCityParquetModuleSql,
@@ -41,26 +41,26 @@ import {
   quoteIdent,
   quoteLiteral,
   READ_JSON_OPTIONS,
-} from "../../../src/analytics/sql";
-import { groupTypesByModule } from "../../../src/analytics/cityGmlModule";
+} from "../../../src/insights/sql";
+import { groupTypesByModule } from "../../../src/insights/cityGmlModule";
 import {
   encodeRowsAsJson,
   flatRowsFromModel,
-} from "../../../src/analytics/layerRows";
-import { validateExportBytes } from "../../../src/analytics/export";
+} from "../../../src/insights/layerRows";
+import { validateExportBytes } from "../../../src/insights/export";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 
 /**
- * `export.ts` reaches DuckDB through `analytics/duckdb.ts`, whose module scope
+ * `export.ts` reaches DuckDB through `insights/duckdb.ts`, whose module scope
  * imports `@duckdb/duckdb-wasm` — the BROWSER bundle, which has no business
  * being evaluated by a Node suite that talks to the node bindings, nor by the
  * default offline run that only collects this file. Only the module's PURE
  * exports are used here (`validateExportBytes`), so the engine seam is stubbed
  * out entirely; every stub throws, because nothing in this file may reach one.
  */
-vi.mock("../../../src/analytics/duckdb", () => {
+vi.mock("../../../src/insights/duckdb", () => {
   const unreachable = () => {
-    throw new Error("this suite talks to the harness, not to analytics/duckdb");
+    throw new Error("this suite talks to the harness, not to insights/duckdb");
   };
   return {
     initDuckDB: unreachable,

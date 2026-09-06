@@ -57,10 +57,10 @@ It is broken into four sub-milestones, each independently committable.
 
 **Architecture**:
 
-- Create `src/analytics/computeStats.ts` — pure functions that compute statistics from a `CityModel`:
+- Create `src/insights/computeStats.ts` — pure functions that compute statistics from a `CityModel`:
   - `computeModelStats(model)` → `ModelStats` (object count, total roof area, avg height, avg slope, roof count by orientation band)
   - `computeObjectStats(model, objectId)` → `ObjectStats` (per-building metrics)
-- Create `src/analytics/types.ts` — `ModelStats`, `ObjectStats` types
+- Create `src/insights/types.ts` — `ModelStats`, `ObjectStats` types
 - Add `StatsTab` to the inspector panel (new tab alongside object/surfaces/analysis/rules/solar)
 - Two display modes:
   - **Model scope** (no selection): Show full-model aggregate stats
@@ -86,7 +86,7 @@ It is broken into four sub-milestones, each independently committable.
 
 **Architecture**:
 
-- Create `src/analytics/duckdb.ts` — singleton DuckDB-wasm instance management:
+- Create `src/insights/duckdb.ts` — singleton DuckDB-wasm instance management:
   - `initDuckDB()` → initialize DuckDB-wasm, load the cityjson extension
   - `loadModelIntoTables(source)` → execute `read_cityjson()` / `read_cityjsonseq()` / `read_flatcitybuf()` to populate tables
   - `queryStats(sql)` → run arbitrary SQL and return results
@@ -153,9 +153,9 @@ Each sub-milestone gets its own commit. Code review via codex before each commit
 
 If this work is picked up by another contributor:
 
-- All domain types and interfaces are in `src/persistence/types.ts` and `src/analytics/types.ts`
+- All domain types and interfaces are in `src/persistence/types.ts` and `src/insights/types.ts`
 - The persistence layer uses dependency injection — `ProjectStateStore` is an interface, implementations are swappable
 - Statistics are computed as pure functions, not stored in Zustand — they recompute on render from the immutable `CityModel`
-- DuckDB integration is isolated in `src/analytics/duckdb.ts` — if it doesn't work, only that file and its consumers need to change
+- DuckDB integration is isolated in `src/insights/duckdb.ts` — if it doesn't work, only that file and its consumers need to change
 - URL sharing codec is self-contained in `src/persistence/urlShare.ts`
 - All existing Zustand stores (solar, rules, selection) have `.getState()` and `.setState()` for imperative access from persistence code

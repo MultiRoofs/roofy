@@ -116,7 +116,7 @@ parents, children` must be present. Directory argument without a trailing
 useLayerFileLoader ──addLayer──▶ layerStore
         │ (bytes / model / residents)
         ▼
-analytics/layerTables.ts  ── one FIFO queue ──▶ analytics/duckdb.ts (engine, extensions)
+insights/layerTables.ts  ── one FIFO queue ──▶ insights/duckdb.ts (engine, extensions)
         │ registry: layerId → { table, sourceFile, reader, columns, rowCount }
         ▼
 features/query/queryStore.ts  (per-layer: filter AST, sort, page, pageSize, syncToMap)
@@ -126,10 +126,10 @@ ui/table/* (grid, filter bar,          scene/handleSync (visibleObjectIds →
    pagination, export button)           handle.setVisibleObjectIds)
         │
         ▼
-ui/table/ExportDialog ──▶ analytics/export.ts (COPY / cityparquet_write → Blob)
+ui/table/ExportDialog ──▶ insights/export.ts (COPY / cityparquet_write → Blob)
 ```
 
-### 3.1 Engine (`src/analytics/duckdb.ts`)
+### 3.1 Engine (`src/insights/duckdb.ts`)
 
 - `@duckdb/duckdb-wasm@1.33.1-dev64.0`, pinned exactly (already bumped in
   the worktree). Bundles still come from jsDelivr; nothing is vendored
@@ -159,7 +159,7 @@ duckdb_extensions() WHERE loaded`, because the community slot for a DuckDB
   version can be rebuilt under us (the duckdb-wasm pin is what pins the
   extension build) and a schema drift must be diagnosable from the UI.
 
-### 3.2 Per-layer tables (`src/analytics/layerTables.ts`, new)
+### 3.2 Per-layer tables (`src/insights/layerTables.ts`, new)
 
 ```ts
 interface LayerTable {
@@ -301,7 +301,7 @@ interface LayerQuery {
 only (deliberately not in the v3 snapshot, like `activeGeoLayerId`). Apply is
 an explicit action, never per keystroke: applying can rebuild geometry.
 
-`src/analytics/sql.ts` (pure, unit-tested):
+`src/insights/sql.ts` (pure, unit-tested):
 
 - `quoteIdent(name)` (`"` doubled); `quoteLiteral(value)` (`'` doubled,
   numbers must be finite, booleans `TRUE`/`FALSE`). DATE/TIMESTAMP columns get
@@ -385,7 +385,7 @@ appearance, surfaceColors, visibleObjectIds: ReadonlySet<string> | null =
   not available for streaming layers yet" (the id set would have to travel to
   the FCB worker and be re-applied per cell; deferred).
 
-### 3.6 Export (`src/analytics/export.ts` + `src/ui/table/ExportDialog.tsx`)
+### 3.6 Export (`src/insights/export.ts` + `src/ui/table/ExportDialog.tsx`)
 
 Dialog (portal modal, `useModalChrome`), opened from the table header for the
 active layer:
@@ -407,7 +407,7 @@ SELECT id, feature_id, object_type, parents, children, children_roles,
 bbox, geometry_lod<L>, geometry_properties_lod<L>, <attributes>
 FROM <reader>('<sourceFile>', lod := '<L>') WHERE <feature predicate>
 AND <module predicate>`. Module is decided by
-    `cityGmlModuleOf(objectType)` (pure, `src/analytics/cityGmlModule.ts`):
+    `cityGmlModuleOf(objectType)` (pure, `src/insights/cityGmlModule.ts`):
     Building* → building, Bridge* → bridge, Tunnel\* → tunnel,
     OtherConstruction → construction, Road/Railway/TransportSquare/Waterway
     → transportation, PlantCover/SolitaryVegetationObject → vegetation,
@@ -491,11 +491,11 @@ on restore by the same add path.
   with the duckdb-wasm bump, run `pnpm install` in the submodule afterwards,
   and verify `npm ci` in a fresh clone of the pushed commit before pushing
   further (CI runs `npm ci`).
-- Every new export from `src/analytics/duckdb.ts` is added to the seven test
+- Every new export from `src/insights/duckdb.ts` is added to the seven test
   files that `vi.mock` it (`tests/unit/app/appCatalogEntry`, `appRestoreShare`,
   `appEngineBoot`, `appCityParquetLayers`, `tests/unit/features/stac/stacItems`,
-  `tests/unit/analytics/duckdbStatus`, `streamingDuckdb`).
-- The `analytics/duckdb.ts` module is the ONLY importer of
+  `tests/unit/insights/duckdbStatus`, `streamingDuckdb`).
+- The `insights/duckdb.ts` module is the ONLY importer of
   `@duckdb/duckdb-wasm`; `layerTables`, `export` and `sql` take the engine
   through that module's functions so they can be unit-tested with a mock.
 

@@ -7,7 +7,7 @@
  * boundary stays a component boundary.
  */
 
-import type { DuckDBStatus } from "../analytics/duckdb";
+import type { DuckDBStatus } from "../insights/duckdb";
 
 export function duckdbDotClass(status: DuckDBStatus): string {
   if (status.state === "ready") {

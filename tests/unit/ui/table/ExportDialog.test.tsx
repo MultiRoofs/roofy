@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react";
 
 const runQuery = vi.fn();
-vi.mock("../../../../src/analytics/duckdb", () => ({
+vi.mock("../../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
   isExtensionLoaded: vi.fn(() => false),
@@ -25,7 +25,7 @@ vi.mock("../../../../src/analytics/duckdb", () => ({
 }));
 
 const runExport = vi.fn();
-vi.mock("../../../../src/analytics/export", () => ({
+vi.mock("../../../../src/insights/export", () => ({
   runExport: (request: unknown) => runExport(request),
 }));
 
@@ -62,7 +62,7 @@ const { exportFileName } =
 const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
 const { useLayerTableStore } =
-  await import("../../../../src/analytics/layerTables");
+  await import("../../../../src/insights/layerTables");
 
 const READER_TABLE = {
   table: "layer_1",

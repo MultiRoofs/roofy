@@ -32,7 +32,7 @@ Browser-first, no backend, no login in v1. Separated concerns:
 
 - `src/domain/` — domain types and parsing (citymodel, cityjson)
 - `src/scene/` — Three.js scene rendering
-- `src/analytics/` — DuckDB-wasm queries
+- `src/insights/` — DuckDB-wasm queries
 - `src/persistence/` — persistence interfaces (DI-based)
 - `src/features/` — feature modules
 - `src/app/` — application shell (App.tsx)

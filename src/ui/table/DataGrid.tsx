@@ -7,7 +7,7 @@
  */
 
 import { memo } from "react";
-import type { ColumnInfo } from "../../analytics/columnKind";
+import type { ColumnInfo } from "../../insights/columnKind";
 import { formatCell, rawCellTitle } from "./tableText";
 
 /** The id a row is selected by. Every layer table has an `id` column, but a

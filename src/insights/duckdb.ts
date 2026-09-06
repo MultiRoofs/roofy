@@ -10,7 +10,7 @@
  * and all query functions return null. The M4.2 pure-function stats
  * remain fully functional as the primary analytics path.
  *
- * Per-layer tables live in `analytics/layerTables.ts`, which reaches the
+ * Per-layer tables live in `insights/layerTables.ts`, which reaches the
  * engine only through the functions exported here — this module is the ONLY
  * importer of `@duckdb/duckdb-wasm` in the app.
  */

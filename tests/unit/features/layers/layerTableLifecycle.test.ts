@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const enqueued: string[] = [];
 const dropped: string[] = [];
-vi.mock("../../../../src/analytics/layerTables", async (importOriginal) => {
+vi.mock("../../../../src/insights/layerTables", async (importOriginal) => {
   const actual =
     await importOriginal<
-      typeof import("../../../../src/analytics/layerTables")
+      typeof import("../../../../src/insights/layerTables")
     >();
   return {
     ...actual,
@@ -40,7 +40,7 @@ const { useLayerStore } =
 const { useStreamStore } =
   await import("../../../../src/features/streaming/streamStore");
 const { useLayerTableStore } =
-  await import("../../../../src/analytics/layerTables");
+  await import("../../../../src/insights/layerTables");
 const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
 import type { Layer } from "../../../../src/features/layers/layerStore";

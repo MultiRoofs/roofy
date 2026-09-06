@@ -19,7 +19,7 @@
  */
 
 import { useCallback } from "react";
-import type { ColumnInfo } from "../../analytics/columnKind";
+import type { ColumnInfo } from "../../insights/columnKind";
 import {
   isNullaryOp,
   type FilterCondition,

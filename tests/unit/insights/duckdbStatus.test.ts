@@ -9,7 +9,7 @@ import {
   getDuckDBStatus,
   queryDuckDB,
   queryParquetBuffer,
-} from "../../../src/analytics/duckdb";
+} from "../../../src/insights/duckdb";
 
 describe("DuckDB status", () => {
   it("starts in uninitialized state", () => {

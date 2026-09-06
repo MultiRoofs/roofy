@@ -51,7 +51,7 @@ const tables = vi.hoisted(() => ({
   ),
 }));
 
-vi.mock("../../../../src/analytics/layerTables", () => ({
+vi.mock("../../../../src/insights/layerTables", () => ({
   enqueueLayerTable: tables.enqueueLayerTable,
 }));
 

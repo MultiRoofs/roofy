@@ -271,7 +271,7 @@ lazily-booted DuckDB, by first querying `duckdb_tables()` and seeing the panel's
 own `layer_1` with `count(*) = 2231`):
 
 ```js
-const m = await import("/src/analytics/duckdb.ts");
+const m = await import("/src/insights/duckdb.ts");
 await m.runQuery("SELECT file FROM glob('exp_*')"); // ok: true, rows: []
 await m.runQuery("SELECT schema_name FROM duckdb_schemas()");
 ```

@@ -482,7 +482,7 @@ both plans.
 - 11.1 Engine: `@duckdb/duckdb-wasm@1.33.1-dev64.0` (DuckDB 1.5.5), per-extension
   status, `ensureExtension` for `spatial`/`three_d`, `runQuery` with DuckDB's own
   error message, VFS primitives, init retry.
-- 11.2 One table per city layer (`analytics/layerTables.ts`), reader-backed from
+- 11.2 One table per city layer (`insights/layerTables.ts`), reader-backed from
   bytes or a flat fallback from the parsed model / resident records; one FIFO
   queue; `addCityLayer` as the single static add path.
 - 11.3 Table panel: pagination (100/500/1000), sort, structured WHERE filter,

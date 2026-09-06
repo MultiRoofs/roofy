@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { duckdbLabel, duckdbTooltip } from "../../../src/ui/duckdbStatusText";
-import type { DuckDBStatus } from "../../../src/analytics/duckdb";
+import type { DuckDBStatus } from "../../../src/insights/duckdb";
 
 const ready = (cityjson: "loaded" | "failed"): DuckDBStatus => ({
   state: "ready",

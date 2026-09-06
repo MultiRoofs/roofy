@@ -9,12 +9,12 @@
  * filter, because it looks like a filter that is working.
  */
 
-import { runQuery } from "../../analytics/duckdb";
+import { runQuery } from "../../insights/duckdb";
 import {
   useLayerTableStore,
   type LayerTable,
-} from "../../analytics/layerTables";
-import { buildFeatureIdsSql, compileFilter } from "../../analytics/sql";
+} from "../../insights/layerTables";
+import { buildFeatureIdsSql, compileFilter } from "../../insights/sql";
 import { useLayerStore } from "../layers/layerStore";
 import { layerQuery, useQueryStore } from "./queryStore";
 

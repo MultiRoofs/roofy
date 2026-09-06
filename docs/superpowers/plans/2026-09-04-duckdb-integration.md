@@ -4,7 +4,7 @@
 
 **Goal:** Make DuckDB-wasm a first-class part of the viewer — one table per city layer, a real query surface (paging, sort, structured filter) in the table panel, a toggle that applies the filter to the 3D map, and an export dialog that writes the layer or its filtered subset to Parquet/CSV/JSON or a CityParquet package.
 
-**Architecture:** `analytics/duckdb.ts` stays the ONLY importer of `@duckdb/duckdb-wasm` and grows per-extension status, `runQuery`, and VFS primitives. `analytics/layerTables.ts` owns a registry plus one async FIFO queue that turns a layer's bytes (reader-backed) or its parsed objects (flat fallback) into a `layer_<n>` table; `features/query/queryStore.ts` holds the per-layer filter/sort/page; `analytics/sql.ts` compiles both into SQL strings that are pure functions of their inputs; `ui/table/*` renders the result; `layerStore.visibleObjectIds` + a new plugin setter apply the filter to geometry; `analytics/export.ts` writes files back out through the same engine.
+**Architecture:** `insights/duckdb.ts` stays the ONLY importer of `@duckdb/duckdb-wasm` and grows per-extension status, `runQuery`, and VFS primitives. `insights/layerTables.ts` owns a registry plus one async FIFO queue that turns a layer's bytes (reader-backed) or its parsed objects (flat fallback) into a `layer_<n>` table; `features/query/queryStore.ts` holds the per-layer filter/sort/page; `insights/sql.ts` compiles both into SQL strings that are pure functions of their inputs; `ui/table/*` renders the result; `layerStore.visibleObjectIds` + a new plugin setter apply the filter to geometry; `insights/export.ts` writes files back out through the same engine.
 
 **Tech Stack:** `@duckdb/duckdb-wasm@1.33.1-dev64.0` (DuckDB 1.5.5, `wasm_eh`), the `cityjson` community extension v0.4.0, React 19 + Zustand, Vitest + @testing-library/react, `fflate` for zipping, and the `@cityjson/navara-cityjson` plugin submodule for the geometry filter.
 
@@ -13,16 +13,16 @@
 ## Global Constraints
 
 - `@duckdb/duckdb-wasm` is pinned EXACTLY to `1.33.1-dev64.0`. Never `latest` (dev57 / DuckDB 1.5.4) — its community slot serves a stale 4-function `cityjson` and a `three_d` that breaks `LOAD spatial`, silently.
-- `src/analytics/duckdb.ts` is the ONLY module UNDER `src/` that may `import … from "@duckdb/duckdb-wasm"`. `layerTables`, `export`, `sql` and every UI module take the engine through that module's exported functions so they can be mocked with `vi.mock`. (The opt-in integration harness under `tests/integration/duckdb/` loads the NODE bindings directly — a different entry point, and the reason the rule is scoped to `src/`.)
+- `src/insights/duckdb.ts` is the ONLY module UNDER `src/` that may `import … from "@duckdb/duckdb-wasm"`. `layerTables`, `export`, `sql` and every UI module take the engine through that module's exported functions so they can be mocked with `vi.mock`. (The opt-in integration harness under `tests/integration/duckdb/` loads the NODE bindings directly — a different entry point, and the reason the rule is scoped to `src/`.)
 - `COPY … TO (FORMAT cityjson | cityjsonseq | flatcitybuf)` writes **0 bytes** in wasm, silently. Those three formats are NEVER offered in the export dialog.
 - `cityparquet_read` and `cityjson_geoparquet_geo` are unusable in wasm. Never call them.
 - A `dropFile`d VFS name still resolves to ZERO BYTES and fails with a misleading JSON parse error. VFS names are minted from a module counter and **never reused**.
 - **A MISSING VFS name reads back as ONE GARBAGE BYTE with NO error** (`copyFileToBuffer` and `read_blob` alike); a genuinely empty file reads 0 bytes. Every read-back is therefore validated BY CONTENT — `PAR1` magic for Parquet, `JSON.parse` for JSON, a newline-terminated header line for CSV — before it is offered as a download.
 - `spatial` does NOT autoload in wasm and is a CORE extension, not a community one: `INSTALL spatial` (no `FROM community`) then `LOAD spatial`, ~5 s / 23.6 MB. `cityjson` and `three_d` come `FROM community`.
 - `HUGEINT` and `DECIMAL` cells arrive through Arrow as STRINGS, which is why they classify `castText` (`::VARCHAR` makes every such column uniform) and why no formatter may assume a number.
-- DuckDB's `glob()` table function works in the browser but lists names that were never created, so it is used for CLEANUP CHECKS only — never to discover what a write produced. There is no glob helper in `analytics/duckdb.ts`; a caller that wants one sends `SELECT file FROM glob('…')` through `runQuery`.
+- DuckDB's `glob()` table function works in the browser but lists names that were never created, so it is used for CLEANUP CHECKS only — never to discover what a write produced. There is no glob helper in `insights/duckdb.ts`; a caller that wants one sends `SELECT file FROM glob('…')` through `runQuery`.
 - Reader schema (identical for `read_cityjson` / `read_cityjsonseq` / `read_flatcitybuf` on 1.5.5): `id, feature_id, object_type, parents VARCHAR[], children VARCHAR[], children_roles VARCHAR[], address STRUCT[], bbox STRUCT, geometry_lod<L> BLOB, geometry_properties_lod<L> STRUCT, material_lod<L>, texture_lod<L>, template STRUCT, other`, then one inferred column per attribute. `id` IS `CityObject.id`; `feature_id` is the root object of the feature. Absent `parents`/`children` are SQL NULL, never `[]`.
-- Every new export from `src/analytics/duckdb.ts` must reach the test files that `vi.mock` it. Seven exist today; Task 4 brings SIX of them up to the new surface — `tests/unit/app/appCatalogEntry.test.tsx`, `tests/unit/app/appRestoreShare.test.tsx`, `tests/unit/app/appEngineBoot.test.tsx`, `tests/unit/app/appCityParquetLayers.test.tsx`, `tests/unit/features/stac/stacItems.test.ts`, `tests/unit/analytics/duckdbStatus.test.ts` — and DELETES the seventh, `tests/unit/analytics/streamingDuckdb.test.ts`, whose subject is removed.
+- Every new export from `src/insights/duckdb.ts` must reach the test files that `vi.mock` it. Seven exist today; Task 4 brings SIX of them up to the new surface — `tests/unit/app/appCatalogEntry.test.tsx`, `tests/unit/app/appRestoreShare.test.tsx`, `tests/unit/app/appEngineBoot.test.tsx`, `tests/unit/app/appCityParquetLayers.test.tsx`, `tests/unit/features/stac/stacItems.test.ts`, `tests/unit/insights/duckdbStatus.test.ts` — and DELETES the seventh, `tests/unit/insights/streamingDuckdb.test.ts`, whose subject is removed.
 - Plugin (submodule) changes go on a `duckdb-integration` branch cut from **`2963ddb`** — the gitlink `origin/develop` carried after the Navara 0.1.1 merge — are pushed, and the parent gitlink points at that branch's head. NEVER push onto the plugin repo's `main`. (This branch reaches `2963ddb` in Task 23b; before then it is still on `947c980`. `develop` has since moved its pin to **`ec65845`**, which Task 34's Step 7 merges INTO the branch rather than rebasing onto.)
 - `buildCityMeshArrays`'s parameter order is `(model, layerId, originOffset, selectedLod, hiddenTypes, appearance, surfaceColors, visibleObjectIds)`. `surfaceColors` is `ec65845`'s, and **main's shape wins**: `visibleObjectIds` is the EIGHTH parameter, never the seventh. Every call site passes `SURFACE_COLORS_LINEAR` as the seventh argument, exactly as `ec65845`'s own sites do.
 - Snapshot schema stays at **v3**. Filter, sort, page, sync-to-map and `visibleObjectIds` are SESSION state and are never persisted.
@@ -42,21 +42,21 @@
 
 **New — engine-free pure modules**
 
-- `src/analytics/columnKind.ts` — the DuckDB column vocabulary: `ColumnKind`, `ColumnInfo`, `LodColumn`, `classifyColumnType`, `isTextColumn`, `isDroppedColumn`, `lodsFromColumnNames`.
+- `src/insights/columnKind.ts` — the DuckDB column vocabulary: `ColumnKind`, `ColumnInfo`, `LodColumn`, `classifyColumnType`, `isTextColumn`, `isDroppedColumn`, `lodsFromColumnNames`.
 - `src/domain/citymodel/featureId.ts` — `rootFeatureId`, the cycle-safe walk up `parents` that gives the flat fallback the same `feature_id` the reader produces.
-- `src/analytics/cityGmlModule.ts` — `CityGmlModule`, `cityGmlModuleOf`, `groupTypesByModule`.
+- `src/insights/cityGmlModule.ts` — `CityGmlModule`, `cityGmlModuleOf`, `groupTypesByModule`.
 - `src/features/query/types.ts` — `FilterOp`, `FilterValue`, `FilterCondition`, `FilterGroup`, `LayerQuery`, `PageSize`, `PAGE_SIZES`, `EMPTY_FILTER`, `DEFAULT_LAYER_QUERY`, `isNullaryOp`.
-- `src/analytics/sql.ts` — every SQL string this feature emits, as pure functions.
-- `src/analytics/layerRows.ts` — the flat-fallback row builders (`CityModel` / `ResidentObjectRecord` → rows → JSON bytes).
+- `src/insights/sql.ts` — every SQL string this feature emits, as pure functions.
+- `src/insights/layerRows.ts` — the flat-fallback row builders (`CityModel` / `ResidentObjectRecord` → rows → JSON bytes).
 
 **New — stateful**
 
 - `src/features/query/queryStore.ts` — Zustand, `Record<layerId, LayerQuery>`, session only.
-- `src/analytics/layerTables.ts` — registry + FIFO queue + `useLayerTableStore`.
+- `src/insights/layerTables.ts` — registry + FIFO queue + `useLayerTableStore`.
 - `src/features/layers/addCityLayer.ts` — `addLayer` + `enqueueLayerTable` in one call, used by every static add site.
 - `src/features/layers/layerTableLifecycle.ts` — `installLayerTableLifecycle()`: store subscriptions for drops, streaming re-enqueues and the panel gate.
 - `src/features/query/mapFilterSync.ts` — `syncFilterToMap(layerId)`.
-- `src/analytics/export.ts` — `runExport`.
+- `src/insights/export.ts` — `runExport`.
 - `src/platform/download.ts` — `downloadBlob` / `downloadText`, factored out of `RuleBuilderTab`.
 
 **New — UI**
@@ -65,7 +65,7 @@
 
 **Modified**
 
-- `src/analytics/duckdb.ts` — per-extension status, `ensureExtension`, `runQuery`/`ddl`/`formatDuckDBError`, `registerBuffer`/`dropBuffer`/`readFile`, init retry. Loses `shouldUseSourceUrlPath`, `loadModelIntoDuckDB`, `loadCityModelFromMemory`, `loadResidentObjectsIntoDuckDB`.
+- `src/insights/duckdb.ts` — per-extension status, `ensureExtension`, `runQuery`/`ddl`/`formatDuckDBError`, `registerBuffer`/`dropBuffer`/`readFile`, init retry. Loses `shouldUseSourceUrlPath`, `loadModelIntoDuckDB`, `loadCityModelFromMemory`, `loadResidentObjectsIntoDuckDB`.
 - `src/ui/StatusBar.tsx` — new labels + extension tooltip.
 - `src/app/App.tsx` — loses the DuckDB load effect and the `duckdbModelLoaded` / `duckdbTableLoaded` flags; installs the layer-table lifecycle; routes its four direct `addLayer` calls through `addCityLayer`.
 - `src/domain/citymodel/loadCityModel.ts` — `loadFromUrl` returns `LoadedModel`; new `fetchModelBytes`.
@@ -174,8 +174,8 @@ EOF
 
 **Files:**
 
-- Modify: `src/analytics/duckdb.ts`
-- Test: `tests/unit/analytics/duckdbEngine.test.ts` (create)
+- Modify: `src/insights/duckdb.ts`
+- Test: `tests/unit/insights/duckdbEngine.test.ts` (create)
 
 **Interfaces:**
 
@@ -244,7 +244,7 @@ export function queryParquetBuffer(
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/unit/analytics/duckdbEngine.test.ts`:
+Create `tests/unit/insights/duckdbEngine.test.ts`:
 
 ```ts
 /**
@@ -263,7 +263,7 @@ import {
   readFile,
   registerBuffer,
   runQuery,
-} from "../../../src/analytics/duckdb";
+} from "../../../src/insights/duckdb";
 
 describe("formatDuckDBError", () => {
   it("keeps the first useful line and strips the LINE/caret block", () => {
@@ -326,7 +326,7 @@ describe("init failure", () => {
       revokeObjectURL: () => {},
     });
 
-    const engine = await import("../../../src/analytics/duckdb");
+    const engine = await import("../../../src/insights/duckdb");
     await engine.initDuckDB();
 
     expect(engine.getDuckDBStatus().state).toBe("failed");
@@ -383,10 +383,10 @@ describe("engine entry points before init", () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run tests/unit/analytics/duckdbEngine.test.ts`
+Run: `npx vitest run tests/unit/insights/duckdbEngine.test.ts`
 Expected: FAIL — `formatDuckDBError`, `runQuery`, `ddl`, `registerBuffer`, `dropBuffer`, `readFile`, `ensureExtension` and `isExtensionLoaded` are not exported.
 
-- [ ] **Step 3: Replace the status/init section of `src/analytics/duckdb.ts`**
+- [ ] **Step 3: Replace the status/init section of `src/insights/duckdb.ts`**
 
 Replace the `Types`, `Singleton state` and `Initialization` sections (everything from `export type DuckDBStatus` down to the end of `initDuckDB`) with:
 
@@ -770,7 +770,7 @@ export async function queryDuckDB(sql: string): Promise<QueryResult | null> {
 
 - [ ] **Step 6: Run the new test**
 
-Run: `npx vitest run tests/unit/analytics/duckdbEngine.test.ts`
+Run: `npx vitest run tests/unit/insights/duckdbEngine.test.ts`
 Expected: PASS — the four `formatDuckDBError` cases, the init-failure case
 (worker terminated, retry re-runs) and the six "not initialized" guards.
 
@@ -807,7 +807,7 @@ Create `tests/unit/ui/StatusBarDuckdb.test.tsx`:
 ```ts
 import { describe, it, expect } from "vitest";
 import { duckdbLabel, duckdbTooltip } from "../../../src/ui/StatusBar";
-import type { DuckDBStatus } from "../../../src/analytics/duckdb";
+import type { DuckDBStatus } from "../../../src/insights/duckdb";
 
 const ready = (cityjson: "loaded" | "failed"): DuckDBStatus => ({
   state: "ready",
@@ -986,7 +986,7 @@ const extensionLoaded =
 - [ ] **Step 6: Run the tests and the type check**
 
 ```bash
-npx vitest run tests/unit/ui/StatusBarDuckdb.test.tsx tests/unit/analytics/duckdbEngine.test.ts
+npx vitest run tests/unit/ui/StatusBarDuckdb.test.tsx tests/unit/insights/duckdbEngine.test.ts
 npx tsc -b --noEmit
 ```
 
@@ -995,7 +995,7 @@ Expected: PASS, and a clean type check.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/analytics/duckdb.ts src/ui/StatusBar.tsx src/app/App.tsx tests/unit/analytics/duckdbEngine.test.ts tests/unit/ui/StatusBarDuckdb.test.tsx
+git add src/insights/duckdb.ts src/ui/StatusBar.tsx src/app/App.tsx tests/unit/insights/duckdbEngine.test.ts tests/unit/ui/StatusBarDuckdb.test.tsx
 git commit -m "$(cat <<'EOF'
 feat(analytics): per-extension DuckDB status, runQuery and VFS primitives
 
@@ -1022,8 +1022,8 @@ EOF
 - Modify: `tests/unit/app/appEngineBoot.test.tsx`
 - Modify: `tests/unit/app/appCityParquetLayers.test.tsx`
 - Modify: `tests/unit/features/stac/stacItems.test.ts`
-- Modify: `tests/unit/analytics/duckdbStatus.test.ts`
-- Delete: `tests/unit/analytics/streamingDuckdb.test.ts`
+- Modify: `tests/unit/insights/duckdbStatus.test.ts`
+- Delete: `tests/unit/insights/streamingDuckdb.test.ts`
 
 **Interfaces:**
 
@@ -1059,13 +1059,13 @@ until Task 18, so the app itself compiles and runs throughout.
 
 - [ ] **Step 1: Delete the obsolete streaming-DuckDB test**
 
-`tests/unit/analytics/streamingDuckdb.test.ts` tests `shouldUseSourceUrlPath` and `loadResidentObjectsIntoDuckDB`, both of which Task 18 deletes. Its subject is gone, not moved.
+`tests/unit/insights/streamingDuckdb.test.ts` tests `shouldUseSourceUrlPath` and `loadResidentObjectsIntoDuckDB`, both of which Task 18 deletes. Its subject is gone, not moved.
 
 ```bash
-git rm tests/unit/analytics/streamingDuckdb.test.ts
+git rm tests/unit/insights/streamingDuckdb.test.ts
 ```
 
-- [ ] **Step 2: Rewrite `tests/unit/analytics/duckdbStatus.test.ts`**
+- [ ] **Step 2: Rewrite `tests/unit/insights/duckdbStatus.test.ts`**
 
 Replace the whole file with:
 
@@ -1081,7 +1081,7 @@ import {
   getDuckDBStatus,
   queryDuckDB,
   queryParquetBuffer,
-} from "../../../src/analytics/duckdb";
+} from "../../../src/insights/duckdb";
 
 describe("DuckDB status", () => {
   it("starts in uninitialized state", () => {
@@ -1108,7 +1108,7 @@ describe("DuckDB status", () => {
 Replace its `vi.mock` factory (lines ~16–22) with:
 
 ```ts
-vi.mock("../../../../src/analytics/duckdb", () => ({
+vi.mock("../../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   // Defaults to READY, because that is the state every other test in this
   // file assumes; the one test that cares overrides it per call.
@@ -1140,10 +1140,10 @@ Then grep the file for `{ state: "ready", extensionLoaded: true }` and `{ state:
 
 - [ ] **Step 4: Update the three simple App mocks**
 
-In `tests/unit/app/appCatalogEntry.test.tsx`, `tests/unit/app/appEngineBoot.test.tsx` and `tests/unit/app/appRestoreShare.test.tsx`, replace each `vi.mock("../../../src/analytics/duckdb", () => ({ … }))` factory body with the canonical literal:
+In `tests/unit/app/appCatalogEntry.test.tsx`, `tests/unit/app/appEngineBoot.test.tsx` and `tests/unit/app/appRestoreShare.test.tsx`, replace each `vi.mock("../../../src/insights/duckdb", () => ({ … }))` factory body with the canonical literal:
 
 ```ts
-vi.mock("../../../src/analytics/duckdb", () => ({
+vi.mock("../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
   isExtensionLoaded: vi.fn(() => false),
@@ -1165,7 +1165,7 @@ vi.mock("../../../src/analytics/duckdb", () => ({
 Replace its factory with the same literal, but keep its `extensionReady` switch on `getDuckDBStatus`:
 
 ```ts
-vi.mock("../../../src/analytics/duckdb", () => ({
+vi.mock("../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   getDuckDBStatus: vi.fn(() =>
     extensionReady
@@ -1254,8 +1254,8 @@ EOF
 
 **Files:**
 
-- Create: `src/analytics/columnKind.ts`
-- Test: `tests/unit/analytics/columnKind.test.ts`
+- Create: `src/insights/columnKind.ts`
+- Test: `tests/unit/insights/columnKind.test.ts`
 
 **Interfaces:**
 
@@ -1289,7 +1289,7 @@ export function lodsFromColumnNames(
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/unit/analytics/columnKind.test.ts`:
+Create `tests/unit/insights/columnKind.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -1298,7 +1298,7 @@ import {
   isDroppedColumn,
   isTextColumn,
   lodsFromColumnNames,
-} from "../../../src/analytics/columnKind";
+} from "../../../src/insights/columnKind";
 
 describe("classifyColumnType", () => {
   it("calls a list, a struct and a map nested", () => {
@@ -1470,12 +1470,12 @@ describe("lodsFromColumnNames", () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run tests/unit/analytics/columnKind.test.ts`
-Expected: FAIL — cannot resolve `src/analytics/columnKind`.
+Run: `npx vitest run tests/unit/insights/columnKind.test.ts`
+Expected: FAIL — cannot resolve `src/insights/columnKind`.
 
 - [ ] **Step 3: Write the implementation**
 
-Create `src/analytics/columnKind.ts`:
+Create `src/insights/columnKind.ts`:
 
 ```ts
 /**
@@ -1596,14 +1596,14 @@ export function lodsFromColumnNames(
 
 - [ ] **Step 4: Run the test**
 
-Run: `npx vitest run tests/unit/analytics/columnKind.test.ts`
+Run: `npx vitest run tests/unit/insights/columnKind.test.ts`
 Expected: PASS — all `classifyColumnType`, `isTextColumn`, `isDroppedColumn`
 and LoD-column cases green.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/analytics/columnKind.ts tests/unit/analytics/columnKind.test.ts
+git add src/insights/columnKind.ts tests/unit/insights/columnKind.test.ts
 git commit -m "$(cat <<'EOF'
 feat(analytics): the DuckDB column vocabulary as pure functions
 
@@ -1790,8 +1790,8 @@ EOF
 
 **Files:**
 
-- Create: `src/analytics/cityGmlModule.ts`
-- Test: `tests/unit/analytics/cityGmlModule.test.ts`
+- Create: `src/insights/cityGmlModule.ts`
+- Test: `tests/unit/insights/cityGmlModule.test.ts`
 
 **Interfaces:**
 
@@ -1824,14 +1824,14 @@ export function groupTypesByModule(
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/unit/analytics/cityGmlModule.test.ts`:
+Create `tests/unit/insights/cityGmlModule.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
 import {
   cityGmlModuleOf,
   groupTypesByModule,
-} from "../../../src/analytics/cityGmlModule";
+} from "../../../src/insights/cityGmlModule";
 
 describe("cityGmlModuleOf", () => {
   it("maps every Building* type to building", () => {
@@ -1901,12 +1901,12 @@ describe("groupTypesByModule", () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run tests/unit/analytics/cityGmlModule.test.ts`
+Run: `npx vitest run tests/unit/insights/cityGmlModule.test.ts`
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Write the implementation**
 
-Create `src/analytics/cityGmlModule.ts`:
+Create `src/insights/cityGmlModule.ts`:
 
 ```ts
 /**
@@ -2011,13 +2011,13 @@ export function groupTypesByModule(
 
 - [ ] **Step 4: Run the test**
 
-Run: `npx vitest run tests/unit/analytics/cityGmlModule.test.ts`
+Run: `npx vitest run tests/unit/insights/cityGmlModule.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/analytics/cityGmlModule.ts tests/unit/analytics/cityGmlModule.test.ts
+git add src/insights/cityGmlModule.ts tests/unit/insights/cityGmlModule.test.ts
 git commit -m "$(cat <<'EOF'
 feat(analytics): cityGmlModuleOf, the CityParquet object-table partition
 
@@ -2505,8 +2505,8 @@ EOF
 
 **Files:**
 
-- Create: `src/analytics/sql.ts`
-- Test: `tests/unit/analytics/sqlFilter.test.ts`
+- Create: `src/insights/sql.ts`
+- Test: `tests/unit/insights/sqlFilter.test.ts`
 
 **Interfaces:**
 
@@ -2529,7 +2529,7 @@ export function compileFilter(
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/unit/analytics/sqlFilter.test.ts`:
+Create `tests/unit/insights/sqlFilter.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -2538,8 +2538,8 @@ import {
   escapeLikeNeedle,
   quoteIdent,
   quoteLiteral,
-} from "../../../src/analytics/sql";
-import type { ColumnInfo } from "../../../src/analytics/columnKind";
+} from "../../../src/insights/sql";
+import type { ColumnInfo } from "../../../src/insights/columnKind";
 import type { FilterGroup } from "../../../src/features/query/types";
 
 const COLUMNS: ReadonlyArray<ColumnInfo> = [
@@ -2964,10 +2964,10 @@ describe("compileFilter", () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run tests/unit/analytics/sqlFilter.test.ts`
-Expected: FAIL — `src/analytics/sql` not found.
+Run: `npx vitest run tests/unit/insights/sqlFilter.test.ts`
+Expected: FAIL — `src/insights/sql` not found.
 
-- [ ] **Step 3: Write `src/analytics/sql.ts`**
+- [ ] **Step 3: Write `src/insights/sql.ts`**
 
 ```ts
 /**
@@ -2981,7 +2981,7 @@ Expected: FAIL — `src/analytics/sql` not found.
  * text input, so both are quoted here and nowhere else.
  *
  * No engine import — every builder returns a string the caller hands to
- * `runQuery`/`ddl` from `analytics/duckdb.ts`.
+ * `runQuery`/`ddl` from `insights/duckdb.ts`.
  */
 
 import { isTextColumn, type ColumnInfo } from "./columnKind";
@@ -3262,13 +3262,13 @@ export function compileFilter(
 
 - [ ] **Step 4: Run the test**
 
-Run: `npx vitest run tests/unit/analytics/sqlFilter.test.ts`
+Run: `npx vitest run tests/unit/insights/sqlFilter.test.ts`
 Expected: PASS — every quoting, operator and rejection case green.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/analytics/sql.ts tests/unit/analytics/sqlFilter.test.ts
+git add src/insights/sql.ts tests/unit/insights/sqlFilter.test.ts
 git commit -m "$(cat <<'EOF'
 feat(analytics): SQL quoting and compileFilter
 
@@ -3290,8 +3290,8 @@ EOF
 
 **Files:**
 
-- Modify: `src/analytics/sql.ts`
-- Test: `tests/unit/analytics/sqlQuery.test.ts`
+- Modify: `src/insights/sql.ts`
+- Test: `tests/unit/insights/sqlQuery.test.ts`
 
 **Interfaces:**
 
@@ -3325,7 +3325,7 @@ export function buildFeatureScopeWhere(
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/unit/analytics/sqlQuery.test.ts`:
+Create `tests/unit/insights/sqlQuery.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -3337,8 +3337,8 @@ import {
   buildRootTypesSql,
   gridColumns,
   projectColumn,
-} from "../../../src/analytics/sql";
-import type { ColumnInfo } from "../../../src/analytics/columnKind";
+} from "../../../src/insights/sql";
+import type { ColumnInfo } from "../../../src/insights/columnKind";
 
 const COLUMNS: ReadonlyArray<ColumnInfo> = [
   { name: "id", type: "VARCHAR", kind: "scalar" },
@@ -3555,10 +3555,10 @@ describe("buildRootTypesSql", () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run tests/unit/analytics/sqlQuery.test.ts`
+Run: `npx vitest run tests/unit/insights/sqlQuery.test.ts`
 Expected: FAIL — the builders are not exported.
 
-- [ ] **Step 3: Append the builders to `src/analytics/sql.ts`**
+- [ ] **Step 3: Append the builders to `src/insights/sql.ts`**
 
 ```ts
 // ---------------------------------------------------------------------------
@@ -3704,13 +3704,13 @@ export function buildRootTypesSql(table: string): string {
 
 - [ ] **Step 4: Run both SQL test files**
 
-Run: `npx vitest run tests/unit/analytics/sqlQuery.test.ts tests/unit/analytics/sqlFilter.test.ts`
+Run: `npx vitest run tests/unit/insights/sqlQuery.test.ts tests/unit/insights/sqlFilter.test.ts`
 Expected: PASS — both SQL suites green.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/analytics/sql.ts tests/unit/analytics/sqlQuery.test.ts
+git add src/insights/sql.ts tests/unit/insights/sqlQuery.test.ts
 git commit -m "$(cat <<'EOF'
 feat(analytics): page/count/feature-id/distinct SQL builders
 
@@ -3732,8 +3732,8 @@ EOF
 
 **Files:**
 
-- Modify: `src/analytics/sql.ts`
-- Test: `tests/unit/analytics/sqlExport.test.ts`
+- Modify: `src/insights/sql.ts`
+- Test: `tests/unit/insights/sqlExport.test.ts`
 
 **Interfaces:**
 
@@ -3798,7 +3798,7 @@ export const CITYPARQUET_SOURCE_TABLE: "src";
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/unit/analytics/sqlExport.test.ts`:
+Create `tests/unit/insights/sqlExport.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -3806,8 +3806,8 @@ import {
   buildAttributeExportSql,
   buildCityParquetModuleSql,
   buildCityParquetSourceSql,
-} from "../../../src/analytics/sql";
-import type { ColumnInfo } from "../../../src/analytics/columnKind";
+} from "../../../src/insights/sql";
+import type { ColumnInfo } from "../../../src/insights/columnKind";
 
 const COLUMNS: ReadonlyArray<ColumnInfo> = [
   { name: "id", type: "VARCHAR", kind: "scalar" },
@@ -4095,10 +4095,10 @@ describe("buildCityParquetModuleSql", () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run tests/unit/analytics/sqlExport.test.ts`
+Run: `npx vitest run tests/unit/insights/sqlExport.test.ts`
 Expected: FAIL — the three builders are not exported.
 
-- [ ] **Step 3: Append the export builders to `src/analytics/sql.ts`**
+- [ ] **Step 3: Append the export builders to `src/insights/sql.ts`**
 
 Append the following (no new import is needed — the caller supplies the LoD
 suffix, so `sql.ts` never has to spell one itself):
@@ -4312,7 +4312,7 @@ export function buildCityParquetModuleSql(input: {
 
 - [ ] **Step 4: Run the test**
 
-Run: `npx vitest run tests/unit/analytics/sqlExport.test.ts`
+Run: `npx vitest run tests/unit/insights/sqlExport.test.ts`
 Expected: PASS — both export builders green.
 
 - [ ] **Step 5: Type-check**
@@ -4323,7 +4323,7 @@ Expected: clean.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/analytics/sql.ts tests/unit/analytics/sqlExport.test.ts
+git add src/insights/sql.ts tests/unit/insights/sqlExport.test.ts
 git commit -m "$(cat <<'EOF'
 feat(analytics): export SQL — COPY for attributes, one source read per package
 
@@ -4348,8 +4348,8 @@ EOF
 
 **Files:**
 
-- Create: `src/analytics/layerRows.ts`
-- Test: `tests/unit/analytics/layerRows.test.ts`
+- Create: `src/insights/layerRows.ts`
+- Test: `tests/unit/insights/layerRows.test.ts`
 
 **Interfaces:**
 
@@ -4377,7 +4377,7 @@ export function encodeRowsAsJson(rows: ReadonlyArray<FlatRow>): Uint8Array;
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/unit/analytics/layerRows.test.ts`:
+Create `tests/unit/insights/layerRows.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -4385,7 +4385,7 @@ import {
   encodeRowsAsJson,
   flatRowsFromModel,
   flatRowsFromRecords,
-} from "../../../src/analytics/layerRows";
+} from "../../../src/insights/layerRows";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
 
@@ -4556,12 +4556,12 @@ describe("encodeRowsAsJson", () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run tests/unit/analytics/layerRows.test.ts`
+Run: `npx vitest run tests/unit/insights/layerRows.test.ts`
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Write the implementation**
 
-Create `src/analytics/layerRows.ts`:
+Create `src/insights/layerRows.ts`:
 
 ```ts
 /**
@@ -4694,13 +4694,13 @@ export function encodeRowsAsJson(rows: ReadonlyArray<FlatRow>): Uint8Array {
 
 - [ ] **Step 4: Run the test**
 
-Run: `npx vitest run tests/unit/analytics/layerRows.test.ts`
+Run: `npx vitest run tests/unit/insights/layerRows.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/analytics/layerRows.ts tests/unit/analytics/layerRows.test.ts
+git add src/insights/layerRows.ts tests/unit/insights/layerRows.test.ts
 git commit -m "$(cat <<'EOF'
 feat(analytics): flat-fallback rows aligned to the reader's column names
 
@@ -4721,8 +4721,8 @@ EOF
 
 **Files:**
 
-- Create: `src/analytics/layerTables.ts`
-- Test: `tests/unit/analytics/layerTablesBuild.test.ts`
+- Create: `src/insights/layerTables.ts`
+- Test: `tests/unit/insights/layerTablesBuild.test.ts`
 
 **Interfaces:**
 
@@ -4803,7 +4803,7 @@ export function resetLayerTablesForTest(): void;
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/unit/analytics/layerTablesBuild.test.ts`:
+Create `tests/unit/insights/layerTablesBuild.test.ts`:
 
 ```ts
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -4822,7 +4822,7 @@ let failures: Record<string, string> = {};
 let engineReady = true;
 let initGate: Promise<void> | null = null;
 
-vi.mock("../../../src/analytics/duckdb", () => {
+vi.mock("../../../src/insights/duckdb", () => {
   const run = async (statement: string) => {
     sql.push(statement);
     for (const [needle, message] of Object.entries(failures)) {
@@ -4879,7 +4879,7 @@ const {
   resetLayerTablesForTest,
   retryEngine,
   useLayerTableStore,
-} = await import("../../../src/analytics/layerTables");
+} = await import("../../../src/insights/layerTables");
 import type { CityModel } from "../../../src/domain/citymodel/types";
 
 const READER_DESCRIBE = [
@@ -5203,10 +5203,10 @@ describe("flat-fallback layer table", () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run tests/unit/analytics/layerTablesBuild.test.ts`
-Expected: FAIL — `src/analytics/layerTables` not found.
+Run: `npx vitest run tests/unit/insights/layerTablesBuild.test.ts`
+Expected: FAIL — `src/insights/layerTables` not found.
 
-- [ ] **Step 3: Write `src/analytics/layerTables.ts`**
+- [ ] **Step 3: Write `src/insights/layerTables.ts`**
 
 ```ts
 /**
@@ -5771,13 +5771,13 @@ export function enqueueLayerTable(
 
 - [ ] **Step 4: Run the test**
 
-Run: `npx vitest run tests/unit/analytics/layerTablesBuild.test.ts`
+Run: `npx vitest run tests/unit/insights/layerTablesBuild.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/analytics/layerTables.ts tests/unit/analytics/layerTablesBuild.test.ts
+git add src/insights/layerTables.ts tests/unit/insights/layerTablesBuild.test.ts
 git commit -m "$(cat <<'EOF'
 feat(analytics): one DuckDB table per city layer
 
@@ -5801,8 +5801,8 @@ EOF
 
 **Files:**
 
-- Modify: `src/analytics/layerTables.ts`
-- Test: `tests/unit/analytics/layerTablesQueue.test.ts`
+- Modify: `src/insights/layerTables.ts`
+- Test: `tests/unit/insights/layerTablesQueue.test.ts`
 
 **Interfaces:**
 
@@ -5815,7 +5815,7 @@ export function dropLayerTable(layerId: string): Promise<void>;
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/unit/analytics/layerTablesQueue.test.ts`:
+Create `tests/unit/insights/layerTablesQueue.test.ts`:
 
 ```ts
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -5852,7 +5852,7 @@ async function flushMicrotasks(): Promise<void> {
   for (let i = 0; i < 5; i++) await Promise.resolve();
 }
 
-vi.mock("../../../src/analytics/duckdb", () => {
+vi.mock("../../../src/insights/duckdb", () => {
   const run = async (statement: string) => {
     sql.push(statement);
     if (statement.startsWith("CREATE OR REPLACE TABLE")) {
@@ -5913,7 +5913,7 @@ const {
   resetLayerTablesForTest,
   retryEngine,
   useLayerTableStore,
-} = await import("../../../src/analytics/layerTables");
+} = await import("../../../src/insights/layerTables");
 
 const RESIDENT = { kind: "resident" as const, records: () => [] };
 const ONE_ROW = {
@@ -6148,12 +6148,12 @@ describe("rebuild", () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run tests/unit/analytics/layerTablesQueue.test.ts`
+Run: `npx vitest run tests/unit/insights/layerTablesQueue.test.ts`
 Expected: FAIL — `dropLayerTable` is not exported, and the rebuild does not drop the previous table.
 
 - [ ] **Step 3: Add the drop, and make a rebuild retire its predecessor**
 
-In `src/analytics/layerTables.ts`, add after `enqueueLayerTable`. The `retire`
+In `src/insights/layerTables.ts`, add after `enqueueLayerTable`. The `retire`
 helper it uses already exists — Task 13 defines it, because the rebuild path
 calls it too:
 
@@ -6206,13 +6206,13 @@ previous entry rather than deleting it.
 
 - [ ] **Step 4: Run both layerTables test files**
 
-Run: `npx vitest run tests/unit/analytics/layerTablesBuild.test.ts tests/unit/analytics/layerTablesQueue.test.ts`
+Run: `npx vitest run tests/unit/insights/layerTablesBuild.test.ts tests/unit/insights/layerTablesQueue.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/analytics/layerTables.ts tests/unit/analytics/layerTablesQueue.test.ts
+git add src/insights/layerTables.ts tests/unit/insights/layerTablesQueue.test.ts
 git commit -m "$(cat <<'EOF'
 feat(analytics): layer-table drops and rebuilds share the build queue
 
@@ -6802,7 +6802,7 @@ const enqueued: Array<{ layerId: string; source: unknown }> = [];
 /** Set to make the next enqueue REJECT — the "a DuckDB failure must not fail a
  *  layer add" case needs a rejection, not a resolved false. */
 let enqueueRejects = false;
-vi.mock("../../../../src/analytics/layerTables", () => ({
+vi.mock("../../../../src/insights/layerTables", () => ({
   enqueueLayerTable: vi.fn(async (layerId: string, source: unknown) => {
     enqueued.push({ layerId, source });
     if (enqueueRejects) throw new Error("DuckDB is not running");
@@ -6990,7 +6990,7 @@ import {
   enqueueLayerTable,
   type LayerTableSource,
   type SourceProvider,
-} from "../../analytics/layerTables";
+} from "../../insights/layerTables";
 import type { Rule } from "../rules/types";
 import { useLayerStore } from "./layerStore";
 
@@ -7313,7 +7313,7 @@ npx vitest run tests/unit/features/layers tests/unit/app
 npx tsc -b --noEmit
 ```
 
-Expected: PASS and clean. (The App tests mock `analytics/duckdb`, not `analytics/layerTables`; the real `enqueueLayerTable` runs against the mocked engine and records a failed table, which nothing in those tests asserts on.)
+Expected: PASS and clean. (The App tests mock `insights/duckdb`, not `insights/layerTables`; the real `enqueueLayerTable` runs against the mocked engine and records a failed table, which nothing in those tests asserts on.)
 
 - [ ] **Step 7: Commit**
 
@@ -7342,9 +7342,9 @@ EOF
 **Files:**
 
 - Create: `src/features/layers/layerTableLifecycle.ts`
-- Modify: `src/analytics/layerTables.ts` (`retryEngine`'s re-parking, Step 5)
+- Modify: `src/insights/layerTables.ts` (`retryEngine`'s re-parking, Step 5)
 - Test: `tests/unit/features/layers/layerTableLifecycle.test.ts`
-- Test: `tests/unit/analytics/layerTablesBuild.test.ts` (the re-park cases)
+- Test: `tests/unit/insights/layerTablesBuild.test.ts` (the re-park cases)
 
 **Interfaces:**
 
@@ -7373,10 +7373,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const enqueued: string[] = [];
 const dropped: string[] = [];
-vi.mock("../../../../src/analytics/layerTables", async (importOriginal) => {
+vi.mock("../../../../src/insights/layerTables", async (importOriginal) => {
   const actual =
     await importOriginal<
-      typeof import("../../../../src/analytics/layerTables")
+      typeof import("../../../../src/insights/layerTables")
     >();
   return {
     ...actual,
@@ -7399,7 +7399,7 @@ const { useLayerStore } =
 const { useStreamStore } =
   await import("../../../../src/features/streaming/streamStore");
 const { useLayerTableStore } =
-  await import("../../../../src/analytics/layerTables");
+  await import("../../../../src/insights/layerTables");
 const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
 import type { Layer } from "../../../../src/features/layers/layerStore";
@@ -7582,7 +7582,7 @@ import {
   enqueueLayerTable,
   useLayerTableStore,
   type LayerTableSource,
-} from "../../analytics/layerTables";
+} from "../../insights/layerTables";
 import { useLayerStore } from "./layerStore";
 
 /**
@@ -7717,7 +7717,7 @@ Expected: PASS.
 
 - [ ] **Step 5: Make `retryEngine` RE-PARK a source it could not build**
 
-This step edits `src/analytics/layerTables.ts` (Task 13's module) because that
+This step edits `src/insights/layerTables.ts` (Task 13's module) because that
 is where the parking lives — but it belongs to the RETRY PATH, which is what
 this task wires up.
 
@@ -7781,7 +7781,7 @@ than a layer that can never have a table again.
 - [ ] **Step 6: Write the tests for it**
 
 Add `dropLayerTable` to the destructured import in
-`tests/unit/analytics/layerTablesBuild.test.ts`, then append inside its
+`tests/unit/insights/layerTablesBuild.test.ts`, then append inside its
 `describe("waiting for the engine")` block:
 
 ```ts
@@ -7838,7 +7838,7 @@ it("does NOT re-park a source whose layer was removed mid-retry", async () => {
 - [ ] **Step 7: Run both suites**
 
 ```bash
-npx vitest run tests/unit/analytics/layerTablesBuild.test.ts tests/unit/features/layers/layerTableLifecycle.test.ts
+npx vitest run tests/unit/insights/layerTablesBuild.test.ts tests/unit/features/layers/layerTableLifecycle.test.ts
 ```
 
 Expected: PASS.
@@ -7846,7 +7846,7 @@ Expected: PASS.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/analytics/layerTables.ts src/features/layers/layerTableLifecycle.ts tests/unit/analytics/layerTablesBuild.test.ts tests/unit/features/layers/layerTableLifecycle.test.ts
+git add src/insights/layerTables.ts src/features/layers/layerTableLifecycle.ts tests/unit/insights/layerTablesBuild.test.ts tests/unit/features/layers/layerTableLifecycle.test.ts
 git commit -m "$(cat <<'EOF'
 feat(layers): subscribe the table registry to the layer and stream stores
 
@@ -7870,7 +7870,7 @@ EOF
 **Files:**
 
 - Modify: `src/app/App.tsx`
-- Modify: `src/analytics/duckdb.ts`
+- Modify: `src/insights/duckdb.ts`
 - Modify: `src/ui/table/TablePanel.tsx` (prop removal only)
 - Modify: `src/ui/inspector/InspectorPanel.tsx`, `src/ui/inspector/StatsTab.tsx` (prop removal only)
 - Modify: `tests/unit/app/appCityParquetLayers.test.tsx`
@@ -7887,9 +7887,9 @@ In `tests/unit/app/appCityParquetLayers.test.tsx`, add this mock beside the exis
 ```ts
 /** What the app asked DuckDB to build a table from, per layer. */
 const enqueued: Array<{ layerId: string; kind: string }> = [];
-vi.mock("../../../src/analytics/layerTables", async (importOriginal) => {
+vi.mock("../../../src/insights/layerTables", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../../src/analytics/layerTables")>();
+    await importOriginal<typeof import("../../../src/insights/layerTables")>();
   return {
     ...actual,
     enqueueLayerTable: vi.fn(
@@ -7941,7 +7941,7 @@ Expected: FAIL — nothing enqueues yet from the share path (Task 16 wired it, s
 
 - Delete the whole `// Load active layer's model into DuckDB …` effect (the one whose dependency array is `[duckdbStatus, activeLayerId, layers, activeStreamVersion]`).
 - Delete the `duckdbModelLoaded` and `duckdbTableLoaded` state declarations and every `setDuckdbModelLoaded` / `setDuckdbTableLoaded` call (including the two inside `handleClose`).
-- Delete the now-unused imports `loadModelIntoDuckDB`, `loadCityModelFromMemory`, `loadResidentObjectsIntoDuckDB`, `shouldUseSourceUrlPath`, and `getResidentModel` if nothing else in the file uses it (grep first — `useTotalObjectCount` is separate). Add `retryEngine` from `../analytics/layerTables`; `initDuckDB` is no longer imported directly by `App.tsx`.
+- Delete the now-unused imports `loadModelIntoDuckDB`, `loadCityModelFromMemory`, `loadResidentObjectsIntoDuckDB`, `shouldUseSourceUrlPath`, and `getResidentModel` if nothing else in the file uses it (grep first — `useTotalObjectCount` is separate). Add `retryEngine` from `../insights/layerTables`; `initDuckDB` is no longer imported directly by `App.tsx`.
 - Delete the `activeStreamVersion` selector if nothing else reads it (grep: it is also unused once the effect goes).
 - Replace `<TablePanel duckdbTableLoaded={duckdbTableLoaded} … />` with `<TablePanel … />` (props: `onCollapse`, `onHeightChange`).
 - Replace `<InspectorPanel … duckdbModelLoaded={duckdbModelLoaded} />` with the same element minus that prop.
@@ -7977,12 +7977,12 @@ useEffect(() => {
 }, [tableOpen]);
 ```
 
-- [ ] **Step 4: Delete the four dead functions from `src/analytics/duckdb.ts`**
+- [ ] **Step 4: Delete the four dead functions from `src/insights/duckdb.ts`**
 
 Delete `shouldUseSourceUrlPath`, `loadModelIntoDuckDB`, the whole `In-memory loading` section (`RESERVED_COLS`, `registerCityObjectRows`, `attributeRow`, `loadCityModelFromMemory`, `loadResidentObjectsIntoDuckDB`) and the now-unused imports `CityModel`, `CityModelReference`, `UrlModelRef`, `ResidentObjectRecord`. Update the module doc comment's last paragraph to:
 
 ```
- * Per-layer tables live in `analytics/layerTables.ts`, which reaches the
+ * Per-layer tables live in `insights/layerTables.ts`, which reaches the
  * engine only through the functions exported here — this module is the ONLY
  * importer of `@duckdb/duckdb-wasm` in the app.
 ```
@@ -8014,7 +8014,7 @@ plus the `DuckDBStatus` type import:
  * boundary stays a component boundary.
  */
 
-import type { DuckDBStatus } from "../analytics/duckdb";
+import type { DuckDBStatus } from "../insights/duckdb";
 ```
 
 Then, in `StatusBar.tsx`, delete the three functions and import them:
@@ -8050,7 +8050,7 @@ Expected: PASS, clean, and no `only-export-components` warning for
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/app/App.tsx src/analytics/duckdb.ts src/ui tests/unit/app/appCityParquetLayers.test.tsx tests/unit/ui/StatusBarDuckdb.test.tsx
+git add src/app/App.tsx src/insights/duckdb.ts src/ui tests/unit/app/appCityParquetLayers.test.tsx tests/unit/ui/StatusBarDuckdb.test.tsx
 git commit -m "$(cat <<'EOF'
 refactor: delete the single global city_objects table and its loaders
 
@@ -8090,7 +8090,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
 const runQuery = vi.fn();
-vi.mock("../../../../src/analytics/duckdb", () => ({
+vi.mock("../../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
   isExtensionLoaded: vi.fn(() => false),
@@ -8107,7 +8107,7 @@ vi.mock("../../../../src/analytics/duckdb", () => ({
 
 const { StatsTab } = await import("../../../../src/ui/inspector/StatsTab");
 const { useLayerTableStore } = await import(
-  "../../../../src/analytics/layerTables"
+  "../../../../src/insights/layerTables"
 );
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 
@@ -8206,9 +8206,9 @@ Expected: FAIL — `StatsTab` has no `layerId` prop and still queries `city_obje
 Replace the imports of `queryDuckDB` / `QueryResult` with:
 
 ```ts
-import { runQuery } from "../../analytics/duckdb";
-import { useLayerTableStore } from "../../analytics/layerTables";
-import { quoteIdent } from "../../analytics/sql";
+import { runQuery } from "../../insights/duckdb";
+import { useLayerTableStore } from "../../insights/layerTables";
+import { quoteIdent } from "../../insights/sql";
 ```
 
 Replace `StatsTabProps` and the DuckDB effect with:
@@ -8401,7 +8401,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 
 const runQuery = vi.fn();
-vi.mock("../../../../src/analytics/duckdb", () => ({
+vi.mock("../../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
   isExtensionLoaded: vi.fn(() => false),
@@ -8420,7 +8420,7 @@ vi.mock("../../../../src/analytics/duckdb", () => ({
 const { useLayerQuery } =
   await import("../../../../src/ui/table/useLayerQuery");
 const { useLayerTableStore } =
-  await import("../../../../src/analytics/layerTables");
+  await import("../../../../src/insights/layerTables");
 const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
 
@@ -8649,18 +8649,18 @@ Expected: FAIL — module not found.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { runQuery } from "../../analytics/duckdb";
-import type { ColumnInfo } from "../../analytics/columnKind";
+import { runQuery } from "../../insights/duckdb";
+import type { ColumnInfo } from "../../insights/columnKind";
 import {
   useLayerTableStore,
   type LayerTable,
-} from "../../analytics/layerTables";
+} from "../../insights/layerTables";
 import {
   buildCountSql,
   buildPageSql,
   compileFilter,
   gridColumns,
-} from "../../analytics/sql";
+} from "../../insights/sql";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 
 export interface LayerQueryView {
@@ -8915,7 +8915,7 @@ Create `tests/unit/ui/table/FilterBar.test.tsx`:
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { FilterBar, operatorsFor } from "../../../../src/ui/table/FilterBar";
-import type { ColumnInfo } from "../../../../src/analytics/columnKind";
+import type { ColumnInfo } from "../../../../src/insights/columnKind";
 import type { FilterGroup } from "../../../../src/features/query/types";
 
 const COLUMNS: ReadonlyArray<ColumnInfo> = [
@@ -9139,7 +9139,7 @@ Expected: FAIL — module not found.
  */
 
 import { useCallback } from "react";
-import { isTextColumn, type ColumnInfo } from "../../analytics/columnKind";
+import { isTextColumn, type ColumnInfo } from "../../insights/columnKind";
 import {
   isNullaryOp,
   type FilterCondition,
@@ -9210,7 +9210,7 @@ function valueText(value: FilterCondition["value"]): string {
  * point is deleted the instant it is typed and no fractional threshold can
  * ever be entered; `Number("-")` is NaN, so a negative number cannot be
  * started either. The column's type decides what the string MEANS at compile
- * time (`literalFor` in `analytics/sql.ts`), where nothing is being retyped
+ * time (`literalFor` in `insights/sql.ts`), where nothing is being retyped
  * and a bad value can be refused with a sentence.
  *
  * "is one of" is the exception: a list is not something a single string can
@@ -9514,7 +9514,7 @@ Create `tests/unit/ui/table/DataGrid.test.tsx`:
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { DataGrid, formatCell } from "../../../../src/ui/table/DataGrid";
-import type { ColumnInfo } from "../../../../src/analytics/columnKind";
+import type { ColumnInfo } from "../../../../src/insights/columnKind";
 
 const COLUMNS: ReadonlyArray<ColumnInfo> = [
   { name: "id", type: "VARCHAR", kind: "scalar" },
@@ -9766,7 +9766,7 @@ Expected: FAIL — modules not found.
  */
 
 import { memo } from "react";
-import type { ColumnInfo } from "../../analytics/columnKind";
+import type { ColumnInfo } from "../../insights/columnKind";
 
 /**
  * A cell as text.
@@ -10121,7 +10121,7 @@ import {
 } from "@testing-library/react";
 
 const runQuery = vi.fn();
-vi.mock("../../../../src/analytics/duckdb", () => ({
+vi.mock("../../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
   isExtensionLoaded: vi.fn(() => false),
@@ -10141,14 +10141,14 @@ const { TablePanel } = await import("../../../../src/ui/table/TablePanel");
 const { useLayerStore } =
   await import("../../../../src/features/layers/layerStore");
 const { useLayerTableStore } =
-  await import("../../../../src/analytics/layerTables");
+  await import("../../../../src/insights/layerTables");
 const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
 const { useSelectionStore } =
   await import("../../../../src/features/selection/selectionStore");
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
-import type { DuckDBStatus } from "../../../../src/analytics/duckdb";
+import type { DuckDBStatus } from "../../../../src/insights/duckdb";
 
 const READY_STATUS: DuckDBStatus = {
   state: "ready",
@@ -10445,8 +10445,8 @@ Expected: FAIL — `TablePanel` still takes `duckdbTableLoaded` and renders the 
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { DuckDBStatus } from "../../analytics/duckdb";
-import { useLayerTableStore } from "../../analytics/layerTables";
+import type { DuckDBStatus } from "../../insights/duckdb";
+import { useLayerTableStore } from "../../insights/layerTables";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 import { useSelectionStore } from "../../features/selection/selectionStore";
@@ -10840,7 +10840,7 @@ const handleRetryDuckDB = useCallback(() => {
 }, []);
 ```
 
-and import `DEFAULT_TABLE_HEIGHT` alongside `TablePanel`, plus `retryEngine` from `../analytics/layerTables`. Delete the `useLayerTableStore.getState().setTablePanelOpen(tableOpen)` effect added in Task 18 — the panel owns that now, and two writers of one flag is one too many.
+and import `DEFAULT_TABLE_HEIGHT` alongside `TablePanel`, plus `retryEngine` from `../insights/layerTables`. Delete the `useLayerTableStore.getState().setTablePanelOpen(tableOpen)` effect added in Task 18 — the panel owns that now, and two writers of one flag is one too many.
 
 - [ ] **Step 5: Add the CSS**
 
@@ -12085,7 +12085,7 @@ Create `tests/unit/features/query/mapFilterSync.test.ts`:
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const runQuery = vi.fn();
-vi.mock("../../../../src/analytics/duckdb", () => ({
+vi.mock("../../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
   isExtensionLoaded: vi.fn(() => false),
@@ -12104,7 +12104,7 @@ vi.mock("../../../../src/analytics/duckdb", () => ({
 const { syncFilterToMap } =
   await import("../../../../src/features/query/mapFilterSync");
 const { useLayerTableStore } =
-  await import("../../../../src/analytics/layerTables");
+  await import("../../../../src/insights/layerTables");
 const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
 const { useLayerStore } =
@@ -12321,9 +12321,9 @@ Expected: FAIL — module not found.
  * filter, because it looks like a filter that is working.
  */
 
-import { runQuery } from "../../analytics/duckdb";
-import { getLayerTable } from "../../analytics/layerTables";
-import { buildFeatureIdsSql, compileFilter } from "../../analytics/sql";
+import { runQuery } from "../../insights/duckdb";
+import { getLayerTable } from "../../insights/layerTables";
+import { buildFeatureIdsSql, compileFilter } from "../../insights/sql";
 import { useLayerStore } from "../layers/layerStore";
 import { layerQuery, useQueryStore } from "./queryStore";
 
@@ -12728,12 +12728,12 @@ EOF
 
 ---
 
-## Task 29: `analytics/export.ts` — the attribute formats
+## Task 29: `insights/export.ts` — the attribute formats
 
 **Files:**
 
-- Create: `src/analytics/export.ts`
-- Test: `tests/unit/analytics/exportAttributes.test.ts`
+- Create: `src/insights/export.ts`
+- Test: `tests/unit/insights/exportAttributes.test.ts`
 
 **Interfaces:**
 
@@ -12791,7 +12791,7 @@ export function runExport(request: ExportRequest): Promise<ExportResult>;
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/unit/analytics/exportAttributes.test.ts`:
+Create `tests/unit/insights/exportAttributes.test.ts`:
 
 ```ts
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -12815,7 +12815,7 @@ function sampleBytes(name: string): Uint8Array {
   );
 }
 
-vi.mock("../../../src/analytics/duckdb", () => ({
+vi.mock("../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
   isExtensionLoaded: vi.fn(() => true),
@@ -12844,8 +12844,8 @@ vi.mock("../../../src/analytics/duckdb", () => ({
 }));
 
 const { resetExportCounterForTests, runExport, validateExportBytes } =
-  await import("../../../src/analytics/export");
-import type { ColumnInfo } from "../../../src/analytics/columnKind";
+  await import("../../../src/insights/export");
+import type { ColumnInfo } from "../../../src/insights/columnKind";
 
 const COLUMNS: ReadonlyArray<ColumnInfo> = [
   { name: "id", type: "VARCHAR", kind: "scalar" },
@@ -13113,10 +13113,10 @@ describe("attribute export", () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run tests/unit/analytics/exportAttributes.test.ts`
+Run: `npx vitest run tests/unit/insights/exportAttributes.test.ts`
 Expected: FAIL — module not found.
 
-- [ ] **Step 3: Write `src/analytics/export.ts` (attribute half)**
+- [ ] **Step 3: Write `src/insights/export.ts` (attribute half)**
 
 ```ts
 /**
@@ -13319,13 +13319,13 @@ export async function runExport(request: ExportRequest): Promise<ExportResult> {
 
 - [ ] **Step 4: Run the test**
 
-Run: `npx vitest run tests/unit/analytics/exportAttributes.test.ts`
+Run: `npx vitest run tests/unit/insights/exportAttributes.test.ts`
 Expected: PASS — `validateExportBytes` and the attribute-export cases.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/analytics/export.ts tests/unit/analytics/exportAttributes.test.ts
+git add src/insights/export.ts tests/unit/insights/exportAttributes.test.ts
 git commit -m "$(cat <<'EOF'
 feat(analytics): Parquet/CSV/JSON export through DuckDB's own writers
 
@@ -13343,12 +13343,12 @@ EOF
 
 ---
 
-## Task 30: `analytics/export.ts` — the CityParquet package
+## Task 30: `insights/export.ts` — the CityParquet package
 
 **Files:**
 
-- Modify: `src/analytics/export.ts`
-- Test: `tests/unit/analytics/exportCityParquet.test.ts`
+- Modify: `src/insights/export.ts`
+- Test: `tests/unit/insights/exportCityParquet.test.ts`
 
 **Interfaces:**
 
@@ -13377,7 +13377,7 @@ export type ExportRequest = AttributeExportRequest | CityParquetExportRequest;
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/unit/analytics/exportCityParquet.test.ts`:
+Create `tests/unit/insights/exportCityParquet.test.ts`:
 
 ```ts
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -13402,7 +13402,7 @@ function sampleBytes(path: string): Uint8Array {
     : new TextEncoder().encode('{"type":"Feature","id":"exp"}');
 }
 
-vi.mock("../../../src/analytics/duckdb", () => {
+vi.mock("../../../src/insights/duckdb", () => {
   const run = async (statement: string) => {
     sql.push(statement);
     if (failOn !== null && statement.includes(failOn)) {
@@ -13455,7 +13455,7 @@ vi.mock("../../../src/analytics/duckdb", () => {
 });
 
 const { resetExportCounterForTests, runExport } =
-  await import("../../../src/analytics/export");
+  await import("../../../src/insights/export");
 
 function request(over: Record<string, unknown> = {}) {
   return {
@@ -13734,10 +13734,10 @@ describe("CityParquet package export", () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run tests/unit/analytics/exportCityParquet.test.ts`
+Run: `npx vitest run tests/unit/insights/exportCityParquet.test.ts`
 Expected: FAIL — `runExport` rejects an unknown `kind`.
 
-- [ ] **Step 3: Append the CityParquet route to `src/analytics/export.ts`**
+- [ ] **Step 3: Append the CityParquet route to `src/insights/export.ts`**
 
 EXTEND the file's existing import block (do not add a second import from the
 same module — `./duckdb` and `./sql` are already imported by Task 29's half):
@@ -13877,7 +13877,7 @@ async function dropWrittenFile(path: string): Promise<void> {
  * modules, the source has to be read again through the cityjson reader because
  * the browsing table has no geometry, and the write's own RESULT ROWS name the
  * files it produced. That is the ONLY discovery mechanism: DuckDB's `glob()`
- * lists names that were never created, and `analytics/duckdb.ts` exports no
+ * lists names that were never created, and `insights/duckdb.ts` exports no
  * glob helper at all — the browser smoke reaches it as SQL, purely to confirm
  * that cleanup left nothing behind.
  *
@@ -14015,13 +14015,13 @@ export async function runExport(request: ExportRequest): Promise<ExportResult> {
 
 - [ ] **Step 4: Run both export test files**
 
-Run: `npx vitest run tests/unit/analytics/exportAttributes.test.ts tests/unit/analytics/exportCityParquet.test.ts`
+Run: `npx vitest run tests/unit/insights/exportAttributes.test.ts tests/unit/insights/exportCityParquet.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/analytics/export.ts tests/unit/analytics/exportCityParquet.test.ts
+git add src/insights/export.ts tests/unit/insights/exportCityParquet.test.ts
 git commit -m "$(cat <<'EOF'
 feat(analytics): CityParquet package export, zipped with fflate
 
@@ -14099,7 +14099,7 @@ import {
 } from "@testing-library/react";
 
 const runQuery = vi.fn();
-vi.mock("../../../../src/analytics/duckdb", () => ({
+vi.mock("../../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
   isExtensionLoaded: vi.fn(() => false),
@@ -14116,7 +14116,7 @@ vi.mock("../../../../src/analytics/duckdb", () => ({
 }));
 
 const runExport = vi.fn();
-vi.mock("../../../../src/analytics/export", () => ({
+vi.mock("../../../../src/insights/export", () => ({
   runExport: (request: unknown) => runExport(request),
 }));
 
@@ -14142,7 +14142,7 @@ const { ExportDialog, exportFileName } =
 const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
 const { useLayerTableStore } =
-  await import("../../../../src/analytics/layerTables");
+  await import("../../../../src/insights/layerTables");
 
 const READER_TABLE = {
   table: "layer_1",
@@ -14686,15 +14686,15 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { runQuery } from "../../analytics/duckdb";
-import type { LodColumn } from "../../analytics/columnKind";
+import { runQuery } from "../../insights/duckdb";
+import type { LodColumn } from "../../insights/columnKind";
 import {
   useLayerTableStore,
   type LayerTable,
-} from "../../analytics/layerTables";
-import { runExport, type ExportRequest } from "../../analytics/export";
-import { buildRootTypesSql, compileFilter } from "../../analytics/sql";
-import { FLAT_PREFIX_COLUMNS } from "../../analytics/layerRows";
+} from "../../insights/layerTables";
+import { runExport, type ExportRequest } from "../../insights/export";
+import { buildRootTypesSql, compileFilter } from "../../insights/sql";
+import { FLAT_PREFIX_COLUMNS } from "../../insights/layerRows";
 import { refreshStreamingTable } from "../../features/layers/layerTableLifecycle";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 import { downloadBlob } from "../../platform/download";
@@ -15557,7 +15557,7 @@ whole package in memory for the rest of the session.
 ```bash
 agent-browser eval '
 (async () => {
-  const m = await import("/src/analytics/duckdb.ts");
+  const m = await import("/src/insights/duckdb.ts");
   const r = await m.runQuery("SELECT file FROM glob(\x27exp_*\x27)");
   return JSON.stringify(r);
 })()
@@ -15732,7 +15732,7 @@ import {
   classifyColumnType,
   isDroppedColumn,
   lodsFromColumnNames,
-} from "../../../src/analytics/columnKind";
+} from "../../../src/insights/columnKind";
 import {
   buildCountSql,
   buildFeatureIdsSql,
@@ -15740,8 +15740,8 @@ import {
   buildRootTypesSql,
   compileFilter,
   quoteIdent,
-} from "../../../src/analytics/sql";
-import type { ColumnInfo } from "../../../src/analytics/columnKind";
+} from "../../../src/insights/sql";
+import type { ColumnInfo } from "../../../src/insights/columnKind";
 
 const enabled = process.env.DUCKDB_INTEGRATION === "1";
 const suite = enabled ? describe : describe.skip;
@@ -16088,7 +16088,7 @@ they belong where someone reads before touching the code, not in a record they
 read afterwards:
 
 ```
-- `src/analytics/duckdb.ts` is the ONLY module under `src/` that may import `@duckdb/duckdb-wasm`. Everything else — `layerTables`, `export`, `sql`, every UI module — takes the engine through its exported functions, which is what makes them mockable.
+- `src/insights/duckdb.ts` is the ONLY module under `src/` that may import `@duckdb/duckdb-wasm`. Everything else — `layerTables`, `export`, `sql`, every UI module — takes the engine through its exported functions, which is what makes them mockable.
 - `@duckdb/duckdb-wasm` is pinned EXACTLY, never a range and never `latest`: npm `latest` (dev57 / DuckDB 1.5.4) serves a stale 4-function `cityjson` and a `three_d` that breaks `LOAD spatial`, both silently.
 - ONE writer of the DuckDB status: `App` owns the `duckdbStatus` state, and `duckdb.ts` owns the value. Nothing else calls `setDuckdbStatus`, and nothing reads `getDuckDBStatus()` into a second copy.
 - `retryEngine()` is the door to the engine on boot and on Retry — not `initDuckDB()`. It awaits the same memoised boot AND rebuilds the tables that were refused while the engine was still coming up; calling `initDuckDB` directly leaves those layers permanently table-less.
@@ -16098,7 +16098,7 @@ read afterwards:
 existing ones and in their voice. The whole DuckDB design goes here:
 
 ```
-- **Every city layer gets its OWN DuckDB table, built from bytes, and the source is dropped.** `analytics/layerTables.ts` owns a registry plus ONE async FIFO queue: `addCityLayer` (the single door every static add goes through — a dropped file, a picked folder, a URL, a restore, a share link, a re-link) enqueues a build, and `layerTableLifecycle.ts` diffs the layer store to drop tables and to enqueue a STREAMING layer's (whose rows arrive cell by cell, so it rebuilds on commits, debounced 500 ms, only while the table panel is open; the export dialog forces one rebuild when it opens). The single global `city_objects` table is gone, and with it `shouldUseSourceUrlPath`/`loadModelIntoDuckDB`/`loadCityModelFromMemory`/`loadResidentObjectsIntoDuckDB` — one shared table meant a second layer silently replaced the first one's analytics. A build AWAITS `initDuckDB()` before touching DuckDB and parks its source if the engine is not up (the boot is ~5 s and a restored snapshot lands inside it); `retryEngine()` rebuilds the parked ones. A reader-backed layer hands DuckDB the DECODED BYTES the loader already holds (`loadFromUrl` returns `{model, bytes, encoding}`), never a URL: `read_cityjson` over http is unexercised in wasm and CORS-dependent, and registering bytes means a URL layer is never downloaded twice — `registerBuffer` CONSUMES its array (the worker transfer detaches it), so a re-registration goes through the entry's `SourceProvider`. The build drops `geometry_*`/`geometry_properties_*`/`material_*`/`texture_*`/`template` (53 of 70 columns on Delft, 2.45x less table memory) and then drops the source buffer — probed: a materialised table survives `dropFile`, while the DROPPED NAME resolves to ZERO BYTES forever and fails with a misleading JSON parse error, so VFS names come from a module counter and are NEVER reused. LoDs are DERIVED from the reader's own column names (`{label, suffix}`) and a suffix is never rebuilt from a label: 3D BAG spells LoD 0 `geometry_lod0_0`. CityGML, its ZIP, CityParquet and streaming residents take the FLAT FALLBACK: rows built app-side and loaded through `read_json_auto`, with the column names ALIGNED to the reader's (`id, feature_id, object_type, parents, children`, `parents`/`children` NULL rather than `[]`, `feature_id` from `domain/citymodel/featureId.ts`, and an `ALTER COLUMN … TYPE VARCHAR[]` afterwards because an all-NULL list column infers as JSON) so `parents IS NULL` is the feature-root test on every layer. **Every SQL string is a pure function** in `analytics/sql.ts`, unit-tested against exact strings; `compileFilter` refuses an unknown column, an impossible operator, an empty needle or a non-numeric value BEFORE the query is sent, and `ORDER BY` is table-qualified so a `castText` column sorts on the base column rather than its `::VARCHAR` alias. The map filter (`Layer.visibleObjectIds`, pushed by `handleSync` to the plugin's `setVisibleObjectIds`) expands matches to whole FEATURES — a Building carries the attributes, its BuildingPart the geometry — with `COALESCE("feature_id","id")` on both sides of a POSITIVE `IN`, because one NULL `feature_id` makes a `NOT IN` predicate NULL and hides nothing; `null` means no filter and an EMPTY set means "nothing matched, draw nothing". Streaming layers cannot be map-filtered yet (the id set would have to travel to the FCB worker). Export goes through DuckDB's own writers — `COPY TO parquet|csv|json` (with `ARRAY true` for JSON, and no `::VARCHAR` cast: that one is the grid's), and for a package one read of the source into a scratch schema, a CTAS per CityGML module, `cityparquet_init` as its own statement, then `cityparquet_write` zipped with `fflate` — and **never** `FORMAT cityjson|cityjsonseq|flatcitybuf`, whose sinks bypass DuckDB's VFS entirely (no file is created at all; the same extension writes fine through `cityparquet_write`, which is the upstream pointer). Those three are shown DISABLED in the dialog so the capability is discoverable. **Every read-back is validated BY CONTENT** — `PAR1` magic, `JSON.parse`, a newline-terminated CSV header — because a MISSING VFS name reads back as ONE GARBAGE BYTE with no error at all, while a genuinely empty file reads 0; DuckDB's `glob()` lists names that were never created, so it is fit only for a cleanup check and never for discovery, and the write's own result rows are what name the output. Filter, sort, page, sync-to-map and `visibleObjectIds` are SESSION state: snapshot schema stays v3.
+- **Every city layer gets its OWN DuckDB table, built from bytes, and the source is dropped.** `insights/layerTables.ts` owns a registry plus ONE async FIFO queue: `addCityLayer` (the single door every static add goes through — a dropped file, a picked folder, a URL, a restore, a share link, a re-link) enqueues a build, and `layerTableLifecycle.ts` diffs the layer store to drop tables and to enqueue a STREAMING layer's (whose rows arrive cell by cell, so it rebuilds on commits, debounced 500 ms, only while the table panel is open; the export dialog forces one rebuild when it opens). The single global `city_objects` table is gone, and with it `shouldUseSourceUrlPath`/`loadModelIntoDuckDB`/`loadCityModelFromMemory`/`loadResidentObjectsIntoDuckDB` — one shared table meant a second layer silently replaced the first one's analytics. A build AWAITS `initDuckDB()` before touching DuckDB and parks its source if the engine is not up (the boot is ~5 s and a restored snapshot lands inside it); `retryEngine()` rebuilds the parked ones. A reader-backed layer hands DuckDB the DECODED BYTES the loader already holds (`loadFromUrl` returns `{model, bytes, encoding}`), never a URL: `read_cityjson` over http is unexercised in wasm and CORS-dependent, and registering bytes means a URL layer is never downloaded twice — `registerBuffer` CONSUMES its array (the worker transfer detaches it), so a re-registration goes through the entry's `SourceProvider`. The build drops `geometry_*`/`geometry_properties_*`/`material_*`/`texture_*`/`template` (53 of 70 columns on Delft, 2.45x less table memory) and then drops the source buffer — probed: a materialised table survives `dropFile`, while the DROPPED NAME resolves to ZERO BYTES forever and fails with a misleading JSON parse error, so VFS names come from a module counter and are NEVER reused. LoDs are DERIVED from the reader's own column names (`{label, suffix}`) and a suffix is never rebuilt from a label: 3D BAG spells LoD 0 `geometry_lod0_0`. CityGML, its ZIP, CityParquet and streaming residents take the FLAT FALLBACK: rows built app-side and loaded through `read_json_auto`, with the column names ALIGNED to the reader's (`id, feature_id, object_type, parents, children`, `parents`/`children` NULL rather than `[]`, `feature_id` from `domain/citymodel/featureId.ts`, and an `ALTER COLUMN … TYPE VARCHAR[]` afterwards because an all-NULL list column infers as JSON) so `parents IS NULL` is the feature-root test on every layer. **Every SQL string is a pure function** in `insights/sql.ts`, unit-tested against exact strings; `compileFilter` refuses an unknown column, an impossible operator, an empty needle or a non-numeric value BEFORE the query is sent, and `ORDER BY` is table-qualified so a `castText` column sorts on the base column rather than its `::VARCHAR` alias. The map filter (`Layer.visibleObjectIds`, pushed by `handleSync` to the plugin's `setVisibleObjectIds`) expands matches to whole FEATURES — a Building carries the attributes, its BuildingPart the geometry — with `COALESCE("feature_id","id")` on both sides of a POSITIVE `IN`, because one NULL `feature_id` makes a `NOT IN` predicate NULL and hides nothing; `null` means no filter and an EMPTY set means "nothing matched, draw nothing". Streaming layers cannot be map-filtered yet (the id set would have to travel to the FCB worker). Export goes through DuckDB's own writers — `COPY TO parquet|csv|json` (with `ARRAY true` for JSON, and no `::VARCHAR` cast: that one is the grid's), and for a package one read of the source into a scratch schema, a CTAS per CityGML module, `cityparquet_init` as its own statement, then `cityparquet_write` zipped with `fflate` — and **never** `FORMAT cityjson|cityjsonseq|flatcitybuf`, whose sinks bypass DuckDB's VFS entirely (no file is created at all; the same extension writes fine through `cityparquet_write`, which is the upstream pointer). Those three are shown DISABLED in the dialog so the capability is discoverable. **Every read-back is validated BY CONTENT** — `PAR1` magic, `JSON.parse`, a newline-terminated CSV header — because a MISSING VFS name reads back as ONE GARBAGE BYTE with no error at all, while a genuinely empty file reads 0; DuckDB's `glob()` lists names that were never created, so it is fit only for a cleanup check and never for discovery, and the write's own result rows are what name the output. Filter, sort, page, sync-to-map and `visibleObjectIds` are SESSION state: snapshot schema stays v3.
 ```
 
 And, in whatever Known Issues section `docs/architecture-notes.md` now carries,
@@ -16161,7 +16161,7 @@ BEFORE `## Cross-Cutting Workstreams` — not at the end of the file, where
 - 11.1 Engine: `@duckdb/duckdb-wasm@1.33.1-dev64.0` (DuckDB 1.5.5), per-extension
   status, `ensureExtension` for `spatial`/`three_d`, `runQuery` with DuckDB's own
   error message, VFS primitives, init retry.
-- 11.2 One table per city layer (`analytics/layerTables.ts`), reader-backed from
+- 11.2 One table per city layer (`insights/layerTables.ts`), reader-backed from
   bytes or a flat fallback from the parsed model / resident records; one FIFO
   queue; `addCityLayer` as the single static add path.
 - 11.3 Table panel: pagination (100/500/1000), sort, structured WHERE filter,
@@ -16821,7 +16821,7 @@ Every name that crosses a task boundary, re-checked after the edits:
   and by `useLayerFileLoader` (Task 16, Step 5); `decodeModelBytes` keeps its
   signature and simply calls it.
 - `validationWarnings`, `dropWrittenFile` and `contentFormatOf` are file-local
-  to `analytics/export.ts` (Task 30) and never exported.
+  to `insights/export.ts` (Task 30) and never exported.
 - The "`registerBuffer` CONSUMES its array" contract is stated once, on the
   function (Task 2), and REFERENCED — not restated differently — on
   `LayerTableSource.bytes` and `SourceProvider` (Task 13), `modelTableSource`
@@ -16853,10 +16853,10 @@ Every name that crosses a task boundary, re-checked after the edits:
   refusal, and `quoteLiteral` is no longer called directly on a condition value.
 - `orderClause(table, columns, sort)` gained its first parameter (Task 10) and
   has one caller, `buildPageSql`; `pagingInt` is file-local beside it.
-- `bigintSafe` is file-local to `analytics/layerRows.ts` (Task 12) and used by
+- `bigintSafe` is file-local to `insights/layerRows.ts` (Task 12) and used by
   both `attributeColumns` and `encodeRowsAsJson` — the two places a value can
   reach `JSON.stringify`.
-- `LodColumn` is declared once, in `analytics/columnKind.ts` (Task 5), and is
+- `LodColumn` is declared once, in `insights/columnKind.ts` (Task 5), and is
   the only shape a LoD travels in: `LayerTable.lods` (Task 13),
   `buildCityParquetSourceSql`'s `lodSuffix` (Task 11),
   `CityParquetExportRequest.lodSuffix` (Task 30) and the dialog's picker (Task
@@ -16883,7 +16883,7 @@ surfaceColors, visibleObjectIds)` — and every task that touches it says
   they come from the page's own COUNT query, a separate statement that reports
   its own failure through `message`.
 - `pendingSources` and `ENGINE_NOT_RUNNING` are module state in
-  `analytics/layerTables.ts` (Task 13); `retryEngine()` is its only reader,
+  `insights/layerTables.ts` (Task 13); `retryEngine()` is its only reader,
   `dropLayerTable` (Task 14) its only other writer, and
   `resetLayerTablesForTest` clears it. `retryEngine` is exported in Task 13's
   Interfaces block and called from `App.tsx` in exactly two places — the mount
@@ -16901,13 +16901,13 @@ surfaceColors, visibleObjectIds)` — and every task that touches it says
   by the drop task, and all three maps are cleared by
   `resetLayerTablesForTest`.
 - `isValueList`, `literalFor` and `NUMERIC_TYPES` are file-local to
-  `analytics/sql.ts` (Task 9); `FilterValue` is imported there for the first.
+  `insights/sql.ts` (Task 9); `FilterValue` is imported there for the first.
   Task 21's `parseValue(raw, op)` dropped its `column` parameter, and its one
   caller passes two arguments.
 - `buildDistinctSql` no longer exists anywhere: not in Task 10's Interfaces,
   its implementation, its test, the File Structure, or §3.3's builder list —
   the coverage table records it as deliberately absent.
-- `writtenFileName(row, outDir)` is file-local to `analytics/export.ts` (Task 30) and is the ONLY place an output name is derived; nothing reads `row.file`
+- `writtenFileName(row, outDir)` is file-local to `insights/export.ts` (Task 30) and is the ONLY place an output name is derived; nothing reads `row.file`
   by name any more.
 - `resetExportCounterForTests` is declared in Task 29's Interfaces and called
   in BOTH export suites' `beforeEach` (Tasks 29 and 30).

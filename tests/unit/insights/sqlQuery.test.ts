@@ -7,8 +7,8 @@ import {
   buildRootTypesSql,
   gridColumns,
   projectColumn,
-} from "../../../src/analytics/sql";
-import type { ColumnInfo } from "../../../src/analytics/columnKind";
+} from "../../../src/insights/sql";
+import type { ColumnInfo } from "../../../src/insights/columnKind";
 
 const COLUMNS: ReadonlyArray<ColumnInfo> = [
   { name: "id", type: "VARCHAR", kind: "scalar" },

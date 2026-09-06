@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 
 const runQuery = vi.fn();
-vi.mock("../../../../src/analytics/duckdb", () => ({
+vi.mock("../../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
   isExtensionLoaded: vi.fn(() => false),
@@ -28,7 +28,7 @@ vi.mock("../../../../src/analytics/duckdb", () => ({
 const { useLayerQuery } =
   await import("../../../../src/ui/table/useLayerQuery");
 const { useLayerTableStore } =
-  await import("../../../../src/analytics/layerTables");
+  await import("../../../../src/insights/layerTables");
 const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
 

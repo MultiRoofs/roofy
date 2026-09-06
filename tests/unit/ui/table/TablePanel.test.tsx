@@ -13,7 +13,7 @@ import {
 } from "@testing-library/react";
 
 const runQuery = vi.fn();
-vi.mock("../../../../src/analytics/duckdb", () => ({
+vi.mock("../../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
   isExtensionLoaded: vi.fn(() => false),
@@ -33,14 +33,14 @@ const { TablePanel } = await import("../../../../src/ui/table/TablePanel");
 const { useLayerStore } =
   await import("../../../../src/features/layers/layerStore");
 const { useLayerTableStore } =
-  await import("../../../../src/analytics/layerTables");
+  await import("../../../../src/insights/layerTables");
 const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
 const { useSelectionStore } =
   await import("../../../../src/features/selection/selectionStore");
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
-import type { DuckDBStatus } from "../../../../src/analytics/duckdb";
+import type { DuckDBStatus } from "../../../../src/insights/duckdb";
 
 const READY_STATUS: DuckDBStatus = {
   state: "ready",

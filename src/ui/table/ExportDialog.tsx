@@ -13,15 +13,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { runQuery } from "../../analytics/duckdb";
-import type { LodColumn } from "../../analytics/columnKind";
+import { runQuery } from "../../insights/duckdb";
+import type { LodColumn } from "../../insights/columnKind";
 import {
   useLayerTableStore,
   type LayerTable,
-} from "../../analytics/layerTables";
-import { runExport, type ExportRequest } from "../../analytics/export";
-import { buildRootTypesSql, compileFilter } from "../../analytics/sql";
-import { FLAT_PREFIX_COLUMNS } from "../../analytics/layerRows";
+} from "../../insights/layerTables";
+import { runExport, type ExportRequest } from "../../insights/export";
+import { buildRootTypesSql, compileFilter } from "../../insights/sql";
+import { FLAT_PREFIX_COLUMNS } from "../../insights/layerRows";
 import { refreshStreamingTable } from "../../features/layers/layerTableLifecycle";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 import { downloadBlob } from "../../platform/download";

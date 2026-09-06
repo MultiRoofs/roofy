@@ -10,7 +10,7 @@ let enqueueRejects = false;
  *  `enqueueLayerTable`'s prelude — before it ever returns a promise — would.
  *  Deliberately not an `async` function body, which could not do that. */
 let enqueueThrowsSync = false;
-vi.mock("../../../../src/analytics/layerTables", () => ({
+vi.mock("../../../../src/insights/layerTables", () => ({
   enqueueLayerTable: vi.fn((layerId: string, source: unknown) => {
     enqueued.push({ layerId, source });
     if (enqueueThrowsSync) throw new Error("DuckDB module failed to load");

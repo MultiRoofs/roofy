@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { DataGrid } from "../../../../src/ui/table/DataGrid";
 import { formatCell } from "../../../../src/ui/table/tableText";
-import type { ColumnInfo } from "../../../../src/analytics/columnKind";
+import type { ColumnInfo } from "../../../../src/insights/columnKind";
 
 const COLUMNS: ReadonlyArray<ColumnInfo> = [
   { name: "id", type: "VARCHAR", kind: "scalar" },

@@ -3,7 +3,7 @@ import {
   encodeRowsAsJson,
   flatRowsFromModel,
   flatRowsFromRecords,
-} from "../../../src/analytics/layerRows";
+} from "../../../src/insights/layerRows";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
 

@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useRef, useState } from "react";
 import { FilterBar } from "../../../../src/ui/table/FilterBar";
 import { operatorsFor } from "../../../../src/ui/table/tableText";
-import type { ColumnInfo } from "../../../../src/analytics/columnKind";
+import type { ColumnInfo } from "../../../../src/insights/columnKind";
 import type { FilterGroup } from "../../../../src/features/query/types";
 
 const COLUMNS: ReadonlyArray<ColumnInfo> = [

@@ -111,7 +111,7 @@ vi.mock("../../../src/scene/NavaraViewport", () => ({
  *  this file needs a ready engine, so it stays false throughout. */
 let extensionReady = false;
 
-vi.mock("../../../src/analytics/duckdb", () => ({
+vi.mock("../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   getDuckDBStatus: vi.fn(() =>
     extensionReady
@@ -145,9 +145,9 @@ vi.mock("../../../src/analytics/duckdb", () => ({
 const enqueued = vi.hoisted(
   () => [] as Array<{ layerId: string; kind: string }>,
 );
-vi.mock("../../../src/analytics/layerTables", async (importOriginal) => {
+vi.mock("../../../src/insights/layerTables", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../../src/analytics/layerTables")>();
+    await importOriginal<typeof import("../../../src/insights/layerTables")>();
   return {
     ...actual,
     enqueueLayerTable: vi.fn(

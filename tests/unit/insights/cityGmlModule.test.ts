@@ -3,7 +3,7 @@ import {
   CITY_GML_MODULES,
   cityGmlModuleOf,
   groupTypesByModule,
-} from "../../../src/analytics/cityGmlModule";
+} from "../../../src/insights/cityGmlModule";
 
 describe("CITY_GML_MODULES", () => {
   it("names only tables cityparquet_write accepts", () => {

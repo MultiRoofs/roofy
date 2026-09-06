@@ -13,18 +13,18 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { runQuery } from "../../analytics/duckdb";
-import type { ColumnInfo } from "../../analytics/columnKind";
+import { runQuery } from "../../insights/duckdb";
+import type { ColumnInfo } from "../../insights/columnKind";
 import {
   useLayerTableStore,
   type LayerTable,
-} from "../../analytics/layerTables";
+} from "../../insights/layerTables";
 import {
   buildCountSql,
   buildPageSql,
   compileFilter,
   gridColumns,
-} from "../../analytics/sql";
+} from "../../insights/sql";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 
 export interface LayerQueryView {

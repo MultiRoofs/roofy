@@ -4,8 +4,8 @@ import {
   escapeLikeNeedle,
   quoteIdent,
   quoteLiteral,
-} from "../../../src/analytics/sql";
-import type { ColumnInfo } from "../../../src/analytics/columnKind";
+} from "../../../src/insights/sql";
+import type { ColumnInfo } from "../../../src/insights/columnKind";
 import type { FilterGroup } from "../../../src/features/query/types";
 
 const COLUMNS: ReadonlyArray<ColumnInfo> = [

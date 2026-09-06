@@ -10,8 +10,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { DuckDBStatus } from "../../analytics/duckdb";
-import { useLayerTableStore } from "../../analytics/layerTables";
+import type { DuckDBStatus } from "../../insights/duckdb";
+import { useLayerTableStore } from "../../insights/layerTables";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { syncFilterToMap } from "../../features/query/mapFilterSync";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";

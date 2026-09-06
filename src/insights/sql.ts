@@ -9,7 +9,7 @@
  * text input, so both are quoted here and nowhere else.
  *
  * No engine import — every builder returns a string the caller hands to
- * `runQuery`/`ddl` from `analytics/duckdb.ts`.
+ * `runQuery`/`ddl` from `insights/duckdb.ts`.
  */
 
 import { isTextColumn, type ColumnInfo } from "./columnKind";

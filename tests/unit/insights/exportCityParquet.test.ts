@@ -26,7 +26,7 @@ function sampleBytes(path: string): Uint8Array {
     : new TextEncoder().encode('{"type":"Feature","id":"exp"}');
 }
 
-vi.mock("../../../src/analytics/duckdb", () => {
+vi.mock("../../../src/insights/duckdb", () => {
   const run = async (statement: string) => {
     sql.push(statement);
     if (failOn !== null && statement.includes(failOn)) {
@@ -87,7 +87,7 @@ vi.mock("../../../src/analytics/duckdb", () => {
 });
 
 const { resetExportCounterForTests, runExport } =
-  await import("../../../src/analytics/export");
+  await import("../../../src/insights/export");
 
 function request(over: Record<string, unknown> = {}) {
   return {

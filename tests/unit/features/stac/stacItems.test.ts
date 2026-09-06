@@ -13,7 +13,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../../../src/analytics/duckdb", () => ({
+vi.mock("../../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   // Defaults to READY, because that is the state every other test in this
   // file assumes; the one test that cares overrides it per call.
@@ -44,7 +44,7 @@ import {
   getDuckDBStatus,
   initDuckDB,
   queryParquetBuffer,
-} from "../../../../src/analytics/duckdb";
+} from "../../../../src/insights/duckdb";
 import {
   buildItemsSql,
   fetchCollectionItems,

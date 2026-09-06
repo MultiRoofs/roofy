@@ -42,7 +42,7 @@ async function flushMicrotasks(): Promise<void> {
   for (let i = 0; i < 5; i++) await Promise.resolve();
 }
 
-vi.mock("../../../src/analytics/duckdb", () => {
+vi.mock("../../../src/insights/duckdb", () => {
   const run = async (statement: string) => {
     sql.push(statement);
     events.push(statement);
@@ -108,7 +108,7 @@ const {
   resetLayerTablesForTest,
   retryEngine,
   useLayerTableStore,
-} = await import("../../../src/analytics/layerTables");
+} = await import("../../../src/insights/layerTables");
 
 const RESIDENT = { kind: "resident" as const, records: () => [] };
 const ONE_ROW = {
