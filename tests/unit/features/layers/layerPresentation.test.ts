@@ -129,6 +129,18 @@ describe("layerStateLine", () => {
     expect(layerStateLine(input)).toBe("Streaming · fetching…");
   });
 
+  it('reads "Streaming · probing…" while probing with no count yet', () => {
+    const input: LayerStateInput = {
+      kind: "streaming",
+      streamStatus: "probing",
+    };
+    expect(layerStateLine(input)).toBe("Streaming · probing…");
+  });
+
+  it('reads "Loading…" for a static city layer with no counts and no LoD yet', () => {
+    expect(layerStateLine({ kind: "city" })).toBe("Loading…");
+  });
+
   it('reads "6 features" for an inline vector layer', () => {
     const input: LayerStateInput = { kind: "vector", featureCount: 6 };
     expect(layerStateLine(input)).toBe("6 features");

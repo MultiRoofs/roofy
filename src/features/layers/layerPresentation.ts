@@ -37,11 +37,11 @@ export function layerKindOf(item: ActiveLayer): LayerKind {
 
 export interface LayerStateInput {
   readonly kind: LayerKind;
-  /** Static city: `Object.keys(model.objects).length`. Superseded by
-   *  `counts` when both are given — `counts` is the only source that can
-   *  tell "all Buildings" from "mixed types". */
-  readonly objectCount?: number;
-  /** Static city: root-object counts, from {@link countRootObjects}. */
+  /** Static city: root-object counts, from {@link countRootObjects}. The
+   *  only source of a static city's count — a plain total (no buildings/
+   *  objects split) cannot tell "all Buildings" from "mixed types", and
+   *  Task 17 must not have a path that prints "N objects" for a model that
+   *  is entirely Buildings. */
   readonly counts?: { readonly buildings: number; readonly objects: number };
   /** Static city: `selectedLod`. */
   readonly lod?: string | null;
@@ -88,6 +88,15 @@ export function countRootObjects(model: CityModel): {
   return { buildings, objects };
 }
 
+/**
+ * Precedence contract: `error` wins over every other field, for every kind
+ * — including "streaming" — so a caller with a stream error MUST copy the
+ * driver's message into `error` itself (Task 17's row sources do this).
+ * `unavailable` comes next, then the per-kind formatting below. The
+ * `streamStatus: "error"` branch inside {@link streamingStateLine} is a
+ * defensive fallback only, for an input that sets the status without also
+ * copying the message — it is never reached through the intended path.
+ */
 export function layerStateLine(input: LayerStateInput): string {
   if (input.error != null) return `Error · ${input.error}`;
   if (input.unavailable) return "Needs re-link";
@@ -117,9 +126,6 @@ function cityStateLine(input: LayerStateInput): string {
     const { buildings, objects } = input.counts;
     const allBuildings = objects > 0 && buildings === objects;
     return `${pluralize(objects, allBuildings ? "building" : "object")}${suffix}`;
-  }
-  if (input.objectCount != null) {
-    return `${pluralize(input.objectCount, "object")}${suffix}`;
   }
   return "Loading…";
 }
