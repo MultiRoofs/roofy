@@ -181,8 +181,8 @@ const photorealHandles = {
   stars: { visible: true },
   skyLightProbe: { visible: true },
   sun: { visible: true, update: vi.fn() },
-  // `update` too: the viewport switches this pass into `irradiance` mode right
-  // after `addDefaultPhotorealScene()`, which is what lights the whole scene.
+  // `update` too, so a regression that pushes the pass into `irradiance`
+  // mode (the deferred calibration that can show no cast shadow) is caught.
   aerialPerspective: { visible: true, update: vi.fn() },
   lensFlare: { visible: true },
   toneMapping: { visible: true },
@@ -375,7 +375,8 @@ vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
   }),
 }));
 
-const { NavaraViewport } = await import("../../../src/scene/NavaraViewport");
+const { NavaraViewport, SUN_SHADOW_TUNING } =
+  await import("../../../src/scene/NavaraViewport");
 // The mocked engine export the elevation-heatmap source's marker resolves to.
 // DYNAMIC, like the component above: a static import would evaluate the
 // `@navaramap/three` mock factory before the stubs it closes over exist.
@@ -2266,53 +2267,51 @@ describe("NavaraViewport render settings", () => {
     render(<NavaraViewport onTriangleCount={() => {}} />);
     await waitFor(() =>
       expect(photorealHandles.sun.update).toHaveBeenCalledWith({
-        sun: { castShadow: true },
+        sun: { castShadow: true, ...SUN_SHADOW_TUNING },
       }),
     );
 
     act(() => useRenderDebugStore.getState().setSunShadowsEnabled(false));
     await waitFor(() =>
       expect(photorealHandles.sun.update).toHaveBeenCalledWith({
-        sun: { castShadow: false },
+        sun: { castShadow: false, ...SUN_SHADOW_TUNING },
       }),
     );
     // Never `visible`: the sun is the scene's only key light.
     expect(photorealHandles.sun.visible).toBe(true);
   });
 
-  // THE lighting model. The aerial-perspective pass defaults to
-  // `irradiance: false` — it only hazes whatever the scene lights produced.
-  // Turning it on sets `sunLight = skyLight = true` on the pass, so the physical
-  // atmosphere lights the g-buffer albedo directly. That is the calibration
-  // `DEFAULT_EXPOSURE = 10` belongs to, and the reason the city meshes are unlit
-  // (`MeshBasicMaterial`, @cityjson/navara-cityjson). Without this push the
-  // whole scene is lit twice and clips to white.
-  it("switches the aerial-perspective pass into irradiance mode at startup", async () => {
+  // THE lighting model: the engine's own FORWARD-LIT default. `SunLightDesc`
+  // (direction and colour from the atmosphere, cascaded shadow maps) and the
+  // sky light probe shade every lit material — the city meshes are lit Lambert
+  // materials registered for shadows (`@cityjson/navara-cityjson`), and so
+  // are the terrain and the basemap — and the aerial-perspective pass only
+  // hazes what they produced. The deferred alternative (`view.lit = false` +
+  // `irradiance: true`) re-lights the G-buffer albedo from the atmosphere and
+  // CANNOT show a cast shadow: the engine's irradiance term reads no shadow
+  // buffer (issue #13). Mixing the two is what once clipped the frame white.
+  it("keeps the engine forward-lit at startup and never switches the aerial perspective into irradiance", async () => {
     render(<NavaraViewport onTriangleCount={() => {}} />);
     await waitFor(() =>
-      expect(photorealHandles.aerialPerspective.update).toHaveBeenCalledWith({
-        // `useNormalBuffer: true` is only safe because the TERRAIN layer feeds
-        // the MRT normal attachment (`requestVertexNormals`). Without terrain
-        // the globe writes no normals, a raster basemap turns the attachment
-        // to half-float NaN, and the frame renders black — which is why this
-        // pair is asserted together. See `enableAtmosphericLighting`.
-        aerialPerspective: { irradiance: true, useNormalBuffer: true },
+      expect(photorealHandles.sun.update).toHaveBeenCalledWith({
+        sun: { castShadow: true, ...SUN_SHADOW_TUNING },
       }),
     );
-    // The other half of the calibration since Navara 0.1.0: `view.lit = false`
-    // makes every ENGINE-drawn material (terrain, basemap, tiles) output plain
-    // albedo too, so the irradiance pass is the only thing lighting the frame.
-    // The docs pair the two explicitly; without it the ground is lit twice.
-    expect((viewInstances[0] as { lit?: boolean }).lit).toBe(false);
+    // Stated, not inherited: the engine defaults to `true`, and a future
+    // default flip must not silently take the shadows with it.
+    expect((viewInstances[0] as { lit?: boolean }).lit).toBe(true);
+    for (const call of photorealHandles.aerialPerspective.update.mock.calls) {
+      const ap = (call[0] as { aerialPerspective?: { irradiance?: boolean } })
+        .aerialPerspective;
+      expect(ap?.irradiance).not.toBe(true);
+    }
   });
 
   // The scene-lights calibration is GONE, ambient fill and all. A regression
   // that adds one back is a double-exposed frame, not a brighter one.
   it("adds no scene lights of its own", async () => {
     render(<NavaraViewport onTriangleCount={() => {}} />);
-    await waitFor(() =>
-      expect(photorealHandles.aerialPerspective.update).toHaveBeenCalled(),
-    );
+    await waitFor(() => expect(photorealHandles.sun.update).toHaveBeenCalled());
     expect(addLight).not.toHaveBeenCalled();
   });
 
@@ -2325,7 +2324,7 @@ describe("NavaraViewport render settings", () => {
     const { unmount } = render(<NavaraViewport onTriangleCount={() => {}} />);
     await waitFor(() =>
       expect(photorealHandles.sun.update).toHaveBeenCalledWith({
-        sun: { castShadow: true },
+        sun: { castShadow: true, ...SUN_SHADOW_TUNING },
       }),
     );
     const view = currentView();
@@ -2351,8 +2350,8 @@ describe("NavaraViewport render settings", () => {
   });
 
   it("keeps the viewer alive when the engine refuses a settings push", async () => {
-    photorealHandles.aerialPerspective.update.mockImplementationOnce(() => {
-      throw new Error("this build has no irradiance mode");
+    photorealHandles.sun.update.mockImplementationOnce(() => {
+      throw new Error("this build has no cascaded shadow maps");
     });
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const ref = createRef<CitySceneHandle>();

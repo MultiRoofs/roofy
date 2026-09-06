@@ -5,8 +5,9 @@
  * are about its SHAPE and its invariants rather than about any single tuned
  * number (the commander's browser pass owns those):
  *
- *   - photoreal is a provable no-op — every override null, every "off" flag
- *     false, so applying it pushes nothing anywhere;
+ *   - photoreal's ENVIRONMENT is a provable no-op — every override null, every
+ *     "off" flag false, so applying it pushes nothing anywhere; its mesh style
+ *     is the plugin's default look plus the outline every theme draws;
  *   - every theme's `meshStyle` is ONE frozen object, because `handleSync`
  *     compares by identity to decide whether to re-extract every edge of every
  *     layer;
@@ -14,10 +15,7 @@
  *     colour it tints with — a half-specified style would reach the plugin.
  */
 import { describe, expect, it } from "vitest";
-import {
-  SCENE_THEMES,
-  type SceneTheme,
-} from "../../../src/features/sceneTheme/sceneThemeStore";
+import { SCENE_THEMES } from "../../../src/features/sceneTheme/sceneThemeStore";
 import { sceneThemePolicy } from "../../../src/scene/sceneThemePolicy";
 
 describe("sceneThemePolicy", () => {
@@ -27,10 +25,10 @@ describe("sceneThemePolicy", () => {
     }
   });
 
-  it("makes photoreal a no-op: no override, nothing switched off", () => {
+  it("makes photoreal's environment a no-op: no override, nothing switched off", () => {
     const policy = sceneThemePolicy("photoreal");
 
-    expect(policy.meshStyle).toEqual({ fill: "vertex", edges: null });
+    expect(policy.meshStyle.fill).toBe("vertex");
     expect(policy.basemapOverride).toBeNull();
     expect(policy.googleTilesOff).toBe(false);
 
@@ -45,9 +43,32 @@ describe("sceneThemePolicy", () => {
     expect(env.globeColor).toBeNull();
     expect(env.toneMappingMode).toBeNull();
     expect(env.exposure).toBeNull();
-    expect(env.apAlbedoScale).toBeNull();
+    expect(env.sunIntensity).toBeNull();
     expect(env.skyLightProbeIntensity).toBeNull();
     expect(env.lensFlareOff).toBe(false);
+  });
+
+  it("outlines photoreal's buildings in a dark, non-HDR ink over their own colours", () => {
+    // Issue #13: a lit block with no edge line still reads as a paper cut-out
+    // where two faces meet at the same brightness. The outline is the
+    // plugin's structural-edge extraction (the same lines cartoon draws),
+    // in an ink dark enough to read as a crease and never as a glow.
+    const style = sceneThemePolicy("photoreal").meshStyle;
+    expect(style.fill).toBe("vertex");
+    expect(style.tintRGB).toBeUndefined();
+    const edges = style.edges!;
+    expect(edges).not.toBeNull();
+    expect(edges.hdr).toBeUndefined();
+    const [r, g, b] = [
+      (edges.color >> 16) & 0xff,
+      (edges.color >> 8) & 0xff,
+      edges.color & 0xff,
+    ];
+    for (const channel of [r, g, b]) {
+      // Dark, but not pure black: a hairline of 0 reads as an artefact.
+      expect(channel).toBeGreaterThan(0);
+      expect(channel).toBeLessThan(0x60);
+    }
   });
 
   it("hands out ONE frozen meshStyle per theme, stable across calls", () => {
@@ -68,15 +89,13 @@ describe("sceneThemePolicy", () => {
     }
   });
 
-  it("gives every non-photoreal theme a complete mesh style", () => {
-    const themed = SCENE_THEMES.filter(
-      (t): t is Exclude<SceneTheme, "photoreal"> => t !== "photoreal",
-    );
-    expect(themed).toHaveLength(3);
+  it("gives every theme a complete mesh style", () => {
+    expect(SCENE_THEMES).toHaveLength(4);
 
-    for (const theme of themed) {
+    for (const theme of SCENE_THEMES) {
       const style = sceneThemePolicy(theme).meshStyle;
-      // Every themed look draws edges — that is the whole point of the three.
+      // Every look draws edges: the three stylised ones because the line IS
+      // the look, photoreal because a block without one reads flat (#13).
       expect(style.edges).not.toBeNull();
       const edges = style.edges!;
       // A colour is always present as the non-HDR fallback, even when an HDR
@@ -134,7 +153,7 @@ describe("sceneThemePolicy", () => {
     const wireframe = sceneThemePolicy("wireframe");
     const env = wireframe.environment;
     expect(env.exposure!).toBeGreaterThan(1);
-    expect(env.apAlbedoScale!).toBeGreaterThan(0.05);
+    expect(env.sunIntensity!).toBeGreaterThan(0.05);
 
     // The fill must be a visible dark panel, not zero.
     const tint = wireframe.meshStyle.tintRGB!;
@@ -280,9 +299,9 @@ describe("sceneThemePolicy", () => {
 
   it("keeps every exposure it names positive and finite", () => {
     for (const theme of SCENE_THEMES) {
-      const { exposure, apAlbedoScale, skyLightProbeIntensity } =
+      const { exposure, sunIntensity, skyLightProbeIntensity } =
         sceneThemePolicy(theme).environment;
-      for (const value of [exposure, apAlbedoScale, skyLightProbeIntensity]) {
+      for (const value of [exposure, sunIntensity, skyLightProbeIntensity]) {
         if (value === null) continue;
         expect(Number.isFinite(value)).toBe(true);
         expect(value).toBeGreaterThanOrEqual(0);

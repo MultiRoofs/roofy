@@ -143,10 +143,10 @@ export function RenderingPanel({ onClose }: RenderingPanelProps) {
               onChange={(e) => setExposure(Number(e.target.value))}
             />
           </div>
-          {/* No ambient-light slider: the scene is lit by the physical
-              atmosphere (the aerial-perspective pass in `irradiance` mode), not
-              by scene lights, so a flat fill term is energy on top of an
-              already-calibrated image. Exposure is the one brightness knob. */}
+          {/* No ambient-light slider: the sky light probe the photoreal scene
+              adds is the ambient term, sampled from the atmosphere, so a flat
+              fill on top of it is energy on top of an already-calibrated
+              image. Exposure is the one brightness knob. */}
           <div className="advanced-toggle-row">
             <span>Sun Shadows</span>
             <input

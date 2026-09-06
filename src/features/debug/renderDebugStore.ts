@@ -13,10 +13,10 @@
  * materials to serve a debug toggle is worse than not having the toggle.
  *
  * `ambientIntensity` is gone for a different reason: it had a live counterpart
- * (`view.addLight({ ambient })`), but it belonged to the SCENE-LIGHTS
- * calibration this scene no longer uses. The aerial-perspective pass lights the
- * whole frame from the physical atmosphere now, so an ambient fill is pure
- * additional energy on an already exposure-10 image. See {@link DEFAULT_EXPOSURE}.
+ * (`view.addLight({ ambient })`), but the sky light probe the default
+ * photoreal scene adds IS the ambient term, sampled from the atmosphere, so a
+ * flat fill on top of it is pure additional energy on an already exposure-10
+ * image. See {@link DEFAULT_EXPOSURE}.
  */
 
 import { create } from "zustand";
@@ -25,15 +25,15 @@ import { create } from "zustand";
  * The exposure Navara's own getting-started sets (`view.toneMappingExposure =
  * 10`).
  *
- * This is the PHYSICAL-ATMOSPHERE calibration, and it is the whole scene's
- * calibration: the atmosphere feeds the tone mapper radiance-scale values, and
- * the aerial-perspective pass runs in `irradiance` mode so it — not
- * `SunLightDesc` + `skyLightProbe` — is what lights the city meshes, the globe
- * and the tiles. Every surface in the scene is therefore unlit albedo in the
- * g-buffer; nothing may add scene-light energy on top, or it clips to white at
- * this exposure. The 2026-08-04 overbright-scene diagnosis supersedes the
- * earlier "the scene is far darker" note: exposure 10 was right, the lighting
- * model underneath it was wrong.
+ * This is the engine's FORWARD-LIT calibration, and it is the whole scene's
+ * calibration: the atmosphere feeds `SunLightDesc` and the sky light probe
+ * radiance-scale values, those two light every lit material — the city
+ * meshes, the globe, the tiles — and the aerial-perspective pass only hazes
+ * the result (`NavaraViewport`'s `applyForwardLighting`). Nothing may add
+ * scene-light energy on top, or it clips to white at this exposure; the
+ * 2026-08-04 overbright-scene diagnosis found exactly that (a second lighting
+ * pass over lit materials), and issue #13 moved the scene back to ONE forward
+ * pass so the sun's cascaded shadow maps reach the frame.
  */
 export const DEFAULT_EXPOSURE = 10;
 

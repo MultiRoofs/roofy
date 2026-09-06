@@ -430,72 +430,37 @@ function applyToEngine(what: string, mutate: () => void): void {
 }
 
 /**
- * Switch the scene from SCENE LIGHTS to the PHYSICAL ATMOSPHERE.
+ * State the lighting calibration: the engine's own FORWARD-LIT default.
  *
- * `AerialPerspective` defaults to `irradiance: false` — it only adds
- * transmittance and inscatter over whatever the scene lights produced. Turning
- * it on sets `sunLight = skyLight = true` on the pass, which re-shades the
- * g-buffer ALBEDO with the atmosphere's own sun and sky irradiance. That is
- * what Navara's `/sky/sun-time` sample does, and it is the calibration
- * `DEFAULT_EXPOSURE = 10` belongs to.
+ * `addDefaultPhotorealScene()` adds a `SunLightDesc` (direction and colour
+ * from the atmosphere, cascaded shadow maps) and a `SkyLightProbeDesc`, and
+ * every LIT material — the terrain, the draped basemap, Google's tiles, and
+ * the city meshes, which `@cityjson/navara-cityjson` draws with a Lambert
+ * material registered for the shadow maps — is shaded by those two in the
+ * forward pass. The aerial-perspective pass then only hazes what they
+ * produced (`irradiance: false`, its default), and the tone mapper runs at
+ * `DEFAULT_EXPOSURE = 10`, the exposure the engine's own samples sit at.
  *
- * It is also the reason the city meshes are `MeshBasicMaterial`
- * (`@cityjson/navara-cityjson`): every surface must reach this pass as unlit
- * albedo. Running both models at once — a lit material under `SunLightDesc` +
- * `skyLightProbe`, then this pass on top, at exposure 10 — is precisely what
- * clipped the whole scene to white. See
- * docs/superpowers/research/2026-08-04-overbright-scene-diagnosis.md.
+ * The DEFERRED alternative the app ran until issue #13 — `view.lit = false`
+ * with the pass in `irradiance` mode, re-lighting the G-buffer albedo from the
+ * atmosphere — is deliberately NOT used any more. It is a fine calibration for
+ * imagery on terrain, but it cannot show a cast shadow: the irradiance term
+ * reads the normal buffer only, and no built-in effect reads the shadow
+ * G-buffer the lit pipeline writes, so a building could darken a wall by its
+ * normal but never by the tower next to it. Mixing the two calibrations — lit
+ * materials AND the irradiance pass, at exposure 10 — is what once clipped
+ * the whole scene to white; the pass is therefore never written from here.
  *
- * `view.lit = false` is the OTHER HALF of that rule, and it is the engine's own
- * pairing since 0.1.0 (the realistic-atmosphere guide: "irradiance does not
- * add a light; it re-lights the G-buffer after geometry is drawn — set
- * `view.lit = false`, or the scene is lit twice and washes out"). The city
- * meshes were already unlit by construction; what this switch changes is
- * everything the ENGINE draws with a lit material — the terrain, the draped
- * basemap, Google's tiles, vector layers — which on 0.0.5 reached the pass
- * forward-lit AND were re-lit by it. With `lit = false` their materials output
- * plain albedo while still writing normals and the shadow buffer, so the whole
- * frame is one calibration. A per-mesh `lit` override exists (`MeshConfig.lit`)
- * for anything that must stay forward-lit; nothing here needs it.
- *
- * `useNormalBuffer: true` DEPENDS ON THE TERRAIN LAYER — do not remove one
- * without the other. In irradiance mode the pass reads a per-fragment normal
- * from the g-buffer's normal attachment (allocated on demand since 0.1.0: the
- * aerial-perspective descriptor declares `requiredBuffers = ["normal"]` and
- * re-binds the texture every frame), and the globe contributes normals to it
- * only when a terrain (or hillshade) layer supplies them.
- *
- * Before `terrain.ts` was added, that attachment was unusable and this had to
- * be `false`: with a raster basemap on the globe every texel read back as
- * half-float NaN (0x7e00) across the whole frame — measured with
- * `readRenderTargetPixels` on `mrt.gbufferRenderTarget` texture 1 — because
- * `packNormalToVec2` divides by `abs(x)+abs(y)+abs(z)` and a zero normal in the
- * globe pass produces NaN, which made the irradiance term NaN and rendered the
- * whole frame BLACK. With the basemap off it read (0,0,0), which the pass's own
- * `degenerate` test skipped lighting for. Re:Earth's quantized-mesh terrain,
- * requested with `requestVertexNormals`, is what fills it with real normals;
- * browser-verified with the Esri basemap draped on top, the exact case that
- * used to go black. The cost of the old workaround — every fragment lit by the
- * ellipsoid normal, so a north wall received the same irradiance as a south
- * roof — is gone with it.
- *
- * Reported rather than propagated, like every other engine push in this file:
- * an engine build that refuses the update leaves a dim scene, not a dead one.
+ * `lit` is written rather than inherited: the engine defaults to `true`, but
+ * this app's calibration should be stated where its exposure and its "no
+ * ambient fill" rule are, so a future default flip cannot silently take the
+ * shadows with it. Reported rather than propagated, like every other engine
+ * push in this file.
  */
-function enableAtmosphericLighting(
-  view: Pick<ThreeView, "lit">,
-  scene: PhotorealScene | undefined,
-): void {
-  applyToEngine("the scene-level unlit (deferred lighting) mode", () => {
-    view.lit = false;
+function applyForwardLighting(view: Pick<ThreeView, "lit">): void {
+  applyToEngine("the forward-lit calibration", () => {
+    view.lit = true;
   });
-  const aerialPerspective = scene?.aerialPerspective;
-  if (!aerialPerspective) return;
-  applyToEngine("the atmospheric irradiance lighting mode", () =>
-    aerialPerspective.update({
-      aerialPerspective: { irradiance: true, useNormalBuffer: true },
-    }),
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -507,7 +472,7 @@ function enableAtmosphericLighting(
 //
 //   * a theme NEVER writes a user store, and never touches `atmosphere.date`
 //     (solar time — see the spec's solar-hygiene note). It darkens a scene with
-//     exposure, albedo scale, probe intensity and sky visibility, all of which
+//     exposure, sun intensity, probe intensity and sky visibility, all of which
 //     are presentation;
 //   * leaving a theme RESTORES, and restores to the engine's own defaults —
 //     which is why the four constants below are values read out of the 0.0.5
@@ -523,8 +488,36 @@ const PHOTOREAL_STARS = { pointSize: 1, intensity: 10 } as const;
  *  option straight through and adds no default of its own. */
 const PHOTOREAL_SKY_LIGHT_PROBE_INTENSITY = 1;
 
-/** `AerialPerspectiveEffect`'s default: full albedo through the atmosphere. */
-const PHOTOREAL_AP_ALBEDO_SCALE = 1;
+/** `SunLightOptions.intensity`'s default in `@navaramap/three-default-descs`. */
+const PHOTOREAL_SUN_INTENSITY = 1;
+
+/**
+ * The cascaded shadow maps' bias, pushed with every `castShadow` write.
+ *
+ * The engine's defaults (`shadowBias: 0.0001`, `shadowNormalBias: 0`) were
+ * tuned for its own sample scenes; on a city of large flat roofs and tall
+ * flat walls, lit at a low sun through four cascades spanning 50 km, they
+ * left every lit face covered in a fine checker of SELF-shadowing (shadow
+ * acne — browser-seen on the Delft sample, roofs and sunlit walls alike).
+ *
+ * A DEPTH bias, not a normal bias, and that is a finding: `shadowNormalBias`
+ * (metres along the VERTEX normal that the lookup is moved off the surface)
+ * cleared the big roofs and turned every mis-wound one — a face whose
+ * normal points into its own building, which real CityJSON is full of (see
+ * `createCityMaterial` in the plugin) — solid dark, because it pushed the
+ * lookup INSIDE the roof. The fragment shader flips a back face's normal
+ * for lighting; the vertex-stage bias cannot. `shadowBias` is added to the
+ * fragment's depth in the cascade's own clip space (three's `getShadow`, the
+ * CSM passes it through per cascade), so a NEGATIVE value moves every
+ * fragment a little towards the sun regardless of its winding. At the
+ * cascades' depth ranges this is a metre or two, well under any feature
+ * these models carry. Kept in one constant and written together with
+ * `castShadow` so the two can never drift apart across the toggle.
+ */
+export const SUN_SHADOW_TUNING = Object.freeze({
+  shadowBias: -0.0005,
+  shadowNormalBias: 0,
+});
 
 /** `DEFAULT_TONE_MAPPING_OPTIONS.mode` in the same bundle. */
 const PHOTOREAL_TONE_MAPPING_MODE = ToneMappingMode.AGX;
@@ -905,24 +898,17 @@ function applyThemeEnvironment(
     );
   }
 
-  const aerialPerspective = scene?.aerialPerspective;
-  if (aerialPerspective) {
-    // The FULL calibration every time, never `albedoScale` alone. The live
-    // pass applies updates per-field, but `onUpdateConfig` also does
-    // `Object.assign(this.config, e)` — REPLACING the whole
-    // `aerialPerspective` key in the stored config — and any later internal
-    // pass rebuild reconstructs from that config. An albedoScale-only write
-    // therefore stripped `irradiance`/`useNormalBuffer` from the config, and
-    // the first rebuild after a theme switch reconstructed the pass without
-    // the irradiance term: every albedo pixel black at any exposure, with
-    // only HDR edge lines surviving (browser-diagnosed, 2026-08-06).
-    applyToEngine("the theme's aerial-perspective albedo scale", () =>
-      aerialPerspective.update({
-        aerialPerspective: {
-          irradiance: true,
-          useNormalBuffer: true,
-          albedoScale: env.apAlbedoScale ?? PHOTOREAL_AP_ALBEDO_SCALE,
-        },
+  const sun = scene?.sun;
+  if (sun) {
+    // The key light. `SunLightDesc.onUpdateConfig` MERGES a partial `sun`
+    // block into its stored config and applies each field live, so this
+    // write and the shadow toggle's `castShadow` write (a separate effect)
+    // never clobber each other — unlike the aerial-perspective pass, whose
+    // config keys are REPLACED whole (Known Issue (j)) and which a theme
+    // therefore never writes at all.
+    applyToEngine("the theme's sun intensity", () =>
+      sun.update({
+        sun: { intensity: env.sunIntensity ?? PHOTOREAL_SUN_INTENSITY },
       }),
     );
   }
@@ -1540,7 +1526,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
                   photorealRef.current = scene ?? null;
                   // The session hands the hook its `NavaraViewLike` slice; it
                   // IS the `ThreeView` built by `createView` above.
-                  enableAtmosphericLighting(liveView as ThreeView, scene);
+                  applyForwardLighting(liveView as ThreeView);
                 },
               },
               { key: "cityjson", instance: cityPlugin },
@@ -1862,10 +1848,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     // physically-scaled radiance, so at exposure 1 the whole city sits in the
     // bottom of the curve — dim, low-contrast and blue-grey.
     //
-    // 10 is not a taste setting, it is the exposure the PHYSICAL-ATMOSPHERE
-    // calibration is defined at, which is why the rest of the scene had to move
-    // to that calibration rather than the exposure move to the scene: unlit
-    // albedo everywhere, lit by `enableAtmosphericLighting`, no ambient fill.
+    // 10 is not a taste setting, it is the exposure the engine's forward-lit
+    // calibration is defined at (`applyForwardLighting`): the sun and the sky
+    // probe carry physically-scaled radiance, and no ambient fill is stacked
+    // on top of them.
     // Driven from the store so the slider in Advanced Settings is the same knob
     // rather than a second one.
     useEffect(() => {
@@ -1881,12 +1867,12 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
 
     // NO ambient fill light. The app used to add one
     // (`view.addLight({ ambient })`, default intensity 0.6) on top of the
-    // photoreal scene's sun and sky probe, which made sense while the city
-    // meshes were lit materials. They are unlit albedo now and the
-    // aerial-perspective pass lights the frame from the physical atmosphere
-    // (`enableAtmosphericLighting`), so a flat fill term is energy stacked on
-    // an image already calibrated for exposure 10 — one of the three things
-    // that pushed every roof to white.
+    // photoreal scene's sun and sky probe. The sky probe IS the ambient term
+    // — sampled from the atmosphere, so it follows the time of day — and a
+    // flat fill on top of it is energy stacked on an image already calibrated
+    // for exposure 10, one of the three things that once pushed every roof to
+    // white. A theme that wants its ground darker turns the sun and the probe
+    // down (`sceneThemePolicy`), never adds a light.
 
     // --- The post chain: aerial perspective, lens flare, antialiasing ---
     //
@@ -1940,7 +1926,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     // --- The scene theme's environment ---
     //
     // One effect for the sky, the stars, the two theme-owned meshes, the globe,
-    // the tone curve, the aerial-perspective albedo and the sky-light probe —
+    // the tone curve, the sun's intensity and the sky-light probe —
     // everything `sceneThemePolicy.ts` puts in the `environment` block. The
     // exposure, the basemap, the Google tiles, the clouds and the lens flare
     // are deliberately NOT here: each already has one owner, and the theme is
@@ -1985,13 +1971,18 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     //
     // `SunLightDesc` owns the cascaded shadow maps, so the switch is a config
     // update on its handle (`{ sun: { castShadow } }`) rather than a `visible`
-    // — hiding the light would take the scene's only key light with it.
+    // — hiding the light would take the scene's only key light with it. The
+    // bias rides along (see `SUN_SHADOW_TUNING`); the theme's `intensity` is
+    // a separate write, which is safe because the descriptor MERGES partial
+    // `sun` blocks.
     useEffect(() => {
       const scene = photorealRef.current;
       if (!engineReady || scene?.sun === undefined) return;
       const sun = scene.sun;
       applyToEngine("the sun shadow toggle", () =>
-        sun.update({ sun: { castShadow: sunShadowsEnabled } }),
+        sun.update({
+          sun: { castShadow: sunShadowsEnabled, ...SUN_SHADOW_TUNING },
+        }),
       );
     }, [engineReady, sunShadowsEnabled]);
 

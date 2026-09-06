@@ -313,15 +313,11 @@ function meshCallsFor(key: string): unknown[] {
     .filter((desc) => desc != null && key in desc);
 }
 
-/** The aerial-perspective updates that carry an `albedoScale` — the pass also
- *  receives the app's one lighting calibration on startup, which is not this. */
-function albedoScaleUpdates(): number[] {
-  return photorealHandles.aerialPerspective.update.mock.calls
-    .map(
-      (c) =>
-        (c[0] as { aerialPerspective?: { albedoScale?: number } })
-          ?.aerialPerspective?.albedoScale,
-    )
+/** The sun updates that carry an `intensity` — the theme's lever. The sun
+ *  also receives the shadow toggle (`castShadow`), which is not this. */
+function sunIntensityUpdates(): number[] {
+  return photorealHandles.sun.update.mock.calls
+    .map((c) => (c[0] as { sun?: { intensity?: number } })?.sun?.intensity)
     .filter((v): v is number => typeof v === "number");
 }
 
@@ -571,9 +567,10 @@ describe("scene theme -> the backdrops", () => {
 describe("scene theme -> the environment", () => {
   it("touches NOTHING while the viewer has never left photoreal", async () => {
     await mount();
-    // The one aerial-perspective update that does happen is the app's lighting
-    // calibration (`irradiance`), which is not the theme's business.
-    expect(albedoScaleUpdates()).toEqual([]);
+    // The one sun update that does happen is the shadow toggle, which is not
+    // the theme's business; the aerial perspective is never written at all.
+    expect(sunIntensityUpdates()).toEqual([]);
+    expect(photorealHandles.aerialPerspective.update).not.toHaveBeenCalled();
     expect(photorealHandles.toneMapping.update).not.toHaveBeenCalled();
     expect(photorealHandles.stars.update).not.toHaveBeenCalled();
     expect(photorealHandles.skyLightProbe.update).not.toHaveBeenCalled();
@@ -597,7 +594,7 @@ describe("scene theme -> the environment", () => {
       stars: env.starsBoost,
     });
     expect(meshCallsFor("glowGlobe")).toHaveLength(1);
-    expect(albedoScaleUpdates().at(-1)).toBe(env.apAlbedoScale);
+    expect(sunIntensityUpdates().at(-1)).toBe(env.sunIntensity);
     expect(photorealHandles.skyLightProbe.update).toHaveBeenLastCalledWith({
       skyLightProbe: { intensity: env.skyLightProbeIntensity },
     });
@@ -614,7 +611,7 @@ describe("scene theme -> the environment", () => {
     // every time the user tries the menu.
     expect(meshCallsFor("glowGlobe")).toHaveLength(1);
     expect(meshDelete).not.toHaveBeenCalled();
-    expect(albedoScaleUpdates().at(-1)).toBe(1);
+    expect(sunIntensityUpdates().at(-1)).toBe(1);
     expect(photorealHandles.skyLightProbe.update).toHaveBeenLastCalledWith({
       skyLightProbe: { intensity: 1 },
     });
@@ -750,7 +747,7 @@ describe("scene theme -> theme-to-theme transitions", () => {
     await setTheme("wireframe");
     await setTheme("cartoon");
 
-    expect(albedoScaleUpdates().at(-1)).toBe(cartoon.apAlbedoScale);
+    expect(sunIntensityUpdates().at(-1)).toBe(cartoon.sunIntensity);
     expect(photorealHandles.skyLightProbe.update).toHaveBeenLastCalledWith({
       skyLightProbe: { intensity: cartoon.skyLightProbeIntensity },
     });
@@ -782,7 +779,7 @@ describe("scene theme -> theme-to-theme transitions", () => {
       ORIGINAL_GLOBE_COLOR,
     );
     expect(view.toneMappingExposure).toBe(cyber.exposure);
-    expect(albedoScaleUpdates().at(-1)).toBe(cyber.apAlbedoScale);
+    expect(sunIntensityUpdates().at(-1)).toBe(cyber.sunIntensity);
   });
 });
 
@@ -1007,26 +1004,16 @@ describe("scene theme -> real-engine contracts (Known Issues (i)/(j))", () => {
     expect(colorLike(glow.glowGlobe.glowColor)).toBe(true);
   });
 
-  it("never updates the aerial perspective with albedoScale alone", async () => {
-    // `onUpdateConfig` REPLACES whole config keys (Known Issue (j)): an
-    // albedoScale-only update strips `irradiance`/`useNormalBuffer` from the
-    // stored config, and the next internal pass rebuild reconstructs without
-    // the irradiance term — every albedo pixel black at any exposure.
+  it("never writes the aerial perspective from a theme", async () => {
+    // The pass is the ENGINE's calibration (forward-lit, `irradiance: false`).
+    // A theme darkens with the sun, the probe and the exposure; a write here —
+    // `albedoScale` alone once stripped `irradiance` from the stored config
+    // (Known Issue (j)), and `irradiance: true` would switch the frame to the
+    // deferred calibration that shows no cast shadow — is a regression.
     await mount();
     await setTheme("wireframe");
     await setTheme("cartoon");
     await setTheme("photoreal");
-
-    const themed = photorealHandles.aerialPerspective.update.mock.calls
-      .map(
-        (c) =>
-          (c[0] as { aerialPerspective?: Record<string, unknown> })
-            ?.aerialPerspective,
-      )
-      .filter((ap) => ap !== undefined && "albedoScale" in ap);
-    expect(themed.length).toBeGreaterThan(0);
-    for (const ap of themed) {
-      expect(ap).toMatchObject({ irradiance: true, useNormalBuffer: true });
-    }
+    expect(photorealHandles.aerialPerspective.update).not.toHaveBeenCalled();
   });
 });

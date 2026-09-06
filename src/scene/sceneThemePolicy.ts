@@ -13,19 +13,22 @@
  *
  * Two invariants the tests pin, both load-bearing:
  *
- *   1. **Photoreal is a provable no-op.** Every override is `null` and every
- *      "off" flag `false`, so the viewport's theme effects push nothing at all
- *      and the default rendering is reached by not being touched, rather than
- *      by being restored to a value this file happens to remember.
+ *   1. **Photoreal's environment is a provable no-op.** Every override is
+ *      `null` and every "off" flag `false`, so the viewport's theme effects
+ *      push nothing at all and the default rendering is reached by not being
+ *      touched, rather than by being restored to a value this file happens to
+ *      remember. Its MESH style is not empty, though: every theme draws the
+ *      plugin's structural edges, photoreal in a dark ink (issue #13 — a lit
+ *      block whose faces meet at one brightness reads as a paper cut-out).
  *   2. **One frozen `meshStyle` object per theme.** `handleSync` compares the
  *      style by IDENTITY before pushing it, and pushing it re-extracts every
  *      structural edge of every layer; a table free to hand out a fresh (but
  *      equal) object would pay that cost on every unrelated store change.
  *
- * Every number below is a STARTING VALUE, deliberately: exposure, albedo scale
- * and probe intensity interact through the physical atmosphere in ways only a
- * screenshot settles, so this file ships the levers and the commander's browser
- * pass ships the values.
+ * Every number below is a STARTING VALUE, deliberately: exposure, sun
+ * intensity and probe intensity interact through the physical atmosphere in
+ * ways only a screenshot settles, so this file ships the levers and the
+ * commander's browser pass ships the values.
  */
 import type { ThemeStyle } from "@cityjson/navara-cityjson";
 import type { BasemapId } from "./basemaps";
@@ -121,11 +124,12 @@ export interface ThemeEnvironment {
   /** Overrides the user's exposure slider WITHOUT writing it — the effective
    *  value is `policy.exposure ?? renderDebugStore.exposure`. */
   readonly exposure: number | null;
-  /** The aerial-perspective pass's `albedoScale`: how much of the scene's own
-   *  albedo survives the atmospheric irradiance. Below 1 darkens everything
-   *  the atmosphere lights, which is how the two night themes get dark without
-   *  going anywhere near the solar clock. */
-  readonly apAlbedoScale: number | null;
+  /** The sun light's `intensity` (the engine's `SunLightDesc`, direction and
+   *  colour from the atmosphere): the key-light half of how bright every lit
+   *  surface — city, terrain, basemap — comes out. Below 1 darkens everything
+   *  the sun reaches, which is how the two night themes get dark without going
+   *  anywhere near the solar clock; its shadows scale with it. */
+  readonly sunIntensity: number | null;
   /** The sky light probe's intensity — the ambient half of the same. */
   readonly skyLightProbeIntensity: number | null;
   /** Suppress the lens flare whatever the user's atmosphere setting says.
@@ -135,8 +139,8 @@ export interface ThemeEnvironment {
    *  clouds (all three did), which meant switching look silently threw away
    *  weather the user had turned on and only the flare came back. The clouds
    *  follow the user's toggle in EVERY theme now; they composite through the
-   *  aerial-perspective pass, so a theme's exposure and albedo restyle them
-   *  the way they restyle everything else — stylised, on purpose. */
+   *  aerial-perspective pass, so a theme's exposure and sun restyle them the
+   *  way they restyle everything else — stylised, on purpose. */
   readonly lensFlareOff: boolean;
 }
 
@@ -173,22 +177,31 @@ const NO_ENVIRONMENT: ThemeEnvironment = {
   globeColor: null,
   toneMappingMode: null,
   exposure: null,
-  apAlbedoScale: null,
+  sunIntensity: null,
   skyLightProbeIntensity: null,
   lensFlareOff: false,
 };
 
 /**
- * Photoreal's mesh style, spelled out rather than imported.
+ * Photoreal's ink: a dark warm grey, read as sRGB, drawn UNLIT (the edge
+ * material is a plain line material, so it ignores the sun) at the scene's
+ * exposure. Dark enough to read as the crease between two lit faces, never
+ * as a glow; not pure black, which reads as an artefact against a lit wall.
+ * Every face keeps its own colour (`fill: "vertex"`) and the sun, its shadows
+ * and the sky probe do the shading — the line only says where a face ends.
+ */
+const PHOTOREAL_INK = 0x3a3632;
+
+/**
+ * Photoreal's mesh style: the plugin's default look plus an outline.
  *
- * It is `DEFAULT_THEME_STYLE` by value, but importing that constant would drag
- * `@cityjson/navara-cityjson`'s RUNTIME module — and therefore `three` — into
- * a file whose whole point is being engine-free. Three fields, checked against
- * the plugin's default by the compiler through `ThemeStyle`.
+ * Spelled out rather than built from `DEFAULT_THEME_STYLE`, because importing
+ * that constant would drag `@cityjson/navara-cityjson`'s RUNTIME module — and
+ * therefore `three` — into a file whose whole point is being engine-free.
  */
 const PHOTOREAL_STYLE: ThemeStyle = Object.freeze({
   fill: "vertex",
-  edges: null,
+  edges: Object.freeze({ color: PHOTOREAL_INK }),
 });
 
 /** Near-black ink, read as sRGB. Not pure black: a hairline of pure 0 against
@@ -290,7 +303,7 @@ const POLICIES: Record<SceneTheme, SceneThemePolicy> = {
       // LINEAR at the atmosphere's exposure-10 calibration would clip the
       // whole frame; a flat look wants the curve's bottom, not its shoulder.
       exposure: 1.4,
-      apAlbedoScale: 1.5,
+      sunIntensity: 1.5,
       skyLightProbeIntensity: 1.4,
       lensFlareOff: true,
     }),
@@ -299,8 +312,9 @@ const POLICIES: Record<SceneTheme, SceneThemePolicy> = {
   // NEON-NOIR. A deep blue NIGHT, not a black void: CARTO Dark Matter keeps the
   // streets legible under the city, a night-blue sky box replaces the physical
   // sky, magenta neon rides the building edges and the cyan stays on the
-  // globe's Fresnel rim. Darkness comes from EXPOSURE and albedo, never from
-  // touching `atmosphere.date`, which is solar time and belongs to the analysis.
+  // globe's Fresnel rim. Darkness comes from EXPOSURE and the sun's intensity,
+  // never from touching `atmosphere.date`, which is solar time and belongs to
+  // the analysis.
   cyber: Object.freeze({
     meshStyle: CYBER_STYLE,
     // Streets, canals and blocks under the neon — the single biggest reason
@@ -348,17 +362,25 @@ const POLICIES: Record<SceneTheme, SceneThemePolicy> = {
         heightM: 25,
       }),
       // The GLOW half of the look, and the reason the fill could come down to
-      // a near-silhouette. The threshold is set by MEASUREMENT, not from the
-      // edge HDR values: by the time the AP pass (irradiance x albedoScale)
-      // has had its say, the wire reaches the bloom pass well under 1.0 — at
-      // 1.0 nothing bloomed at all, at 0.1 the whole carto-dark ground washed
-      // out pink, and 0.3 picks the wire out cleanly while the ground stays
-      // dark (browser-bisected 2026-08-10). The halo is what makes the wire
-      // read as neon rather than as a bright hairline; diffuse on purpose
-      // (mipmap blur at a wide radius).
+      // a near-silhouette. The threshold is compared against PRE-tone-mapping
+      // luminance, and what reaches it depends on the lighting calibration:
+      // under the earlier deferred pass the wire was re-lit and attenuated
+      // like everything else and arrived "well under 1.0" (0.3 was bisected
+      // for that, 2026-08-10); under the forward-lit calibration (issue #13)
+      // the edge lines are unlit and arrive at their true HDR value — the
+      // magenta wire's luminance is ~1.7 — and 0.3 selected the whole frame,
+      // flooding it pink (browser A/B against the previous calibration,
+      // 2026-09-06; with the bloom off the two matched). 1.0 sits under the
+      // wire and above the fills, the fog blobs and the carto-dark ground —
+      // and the INTENSITY comes down with it by about the same order, because
+      // the wire now carries ~10x the energy into the blur and a dense wire
+      // network blurred at this radius sums into a flood at the old value
+      // (browser-seen at 2 and 3; 0.25 restores the baseline's halo).
+      // The halo is what makes the wire read as neon rather than as a bright
+      // hairline; diffuse on purpose (mipmap blur at a wide radius).
       bloom: Object.freeze({
-        intensity: 3,
-        luminanceThreshold: 0.3,
+        intensity: 0.25,
+        luminanceThreshold: 1,
         luminanceSmoothing: 0.3,
         radius: 0.9,
       }),
@@ -367,7 +389,7 @@ const POLICIES: Record<SceneTheme, SceneThemePolicy> = {
       // had ever exercised on 0.0.5) blacked out the whole frame's irradiance
       // term — the globe's g-buffer normals go bad and NaN-poison the shared
       // buffer, the same failure Known Issue (e) documents for a missing
-      // terrain layer. Darkness comes from exposure/albedo instead.
+      // terrain layer. Darkness comes from exposure and the sun instead.
       globeColor: null,
       toneMappingMode: "AGX",
       // BRIGHT night, not void: the old 3 / 0.15 / 0.05 triple crushed the
@@ -375,12 +397,12 @@ const POLICIES: Record<SceneTheme, SceneThemePolicy> = {
       // three are the ambient-light budget of the look and were tuned together
       // by screenshot.
       exposure: 4.5,
-      // 0.6 -> 0.5 alongside the near-black fill: albedoScale is what the
-      // atmosphere's irradiance LIFTS the surfaces by, so leaving it where it
-      // was would have handed back a good part of the darkness the tint just
-      // bought. Exposure stays at 4.5 — the basemap, the sky box and the fog
-      // lights are all budgeted against it.
-      apAlbedoScale: 0.5,
+      // Half a sun, alongside the near-black fill (carried over from the
+      // earlier albedo scale of the same value): the sun is what LIFTS the
+      // basemap and the fills, so leaving it at 1 would hand back a good part
+      // of the darkness the tint just bought. Exposure stays at 4.5 — the
+      // basemap, the sky box and the fog lights are all budgeted against it.
+      sunIntensity: 0.5,
       skyLightProbeIntensity: 0.15,
       lensFlareOff: true,
     }),
@@ -417,7 +439,7 @@ const POLICIES: Record<SceneTheme, SceneThemePolicy> = {
       // light budget and were tuned together by screenshot, exactly like
       // cyber's.
       exposure: 2.2,
-      apAlbedoScale: 0.2,
+      sunIntensity: 0.2,
       skyLightProbeIntensity: 0,
       lensFlareOff: true,
     }),
