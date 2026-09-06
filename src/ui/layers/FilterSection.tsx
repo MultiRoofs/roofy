@@ -30,8 +30,10 @@ export function FilterSection({ item }: { readonly item: ActiveLayer }) {
   // notification, and no re-render loop.
   const applied = useQueryStore((s) => layerQuery(s, layerId).applied);
   const clearFilter = useQueryStore((s) => s.clearFilter);
-  const openDrawer = useShellStore((s) => s.openDrawer);
-  const requestSection = useShellStore((s) => s.requestSection);
+  // Through `getState()` rather than a selector: the shell's actions never
+  // change identity, and `ShellActions` declares them as method shorthand,
+  // which `unbound-method` refuses when one is captured as a reference.
+  const shell = () => useShellStore.getState();
 
   if (item.kind === "geo") {
     return <p className="active-layer-note">This layer cannot be filtered.</p>;
@@ -74,8 +76,8 @@ export function FilterSection({ item }: { readonly item: ActiveLayer }) {
           type="button"
           className="active-layer-action"
           onClick={() => {
-            openDrawer();
-            requestSection(null);
+            shell().openDrawer();
+            shell().requestSection(null);
           }}
         >
           Edit in table

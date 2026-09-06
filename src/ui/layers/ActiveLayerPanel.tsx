@@ -66,11 +66,14 @@ export function ActiveLayerPanel({ onZoomToLayer }: ActiveLayerPanelProps) {
       : (s.openSections[layerId] ?? DEFAULT_OPEN_SECTIONS),
   );
   const requestedSection = useShellStore((s) => s.requestedSection);
-  const toggleSection = useShellStore((s) => s.toggleSection);
-  const requestSection = useShellStore((s) => s.requestSection);
   const drawerOpen = useShellStore((s) => s.drawerOpen);
-  const openDrawer = useShellStore((s) => s.openDrawer);
-  const closeDrawer = useShellStore((s) => s.closeDrawer);
+
+  // The ACTIONS come through `getState()`, not a selector: they never change
+  // identity, so subscribing to them buys nothing — and `ShellActions`
+  // declares them as method shorthand, which `typescript-eslint`'s
+  // `unbound-method` rule refuses when one is captured as a reference (the
+  // same reason `LayerActions` declares its own as properties).
+  const shell = () => useShellStore.getState();
 
   // The HEADERS, not the bodies: a closed section has no body to scroll to,
   // and the header is what the user needs on screen to see that it opened.
@@ -82,14 +85,14 @@ export function ActiveLayerPanel({ onZoomToLayer }: ActiveLayerPanelProps) {
     const { section } = requestedSection;
     // Read-then-toggle, from the live state: `toggleSection` TOGGLES, so
     // calling it on a section `requestSection` already opened would close it.
-    const current =
-      useShellStore.getState().openSections[layerId] ?? DEFAULT_OPEN_SECTIONS;
-    if (!current.includes(section)) toggleSection(layerId, section);
+    const state = useShellStore.getState();
+    const current = state.openSections[layerId] ?? DEFAULT_OPEN_SECTIONS;
+    if (!current.includes(section)) state.toggleSection(layerId, section);
     // `?.()` because jsdom implements no `scrollIntoView` — the guard is for
     // the test environment, not for a browser.
     headers.current[section]?.scrollIntoView?.({ block: "nearest" });
-    requestSection(null);
-  }, [layerId, requestedSection, toggleSection, requestSection]);
+    state.requestSection(null);
+  }, [layerId, requestedSection]);
 
   if (item === null || layerId === null) return null;
 
@@ -120,7 +123,9 @@ export function ActiveLayerPanel({ onZoomToLayer }: ActiveLayerPanelProps) {
               // both renames itself and reports a pressed state announces
               // "Close table, pressed" — two encodings of one fact, and the
               // reading is backwards.
-              onClick={() => (drawerOpen ? closeDrawer() : openDrawer())}
+              onClick={() =>
+                drawerOpen ? shell().closeDrawer() : shell().openDrawer()
+              }
             >
               {drawerOpen ? "Close table" : "Open table"}
             </button>
@@ -144,7 +149,7 @@ export function ActiveLayerPanel({ onZoomToLayer }: ActiveLayerPanelProps) {
                 className="active-layer-section-header"
                 aria-expanded={open}
                 aria-controls={`active-layer-section-${id}`}
-                onClick={() => toggleSection(layerId, id)}
+                onClick={() => shell().toggleSection(layerId, id)}
               >
                 <svg
                   className={`active-layer-caret ${open ? "is-open" : ""}`}
