@@ -12,8 +12,12 @@ import {
   type SelectionState,
 } from "../selection/selectionStore";
 
+/** The name shown for a workspace that has never been renamed. */
+export const DEFAULT_WORKSPACE_NAME = "Untitled workspace";
+
 export interface WorkspaceState {
   readonly activeLayerId: string | null;
+  readonly name: string;
 }
 
 export interface WorkspaceActions {
@@ -28,6 +32,12 @@ export interface WorkspaceActions {
    * back door that writes the id without honouring it.
    */
   setActiveLayerId: (id: string | null) => void;
+  /** Trims the given name; an empty (or all-whitespace) result falls back
+   *  to {@link DEFAULT_WORKSPACE_NAME} rather than leaving the workspace
+   *  unnamed. */
+  setName: (name: string) => void;
+  /** "New workspace" calls this to restore the default name. */
+  resetName: () => void;
 }
 
 export type WorkspaceStore = WorkspaceState & WorkspaceActions;
@@ -53,9 +63,15 @@ export function selectionLayerId(
 
 export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
   activeLayerId: null,
+  name: DEFAULT_WORKSPACE_NAME,
   setActiveLayerId: (id) => {
     const owner = selectionLayerId(useSelectionStore.getState());
     if (owner !== null && owner !== id) useSelectionStore.getState().clear();
     set({ activeLayerId: id });
   },
+  setName: (name) => {
+    const trimmed = name.trim();
+    set({ name: trimmed.length > 0 ? trimmed : DEFAULT_WORKSPACE_NAME });
+  },
+  resetName: () => set({ name: DEFAULT_WORKSPACE_NAME }),
 }));

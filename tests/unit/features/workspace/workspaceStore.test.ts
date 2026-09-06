@@ -4,7 +4,10 @@ import { useSelectionStore } from "../../../../src/features/selection/selectionS
 
 describe("workspaceStore", () => {
   beforeEach(() => {
-    useWorkspaceStore.setState({ activeLayerId: null });
+    useWorkspaceStore.setState({
+      activeLayerId: null,
+      name: "Untitled workspace",
+    });
     useSelectionStore.setState({
       selections: [],
       hovered: null,
@@ -56,6 +59,33 @@ describe("workspaceStore", () => {
         .select({ kind: "object", layerId: "a", objectId: "o1" });
       useWorkspaceStore.getState().setActiveLayerId(null);
       expect(useSelectionStore.getState().selections).toEqual([]);
+    });
+  });
+
+  describe("name", () => {
+    it("defaults to Untitled workspace", () => {
+      expect(useWorkspaceStore.getState().name).toBe("Untitled workspace");
+    });
+
+    it("sets a trimmed name", () => {
+      useWorkspaceStore.getState().setName("  Delft city model  ");
+      expect(useWorkspaceStore.getState().name).toBe("Delft city model");
+    });
+
+    it("falls back to the default when set to an empty or blank string", () => {
+      useWorkspaceStore.getState().setName("Delft");
+      useWorkspaceStore.getState().setName("   ");
+      expect(useWorkspaceStore.getState().name).toBe("Untitled workspace");
+
+      useWorkspaceStore.getState().setName("Delft");
+      useWorkspaceStore.getState().setName("");
+      expect(useWorkspaceStore.getState().name).toBe("Untitled workspace");
+    });
+
+    it("resetName restores the default", () => {
+      useWorkspaceStore.getState().setName("Delft city model");
+      useWorkspaceStore.getState().resetName();
+      expect(useWorkspaceStore.getState().name).toBe("Untitled workspace");
     });
   });
 });
