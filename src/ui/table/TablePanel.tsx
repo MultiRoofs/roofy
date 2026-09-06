@@ -12,10 +12,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { DuckDBStatus } from "../../insights/duckdb";
 import { useLayerTableStore } from "../../insights/layerTables";
-import { useLayerStore } from "../../features/layers/layerStore";
 import { syncFilterToMap } from "../../features/query/mapFilterSync";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 import { useSelectionStore } from "../../features/selection/selectionStore";
+import { useActiveCityLayer } from "../../features/workspace/activeLayer";
 import { extractCrsCode } from "../toolbar/crsCode";
 import type { Selection } from "../../domain/selection/types";
 import { DataGrid } from "./DataGrid";
@@ -49,9 +49,10 @@ export function TablePanel({
   onCollapse,
   onHeightChange,
 }: TablePanelProps) {
-  const layers = useLayerStore((s) => s.layers);
-  const activeLayerId = useLayerStore((s) => s.activeLayerId);
-  const activeLayer = layers.find((l) => l.id === activeLayerId) ?? layers[0];
+  // The workspace's one active layer, with no fallback to the first: a table
+  // that quietly showed some OTHER layer's rows while the sidebar highlighted
+  // a geo layer is exactly the disagreement this milestone removes.
+  const activeLayer = useActiveCityLayer();
   const layerId = activeLayer?.id ?? null;
 
   const view = useLayerQuery(layerId);
@@ -60,10 +61,6 @@ export function TablePanel({
   );
   const sceneSelections = useSelectionStore((s) => s.selections);
 
-  const [syncSelection, setSyncSelection] = useState(true);
-  const [tableSelection, setTableSelection] = useState<ReadonlySet<string>>(
-    new Set(),
-  );
   const [filterOpen, setFilterOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
 
@@ -93,43 +90,33 @@ export function TablePanel({
   // which defeats the `React.memo` below — and this component re-renders on
   // every hover, every camera settle and every store touch, while the grid is
   // up to 1000 rows of DOM.
+  //
+  // There is ONE selection. The panel used to offer a "Sync selection"
+  // checkbox that, switched off, gave the grid a second selection of its own:
+  // a row highlighted here, an object highlighted in the viewport, and no way
+  // for the user to know which of the two the inspector was describing. It
+  // also died with the component, so collapsing the panel silently discarded
+  // whatever had been picked in it.
   const selectedIds = useMemo(
-    () =>
-      syncSelection
-        ? new Set(sceneSelections.map((s) => s.objectId))
-        : tableSelection,
-    [syncSelection, sceneSelections, tableSelection],
+    () => new Set(sceneSelections.map((s) => s.objectId)),
+    [sceneSelections],
   );
 
   const handleRowClick = useCallback(
     (objectId: string, shiftKey: boolean) => {
-      if (!syncSelection) {
-        setTableSelection((prev) => {
-          const next = new Set(prev);
-          if (shiftKey) {
-            if (next.has(objectId)) next.delete(objectId);
-            else next.add(objectId);
-          } else {
-            next.clear();
-            next.add(objectId);
-          }
-          return next;
-        });
-        return;
-      }
       if (layerId === null) return;
       const store = useSelectionStore.getState();
       const sel: Selection = { kind: "object", layerId, objectId };
       if (shiftKey) store.toggleSelect(sel);
       else store.select(sel);
     },
-    [syncSelection, layerId],
+    [layerId],
   );
 
-  const handleUnselectAll = useCallback(() => {
-    if (syncSelection) useSelectionStore.getState().clear();
-    else setTableSelection(new Set());
-  }, [syncSelection]);
+  const handleUnselectAll = useCallback(
+    () => useSelectionStore.getState().clear(),
+    [],
+  );
 
   // A CALLBACK, like `selectedIds` is a memo: an inline arrow is a new prop
   // identity every render, which is all it takes to defeat `DataGrid`'s memo.
@@ -176,15 +163,6 @@ export function TablePanel({
           )}
         </span>
 
-        <label className="table-sync-label">
-          <input
-            type="checkbox"
-            checked={syncSelection}
-            onChange={(e) => setSyncSelection(e.target.checked)}
-          />
-          <span>Sync selection</span>
-        </label>
-
         <label
           className="table-sync-label"
           title={activeLayer?.isStreaming ? STREAMING_FILTER_REASON : undefined}
@@ -193,7 +171,7 @@ export function TablePanel({
             type="checkbox"
             aria-label="Filter map"
             disabled={
-              activeLayer === undefined ||
+              activeLayer === null ||
               activeLayer.isStreaming ||
               view.status !== "ready"
             }
@@ -357,7 +335,7 @@ export function TablePanel({
         />
       )}
 
-      {exportOpen && view.table !== null && activeLayer !== undefined && (
+      {exportOpen && view.table !== null && activeLayer !== null && (
         <ExportDialog
           layerId={activeLayer.id}
           layerName={activeLayer.name}

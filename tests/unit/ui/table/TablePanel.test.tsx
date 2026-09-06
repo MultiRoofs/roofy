@@ -41,6 +41,7 @@ const { useSelectionStore } =
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 import type { DuckDBStatus } from "../../../../src/insights/duckdb";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 
 const READY_STATUS: DuckDBStatus = {
   state: "ready",
@@ -126,7 +127,8 @@ beforeEach(() => {
           ],
         },
   );
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
   useLayerTableStore.setState({ tables: {}, tablePanelOpen: false });
   useQueryStore.setState({ queries: {} });
   useSelectionStore.setState({ selections: [] });
@@ -141,8 +143,8 @@ describe("TablePanel — the export dialog", () => {
     // table while its heading named the new layer.
     useLayerStore.setState({
       layers: [layer(), layer({ id: "L2", name: "rotterdam" })],
-      activeLayerId: "L",
     });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
     useLayerTableStore.setState({
       tables: {
         L: { state: "ready", info: TABLE },
@@ -154,7 +156,7 @@ describe("TablePanel — the export dialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Export" }));
     expect(await screen.findByRole("dialog")).toBeTruthy();
 
-    useLayerStore.setState({ activeLayerId: "L2" });
+    useWorkspaceStore.setState({ activeLayerId: "L2" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 });
@@ -187,7 +189,8 @@ describe("TablePanel states", () => {
       ok: false,
       message: "Conversion Error: could not convert",
     });
-    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerStore.setState({ layers: [layer()] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
     useLayerTableStore.setState({
       tables: { L: { state: "ready", info: TABLE } },
     });
@@ -207,7 +210,8 @@ describe("TablePanel states", () => {
     // A Retry sets the status back to `initializing` while every table is
     // still `failed` from the outage. "This layer's table could not be built"
     // over a retry in progress reads as a Retry that did nothing.
-    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerStore.setState({ layers: [layer()] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
     useLayerTableStore.setState({
       tables: { L: { state: "failed", message: "Binder Error: nope" } },
     });
@@ -217,14 +221,16 @@ describe("TablePanel states", () => {
   });
 
   it("shows a spinner while the table is building", () => {
-    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerStore.setState({ layers: [layer()] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
     useLayerTableStore.setState({ tables: { L: { state: "building" } } });
     panel();
     expect(screen.getByText("Building this layer's table…")).toBeTruthy();
   });
 
   it("shows the build failure and offers no grid", () => {
-    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerStore.setState({ layers: [layer()] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
     useLayerTableStore.setState({
       tables: { L: { state: "failed", message: "Binder Error: nope" } },
     });
@@ -235,7 +241,8 @@ describe("TablePanel states", () => {
   });
 
   it("renders the layer's name and its rows once ready", async () => {
-    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerStore.setState({ layers: [layer()] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
     useLayerTableStore.setState({
       tables: { L: { state: "ready", info: TABLE } },
     });
@@ -263,7 +270,8 @@ describe("TablePanel states", () => {
             rows: [{ id: "B1", object_type: "Building" }],
           },
     );
-    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerStore.setState({ layers: [layer()] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
     useLayerTableStore.setState({
       tables: { L: { state: "ready", info: TABLE } },
     });
@@ -281,8 +289,9 @@ describe("TablePanel states", () => {
     expect(screen.getByText("filtered from 2,231")).toBeTruthy();
   });
 
-  it("selects a city object when a row is clicked with Sync selection on", async () => {
-    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+  it("selects a city object when a row is clicked", async () => {
+    useLayerStore.setState({ layers: [layer()] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
     useLayerTableStore.setState({
       tables: { L: { state: "ready", info: TABLE } },
     });
@@ -290,6 +299,36 @@ describe("TablePanel states", () => {
     fireEvent.click(await screen.findByText("B1"));
     expect(useSelectionStore.getState().selections).toEqual([
       { kind: "object", layerId: "L", objectId: "B1" },
+    ]);
+  });
+
+  it("offers no way to detach the table from the scene selection", () => {
+    // There was a "Sync selection" checkbox, and turning it off gave the grid
+    // a SECOND selection of its own — one highlighted in the table, another in
+    // the viewport, neither telling the user which one the inspector meant.
+    useLayerStore.setState({ layers: [layer()] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    panel();
+    expect(screen.queryByText("Sync selection")).toBeNull();
+  });
+
+  it("still writes the global selection after the panel has re-mounted", async () => {
+    // The old local `tableSelection` state died with the component; the global
+    // store is the only thing a collapse-and-reopen must not be able to lose.
+    useLayerStore.setState({ layers: [layer()] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    panel();
+    cleanup();
+    panel();
+    fireEvent.click(await screen.findByText("B2"));
+    expect(useSelectionStore.getState().selections).toEqual([
+      { kind: "object", layerId: "L", objectId: "B2" },
     ]);
   });
 
@@ -303,7 +342,8 @@ describe("TablePanel states", () => {
           }
         : { ok: true, columns: [], rows: [] },
     );
-    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerStore.setState({ layers: [layer()] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
     useLayerTableStore.setState({
       tables: { L: { state: "ready", info: TABLE } },
     });
@@ -332,8 +372,8 @@ describe("TablePanel states", () => {
     );
     useLayerStore.setState({
       layers: [layer({ isStreaming: true })],
-      activeLayerId: "L",
     });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
     useLayerTableStore.setState({
       tables: { L: { state: "ready", info: TABLE } },
     });
@@ -353,7 +393,8 @@ describe("TablePanel states", () => {
           }
         : { ok: true, columns: [], rows: [] },
     );
-    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerStore.setState({ layers: [layer()] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
     useLayerTableStore.setState({
       tables: { L: { state: "ready", info: TABLE } },
     });
@@ -372,8 +413,8 @@ describe("TablePanel states", () => {
   it("disables the Filter map toggle for a streaming layer, and says why", () => {
     useLayerStore.setState({
       layers: [layer({ isStreaming: true })],
-      activeLayerId: "L",
     });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
     useLayerTableStore.setState({
       tables: { L: { state: "ready", info: TABLE } },
     });
@@ -386,7 +427,8 @@ describe("TablePanel states", () => {
   });
 
   it("ENABLES the Filter map toggle for a static layer with a ready table", async () => {
-    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerStore.setState({ layers: [layer()] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
     useLayerTableStore.setState({
       tables: { L: { state: "ready", info: TABLE } },
     });
@@ -408,7 +450,8 @@ describe("TablePanel states", () => {
           ? { ok: true, columns: ["id"], rows: [{ id: "B1" }] }
           : { ok: true, columns: [], rows: [] },
     );
-    useLayerStore.setState({ layers: [layer()], activeLayerId: "L" });
+    useLayerStore.setState({ layers: [layer()] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
     useLayerTableStore.setState({
       tables: { L: { state: "ready", info: TABLE } },
     });
