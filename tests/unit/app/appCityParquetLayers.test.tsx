@@ -31,6 +31,7 @@ import type {
   ProjectSnapshot,
   ProjectStateStore,
 } from "../../../src/persistence/types";
+import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
 
 // jsdom ships no `matchMedia`, which `useTheme` reads on its first render.
 window.matchMedia ??= ((query: string) =>
@@ -260,7 +261,8 @@ beforeEach(() => {
   loadCityParquetFromUrl.mockResolvedValue(parquetModel);
   loadCityParquetFromFiles.mockReset();
   loadCityParquetFromFiles.mockResolvedValue(parquetModel);
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
   enqueued.length = 0;
   location.hash = "";
 });

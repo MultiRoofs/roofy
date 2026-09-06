@@ -8,6 +8,7 @@ import type {
   CityAppearance,
   CityModel,
 } from "../../../../src/domain/citymodel/types";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 
 function model(appearance?: CityAppearance): CityModel {
   return {
@@ -30,7 +31,8 @@ const both: CityAppearance = {
 };
 
 afterEach(() => {
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
 });
 
 describe("computeAppearanceThemes", () => {

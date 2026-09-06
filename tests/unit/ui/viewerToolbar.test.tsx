@@ -18,10 +18,12 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ViewerToolbar } from "../../../src/ui/toolbar/ViewerToolbar";
 import { useLayerStore } from "../../../src/features/layers/layerStore";
 import type { Layer } from "../../../src/features/layers/layerStore";
+import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
 
 afterEach(() => {
   cleanup();
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
 });
 
 const baseProps = {
@@ -168,14 +170,16 @@ describe("ViewerToolbar — controls only, no scene information", () => {
     ["the rule count", "Rules"],
   ] as const) {
     it(`does not restate ${what}, which another surface already shows`, () => {
-      useLayerStore.setState({ layers: [loadedLayer()], activeLayerId: "L" });
+      useLayerStore.setState({ layers: [loadedLayer()] });
+      useWorkspaceStore.setState({ activeLayerId: "L" });
       render(<ViewerToolbar {...baseProps} />);
       expect(screen.queryByText(text)).toBeNull();
     });
   }
 
   it("does not carry the file name, the CRS or a separate sun pill", () => {
-    useLayerStore.setState({ layers: [loadedLayer()], activeLayerId: "L" });
+    useLayerStore.setState({ layers: [loadedLayer()] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
     const { container } = render(<ViewerToolbar {...baseProps} />);
     expect(container.querySelector(".toolbar-file")).toBeNull();
     expect(container.querySelector(".meta-pills")).toBeNull();

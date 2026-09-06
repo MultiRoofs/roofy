@@ -15,10 +15,12 @@ import type { Layer } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import type { StreamState } from "../../../../src/features/streaming/streamStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 
 afterEach(() => {
   cleanup();
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
   useStreamStore.setState({ streams: {} });
 });
 
@@ -58,7 +60,8 @@ function makeLayer(overrides: Partial<Layer> = {}): Layer {
 /** Registers `layer` in the store so the component's `setHiddenTypes` writes
  *  land somewhere observable, and returns it for rendering. */
 function seed(layer: Layer): Layer {
-  useLayerStore.setState({ layers: [layer], activeLayerId: layer.id });
+  useLayerStore.setState({ layers: [layer] });
+  useWorkspaceStore.setState({ activeLayerId: layer.id });
   return layer;
 }
 

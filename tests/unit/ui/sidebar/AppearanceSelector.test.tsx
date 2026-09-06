@@ -7,6 +7,7 @@ import {
 } from "../../../../src/ui/sidebar/appearanceOption";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import type { AppearanceTheme } from "@cityjson/navara-core";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 
 const themes: AppearanceTheme[] = [
   { kind: "texture", name: "rgbTexture" },
@@ -15,7 +16,8 @@ const themes: AppearanceTheme[] = [
 
 afterEach(() => {
   cleanup();
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
 });
 
 describe("AppearanceSelector", () => {

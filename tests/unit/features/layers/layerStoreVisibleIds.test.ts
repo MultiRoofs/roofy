@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 
 function model(): CityModel {
   return {
@@ -24,7 +25,8 @@ function addLayer(): string {
 }
 
 beforeEach(() => {
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
 });
 
 describe("Layer.visibleObjectIds", () => {

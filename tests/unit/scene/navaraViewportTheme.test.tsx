@@ -241,6 +241,7 @@ import {
 import { sceneThemePolicy } from "../../../src/scene/sceneThemePolicy";
 import { BLOOM_EFFECT_KEY } from "../../../src/scene/bloomEffect";
 import type { CityModel } from "../../../src/domain/citymodel/types";
+import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
 
 class ResizeObserverStub {
   observe() {}
@@ -436,7 +437,8 @@ beforeEach(() => {
   for (const handle of Object.values(photorealHandles)) handle.visible = true;
   listeners.clear();
   viewInstances.length = 0;
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
   useSceneThemeStore.setState({ theme: DEFAULT_SCENE_THEME });
   useBasemapStore.setState({ basemapId: "osm" });
   useTilesStore.setState({ enabled: false });
@@ -450,7 +452,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
   useSceneThemeStore.setState({ theme: DEFAULT_SCENE_THEME });
   useBasemapStore.setState({ basemapId: "osm" });
   useTilesStore.setState({ enabled: false });
@@ -464,8 +467,8 @@ describe("scene theme -> the city meshes", () => {
     await act(async () => {
       useLayerStore.setState({
         layers: [makeLayer("L1")],
-        activeLayerId: "L1",
       });
+      useWorkspaceStore.setState({ activeLayerId: "L1" });
     });
     // Photoreal is still pushed — it is the style that UNDOES a theme, and at
     // the plugin it equals the mesh's own default, so the push costs nothing.
@@ -495,8 +498,8 @@ describe("scene theme -> the city meshes", () => {
     await act(async () => {
       useLayerStore.setState({
         layers: [makeLayer("L2")],
-        activeLayerId: "L2",
       });
+      useWorkspaceStore.setState({ activeLayerId: "L2" });
     });
     // A file dropped into a themed scene must not render one photoreal frame.
     expect(handle.setThemeStyle).toHaveBeenCalledWith(
@@ -791,8 +794,8 @@ describe("scene theme -> the volumetric neon (fogLight)", () => {
     await act(async () => {
       useLayerStore.setState({
         layers: [makeLayer("L1")],
-        activeLayerId: "L1",
       });
+      useWorkspaceStore.setState({ activeLayerId: "L1" });
     });
   }
 

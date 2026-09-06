@@ -45,6 +45,7 @@ const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 
 function emptyModel(): CityModel {
   return {
@@ -87,7 +88,8 @@ beforeEach(() => {
   dropped.length = 0;
   clearMapFilter.mockReset();
   forgetMapFilter.mockReset();
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
   useStreamStore.setState({ streams: {} });
   useQueryStore.setState({ queries: {} });
   useLayerTableStore.setState({ tables: {}, tablePanelOpen: false });

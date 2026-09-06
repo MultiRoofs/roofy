@@ -29,10 +29,12 @@ vi.mock("../../../../src/ui/stac/StacBrowser", () => ({
 
 import { LayerPanel } from "../../../../src/ui/layers/LayerPanel";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 
 afterEach(() => {
   cleanup();
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
 });
 
 const noop = () => {};

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { gzipSync } from "node:zlib";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 
 const enqueued: Array<{ layerId: string; source: unknown }> = [];
 /** Set to make the next enqueue REJECT — the "a DuckDB failure must not fail a
@@ -43,7 +44,8 @@ beforeEach(() => {
   enqueued.length = 0;
   enqueueRejects = false;
   enqueueThrowsSync = false;
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
 });
 
 afterEach(() => {

@@ -29,6 +29,7 @@ import type {
   ProjectStateStore,
   SnapshotSummary,
 } from "../../../src/persistence/types";
+import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
 
 // jsdom ships no `matchMedia`, which `useTheme` reads on its first render.
 window.matchMedia ??= ((query: string) =>
@@ -163,7 +164,8 @@ describe("App landing page — catalog entry point", () => {
     // Never resolves: the landing page has to stay mounted for the assertion
     // that follows the add, and a resolved model would swap in the shell.
     loadFromUrl.mockReturnValue(new Promise(() => {}));
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
   });
 
   afterEach(cleanup);

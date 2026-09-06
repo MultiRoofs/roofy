@@ -12,6 +12,7 @@ import {
 } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 
 function makeLayer(id: string, isStreaming: boolean): Layer {
   return {
@@ -59,7 +60,8 @@ function seedStream(id: string, ladder: readonly string[]): void {
 
 afterEach(() => {
   cleanup();
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
   useStreamStore.setState({ streams: {} });
 });
 

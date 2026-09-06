@@ -12,6 +12,7 @@ import {
   useLayerStore,
   type Layer,
 } from "../../../../src/features/layers/layerStore";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 
 function region(layerId: string, minX = 84000): QueryRegion {
   return {
@@ -32,7 +33,8 @@ function region(layerId: string, minX = 84000): QueryRegion {
 describe("StreamQueryBoxOverlay", () => {
   beforeEach(() => {
     useQueryRegionStore.setState({ regions: {} });
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useRenderDebugStore.getState().setStreamQueryBoxEnabled(false);
   });
   afterEach(() => {

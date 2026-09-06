@@ -33,6 +33,7 @@ const { useQueryStore } =
 const { useLayerStore } =
   await import("../../../../src/features/layers/layerStore");
 import type { CityModel } from "../../../../src/domain/citymodel/types";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 
 const TABLE = {
   table: "layer_1",
@@ -81,7 +82,8 @@ function visibleIds(layerId: string): ReadonlySet<string> | null {
 
 beforeEach(() => {
   runQuery.mockReset();
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
   useQueryStore.setState({ queries: {} });
   useLayerTableStore.setState({ tables: {}, tablePanelOpen: false });
 });

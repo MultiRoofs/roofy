@@ -21,10 +21,12 @@ import { AddLayerDialog } from "../../../../src/ui/layers/AddLayerDialog";
 import { LayerPanel } from "../../../../src/ui/layers/LayerPanel";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import { useGeoLayerStore } from "../../../../src/features/geoLayers/geoLayerStore";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 
 afterEach(() => {
   cleanup();
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
   useGeoLayerStore.setState({ layers: [] });
 });
 

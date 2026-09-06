@@ -209,6 +209,7 @@ import type { QueryRegion } from "@cityjson/navara-flatcitybuf";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 import type { Rule } from "../../../src/features/rules/types";
 import type { Selection } from "../../../src/domain/selection/types";
+import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
 
 const CRS_URI = "https://www.opengis.net/def/crs/EPSG/0/7415";
 
@@ -437,7 +438,8 @@ describe("NavaraViewport streaming wiring", () => {
     cityPluginInstance.addCityModel.mockImplementation(
       (_model: unknown, opts: { id: string }) => makeStaticHandle(opts.id),
     );
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useStreamStore.setState({ streams: {} });
     useQueryRegionStore.setState({ regions: {} });
     // The fetch-box diagnostic is OFF by default; the cases that need it turn
@@ -455,7 +457,8 @@ describe("NavaraViewport streaming wiring", () => {
     pendingInitRelease?.();
     pendingInitRelease = null;
     cleanup();
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useStreamStore.setState({ streams: {} });
     useQueryRegionStore.setState({ regions: {} });
     useRenderDebugStore.getState().setStreamQueryBoxEnabled(false);

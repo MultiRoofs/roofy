@@ -20,10 +20,12 @@ import type { Layer } from "../../../../src/features/layers/layerStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import type { StreamState } from "../../../../src/features/streaming/streamStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 
 afterEach(() => {
   cleanup();
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
   useStreamStore.setState({ streams: {} });
 });
 
@@ -103,8 +105,8 @@ describe("LodSelector — static layer (isStreaming: false)", () => {
   it("changing the selection calls setLayerLod, same as before streaming existed", () => {
     useLayerStore.setState({
       layers: [baseLayer({ availableLods: ["1.2", "2.2"] })],
-      activeLayerId: "L",
     });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
     render(
       <LodSelector
         layerId="L"
@@ -170,8 +172,8 @@ describe("LodSelector — streaming layer, auto mode", () => {
     useStreamStore.setState({ streams: { L: baseStream() } });
     useLayerStore.setState({
       layers: [baseLayer({ isStreaming: true, lodMode: "auto" })],
-      activeLayerId: "L",
     });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
     render(
       <LodSelector
         layerId="L"
@@ -209,8 +211,8 @@ describe("LodSelector — streaming layer, manual mode", () => {
     useStreamStore.setState({ streams: { L: baseStream() } });
     useLayerStore.setState({
       layers: [baseLayer({ isStreaming: true, lodMode: "manual" })],
-      activeLayerId: "L",
     });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
     render(
       <LodSelector
         layerId="L"

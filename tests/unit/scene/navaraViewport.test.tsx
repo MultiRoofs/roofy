@@ -405,6 +405,7 @@ import type { CityModel } from "../../../src/domain/citymodel/types";
 // The licence text the attribution overlay must show whatever else is on
 // screen (Task C17 / Global Constraints -> Vertical datum).
 import { GEOID_ATTRIBUTION } from "@cityjson/navara-core";
+import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
 
 /**
  * jsdom has no `ResizeObserver`, and the container-resize wiring is exactly
@@ -570,12 +571,14 @@ describe("NavaraViewport lifecycle", () => {
     cityPluginInstance.addCityModel.mockImplementation(
       (_model: unknown, opts: { id: string }) => makeHandle(opts.id),
     );
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
   });
 
   afterEach(() => {
     cleanup();
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useSelectionStore.setState({
       toolMode: "select",
       selections: [],
@@ -1591,7 +1594,8 @@ describe("NavaraViewport Google tiles", () => {
     defaultPluginThrows = null;
     cityPluginInstance.getHandle.mockReset();
     cityPluginInstance.addCityModel.mockReset();
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
   });
 
   afterEach(() => {
@@ -1792,7 +1796,8 @@ describe("NavaraViewport basemap", () => {
     // The basemap suite owns `addSource`/`addLayer`, so the Google tiles stay
     // out of the way (no key configured is the same as the toggle being off).
     useTilesStore.setState({ enabled: false });
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
   });
 
   afterEach(() => {
@@ -2015,7 +2020,8 @@ describe("NavaraViewport wheel", () => {
     viewInstances.length = 0;
     defaultPluginThrows = null;
     useTilesStore.setState({ enabled: false });
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
   });
 
   afterEach(() => {
@@ -2060,7 +2066,8 @@ describe("NavaraViewport clouds", () => {
     viewInstances.length = 0;
     defaultPluginThrows = null;
     useTilesStore.setState({ enabled: false });
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
   });
 
   afterEach(() => {
@@ -2194,7 +2201,8 @@ describe("NavaraViewport render settings", () => {
     viewInstances.length = 0;
     defaultPluginThrows = null;
     useTilesStore.setState({ enabled: false });
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
   });
 
   afterEach(() => {
@@ -2378,7 +2386,8 @@ describe("NavaraViewport container resize", () => {
     viewInstances.length = 0;
     defaultPluginThrows = null;
     useTilesStore.setState({ enabled: false });
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
   });
 
   afterEach(() => {
@@ -2451,7 +2460,8 @@ describe("NavaraViewport geospatial layers", () => {
     );
     // This suite owns `addSource`/`addLayer`: no backdrop of its own.
     useTilesStore.setState({ enabled: false });
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useGeoLayerStore.setState({ layers: [] });
     useSelectionStore.setState({
       selections: [],
@@ -2465,7 +2475,8 @@ describe("NavaraViewport geospatial layers", () => {
   afterEach(() => {
     cleanup();
     useGeoLayerStore.setState({ layers: [] });
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useSelectionStore.setState({
       selections: [],
       hovered: null,

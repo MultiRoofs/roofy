@@ -189,6 +189,7 @@ import {
 } from "../../../src/features/layers/layerStore";
 import { useSolarStore } from "../../../src/features/solar/solarStore";
 import type { CityModel } from "../../../src/domain/citymodel/types";
+import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -270,7 +271,8 @@ function zenithEcef(site: { lat: number; lon: number }) {
 
 /** Renders the viewport with one layer loaded and the engine up. */
 async function mountWithLayer() {
-  useLayerStore.setState({ layers: [makeLayer("a")], activeLayerId: "a" });
+  useLayerStore.setState({ layers: [makeLayer("a")] });
+  useWorkspaceStore.setState({ activeLayerId: "a" });
   const result = render(<NavaraViewport onTriangleCount={() => {}} />);
   await waitFor(() =>
     expect(cityPluginInstance.addCityModel).toHaveBeenCalledTimes(1),
@@ -298,7 +300,8 @@ describe("NavaraViewport solar wiring", () => {
     cityPluginInstance.addCityModel.mockImplementation(
       (_model: unknown, opts: { id: string }) => makeHandle(opts.id),
     );
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useSolarStore.setState({
       datetime: new Date("2026-06-21T12:00:00.000Z"),
       latLon: null,
@@ -310,7 +313,8 @@ describe("NavaraViewport solar wiring", () => {
 
   afterEach(() => {
     cleanup();
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useSolarStore.setState({ timeAnimating: false, latLon: null });
   });
 
@@ -330,7 +334,8 @@ describe("NavaraViewport solar wiring", () => {
     await mountWithLayer();
     expect(useSolarStore.getState().sunPosition).not.toBeNull();
     await act(async () => {
-      useLayerStore.setState({ layers: [], activeLayerId: null });
+      useLayerStore.setState({ layers: [] });
+      useWorkspaceStore.setState({ activeLayerId: null });
     });
     await waitFor(() => expect(useSolarStore.getState().latLon).toBeNull());
     expect(useSolarStore.getState().sunPosition).toBeNull();
@@ -420,7 +425,8 @@ describe("NavaraViewport solar wiring", () => {
       renders(datetime, sun);
       return null;
     }
-    useLayerStore.setState({ layers: [makeLayer("a")], activeLayerId: "a" });
+    useLayerStore.setState({ layers: [makeLayer("a")] });
+    useWorkspaceStore.setState({ activeLayerId: "a" });
     render(
       <>
         <NavaraViewport onTriangleCount={() => {}} />
@@ -526,7 +532,8 @@ describe("NavaraViewport solar wiring", () => {
   });
 
   it("subscribes exactly once across a StrictMode double mount", async () => {
-    useLayerStore.setState({ layers: [makeLayer("a")], activeLayerId: "a" });
+    useLayerStore.setState({ layers: [makeLayer("a")] });
+    useWorkspaceStore.setState({ activeLayerId: "a" });
     render(
       <StrictMode>
         <NavaraViewport onTriangleCount={() => {}} />

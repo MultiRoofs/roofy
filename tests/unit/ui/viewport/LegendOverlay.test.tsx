@@ -15,10 +15,12 @@ import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { Rule } from "../../../../src/features/rules/types";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
+import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 
 afterEach(() => {
   cleanup();
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
 });
 
 function emptyModel(): CityModel {
@@ -79,8 +81,8 @@ describe("LegendOverlay", () => {
           rules: [rule({ id: "r2", name: "Steep roofs", color: "#00ff00" })],
         }),
       ],
-      activeLayerId: "a",
     });
+    useWorkspaceStore.setState({ activeLayerId: "a" });
 
     render(<LegendOverlay />);
 
@@ -102,8 +104,8 @@ describe("LegendOverlay", () => {
           rules: [rule({ id: "r1", name: "Flat roofs" })],
         }),
       ],
-      activeLayerId: "a",
     });
+    useWorkspaceStore.setState({ activeLayerId: "a" });
 
     render(<LegendOverlay />);
 
@@ -130,8 +132,8 @@ describe("LegendOverlay", () => {
           rules: [rule({ id: "shared", name: "Flat roofs", color: "#00ff00" })],
         }),
       ],
-      activeLayerId: "a",
     });
+    useWorkspaceStore.setState({ activeLayerId: "a" });
 
     render(<LegendOverlay />);
 
@@ -164,8 +166,8 @@ describe("LegendOverlay", () => {
           rules: [rule({ id: "r3", name: "Off rule", enabled: false })],
         }),
       ],
-      activeLayerId: "a",
     });
+    useWorkspaceStore.setState({ activeLayerId: "a" });
 
     const { container } = render(<LegendOverlay />);
 

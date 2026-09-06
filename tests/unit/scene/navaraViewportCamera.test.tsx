@@ -220,6 +220,7 @@ import {
   TILTED_PITCH_DEG,
 } from "../../../src/scene/viewModePolicy";
 import type { CityModel } from "../../../src/domain/citymodel/types";
+import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
 
 class ResizeObserverStub {
   observe() {}
@@ -305,7 +306,8 @@ function compass(): HTMLElement {
  *  makes the camera readable. */
 async function mount(withLayer = false) {
   if (withLayer) {
-    useLayerStore.setState({ layers: [makeLayer("a")], activeLayerId: "a" });
+    useLayerStore.setState({ layers: [makeLayer("a")] });
+    useWorkspaceStore.setState({ activeLayerId: "a" });
     cityPluginInstance.addCityModel.mockImplementation(() => makeHandle("a"));
   }
   const ref = { current: null as CitySceneHandle | null };
@@ -333,13 +335,15 @@ describe("NavaraViewport camera controls", () => {
     suppressSettleThenCommit.mockClear();
     cityPluginInstance.addCityModel.mockReset();
     cityPluginInstance.getHandle.mockReset();
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useSolarStore.getState().setLatLon(null);
   });
 
   afterEach(() => {
     cleanup();
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useViewModeStore.setState({ mode: DEFAULT_VIEW_MODE });
   });
 
@@ -503,7 +507,8 @@ describe("NavaraViewport view modes and flyTo", () => {
     cameraOn.mockClear();
     cameraOff.mockClear();
     suppressSettleThenCommit.mockClear();
-    useLayerStore.setState({ layers: [], activeLayerId: null });
+    useLayerStore.setState({ layers: [] });
+    useWorkspaceStore.setState({ activeLayerId: null });
     useViewModeStore.setState({ mode: DEFAULT_VIEW_MODE });
   });
 

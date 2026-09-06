@@ -49,6 +49,7 @@ import type {
 } from "../../../src/persistence/types";
 import type { StreamPlugin } from "../../../src/features/streaming/streamPlugin";
 import type { PlatformServices } from "../../../src/platform/types";
+import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
 
 // jsdom ships no `matchMedia`, which `useTheme` reads on its first render.
 window.matchMedia ??= ((query: string) =>
@@ -270,7 +271,8 @@ beforeEach(() => {
   cameraState = CAM;
   loadFromUrl.mockReset();
   loadFromUrl.mockResolvedValue(loaded);
-  useLayerStore.setState({ layers: [], activeLayerId: null });
+  useLayerStore.setState({ layers: [] });
+  useWorkspaceStore.setState({ activeLayerId: null });
   location.hash = "";
 });
 
