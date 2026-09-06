@@ -28,7 +28,17 @@ import type {
   CityObject,
 } from "../../../../src/domain/citymodel/types";
 
+/** The one engine call a row makes. Faked so the ORDER of the two halves of a
+ *  streaming remove can be observed — the stream is reachable only BY layer
+ *  id, so closing it after the store entry has gone would strand the worker
+ *  and its cell meshes for the lifetime of the tab. */
+const streaming = vi.hoisted(() => ({ closeStreamingLayer: vi.fn() }));
+vi.mock("../../../../src/features/streaming/openStreamingLayer", () => ({
+  closeStreamingLayer: streaming.closeStreamingLayer,
+}));
+
 beforeEach(() => {
+  streaming.closeStreamingLayer.mockClear();
   useLayerStore.setState({ layers: [] });
   useGeoLayerStore.setState({ layers: [] });
   useWorkspaceStore.setState({ activeLayerId: null });
@@ -37,6 +47,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   useLayerStore.setState({ layers: [] });
   useGeoLayerStore.setState({ layers: [] });
   useWorkspaceStore.setState({ activeLayerId: null });
@@ -135,17 +146,20 @@ const geoStore = () => useGeoLayerStore.getState();
 function renderList(props: Partial<Parameters<typeof LayerList>[0]> = {}): {
   onZoomToLayer: ReturnType<typeof vi.fn>;
   onOpenTable: ReturnType<typeof vi.fn>;
+  dismissFailed: ReturnType<typeof vi.fn>;
 } {
   const onZoomToLayer = vi.fn();
   const onOpenTable = vi.fn();
+  const dismissFailed = vi.fn();
   render(
     <LayerList
       onZoomToLayer={onZoomToLayer}
       onOpenTable={onOpenTable}
+      dismissFailed={dismissFailed}
       {...props}
     />,
   );
-  return { onZoomToLayer, onOpenTable };
+  return { onZoomToLayer, onOpenTable, dismissFailed };
 }
 
 function rowFor(name: string): HTMLElement {
@@ -156,7 +170,7 @@ function rowFor(name: string): HTMLElement {
 
 function menuOf(name: string): void {
   const row = rowFor(name);
-  const trigger = row.querySelector('[aria-label="Layer actions"]');
+  const trigger = row.querySelector('[aria-label^="Layer actions"]');
   fireEvent.click(trigger as Element);
 }
 
@@ -261,7 +275,7 @@ describe("LayerList — what a row does", () => {
     seedCity(layer({ id: "l1", name: "Delft" }));
     renderList();
 
-    fireEvent.click(screen.getByRole("button", { name: "Hide layer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide Delft" }));
     expect(useLayerStore.getState().layers[0]!.visible).toBe(false);
   });
 
@@ -273,7 +287,7 @@ describe("LayerList — what a row does", () => {
     });
     renderList();
 
-    fireEvent.click(screen.getByRole("button", { name: "Hide layer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide OSM" }));
     expect(useGeoLayerStore.getState().layers[0]!.visible).toBe(false);
   });
 
@@ -329,6 +343,46 @@ describe("LayerList — what a row does", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
 
     expect(useGeoLayerStore.getState().layers).toHaveLength(0);
+  });
+
+  it("offers no Zoom for a raster row — an XYZ template names no extent", () => {
+    geoStore().addGeoLayer({
+      name: "OSM",
+      kind: "raster-xyz",
+      config: { urlTemplate: "https://tile.example/{z}/{x}/{y}.png" },
+    });
+    renderList();
+
+    menuOf("OSM");
+    // A button that could only ever toast teaches users to ignore the menu.
+    expect(screen.queryByRole("button", { name: "Zoom to layer" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Remove" })).toBeTruthy();
+  });
+
+  it("offers no Zoom for a geo layer whose file never came back", () => {
+    geoStore().addGeoLayer({ name: "Roads", kind: "geojson", config: {} });
+    renderList();
+
+    menuOf("Roads");
+    expect(screen.queryByRole("button", { name: "Zoom to layer" })).toBeNull();
+  });
+
+  it("closes the stream BEFORE dropping a streaming layer from the store", () => {
+    seedCity(layer({ id: "s1", name: "delft.fcb", isStreaming: true }));
+    seedStream("s1", 10);
+    const removeLayer = vi.spyOn(useLayerStore.getState(), "removeLayer");
+    renderList();
+
+    menuOf("delft.fcb");
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+
+    // `getStreamPlugin()` is null in a test with no viewport; what matters is
+    // that the close happens, with this layer's id, and happens FIRST.
+    expect(streaming.closeStreamingLayer).toHaveBeenCalledWith(null, "s1");
+    expect(removeLayer).toHaveBeenCalledWith("s1");
+    expect(
+      streaming.closeStreamingLayer.mock.invocationCallOrder[0]!,
+    ).toBeLessThan(removeLayer.mock.invocationCallOrder[0]!);
   });
 
   it("zooms to the layer the menu belongs to", () => {
@@ -406,9 +460,9 @@ describe("LayerList — rows with no store entry", () => {
     });
 
     expect(screen.getByText("Error · network down")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Retry/ }));
     expect(retry).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Dismiss/ }));
     expect(dismissFailed).toHaveBeenCalledWith("a1");
   });
 

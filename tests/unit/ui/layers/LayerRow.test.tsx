@@ -79,7 +79,7 @@ function renderRow(
 }
 
 function openMenu(): void {
-  fireEvent.click(screen.getByRole("button", { name: "Layer actions" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Layer actions/ }));
 }
 
 describe("LayerRow", () => {
@@ -141,7 +141,7 @@ describe("LayerRow", () => {
   it("toggles visibility WITHOUT activating — the eye is not a row click", () => {
     const cbs = renderRow();
 
-    fireEvent.click(screen.getByRole("button", { name: "Hide layer" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Hide/ }));
     expect(cbs.onToggleVisible).toHaveBeenCalledTimes(1);
     expect(cbs.onActivate).not.toHaveBeenCalled();
   });
@@ -149,7 +149,19 @@ describe("LayerRow", () => {
   it("names the eye button for what it will DO, not for the state it shows", () => {
     renderRow({ item: cityItem({ visible: false }) });
 
-    expect(screen.getByRole("button", { name: "Show layer" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Show/ })).toBeTruthy();
+  });
+
+  it("names its controls after the LAYER, not after the row's position", () => {
+    // A list of five rows otherwise announces five identical "Hide layer" and
+    // "Layer actions" buttons, and a screen-reader user tabbing through them
+    // has no way to tell which layer they are about to hide.
+    renderRow();
+
+    expect(screen.getByRole("button", { name: "Hide Delft" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Layer actions for Delft" }),
+    ).toBeTruthy();
   });
 
   it("marks a hidden row so the list can dim it", () => {
@@ -240,6 +252,87 @@ describe("LayerRow", () => {
     expect(cbs.onActivate).not.toHaveBeenCalled();
   });
 
+  it("returns the focus to the row when a rename commits", () => {
+    renderRow();
+    const row = screen.getByRole("listitem");
+
+    fireEvent.doubleClick(screen.getByText("Delft"));
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+
+    // The field unmounts under the keyboard user's hands; without this the
+    // focus ring falls to <body> and they lose their place in the list.
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("returns the focus to the row when a rename is abandoned", () => {
+    renderRow();
+    const row = screen.getByRole("listitem");
+
+    fireEvent.doubleClick(screen.getByText("Delft"));
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
+
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("commits a rename ONCE, however the edit ends", () => {
+    // Enter commits and hands the focus back, which blurs the field — and the
+    // blur handler commits too. Both must not fire `onRename`.
+    const cbs = renderRow();
+
+    fireEvent.doubleClick(screen.getByText("Delft"));
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Delft 2.2" },
+    });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+
+    expect(cbs.onRename).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not rename when the name is unchanged", () => {
+    const cbs = renderRow();
+
+    fireEvent.doubleClick(screen.getByText("Delft"));
+    // Retyped identically, whitespace and all — still the same name.
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "  Delft  " },
+    });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+
+    expect(cbs.onRename).not.toHaveBeenCalled();
+  });
+
+  it("does not rename to nothing", () => {
+    const cbs = renderRow();
+
+    fireEvent.doubleClick(screen.getByText("Delft"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "   " } });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+
+    expect(cbs.onRename).not.toHaveBeenCalled();
+    expect(screen.getByText("Delft")).toBeTruthy();
+  });
+
+  it("commits a changed name on blur — clicking away is not abandoning", () => {
+    const cbs = renderRow();
+
+    fireEvent.doubleClick(screen.getByText("Delft"));
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Delft 2.2" },
+    });
+    fireEvent.blur(screen.getByRole("textbox"));
+
+    expect(cbs.onRename).toHaveBeenCalledTimes(1);
+    expect(cbs.onRename).toHaveBeenCalledWith("Delft 2.2");
+  });
+
+  it("omits Zoom to layer for a row with nothing to fly to", () => {
+    renderRow({ item: geoItem(), kind: "raster", onZoom: null });
+
+    openMenu();
+    expect(screen.queryByRole("button", { name: "Zoom to layer" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Remove" })).toBeTruthy();
+  });
+
   it("renders the filter chip beside the state line", () => {
     renderRow({ filterChip: <span>2 filters</span> });
 
@@ -265,7 +358,7 @@ describe("PlaceholderRow", () => {
     // A real button, not a `<label>` fronting the input: a label is not a tab
     // stop, and re-linking would be the one action here a keyboard could not
     // reach.
-    expect(screen.getByRole("button", { name: "Re-link" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Re-link/ })).toBeTruthy();
 
     const file = new File(["{}"], "delft.city.json");
     fireEvent.change(screen.getByTestId("relink-input"), {
@@ -273,7 +366,7 @@ describe("PlaceholderRow", () => {
     });
     expect(onRelink).toHaveBeenCalledWith(file);
 
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Dismiss/ }));
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
@@ -302,9 +395,12 @@ describe("PlaceholderRow", () => {
       screen.getByText("Error · Unsupported CityJSON version 0.9"),
     ).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(
+      screen.getByRole("button", { name: "Retry broken.city.json" }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Retry/ }));
     expect(onRetry).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Dismiss/ }));
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 

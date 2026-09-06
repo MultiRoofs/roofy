@@ -86,7 +86,10 @@ export interface LayerListProps {
   readonly pending?: ReadonlyArray<PendingAdd>;
   /** `useLayerFileLoader().failed` — adds that did not land. */
   readonly failed?: ReadonlyArray<FailedAdd>;
-  readonly dismissFailed?: (id: string) => void;
+  /** `useLayerFileLoader().dismissFailed`. REQUIRED, unlike the arrays above:
+   *  a failed row that cannot be dismissed is a row the user can only stare
+   *  at, so a caller that renders `failed` must also be able to clear it. */
+  readonly dismissFailed: (id: string) => void;
 }
 
 const NO_ROWS: ReadonlyArray<never> = [];
@@ -144,7 +147,7 @@ export function LayerList({
           name={add.name}
           message={add.message}
           onRetry={add.retry}
-          onDismiss={dismissFailed ? () => dismissFailed(add.id) : undefined}
+          onDismiss={() => dismissFailed(add.id)}
         />
       ))}
     </div>
@@ -183,10 +186,12 @@ function StoreLayerRow({
   const streamStatus = useStreamStore((s) => s.streams[id]?.status);
   const streamMessage = useStreamStore((s) => s.streams[id]?.message);
 
-  // A STATIC city layer only: a streaming layer's `model.objects` is a stub
-  // that is never populated (see residentModel.ts), so counting it would
-  // print "0 objects" for a layer holding thousands. Memoised on the model
-  // reference because it walks every object in the file.
+  // A STATIC city layer only. Not a correctness guard on the state line —
+  // the streaming branch below never reads `counts` — but a PERFORMANCE one:
+  // `countRootObjects` walks every object in the model, and a streaming
+  // layer's `model.objects` is a stub that is never populated (see
+  // residentModel.ts), so the walk would be wasted. Memoised on the model
+  // reference for the static case, where the walk is real.
   const model =
     item.kind === "city" && !item.layer.isStreaming ? item.layer.model : null;
   const counts = useMemo(
@@ -243,7 +248,7 @@ function StoreLayerRow({
         if (item.kind === "city") updateLayer(id, { name });
         else updateGeoLayer(id, { name });
       }}
-      onZoom={() => onZoomToLayer(item)}
+      onZoom={canZoom(item) ? () => onZoomToLayer(item) : null}
       // City kinds only: a geospatial layer has no attribute table behind it.
       onOpenTable={item.kind === "city" ? () => onOpenTable(id) : null}
       onRemove={() => {
@@ -259,6 +264,22 @@ function StoreLayerRow({
       }}
     />
   );
+}
+
+/**
+ * Whether the app can compute an extent to fly to.
+ *
+ * Inherited verbatim from `GeoLayerRow`, which hid its zoom button for the
+ * same two cases: an XYZ template names no extent at all, and an UNLINKED
+ * layer (restored from a snapshot, no data and no url) has nothing to walk
+ * until its file comes back. A menu item that could only ever toast teaches
+ * users to ignore the whole menu. Every city layer has a model or a header,
+ * so all of them can be flown to.
+ */
+function canZoom(item: ActiveLayer): boolean {
+  if (item.kind === "city") return true;
+  if (item.layer.kind === "raster-xyz") return false;
+  return !isGeoLayerUnavailable(item.layer);
 }
 
 /**

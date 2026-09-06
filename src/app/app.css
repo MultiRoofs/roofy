@@ -128,7 +128,8 @@
 .camera-ctl-btn:focus-visible,
 .legend-toggle:focus-visible,
 .preset-btn:focus-visible,
-.layer-item:focus-visible {
+.layer-item:focus-visible,
+.layer-row:focus-visible {
   outline-offset: -2px;
 }
 
@@ -3557,8 +3558,9 @@ body {
 }
 
 /* The ghost button from the kit, at row scale: transparent, hairline, muted
-   ink. Also worn by the `<label>` that fronts the hidden file input, which
-   is why the rule sets `display` rather than relying on the button default. */
+   ink. Worn by Re-link, Retry and Dismiss on the three placeholder rows —
+   all real buttons, so `inline-flex` is only there to centre the label
+   against the row's 1.25rem control height. */
 .layer-row-link-btn {
   display: inline-flex;
   align-items: center;

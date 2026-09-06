@@ -41,7 +41,9 @@ export interface LayerRowProps {
   readonly onToggleVisible: () => void;
   /** Called with the TRIMMED new name, only when it is non-empty. */
   readonly onRename: (name: string) => void;
-  readonly onZoom: () => void;
+  /** `null` for a row with no extent to fly to — an XYZ raster names none,
+   *  and a geo layer waiting for its file has nothing to walk yet. */
+  readonly onZoom: (() => void) | null;
   readonly onOpenTable: (() => void) | null;
   readonly onRemove: () => void;
 }
@@ -60,22 +62,42 @@ export function LayerRow({
   onRemove,
 }: LayerRowProps) {
   const { name, visible } = item.layer;
+  const rowRef = useRef<HTMLDivElement>(null);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(name);
+  // A REF beside the state, read synchronously inside one event: ending the
+  // edit hands the focus back to the row, which blurs the field, whose own
+  // handler ends the edit again — and `renaming` is still `true` in that
+  // second closure, so a state read cannot stop the double commit.
+  const editing = useRef(false);
 
   const startRename = () => {
     setDraft(name);
+    editing.current = true;
     setRenaming(true);
   };
 
-  const commitRename = () => {
-    const trimmed = draft.trim();
-    if (trimmed !== "" && trimmed !== name) onRename(trimmed);
+  /**
+   * End the edit, keeping it or not, and put the focus back on the row.
+   *
+   * The field unmounts here. A control that unmounts with the focus inside it
+   * strands the ring on `<body>` and the keyboard user loses their place in
+   * the list — the same rule `useHeaderMenu` holds for a dismissed popover.
+   */
+  const endRename = (keep: boolean) => {
+    if (!editing.current) return;
+    editing.current = false;
+    if (keep) {
+      const trimmed = draft.trim();
+      if (trimmed !== "" && trimmed !== name) onRename(trimmed);
+    }
     setRenaming(false);
+    rowRef.current?.focus();
   };
 
   return (
     <div
+      ref={rowRef}
       role="listitem"
       className={[
         "layer-row",
@@ -101,8 +123,10 @@ export function LayerRow({
       <button
         type="button"
         className="layer-row-eye"
-        // Named for what the click will DO, not for the state it shows.
-        aria-label={visible ? "Hide layer" : "Show layer"}
+        // Named for what the click will DO, not for the state it shows — and
+        // named after the LAYER, because five rows of "Hide layer" tell a
+        // screen-reader user nothing about which one they are on.
+        aria-label={visible ? `Hide ${name}` : `Show ${name}`}
         onClick={(e) => {
           e.stopPropagation();
           onToggleVisible();
@@ -123,11 +147,11 @@ export function LayerRow({
             value={draft}
             autoFocus
             onChange={(e) => setDraft(e.target.value)}
-            onBlur={commitRename}
+            onBlur={() => endRename(true)}
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
-                commitRename();
+                endRename(true);
                 return;
               }
               if (e.key !== "Escape") return;
@@ -135,7 +159,7 @@ export function LayerRow({
               // document listener would otherwise take it, and the app's
               // "Escape clears the selection" would take what was left.
               e.stopPropagation();
-              setRenaming(false);
+              endRename(false);
             }}
           />
         ) : (
@@ -157,6 +181,7 @@ export function LayerRow({
       </span>
 
       <LayerRowMenu
+        name={name}
         onZoom={onZoom}
         onOpenTable={onOpenTable}
         onStartRename={startRename}
@@ -232,6 +257,7 @@ export function PlaceholderRow({
           <button
             type="button"
             className="layer-row-link-btn"
+            aria-label={`Re-link ${name}`}
             onClick={() => fileInputRef.current?.click()}
           >
             Re-link
@@ -254,7 +280,12 @@ export function PlaceholderRow({
         </>
       )}
       {kind === "error" && onRetry && (
-        <button type="button" className="layer-row-link-btn" onClick={onRetry}>
+        <button
+          type="button"
+          className="layer-row-link-btn"
+          aria-label={`Retry ${name}`}
+          onClick={onRetry}
+        >
           Retry
         </button>
       )}
@@ -262,6 +293,7 @@ export function PlaceholderRow({
         <button
           type="button"
           className="layer-row-link-btn layer-row-dismiss"
+          aria-label={`Dismiss ${name}`}
           onClick={onDismiss}
         >
           Dismiss

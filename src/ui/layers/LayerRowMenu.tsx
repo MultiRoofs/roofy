@@ -20,7 +20,14 @@
 import { useHeaderMenu } from "../header/useHeaderMenu";
 
 export interface LayerRowMenuProps {
-  readonly onZoom: () => void;
+  /** The layer's name, for the trigger's accessible name: a list of rows all
+   *  announcing "Layer actions" says nothing about which layer is about to be
+   *  acted on. */
+  readonly name: string;
+  /** `null` for a row with no extent to fly to; the item is then absent, for
+   *  the same reason `onOpenTable`'s is — `GeoLayerRow` learned that a button
+   *  which could only ever toast teaches users to ignore the whole cluster. */
+  readonly onZoom: (() => void) | null;
   /** `null` for a row with no table — a geospatial layer has no attributes
    *  to open. The item is then absent rather than disabled: a permanently
    *  greyed row teaches nothing. */
@@ -32,6 +39,7 @@ export interface LayerRowMenuProps {
 }
 
 export function LayerRowMenu({
+  name,
   onZoom,
   onOpenTable,
   onStartRename,
@@ -60,7 +68,7 @@ export function LayerRowMenu({
         ref={menu.triggerRef}
         type="button"
         className="layer-row-menu-btn"
-        aria-label="Layer actions"
+        aria-label={`Layer actions for ${name}`}
         aria-haspopup="dialog"
         aria-expanded={menu.open}
         onClick={() => menu.toggle()}
@@ -78,13 +86,15 @@ export function LayerRowMenu({
           role="dialog"
           aria-label="Layer actions"
         >
-          <button
-            type="button"
-            className="menu-item"
-            onClick={() => act(onZoom)}
-          >
-            Zoom to layer
-          </button>
+          {onZoom !== null && (
+            <button
+              type="button"
+              className="menu-item"
+              onClick={() => act(onZoom)}
+            >
+              Zoom to layer
+            </button>
+          )}
           {onOpenTable !== null && (
             <button
               type="button"
