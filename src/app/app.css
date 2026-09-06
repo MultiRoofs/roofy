@@ -627,6 +627,14 @@ body {
 .shell-status {
   display: flex;
   min-width: 0;
+}
+
+/* Clipped, because these two sit in the `1fr` row: without it a panel taller
+   than the viewport would push the row (and the status bar) off screen. The
+   header and the status bar are in FIXED tracks and must NOT be clipped —
+   every toolbar tooltip and popover hangs below its button. */
+.shell-left,
+.shell-right {
   overflow: hidden;
 }
 
