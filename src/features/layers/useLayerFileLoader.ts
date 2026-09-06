@@ -245,7 +245,12 @@ export function useLayerFileLoader(
       try {
         return await attempt();
       } catch (e) {
-        const message = e instanceof Error ? e.message : entry.fallback;
+        // `(… && e.message) ||`, not a plain ternary: a rejection carrying an
+        // Error with an EMPTY message (a bare `new Error()`, an aborted
+        // fetch on some engines) would otherwise reach the row as the bald
+        // "Error · " — a state line that names no trouble at all. The
+        // per-path fallback sentence is the honest answer there.
+        const message = (e instanceof Error && e.message) || entry.fallback;
         setError(message, entry.source);
         setFailed((rows) => [
           ...rows,

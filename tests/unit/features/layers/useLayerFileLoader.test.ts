@@ -697,3 +697,111 @@ describe("useLayerFileLoader — pending and failed adds", () => {
     expect(result.current.failed.map((f) => f.name)).toEqual(["two.fcb"]);
   });
 });
+
+describe("useLayerFileLoader — several adds at once, and retrying", () => {
+  it("stays loading until BOTH concurrent adds settle, one pending row each", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+
+    let releaseFirst!: (handle: FcbStreamLayerHandle) => void;
+    let releaseSecond!: (handle: FcbStreamLayerHandle) => void;
+    openStream.mockReturnValueOnce(
+      new Promise<FcbStreamLayerHandle>((resolve) => {
+        releaseFirst = resolve;
+      }),
+    );
+    openStream.mockReturnValueOnce(
+      new Promise<FcbStreamLayerHandle>((resolve) => {
+        releaseSecond = resolve;
+      }),
+    );
+
+    let first!: Promise<string | null>;
+    let second!: Promise<string | null>;
+    act(() => {
+      first = result.current.addLayerFromUrl("https://x/one.fcb");
+      second = result.current.addLayerFromUrl("https://x/two.fcb");
+    });
+
+    expect(result.current.pending.map((p) => p.name)).toEqual([
+      "one.fcb",
+      "two.fcb",
+    ]);
+    // Distinct ids: they are React keys, and two rows sharing one would
+    // collapse into a single loading row.
+    expect(new Set(result.current.pending.map((p) => p.id)).size).toBe(2);
+
+    await act(async () => {
+      releaseFirst(fakeHandle("l1"));
+      await first;
+    });
+    // The FIRST to settle must not clear the spinner the second is still
+    // using — the race the old boolean `loading` lost.
+    expect(result.current.loading).toBe(true);
+    expect(result.current.pending.map((p) => p.name)).toEqual(["two.fcb"]);
+
+    await act(async () => {
+      releaseSecond(fakeHandle("l2"));
+      await second;
+    });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.pending).toHaveLength(0);
+  });
+
+  it("a retry that fails again REPLACES its row rather than adding a second", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    openStream.mockRejectedValueOnce(new Error("first attempt"));
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/delft.fcb");
+    });
+    expect(result.current.failed).toHaveLength(1);
+
+    openStream.mockRejectedValueOnce(new Error("second attempt"));
+    await act(async () => {
+      result.current.failed[0]!.retry();
+    });
+
+    expect(result.current.failed).toHaveLength(1);
+    expect(result.current.failed[0]!.message).toMatch(/second attempt/);
+  });
+
+  it("a retry keeps the overrides the original add was given", async () => {
+    // The re-link path: a snapshot-restored layer carries its saved rules,
+    // visibility and LoD into the add. A retry that dropped them would
+    // silently revert the layer to fresh-layer defaults — the exact failure
+    // `applyPostCreateOverrides` exists to prevent.
+    const { result } = renderHook(() => useLayerFileLoader());
+    openStream.mockRejectedValueOnce(new Error("network down"));
+    const file = new File(["fake fcb bytes"], "restored.fcb");
+
+    await act(async () => {
+      await result.current.addLayerFromFile(file, {
+        rulesEnabled: false,
+        visible: false,
+      });
+    });
+    expect(useLayerStore.getState().layers).toHaveLength(0);
+
+    await act(async () => {
+      result.current.failed[0]!.retry();
+    });
+
+    const layer = useLayerStore.getState().layers[0]!;
+    expect(layer.rulesEnabled).toBe(false);
+    expect(layer.visible).toBe(false);
+  });
+
+  it("never shows a bald 'Error · ' for a rejection carrying no message", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    openStream.mockRejectedValueOnce(new Error(""));
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/delft.fcb");
+    });
+
+    expect(result.current.failed[0]!.message).toBe(
+      "Failed to load remote file.",
+    );
+    expect(result.current.error).toBe("Failed to load remote file.");
+  });
+});
