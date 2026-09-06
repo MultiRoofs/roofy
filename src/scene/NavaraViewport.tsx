@@ -512,18 +512,31 @@ const PHOTOREAL_SUN_INTENSITY = 1;
  * fragment a little towards the sun regardless of its winding. The value is
  * ONE number for all four cascades (`CascadedShadowMaps.bias` fans it out
  * unscaled), and each cascade's ortho camera spans its frustum slice plus
- * `shadowMargin` (5 km), so 0.0005 of that range is about five metres in the
- * nearest cascade and tens of metres in the far ones: a thin caster that
- * close to its receiver casts nothing (peter-panning). Browser-checked at a
- * street-level camera (shadows attached to their bases, no acne) and at the
- * layer-fit view (2.2 km up: shadows present beside the blocks); a lower
- * sun over a far cascade is the untested case, and a per-cascade bias would
- * need the engine to expose one. Kept in one constant and written together
- * with `castShadow` so the two can never drift apart across the toggle.
+ * `shadowMargin` on either side, so the bias's worth in metres is the
+ * cascade's depth range times 0.0005: a caster closer than that to its
+ * receiver casts nothing on it (peter-panning).
+ *
+ * `shadowMargin` is the lever on that range. The engine's 5 km (room for a
+ * mountain outside the frustum to shadow the valley in view) put the nearest
+ * cascade's depth range at 8.3 km, so about four metres of bias at street
+ * level; 500 m — still five times any building — brings it to 3.8 km and
+ * under two metres (probed at the 200 m camera, cascade fars 8328/11929/
+ * 18865/83085 → 3828/7429/14365/78585), with no acne returning. The far
+ * cascades stay coarse regardless: at the layer-fit view (2.2 km up) the
+ * buildings sit in cascades whose depth range is tens of kilometres, so
+ * their shadows reach the ground but not each other, and no bias fixes
+ * that — a smaller one only brings the acne back (browser-swept: 1e-4 and
+ * 2e-5 stripe the roofs). A per-cascade bias would need the engine to
+ * expose one. Browser-checked at a street-level camera (shadows attached to
+ * their bases, no acne) and at the layer-fit view (shadows present beside
+ * the blocks); a lower sun over a far cascade is the untested case. Kept in
+ * one constant and written together with `castShadow` so the pieces can
+ * never drift apart across the toggle.
  */
 export const SUN_SHADOW_TUNING = Object.freeze({
   shadowBias: -0.0005,
   shadowNormalBias: 0,
+  shadowMargin: 500,
 });
 
 /** `DEFAULT_TONE_MAPPING_OPTIONS.mode` in the same bundle. */
