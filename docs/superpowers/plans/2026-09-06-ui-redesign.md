@@ -41,6 +41,10 @@ Each later slice gets its own task-level section appended to this document (same
 
 Outcome: the app behaves by the design's interaction rules 1, 2, 4 and 5 with the OLD panels still on screen. Nothing visual changes except the removals. Every existing test still passes or is rewritten for the new rule.
 
+### Execution order for 12.1
+
+Tasks run **1 → 3 → 4 → 2 → 5 → 6 → 7 → 8**, not in numeric order. Task 4 rewires every reader to the workspace store while the old store fields still exist (unread), so Task 2's deletion is green by construction. Every commit leaves `npx vp check`, `npx tsc -b --noEmit` and `npx vp test run` green; a subagent inheriting a red suite cannot tell its own breakage from the plan's. One writer at a time in this worktree: tasks are dispatched sequentially, never in parallel.
+
 ### File map for 12.1
 
 - Create `src/features/workspace/workspaceStore.ts` — `activeLayerId` for both layer kinds.
@@ -242,7 +246,7 @@ export function useActiveCityLayer(): Layer | null {
 }
 ```
 
-(If `zustand/react/shallow` is not available in the pinned Zustand, select the id and the array separately and `find` in the hook body.)
+Do not use `useShallow`: `find` returns a stable object reference, so select the id and the array separately and `find` in the hook body (drop the import).
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -291,10 +295,10 @@ Expected: FAIL on the new assertions.
 In `layerStore.ts`: delete `activeLayerId` from `LayerStoreState`, delete `setActiveLayer` from the actions interface and the implementation, make `addLayer` return without the `activeLayerId:` line, make `removeLayer` `set((state) => ({ layers: state.layers.filter((l) => l.id !== id) }))`, and `removeAllLayers: () => set({ layers: [] })`.
 In `geoLayerStore.ts`: delete `activeGeoLayerId` and `setActiveGeoLayer`; `removeGeoLayer` / `removeAllGeoLayers` only touch `layers`.
 
-- [ ] **Step 4: Run the whole suite; fix every compile error by switching the caller to `useWorkspaceStore` / `useActiveLayer` (Task 4 finishes this properly; here only make it compile)**
+- [ ] **Step 4: Run the whole suite**
 
 Run: `npx tsc -b --noEmit && npx vitest run`
-Expected: type check clean; tests that assert old behaviour (first-add seeds active, removal picks the last) fail — they are rewritten in Task 3 and Task 4.
+Expected: green. Task 4 already moved every reader and every test to the workspace store; if anything still references the deleted fields, that is a Task 4 omission — fix the reader, do not reintroduce the field.
 
 - [ ] **Step 5: Commit** — `refactor(layers): drop the per-store active ids`
 
@@ -460,7 +464,7 @@ describe("activateLayer + invariants", () => {
 });
 ```
 
-Add to `selectionStore.test.ts`:
+In `selectionStore.test.ts`, DELETE the existing case asserting that `setMode` clears the selection, then add:
 
 ```ts
 it("switching to object mode narrows surface selections to their objects", () => {
@@ -648,7 +652,7 @@ Note `nextActiveAfterRemoval` receives the order BEFORE removal and the removed 
 
 - Delete: `src/ui/viewport/AttributePanel.tsx`, `tests/unit/ui/viewport/AttributePanel.test.tsx`
 - Modify: `src/app/App.tsx:1270-1300, :1366-1370` (the `selectedObjects` / `geoFeature` resolution and the mount), `src/app/app.css` sections `ATTRIBUTE PANEL` (:2965) and `AGGREGATION MODE SELECT` (:3136)
-- Test: `tests/unit/app/appEngineBoot.test.tsx` — add "a selection renders exactly one attribute table" (query by the inspector's heading; assert `screen.queryByText(/inherited from/i)` from the overlay is absent)
+- Test: `tests/unit/app/appEngineBoot.test.tsx` — add "a selection renders exactly one attribute table": assert `document.querySelector(".attribute-panel")` is null and `screen.getAllByRole("table")` (or the inspector's attribute-list role) has length 1
 
 - [ ] Steps: failing app test → delete the module, its mount and CSS → `npx vp check` (dead-class check: `grep -n "attribute-panel\|agg-mode" src` returns nothing) → suite green → commit `refactor(inspector): the details panel is the one attribute view; floating overlay removed`.
 
@@ -656,8 +660,8 @@ Note `nextActiveAfterRemoval` receives the order BEFORE removal and the removed 
 
 **Files:**
 
-- Modify: `src/scene/NavaraViewport.tsx:2380` → `if (before === 0 && liveRef.current.size > 0) setFitToken((t) => t + 1);`
-- Test: `tests/unit/scene/navaraViewport.test.tsx` — the existing auto-fit case becomes two: "fits when the first layer lands" and "does not fit when a second layer lands"; the suppression case stays.
+- Modify: `src/scene/NavaraViewport.tsx:2380` — key the fit on the WORKSPACE going from no layers to some, not on `liveRef` (which counts static handles only): keep a `previousLayerCountRef` holding `layers.length + geoLayers.length + streamingCount` from the last sync (`layers` are already a dependency of the effect; read the geo count from `useGeoLayerStore` and the streaming count from `streamsRef`), and bump the fit token only when the previous total was `0` and the new total is `> 0`. Streaming layers count as layers here: a workspace whose first layer is streaming must not be yanked when the first static layer lands.
+- Test: `tests/unit/scene/navaraViewport.test.tsx` — the existing auto-fit case becomes: "fits when the first layer of an empty workspace lands", "does not fit when a second static layer lands", "does not fit when a static layer joins a workspace that already has a streaming layer", "does not fit when a city layer joins a geo-only workspace"; the suppression case stays.
 
 - [ ] Steps: failing test → one-line change and comment update → green → commit `fix(viewport): only the first layer of an empty workspace fits the camera`.
 
@@ -667,7 +671,7 @@ Note `nextActiveAfterRemoval` receives the order BEFORE removal and the removed 
 
 - Modify: `src/persistence/types.ts:383, :385-404` — `SNAPSHOT_VERSION = "4"`; add
   ```ts
-  /** v4: which layer was active, by position in the unified list (city layers first, then geo). Absent = the first layer. */
+  /** v4: which layer was active. `index` is the position within `snapshot.layers` when `kind` is "city" and within `snapshot.geoLayers` when `kind` is "geo". Absent = the first layer in unified order. */
   readonly activeLayer?: { readonly kind: "city" | "geo"; readonly index: number };
   ```
 - Create: `src/persistence/migrateSnapshot.ts`
@@ -684,7 +688,7 @@ Note `nextActiveAfterRemoval` receives the order BEFORE removal and the removed 
   ```
 - Modify: `src/persistence/restoreSnapshot.ts:22-24` → call `migrateSnapshot`; throw the error outcome; return `viewState` and, additionally, `activeLayer` (change the return type to `{ viewState: ViewState; activeLayer: ProjectSnapshot["activeLayer"] }` and update the two callers in `App.tsx`)
 - Modify: `src/persistence/captureSnapshot.ts:20-37, :39` — `CaptureInput` gains `activeLayer?: { kind; index }`; written when defined
-- Modify: `src/app/App.tsx` `handleSave` :627-668 (compute `activeLayer` from `useWorkspaceStore` + `unifiedLayerOrder`), `handleRestore` :696-925 (after the per-layer loop, map `activeLayer.index` onto the ids actually added — unavailable placeholders are skipped — and call `activateLayer(id)`; when the index does not resolve, activate the first added layer), `readShareHash` path unchanged (share stays v3; add a comment saying why)
+- Modify: `src/app/App.tsx` `handleSave` :627-668 (compute `activeLayer` as `{ kind: "city", index: layers.findIndex(l => l.id === activeLayerId) }` or `{ kind: "geo", index: geoLayers.findIndex(...) }`, omitted when the id resolves to neither), `handleRestore` :696-925 (build `addedCityIds: (string | null)[]` ALIGNED with `snapshot.layers` — `null` for an unavailable placeholder or a failed load — and `addedGeoIds` aligned with `snapshot.geoLayers`; after the loops, resolve `activeLayer` by indexing the aligned array of its kind, and call `activateLayer(id)`; when the slot is `null` or the field is absent, activate the first non-null added id in unified order. Never compact the arrays: a skipped layer must not shift later indexes), `readShareHash` path unchanged (share stays v3; add a comment saying why)
 - Tests: `tests/unit/persistence/snapshotV4.test.ts` (new: round trip with `activeLayer`; v3 document migrates with `migratedFrom: "3"`; v2 is rejected with `UnsupportedSnapshotVersionError`), update `tests/unit/persistence/{snapshotV3,captureRestore}.test.ts` for the version string, `tests/unit/app/appRestoreShare.test.tsx` — "restore activates the saved layer" and "a v3 snapshot restores with the first layer active".
 
 - [ ] Steps: failing tests → implement → `npx vitest run tests/unit/persistence tests/unit/app` → suite → commit `feat(persistence): snapshot v4 records the active layer; v3 migrates, v1/v2 stay unsupported`.
@@ -692,7 +696,7 @@ Note `nextActiveAfterRemoval` receives the order BEFORE removal and the removed 
 ### Task 8: Slice gate
 
 - [ ] `npx vp check && npx tsc -b --noEmit && npx vp test run` green; `cd packages/cityjson-navara-plugins && pnpm typecheck && pnpm vitest run` unchanged.
-- [ ] Browser smoke on Delft: pick a building → one attribute view; open the table from the layer row → row click selects in the viewport; add a second layer (any GeoJSON URL) → the camera does not move; save, reload, restore → the saved layer is active.
+- [ ] Browser smoke on Delft: pick a building → one attribute view; open the table from the layer row → row click selects in the viewport; add a second city layer (`fixtures/two-buildings.city.json`) → the camera does not move; save, reload, restore → the saved layer is active.
 - [ ] `docs/roadmap.md` 12.1 marked complete with the commit range; push.
 
 ---
