@@ -166,8 +166,12 @@ export interface FailedAdd {
   readonly message: string;
   /** Re-runs the same add. Removes this row first, so the retry shows as a
    *  {@link LayerFileLoader.pending} row while it runs and a new failed row
-   *  only if it fails again. */
-  retry(): void;
+   *  only if it fails again.
+   *
+   *  A property, not a method: `typescript-eslint(unbound-method)` refuses a
+   *  method reference passed as a callback, and this one exists only to be
+   *  handed to a button's `onClick`. */
+  readonly retry: () => void;
 }
 
 export interface LayerFileLoaderOptions {

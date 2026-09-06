@@ -3308,6 +3308,286 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   LAYER LIST (12.2) — the redesign's ONE list, for every kind of layer.
+   The LAYER PANEL block above still dresses the incumbent two-section
+   pane; Task 23 removes it. Nothing here is shared with it: the row is a
+   two-line block (name over a state line) rather than a one-line strip of
+   controls, so a rule reused between them would have to fight itself.
+   ═══════════════════════════════════════════════════════════════ */
+
+.layer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+/* The kit's list row: hairline box at 6px, 0.35rem 0.5rem, 0.75rem text.
+   `align-items: start` rather than center — the eye, the type icon and the
+   menu align to the NAME, not to the middle of a two-line block, so a row
+   whose state line wraps does not drag its controls down with it. */
+.layer-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+/* Hover raises one tonal step (panel → raised); the active row takes Lime
+   Wash and a lime hairline. The wash never appears at rest. */
+.layer-row:hover {
+  background: var(--bg-panel-hover);
+}
+
+.layer-row-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* Hidden, not gone: 55% keeps the name legible enough to find the row you
+   are looking for and turn it back on. */
+.layer-row-hidden {
+  opacity: 0.55;
+}
+
+.layer-row-eye {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+
+.layer-row-eye:hover {
+  color: var(--fg);
+}
+
+.layer-row-eye svg {
+  width: 0.85rem;
+  height: 0.85rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The type icon sits on the name's baseline row, dim until the row is
+   active or hovered — it identifies, it does not compete with the name. */
+.layer-row-kind {
+  display: flex;
+  align-items: center;
+  height: 1.25rem;
+  color: var(--fg-muted);
+  flex-shrink: 0;
+}
+
+.layer-kind-icon {
+  width: 0.85rem;
+  height: 0.85rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.layer-kind-spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .layer-kind-spin {
+    animation: none;
+  }
+}
+
+.layer-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  /* `min-width: 0` so the name can ellipsise instead of forcing the row
+     wider than the panel — the whole point of the two-line block is that
+     the row never has to grow sideways. */
+  min-width: 0;
+  flex: 1;
+}
+
+.layer-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.25rem;
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.layer-row-name-input {
+  width: 100%;
+  padding: 0.1rem 0.25rem;
+  background: var(--bg-input);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font-size: 0.72rem;
+  font-family: inherit;
+}
+
+.layer-row-name-input:focus {
+  outline: none;
+}
+
+/* The state line and the filter chip share one line and one ink. Muted, not
+   dim: it is text that has to be read (Night Ink Dim is 3:1 and fails AA). */
+.layer-row-state {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  font-size: 0.68rem;
+  color: var(--fg-muted);
+}
+
+.layer-row-state-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── The overflow menu ─────────────────────────────────────────────────── */
+
+.layer-row-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+
+.layer-row-menu-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.layer-row-menu-btn:hover,
+.layer-row-menu-btn[aria-expanded="true"] {
+  color: var(--fg);
+}
+
+.layer-row-menu-btn svg {
+  width: 0.9rem;
+  height: 0.9rem;
+  fill: currentColor;
+}
+
+/* Anchored to the trigger's right edge: the row is the full width of a
+   300px panel, so a left-anchored popover would hang off it. Takes the
+   Menu elevation from `.header-popover`; only the anchoring is new. */
+.layer-row-menu-popover {
+  right: 0;
+  width: 160px;
+}
+
+/* The one destructive item. Ink only at rest — a filled danger row in a
+   four-item menu reads as an alarm the menu is not raising. */
+.menu-item-danger {
+  color: var(--danger);
+}
+
+.menu-item-danger:hover {
+  background: var(--danger-soft);
+}
+
+/* ── Rows with no store entry ──────────────────────────────────────────── */
+
+/* Muted and not interactive: these three have no layer behind them, so the
+   row must not look like something that can be made active. `cursor:
+   default` and no hover tone are the whole tell. */
+.layer-row-unavailable,
+.layer-row-loading,
+.layer-row-error {
+  cursor: default;
+  color: var(--fg-muted);
+}
+
+.layer-row-unavailable:hover,
+.layer-row-loading:hover,
+.layer-row-error:hover {
+  background: transparent;
+}
+
+.layer-row-unavailable .layer-row-name,
+.layer-row-loading .layer-row-name,
+.layer-row-error .layer-row-name {
+  color: var(--fg-muted);
+  font-weight: 400;
+}
+
+.layer-row-error {
+  border-color: var(--danger-soft);
+}
+
+.layer-row-error .layer-row-kind,
+.layer-row-error .layer-row-state-line {
+  color: var(--danger);
+}
+
+/* The ghost button from the kit, at row scale: transparent, hairline, muted
+   ink. Also worn by the `<label>` that fronts the hidden file input, which
+   is why the rule sets `display` rather than relying on the button default. */
+.layer-row-link-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 1.25rem;
+  padding: 0 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: inherit;
+  font-size: 0.68rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.layer-row-link-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.layer-row-dismiss:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ═══════════════════════════════════════════════════════════════
    STATUS BAR ADDITIONS (FPS warning, cursor, mono values)
    ═══════════════════════════════════════════════════════════════ */
 
