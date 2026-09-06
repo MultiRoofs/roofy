@@ -14,8 +14,9 @@
  * footer's reset still restores BOTH stores, weather values included.
  *
  * The BACKDROP — basemap and Google 3D Tiles — is deliberately not here: it is
- * a choice of what to look AT, and its one home is the top of the left sidebar
- * (`BasemapPanel`, `GoogleTilesPanel`).
+ * a choice of what to look AT, and its one home is the header's Scene popover
+ * (`BasemapPanel`, `GoogleTilesPanel` in `SceneControlsTemp`; the left sidebar
+ * held them until the layer panel became the LAYER's home alone).
  *
  * EVERY control here drives live engine state — a `DefaultPlugin`
  * photoreal-scene handle, a `view.addEffect` pass, or

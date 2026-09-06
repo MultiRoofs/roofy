@@ -173,7 +173,7 @@ describe("RenderingPanel", () => {
   });
 
   // The backdrop is a choice of what to look AT, not of how the scene is
-  // rendered: its one home is the left sidebar (`BasemapPanel`,
+  // rendered: its one home is the header's Scene popover (`BasemapPanel`,
   // `GoogleTilesPanel`). The reset must not reach those stores either.
   it("hosts no backdrop control, and leaves the backdrop stores alone", () => {
     useTilesStore.setState({ enabled: true });

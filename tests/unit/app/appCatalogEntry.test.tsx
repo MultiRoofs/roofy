@@ -284,10 +284,11 @@ describe("App landing page — catalog entry point", () => {
     );
     expect(screen.queryByTestId("stac-dialog-stub")).toBeNull();
 
-    // "Close file" in the toolbar — the seam that hands the user back to the
-    // landing page.
+    // "New workspace" in the header's workspace menu — what "Close file" in
+    // the toolbar was: the seam that hands the user back to the landing page.
+    fireEvent.click(screen.getByRole("button", { name: "Untitled workspace" }));
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Close file" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "New workspace" }));
     });
 
     expect(

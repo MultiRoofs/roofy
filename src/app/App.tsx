@@ -75,7 +75,8 @@ import {
 } from "../features/streaming/streamPlugin";
 import { useSolarStore } from "../features/solar/solarStore";
 import { InspectorPanel } from "../ui/inspector/InspectorPanel";
-import { ViewerToolbar } from "../ui/toolbar/ViewerToolbar";
+import { WorkspaceHeader } from "../ui/header/WorkspaceHeader";
+import { SceneControlsTemp } from "../ui/header/SceneControlsTemp";
 import { LeftSidebar } from "../ui/sidebar/LeftSidebar";
 import { SourcePicker } from "../ui/layers/SourcePicker";
 import { StacBrowserDialog } from "../ui/stac/StacBrowserDialog";
@@ -540,7 +541,6 @@ export function App({
   const leftCollapsed = useShellStore((s) => s.leftCollapsed);
   const leftWidth = useShellStore((s) => s.leftWidth);
   const setLeftWidth = useShellStore((s) => s.setLeftWidth);
-  const toggleLeftCollapsed = useShellStore((s) => s.toggleLeftCollapsed);
   const drawerOpen = useShellStore((s) => s.drawerOpen);
   const toggleDrawer = useShellStore((s) => s.toggleDrawer);
   const setRightCollapsed = useShellStore((s) => s.setRightCollapsed);
@@ -687,7 +687,15 @@ export function App({
     [addLayerFromUrl, clearError, withEngineBooting],
   );
 
-  const handleSave = useCallback(async () => {
+  /**
+   * Save, answering whether a snapshot was really written.
+   *
+   * The boolean is not for the caller's convenience: the header's
+   * "Saved · just now" note hangs off it, and a note shown on a click that
+   * hit the transiently-null camera (or a store that refused) would be a
+   * confirmation of something that did not happen.
+   */
+  const handleSave = useCallback(async (): Promise<boolean> => {
     const cameraState = sceneRef.current?.getCameraState();
     // Null is a REAL state, not a defensive check: the engine's
     // `positionGeographic` throws until its first rendered frame (Task B11a),
@@ -699,7 +707,7 @@ export function App({
         "The 3D view is still starting — try saving again in a moment.",
         STATUS_TOAST_MS,
       );
-      return;
+      return false;
     }
 
     const { datetime } = useSolarStore.getState();
@@ -719,7 +727,12 @@ export function App({
       allLayers,
       allGeoLayers,
     );
-    const label = activeLayer?.layer.name ?? "Untitled";
+    // The WORKSPACE names its own snapshot now — it has a name, the user can
+    // edit it in the header, and the list of saved workspaces is the one
+    // place that name is read back. It used to be the active layer's name,
+    // which meant two workspaces built on the same file were indistinguishable
+    // in that list and renaming the workspace changed nothing about it.
+    const label = useWorkspaceStore.getState().name;
     // ...and it is written down as well as read, as a per-kind INDEX into the
     // two lists this same call is about to write (see
     // `ProjectSnapshot.activeLayer`). `undefined` — nothing active, or an id
@@ -775,11 +788,13 @@ export function App({
         "Workspace saved — you'll find it here next time you open Roofy.",
         EXPLANATION_TOAST_MS,
       );
+      return true;
     } catch (e) {
       showToast(
         e instanceof Error ? e.message : "Failed to save workspace.",
         STATUS_TOAST_MS,
       );
+      return false;
     }
   }, [persistenceStore, refreshSnapshots, showToast]);
 
@@ -811,6 +826,9 @@ export function App({
         useSceneThemeStore
           .getState()
           .setSceneTheme(viewState.sceneTheme ?? "photoreal");
+        // The snapshot's label IS the workspace's name — that is what it was
+        // saved as — so restoring one restores the name the header shows.
+        useWorkspaceStore.getState().setName(snapshot.label);
 
         // Remove all existing layers — the streaming ones first, so their
         // workers and cell meshes die with them rather than outliving the
@@ -1314,6 +1332,9 @@ export function App({
     // Last, and after both removals: the invariants hand the active id over to
     // whatever survives each one, and nothing survives this.
     activateLayer(null);
+    // "New workspace" in the header is this same exit, and a new workspace
+    // does not inherit the old one's name.
+    useWorkspaceStore.getState().resetName();
   }, [clearSelection]);
 
   // Re-selecting a file for an "unavailable" (restored-but-file-backed)
@@ -1419,20 +1440,29 @@ export function App({
       <>
         <ViewerShell
           header={
-            <ViewerToolbar
-              pickMode={mode}
-              toolMode={toolMode}
-              onSetPickMode={setMode}
-              onSetToolMode={setToolMode}
-              onClose={handleClose}
-              onToggleLeftSidebar={toggleLeftCollapsed}
-              onFitAll={handleFitAll}
+            <WorkspaceHeader
               onSave={handleSave}
               onShare={handleShare}
               canShare={hasUrlLayers}
-              advancedSettingsOpen={advancedSettingsOpen}
-              onToggleAdvancedSettings={() =>
-                setAdvancedSettingsOpen((o) => !o)
+              /* "New workspace" is what "Close file" was: it empties the
+                 workspace (and resets its name) and hands the user back to
+                 the landing page. */
+              onNewWorkspace={handleClose}
+              onOpenWorkspace={(id) => void handleRestore(id)}
+              snapshots={savedSnapshots}
+              /* Lodgers until 12.5 gives the scene its own home. */
+              sceneControls={
+                <SceneControlsTemp
+                  pickMode={mode}
+                  toolMode={toolMode}
+                  onSetPickMode={setMode}
+                  onSetToolMode={setToolMode}
+                  onFitAll={handleFitAll}
+                  advancedSettingsOpen={advancedSettingsOpen}
+                  onToggleAdvancedSettings={() =>
+                    setAdvancedSettingsOpen((o) => !o)
+                  }
+                />
               }
             />
           }

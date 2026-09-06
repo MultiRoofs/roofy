@@ -49,7 +49,10 @@ import type {
 } from "../../../src/persistence/types";
 import type { StreamPlugin } from "../../../src/features/streaming/streamPlugin";
 import type { PlatformServices } from "../../../src/platform/types";
-import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
+import {
+  useWorkspaceStore,
+  DEFAULT_WORKSPACE_NAME,
+} from "../../../src/features/workspace/workspaceStore";
 import { useGeoLayerStore } from "../../../src/features/geoLayers/geoLayerStore";
 
 // jsdom ships no `matchMedia`, which `useTheme` reads on its first render.
@@ -274,7 +277,10 @@ beforeEach(() => {
   loadFromUrl.mockResolvedValue(loaded);
   useLayerStore.setState({ layers: [] });
   useGeoLayerStore.setState({ layers: [] });
-  useWorkspaceStore.setState({ activeLayerId: null });
+  useWorkspaceStore.setState({
+    activeLayerId: null,
+    name: DEFAULT_WORKSPACE_NAME,
+  });
   location.hash = "";
 });
 
@@ -758,6 +764,50 @@ describe("App save success", () => {
         screen.getByText(/Workspace saved.*next time you open Roofy/),
       ).toBeInTheDocument(),
     );
+  });
+});
+
+describe("App save labels the snapshot with the workspace's name", () => {
+  it("writes the workspace name, not the active layer's", async () => {
+    const save = vi.fn(async (_snapshot: ProjectSnapshot) => "snap-2");
+    render(<App persistenceStore={{ ...storeWith(null), save }} />);
+    await mountShellWithLayer();
+    // The layer is called "delft"; the workspace is not. Two workspaces built
+    // on the same file are otherwise indistinguishable in the saved list.
+    act(() => {
+      useWorkspaceStore.getState().setName("Delft rooftop study");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]![0].label).toBe("Delft rooftop study");
+  });
+
+  it("takes the name back from the snapshot on a restore", async () => {
+    render(<App persistenceStore={storeWith(snapshotWithUrlLayer())} />);
+    await clickRestore();
+
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().name).toBe("delft"),
+    );
+  });
+
+  it("resets the name when a new workspace is started", async () => {
+    render(<App persistenceStore={storeWith(null)} />);
+    await mountShellWithLayer();
+    act(() => {
+      useWorkspaceStore.getState().setName("Delft rooftop study");
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delft rooftop study" }),
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: "New workspace" }));
+    });
+
+    expect(useWorkspaceStore.getState().name).toBe(DEFAULT_WORKSPACE_NAME);
   });
 });
 

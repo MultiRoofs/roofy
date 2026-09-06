@@ -8,8 +8,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { LayerPanel } from "../layers/LayerPanel";
 import type { AddUrlResult } from "../stac/StacBrowser";
-import { GoogleTilesPanel } from "../layers/GoogleTilesPanel";
-import { BasemapPanel } from "../layers/BasemapPanel";
 
 const MIN_WIDTH = 180;
 const MAX_WIDTH = 480;
@@ -99,8 +97,6 @@ export function LeftSidebar({
   return (
     <aside className="left-sidebar" style={{ width }}>
       <div className="left-sidebar-content">
-        <BasemapPanel />
-        <GoogleTilesPanel />
         <LayerPanel
           onAddFile={onAddFile}
           onAddFiles={onAddFiles}

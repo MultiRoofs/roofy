@@ -758,28 +758,11 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   TOOLBAR
+   TOOLBAR PARTS
+   What outlived `ViewerToolbar`: the icon button, the separator and the
+   spacer, worn now by the header's scene controls, the inspector, the table
+   and the status bar.
    ═══════════════════════════════════════════════════════════════ */
-
-.toolbar {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0 0.75rem;
-  background: var(--bg-toolbar);
-  border-bottom: 1px solid var(--border);
-}
-
-/* The brand lockup (`RoofyLockup`, styled by `.roofy-lockup` in brand.css).
-   The kit's toolbar sizing: a fixed 20px mark beside 15px type, which is why
-   the mark size is pinned here instead of following the 1.15em default. */
-.toolbar .roofy-lockup {
-  --roofy-mark-size: 20px;
-  margin-right: 0.15rem;
-  font-size: 0.9375rem;
-}
 
 .toolbar-sep {
   width: 1px;
@@ -850,6 +833,133 @@ body {
    Shell furniture, so it is flat and hairlined (the Three Layers Rule). The
    only shadow in here belongs to the popovers, which float over the window. */
 
+.workspace-header {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0 0.6rem;
+  background: var(--bg-toolbar);
+  border-bottom: 1px solid var(--border);
+}
+
+/* The kit's header sizing: a fixed 20px mark beside 15px type, which is why
+   the mark size is pinned here instead of following the 1.15em default. */
+.workspace-header .roofy-lockup {
+  --roofy-mark-size: 20px;
+  margin-right: 0.15rem;
+  font-size: 0.9375rem;
+}
+
+/* TWO spacers, not one: the scene's controls sit in the MIDDLE of the header
+   while 12.5 is still to come, with workspace identity at one end and the
+   workspace's actions at the other. One spacer would pile identity, scene and
+   actions into a single right-hand clump. */
+.header-spacer {
+  flex: 1;
+  min-width: 0.5rem;
+}
+
+/* ── The workspace name ─────────────────────────────────────────────────────
+   Display type, because this is the one piece of the header that is a NAME
+   rather than a label. It truncates rather than pushing the scene controls
+   around: a long workspace name must not be able to reflow the header. */
+.workspace-name-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  max-width: 240px;
+  padding: 0.2rem 0.4rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font: 500 0.8125rem/1.2 var(--font-display);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.workspace-name-btn:hover,
+.workspace-name-btn[aria-expanded="true"] {
+  background: var(--bg-panel-hover);
+}
+
+.workspace-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-name-caret {
+  flex-shrink: 0;
+  width: 0.75rem;
+  height: 0.75rem;
+  fill: none;
+  stroke: var(--fg-muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ── The workspace's actions ────────────────────────────────────────────────
+   Ghost buttons with icon AND text: these are the header's verbs, and the
+   design gives them words because a lone glyph for "share" was read as
+   "upload" often enough to be a bug report. */
+.header-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  height: 1.75rem;
+  padding: 0 0.5rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.header-action:hover:not(:disabled) {
+  background: var(--bg-panel-hover);
+  color: var(--fg);
+}
+
+.header-action:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.header-action svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The acknowledgement AT the button. Muted and unstyled otherwise: it is a
+   fact for five seconds, not a control. */
+.header-saved-note {
+  color: var(--fg-muted);
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+/* ── The scene's temporary lodgings ─────────────────────────────────────────
+   Deleted whole by 12.5 along with `SceneControlsTemp`. */
+.scene-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
 .header-menu {
   position: relative;
   display: flex;
@@ -875,6 +985,90 @@ body {
 .preferences-popover {
   right: 0;
   width: 220px;
+}
+
+/* Anchored left: it hangs off the workspace name, which is at the header's
+   left end. */
+.workspace-menu-popover {
+  left: 0;
+  width: 240px;
+}
+
+.scene-popover {
+  left: 0;
+  width: 260px;
+  padding: 0.25rem 0.5rem;
+}
+
+/* ── Menu rows ──────────────────────────────────────────────────────────────
+   Full-width, left-aligned, hover raises one tonal step (panel → raised) —
+   the same language as the layer list's rows. No shadow: the shadow belongs
+   to the popover they sit in, not to each row. */
+.menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.35rem 0.6rem;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 0.75rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.menu-item:hover {
+  background: var(--bg-panel-hover);
+}
+
+.menu-sep {
+  height: 1px;
+  margin: 0.25rem 0;
+  background: var(--border);
+}
+
+.workspace-menu-rename {
+  padding: 0.35rem 0.6rem;
+}
+
+.workspace-rename-field {
+  width: 100%;
+  padding: 0.25rem 0.35rem;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg);
+  font: 500 0.8125rem/1.2 var(--font-display);
+}
+
+/* The saved list is a nested block, indented by its own hairline so the
+   snapshots read as belonging to "Open…" rather than as peers of it. */
+.workspace-menu-snapshots {
+  margin-left: 0.6rem;
+  border-left: 1px solid var(--border);
+}
+
+.workspace-snapshot-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-snapshot-date {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+  font-size: 0.65rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.workspace-menu-empty {
+  margin: 0;
+  padding: 0.35rem 0.6rem;
+  color: var(--fg-muted);
+  font-size: 0.7rem;
 }
 
 /* ── Segmented control (System / Light / Dark) ──────────────────────────────
@@ -3091,17 +3285,6 @@ body {
 .layer-add-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   TOOLBAR INLINE SEPARATOR
-   ═══════════════════════════════════════════════════════════════ */
-
-.toolbar-sep-inline {
-  width: 1px;
-  height: 1rem;
-  background: var(--border);
-  margin: 0 0.1rem;
 }
 
 /* ═══════════════════════════════════════════════════════════════
