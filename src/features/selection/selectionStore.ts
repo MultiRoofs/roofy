@@ -104,8 +104,29 @@ export const useSelectionStore = create<SelectionStore>((set, get) => ({
 
   hover: (hovered) => set({ hovered }),
 
+  // Switching pick mode CONVERTS what is selected; it never wipes it. Going
+  // to "surface" keeps object selections as they are (there is no surface to
+  // narrow them to, and picking one is the user's next act); going to
+  // "object" collapses every surface pick to its owning object, deduplicated,
+  // so two faces of one building read as one selected building. The geo
+  // selection is untouched either way — pick mode is a city-object concept.
   setMode: (mode) =>
-    set({ mode, selections: [], hovered: null, geoSelection: null }),
+    set((state) => {
+      if (mode === "surface") return { mode, hovered: null };
+      const seen = new Set<string>();
+      const narrowed: Selection[] = [];
+      for (const s of state.selections) {
+        const key = `${s.layerId} ${s.objectId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        narrowed.push({
+          kind: "object",
+          layerId: s.layerId,
+          objectId: s.objectId,
+        });
+      }
+      return { mode, selections: narrowed, hovered: null };
+    }),
 
   setToolMode: (toolMode) => set({ toolMode, hovered: null }),
 

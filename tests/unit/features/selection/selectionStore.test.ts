@@ -164,20 +164,27 @@ describe("selectionStore", () => {
   });
 
   describe("setMode", () => {
-    it("changes mode and clears selection and hover", () => {
-      useSelectionStore
-        .getState()
-        .select({ kind: "object", layerId: "layer-1", objectId: "b1" });
-      useSelectionStore
-        .getState()
-        .hover({ kind: "object", layerId: "layer-1", objectId: "b2" });
+    it("switching to object mode narrows surface selections to their objects", () => {
+      const s = useSelectionStore.getState();
+      s.selectMany([
+        { kind: "surface", layerId: "L", objectId: "o1", surfaceIndex: 0 },
+        { kind: "surface", layerId: "L", objectId: "o1", surfaceIndex: 3 },
+      ]);
+      s.hover({ kind: "object", layerId: "L", objectId: "o2" });
+      s.setMode("object");
+      expect(useSelectionStore.getState().selections).toEqual([
+        { kind: "object", layerId: "L", objectId: "o1" },
+      ]);
+      expect(useSelectionStore.getState().hovered).toBeNull();
+    });
 
-      useSelectionStore.getState().setMode("surface");
-
-      const state = useSelectionStore.getState();
-      expect(state.mode).toBe("surface");
-      expect(state.selections).toEqual([]);
-      expect(state.hovered).toBeNull();
+    it("switching to surface mode keeps object selections", () => {
+      const s = useSelectionStore.getState();
+      s.select({ kind: "object", layerId: "L", objectId: "o1" });
+      s.setMode("surface");
+      expect(useSelectionStore.getState().selections).toEqual([
+        { kind: "object", layerId: "L", objectId: "o1" },
+      ]);
     });
   });
 
@@ -328,7 +335,7 @@ describe("selectionStore", () => {
       expect(state.hovered).toBeNull();
     });
 
-    it("setMode clears both", () => {
+    it("setMode leaves both alone — switching pick mode converts, it does not wipe", () => {
       useSelectionStore.getState().selectGeoFeature(geoSel);
       useSelectionStore.setState({ selections: [citySel] });
 
@@ -336,8 +343,8 @@ describe("selectionStore", () => {
 
       const state = useSelectionStore.getState();
       expect(state.mode).toBe("surface");
-      expect(state.geoSelection).toBeNull();
-      expect(state.selections).toEqual([]);
+      expect(state.geoSelection).toEqual(geoSel);
+      expect(state.selections).toEqual([citySel]);
     });
   });
 });
