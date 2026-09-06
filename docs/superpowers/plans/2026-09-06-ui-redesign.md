@@ -24,14 +24,14 @@
 
 ## Slices
 
-| Slice | Title                                                           | Depends on | Detailed tasks          |
-| ----- | --------------------------------------------------------------- | ---------- | ----------------------- |
-| 12.1  | Shared context: one active layer, one selection, v4 persistence | —          | in this document        |
-| 12.2  | Shell and layer management                                      | 12.1       | written when 12.1 lands |
-| 12.3  | Styling and inspection                                          | 12.2       | written when 12.2 lands |
-| 12.4  | Linked data and filtering                                       | 12.2, 12.3 | written when 12.3 lands |
-| 12.5  | Scene controls and remaining capabilities                       | 12.2       | written when 12.4 lands |
-| 12.6  | Verification, review, docs                                      | all        | written when 12.5 lands |
+| Slice | Title                                                           | Depends on | Detailed tasks            |
+| ----- | --------------------------------------------------------------- | ---------- | ------------------------- |
+| 12.1  | Shared context: one active layer, one selection, v4 persistence | —          | in this document (done)   |
+| 12.2  | Shell and layer management                                      | 12.1       | in this document (T13–24) |
+| 12.3  | Styling and inspection                                          | 12.2       | written when 12.2 lands   |
+| 12.4  | Linked data and filtering                                       | 12.2, 12.3 | written when 12.3 lands   |
+| 12.5  | Scene controls and remaining capabilities                       | 12.2       | written when 12.4 lands   |
+| 12.6  | Verification, review, docs                                      | all        | written when 12.5 lands   |
 
 Each later slice gets its own task-level section appended to this document (same format as 12.1) immediately before it starts, written against the code as it then exists. The slice outlines below fix the scope, the module boundaries and the interfaces so that 12.1 does not paint later slices into a corner.
 
