@@ -258,11 +258,11 @@ describe("App landing page — catalog entry point", () => {
     expect(useLayerStore.getState().layers).toHaveLength(1);
   });
 
-  it("does not re-open the catalog when the LAST layer is removed from the sidebar", async () => {
+  it("does not re-open the catalog when the LAST layer is removed from the panel", async () => {
     // The other way back to the landing page, and the one a close-time reset
-    // missed entirely: `LayerPanel`'s per-layer remove calls `removeLayer`
+    // missed entirely: the layer row's own remove calls `removeLayer`
     // directly, so `hasLayers` flips false without `handleClose` ever running.
-    // Driven through the REAL sidebar button, not the store.
+    // Driven through the REAL row menu, not the store.
     loadFromUrl.mockResolvedValue(loaded);
     render(<App persistenceStore={emptyStore} />);
 
@@ -273,8 +273,11 @@ describe("App landing page — catalog entry point", () => {
       expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
     );
 
+    fireEvent.click(
+      screen.getByRole("button", { name: /^Layer actions for / }),
+    );
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Remove layer" }));
+      fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     });
 
     expect(

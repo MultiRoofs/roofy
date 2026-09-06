@@ -221,11 +221,41 @@ describe("App viewer shell", () => {
   it("collapses the left panel to the rail through the shell store", () => {
     const shell = renderViewer();
     expect(shell().style.getPropertyValue("--left-w")).toBe("300px");
+    expect(shell().querySelector(".left-panel")).not.toBeNull();
+    expect(shell().querySelector(".left-rail")).toBeNull();
 
     act(() => useShellStore.getState().toggleLeftCollapsed());
 
     expect(shell().style.getPropertyValue("--left-w")).toBe("40px");
+    // The rail is a different COMPONENT, not the panel with a class on it:
+    // 40px holds a count and the active layer's kind, and nothing else.
+    expect(shell().querySelector(".left-panel")).toBeNull();
+    expect(shell().querySelector(".left-rail")).not.toBeNull();
+  });
+
+  it("puts the layer list and the active layer's panel in the left slot", () => {
+    const shell = renderViewer();
+
+    const left = shell().querySelector(".shell-left");
+    expect(left?.querySelector(".layer-list")).not.toBeNull();
+    // The active layer follows the workspace's own rule — the one layer there
+    // is, activated by `installWorkspaceInvariants` when it landed.
+    expect(left?.querySelector(".active-layer")).not.toBeNull();
+    // And the sidebar that used to be here is off the render tree.
     expect(shell().querySelector(".left-sidebar")).toBeNull();
+  });
+
+  it("expands the panel again from the rail", () => {
+    const shell = renderViewer();
+    act(() => useShellStore.getState().setLeftCollapsed(true));
+
+    // Two controls carry this name while the panel is shut — the header's
+    // chevron and the rail's own button. The rail's is the one in the column.
+    const railButton = shell().querySelector(".left-rail-btn");
+    fireEvent.click(railButton as Element);
+
+    expect(useShellStore.getState().leftCollapsed).toBe(false);
+    expect(shell().querySelector(".left-panel")).not.toBeNull();
   });
 
   it("puts the drawer under the map when the shell store opens it", () => {

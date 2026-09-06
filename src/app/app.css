@@ -651,8 +651,9 @@ body {
   grid-area: left;
 }
 
-/* The collapsed rail is an empty 40px column until `LeftRail` fills it —
-   the panel that normally paints this edge is not mounted. */
+/* The collapsed column carries `LeftRail`, which paints no chrome of its
+   own: the edge the left panel normally draws has to survive its collapse,
+   or the rail would float on the map's background. */
 .viewer-shell.left-collapsed .shell-left {
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
@@ -1132,6 +1133,175 @@ body {
 /* ═══════════════════════════════════════════════════════════════
    TOOL RAIL
    ═══════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════════
+   LEFT PANEL (12.2) — the shell's left column: the layer list over the
+   ACTIVE layer's configuration, in one full-height panel. The LEFT
+   SIDEBAR block below still dresses the incumbent (`LeftSidebar` +
+   `LayerPanel`); Task 23 removes it. Nothing is shared: that one is a box
+   around a scrolling pane, this one is a two-region column.
+   ═══════════════════════════════════════════════════════════════ */
+
+.left-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  /* The resize handle is absolutely positioned against this edge — the same
+     arrangement `.shell-right` makes for the details panel's. */
+  position: relative;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+}
+
+.left-panel-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.6rem 0.5rem 0.4rem;
+}
+
+/* The kit's Label role, like every other panel heading. */
+.left-panel-title {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  color: var(--fg-muted);
+}
+
+/* Ghost, not filled: adding a layer is the panel's most common act but not
+   its loudest — the map is. Same treatment as `.active-layer-action`. */
+.left-panel-add {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: inherit;
+  font-size: 0.68rem;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.left-panel-add:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* The list takes the height it needs and no more, so the active layer's
+   panel starts as close to its own row as it can. */
+.left-panel-list {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 0.5rem 0.5rem;
+}
+
+/* …but never more than half the column when there IS something under it: a
+   forty-layer workspace must not push the form off the bottom. With no
+   active layer the list is the only region and keeps the whole height (and
+   in a browser without `:has`, it simply keeps it either way). */
+.left-panel:has(.left-panel-active) .left-panel-list {
+  max-height: 50%;
+}
+
+.left-panel-empty {
+  margin: 0.35rem 0;
+  color: var(--fg-muted);
+  font-size: 0.72rem;
+}
+
+/* The hairline between the two regions is this one's top border, so an
+   empty workspace shows no rule under nothing. Its own scroll container:
+   the list above it must never have to be scrolled past. */
+.left-panel-active {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+
+/* `.resize-handle-x` pins itself to its container's LEFT edge, which is what
+   the details panel wants (its handle faces the map from the right column).
+   This one is the left panel's own RIGHT edge — the same edge the drag math
+   in `LeftPanel` assumes when it widens on a positive delta. */
+.left-panel > .resize-handle-x {
+  left: auto;
+  right: 0;
+}
+
+/* ── The collapsed form: a 40px rail ─────────────────────────── */
+
+.left-rail {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+}
+
+.left-rail-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.left-rail-btn:hover {
+  color: var(--accent);
+}
+
+.left-rail-btn svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* A count, not a dot: the number is the fact worth 40px. Tucked into the
+   button's corner rather than under it, so the rail's second slot stays
+   the active layer's. */
+.left-rail-badge {
+  position: absolute;
+  top: -0.15rem;
+  right: -0.15rem;
+  min-width: 0.9rem;
+  padding: 0 0.15rem;
+  border-radius: 0.45rem;
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  line-height: 0.9rem;
+  text-align: center;
+}
+
+.left-rail-kind {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 1.25rem;
+  color: var(--fg-muted);
+}
 
 /* ═══════════════════════════════════════════════════════════════
    LEFT SIDEBAR
@@ -3505,11 +3675,18 @@ body {
   fill: currentColor;
 }
 
-/* Anchored to the trigger's right edge: the row is the full width of a
-   300px panel, so a left-anchored popover would hang off it. Takes the
-   Menu elevation from `.header-popover`; only the anchoring is new. */
+/* PORTALLED to `document.body` and pinned to the viewport, because the left
+   panel scrolls its list and an absolutely positioned popover inside an
+   `overflow-y: auto` box is clipped by it. `LayerRowMenu` writes `top` and
+   `left` from the trigger's rect (right-aligned on it — the row is the full
+   width of a 300px panel, so a left-anchored popover would hang off it), so
+   `.header-popover`'s own `top` and the `right` anchoring are cleared here.
+   Everything else — the Menu elevation, the border, the radius — still comes
+   from `.header-popover`. */
 .layer-row-menu-popover {
-  right: 0;
+  position: fixed;
+  top: auto;
+  right: auto;
   width: 160px;
 }
 

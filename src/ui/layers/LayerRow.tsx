@@ -308,8 +308,12 @@ export function PlaceholderRow({
  * app (`VisibilityIcon`, `TrashIcon`, the header's carets): the set is small,
  * it must inherit `currentColor` to follow the row's ink, and a sprite or an
  * icon package for five paths would cost more than it saves.
+ *
+ * EXPORTED for `LeftRail`, which shows the active layer's kind in the 40px
+ * the collapsed panel has left: the rail and the row must agree about what a
+ * streaming layer looks like, and two hand-drawn broadcast glyphs would not.
  */
-function LayerKindIcon({ kind }: { readonly kind: LayerKind }) {
+export function LayerKindIcon({ kind }: { readonly kind: LayerKind }) {
   switch (kind) {
     case "city":
       return (

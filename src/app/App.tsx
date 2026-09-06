@@ -1,5 +1,5 @@
 import type { AppearanceTheme } from "@cityjson/navara-core";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./brand.css";
 import "./app.css";
 import { detectEncoding } from "../domain/citymodel/detectEncoding";
@@ -56,6 +56,7 @@ import { useEscapeClearsSelection } from "../features/selection/useEscapeClearsS
 import {
   useActiveCityLayer,
   resolveActiveLayer,
+  type ActiveLayer,
 } from "../features/workspace/activeLayer";
 import {
   activateLayer,
@@ -77,7 +78,7 @@ import { useSolarStore } from "../features/solar/solarStore";
 import { InspectorPanel } from "../ui/inspector/InspectorPanel";
 import { WorkspaceHeader } from "../ui/header/WorkspaceHeader";
 import { SceneControlsTemp } from "../ui/header/SceneControlsTemp";
-import { LeftSidebar } from "../ui/sidebar/LeftSidebar";
+import { LeftPanel } from "../ui/sidebar/LeftPanel";
 import { SourcePicker } from "../ui/layers/SourcePicker";
 import { StacBrowserDialog } from "../ui/stac/StacBrowserDialog";
 import type { AddUrlResult } from "../ui/stac/StacBrowser";
@@ -85,6 +86,7 @@ import { ShareDialog } from "../ui/ShareDialog";
 import { StatusBar } from "../ui/StatusBar";
 import { ViewerShell } from "../ui/shell/ViewerShell";
 import { useShellStore } from "../ui/shell/shellStore";
+import { LeftRail } from "../ui/shell/LeftRail";
 import { PreferencesMenu } from "../ui/header/PreferencesMenu";
 import { installThemeListener } from "../features/theme/themeStore";
 import { RoofyLockup } from "../ui/RoofyLockup";
@@ -492,37 +494,26 @@ export function App({
     error: loadError,
     lastError,
     clearError,
+    pending,
+    failed,
+    dismissFailed,
   } = useLayerFileLoader({ resolveStreamPlugin });
 
-  /** The message already put on screen, so a re-render cannot raise the same
-   *  toast twice — and so a REPEAT of the same failure still does (every entry
-   *  point calls `clearError()` first, which resets this through the `null`
-   *  branch below). */
-  const toastedLoadErrorRef = useRef<string | null>(null);
-
-  /**
-   * A failed load has ONE surface, and the viewer shell is not the landing
-   * page.
+  /*
+   * A failed load has ONE surface, and since 12.2 it is a ROW.
    *
-   * `loadError` is rendered inline as `.error-message` — in the landing
-   * branch only. Once the shell is up, an add that fails has nowhere to be
-   * seen: the Add Layer dialog closes on the way out and takes the only
-   * remaining surface with it, so a folder with no CityParquet object tables,
-   * or a 404, simply did nothing. Toast it there, exactly as a layer the
-   * ENGINE refuses already is (`handleLayerError`), and leave the landing
-   * page's inline paragraph as the only report on that side — two reports of
-   * one failure is its own bug.
+   * `useLayerFileLoader` books every add: a failure leaves a `failed` entry
+   * carrying its own sentence and its own retry, and `LeftPanel` renders it
+   * as an error row in the layer list, exactly where the layer would have
+   * appeared. That is why there is no toast here any more — this used to
+   * raise one inside the viewer, because the Add Layer dialog closed on the
+   * way out and took the only other surface with it. Two reports of one
+   * failure is its own bug, and the row is the better of the two: it names
+   * the source, it does not time out, and it can be retried.
+   *
+   * The landing page has no list to put a row in, so `loadError` is still
+   * rendered inline there as `.error-message` — its one report on that side.
    */
-  useEffect(() => {
-    if (loadError === null) {
-      toastedLoadErrorRef.current = null;
-      return;
-    }
-    if (!hasLayers && !engineBooting) return;
-    if (toastedLoadErrorRef.current === loadError) return;
-    toastedLoadErrorRef.current = loadError;
-    showToast(loadError, EXPLANATION_TOAST_MS);
-  }, [loadError, hasLayers, engineBooting, showToast]);
 
   const selections = useSelectionStore((s) => s.selections);
   const mode = useSelectionStore((s) => s.mode);
@@ -535,14 +526,14 @@ export function App({
   const geoLayers = useGeoLayerStore((s) => s.layers);
 
   // The shell's layout state (what `inspectorOpen`, `leftSidebarCollapsed`,
-  // `leftSidebarWidth`, `tableOpen` and `tableHeight` used to be). `App`
-  // reads only what it has to hand to the old region components; the sizes
-  // are `ViewerShell`'s to read.
+  // `leftSidebarWidth`, `tableOpen` and `tableHeight` used to be). `App` reads
+  // only the three facts its own render forks on: which component the left
+  // column gets, whether the drawer is mounted, and what closing the details
+  // panel does. The SIZES belong to `ViewerShell` and to the panels that own
+  // their own edges — `LeftPanel` writes `leftWidth` itself, which is why
+  // there is no `onWidthChange` to thread through any more.
   const leftCollapsed = useShellStore((s) => s.leftCollapsed);
-  const leftWidth = useShellStore((s) => s.leftWidth);
-  const setLeftWidth = useShellStore((s) => s.setLeftWidth);
   const drawerOpen = useShellStore((s) => s.drawerOpen);
-  const toggleDrawer = useShellStore((s) => s.toggleDrawer);
   const setRightCollapsed = useShellStore((s) => s.setRightCollapsed);
 
   // The two effects that used to steer the geo store's own active id from the
@@ -1373,6 +1364,36 @@ export function App({
     setUnavailableLayers((prev) => prev.filter((u) => u.id !== entryId));
   }, []);
 
+  /**
+   * The unavailable entries as LIST ROWS.
+   *
+   * Inside the shell they are no longer a banner floating over the map: a
+   * layer that is waiting for its file is still one of the workspace's
+   * layers, so it takes a row in the list beside the ones that loaded, and
+   * re-linking it is a button on that row. The landing page keeps the banner
+   * — it has no list to put a row in.
+   *
+   * Re-linking drops the entry as the add STARTS (`handleResolveUnavailableLayer`
+   * removes it before calling `addLayerFromFile`, in the same event as the
+   * loader's own `setPending`), so the "Needs re-link" row is replaced by the
+   * "Loading…" one rather than sitting beside it.
+   */
+  const unavailableRows = useMemo(
+    () =>
+      unavailableLayers.map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        kind: "unavailable" as const,
+        onRelink: (file: File) => handleResolveUnavailableLayer(entry.id, file),
+        onDismiss: () => handleDismissUnavailableLayer(entry.id),
+      })),
+    [
+      unavailableLayers,
+      handleResolveUnavailableLayer,
+      handleDismissUnavailableLayer,
+    ],
+  );
+
   const handleFitAll = useCallback(() => {
     sceneRef.current?.fitAll();
   }, []);
@@ -1406,6 +1427,18 @@ export function App({
       })();
     },
     [showToast],
+  );
+
+  /** Zoom to whichever layer the left panel asks about. Stable, and that
+   *  matters here: `App` re-renders on every cursor-position update from the
+   *  viewport, and an inline arrow would hand `LeftPanel` a new prop — and
+   *  every row a new render — on every mouse move over the map. */
+  const handleZoomToLayer = useCallback(
+    (item: ActiveLayer) => {
+      if (item.kind === "city") sceneRef.current?.fitLayer(item.layer.id);
+      else handleFlyToGeoLayer(item.layer.id);
+    },
+    [handleFlyToGeoLayer],
   );
 
   /** A layer the engine refused (the CRS gate — no reference system, or a
@@ -1466,20 +1499,28 @@ export function App({
               }
             />
           }
+          /* The rail is not a collapsed panel: it is a different component
+             for a 40px column (the shell already narrows the track), which
+             is why the choice is made here rather than inside the panel. */
           left={
-            <LeftSidebar
-              width={leftWidth}
-              onWidthChange={setLeftWidth}
-              collapsed={leftCollapsed}
-              onAddFile={handlePickedFile}
-              onAddFiles={handlePickedFiles}
-              onAddUrl={handleAddUrl}
-              loading={loading}
-              onFlyToLayer={(id) => sceneRef.current?.fitLayer(id)}
-              onFlyToGeoLayer={handleFlyToGeoLayer}
-              tableOpen={drawerOpen}
-              onToggleTable={toggleDrawer}
-            />
+            leftCollapsed ? (
+              <LeftRail />
+            ) : (
+              <LeftPanel
+                onAddFile={handlePickedFile}
+                onAddFiles={handlePickedFiles}
+                onAddUrl={handleAddUrl}
+                loading={loading}
+                /* The one thing only `App` can answer: a city layer is flown
+                   to through the scene handle, a geospatial one through an
+                   extent this app computes for itself. */
+                onZoomToLayer={handleZoomToLayer}
+                extraRows={unavailableRows}
+                pending={pending}
+                failed={failed}
+                dismissFailed={dismissFailed}
+              />
+            )
           }
           map={
             <div className="viewport">
@@ -1536,14 +1577,6 @@ export function App({
             />
           }
         />
-
-        {unavailableLayers.length > 0 && (
-          <UnavailableLayersBanner
-            layers={unavailableLayers}
-            onResolve={handleResolveUnavailableLayer}
-            onDismiss={handleDismissUnavailableLayer}
-          />
-        )}
 
         {/* Keyed on the URL so a second Share click while the dialog is open
             remounts it — the auto-copy effect must run again for the NEW

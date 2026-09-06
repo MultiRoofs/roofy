@@ -16,7 +16,26 @@
  * navigation, roving tabindex and typeahead, and a half-built one lies to a
  * screen reader about what it can do. Same choice, for the same reason, as
  * `WorkspaceMenu`.
+ *
+ * PORTALLED, unlike the header's three, because of where the row lives: the
+ * left panel scrolls its layer list (`overflow-y: auto`), and an absolutely
+ * positioned popover inside a scroll container is clipped by it — the last
+ * row's menu would open into a strip four pixels tall. Flipping it upwards
+ * only moves the problem: a two-row list is shorter than the popover either
+ * way. So the popover goes to `document.body` and is placed against the
+ * trigger's rect, measured when it opens.
+ *
+ * Two consequences the code below has to pay for:
+ *  - it is "outside" the menu's root by DOM ancestry, so the dismiss listener
+ *    is told about it through `useHeaderMenu`'s `popoverRef` — otherwise the
+ *    mousedown that starts a click on an item closes the menu first and the
+ *    click lands on nothing;
+ *  - it no longer moves with the row. A scroll or a resize while it is open
+ *    would leave it hanging beside the list, so both CLOSE it rather than
+ *    chase the trigger (a menu is a moment, not a state).
  */
+import { useEffect, useLayoutEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useHeaderMenu } from "../header/useHeaderMenu";
 
 export interface LayerRowMenuProps {
@@ -38,6 +57,15 @@ export interface LayerRowMenuProps {
   readonly onRemove: () => void;
 }
 
+/** The popover's width, in px — `.layer-row-menu-popover` in `app.css`. Read
+ *  here because a portalled popover is placed by this module, and a right
+ *  edge cannot be computed from a width nobody knows. */
+const POPOVER_WIDTH = 160;
+
+/** The gap between the trigger and the popover, matching `.header-popover`'s
+ *  `calc(100% + 0.35rem)`. */
+const POPOVER_GAP = 6;
+
 export function LayerRowMenu({
   name,
   onZoom,
@@ -49,6 +77,45 @@ export function LayerRowMenu({
   // as METHODS on `HeaderMenu`, and pulling them out is the unbound-method
   // reference the lint objects to. Called through the object, they are calls.
   const menu = useHeaderMenu();
+  const [at, setAt] = useState<{ top: number; left: number }>({
+    top: 0,
+    left: 0,
+  });
+
+  // Before paint, so the popover is never painted at the previous row's
+  // position for a frame.
+  useLayoutEffect(() => {
+    if (!menu.open) return;
+    const rect = menu.triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setAt({
+      top: rect.bottom + POPOVER_GAP,
+      // Right-aligned on the trigger, as the in-flow version was: the row
+      // fills a 240–420 px panel, so a left-anchored popover hangs off it.
+      left: rect.right - POPOVER_WIDTH,
+    });
+  }, [menu.open, menu.triggerRef]);
+
+  // A popover pinned to the viewport cannot follow the list under it, so a
+  // scroll or a resize CLOSES it rather than leaving it hanging beside the
+  // row it belongs to. The scroll listener is capturing because the scroll
+  // that matters happens on the list container, not on the window, and a
+  // scroll event does not bubble.
+  //
+  // `[menu]` is a new object every render, so this re-subscribes on each one:
+  // deliberate, and cheap — the body returns immediately while the menu is
+  // closed, which is nearly always, and destructuring `setOpen` out of a
+  // `HeaderMenu` is the unbound-method reference the lint refuses.
+  useEffect(() => {
+    if (!menu.open) return;
+    const close = () => menu.setOpen(false);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [menu]);
 
   const act = (run: () => void) => {
     run();
@@ -80,47 +147,54 @@ export function LayerRowMenu({
         </svg>
       </button>
 
-      {menu.open && (
-        <div
-          className="header-popover layer-row-menu-popover"
-          role="dialog"
-          aria-label="Layer actions"
-        >
-          {onZoom !== null && (
+      {menu.open &&
+        createPortal(
+          <div
+            ref={menu.popoverRef}
+            className="header-popover layer-row-menu-popover"
+            role="dialog"
+            aria-label="Layer actions"
+            style={{ top: at.top, left: at.left }}
+            // The portal escapes the row in the DOM but not in the REACT
+            // tree, so a click on an item still bubbles to the wrapper above
+            // — which is what stops it from also activating the row.
+          >
+            {onZoom !== null && (
+              <button
+                type="button"
+                className="menu-item"
+                onClick={() => act(onZoom)}
+              >
+                Zoom to layer
+              </button>
+            )}
+            {onOpenTable !== null && (
+              <button
+                type="button"
+                className="menu-item"
+                onClick={() => act(onOpenTable)}
+              >
+                Open table
+              </button>
+            )}
             <button
               type="button"
               className="menu-item"
-              onClick={() => act(onZoom)}
+              onClick={() => act(onStartRename)}
             >
-              Zoom to layer
+              Rename
             </button>
-          )}
-          {onOpenTable !== null && (
+            <hr className="menu-sep" />
             <button
               type="button"
-              className="menu-item"
-              onClick={() => act(onOpenTable)}
+              className="menu-item menu-item-danger"
+              onClick={() => act(onRemove)}
             >
-              Open table
+              Remove
             </button>
-          )}
-          <button
-            type="button"
-            className="menu-item"
-            onClick={() => act(onStartRename)}
-          >
-            Rename
-          </button>
-          <hr className="menu-sep" />
-          <button
-            type="button"
-            className="menu-item menu-item-danger"
-            onClick={() => act(onRemove)}
-          >
-            Remove
-          </button>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

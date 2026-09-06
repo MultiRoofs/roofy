@@ -412,6 +412,43 @@ describe("App restore against CitySceneHandle.ready", () => {
     expect(screen.queryByTestId("navara-viewport")).toBeNull();
     expect(setCameraState).not.toHaveBeenCalled();
   });
+
+  it("gives a file-backed layer a ROW in the viewer, not a banner over it", async () => {
+    // 12.2: inside the shell a layer waiting for its file is still one of the
+    // workspace's layers, so it takes a row in the list beside the ones that
+    // loaded — the banner that used to float over the map is the LANDING
+    // page's alone (there is no list there to put a row in).
+    const snapshot: ProjectSnapshot = {
+      ...snapshotWithUrlLayer(),
+      layers: [
+        ...snapshotWithUrlLayer().layers!,
+        {
+          name: "houses",
+          modelRef: { type: "file", fileName: "houses.city.json" },
+          rules: [],
+          rulesEnabled: true,
+          visible: true,
+        },
+      ],
+    };
+    render(<App persistenceStore={storeWith(snapshot)} />);
+    await clickRestore();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
+    );
+
+    const row = await waitFor(() => {
+      const el = screen.getByText("houses").closest('[role="listitem"]');
+      if (el === null) throw new Error("no row for the unavailable layer");
+      return el;
+    });
+    expect(row.textContent).toContain("Needs re-link");
+    expect(
+      screen.getByRole("button", { name: "Re-link houses" }),
+    ).toBeInTheDocument();
+    expect(document.querySelector(".unavailable-layers")).toBeNull();
+  });
 });
 
 /**

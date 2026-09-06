@@ -406,9 +406,12 @@ describe("App share-link restore — CityParquet layers", () => {
  * A failed GROUP add has to be visible from wherever it was attempted.
  *
  * `loadError` is rendered inline — in the LANDING branch only. Inside the
- * viewer shell the Add Layer dialog closes on the way out, so before this the
- * "no CityParquet object tables" sentence went nowhere at all and dropping two
- * wrong files simply did nothing.
+ * viewer shell the Add Layer dialog closes on the way out, so the "no
+ * CityParquet object tables" sentence has to land somewhere else: since 12.2
+ * that is an ERROR ROW in the layer list, where the layer would have
+ * appeared. It used to be a toast, and a toast times out, names no source and
+ * cannot be retried — the row does all three, so the toast is gone rather
+ * than doubled.
  */
 describe("App — a failed group add is reported", () => {
   const NO_TABLES = "No CityParquet object tables in the selection.";
@@ -425,7 +428,7 @@ describe("App — a failed group add is reported", () => {
     });
   }
 
-  it("toasts the loader's message inside the viewer shell", async () => {
+  it("leaves an error row in the layer list inside the viewer shell", async () => {
     loadCityParquetFromFiles.mockRejectedValue(new Error(NO_TABLES));
     render(<App persistenceStore={storeWith(null)} />);
     // A layer, so the shell is up and the landing page's inline error slot is
@@ -440,7 +443,7 @@ describe("App — a failed group add is reported", () => {
       rulesEnabled: true,
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: "+ Add Layer" }));
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add layer" }));
     // The dialog opens on the geospatial tab; the city-model drop zone is the
     // one this group add goes through.
     fireEvent.click(screen.getByRole("tab", { name: /city model/i }));
@@ -449,12 +452,14 @@ describe("App — a failed group add is reported", () => {
     await waitFor(() =>
       expect(loadCityParquetFromFiles).toHaveBeenCalledTimes(1),
     );
-    const toast = await waitFor(() => {
-      const el = document.querySelector(".toast");
-      if (el === null) throw new Error("no toast yet");
-      return el;
-    });
-    expect(toast.textContent).toBe(NO_TABLES);
+    // The row names the source AND the reason, and offers a retry — none of
+    // which a toast did.
+    expect(await screen.findByText(`Error · ${NO_TABLES}`)).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Retry a.city.json" }),
+    ).toBeTruthy();
+    // ONE report: the toast that used to double it is gone.
+    expect(document.querySelector(".toast")).toBeNull();
     // The dialog closed on the way out, as it does for a single file.
     expect(screen.queryByRole("dialog")).toBeNull();
   });
