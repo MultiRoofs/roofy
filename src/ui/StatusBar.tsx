@@ -7,7 +7,7 @@
 import type { DuckDBStatus } from "../insights/duckdb";
 import type { StreamStatus } from "../features/streaming/streamStore";
 import { useActiveCityLayer } from "../features/workspace/activeLayer";
-import { extractCrsCode } from "./toolbar/crsCode";
+import { extractCrsCode } from "../features/layers/crsCode";
 import { duckdbDotClass, duckdbLabel, duckdbTooltip } from "./duckdbStatusText";
 
 interface StatusBarProps {

@@ -4,7 +4,7 @@
  * did — the URI form was the only one anyone had checked.
  */
 import { describe, expect, it } from "vitest";
-import { extractCrsCode } from "../../../../src/ui/toolbar/crsCode";
+import { extractCrsCode } from "../../../../src/features/layers/crsCode";
 
 describe("extractCrsCode", () => {
   it("takes the code out of CityJSON's URI form", () => {

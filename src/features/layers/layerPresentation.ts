@@ -1,5 +1,7 @@
 /**
- * A layer's kind and its one-line state, for the layer list row (Task 17).
+ * How a layer describes itself in words: its kind, its one-line state for the
+ * list row (Task 17), and the definition lines the active layer's Details
+ * section reads out (Task 18).
  *
  * PURE and engine-free: no React, no Zustand, no `@navaramap/*`. The row
  * itself decides which `LayerStateInput` fields it has to hand (a static
@@ -11,13 +13,16 @@
  * to redo: only ROOT objects (no `parents`) are meaningful counts — a
  * `BuildingPart` is not a second building — and "does every root object
  * happen to be a Building" is the one bit `layerStateLine` needs to choose
- * between "N buildings" and "N objects".
+ * between "N buildings" and "N objects". {@link countRootObjectsByType}
+ * applies the same rule per type, for the Details section's breakdown.
  */
 import { toplevelCityObjectType } from "@cityjson/navara-core";
-import type { CityModel } from "../../domain/citymodel/types";
+import type { CityModelEncoding } from "@cityjson/navara-core";
+import type { BBox3, CityModel } from "../../domain/citymodel/types";
 import type { ActiveLayer } from "../workspace/activeLayer";
 import type { StreamStatus } from "../streaming/streamStore";
 import { presentStreamStatus } from "../streaming/streamStatusPresentation";
+import { extractCrsCode } from "./crsCode";
 
 export type LayerKind = "city" | "streaming" | "vector" | "raster" | "tiles";
 
@@ -151,6 +156,154 @@ function streamingStateLine(input: LayerStateInput): string {
     case undefined:
       return "Streaming";
   }
+}
+
+// ---------------------------------------------------------------------------
+// The active layer's definition lines (Task 18)
+// ---------------------------------------------------------------------------
+
+/**
+ * What each encoding is CALLED, in the format's own spelling.
+ *
+ * A `Record` rather than a `switch`, so adding a member to
+ * `CityModelEncoding` upstream is a type error here rather than a silent
+ * `undefined` in a panel.
+ */
+const ENCODING_LABELS: Readonly<Record<CityModelEncoding, string>> = {
+  cityjson: "CityJSON",
+  cityjsonseq: "CityJSONSeq",
+  flatcitybuf: "FlatCityBuf",
+  citygml: "CityGML",
+  cityparquet: "CityParquet",
+};
+
+export function encodingLabel(encoding: CityModelEncoding): string {
+  return ENCODING_LABELS[encoding];
+}
+
+/**
+ * The line under the active layer's name: what kind of thing it is, and —
+ * where there is a second word worth saying — what format it came in.
+ *
+ * The format comes from `model.sourceEncoding`, which every parser sets (and
+ * `openStreamingLayer` sets on its stub), NOT from re-detecting the file
+ * name: `detectEncoding` guesses from an extension and answers "cityjson" for
+ * anything it does not recognise, so a signed or extensionless URL would wear
+ * the wrong badge. A raster tile template and a 3D tileset name no encoding
+ * at all, so their lines are one phrase.
+ */
+export function layerKindLine(item: ActiveLayer): string {
+  switch (layerKindOf(item)) {
+    case "city":
+      return `City model · ${encodingLabel(cityModelOf(item).sourceEncoding)}`;
+    case "streaming":
+      return `Streaming city model · ${encodingLabel(
+        cityModelOf(item).sourceEncoding,
+      )}`;
+    case "vector":
+      return "Vector layer · GeoJSON";
+    case "raster":
+      return "Raster layer";
+    case "tiles":
+      return "3D Tiles";
+  }
+}
+
+/** Narrowing helper for the two city branches above — `layerKindOf` has
+ *  already proven the discriminant, but it cannot tell TypeScript so. */
+function cityModelOf(item: ActiveLayer): CityModel {
+  if (item.kind !== "city") throw new Error("not a city layer");
+  return item.layer.model;
+}
+
+/**
+ * The layer's CRS as one label — "EPSG:7415" — or `null` when the source
+ * names no reference system.
+ *
+ * `extractCrsCode` strips whatever authority the source already carries (an
+ * OGC URI from CityJSON, "EPSG:7415" from FlatCityBuf), so the prefix is
+ * added exactly once here rather than at each of the three call sites that
+ * used to compose it.
+ */
+export function crsLabel(referenceSystem: string | undefined): string | null {
+  const code = extractCrsCode(referenceSystem);
+  return code === null ? null : `EPSG:${code}`;
+}
+
+/** The layer's EPSG code as a number, or null. The CityParquet writer takes
+ *  `crs => 'EPSG:NNNN'` and nothing else, so a layer whose reference system
+ *  names no code cannot be written as a package. */
+export function epsgOf(referenceSystem: string | undefined): number | null {
+  const code = extractCrsCode(referenceSystem);
+  if (code === null) return null;
+  const n = Number(code);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
+ * A source path shortened from the MIDDLE, keeping both ends.
+ *
+ * A URL's two informative halves are its host and its file name, and both are
+ * at the ends — an ellipsis on the right (the CSS default) throws away the
+ * file name, which is the half that tells two tiles of the same dataset
+ * apart. The head takes the odd character, so the host survives a tie.
+ */
+export function truncateMiddle(text: string, max: number): string {
+  if (text.length <= max) return text;
+  if (max <= 1) return "…";
+  const keep = max - 1;
+  const head = Math.ceil(keep / 2);
+  const tail = keep - head;
+  return `${text.slice(0, head)}…${tail === 0 ? "" : text.slice(-tail)}`;
+}
+
+/**
+ * Root objects grouped by type, commonest first, ties broken by name.
+ *
+ * Same rule as {@link countRootObjects}: an object with `parents` is a PART
+ * of something already counted, so a Delft building with five BuildingParts
+ * is one Building here, not six objects. Sorted rather than left in insertion
+ * order so the list does not reshuffle when a model is reloaded.
+ */
+export function countRootObjectsByType(
+  model: CityModel,
+): ReadonlyArray<{ readonly type: string; readonly count: number }> {
+  const counts = new Map<string, number>();
+  for (const object of Object.values(model.objects)) {
+    if (object.parents.length > 0) continue;
+    counts.set(object.objectType, (counts.get(object.objectType) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([type, count]) => ({ type, count }))
+    .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
+}
+
+/**
+ * The model's extent as one line: the two horizontal corners, in the CRS
+ * they are expressed in.
+ *
+ * X and Y only. The Z range is real but it is a different question ("how tall
+ * is this?"), the inspector already answers it per object, and a six-number
+ * line does not fit a 300 px panel.
+ *
+ * The decimal places follow the extent's own SPAN rather than a fixed
+ * setting: a projected model spans hundreds of metres, where a tenth of a
+ * metre is already more precision than anyone reads, while a WGS84 extent
+ * spans hundredths of a degree, where one decimal place would collapse both
+ * corners onto the same number.
+ */
+export function extentLine(
+  bbox: BBox3 | null,
+  crs: string | null,
+): string | null {
+  if (bbox === null) return null;
+  const [minX, minY, , maxX, maxY] = bbox;
+  const span = Math.max(maxX - minX, maxY - minY);
+  const digits = span >= 100 ? 1 : 5;
+  const n = (v: number) =>
+    v.toLocaleString("en-GB", { maximumFractionDigits: digits });
+  const corners = `${n(minX)}, ${n(minY)} → ${n(maxX)}, ${n(maxY)}`;
+  return crs === null ? corners : `${corners} (${crs})`;
 }
 
 /** Grouped digits, one locale (`en-GB`), independent of the host machine's

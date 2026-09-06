@@ -1,13 +1,13 @@
 /**
  * The bare numeric CRS code from whatever a layer calls its reference system.
  *
- * Its own module rather than a second export from the toolbar component,
- * because a file that exports both a component and a helper loses fast refresh
- * (and the linter says so). It was never toolbar-specific anyway: it is a
- * property of the two loaders' spellings, its one caller is `StatusBar`, and
- * the toolbar that gave the directory its name is gone (the workspace header
- * replaced it). The path stays put because the helper is not
- * status-bar-specific either.
+ * Its own module rather than a second export from a component, because a file
+ * that exports both a component and a helper loses fast refresh (and the
+ * linter says so). It lived under `ui/toolbar/` while `StatusBar` was its one
+ * caller; it moved HERE when `layerPresentation` came to need it, because
+ * nothing under `features/` may import from `ui/` (see `formatCount`'s note
+ * in that file) and the spelling of a layer's reference system was never a
+ * property of any panel — it is a property of the two loaders' spellings.
  *
  * The caller prepends "EPSG:" itself, so this has to strip any authority the
  * source already carries or it reads "EPSG:EPSG:7415" — which is exactly what

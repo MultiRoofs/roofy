@@ -16,7 +16,7 @@ import { syncFilterToMap } from "../../features/query/mapFilterSync";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 import { useSelectionStore } from "../../features/selection/selectionStore";
 import { useActiveCityLayer } from "../../features/workspace/activeLayer";
-import { extractCrsCode } from "../toolbar/crsCode";
+import { epsgOf } from "../../features/layers/layerPresentation";
 import type { Selection } from "../../domain/selection/types";
 import { ResizeHandle } from "../shell/ResizeHandle";
 import { useShellStore } from "../shell/shellStore";
@@ -358,14 +358,4 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
       )}
     </div>
   );
-}
-
-/** The layer's EPSG code as a number, or null. The CityParquet writer takes
- *  `crs => 'EPSG:NNNN'` and nothing else, so a layer whose reference system
- *  names no code cannot be written as a package. */
-function epsgOf(referenceSystem: string | undefined): number | null {
-  const code = extractCrsCode(referenceSystem);
-  if (code === null) return null;
-  const n = Number(code);
-  return Number.isInteger(n) && n > 0 ? n : null;
 }
