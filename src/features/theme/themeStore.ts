@@ -20,9 +20,11 @@
  * once and which re-resolves whenever the OS flips — but only while the
  * preference is "system".
  *
- * The storage key stays `roofy-theme`, and the values `"dark"` / `"light"`
- * written by the old toggle read back as explicit preferences, so nobody's
- * chosen theme is lost to the migration.
+ * The preference is stored under a NEW key (`roofy-theme-preference`). The
+ * old `roofy-theme` key is deleted on the first read and never honoured: the
+ * old hook wrote it on every mount, so treating it as a choice would have
+ * left every returning user pinned to an explicit theme they never picked.
+ * System is the default for everyone.
  */
 import { create } from "zustand";
 
@@ -33,7 +35,21 @@ export type Theme = "dark" | "light";
  *  time and re-resolves whenever the OS changes. */
 export type ThemePreference = "system" | "light" | "dark";
 
-export const THEME_STORAGE_KEY = "roofy-theme";
+/**
+ * Where the PREFERENCE is kept — a new key, deliberately.
+ *
+ * The old hook stored an effective theme under {@link LEGACY_THEME_STORAGE_KEY}
+ * and wrote it on EVERY mount, so every returning user has one whether or not
+ * they ever chose anything. Reading those values as explicit preferences would
+ * have meant nobody ever landed on "System": the whole point of this change
+ * would have reached only brand-new users. A new key makes System the default
+ * for everyone, and the old key is deleted on the first read so it cannot rot
+ * in storage as a value nothing reads.
+ */
+export const THEME_STORAGE_KEY = "roofy-theme-preference";
+
+/** The old hook's key. Removed on the first read, never honoured. */
+export const LEGACY_THEME_STORAGE_KEY = "roofy-theme";
 
 /** The one media query. Per the CSS spec a UA with no user preference reports
  *  `light`, so this single query answers both directions. */
@@ -70,14 +86,14 @@ function systemTheme(): Theme {
 function readStoredPreference(): ThemePreference {
   let stored: string | null = null;
   try {
+    // The old key is swept, not read — see THEME_STORAGE_KEY.
+    localStorage.removeItem(LEGACY_THEME_STORAGE_KEY);
     stored = localStorage.getItem(THEME_STORAGE_KEY);
   } catch {
     // A blocked localStorage (private mode, a hardened profile) is not a
     // reason to fail to render: fall through to "system".
     return "system";
   }
-  // "dark" and "light" are also what the pre-Preferences toggle wrote, which
-  // is exactly the reading we want for them: an explicit choice.
   if (stored === "dark" || stored === "light" || stored === "system")
     return stored;
   return "system";

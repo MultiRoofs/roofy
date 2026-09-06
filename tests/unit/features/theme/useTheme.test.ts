@@ -18,6 +18,7 @@ import {
   installThemeListener,
   initialThemeState,
   THEME_STORAGE_KEY,
+  LEGACY_THEME_STORAGE_KEY,
 } from "../../../../src/features/theme/themeStore";
 import { useTheme } from "../../../../src/features/theme/useTheme";
 
@@ -80,15 +81,25 @@ describe("theme preference — stored value", () => {
   });
 
   for (const legacy of ["dark", "light"] as const) {
-    it(`reads the legacy stored value "${legacy}" as an explicit preference`, () => {
-      localStorage.setItem(THEME_STORAGE_KEY, legacy);
-      const state = initialThemeState();
-      expect(state.preference).toBe(legacy);
-      // Explicit means explicit: the OS says the opposite here.
-      osPrefersDark = legacy === "light";
-      expect(initialThemeState().theme).toBe(legacy);
+    it(`throws away the old key's "${legacy}" instead of reading it as a choice`, () => {
+      localStorage.setItem(LEGACY_THEME_STORAGE_KEY, legacy);
+
+      // The old hook wrote that key on EVERY mount, so every returning user
+      // has one whether or not they ever chose anything. Honouring it would
+      // mean nobody ever lands on System.
+      expect(initialThemeState().preference).toBe("system");
+      expect(localStorage.getItem(LEGACY_THEME_STORAGE_KEY)).toBeNull();
     });
   }
+
+  it("keeps an explicit preference stored under the new key", () => {
+    localStorage.setItem(THEME_STORAGE_KEY, "dark");
+    const state = initialThemeState();
+    expect(state.preference).toBe("dark");
+    // Explicit means explicit: the OS says the opposite here.
+    osPrefersDark = false;
+    expect(initialThemeState().theme).toBe("dark");
+  });
 
   it("treats an unrecognised stored value as system rather than crashing", () => {
     localStorage.setItem(THEME_STORAGE_KEY, "solarized");
