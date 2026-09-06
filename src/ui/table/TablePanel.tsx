@@ -9,7 +9,7 @@
  * happened.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DuckDBStatus } from "../../insights/duckdb";
 import { useLayerTableStore } from "../../insights/layerTables";
 import { syncFilterToMap } from "../../features/query/mapFilterSync";
@@ -52,6 +52,9 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
     layerId === null ? null : layerQuery(s, layerId),
   );
   const sceneSelections = useSelectionStore((s) => s.selections);
+
+  /** The drawer height the current resize drag started from. */
+  const dragOriginHeight = useRef(0);
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -136,14 +139,19 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
   return (
     <div className="table-panel">
       {/* Dragging the top edge UP (a negative delta) makes the drawer
-          taller — the drawer grows from its top. */}
+          taller — the drawer grows from its top. The delta is measured from
+          pointerdown, so the height it is added to is the one the drag
+          started from. */}
       <ResizeHandle
         axis="y"
         label="Resize table"
+        onStart={() => {
+          dragOriginHeight.current = useShellStore.getState().drawerHeight;
+        }}
         onDelta={(dy) =>
           useShellStore
             .getState()
-            .setDrawerHeight(useShellStore.getState().drawerHeight - dy)
+            .setDrawerHeight(dragOriginHeight.current - dy)
         }
       />
 

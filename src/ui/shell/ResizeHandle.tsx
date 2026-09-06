@@ -2,13 +2,11 @@
  * The shell's one drag handle: a 4px strip that reports pointer movement
  * along ONE axis and knows nothing about what it resizes.
  *
- * `onDelta` receives the movement SINCE THE LAST MOVE, not since the drag
- * started, so a consumer can add it to whatever the store currently holds
- * without carrying a start value across the drag (`useShellStore.getState()`
- * at the moment of the move is always the truth). The cost is that a drag
- * pushed past a clamp has to travel back the same distance before the panel
- * moves again; the alternative — a cumulative delta — needs a start width the
- * `{ axis, onDelta, label }` contract has nowhere to put.
+ * `onDelta` receives the movement SINCE POINTERDOWN, and `onStart` fires at
+ * pointerdown so the consumer can record the size the drag began from. That
+ * pairing is what keeps a drag honest across a clamp: a per-move increment
+ * added to the CLAMPED value would make a pointer dragged past a limit and
+ * back ignore the whole overshoot's worth of the return journey.
  *
  * `setPointerCapture` is guarded: jsdom has no pointer capture, and calling
  * it there throws where the drag would otherwise work fine.
@@ -20,16 +18,24 @@ export interface ResizeHandleProps {
   /** "x" for a vertical handle on a panel's side edge, "y" for a horizontal
    *  one on the drawer's top edge. */
   readonly axis: "x" | "y";
-  /** Pixels moved along `axis` since the previous move event: positive is
-   *  right (x) or down (y). */
+  /** Pixels moved along `axis` since pointerdown: positive is right (x) or
+   *  down (y). */
   readonly onDelta: (px: number) => void;
+  /** Fired at pointerdown, before any `onDelta` — where a consumer records
+   *  the size the drag starts from. */
+  readonly onStart?: () => void;
   /** The handle's accessible name — "Resize details panel". */
   readonly label: string;
 }
 
-export function ResizeHandle({ axis, onDelta, label }: ResizeHandleProps) {
+export function ResizeHandle({
+  axis,
+  onDelta,
+  onStart,
+  label,
+}: ResizeHandleProps) {
   const draggingRef = useRef(false);
-  const lastRef = useRef(0);
+  const originRef = useRef(0);
   const cleanupRef = useRef<(() => void) | null>(null);
 
   // A drag that outlives the handle (a panel closing under it) would leave
@@ -44,7 +50,8 @@ export function ResizeHandle({ axis, onDelta, label }: ResizeHandleProps) {
     (e: React.PointerEvent<HTMLDivElement>) => {
       e.preventDefault();
       draggingRef.current = true;
-      lastRef.current = axis === "x" ? e.clientX : e.clientY;
+      originRef.current = axis === "x" ? e.clientX : e.clientY;
+      onStart?.();
 
       const target = e.currentTarget;
       const pointerId = e.pointerId;
@@ -60,9 +67,7 @@ export function ResizeHandle({ axis, onDelta, label }: ResizeHandleProps) {
       const onMove = (ev: PointerEvent) => {
         if (!draggingRef.current) return;
         const position = axis === "x" ? ev.clientX : ev.clientY;
-        const delta = position - lastRef.current;
-        lastRef.current = position;
-        if (delta !== 0) onDelta(delta);
+        onDelta(position - originRef.current);
       };
 
       const stop = () => {
@@ -85,7 +90,7 @@ export function ResizeHandle({ axis, onDelta, label }: ResizeHandleProps) {
       window.addEventListener("pointercancel", stop);
       cleanupRef.current = stop;
     },
-    [axis, onDelta],
+    [axis, onDelta, onStart],
   );
 
   return (

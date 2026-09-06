@@ -55,6 +55,12 @@
      `shellStore`. */
   --header-h: 2.75rem;
   --statusbar-h: 1.75rem;
+  /* Fallbacks only: `ViewerShell` overwrites all three per render. They keep
+     a shell rendered without them (a test, a storybook) a grid rather than a
+     pile of `var()`-less tracks. */
+  --left-w: 300px;
+  --right-w: 0px;
+  --drawer-h: 0px;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -70,7 +76,8 @@
 }
 
 [data-theme="light"] .legend-toggle,
-[data-theme="light"] .legend-card {
+[data-theme="light"] .legend-card,
+[data-theme="light"] .details-pill {
   background: rgba(255, 255, 255, 0.92);
 }
 
@@ -176,9 +183,7 @@ html {
    so the page reads as Roofy before the lockup does. */
 body {
   margin: 0;
-  /* Desktop-first (PRODUCT.md): below this the shell scrolls sideways rather
-     than reflowing into a layout nobody designed. */
-  min-width: 1024px;
+  min-width: 320px;
   min-height: 100vh;
   font-family: var(--font-ui);
   line-height: 1.5;
@@ -615,6 +620,10 @@ body {
     "left   map    right"
     "status status status";
   height: 100vh;
+  /* Desktop-first (PRODUCT.md): below this the SHELL scrolls sideways rather
+     than reflowing into a layout nobody designed. The landing page is an
+     ordinary document and keeps the body's own floor. */
+  min-width: 1024px;
   background: var(--bg-root);
   color: var(--fg);
 }
@@ -629,13 +638,14 @@ body {
   min-width: 0;
 }
 
-/* Clipped, because these two sit in the `1fr` row: without it a panel taller
-   than the viewport would push the row (and the status bar) off screen. The
-   header and the status bar are in FIXED tracks and must NOT be clipped —
-   every toolbar tooltip and popover hangs below its button. */
+/* These two sit in the `1fr` row, and both panels scroll inside themselves:
+   `min-height: 0` is what stops their content from setting the row's height
+   and pushing the status bar off screen. NOT `overflow: hidden` — the header
+   and the status bar showed what that costs (every tooltip and popover hangs
+   outside its region). */
 .shell-left,
 .shell-right {
-  overflow: hidden;
+  min-height: 0;
 }
 
 .shell-header {
@@ -668,6 +678,10 @@ body {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  /* The drawer's height is a stored number, not a measurement: a viewport
+     that shrank under it must clip the overflow, never paint it over the
+     status bar. */
+  overflow: hidden;
 }
 
 .map-column > .map-area {

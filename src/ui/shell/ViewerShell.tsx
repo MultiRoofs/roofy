@@ -16,6 +16,7 @@
  * is not clearing the selection.
  */
 
+import { useRef } from "react";
 import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { useShellStore } from "./shellStore";
 import { ResizeHandle } from "./ResizeHandle";
@@ -56,13 +57,18 @@ export function ViewerShell({
   const drawerHeight = useShellStore((s) => s.drawerHeight);
   const drawerExpanded = useShellStore((s) => s.drawerExpanded);
 
+  /** The width the current resize drag started from — `ResizeHandle` reports
+   *  its movement from pointerdown, not from the previous move. */
+  const rightDragOrigin = useRef(0);
+
   const rightOpen = right !== null && !rightCollapsed;
 
   const classes = [
     "viewer-shell",
     leftCollapsed && "left-collapsed",
     rightCollapsed && "right-collapsed",
-    drawerExpanded && "drawer-expanded",
+    // An expanded flag with no drawer must not hide the map.
+    drawerExpanded && drawer !== null && "drawer-expanded",
   ]
     .filter(Boolean)
     .join(" ");
@@ -102,10 +108,15 @@ export function ViewerShell({
           <ResizeHandle
             axis="x"
             label="Resize details panel"
+            onStart={() => {
+              rightDragOrigin.current = useShellStore.getState().rightWidth;
+            }}
+            /* The handle is on the panel's LEFT edge: dragging left (a
+               negative delta) widens it. */
             onDelta={(dx) =>
               useShellStore
                 .getState()
-                .setRightWidth(useShellStore.getState().rightWidth - dx)
+                .setRightWidth(rightDragOrigin.current - dx)
             }
           />
           {right}

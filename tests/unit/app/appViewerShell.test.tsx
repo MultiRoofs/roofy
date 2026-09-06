@@ -66,6 +66,8 @@ const { useLayerStore } =
   await import("../../../src/features/layers/layerStore");
 const { useSelectionStore } =
   await import("../../../src/features/selection/selectionStore");
+const { useGeoLayerStore } =
+  await import("../../../src/features/geoLayers/geoLayerStore");
 const { useWorkspaceStore } =
   await import("../../../src/features/workspace/workspaceStore");
 const { useShellStore, defaultShellState } =
@@ -112,6 +114,21 @@ function renderViewer() {
   return () => container.querySelector(".viewer-shell") as HTMLElement;
 }
 
+/** A picked feature of a real geo layer: `App` drops a geo selection whose
+ *  layer is gone, so the layer has to exist. */
+function selectGeoFeature(): void {
+  const geoLayerId = useGeoLayerStore.getState().addGeoLayer({
+    name: "roads",
+    kind: "geojson",
+    config: { url: "https://x/roads.geojson" },
+  });
+  act(() => {
+    useSelectionStore
+      .getState()
+      .selectGeoFeature({ geoLayerId, batchId: 7, properties: {} });
+  });
+}
+
 function select(): void {
   act(() => {
     useSelectionStore.getState().select({
@@ -126,6 +143,7 @@ beforeEach(() => {
   useLayerStore.setState({ layers: [] });
   useWorkspaceStore.setState({ activeLayerId: null });
   useSelectionStore.setState({ selections: [], geoSelection: null });
+  useGeoLayerStore.setState({ layers: [] });
   // jsdom is 1024×768, below both of `defaultShellState`'s breakpoints.
   useShellStore.setState(defaultShellState(1440, 900));
 });
@@ -133,6 +151,47 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("App viewer shell", () => {
+  it("opens the right column for a GEO feature too, and closes it on clear", () => {
+    const shell = renderViewer();
+
+    selectGeoFeature();
+
+    expect(shell().querySelector(".shell-right")).not.toBeNull();
+    expect(shell().style.getPropertyValue("--right-w")).toBe("340px");
+
+    act(() => useSelectionStore.getState().clear());
+
+    expect(shell().style.getPropertyValue("--right-w")).toBe("0");
+    expect(shell().querySelector(".shell-right")).toBeNull();
+  });
+
+  it("names the collapsed pill after what is selected", () => {
+    renderViewer();
+    select();
+    act(() => useShellStore.getState().setRightCollapsed(true));
+
+    // One object: the id's tail, which is what distinguishes it.
+    expect(
+      screen.getByRole("button", { name: "Details · …100000025028" }),
+    ).toBeTruthy();
+
+    act(() => {
+      useSelectionStore.getState().toggleSelect({
+        kind: "object",
+        layerId: "city-1",
+        objectId: "second-building",
+      });
+    });
+    expect(
+      screen.getByRole("button", { name: "Details · 2 selected" }),
+    ).toBeTruthy();
+
+    selectGeoFeature();
+    expect(
+      screen.getByRole("button", { name: "Details · Feature" }),
+    ).toBeTruthy();
+  });
+
   it("gives the right column no width until something is selected", () => {
     const shell = renderViewer();
 

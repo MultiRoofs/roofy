@@ -4,10 +4,17 @@
  * — jsdom has no layout, so the property values ARE the contract.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { ViewerShell } from "../../../../src/ui/shell/ViewerShell";
 import {
   defaultShellState,
+  SHELL_LIMITS,
   useShellStore,
 } from "../../../../src/ui/shell/shellStore";
 
@@ -142,23 +149,43 @@ describe("ViewerShell collapsed-details pill", () => {
 });
 
 describe("ViewerShell right-panel resize", () => {
-  it("widens the panel when its left-edge handle is dragged left", () => {
+  function grabHandle(): HTMLElement {
     shell({ right: <div data-testid="the-right" /> });
+    return screen.getByRole("separator", { name: "Resize details panel" });
+  }
 
-    const handle = screen.getByRole("separator", {
-      name: "Resize details panel",
-    });
-    fireEvent.pointerDown(handle, { clientX: 900, pointerId: 1 });
+  function move(clientX: number): void {
     window.dispatchEvent(
-      new PointerEvent("pointermove", { clientX: 880, pointerId: 1 }),
+      new PointerEvent("pointermove", { clientX, pointerId: 1 }),
     );
+  }
+
+  it("widens the panel when its left-edge handle is dragged left", () => {
+    const handle = grabHandle();
+
+    fireEvent.pointerDown(handle, { clientX: 900, pointerId: 1 });
+    move(880);
     expect(useShellStore.getState().rightWidth).toBe(360);
+    move(870);
+    expect(useShellStore.getState().rightWidth).toBe(370);
 
     window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 }));
-    window.dispatchEvent(
-      new PointerEvent("pointermove", { clientX: 700, pointerId: 1 }),
-    );
-    expect(useShellStore.getState().rightWidth).toBe(360);
+    move(700);
+    expect(useShellStore.getState().rightWidth).toBe(370);
+  });
+
+  it("measures from where the drag STARTED, so an over-drag does not drift", () => {
+    // Past `SHELL_LIMITS.rightMax` (480) and back to 40px out. Deltas
+    // relative to the previous move instead of the pointerdown would clamp at
+    // 480 and then subtract the whole way back — landing at 320, a panel that
+    // ignores the pointer until the drag has repaid its own overshoot.
+    const handle = grabHandle();
+
+    fireEvent.pointerDown(handle, { clientX: 900, pointerId: 1 });
+    move(600);
+    expect(useShellStore.getState().rightWidth).toBe(SHELL_LIMITS.rightMax);
+    move(860);
+    expect(useShellStore.getState().rightWidth).toBe(380);
   });
 });
 
@@ -172,5 +199,44 @@ describe("ViewerShell expanded drawer", () => {
   it("keeps the map when the drawer is not expanded", () => {
     const el = shell({ drawer: <div data-testid="the-drawer" /> });
     expect(el.classList.contains("drawer-expanded")).toBe(false);
+  });
+
+  it("never hides the map for an expanded flag with NO drawer", () => {
+    useShellStore.setState({ drawerExpanded: true });
+    const el = shell();
+    expect(el.classList.contains("drawer-expanded")).toBe(false);
+  });
+});
+
+describe("ViewerShell map identity", () => {
+  /** The map slot survives every layout change. At most ONE Navara viewport
+   *  may exist per page, and a remounted `.map-area` would tear the engine
+   *  down and build a second one — see the hard rule in CLAUDE.md. */
+  it("keeps the same map node across drawer and right-column changes", () => {
+    function Harness() {
+      const drawerOpen = useShellStore((s) => s.drawerOpen);
+      return (
+        <ViewerShell
+          header={<div />}
+          left={<div />}
+          map={<div data-testid="the-map" />}
+          drawer={drawerOpen ? <div data-testid="the-drawer" /> : null}
+          right={<div data-testid="the-right" />}
+          rightTitle="Building 1"
+          status={<div />}
+        />
+      );
+    }
+    const { container } = render(<Harness />);
+    const mapArea = container.querySelector(".map-area");
+    const mapNode = screen.getByTestId("the-map");
+
+    act(() => useShellStore.getState().openDrawer());
+    act(() => useShellStore.getState().closeDrawer());
+    act(() => useShellStore.getState().setRightCollapsed(true));
+    act(() => useShellStore.getState().setRightCollapsed(false));
+
+    expect(container.querySelector(".map-area")).toBe(mapArea);
+    expect(screen.getByTestId("the-map")).toBe(mapNode);
   });
 });
