@@ -12,6 +12,10 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { PreferencesMenu } from "../../../../src/ui/header/PreferencesMenu";
 import { useThemeStore } from "../../../../src/features/theme/themeStore";
 
+/** What the deleted sun/moon button was called, in either of its two states.
+ *  Appearance has one home now (this popover) and no second control anywhere. */
+const THEME_TOGGLE_NAME = /toggle theme|switch to (dark|light)/i;
+
 let osPrefersDark = false;
 
 beforeEach(() => {
@@ -121,9 +125,20 @@ describe("PreferencesMenu", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("carries no theme toggle of its own", () => {
-    const { container } = render(<PreferencesMenu />);
+  it("is the only appearance control — no toggle survives beside it", () => {
+    render(<PreferencesMenu />);
     openMenu();
-    expect(container.querySelector(".theme-toggle-btn")).toBeNull();
+    // Named by what a user would reach for, not by a class that no longer
+    // exists anywhere: a `.theme-toggle-btn` query would pass whatever the
+    // component rendered.
+    expect(
+      screen
+        .getAllByRole("button")
+        .filter((b) =>
+          THEME_TOGGLE_NAME.test(
+            b.getAttribute("aria-label") ?? b.textContent ?? "",
+          ),
+        ),
+    ).toEqual([]);
   });
 });

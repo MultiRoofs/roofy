@@ -804,7 +804,7 @@ describe("App save labels the snapshot with the workspace's name", () => {
       screen.getByRole("button", { name: "Delft rooftop study" }),
     );
     await act(async () => {
-      fireEvent.click(screen.getByRole("menuitem", { name: "New workspace" }));
+      fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
     });
 
     expect(useWorkspaceStore.getState().name).toBe(DEFAULT_WORKSPACE_NAME);

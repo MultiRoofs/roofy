@@ -102,7 +102,7 @@ export function WorkspaceMenu({
         type="button"
         className="workspace-name-btn"
         aria-expanded={open}
-        aria-haspopup="menu"
+        aria-haspopup="dialog"
         onClick={() => {
           setDraft(name);
           toggle();
@@ -117,7 +117,7 @@ export function WorkspaceMenu({
       {open && (
         <div
           className="header-popover workspace-menu-popover"
-          role="menu"
+          role="dialog"
           aria-label="Workspace"
         >
           {renaming ? (
@@ -148,7 +148,6 @@ export function WorkspaceMenu({
           ) : (
             <button
               type="button"
-              role="menuitem"
               className="menu-item"
               onClick={() => setRenaming(true)}
             >
@@ -158,7 +157,6 @@ export function WorkspaceMenu({
 
           <button
             type="button"
-            role="menuitem"
             className="menu-item"
             onClick={() => act(onNewWorkspace)}
           >
@@ -167,9 +165,7 @@ export function WorkspaceMenu({
 
           <button
             type="button"
-            role="menuitem"
             className="menu-item"
-            aria-expanded={openListShown}
             onClick={() => setOpenListShown((v) => !v)}
           >
             Open…
@@ -184,7 +180,6 @@ export function WorkspaceMenu({
                   <button
                     key={snapshot.id}
                     type="button"
-                    role="menuitem"
                     className="menu-item workspace-snapshot"
                     onClick={() => act(() => onOpenWorkspace(snapshot.id))}
                   >
@@ -200,11 +195,10 @@ export function WorkspaceMenu({
             </div>
           )}
 
-          <div className="menu-sep" />
+          <hr className="menu-sep" />
 
           <button
             type="button"
-            role="menuitem"
             className="menu-item"
             onClick={() => act(onSave)}
           >

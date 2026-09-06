@@ -575,8 +575,6 @@ body {
   width: min(100%, 34rem);
 }
 
-/* The landing page's only chrome: the same theme toggle the toolbar renders,
-   pinned to the corner so the theme can be flipped before any data loads. */
 /* The landing page's one chrome affordance: the Preferences gear, parked in
    the corner so the hero keeps the page to itself. Named for what it holds
    rather than for the theme toggle it used to hold — appearance is a
@@ -944,11 +942,30 @@ body {
 }
 
 /* The acknowledgement AT the button. Muted and unstyled otherwise: it is a
-   fact for five seconds, not a control. */
+   fact for five seconds, not a control.
+
+   It is taken OUT OF FLOW — absolutely positioned to the LEFT of the Save
+   button, over the flexible gap that is already there — so that appearing and
+   vanishing cannot shove Save, Share and Preferences sideways twice per save.
+   A note that moves the button you just pressed is worse than no note. Left
+   rather than below, so it stays on the header's own row instead of hanging
+   over the map. */
+.header-save {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
 .header-saved-note {
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  transform: translateY(-50%);
+  margin-right: 0.4rem;
   color: var(--fg-muted);
   font-size: 0.7rem;
   white-space: nowrap;
+  pointer-events: none;
 }
 
 /* ── The scene's temporary lodgings ─────────────────────────────────────────
@@ -1101,11 +1118,14 @@ body {
   color: var(--fg);
 }
 
-/* Lime Wash plus the accent ink — the same "this one is active" language the
-   active layer row and the active tool wear. */
+/* Lime Wash plus a lime hairline plus the accent ink — the same "this one is
+   active" language the active layer row and the active tool wear. The hairline
+   is an inset shadow rather than a border so the cell does not change size
+   when it becomes the selected one. */
 .appearance-segment.is-selected {
   background: var(--accent-soft);
   color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 /* ═══════════════════════════════════════════════════════════════

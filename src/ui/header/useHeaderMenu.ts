@@ -56,7 +56,7 @@ export function useHeaderMenu(): HeaderMenu {
   return {
     open,
     setOpen,
-    toggle: () => setOpen(!open),
+    toggle: () => setOpen((o) => !o),
     rootRef,
     triggerRef,
   };

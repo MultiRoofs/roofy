@@ -132,19 +132,28 @@ export function WorkspaceHeader({
 
       <div className="header-spacer" />
 
-      <button
-        type="button"
-        className="header-action"
-        aria-label="Save workspace"
-        onClick={() => void handleSave()}
-      >
-        <svg viewBox="0 0 24 24">
-          <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
-          <path d="M17 21v-8H7v8M7 3v5h8" />
-        </svg>
-        <span>Save</span>
-      </button>
-      {savedNote && <span className="header-saved-note">Saved · just now</span>}
+      {/* The note is positioned against this wrapper, in the flexible gap to
+          the button's left, rather than sitting beside it in flow: a
+          confirmation that shoves Save, Share and Preferences sideways when it
+          arrives — and back again five seconds later — moves the button the
+          user just pressed. */}
+      <span className="header-save">
+        <button
+          type="button"
+          className="header-action"
+          aria-label="Save workspace"
+          onClick={() => void handleSave()}
+        >
+          <svg viewBox="0 0 24 24">
+            <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
+            <path d="M17 21v-8H7v8M7 3v5h8" />
+          </svg>
+          <span>Save</span>
+        </button>
+        {savedNote && (
+          <span className="header-saved-note">Saved · just now</span>
+        )}
+      </span>
 
       {/* Named for what it OPENS: the click raises `ShareDialog`, which shows
           the link and copies it. Disabled rather than hidden when there is

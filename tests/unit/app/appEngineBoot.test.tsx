@@ -476,7 +476,7 @@ describe("App inspector follows viewport picks across the geo/city split", () =>
     // "New workspace" — the header's name for what "Close file" used to do.
     fireEvent.click(screen.getByRole("button", { name: "Untitled workspace" }));
     await act(async () => {
-      fireEvent.click(screen.getByRole("menuitem", { name: "New workspace" }));
+      fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
     });
 
     expect(useLayerStore.getState().layers).toEqual([]);

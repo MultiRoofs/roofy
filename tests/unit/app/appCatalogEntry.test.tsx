@@ -190,6 +190,23 @@ describe("App landing page — catalog entry point", () => {
     expect(screen.queryByTestId("stac-dialog-stub")).toBeNull();
   });
 
+  it("offers appearance through Preferences alone — no theme toggle in the corner", () => {
+    render(<App persistenceStore={emptyStore} />);
+
+    expect(
+      screen.getByRole("button", { name: "Preferences" }),
+    ).toBeInTheDocument();
+    expect(
+      screen
+        .getAllByRole("button")
+        .filter((b) =>
+          /toggle theme|switch to (dark|light)/i.test(
+            b.getAttribute("aria-label") ?? b.textContent ?? "",
+          ),
+        ),
+    ).toEqual([]);
+  });
+
   it("mounts the catalog dialog on click and closes it again", () => {
     render(<App persistenceStore={emptyStore} />);
 
@@ -288,7 +305,7 @@ describe("App landing page — catalog entry point", () => {
     // the toolbar was: the seam that hands the user back to the landing page.
     fireEvent.click(screen.getByRole("button", { name: "Untitled workspace" }));
     await act(async () => {
-      fireEvent.click(screen.getByRole("menuitem", { name: "New workspace" }));
+      fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
     });
 
     expect(

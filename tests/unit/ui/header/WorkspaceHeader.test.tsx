@@ -118,6 +118,24 @@ describe("WorkspaceHeader — the workspace's own controls", () => {
     ).toBe(true);
   });
 
+  it("carries no theme toggle — appearance lives in Preferences alone", () => {
+    render(
+      <WorkspaceHeader
+        {...baseProps}
+        sceneControls={<SceneControlsTemp {...sceneProps} />}
+      />,
+    );
+    expect(
+      screen
+        .getAllByRole("button")
+        .filter((b) =>
+          /toggle theme|switch to (dark|light)/i.test(
+            b.getAttribute("aria-label") ?? b.textContent ?? "",
+          ),
+        ),
+    ).toEqual([]);
+  });
+
   it("dispatches Share", () => {
     const onShare = vi.fn();
     render(<WorkspaceHeader {...baseProps} onShare={onShare} />);
@@ -206,7 +224,7 @@ describe("WorkspaceMenu", () => {
     render(<WorkspaceHeader {...baseProps} />);
     openWorkspaceMenu();
 
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
     const field = screen.getByLabelText("Workspace name");
     fireEvent.change(field, { target: { value: "Delft rooftop study" } });
     fireEvent.keyDown(field, { key: "Enter" });
@@ -219,14 +237,14 @@ describe("WorkspaceMenu", () => {
     render(<WorkspaceHeader {...baseProps} onSave={onSave} />);
     openWorkspaceMenu();
 
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
     const field = screen.getByLabelText("Workspace name");
     fireEvent.change(field, { target: { value: "Delft rooftop study" } });
     // The mousedown on "Save" blurs the field on its way. If blur closed the
     // menu, the item would unmount before its click landed and Save would
     // silently do nothing.
     fireEvent.blur(field);
-    fireEvent.click(screen.getByRole("menuitem", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(useWorkspaceStore.getState().name).toBe("Delft rooftop study");
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
@@ -235,7 +253,7 @@ describe("WorkspaceMenu", () => {
   it("abandons a rename on Escape without touching the name", () => {
     render(<WorkspaceHeader {...baseProps} />);
     openWorkspaceMenu();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
 
     const field = screen.getByLabelText("Workspace name");
     fireEvent.change(field, { target: { value: "nope" } });
@@ -249,11 +267,11 @@ describe("WorkspaceMenu", () => {
     render(<WorkspaceHeader {...baseProps} onNewWorkspace={onNewWorkspace} />);
     openWorkspaceMenu();
 
-    fireEvent.click(screen.getByRole("menuitem", { name: "New workspace" }));
+    fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
 
     expect(onNewWorkspace).toHaveBeenCalledTimes(1);
     // The menu is done with: acting on an item closes it.
-    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Workspace" })).toBeNull();
   });
 
   it("lists the saved workspaces with their date, and opens one", () => {
@@ -263,9 +281,9 @@ describe("WorkspaceMenu", () => {
     );
     openWorkspaceMenu();
 
-    fireEvent.click(screen.getByRole("menuitem", { name: /^Open/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Open/ }));
 
-    const entry = screen.getByRole("menuitem", { name: /Delft rooftop study/ });
+    const entry = screen.getByRole("button", { name: /Delft rooftop study/ });
     expect(entry.textContent).toMatch(/2026/);
     fireEvent.click(entry);
 
@@ -276,7 +294,7 @@ describe("WorkspaceMenu", () => {
     render(<WorkspaceHeader {...baseProps} snapshots={[]} />);
     openWorkspaceMenu();
 
-    fireEvent.click(screen.getByRole("menuitem", { name: /^Open/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Open/ }));
 
     expect(screen.getByText("No saved workspaces yet")).toBeInTheDocument();
   });
@@ -286,7 +304,7 @@ describe("WorkspaceMenu", () => {
     render(<WorkspaceHeader {...baseProps} onSave={onSave} />);
     openWorkspaceMenu();
 
-    fireEvent.click(screen.getByRole("menuitem", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
   });
@@ -297,7 +315,7 @@ describe("WorkspaceMenu", () => {
 
     fireEvent.keyDown(document, { key: "Escape" });
 
-    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Workspace" })).toBeNull();
     expect(document.activeElement).toBe(
       screen.getByRole("button", { name: DEFAULT_WORKSPACE_NAME }),
     );
@@ -419,6 +437,29 @@ describe("SceneControlsTemp", () => {
 
     expect(onSetPickMode).toHaveBeenCalledWith("surface");
     expect(onSetToolMode).toHaveBeenCalledWith("select");
+  });
+
+  it("carries no place search — that is a scene overlay now", () => {
+    render(<SceneControlsTemp {...sceneProps} />);
+    expect(screen.queryByTitle("Search for a place")).toBeNull();
+  });
+
+  it("labels its icon buttons with aria-label and the CSS bubble, never `title`", () => {
+    // Rule 1 of the tooltip pattern (app.css, HOVER TOOLTIPS): `data-tooltip`
+    // REPLACES `title`, or the browser draws the native tip on top of ours.
+    // Rule 2: the `aria-label` must survive, or `content: attr(data-tooltip)`
+    // becomes the button's accessible name.
+    render(<SceneControlsTemp {...sceneProps} />);
+    for (const label of [
+      "Select objects (V)",
+      "Select surfaces (S)",
+      "Zoom to fit (F)",
+      "Scene",
+    ]) {
+      const button = screen.getByRole("button", { name: label });
+      expect(button.getAttribute("title")).toBeNull();
+      expect(button.getAttribute("data-tooltip")).toBe(label);
+    }
   });
 
   it("keeps Zoom to fit", () => {
