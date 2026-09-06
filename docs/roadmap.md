@@ -559,7 +559,18 @@ no compatibility shims; saved workspaces migrate to schema v4.
   with Top-down / Angled / Free 3D and explicit Zoom to layer / selection,
   Sun & shade and Scene settings as nonmodal sheets, interface appearance
   under Preferences, Cyber under Presentation looks, weather as a visual
-  effect.
+  effect. PENDING ADD-ON (deferred 2026-09-06 so it lands in the redesigned
+  sheet, not the old panel): a Shadow quality control beside the sun-shadows
+  switch. The knob already exists — `renderDebugStore.shadowQuality`
+  (`"low" | "medium" | "high"`, default medium) selects a row of
+  `src/scene/shadowQuality.ts` (shadow map 1024/2048/4096 per cascade, bias
+  scaled to the texel, 500 m margin) and `NavaraViewport` writes it live.
+  The control adds a select (disabled while shadows are off), a one-line
+  cost hint per level (4096 is 64 MB of GPU memory per cascade, four
+  cascades), persistence of the choice (the store is not persisted today)
+  and a test that the select drives the store. Until then the dev-console
+  handle `window.__roofyRenderDebug.getState().setShadowQuality("high")`
+  is the way in.
 - 12.6 Verification: browser smokes for the nine acceptance scenarios at
   1440×900 and 1280×720, Codex review of the milestone, docs.
 
