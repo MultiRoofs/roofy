@@ -65,6 +65,10 @@ describe("layerStore", () => {
     useLayerStore.setState({ layers: [] });
   });
 
+  it("does not carry an active id (the workspace store owns it)", () => {
+    expect("activeLayerId" in useLayerStore.getState()).toBe(false);
+  });
+
   describe("addLayer", () => {
     it("adds a layer", () => {
       useLayerStore.getState().addLayer({

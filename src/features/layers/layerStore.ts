@@ -105,7 +105,6 @@ export interface Layer {
 
 export interface LayerStoreState {
   readonly layers: ReadonlyArray<Layer>;
-  readonly activeLayerId: string | null;
 }
 
 export interface LayerStoreActions {
@@ -148,7 +147,6 @@ export interface LayerStoreActions {
     id: string,
     patch: Partial<Pick<Layer, "name" | "visible">>,
   ) => void;
-  setActiveLayer: (id: string | null) => void;
   removeAllLayers: () => void;
   setLayerLod: (layerId: string, lod: string | null) => void;
   setLodMode: (layerId: string, mode: "auto" | "manual") => void;
@@ -251,7 +249,6 @@ export function defaultAppearanceTheme(
 
 export const useLayerStore = create<LayerStore>((set) => ({
   layers: [],
-  activeLayerId: null,
 
   addLayer: (input) => {
     const id = input.id ?? crypto.randomUUID();
@@ -297,29 +294,21 @@ export const useLayerStore = create<LayerStore>((set) => ({
           selectedAppearance,
         },
       ],
-      activeLayerId: state.activeLayerId ?? id,
     }));
     return id;
   },
 
   removeLayer: (id) =>
-    set((state) => {
-      const layers = state.layers.filter((l) => l.id !== id);
-      const activeLayerId =
-        state.activeLayerId === id
-          ? (layers[layers.length - 1]?.id ?? null)
-          : state.activeLayerId;
-      return { layers, activeLayerId };
-    }),
+    set((state) => ({
+      layers: state.layers.filter((l) => l.id !== id),
+    })),
 
   updateLayer: (id, patch) =>
     set((state) => ({
       layers: state.layers.map((l) => (l.id === id ? { ...l, ...patch } : l)),
     })),
 
-  setActiveLayer: (id) => set({ activeLayerId: id }),
-
-  removeAllLayers: () => set({ layers: [], activeLayerId: null }),
+  removeAllLayers: () => set({ layers: [] }),
 
   setLayerLod: (layerId, lod) =>
     set((state) => ({

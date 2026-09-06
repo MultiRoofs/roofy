@@ -31,6 +31,10 @@ function addRaster(name = "XYZ"): string {
   });
 }
 
+it("does not carry an active id (the workspace store owns it)", () => {
+  expect("activeGeoLayerId" in useGeoLayerStore.getState()).toBe(false);
+});
+
 describe("addGeoLayer", () => {
   it("appends a layer with a unique id, visible and fully opaque by default", () => {
     const first = addRaster("A");
