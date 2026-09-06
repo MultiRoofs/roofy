@@ -1,5 +1,5 @@
 /**
- * Component tests for RuleBuilderTab.
+ * Component tests for RulesEditor.
  *
  * Two things are proven here. First, the static-vs-streaming field-source
  * branching: for a static layer, the condition-field dropdown walks the
@@ -9,12 +9,13 @@
  * precomputed `surfaceAttrKeys`) — never from a `CityModel`, since a
  * streaming layer's `model` prop has no real objects.
  *
- * Second, that the tab NAMES the layer it edits and offers no way to re-point
- * itself: rules are per-layer, and the layer is the workspace's active one.
+ * Second, that the editor NAMES the layer it edits and offers no way to
+ * re-point itself: rules are per-layer, and the layer is the workspace's
+ * active one.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { RuleBuilderTab } from "../../../../src/ui/inspector/RuleBuilderTab";
+import { RulesEditor } from "../../../../src/ui/layers/RulesEditor";
 import { downloadText } from "../../../../src/platform/download";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import type { Layer } from "../../../../src/features/layers/layerStore";
@@ -91,7 +92,7 @@ function fieldOptionTexts(): string[] {
     .filter((t): t is string => t !== null);
 }
 
-describe("RuleBuilderTab — streaming field source", () => {
+describe("RulesEditor — streaming field source", () => {
   beforeEach(() => {
     const cache = new CellCache<never>({
       maxTriangles: Infinity,
@@ -129,7 +130,7 @@ describe("RuleBuilderTab — streaming field source", () => {
   });
 
   it("sources condition fields from the resident model, not the (empty) CityModel prop", () => {
-    render(<RuleBuilderTab model={emptyModel()} layerId="L" />);
+    render(<RulesEditor model={emptyModel()} layerId="L" />);
     fireEvent.click(screen.getByText("+ Add Rule"));
 
     const options = fieldOptionTexts();
@@ -138,7 +139,7 @@ describe("RuleBuilderTab — streaming field source", () => {
   });
 });
 
-describe("RuleBuilderTab — static field source (unchanged)", () => {
+describe("RulesEditor — static field source (unchanged)", () => {
   it("still walks the CityModel's objects and surfaces", () => {
     const model: CityModel = {
       ...emptyModel(),
@@ -167,7 +168,7 @@ describe("RuleBuilderTab — static field source (unchanged)", () => {
     });
     useWorkspaceStore.setState({ activeLayerId: "L" });
 
-    render(<RuleBuilderTab model={model} layerId="L" />);
+    render(<RulesEditor model={model} layerId="L" />);
     fireEvent.click(screen.getByText("+ Add Rule"));
 
     const options = fieldOptionTexts();
@@ -180,7 +181,7 @@ describe("RuleBuilderTab — static field source (unchanged)", () => {
 // Target-layer picker
 // ---------------------------------------------------------------------------
 
-describe("RuleBuilderTab — exporting rules", () => {
+describe("RulesEditor — exporting rules", () => {
   it("hands the layer's rules to the one download helper", () => {
     const rules = [
       {
@@ -197,7 +198,7 @@ describe("RuleBuilderTab — exporting rules", () => {
     });
     useWorkspaceStore.setState({ activeLayerId: "L" });
 
-    render(<RuleBuilderTab model={emptyModel()} layerId="L" />);
+    render(<RulesEditor model={emptyModel()} layerId="L" />);
     fireEvent.click(screen.getByText("Export rules"));
 
     // The STORE's rules, not the prop's, and pretty-printed — the file is
@@ -209,17 +210,17 @@ describe("RuleBuilderTab — exporting rules", () => {
   });
 });
 
-describe("RuleBuilderTab — the layer it edits", () => {
+describe("RulesEditor — the layer it edits", () => {
   it("names its target layer in the heading", () => {
     useLayerStore.setState({ layers: [baseLayer({ name: "Delft" })] });
     useWorkspaceStore.setState({ activeLayerId: "L" });
-    render(<RuleBuilderTab model={emptyModel()} layerId="L" />);
+    render(<RulesEditor model={emptyModel()} layerId="L" />);
     expect(screen.getByText("Rules \u00b7 Delft")).toBeTruthy();
   });
 
-  it("offers no picker: the tab follows the workspace's active layer", () => {
+  it("offers no picker: the editor follows the workspace's active layer", () => {
     // It used to carry a target `<select>` that let the Rules tab point at a
-    // DIFFERENT layer from the one the rest of the inspector described.
+    // DIFFERENT layer from the one the rest of the UI described.
     useLayerStore.setState({
       layers: [
         baseLayer({ id: "L", name: "Delft" }),
@@ -227,7 +228,7 @@ describe("RuleBuilderTab — the layer it edits", () => {
       ],
     });
     useWorkspaceStore.setState({ activeLayerId: "L" });
-    render(<RuleBuilderTab model={emptyModel()} layerId="L" />);
+    render(<RulesEditor model={emptyModel()} layerId="L" />);
     expect(
       screen.queryByRole("combobox", { name: /rules target layer/i }),
     ).toBeNull();
@@ -242,7 +243,7 @@ describe("RuleBuilderTab — the layer it edits", () => {
       ],
     });
     useWorkspaceStore.setState({ activeLayerId: "R" });
-    render(<RuleBuilderTab model={emptyModel()} layerId="R" />);
+    render(<RulesEditor model={emptyModel()} layerId="R" />);
 
     fireEvent.click(screen.getByRole("button", { name: "Flat roofs" }));
 

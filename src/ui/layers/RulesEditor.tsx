@@ -1,15 +1,20 @@
 /**
- * Rule builder tab for creating and managing per-layer colorization rules.
+ * The rule editor: create and manage one layer's colorization rules.
  *
  * Rules are stored in the layer store; `handleSync` compiles them
  * (`compileRuleEvaluator`) and pushes the result into
  * `CityModelHandle.setStyle`.
  *
- * Rules are per-layer, so the tab always edits exactly one layer — the
+ * It lives under `ui/layers/` because a rule is a LAYER's styling, not a
+ * property of the current selection — this was the inspector's "Rules" tab
+ * (`RuleBuilderTab`), five tabs away from the layer it edits, and it is now
+ * the body of the active layer's Style section. Same content, no tab chrome.
+ *
+ * Rules are per-layer, so the editor always edits exactly one layer — the
  * workspace's active one — and says which, in its heading. It used to carry a
- * target-layer `<select>` of its own, which let the Rules tab point at a
- * DIFFERENT layer from the one the rest of the inspector was describing; the
- * layer list is now the only place a layer is chosen.
+ * target-layer `<select>` of its own, which let it point at a DIFFERENT layer
+ * from the one the rest of the UI was describing; the layer list is now the
+ * only place a layer is chosen.
  */
 
 import { useCallback, useRef, useState } from "react";
@@ -29,7 +34,7 @@ import type {
 import { RULE_PRESETS } from "../../features/rules/presets";
 import { downloadText } from "../../platform/download";
 
-export interface RuleBuilderTabProps {
+export interface RulesEditorProps {
   readonly model: CityModel;
   readonly layerId: string;
 }
@@ -44,7 +49,7 @@ const METRIC_FIELDS = [
 
 const OPERATORS: ConditionOperator[] = [">", "<", "=", ">=", "<="];
 
-export function RuleBuilderTab({ model, layerId }: RuleBuilderTabProps) {
+export function RulesEditor({ model, layerId }: RulesEditorProps) {
   const layer = useLayerStore((s) => s.layers.find((l) => l.id === layerId));
   const rules = layer?.rules ?? [];
   const enabled = layer?.rulesEnabled ?? true;

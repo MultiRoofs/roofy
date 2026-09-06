@@ -34,7 +34,7 @@ import {
 import { ErrorBoundary } from "../ErrorBoundary";
 import { AnalysisTab } from "./AnalysisTab";
 import { GeoLayerInspector } from "./GeoLayerInspector";
-import { RuleBuilderTab } from "./RuleBuilderTab";
+import { RulesEditor } from "../layers/RulesEditor";
 import { StatsTab } from "./StatsTab";
 import {
   computeTotalRoofArea,
@@ -322,7 +322,7 @@ export function InspectorPanel({ selections, onClose }: InspectorPanelProps) {
             <ErrorBoundary fallback="inline" key={activeTab}>
               {activeTab === "rules" ? (
                 displayLayer ? (
-                  <RuleBuilderTab
+                  <RulesEditor
                     model={displayLayer.model}
                     layerId={displayLayer.id}
                   />
