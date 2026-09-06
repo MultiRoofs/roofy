@@ -810,3 +810,232 @@ Scope: the new grid and regions with the OLD contents where the new ones do not 
 - `Color by attribute` for vector layers depends on `geoLayerSync` painting per feature; verify before promising it in 12.3.
 - Building-oriented rows need the flat table's parent column semantics; verify in `layerRows.ts` / `layerTables.ts` before 12.4.
 - `useTheme` "system" mode must keep the OS-preference behaviour that the landing page relies on.
+
+---
+
+## Slice 12.2 — Shell and layer management (detailed)
+
+Written 2026-09-06 after 12.1 landed (HEAD 6cc9e80). Read the approved design's "Shell layout", "Header (Workspace)", "Left panel (Layer)" and "Add layer dialog" sections before any task; they are the UI contract and are not repeated here.
+
+Outcome: the new grid and regions exist with the NEW left panel and header, and the OLD inspector, table panel and scene menus still doing their jobs inside the new frame. A geo-only workspace enters the viewer. Rules move out of the inspector into the active layer's STYLE section (12.3 reshapes Style; 12.2 only relocates it).
+
+Rulings that amend the outlines above:
+
+- `ViewerToolbar` is replaced by `WorkspaceHeader` in THIS slice. Its pick-mode buttons, `ViewModeToggle`, `SceneThemeMenu`, `SolarMenu`, `WeatherMenu`, the rendering-settings gear and a new `Scene` popover holding `BasemapPanel` + `GoogleTilesPanel` mount inside the header's right group as a temporary "scene group" (one component, `src/ui/header/SceneControlsTemp.tsx`) until 12.5 moves them onto the map. 12.5 deletes `SceneControlsTemp` and those menus.
+- The camera-fit producers: with a geo-only workspace reachable, the viewport no longer unmounts while geo rows exist, so the "geo rows outlive the scene" case from 12.1 disappears. The stream predicate gets its geo term back in workspace form (`useLayerStore.getState().layers.length === 1 && geo rows === 0`, i.e. only this stream's own row exists), and `App` fits the FIRST geo layer of an empty workspace explicitly (`fitBounds(resolveGeoLayerBounds(layer))`) right after adding it. A city layer joining a geo-first workspace does not fit (already true).
+- Workspace name: `useWorkspaceStore` gains `name: string` (default `"Untitled workspace"`) and `setName`; Save writes it as the snapshot `label`; Restore sets it from the label; the header shows it. No new persistence field.
+- Interface appearance: `useTheme` gains a preference `"system" | "light" | "dark"` (storage key stays `roofy-theme`; the stored value `"system"` or absent means follow `prefers-color-scheme`; the effective theme is what `data-theme` shows). The header's theme toggle goes; Preferences owns it.
+
+### Execution order for 12.2
+
+**T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9 → T10 → T11 → T12**, one at a time, each commit green. T2 (shell grid) mounts the OLD `LeftSidebar` and `InspectorPanel` inside the new grid so the app keeps working; T7 swaps in the new left panel; T11 deletes the old modules.
+
+### File map for 12.2
+
+- Create `src/ui/shell/shellStore.ts`, `src/ui/shell/ViewerShell.tsx`, `src/ui/shell/ResizeHandle.tsx`, `src/ui/shell/LeftRail.tsx`.
+- Create `src/ui/header/WorkspaceHeader.tsx`, `src/ui/header/WorkspaceMenu.tsx`, `src/ui/header/PreferencesMenu.tsx`, `src/ui/header/SceneControlsTemp.tsx`.
+- Create `src/features/layers/layerPresentation.ts`.
+- Create `src/ui/layers/LayerList.tsx`, `src/ui/layers/LayerRow.tsx`, `src/ui/layers/LayerRowMenu.tsx`, `src/ui/layers/ActiveLayerPanel.tsx`, `src/ui/layers/StyleSection.tsx`, `src/ui/layers/FilterSection.tsx`, `src/ui/layers/DetailsSection.tsx`, `src/ui/sidebar/LeftPanel.tsx`.
+- Modify `src/features/workspace/workspaceStore.ts` (name), `src/features/theme/useTheme.ts` (preference), `src/app/App.tsx` (shell, header, landing condition, geo-first fit, workspace name), `src/scene/NavaraViewport.tsx` (stream predicate geo term), `src/ui/inspector/InspectorPanel.tsx` (no Rules tab, no geo override, hidden when the selection is empty), `src/ui/table/TablePanel.tsx` (height/open from `shellStore`), `src/ui/layers/AddLayerDialog.tsx` + `SourcePicker.tsx` + `GeospatialSourceForm.tsx` (File / URL / Catalog with detection), `src/app/app.css` (new sections `VIEWER SHELL`, `HEADER`, `LEFT PANEL`, `LAYER LIST`, `ACTIVE LAYER`; old `TOOLBAR`, `LEFT SIDEBAR`, `LAYER PANEL`, `THEME TOGGLE`, `VIEW MODE TOGGLE (toolbar)` sections removed in T11).
+- Delete (T11) `src/ui/toolbar/ViewerToolbar.tsx`, `src/ui/ThemeToggleButton.tsx`, `src/ui/sidebar/LeftSidebar.tsx`, `src/ui/layers/LayerPanel.tsx`, `src/ui/layers/GeoLayerRow.tsx`, `src/ui/inspector/GeoLayerInspector.tsx` (its style form moves into `StyleSection`), and their tests; `LodSelector`, `AppearanceSelector`, `LayerTypeToggles`, `StreamingLodControl`, `BasemapPanel`, `GoogleTilesPanel` are reused, not deleted.
+
+### Task 1: shellStore and workspace name
+
+**Files:** create `src/ui/shell/shellStore.ts`; modify `src/features/workspace/workspaceStore.ts`; tests `tests/unit/ui/shell/shellStore.test.ts`, extend `tests/unit/features/workspace/workspaceStore.test.ts`.
+
+**Interfaces (produces):**
+
+```ts
+// shellStore.ts — session-only UI state, never persisted
+export type PanelSection = "style" | "filter" | "details";
+export interface ShellState {
+  readonly leftCollapsed: boolean;      // default false
+  readonly leftWidth: number;           // default 300, clamped 240..420
+  readonly rightWidth: number;          // default 340, clamped 280..480
+  readonly drawerOpen: boolean;         // default false
+  readonly drawerHeight: number;        // default 280, clamped 160..(viewport - 200) by the component, store clamps 160..800
+  readonly drawerExpanded: boolean;     // default false
+  readonly openSections: ReadonlyArray<PanelSection>;   // default ["style"]
+  readonly requestedSection: PanelSection | null;       // set by the legend / "Edit in table" to open + scroll a section; consumed by ActiveLayerPanel
+}
+export interface ShellActions {
+  setLeftCollapsed(v: boolean): void; toggleLeftCollapsed(): void;
+  setLeftWidth(px: number): void; setRightWidth(px: number): void;
+  openDrawer(): void; closeDrawer(): void; toggleDrawer(): void;
+  setDrawerHeight(px: number): void; setDrawerExpanded(v: boolean): void;
+  toggleSection(s: PanelSection): void; requestSection(s: PanelSection | null): void;
+}
+export const SHELL_LIMITS = { leftMin: 240, leftMax: 420, rightMin: 280, rightMax: 480, drawerMin: 160, drawerMax: 800 } as const;
+export const useShellStore: ...;
+
+// workspaceStore.ts additions
+readonly name: string;                 // default "Untitled workspace"
+setName(name: string): void;           // trims; empty → default
+```
+
+Tests: defaults; clamping at each limit; `toggleSection` adds/removes; `requestSection` opens the section too (`openSections` gains it); `setName("  ")` → default.
+
+- [ ] Steps: failing tests → implement (plain `create<T>()`) → green → commit `feat(shell): shell store for panel, drawer and section state; workspace name`.
+
+### Task 2: ViewerShell grid with the old regions inside
+
+**Files:** create `src/ui/shell/ViewerShell.tsx`, `src/ui/shell/ResizeHandle.tsx`; modify `src/app/App.tsx` (viewer branch), `src/ui/table/TablePanel.tsx` (reads `drawerHeight`/`setDrawerHeight`/`closeDrawer` from `shellStore` instead of props; `onCollapse`/`onHeightChange` props removed), `src/app/app.css` (`VIEWER SHELL` section rewritten); tests `tests/unit/ui/shell/ViewerShell.test.tsx`, update `tests/unit/ui/table/TablePanel.test.tsx`, `tests/unit/app/*` for the removed `App` state.
+
+**Interfaces (produces):**
+
+```tsx
+export interface ViewerShellProps {
+  readonly header: ReactNode;
+  readonly left: ReactNode; // full-height left panel (or rail when collapsed — the caller passes LeftRail)
+  readonly map: ReactNode; // the viewport + its overlays
+  readonly drawer: ReactNode | null; // null = closed; rendered under the map only
+  readonly right: ReactNode | null; // null = no selection → column width 0
+  readonly status: ReactNode;
+}
+export function ViewerShell(props: ViewerShellProps): ReactElement;
+```
+
+Grid (`.viewer-shell`): rows `var(--header-h) 1fr var(--statusbar-h)`; columns `var(--left-w) 1fr var(--right-w)`; areas `"header header header" "left map right" "status status status"`. The map cell is a column flex: `.map-column > .map-area { flex: 1 1 auto; min-height: 0 }` and `.map-column > .drawer-area { flex: 0 0 var(--drawer-h) }`; `.viewer-shell.drawer-expanded .map-area { display: none }` and the drawer takes the column. `--left-w` is `40px` when collapsed (the rail), `--right-w` is `0` when `right` is null. Widths come from `shellStore` as inline custom properties on the shell element. `ResizeHandle` is a vertical (or horizontal for the drawer) pointer-drag handle: `interface ResizeHandleProps { axis: "x" | "y"; onDelta(px: number): void; label: string }` (the old `LeftSidebar` handle logic moves here, with `setPointerCapture` guarded). Body `min-width: 1024px`.
+Tests: renders the six regions in the right areas (class names); `right === null` sets `--right-w: 0`; collapsed left sets `--left-w: 40px`; `drawerExpanded` hides the map area.
+
+- [ ] Steps: failing tests → implement → `App` viewer branch returns `<ViewerShell header={<ViewerToolbar …/>} left={<LeftSidebar …/>} map={viewport + overlays} drawer={drawerOpen ? <TablePanel …/> : null} right={selections.length > 0 || geoSelection ? <InspectorPanel …/> : null} status={<StatusBar …/>}/>` (the inspector-open toggle and `inspectorOpen` state are removed: the right column follows the selection) → suite green → commit `feat(shell): grid with the drawer under the map column and a selection-driven right column`.
+
+### Task 3: WorkspaceHeader, menus, Preferences, theme preference
+
+**Files:** create `src/ui/header/{WorkspaceHeader,WorkspaceMenu,PreferencesMenu,SceneControlsTemp}.tsx`; modify `src/features/theme/useTheme.ts`, `src/app/App.tsx` (header mount; Save uses the workspace name as label; Restore sets the name; "New workspace" = `handleClose`; "Open…" lists snapshots via the existing `persistenceStore.list()` and calls `handleRestore(id)`), `src/app/app.css` (`HEADER` section); tests `tests/unit/ui/header/*.test.tsx`, `tests/unit/features/theme/useTheme.test.ts`, update `tests/unit/ui/viewerToolbar.test.tsx` → moved to `tests/unit/ui/header/WorkspaceHeader.test.tsx`.
+
+**Interfaces:**
+
+```tsx
+export interface WorkspaceHeaderProps {
+  readonly onSave(): void; readonly onShare(): void; readonly canShare: boolean;
+  readonly onNewWorkspace(): void; readonly onOpenWorkspace(id: string): void;
+  readonly snapshots: ReadonlyArray<SnapshotSummary>;
+  readonly sceneControls: ReactNode;   // <SceneControlsTemp …/> until 12.5
+}
+// useTheme
+export type ThemePreference = "system" | "light" | "dark";
+export function useTheme(): { theme: Theme; preference: ThemePreference; setPreference(p: ThemePreference): void };
+```
+
+Header anatomy (left → right): `RoofyLockup`, the workspace name button (`WorkspaceMenu`: Rename inline, New workspace, Open… submenu of snapshots with date, Save), the left-collapse button (`aria-label="Collapse layers panel"` / "Expand layers panel"), spacer, `sceneControls`, Save (ghost, icon + text; after a save shows "Saved · just now" muted for 5 s), Share, Preferences (gear → `PreferencesMenu` popover: INTERFACE APPEARANCE segmented System / Light / Dark). Menus follow the existing popover pattern (`SolarMenu`'s open state + outside-click close) and the "Menu" shadow from DESIGN.md. No theme toggle button anywhere else.
+`SceneControlsTemp`: the pick-mode pair (Feature / Surface with the existing `PickMode` icons; Measure and Box select are NOT rendered any more), `ViewModeToggle`, `SceneThemeMenu`, `SolarMenu`, `WeatherMenu`, the rendering gear, and a `Scene` popover button hosting `BasemapPanel` + `GoogleTilesPanel`. Marked with a `data-temporary="12.5"` attribute and a comment.
+Tests: header renders name, Save/Share/Preferences; Preferences sets `data-theme` for light/dark and clears the override for system (mock `matchMedia`); New workspace calls the prop; Rename writes `workspaceStore.name`; Save label = name (App test: `persistenceStore.save` receives `label === name`).
+
+- [ ] Steps: failing tests → implement → suite → commit `feat(header): workspace header with menu, Save, Share and Preferences; interface appearance follows the system by default`.
+
+### Task 4: layerPresentation (pure)
+
+**Files:** create `src/features/layers/layerPresentation.ts`; test `tests/unit/features/layers/layerPresentation.test.ts`.
+
+```ts
+export type LayerKind = "city" | "streaming" | "vector" | "raster" | "tiles";
+export function layerKindOf(item: ActiveLayer): LayerKind; // city Layer → isStreaming ? "streaming" : "city"; geo by kind: geojson → vector, raster-xyz → raster, 3d-tiles → tiles
+export interface LayerStateInput {
+  readonly kind: LayerKind;
+  readonly objectCount?: number; // static city: Object.keys(model.objects).length
+  readonly lod?: string | null; // static city: selectedLod
+  readonly residentCount?: number; // streaming: getResidentModel().featureCount
+  readonly streamStatus?: StreamStatus; // streaming
+  readonly featureCount?: number; // vector: features.length when data is inline
+  readonly error?: string | null; // any: the load/parse error message
+  readonly unavailable?: boolean; // restored placeholder awaiting a re-link
+}
+export function layerStateLine(input: LayerStateInput): string;
+// examples: "1,204 buildings · LoD 2.2" (objects are counted as "objects" when the model has non-building types: "2,231 objects · LoD 2.2"), "Streaming · 1,240 loaded", "Streaming · fetching…", "6 features", "Raster", "3D Tiles", "Error · could not parse", "Needs re-link"
+export function pluralize(n: number, unit: string): string; // "1 building", "2 buildings"; uses Intl.NumberFormat("en-GB")-style grouping via the existing `formatCount` in src/ui/table/tableText.ts if importable without pulling UI, else a local formatter
+```
+
+Tests: one per example line; `layerKindOf` for all five kinds.
+
+- [ ] Steps: failing tests → implement → commit `feat(layers): one presentation function for a layer's kind and state line`.
+
+### Task 5: LayerList and LayerRow
+
+**Files:** create `src/ui/layers/{LayerList,LayerRow,LayerRowMenu}.tsx`; `src/app/app.css` (`LAYER LIST` section); tests `tests/unit/ui/layers/{LayerList,LayerRow}.test.tsx`.
+
+```tsx
+export interface LayerListProps { readonly onZoomToLayer(item: ActiveLayer): void; readonly onOpenTable(layerId: string): void; }
+export function LayerList(props): ReactElement;   // rows in unifiedLayerOrder; reads both stores + workspace active id
+export interface LayerRowProps {
+  readonly item: ActiveLayer; readonly active: boolean; readonly stateLine: string; readonly kind: LayerKind;
+  readonly filterChip: ReactNode | null;   // 12.4 fills; null now
+  readonly onActivate(): void; readonly onToggleVisible(): void; readonly onRename(name: string): void;
+  readonly onZoom(): void; readonly onOpenTable: (() => void) | null; readonly onRemove(): void;
+}
+```
+
+Row anatomy per the design (eye button, type icon by `LayerKind`, name, state line under it, the chip slot at the end of the state line, an overflow `⋯` button opening `LayerRowMenu`: Zoom to layer, Open table (city kinds only), Rename, Remove). Row click (not on a button) → `activateLayer(id)`. Double-click the name → inline rename input (Enter commits, Escape cancels) — keep the existing behaviour. Hidden rows at 55% opacity. Remove: city → `closeStreamingLayer(getStreamPlugin(), id)` then `removeLayer(id)`; geo → `removeGeoLayer(id)`. The list has `role="list"`, rows `role="listitem"` with `aria-current="true"` on the active one. Keyboard: rows are focusable (`tabIndex=0`), Enter activates.
+Tests: renders city, streaming, vector, raster rows with the right state lines; click activates (workspace store); eye toggles `visible`; menu Remove removes; Open table absent on a vector row; `aria-current` on the active row.
+
+- [ ] Steps: failing tests → implement → commit `feat(layers): one layer list for every layer kind`.
+
+### Task 6: ActiveLayerPanel with Style (relocated rules), Filter (summary) and Details
+
+**Files:** create `src/ui/layers/{ActiveLayerPanel,StyleSection,FilterSection,DetailsSection}.tsx`; `src/app/app.css` (`ACTIVE LAYER` section); modify `src/ui/inspector/RuleBuilderTab.tsx` → renamed/moved to `src/ui/layers/RulesEditor.tsx` (same content, no tab chrome; props `{ model: CityModel; layerId: string }` unchanged) with its test moved; tests `tests/unit/ui/layers/{ActiveLayerPanel,StyleSection,FilterSection,DetailsSection}.test.tsx`.
+
+- `ActiveLayerPanel` reads `useActiveLayer()`; when null renders nothing. Title = name (Outfit 500 16px), kind line (`"City model · CityJSON 2.0"` from `modelRef`/`detectEncoding`, `"Streaming city model · FlatCityBuf"`, `"Vector layer · GeoJSON"`, `"Raster layer"`, `"3D Tiles"`), action row: `Zoom to layer` (ghost) and, for city kinds, `Open table` / `Close table` (ghost, from `shellStore.drawerOpen`). Three disclosures driven by `shellStore.openSections`; `requestedSection` opens + `scrollIntoView` + clears itself.
+- `StyleSection`: city → `<RulesEditor model layerId/>` (streaming passes the resident model as `RuleBuilderTab` did); geo vector → the fill/stroke/opacity form from `GeoLayerInspector` (moved here); raster → opacity slider; tiles → a muted "No style options" line.
+- `FilterSection`: reads `layerQuery(useQueryStore.getState(), id).applied` (subscribe via the hook); when null → muted "No filter. Filters apply to the map and the table together." (streaming: "…Table only — map filtering for streaming layers is not available yet."); when set → the conditions rendered in mono via the existing `valueText`/`OP_LABELS` from `tableText.ts`, buttons `Edit in table` (opens the drawer and `requestSection(null)`; 12.4 focuses the filter bar) and `Clear filter` (`useQueryStore.clearFilter(id)` + `clearMapFilter(id)`). Raster/tiles → "This layer cannot be filtered."
+- `DetailsSection`: definition rows Source (file name or URL, truncated middle), Format, CRS (`epsgOf` from `TablePanel` moved into `layerPresentation.ts` as `crsLabel`), Objects (counts by type from `availableObjectTypes` + `model.objects`, streaming from `useStreamStore.types`), then `<LodSelector/>`, `<AppearanceSelector/>`, `<LayerTypeToggles/>`, and for streaming `<StreamingLodControl/>` + the camera-sync toggle (SYNC / FROZEN from `LayerPanel`) + the resident-cache line with its tooltip; a `Metadata` disclosure with `JSON.stringify(model.metadata, null, 2)` in a `<pre>`.
+  Tests: each section for city / streaming / vector / raster; FilterSection with and without an applied filter; Details shows LoD selector for static and streaming control for streaming; `requestedSection` opens and clears.
+
+- [ ] Steps: failing tests → implement → commit `feat(layers): the active layer's Style, Filter and Details under the list; rules leave the inspector`.
+
+### Task 7: LeftPanel + LeftRail replace LeftSidebar/LayerPanel
+
+**Files:** create `src/ui/sidebar/LeftPanel.tsx`, `src/ui/shell/LeftRail.tsx`; modify `src/app/App.tsx` (mount; `onZoomToLayer` → `fitLayer` / `handleFlyToGeoLayer`; `onOpenTable` → `shellStore.openDrawer` + `activateLayer`); `src/app/app.css` (`LEFT PANEL` section); tests `tests/unit/ui/sidebar/LeftPanel.test.tsx`, `tests/unit/ui/shell/LeftRail.test.tsx`.
+`LeftPanel`: "LAYERS" mono label + ghost `+ Add layer` (opens `AddLayerDialog`), `<LayerList/>`, hairline, `<ActiveLayerPanel/>` in its own scroll container; the right-edge `ResizeHandle` writing `setLeftWidth`. `LeftRail` (40px): a `Layers` icon button with the layer-count badge that expands the panel, and the active layer's kind icon. Empty list state: "No layers yet" + the Add layer button.
+Tests: renders list + active panel; rail expands; Add layer opens the dialog.
+
+- [ ] Steps: failing tests → implement → suite → commit `feat(shell): left panel with the layer list and the active layer's configuration; rail when collapsed`.
+
+### Task 8: Inspector trimmed to the selection
+
+**Files:** modify `src/ui/inspector/InspectorPanel.tsx` (delete the Rules tab and `RuleBuilderTab` import, the geo-override branch, the `activeTab === "rules"` paths; the panel renders selection content only; `onClose` = `useSelectionStore.clear`), `src/app/App.tsx` (right region null when no selection — done in T2; the geo feature selection renders `GeoFeatureDetailsTemp` = the old `GeoAttributes` list from the deleted overlay recreated minimally inside the inspector as a `Feature` tab until 12.3), tests `tests/unit/ui/inspector/InspectorPanel.test.tsx`.
+Tests: no "Rules" tab; a geo selection shows the feature's properties; empty selection → App renders no inspector.
+
+- [ ] Steps: failing tests → implement → commit `refactor(inspector): selection only — rules and layer style live under the layer`.
+
+### Task 9: Add layer dialog — File / URL / Catalog with detection
+
+**Files:** modify `src/ui/layers/AddLayerDialog.tsx` (`SourceTab = "file" | "url" | "catalog"`), `src/ui/layers/SourcePicker.tsx` (split: the drop zone + Browse/Choose folder stays for the file tab; the URL form becomes `src/ui/layers/UrlSourceForm.tsx`), `src/ui/layers/GeospatialSourceForm.tsx` (its URL kinds fold into `UrlSourceForm` through detection; its name field stays), create `src/features/layers/detectSource.ts`:
+
+```ts
+export type DetectedSource =
+  | {
+      readonly kind: "city";
+      readonly encoding: CityModelEncoding;
+      readonly label: string;
+    } // "CityJSON", "CityJSONSeq", "FlatCityBuf · streams as the camera moves", "CityParquet", "CityGML (zip)"
+  | {
+      readonly kind: "geo";
+      readonly geoKind: GeoLayerKind;
+      readonly label: string;
+    } // "GeoJSON", "XYZ raster tiles", "3D Tiles"
+  | { readonly kind: "unknown"; readonly label: "Unknown format" };
+export function detectSourceFromName(nameOrUrl: string): DetectedSource; // composes detectEncoding, classifyCityParquetUrl, classifyGeoUrl
+export const SOURCE_OVERRIDES: ReadonlyArray<DetectedSource>; // the options for "Change…"
+```
+
+Dialog: tabs File | URL | Catalog; the File tab shows the drop zone; after a file is chosen or dropped (do not add yet) show `Detected: <label> [Change…]` and the filled `Add layer` button; URL tab: input + `Detect` (on blur / Enter) → same line; Catalog tab: `StacBrowser` unchanged. `Add layer` routes by the (possibly overridden) detection: city → the existing `onAddFile` / `onAddUrl`; geo → `addGeoLayer` through `geoLayerFromUrl` / `parseGeoJsonText`. A geo add returns to the viewer (T10). Tests: `detectSourceFromName` for every extension; the dialog shows the detection line and the override select; adding a `.geojson` URL calls `addGeoLayer`.
+
+- [ ] Steps: failing tests → implement → commit `feat(layers): one Add layer dialog — File, URL, Catalog — with format detection and a correction control`.
+
+### Task 10: Geo-only workspaces enter the viewer; fit producers revisited
+
+**Files:** modify `src/app/App.tsx` (`hasWorkspace = layers.length > 0 || geoLayers.length > 0`; the viewer branch condition `hasWorkspace || engineBooting`; on `addGeoLayer` from the dialog or the landing page, when the unified order had length 0 before the add → `sceneRef.current?.fitBounds(resolveGeoLayerBounds(layer))` once the scene is ready via `applyCameraWhenReady`-style gating), `src/scene/NavaraViewport.tsx` (stream predicate: `workspaceWasEmpty = streams.size === 0 && liveRef.current.size === 0 && useGeoLayerStore.getState().layers.length === 0` — the geo term returns because the viewport no longer unmounts while geo rows exist; update the comment and the Task 6 test "fits the first stream of a scene even when geo rows outlived the last one" → replaced by "does not fit when a stream joins a geo-only workspace"), the landing page's `SourcePicker` gets the same detection so a dropped `.geojson` enters the viewer; tests `tests/unit/app/appGeoOnly.test.tsx` (a GeoJSON add from the landing page shows the viewer with the geo row active and fits once; adding a city layer afterwards does not fit), update `tests/unit/scene/navaraViewportStreaming.test.tsx`.
+
+- [ ] Steps: failing tests → implement → commit `feat(app): a geospatial-only workspace enters the viewer; the first content of a scene fits once, whatever its kind`.
+
+### Task 11: Delete the old shell modules and CSS
+
+**Files:** delete `src/ui/toolbar/ViewerToolbar.tsx`, `src/ui/ThemeToggleButton.tsx`, `src/ui/sidebar/LeftSidebar.tsx`, `src/ui/layers/LayerPanel.tsx`, `src/ui/layers/GeoLayerRow.tsx`, `src/ui/inspector/GeoLayerInspector.tsx` and their tests; remove the CSS sections `TOOLBAR`, `TOOL RAIL`, `LEFT SIDEBAR`, `LAYER PANEL` (keep the `.layer-type-toggles` rules used by `LayerTypeToggles`; move them under `ACTIVE LAYER`), `THEME TOGGLE`, `PICK MODE TOGGLE` (if `SceneControlsTemp` has its own), `INSPECTOR PANEL` rules for the removed tabs; gate `grep -rn "left-sidebar\|layer-item\|tb-btn\|theme-toggle" src` returns only what `SceneControlsTemp` still uses (list them in the report). Tests green; `npx vp check` clean.
+
+- [ ] Steps: delete → fix references → suite → commit `refactor(shell): remove the old toolbar, sidebar and layer panel`.
+
+### Task 12: Slice gate
+
+- [ ] `npx vp check src tests`, `npx tsc -b --noEmit`, `npx vitest run`, submodule `pnpm typecheck` + `pnpm vitest run` unchanged.
+- [ ] Browser smoke (Delft + a GeoJSON URL) at 1440×900 and 1280×720: layer rows for both kinds; row click activates without moving the camera; Open table opens the drawer UNDER the map with the left panel still full height; collapse both panels (right collapses with Escape/clear); resize the left panel; Add layer dialog detection line for `.fcb`, `.geojson`, `.city.json`; geo-only workspace from the landing page enters the viewer and fits; Preferences switches appearance; Save → New workspace → Open… restores with the name.
+- [ ] Docs: `docs/roadmap.md` 12.2 complete; `docs/architecture-notes.md` records the shell store and the "viewer whenever any layer exists" rule; `DESIGN.md` Layout section rewritten for the new grid (the other session's untracked copy is left alone — edit only if it is tracked by then; otherwise record the layout in the design spec's "Shell layout" section, which is tracked). Push.
