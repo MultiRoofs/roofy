@@ -7,7 +7,8 @@
  *
  *   - photoreal's ENVIRONMENT is a provable no-op — every override null, every
  *     "off" flag false, so applying it pushes nothing anywhere; its mesh style
- *     is the plugin's default look plus the outline every theme draws;
+ *     is the palette's own colours scaled to a physical albedo, plus the
+ *     outline every theme draws;
  *   - every theme's `meshStyle` is ONE frozen object, because `handleSync`
  *     compares by identity to decide whether to re-extract every edge of every
  *     layer;
@@ -28,7 +29,6 @@ describe("sceneThemePolicy", () => {
   it("makes photoreal's environment a no-op: no override, nothing switched off", () => {
     const policy = sceneThemePolicy("photoreal");
 
-    expect(policy.meshStyle.fill).toBe("vertex");
     expect(policy.basemapOverride).toBeNull();
     expect(policy.googleTilesOff).toBe(false);
 
@@ -54,8 +54,6 @@ describe("sceneThemePolicy", () => {
     // plugin's structural-edge extraction (the same lines cartoon draws),
     // in an ink dark enough to read as a crease and never as a glow.
     const style = sceneThemePolicy("photoreal").meshStyle;
-    expect(style.fill).toBe("vertex");
-    expect(style.tintRGB).toBeUndefined();
     const edges = style.edges!;
     expect(edges).not.toBeNull();
     expect(edges.hdr).toBeUndefined();
@@ -69,6 +67,30 @@ describe("sceneThemePolicy", () => {
       expect(channel).toBeGreaterThan(0);
       expect(channel).toBeLessThan(0x60);
     }
+  });
+
+  it("scales photoreal's buildings to a physical albedo, neutral and below the clip", () => {
+    // Issue #13, second report: the palette's wall (#d9dcd4) and roof
+    // (#d9481c) are DISPLAY colours, near-white in linear light. Handed to a
+    // lit material as albedo at the scene's exposure, a sunlit wall lands at
+    // the same value as the sunlit ground and a roof clips, so the sun's
+    // orientation term — six times more light on a west wall than a south
+    // one at the sample's sun — survives as a difference of a few counts.
+    // `material.color` multiplies the vertex colours before the lighting
+    // equation, so a NEUTRAL grey tint is an albedo, not a colour: hues
+    // survive, the shading gets its headroom back. Neutral so no rule colour
+    // shifts; below ~0.7 because the roof's red channel clips there at
+    // exposure 10; above 0.3 because that put a sunlit wall darker than the
+    // shaded ground (browser-measured, see docs/architecture-notes.md).
+    const style = sceneThemePolicy("photoreal").meshStyle;
+    expect(style.fill).toBe("tint");
+    const tint = style.tintRGB!;
+    expect(tint).toBeDefined();
+    const [r, g, b] = tint;
+    expect(g).toBe(r);
+    expect(b).toBe(r);
+    expect(r).toBeGreaterThan(0.3);
+    expect(r).toBeLessThan(0.7);
   });
 
   it("hands out ONE frozen meshStyle per theme, stable across calls", () => {

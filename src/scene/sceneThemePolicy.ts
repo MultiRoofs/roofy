@@ -187,20 +187,46 @@ const NO_ENVIRONMENT: ThemeEnvironment = {
  * material is a plain line material, so it ignores the sun) at the scene's
  * exposure. Dark enough to read as the crease between two lit faces, never
  * as a glow; not pure black, which reads as an artefact against a lit wall.
- * Every face keeps its own colour (`fill: "vertex"`) and the sun, its shadows
- * and the sky probe do the shading — the line only says where a face ends.
+ * Every face keeps its own hue (the tint below is a neutral albedo) and the
+ * sun, its shadows and the sky probe do the shading — the line only says
+ * where a face ends.
  */
 const PHOTOREAL_INK = 0x3a3632;
 
 /**
- * Photoreal's mesh style: the plugin's default look plus an outline.
+ * Photoreal's mesh style: the palette's own colours, scaled to an albedo,
+ * plus an outline.
+ *
+ * `fill: "tint"` with a NEUTRAL grey is not a colour cast: `material.color`
+ * multiplies the vertex colours before the lighting equation, so this is the
+ * surfaces' albedo. The palette (`cityColors.ts`) is a set of DISPLAY colours
+ * — a wall of #d9dcd4 is 0.85 linear, near white — and handed to the lit
+ * material as-is at the scene's exposure it left a sunlit wall at the same
+ * value as the sunlit ground and clipped every roof, so the sun's orientation
+ * term (six times more light on a west wall than on a south one at the Delft
+ * sample's sun) survived as a difference of a few counts; the buildings read
+ * as flat pale slabs with blue edges (issue #13, second report). Browser
+ * measurements at the fixed 200 m camera, sunlit west wall / south wall /
+ * sky-lit east wall / roof red channel: tint 1.0 gave 185/138/117/251(clip),
+ * 0.7 gave 170/121/101/242, 0.5 gave 155/107/86/231, 0.4 gave 145/97/77/223
+ * against a sunlit ground of about 226. Half: the sunlit wall sits clearly
+ * below the ground, the roof keeps twenty counts of headroom, the shaded side
+ * still reads. Not the exposure: that would drag the globe, which the engine
+ * calibrated for its own imagery, down with the buildings.
  *
  * Spelled out rather than built from `DEFAULT_THEME_STYLE`, because importing
  * that constant would drag `@cityjson/navara-cityjson`'s RUNTIME module — and
  * therefore `three` — into a file whose whole point is being engine-free.
  */
+const PHOTOREAL_ALBEDO = 0.5;
+
 const PHOTOREAL_STYLE: ThemeStyle = Object.freeze({
-  fill: "vertex",
+  fill: "tint",
+  tintRGB: Object.freeze([
+    PHOTOREAL_ALBEDO,
+    PHOTOREAL_ALBEDO,
+    PHOTOREAL_ALBEDO,
+  ]) as readonly [number, number, number],
   edges: Object.freeze({ color: PHOTOREAL_INK }),
 });
 
