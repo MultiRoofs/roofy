@@ -26,7 +26,17 @@
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useStreamStore } from "../../features/streaming/streamStore";
 
-export function StreamingLodControl() {
+export interface StreamingLodControlProps {
+  /** The control's visible label. It defaults to the compact "Streaming LoD"
+   *  the dense layer row wants; the active layer's Details section passes the
+   *  long form, because there the control sits among PER-LAYER settings and
+   *  has to say out loud that it is not one of them. */
+  readonly label?: string;
+}
+
+export function StreamingLodControl({
+  label = "Streaming LoD",
+}: StreamingLodControlProps = {}) {
   const layers = useLayerStore((s) => s.layers);
   const setLayerLod = useLayerStore((s) => s.setLayerLod);
   const setLodMode = useLayerStore((s) => s.setLodMode);
@@ -72,7 +82,7 @@ export function StreamingLodControl() {
 
   return (
     <div className="streaming-lod-control">
-      <label htmlFor="streaming-lod">Streaming LoD</label>
+      <label htmlFor="streaming-lod">{label}</label>
       <select
         id="streaming-lod"
         className="advanced-select"

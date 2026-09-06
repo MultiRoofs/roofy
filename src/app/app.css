@@ -5330,3 +5330,343 @@ button.file-label:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   ACTIVE LAYER (12.2) — the panel under the layer list: one layer's
+   Style, Filter and Details.
+
+   It is a FORM, not a strip of controls: the row above gave up its LoD
+   select, its appearance select and its type toggles precisely so they
+   could be laid out here with a label each. Three disclosures, each a
+   full-width header button over a body — the panel is 240–420 px wide,
+   so nothing sits beside anything else.
+
+   Section titles follow the kit's Label spec (mono, 500, uppercase,
+   0.16em, muted ink) like every other panel heading; the layer's NAME is
+   the one place in this block that uses the display face.
+   ═══════════════════════════════════════════════════════════════ */
+
+.active-layer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem 0.5rem 0.75rem;
+}
+
+.active-layer-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+/* The kit's Title role, at the shell's scale: Outfit 500, 1rem. */
+.active-layer-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: var(--tracking-h1);
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Muted, not dim: Night Ink Dim is 3:1 and this is text that has to be
+   read (it is how a user tells a streamed layer from a resident one). */
+.active-layer-kind {
+  margin: 0;
+  font-size: 0.68rem;
+  color: var(--fg-muted);
+}
+
+.active-layer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.25rem;
+}
+
+/* The ghost treatment `.rule-io-btn` wears, without its `flex: 1` — these
+   are two or three short verbs, not a segmented control. */
+.active-layer-action {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: inherit;
+  font-size: 0.68rem;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+
+.active-layer-action:hover {
+  background: var(--bg-panel-hover);
+  color: var(--fg);
+}
+
+.active-layer-action.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+/* ── The three disclosures ─────────────────────────────────────────────── */
+
+.active-layer-sections {
+  display: flex;
+  flex-direction: column;
+}
+
+.active-layer-section {
+  border-top: 1px solid var(--border);
+}
+
+.active-layer-section:last-child {
+  border-bottom: 1px solid var(--border);
+}
+
+.active-layer-section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0.45rem 0.15rem;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.15s;
+}
+
+.active-layer-section-header:hover {
+  color: var(--fg);
+}
+
+.active-layer-section-title {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+}
+
+/* One caret, rotated — a second glyph for "open" would be a second thing to
+   keep in step with `aria-expanded`. */
+.active-layer-caret {
+  width: 0.7rem;
+  height: 0.7rem;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 0.15s;
+}
+
+.active-layer-caret.is-open {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .active-layer-caret {
+    transition: none;
+  }
+}
+
+.active-layer-section-body {
+  padding: 0 0.15rem 0.6rem;
+}
+
+/* ── Definition rows, groups and notes ─────────────────────────────────── */
+
+.active-layer-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin: 0;
+}
+
+.active-layer-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.15rem 0;
+}
+
+.active-layer-key {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  color: var(--fg-label);
+}
+
+/* WRAPS rather than ellipsising: an extent and a resident-cache line are
+   the answers a reader came for, and half of one is not an answer. Mono,
+   like every other value in this app, because most of them are numbers. */
+.active-layer-value {
+  margin: 0;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--fg);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.active-layer-group {
+  margin-top: 0.6rem;
+}
+
+.active-layer-group-title {
+  margin: 0 0 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--fg-muted);
+}
+
+/* Every "there is nothing here, and here is why" line in the panel. */
+.active-layer-note {
+  margin: 0;
+  font-size: 0.7rem;
+  line-height: 1.45;
+  color: var(--fg-muted);
+}
+
+/* ── Style section: the geo forms ──────────────────────────────────────── */
+
+.active-layer-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.active-layer-field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.active-layer-field-label {
+  font-size: 0.62rem;
+  color: var(--fg-muted);
+}
+
+/* ── Filter section: the applied conditions ────────────────────────────── */
+
+.active-layer-conditions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+.active-layer-condition {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+/* The group's one logic word, set apart so the conditions read as a list
+   rather than as one long expression. */
+.active-layer-condition-logic {
+  flex-shrink: 0;
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  color: var(--fg-muted);
+}
+
+/* ── Details section: the reused controls ──────────────────────────────── */
+
+.active-layer-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.active-layer-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.active-layer-control-label {
+  font-size: 0.68rem;
+  color: var(--fg-label);
+}
+
+/* `StreamingLodControl` brings its own box; inside this panel it is one
+   control among several, so the box and its top margin go. */
+.active-layer-controls .streaming-lod-control {
+  margin-top: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 0.68rem;
+  color: var(--fg-label);
+}
+
+/* `LayerTypeToggles` was drawn for the incumbent row, where its list wrapped
+   to a full-width block under a flex line. Here the wrapper IS that block. */
+.active-layer-types {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.active-layer-types .layer-types-list {
+  border-top: none;
+  padding-top: 0;
+}
+
+.active-layer-subdisclosure {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.active-layer-subdisclosure:hover {
+  color: var(--fg);
+}
+
+/* The file's own words. Scrolls in both directions inside its own box: a
+   metadata block is arbitrary JSON and must never widen the panel. */
+.active-layer-metadata {
+  max-height: 14rem;
+  margin: 0.3rem 0 0;
+  padding: 0.4rem 0.5rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  line-height: 1.5;
+}
