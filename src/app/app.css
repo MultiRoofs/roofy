@@ -2134,27 +2134,6 @@ body {
   justify-content: space-between;
 }
 
-.rule-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.7rem;
-  color: var(--fg-muted);
-  cursor: pointer;
-}
-
-.rule-toggle input {
-  accent-color: var(--accent);
-}
-
-.rule-toggle-label {
-  font-family: var(--font-mono);
-  font-size: 0.66rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-label);
-}
-
 .rule-empty {
   font-size: 0.75rem;
   color: var(--fg-muted);

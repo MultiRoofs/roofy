@@ -225,24 +225,6 @@ describe("layerStore", () => {
       expect(layer.rules.map((r) => r.name)).toEqual(["B", "C", "A"]);
     });
 
-    it("toggles between colouring BY RULES and by surface type", () => {
-      // The editor's ON/OFF switch flips the MODE now — which is what it
-      // always meant — and carries the vestigial flag with it, so the two can
-      // never disagree. A fresh layer has no rules, so it starts OFF.
-      const read = () =>
-        useLayerStore.getState().layers.find((l) => l.id === layerId)!;
-      expect(read().colorBy).toBe("surface");
-      expect(read().rulesEnabled).toBe(false);
-
-      useLayerStore.getState().toggleRulesEnabled(layerId);
-      expect(read().colorBy).toBe("rules");
-      expect(read().rulesEnabled).toBe(true);
-
-      useLayerStore.getState().toggleRulesEnabled(layerId);
-      expect(read().colorBy).toBe("surface");
-      expect(read().rulesEnabled).toBe(false);
-    });
-
     it("clears all rules from a specific layer", () => {
       useLayerStore.getState().addRule(layerId, makeRule());
       useLayerStore.getState().addRule(layerId, makeRule({ name: "second" }));

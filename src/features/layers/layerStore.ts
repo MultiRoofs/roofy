@@ -219,7 +219,6 @@ export interface LayerStoreActions {
   ) => void;
   deleteRule: (layerId: string, ruleId: string) => void;
   reorderRules: (layerId: string, fromIdx: number, toIdx: number) => void;
-  toggleRulesEnabled: (layerId: string) => void;
   clearRules: (layerId: string) => void;
 }
 
@@ -468,19 +467,6 @@ export const useLayerStore = create<LayerStore>((set) => ({
         const [moved] = rules.splice(fromIdx, 1);
         if (moved) rules.splice(toIdx, 0, moved);
         return { ...l, rules };
-      }),
-    })),
-
-  // The editor's ON/OFF switch, which "Color by" replaces in 12.3. Until the
-  // select lands it keeps working by flipping the MODE between rules and
-  // surface — which is exactly what it always meant — rather than a flag the
-  // renderers no longer read.
-  toggleRulesEnabled: (layerId) =>
-    set((state) => ({
-      layers: state.layers.map((l) => {
-        if (l.id !== layerId) return l;
-        const colorBy = l.colorBy === "rules" ? "surface" : "rules";
-        return { ...l, colorBy, rulesEnabled: colorBy === "rules" };
       }),
     })),
 

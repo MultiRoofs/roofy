@@ -26,6 +26,7 @@ import type { CityModel } from "../../../../src/domain/citymodel/types";
 import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 import { useRuleDraftStore } from "../../../../src/features/rules/ruleDraftStore";
 import {
+  NEW_RULE_COLOR_HEX,
   SINGLE_COLOR_HEX,
   UNMATCHED_COLOR_HEX,
 } from "../../../../src/scene/cityColors";
@@ -217,6 +218,35 @@ describe("RulesEditor — exporting rules", () => {
     expect(downloadText).toHaveBeenCalledWith(
       JSON.stringify(rules, null, 2),
       "rules.json",
+    );
+  });
+});
+
+describe("RulesEditor — no On/Off toggle of its own", () => {
+  it("offers no rules on/off switch: the mode is the `Color by` select's", () => {
+    // The editor used to carry an On/Off checkbox in its header that wrote
+    // `rulesEnabled`. Two controls for one fact (this one and the section's
+    // `Color by`) is exactly the disagreement 12.3 removes (R10).
+    useLayerStore.setState({ layers: [baseLayer({ name: "Delft" })] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
+    render(<RulesEditor model={emptyModel()} layerId="L" />);
+
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.queryByText("On")).toBeNull();
+    expect(screen.queryByText("Off")).toBeNull();
+  });
+
+  it("opens a new rule on the palette's new-rule colour, not a local literal", () => {
+    useLayerStore.setState({ layers: [baseLayer({})] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
+    render(<RulesEditor model={emptyModel()} layerId="L" />);
+    fireEvent.click(screen.getByText("+ Add Rule"));
+
+    // `scene/cityColors.ts` is the app's ONE colour answer, and the collision
+    // test there can only pin a value this file actually uses.
+    expect(document.querySelector("input[type=color]")).toHaveProperty(
+      "value",
+      NEW_RULE_COLOR_HEX,
     );
   });
 });

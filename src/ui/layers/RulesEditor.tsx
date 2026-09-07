@@ -36,6 +36,7 @@ import {
   type RuleFormValues,
 } from "../../features/rules/ruleDraftStore";
 import { RULE_PRESETS } from "../../features/rules/presets";
+import { NEW_RULE_COLOR_HEX } from "../../scene/cityColors";
 import { downloadText } from "../../platform/download";
 
 export interface RulesEditorProps {
@@ -56,7 +57,6 @@ const OPERATORS: ConditionOperator[] = [">", "<", "=", ">=", "<="];
 export function RulesEditor({ model, layerId }: RulesEditorProps) {
   const layer = useLayerStore((s) => s.layers.find((l) => l.id === layerId));
   const rules = layer?.rules ?? [];
-  const enabled = layer?.rulesEnabled ?? true;
   const isStreaming = layer?.isStreaming ?? false;
   // Under a texture theme the images cover their faces outright (the mesh
   // whites those vertices out), so a rule colour shows only on faces that
@@ -71,7 +71,6 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
   const addRule = useLayerStore((s) => s.addRule);
   const updateRule = useLayerStore((s) => s.updateRule);
   const deleteRule = useLayerStore((s) => s.deleteRule);
-  const toggleRulesEnabled = useLayerStore((s) => s.toggleRulesEnabled);
 
   // The unsaved editor's state, keyed by layerId — moved out of local
   // `useState` (Task 27). Nothing about the form lives in this component, so
@@ -204,14 +203,6 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
           <div className="attr-section-title">
             Rules &middot; {layer?.name ?? "no layer"}
           </div>
-          <label className="rule-toggle">
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={() => toggleRulesEnabled(layerId)}
-            />
-            <span className="rule-toggle-label">{enabled ? "On" : "Off"}</span>
-          </label>
         </div>
 
         {rules.length === 0 && !showForm && (
@@ -519,7 +510,7 @@ function RuleForm({
 function defaultRuleFormValues(): RuleFormValues {
   return {
     name: "",
-    color: "#7cb518",
+    color: NEW_RULE_COLOR_HEX,
     logic: "AND",
     conditions: [{ field: "inclinationDeg", operator: "<", value: 10 }],
   };
