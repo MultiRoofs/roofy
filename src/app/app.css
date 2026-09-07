@@ -95,10 +95,6 @@
   border-color: var(--border);
 }
 
-[data-theme="light"] .layer-item.layer-active {
-  border-color: var(--accent);
-}
-
 [data-theme="light"] .layer-vis-btn svg {
   stroke: var(--fg-muted);
 }
@@ -1131,15 +1127,10 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   TOOL RAIL
-   ═══════════════════════════════════════════════════════════════ */
-
-/* ═══════════════════════════════════════════════════════════════
    LEFT PANEL (12.2) — the shell's left column: the layer list over the
-   ACTIVE layer's configuration, in one full-height panel. The LEFT
-   SIDEBAR block below still dresses the incumbent (`LeftSidebar` +
-   `LayerPanel`); Task 23 removes it. Nothing is shared: that one is a box
-   around a scrolling pane, this one is a two-region column.
+   ACTIVE layer's configuration, in one full-height panel. Nothing is
+   shared with the incumbent it replaced: that one was a box around a
+   scrolling pane, this one is a two-region column.
    ═══════════════════════════════════════════════════════════════ */
 
 .left-panel {
@@ -1316,43 +1307,6 @@ body {
   justify-content: center;
   height: 1.25rem;
   color: var(--fg-muted);
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   LEFT SIDEBAR
-   ═══════════════════════════════════════════════════════════════ */
-
-.left-sidebar {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  position: relative;
-  background: var(--bg-panel);
-  border-right: 1px solid var(--border);
-  overflow: hidden;
-}
-
-.left-sidebar-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0.5rem;
-}
-
-.left-sidebar-handle {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 4px;
-  height: 100%;
-  cursor: col-resize;
-  background: transparent;
-  transition: background 0.15s;
-  z-index: 10;
-}
-
-.left-sidebar-handle:hover,
-.left-sidebar-handle:active {
-  background: var(--accent);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -2081,23 +2035,6 @@ body {
 
 .statusbar .toolbar-spacer {
   flex: 1;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   PICK MODE TOGGLE
-   ═══════════════════════════════════════════════════════════════ */
-
-.pick-mode-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  font-size: 0.6rem;
-  color: var(--fg-muted);
-  text-align: center;
-}
-
-.pick-mode-group .label {
-  letter-spacing: 0.04em;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -3018,14 +2955,18 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   LAYER PANEL
+   LAYER ROW PARTS — what outlived the incumbent `LayerPanel` (Task 23):
+   the row chrome `GoogleTilesPanel` still wears, the LoD/appearance
+   selects (`LodSelector`, `AppearanceSelector`), and the shared
+   vector/raster style controls (`GeoStyleControls`, `BasemapPanel`) and
+   error copy (`AddLayerDialog`, `UrlSourceForm`) from T18. The object-type
+   toggles moved to the ACTIVE LAYER section below, next to the
+   `LayerTypeToggles` that now renders them from `DetailsSection`.
    ═══════════════════════════════════════════════════════════════ */
 
 .layer-item {
   display: flex;
   align-items: center;
-  /* Wraps so the object-type list (`.layer-types-list`, the last child) can be
-     a full-width block under the row rather than a column squeezed into it. */
   flex-wrap: wrap;
   gap: 0.5rem;
   padding: 0.35rem 0.5rem;
@@ -3041,11 +2982,6 @@ body {
 
 .layer-item:hover {
   background: var(--bg-panel-hover);
-}
-
-.layer-item.layer-active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
 }
 
 .layer-item.layer-hidden {
@@ -3096,50 +3032,10 @@ body {
   font-weight: 500;
 }
 
-.layer-name-input {
-  flex: 1;
-  min-width: 0;
-  padding: 0.15rem 0.3rem;
-  background: var(--bg-input);
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
-  color: var(--fg);
-  font-size: 0.72rem;
-  font-family: inherit;
-}
-
-.layer-name-input:focus {
-  outline: none;
-}
-
 .layer-meta {
   font-size: 0.6rem;
   color: var(--fg-muted);
   flex-shrink: 0;
-}
-
-/* Allowed to SHRINK, unlike the static count: the row also carries a STREAM
-   badge and the camera-sync toggle, and in a 240 px sidebar a non-shrinking
-   count pushed the toggle out of the panel entirely. */
-.layer-meta-streaming {
-  min-width: 0;
-  /* Shrinks FASTER than the name (which has a floor): of the two, the count
-     is the one you can lose and still know what you are looking at. */
-  flex-shrink: 4;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.layer-badge-streaming {
-  flex-shrink: 0;
-  padding: 0.05rem 0.3rem;
-  font-size: 0.55rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-pill);
 }
 
 .lod-selector-streaming {
@@ -3207,121 +3103,8 @@ body {
   border-color: var(--accent);
 }
 
-.layer-actions {
-  display: flex;
-  gap: 0.15rem;
-  flex-shrink: 0;
-}
-
-/* Per-layer object-type visibility. The caret sits inline at the end of the
-   row; the list it opens is a full-width block on the row's next flex line. */
-.layer-types-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1rem;
-  height: 1rem;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--fg-muted);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition:
-    color 0.15s,
-    transform 0.15s;
-}
-
-.layer-types-btn:hover {
-  color: var(--fg);
-}
-
-.layer-types-btn.is-open {
-  color: var(--accent);
-  transform: rotate(180deg);
-}
-
-.layer-types-btn svg {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.layer-types-list {
-  flex: 0 0 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  padding: 0.3rem 0.1rem 0.1rem;
-  border-top: 1px solid var(--border);
-  cursor: default;
-}
-
-.layer-types-item {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  color: var(--fg-label);
-  font-size: 0.68rem;
-  cursor: pointer;
-}
-
-.layer-types-item input {
-  width: 0.7rem;
-  height: 0.7rem;
-  margin: 0;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
-.layer-types-empty {
-  color: var(--fg-muted);
-  font-size: 0.62rem;
-  font-style: italic;
-}
-
-/* ── Geospatial layers section ───────────────────────────────── */
-
-/* The second section inside the same panel: a rule above it, so the two
-   headings read as siblings rather than as one list with a subtitle. */
-.geo-section-title {
-  margin-top: 0.7rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--border);
-}
-
-.layer-section-empty {
-  margin: 0 0 0.3rem;
-  color: var(--fg-muted);
-  font-size: 0.65rem;
-  font-style: italic;
-  line-height: 1.4;
-}
-
-/* Clickable like a city-model row: the inspector follows the workspace's one
-   active layer, whichever section it lives in (features/workspace). */
-.geo-layer-item {
-  cursor: pointer;
-}
-
-.layer-badge-geo {
-  flex-shrink: 0;
-  padding: 0.05rem 0.3rem;
-  font-size: 0.55rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  color: var(--fg-muted);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-}
-
-/* Sized for the narrow case and widened in the inspector below. The base
-   widths date from when these controls sat in a 240 px layer row; they now
-   only render in the inspector, but the pair is kept as base + override so a
-   narrower host would still get something readable. */
+/* Sized for the narrow case, and used at full width by `GeoStyleControls`
+   (the shared style form the active layer's Style disclosure renders). */
 .geo-opacity-slider {
   flex-shrink: 0;
   width: 3.5rem;
@@ -3372,71 +3155,6 @@ body {
   cursor: pointer;
 }
 
-/* The same controls in the INSPECTOR, where the panel is wide: the widths
-   above are sized for a 240 px layer row and read as cramped stubs here, so
-   they are overridden scoped to the inspector rather than loosened globally.
-   A source URL is unbreakable text, so it wraps mid-token instead of forcing
-   the panel wider. */
-
-/* `width: 100%` on a style slider is only half the fix: `.geo-style-field` is
-   `display: contents`, so the control is a grid item of `.geo-style-fields`
-   and 100% resolves against its TRACK — an `auto` track sized to the control's
-   own intrinsic width, which leaves the slider exactly as wide as it was. The
-   second track has to be able to stretch first. `minmax(0, 1fr)` rather than
-   `1fr` so the fixed-width controls (the colour swatch, the number inputs)
-   cannot push the track past its share. */
-.geo-inspector .geo-style-fields {
-  grid-template-columns: 1fr minmax(0, 1fr);
-}
-
-.geo-inspector .geo-opacity-slider,
-.geo-inspector .geo-style-slider {
-  width: 100%;
-}
-
-.geo-inspector .geo-style-number {
-  width: 4.5rem;
-}
-
-.geo-inspector-source {
-  word-break: break-all;
-}
-
-/* Wrapped under the row (the flex line breaks before it), like the city rows'
-   object-type list. */
-.geo-layer-relink {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.35rem;
-  width: 100%;
-  padding-top: 0.3rem;
-  border-top: 1px dashed var(--border);
-}
-
-.geo-layer-relink-note {
-  color: var(--fg-muted);
-  font-size: 0.62rem;
-  line-height: 1.3;
-}
-
-.geo-layer-relink-btn {
-  padding: 0.1rem 0.4rem;
-  border: 1px solid var(--border-accent);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--fg-muted);
-  font-family: inherit;
-  font-size: 0.62rem;
-  cursor: pointer;
-}
-
-.geo-layer-relink-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.geo-layer-error,
 .geo-source-error {
   width: 100%;
   margin: 0;
@@ -3450,27 +3168,6 @@ body {
    the format is detected), and with it `.geo-source-form`, `.geo-kind-select`
    and `.geo-source-hint`. `.geo-source-error` above stays: it is the refusal
    line for a geospatial add, wherever the add was made. */
-
-.layer-add-btn {
-  display: block;
-  width: 100%;
-  padding: 0.4rem;
-  border: 1px dashed var(--border-accent);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--fg-muted);
-  font-size: 0.75rem;
-  cursor: pointer;
-  transition:
-    border-color 0.15s,
-    color 0.15s;
-  margin-top: 0.35rem;
-}
-
-.layer-add-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
 
 /* ═══════════════════════════════════════════════════════════════
    LAYER LIST (12.2) — the redesign's ONE list, for every kind of layer.
@@ -4743,7 +4440,6 @@ button.file-label:disabled {
 }
 
 .share-status.is-error::before,
-.geo-layer-error::before,
 .geo-source-error::before,
 .drop-zone p.source-picker-hint::before {
   content: "";
@@ -4761,7 +4457,6 @@ button.file-label:disabled {
 [data-theme="light"] .error-message,
 [data-theme="light"] .error-detail,
 [data-theme="light"] .share-status.is-error,
-[data-theme="light"] .geo-layer-error,
 [data-theme="light"] .geo-source-error,
 [data-theme="light"] .drop-zone p.source-picker-hint,
 [data-theme="light"] .source-picker-panel .drop-zone p.source-picker-hint {
@@ -5969,6 +5664,77 @@ button.file-label:disabled {
   background: transparent;
   font-size: 0.68rem;
   color: var(--fg-label);
+}
+
+/* Per-layer object-type visibility (`LayerTypeToggles`, rendered by
+   `DetailsSection`). The caret sits inline at the end of the control row;
+   the list it opens is the full-width block `.active-layer-types` wraps. */
+.layer-types-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    color 0.15s,
+    transform 0.15s;
+}
+
+.layer-types-btn:hover {
+  color: var(--fg);
+}
+
+.layer-types-btn.is-open {
+  color: var(--accent);
+  transform: rotate(180deg);
+}
+
+.layer-types-btn svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.layer-types-list {
+  flex: 0 0 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.3rem 0.1rem 0.1rem;
+  border-top: 1px solid var(--border);
+  cursor: default;
+}
+
+.layer-types-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--fg-label);
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.layer-types-item input {
+  width: 0.7rem;
+  height: 0.7rem;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.layer-types-empty {
+  color: var(--fg-muted);
+  font-size: 0.62rem;
+  font-style: italic;
 }
 
 /* `LayerTypeToggles` was drawn for the incumbent row, where its list wrapped
