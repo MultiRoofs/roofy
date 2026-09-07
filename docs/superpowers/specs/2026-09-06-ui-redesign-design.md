@@ -474,3 +474,5 @@ after ~1.5 s. A geospatial-only add (GeoJSON) opens the viewer just the same.
 - Raster colormap selection (no engine support today).
 - Streaming "Refresh visible" (12.5).
 - Expressive scene backgrounds (Day sky / Dusk / Night) — no engine support.
+
+Slice 12.3 scheduling exceptions (plan review 2026-09-07): the rule list's drag handle for precedence ships as Move up / Move down in 12.3 and drag in 12.6 polish; legend row counts arrive with 12.4's `useLayerCounts`; GEOMETRY's "Raw object" opens the drawer's Raw objects view once 12.4 builds it (disabled with a note until then); the legend's presentation size also applies when the right panel is absent (no selection) and the left panel is collapsed; vector "Color by attribute" and "stroke colour" depend on an engine probe and are deferred with a note here if the engine cannot paint per feature or draw polygon outlines.
