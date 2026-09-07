@@ -1,7 +1,7 @@
 /**
  * The one key/value row shared by every inspector view that lists flat
  * attributes: `InspectorPanel`'s Object tab, `GeoLayerInspector`'s layer
- * info, and `GeoFeatureDetailsTemp`'s geo feature properties.
+ * info, and the details panel's geo feature properties.
  *
  * Split out of `InspectorPanel.tsx` so it can be reused without importing
  * that whole component. `formatValue` lives in the sibling `formatAttrValue`

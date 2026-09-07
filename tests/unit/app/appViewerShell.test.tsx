@@ -203,15 +203,14 @@ describe("App viewer shell", () => {
     select();
 
     expect(shell().style.getPropertyValue("--right-w")).toBe("340px");
-    expect(shell().querySelector(".inspector")).not.toBeNull();
+    expect(shell().querySelector(".details-panel")).not.toBeNull();
   });
 
   // A geo feature pick has no city-object identity (`GeoFeatureSelection` is
   // deliberately outside the `Selection` union — see its doc comment), so it
-  // never reaches `InspectorPanel`. `App` renders `GeoFeatureDetailsTemp`
-  // instead — the layer's name plus the feature's own properties, the old
-  // `GeoAttributes` list from the deleted viewport overlay, minimal until
-  // Task 12.3.
+  // never reaches the building details. `App` renders the SAME `DetailsPanel`
+  // for every selection kind; the geo view shows the layer name, a summary
+  // and the feature's own properties.
   it("shows the picked geo feature's layer name and properties", () => {
     const shell = renderViewer();
 
@@ -220,10 +219,10 @@ describe("App viewer shell", () => {
     const right = shell().querySelector(".shell-right") as HTMLElement;
     expect(right).not.toBeNull();
     expect(within(right).getByText("roads")).toBeTruthy();
-    expect(within(right).getByText("highway")).toBeTruthy();
-    expect(within(right).getByText("residential")).toBeTruthy();
-    expect(within(right).getByText("lanes")).toBeTruthy();
-    expect(within(right).getByText("2")).toBeTruthy();
+    expect(within(right).getAllByText("highway").length).toBeGreaterThan(0);
+    expect(within(right).getAllByText("residential").length).toBeGreaterThan(0);
+    expect(within(right).getAllByText("lanes").length).toBeGreaterThan(0);
+    expect(within(right).getAllByText("2").length).toBeGreaterThan(0);
     // No city tabs for a geo feature: there is nothing for them to tab
     // between.
     expect(within(right).queryByRole("button", { name: "Object" })).toBeNull();
@@ -240,7 +239,7 @@ describe("App viewer shell", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
 
-    expect(shell().querySelector(".inspector")).toBeNull();
+    expect(shell().querySelector(".details-panel")).toBeNull();
     expect(shell().querySelector(".shell-right")).toBeNull();
     expect(useSelectionStore.getState().selections).toHaveLength(0);
     expect(screen.queryByRole("button", { name: /^Details ·/ })).toBeNull();

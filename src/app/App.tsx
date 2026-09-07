@@ -87,8 +87,7 @@ import {
   type StreamPlugin,
 } from "../features/streaming/streamPlugin";
 import { useSolarStore } from "../features/solar/solarStore";
-import { InspectorPanel } from "../ui/inspector/InspectorPanel";
-import { GeoFeatureDetailsTemp } from "../ui/inspector/GeoFeatureDetailsTemp";
+import { DetailsPanel } from "../ui/details/DetailsPanel";
 import { WorkspaceHeader } from "../ui/header/WorkspaceHeader";
 import { SceneControlsTemp } from "../ui/header/SceneControlsTemp";
 import { LeftPanel } from "../ui/sidebar/LeftPanel";
@@ -1852,16 +1851,8 @@ export function App({
             ) : null
           }
           right={
-            selections.length > 0 ? (
-              <InspectorPanel
-                selections={selections}
-                onClose={clearSelection}
-              />
-            ) : geoSelection !== null ? (
-              <GeoFeatureDetailsTemp
-                selection={geoSelection}
-                onClose={clearSelection}
-              />
+            selections.length > 0 || geoSelection !== null ? (
+              <DetailsPanel onClose={clearSelection} />
             ) : null
           }
           rightTitle={selectionTitle(selections, geoSelection !== null)}
