@@ -287,6 +287,33 @@ describe("openStreamingLayer", () => {
     expect(opts.rules).toBe(effectiveRules(layer));
   });
 
+  it("derives the seed's enable flag from the MODE, so a caller that names only `colorBy` costs no re-bake", async () => {
+    const plugin = fakePlugin();
+    const layerId = await openStreamingLayer({
+      plugin,
+      source: { url: "https://x/a.fcb" },
+      name: "a.fcb",
+      modelRef: { type: "url", url: "https://x/a.fcb" },
+      // No `rulesEnabled`: the mode is the whole answer.
+      colorBy: "single",
+      singleColor: "#0a0b0c",
+    });
+    const layer = useLayerStore
+      .getState()
+      .layers.find((l) => l.id === layerId)!;
+    expect(layer.colorBy).toBe("single");
+    expect(layer.rulesEnabled).toBe(false);
+
+    const opts = plugin.openStream.mock.calls[0]![0];
+    expect(opts.rulesEnabled).toBe(true);
+    expect(opts.rules![0]!.color).toBe("#0a0b0c");
+    // IDENTITY, not equality: this is the array the first `syncStreamState`
+    // compares against. A seed derived from a different `rulesEnabled` than the
+    // store settled on would be an equal-but-distinct array, and the memo would
+    // answer "changed" and re-bake every resident cell for nothing.
+    expect(opts.rules).toBe(effectiveRules(layer));
+  });
+
   it("seeds hiddenTypes into the plugin AND onto the layer, so a restored layer's very first fetch is already filtered", async () => {
     const plugin = fakePlugin();
     const layerId = await openStreamingLayer({

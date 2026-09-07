@@ -81,8 +81,13 @@ export async function openStreamingLayer(
   // array than the one the stream was opened with and re-bake every cell it
   // had just baked.
   const rules = input.rules ?? [];
-  const rulesEnabled = input.rulesEnabled ?? true;
-  const colorBy = normalizeColorBy({ ...input, rules, rulesEnabled });
+  const colorBy = normalizeColorBy({ ...input, rules });
+  // DERIVED from the settled mode, never from `input.rulesEnabled`: the store
+  // derives it the same way, and a seed built from a different answer would be
+  // an equal-but-distinct array that the first `syncStreamState` reads as a
+  // change. `normalizeColorBy` above is the one place the caller's legacy flag
+  // is still consulted — to derive a mode when the caller named none.
+  const rulesEnabled = colorBy.colorBy === "rules";
   const styling = { rules, rulesEnabled, ...colorBy };
   const handle = await input.plugin.openStream({
     id,

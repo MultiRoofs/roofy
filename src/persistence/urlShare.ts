@@ -205,8 +205,17 @@ export function readShareHash(hash: string): ShareHashResult {
   // layer gets its three styling fields validated and defaulted here — through
   // the SAME function the snapshot path uses, so one workspace cannot come back
   // differently depending on which door it arrived by.
+  // A hand-edited hash can put anything in that array, and this function runs
+  // unguarded inside an App effect — so a `null` element must not become a
+  // TypeError and a blank app. A non-object entry is passed through untouched:
+  // it is not a layer, and rejecting it is the consumer's job, not this
+  // codec's.
   const layers = Array.isArray(parsed.layers)
-    ? parsed.layers.map((l) => ({ ...l, ...normalizeColorBy(l) }))
+    ? parsed.layers.map((l) =>
+        l !== null && typeof l === "object"
+          ? { ...l, ...normalizeColorBy(l) }
+          : l,
+      )
     : [];
   return { kind: "ok", state: { ...parsed, layers } };
 }

@@ -128,9 +128,22 @@ describe("effectiveRules memoisation", () => {
     expect(effectiveRules({ ...base, colorBy: "single" })).not.toBe(first);
     expect(effectiveRules({ ...base, rules: [FLAT] })).not.toBe(first);
     expect(effectiveRules({ ...base, singleColor: "#010203" })).not.toBe(first);
-    expect(effectiveRules({ ...base, rulesEnabled: false })).not.toBe(first);
     // ...and the original inputs still answer with the original array.
     expect(effectiveRules(base)).toBe(first);
+  });
+
+  it("ignores `rulesEnabled`, which no longer decides anything", () => {
+    // The MODE decides whether rules paint, so the legacy flag is not part of
+    // the answer — and must not be part of the key either. Two callers that
+    // disagree about it (a restore that defaults it to true beside a layer
+    // whose mode is "single") would otherwise hand the streaming worker a
+    // second, equal array and cost a full re-bake of every resident cell.
+    for (const colorBy of ["surface", "rules", "single"] as const) {
+      const on = input({ colorBy, rules: [FLAT], rulesEnabled: true });
+      expect(effectiveRules(on)).toBe(
+        effectiveRules({ ...on, rulesEnabled: false }),
+      );
+    }
   });
 });
 

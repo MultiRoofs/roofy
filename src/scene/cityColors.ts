@@ -70,6 +70,20 @@ export const SURFACE_COLOR_HEX = resolved.surfaceColors;
 // ---------------------------------------------------------------------------
 
 /**
+ * The colour a fresh rule opens with in the rule builder.
+ *
+ * Here rather than inline in the editor because it is a RULE colour, and the
+ * collision rule this file is built around has to be able to see every one of
+ * them: a user's very first rule wears this, so a base surface or an accent
+ * equal to it would be exactly the confusion the rule exists to prevent
+ * (`tests/unit/scene/cityColors.test.ts` pins it).
+ *
+ * `RulesEditor.tsx` still spells the literal for now — Task 28 rewrites that
+ * file and makes it import this constant.
+ */
+export const NEW_RULE_COLOR_HEX = "#7cb518";
+
+/**
  * What a roof wears in "Color by rules" when NO rule matches it — the editable
  * trailing catch-all's default.
  *

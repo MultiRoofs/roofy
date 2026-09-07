@@ -18,15 +18,12 @@ import {
   CATEGORY_OTHER_HEX,
   CATEGORY_PALETTE_HEX,
   CITY_COLORS,
+  NEW_RULE_COLOR_HEX,
   SINGLE_COLOR_HEX,
   UNMATCHED_COLOR_HEX,
 } from "../../../src/scene/cityColors";
 import { RULE_PRESETS } from "../../../src/features/rules/presets";
 import { DEFAULT_GEO_LAYER_STYLE } from "../../../src/features/geoLayers/geoLayerStyle";
-
-/** The colour a fresh rule opens with in `RulesEditor`'s builder — a user's
- *  very first rule wears it, so it counts as a rule colour. */
-const NEW_RULE_DEFAULT = "#7cb518";
 
 const lower = (hex: string) => hex.toLowerCase();
 
@@ -51,7 +48,7 @@ const CHROME: ReadonlyArray<readonly [string, string]> = [
  */
 const RULE_COLORS: ReadonlyArray<readonly [string, string]> = [
   ...RULE_PRESETS.map((p) => [`preset ${p.label}`, p.create().color] as const),
-  ["new-rule default", NEW_RULE_DEFAULT],
+  ["new-rule default", NEW_RULE_COLOR_HEX],
   ["default geo layer", DEFAULT_GEO_LAYER_STYLE.color],
 ];
 

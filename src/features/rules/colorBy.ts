@@ -24,7 +24,9 @@
  *    they are derived from the mode, and a serialised one would be the same
  *    fact written twice. {@link isSyntheticRule} is how a consumer that does
  *    see the effective list (the inspector's RULE MATCH) tells them apart.
- * 2. {@link effectiveRules} is MEMOISED on the identity of all five inputs,
+ * 2. {@link effectiveRules} is MEMOISED on the four inputs that can change it
+ *    (the rules array's identity, the mode and the two colours — never the
+ *    vestigial `rulesEnabled`),
  *    because both consumers' "did the styling change?" test is array identity
  *    and both repaints are expensive (`setStyle` recolours every vertex;
  *    `setRules` re-bakes every resident cell in the worker). A fresh array per
@@ -92,8 +94,9 @@ const NO_RULES: ReadonlyArray<Rule> = Object.freeze([]);
 
 /**
  * Keyed on the `rules` array's identity (the store replaces it on every edit),
- * then on the four scalars. Two levels because the scalars are strings and the
- * array is not: a WeakMap lets a layer that is closed take its cache with it.
+ * then on the three scalars that matter. Two levels because the scalars are
+ * strings and the array is not: a WeakMap lets a layer that is closed take its
+ * cache with it.
  */
 const cache = new WeakMap<
   ReadonlyArray<Rule>,
@@ -104,8 +107,16 @@ const cache = new WeakMap<
  *  rules array is all that is ever asked for again. */
 const MAX_KEYS_PER_RULES_ARRAY = 8;
 
+/**
+ * Deliberately WITHOUT `rulesEnabled`: the mode is what decides whether rules
+ * paint, so the legacy flag cannot change the output — and a key that included
+ * it would let two callers who merely disagree about a vestigial field
+ * (a restore defaulting it to `true` beside a layer whose mode is `"single"`)
+ * mint two equal-but-distinct arrays, which both memos read as "changed" and
+ * pay for with a full repaint or a worker re-bake of every resident cell.
+ */
 function cacheKey(input: ColorByInput): string {
-  return `${input.colorBy}|${input.rulesEnabled}|${input.singleColor}|${input.unmatchedColor}`;
+  return `${input.colorBy}|${input.singleColor}|${input.unmatchedColor}`;
 }
 
 /**

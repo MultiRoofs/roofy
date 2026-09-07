@@ -252,6 +252,32 @@ describe("the share hash", () => {
     });
   });
 
+  it("survives a hand-edited hash whose layers array carries a null", () => {
+    // `readShareHash` runs unguarded inside an App effect, so a throw here is a
+    // blank app for anyone who follows a mangled link. A non-object entry is
+    // passed through untouched rather than repaired: it is not a layer, and
+    // rejecting it is the consumer's existing job.
+    const state = share({});
+    const mangled = {
+      ...state,
+      layers: [null, ...state.layers, 42],
+    } as unknown as ShareableViewState;
+    const hash = "#" + encodeShareState(mangled);
+    expect(() => readShareHash(hash)).not.toThrow();
+    const result = readShareHash(hash);
+    expect(result.kind).toBe("ok");
+    const layers = result.kind === "ok" ? result.state.layers : [];
+    expect(layers).toHaveLength(3);
+    expect(layers[0]).toBeNull();
+    expect(layers[2]).toBe(42);
+    // The real layer beside them is still validated — it carries rules and no
+    // mode, so it derives "rules", exactly as it would on its own.
+    expect(layers[1]).toMatchObject({
+      colorBy: "rules",
+      singleColor: SINGLE_COLOR_HEX,
+    });
+  });
+
   it("stays schema v3 — nothing about a hash's older meaning changed", () => {
     const result = readShareHash(
       "#" + encodeShareState(share({ colorBy: "single" })),
