@@ -74,8 +74,11 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
   const toggleRulesEnabled = useLayerStore((s) => s.toggleRulesEnabled);
 
   // The unsaved editor's state, keyed by layerId — moved out of local
-  // `useState` (Task 27) so switching the active layer and back does not
-  // unmount-and-lose it. See `features/rules/ruleDraftStore.ts`.
+  // `useState` (Task 27). Nothing about the form lives in this component, so
+  // rendering it for a different layer can neither carry the old layer's
+  // half-typed rule across (the leak the seeded-once `useState` produced) nor
+  // lose it when the panel remounts on `key={layerId}`. See
+  // `features/rules/ruleDraftStore.ts`.
   const draft = useRuleDraftStore((s) => s.drafts[layerId] ?? null);
   const setDraft = useRuleDraftStore((s) => s.setDraft);
   const clearDraft = useRuleDraftStore((s) => s.clearDraft);

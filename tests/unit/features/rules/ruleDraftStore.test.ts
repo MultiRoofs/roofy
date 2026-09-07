@@ -106,13 +106,34 @@ describe("installRuleDraftInvariants", () => {
   });
 
   it("a second install disposes the first", () => {
+    // Written so a NO-OP disposal fails it. Both installers are torn down
+    // before the layer is removed — the second by its own dispose, the first
+    // by the second INSTALL — so nothing should be listening and the draft
+    // must survive. If installing did not dispose the superseded installer,
+    // that one is still subscribed and nulls the draft, and this fails.
+    addLayer("A");
+    const first = installRuleDraftInvariants();
+    const second = installRuleDraftInvariants();
+    second();
+
+    useRuleDraftStore.getState().setDraft("A", draft("a-draft"));
+    useLayerStore.getState().removeLayer("A");
+
+    expect(useRuleDraftStore.getState().drafts.A).toEqual(draft("a-draft"));
+
+    // Belt and braces: the superseded installer's dispose is a no-op against
+    // an already-unsubscribed subscription, not an error.
+    first();
+  });
+
+  it("disposing a superseded installer leaves the live one working", () => {
     addLayer("A");
     const first = installRuleDraftInvariants();
     const second = installRuleDraftInvariants();
     useRuleDraftStore.getState().setDraft("A", draft("a-draft"));
 
-    // The first installer's subscription is gone; disposing it must not
-    // touch the second (live) one's subscription.
+    // The first installer's subscription is already gone; disposing it must
+    // not take the second (live) one's subscription with it.
     first();
     useLayerStore.getState().removeLayer("A");
     expect(useRuleDraftStore.getState().drafts.A).toBeNull();

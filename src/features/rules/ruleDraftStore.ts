@@ -3,11 +3,15 @@
  *
  * `RulesEditor` used to keep `editingId`/`showForm` in its own `useState`,
  * and `RuleForm` kept `name`/`color`/`logic`/`conditions` in ANOTHER set of
- * `useState`s seeded once from `initial` — so switching the active layer and
- * back unmounted and remounted the editor and lost whatever the user was
- * mid-typing. Moving that state here, keyed by `layerId`, is what makes the
- * unsaved editor survive the switch: React unmounts and remounts
- * `RulesEditor`, but the store does not.
+ * `useState`s seeded ONCE from `initial`. The bug that produced was not a
+ * lost draft but a LEAKED one: rendering the editor for layer B where layer
+ * A's editor had been is not a remount, so B's editor came up showing A's
+ * half-typed rule under B's name. (The panel's `key={layerId}` does remount
+ * it in the app, which turned the same seeded-once state into a lost draft
+ * there — one cause, two symptoms.)
+ *
+ * Moving that state here, keyed by `layerId`, answers both: the component
+ * holds nothing, so there is nothing to carry across and nothing to lose.
  *
  * SESSION-ONLY, deliberately: a draft is never persisted (no localStorage,
  * no snapshot, no share link) and never captured by `persistence/`. It is
