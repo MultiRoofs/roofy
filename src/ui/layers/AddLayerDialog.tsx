@@ -50,6 +50,7 @@ import { DetectionLine } from "./DetectionLine";
 import { StacBrowser, type AddUrlResult } from "../stac/StacBrowser";
 import {
   SOURCE_OVERRIDES,
+  UNKNOWN_SOURCE,
   detectSourceFromName,
   type DetectedSource,
 } from "../../features/layers/detectSource";
@@ -159,7 +160,20 @@ export function AddLayerDialog({
    *  thinks the file is yet. */
   const stageFile = useCallback((file: File) => {
     setError(null);
-    setStaged({ files: [file], detected: detectSourceFromName(file.name) });
+    const detected = detectSourceFromName(file.name);
+    setStaged({
+      files: [file],
+      // A dropped `tileset.json` really does name 3D Tiles — but a tileset is
+      // a URL the engine walks, not a file it reads, so this tab cannot honour
+      // it and the select does not offer it. Saying "3D Tiles" beside a
+      // disabled button, with the select showing something else, would be
+      // three controls telling three stories; "Unknown format" is the honest
+      // one here, and the URL tab still gives the name its real answer.
+      detected:
+        detected.kind === "geo" && detected.geoKind !== "geojson"
+          ? UNKNOWN_SOURCE
+          : detected,
+    });
   }, []);
 
   const stageFiles = useCallback((files: File[]) => {
@@ -277,7 +291,11 @@ export function AddLayerDialog({
           ))}
         </div>
         <div className="modal-body">
-          {tab === "catalog" ? (
+          {/* The catalog is mounted only while it is SHOWING: it pulls in
+              MapLibre and fetches a STAC catalog, and doing that behind the
+              other two tabs would spend a user's network on a tab they never
+              opened. The other two stay mounted (see below). */}
+          {tab === "catalog" && (
             <div
               role="tabpanel"
               id={`${tabIdPrefix}-catalog-panel`}
@@ -291,66 +309,73 @@ export function AddLayerDialog({
                   they need no detection pass. */}
               <StacBrowser onAddUrl={onAddUrl} />
             </div>
-          ) : tab === "file" ? (
-            <div
-              role="tabpanel"
-              id={`${tabIdPrefix}-file-panel`}
-              aria-labelledby={`${tabIdPrefix}-file-tab`}
-            >
-              <SourcePicker
-                variant="panel"
-                onFile={stageFile}
-                onFiles={stageFiles}
-                loading={loading}
-              />
-              {staged !== null && (
-                <div className="staged-source">
-                  <DetectionLine
-                    detected={staged.detected}
-                    options={FILE_SOURCE_OVERRIDES}
-                    subject={
-                      staged.files.length > 1
-                        ? `${staged.files.length} files`
-                        : staged.files[0]!.name
-                    }
-                    // A group is a package by construction, so there is
-                    // nothing to correct it to.
-                    changeable={staged.files.length === 1}
-                    onChange={(detected) =>
-                      setStaged((current) =>
-                        current === null ? current : { ...current, detected },
-                      )
-                    }
-                  />
-                  <button
-                    type="button"
-                    className="fcb-url-btn"
-                    onClick={addStaged}
-                    disabled={loading || staged.detected.kind === "unknown"}
-                  >
-                    {loading ? "Loading…" : "Add layer"}
-                  </button>
-                </div>
-              )}
-              {error !== null && (
-                <p className="geo-source-error" role="alert">
-                  {error}
-                </p>
-              )}
-            </div>
-          ) : (
-            <div
-              role="tabpanel"
-              id={`${tabIdPrefix}-url-panel`}
-              aria-labelledby={`${tabIdPrefix}-url-tab`}
-            >
-              <UrlSourceForm
-                variant="panel"
-                onSubmit={submitUrl}
-                loading={loading}
-              />
-            </div>
           )}
+          {/* HIDDEN, not unmounted: a URL typed on one tab and corrected by
+              hand must survive a look at the file tab, and unmounting the
+              panel throws both away. `useModalChrome` skips a hidden subtree,
+              so nothing in here can take the keyboard. */}
+          <div
+            role="tabpanel"
+            id={`${tabIdPrefix}-file-panel`}
+            aria-labelledby={`${tabIdPrefix}-file-tab`}
+            hidden={tab !== "file"}
+          >
+            <SourcePicker
+              variant="panel"
+              onFile={stageFile}
+              onFiles={stageFiles}
+              loading={loading}
+            />
+            {staged !== null && (
+              <div className="staged-source">
+                <DetectionLine
+                  detected={staged.detected}
+                  options={FILE_SOURCE_OVERRIDES}
+                  subject={
+                    staged.files.length > 1
+                      ? `${staged.files.length} files`
+                      : staged.files[0]!.name
+                  }
+                  // A group is a package by construction, so there is
+                  // nothing to correct it to.
+                  changeable={staged.files.length === 1}
+                  onChange={(detected) => {
+                    // The refusal on screen was about the LAST choice; this
+                    // is a new one.
+                    setError(null);
+                    setStaged((current) =>
+                      current === null ? current : { ...current, detected },
+                    );
+                  }}
+                />
+                <button
+                  type="button"
+                  className="fcb-url-btn"
+                  onClick={addStaged}
+                  disabled={loading || staged.detected.kind === "unknown"}
+                >
+                  {loading ? "Loading…" : "Add layer"}
+                </button>
+              </div>
+            )}
+            {error !== null && (
+              <p className="geo-source-error" role="alert">
+                {error}
+              </p>
+            )}
+          </div>
+          <div
+            role="tabpanel"
+            id={`${tabIdPrefix}-url-panel`}
+            aria-labelledby={`${tabIdPrefix}-url-tab`}
+            hidden={tab !== "url"}
+          >
+            <UrlSourceForm
+              variant="panel"
+              onSubmit={submitUrl}
+              loading={loading}
+            />
+          </div>
         </div>
       </div>
     </div>,

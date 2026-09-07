@@ -24,6 +24,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 
 const CATALOG_URL = "https://catalog.test/tile.city.json";
@@ -99,10 +100,21 @@ function openUrlTab(handlers: Handlers = {}): HTMLElement {
   return dialog;
 }
 
+/**
+ * The tab panel on screen.
+ *
+ * The File and URL panels are both MOUNTED (the inactive one `hidden`), so a
+ * URL typed on one tab survives a look at another — which means a query by
+ * label or test id can match a control in the panel that is not showing.
+ * Role queries already ignore a hidden subtree; these are scoped by hand.
+ */
+const panel = (): HTMLElement =>
+  document.querySelector<HTMLElement>('[role="tabpanel"]:not([hidden])')!;
+
 /** A drop event carrying files, the way a browser delivers one. jsdom has no
  *  real `DataTransfer`, so the shape the handler reads is supplied directly. */
 function drop(...files: File[]): void {
-  fireEvent.drop(screen.getByTestId("source-picker-drop-zone"), {
+  fireEvent.drop(within(panel()).getByTestId("source-picker-drop-zone"), {
     dataTransfer: { files, types: ["Files"], dropEffect: "" },
   });
 }
@@ -110,18 +122,25 @@ function drop(...files: File[]): void {
 /** Type a URL and ask for it to be classified, the way a user leaving the
  *  field does. */
 function typeUrl(url: string): void {
-  const field = screen.getByLabelText("Source URL");
+  const field = urlField();
   fireEvent.change(field, { target: { value: url } });
   fireEvent.blur(field);
 }
 
+const urlField = () =>
+  within(panel()).getByLabelText("Source URL") as HTMLInputElement;
+
 const addLayerButton = () =>
   screen.getByRole("button", { name: "Add layer" }) as HTMLButtonElement;
 
-const detectionLine = () => screen.getByTestId("detected-source").textContent;
+/** JUST the format name. The line's own `textContent` would include every
+ *  option of the correction select, which makes "contains CityJSON" true of
+ *  almost any state. */
+const detectionLine = () =>
+  within(panel()).getByTestId("detected-format").textContent;
 
 const changeSelect = () =>
-  screen.getByLabelText("Change…") as HTMLSelectElement;
+  within(panel()).getByLabelText("Change…") as HTMLSelectElement;
 
 function geoFile(name: string, body: unknown): File {
   return new File([JSON.stringify(body)], name, { type: "application/json" });
@@ -291,6 +310,43 @@ describe("AddLayerDialog — the File tab", () => {
     expect(options).toContain("geo:geojson");
     expect(options).not.toContain("geo:raster-xyz");
     expect(options).not.toContain("geo:3d-tiles");
+  });
+
+  it("will not pretend a dropped tileset.json is a 3D Tiles layer", () => {
+    openDialog();
+
+    // The name says 3D Tiles, but a tileset is a URL the engine walks, not a
+    // file it reads. Saying "3D Tiles" here and then refusing to add it would
+    // be the line and the button disagreeing, so the honest answer is that we
+    // do not know what this FILE is.
+    drop(new File(["{}"], "tileset.json"));
+
+    expect(detectionLine()).toContain("Unknown format");
+    expect(changeSelect().value).toBe("unknown");
+    expect(addLayerButton().disabled).toBe(true);
+
+    fireEvent.change(changeSelect(), { target: { value: "city:cityjson" } });
+    expect(addLayerButton().disabled).toBe(false);
+  });
+
+  it("clears a refusal when the user corrects the format again", async () => {
+    openDialog();
+
+    drop(
+      geoFile("delft.city.json", {
+        type: "CityJSON",
+        version: "2.0",
+        CityObjects: {},
+      }),
+    );
+    fireEvent.change(changeSelect(), { target: { value: "geo:geojson" } });
+    fireEvent.click(addLayerButton());
+    await waitFor(() => expect(screen.getByText(/not GeoJSON/i)).toBeTruthy());
+
+    // The complaint was about the LAST attempt. Correcting the format is the
+    // answer to it, so it must not sit under the new choice.
+    fireEvent.change(changeSelect(), { target: { value: "city:cityjson" } });
+    expect(screen.queryByText(/not GeoJSON/i)).toBeNull();
   });
 
   it("disables browsing while a load is in flight", () => {
@@ -463,6 +519,59 @@ describe("AddLayerDialog — the URL tab", () => {
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
+  it("adds a .geojson URL to the geo store, never to the city loader", () => {
+    const onAddUrl = vi.fn(async () => ({ ok: true }) as const);
+    openUrlTab({ onAddUrl });
+
+    typeUrl("https://example.com/parcels.geojson");
+    expect(detectionLine()).toContain("GeoJSON");
+    fireEvent.click(addLayerButton());
+
+    expect(geoLayers()).toHaveLength(1);
+    expect(geoLayers()[0]).toMatchObject({
+      kind: "geojson",
+      config: { url: "https://example.com/parcels.geojson" },
+    });
+    expect(onAddUrl).not.toHaveBeenCalled();
+  });
+
+  it("keeps the typed URL and its correction across a look at another tab", () => {
+    openUrlTab();
+
+    typeUrl("https://example.com/model.json");
+    fireEvent.change(changeSelect(), { target: { value: "city:flatcitybuf" } });
+
+    fireEvent.click(screen.getByRole("tab", { name: "File" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Catalog" }));
+    fireEvent.click(screen.getByRole("tab", { name: "URL" }));
+
+    // Retyping a URL because you glanced at another tab is the kind of small
+    // loss that makes a dialog feel hostile.
+    expect(urlField().value).toBe("https://example.com/model.json");
+    expect(detectionLine()).toContain("FlatCityBuf");
+  });
+
+  it("ignores Detect while a correction stands, and re-arms on an edit", () => {
+    const onAddUrl = vi.fn(async () => ({ ok: true }) as const);
+    openUrlTab({ onAddUrl });
+
+    typeUrl("https://example.com/features.txt");
+    fireEvent.change(changeSelect(), { target: { value: "geo:geojson" } });
+
+    // Enter, on a URL the user has already corrected: re-classifying it would
+    // throw the correction away for the second time in one field.
+    fireEvent.submit(within(panel()).getByTestId("url-source-form"));
+    expect(detectionLine()).toContain("GeoJSON");
+    expect(geoLayers()).toHaveLength(0);
+
+    // A DIFFERENT URL is a different question.
+    fireEvent.change(urlField(), {
+      target: { value: "https://example.com/features.txt2" },
+    });
+    fireEvent.submit(within(panel()).getByTestId("url-source-form"));
+    expect(detectionLine()).toContain("Unknown format");
+  });
+
   it("cannot add before anything has been detected", () => {
     openUrlTab();
 
@@ -497,6 +606,19 @@ describe("AddLayerDialog — modal chrome", () => {
     fireEvent.click(screen.getByRole("button", { name: "+ Add layer" }));
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("never hands Tab to a control in the tab panel that is hidden", () => {
+    const dialog = openDialog();
+    // Shift+Tab from the dialog itself wraps to the LAST focusable control,
+    // which must be one the user can see — the URL panel is mounted behind
+    // this one so its field survives a tab switch, and a focus trap that
+    // counted it would strand the keyboard on an invisible input.
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+
+    const active = document.activeElement as HTMLElement;
+    expect(dialog.contains(active)).toBe(true);
+    expect(active.closest("[hidden]")).toBeNull();
   });
 
   it("locks the page behind it from scrolling while open", () => {

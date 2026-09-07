@@ -95,7 +95,14 @@ const TILES_3D: DetectedSource = {
   geoKind: "3d-tiles",
   label: "3D Tiles",
 };
-const UNKNOWN: DetectedSource = { kind: "unknown", label: "Unknown format" };
+/** The "I cannot tell" answer, exported because a caller sometimes has to
+ *  DEMOTE a detection to it: the Add Layer dialog's File tab does, for the two
+ *  geospatial kinds that only a URL can be. */
+export const UNKNOWN_SOURCE: DetectedSource = {
+  kind: "unknown",
+  label: "Unknown format",
+};
+const UNKNOWN = UNKNOWN_SOURCE;
 
 /**
  * The correction select's options.

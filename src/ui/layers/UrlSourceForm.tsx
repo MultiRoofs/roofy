@@ -57,11 +57,20 @@ export function UrlSourceForm({
   const urlFieldId = useId();
   const nameFieldId = useId();
 
+  /**
+   * Classify what is in the field — unless an answer already stands.
+   *
+   * The guard is the whole point: `detected` is non-null only after a detect
+   * or a hand-made correction, and re-running the classifier over an unchanged
+   * URL can only ever overwrite the user's choice with the guess they just
+   * rejected. `onChange` clears the answer, so editing the URL re-arms this.
+   */
   const detect = useCallback(() => {
+    if (detected !== null) return;
     const trimmed = url.trim();
     setDetected(trimmed === "" ? null : detectSourceFromName(trimmed));
     setError(null);
-  }, [url]);
+  }, [detected, url]);
 
   const handleAdd = useCallback(() => {
     const trimmed = url.trim();
@@ -100,19 +109,17 @@ export function UrlSourceForm({
             setDetected(null);
             setError(null);
           }}
-          // Only when there is no answer yet. `onChange` clears the answer,
-          // so an EDITED URL still re-detects on the way out — but simply
-          // clicking back into an untouched field must not overwrite a format
-          // the user corrected by hand. Detect and Enter stay the explicit
-          // "classify this again".
-          onBlur={() => {
-            if (detected === null) detect();
-          }}
+          // `detect` is a no-op while an answer stands, so clicking back into
+          // an untouched field cannot overwrite a hand-picked format.
+          onBlur={detect}
         />
+        {/* Disabled once an answer stands, rather than quietly doing nothing:
+            the answer is on screen, and the way to ask again is to change the
+            URL. */}
         <button
           type="submit"
           className="fcb-url-btn is-secondary"
-          disabled={loading || !url.trim()}
+          disabled={loading || !url.trim() || detected !== null}
         >
           Detect
         </button>

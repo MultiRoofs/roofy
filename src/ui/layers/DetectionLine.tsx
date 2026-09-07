@@ -64,6 +64,7 @@ export function DetectionLine({
         <p className="detected-format">
           <span className="detected-label">Detected:</span>{" "}
           <strong
+            data-testid="detected-format"
             className={
               detected.kind === "unknown"
                 ? "detected-name is-unknown"
