@@ -1,20 +1,24 @@
 /**
- * The rule editor: create and manage one layer's colorization rules.
+ * The `Rules` branch of the active layer's Style section: the presets, the
+ * rule list, the unmatched colour and the rule form for ONE layer.
  *
- * Rules are stored in the layer store; `handleSync` compiles them
- * (`compileRuleEvaluator`) and pushes the result into
- * `CityModelHandle.setStyle`.
+ * Rules are stored in the layer store; `handleSync` compiles the effective
+ * list (`effectiveRules` + `effectiveRulesEnabled`, `features/rules/colorBy.ts`)
+ * and pushes the result into `CityModelHandle.setStyle` or, for a streaming
+ * layer, into the worker through `setRules`.
  *
  * It lives under `ui/layers/` because a rule is a LAYER's styling, not a
  * property of the current selection — this was the inspector's "Rules" tab
- * (`RuleBuilderTab`), five tabs away from the layer it edits, and it is now
- * the body of the active layer's Style section. Same content, no tab chrome.
+ * (`RuleBuilderTab`), five tabs away from the layer it edits. It carries no
+ * heading and no On/Off switch of its own any more: `StyleSection` above it
+ * names the layer on the affected-unit line and owns the mode through
+ * `Color by` (R10). Two controls for "do rules paint?" is how the map and the
+ * panel come to disagree.
  *
  * Rules are per-layer, so the editor always edits exactly one layer — the
- * workspace's active one — and says which, in its heading. It used to carry a
- * target-layer `<select>` of its own, which let it point at a DIFFERENT layer
- * from the one the rest of the UI was describing; the layer list is now the
- * only place a layer is chosen.
+ * workspace's active one. It used to carry a target-layer `<select>` of its
+ * own, which let it point at a DIFFERENT layer from the one the rest of the
+ * UI was describing; the layer list is now the only place a layer is chosen.
  */
 
 import { useCallback, useRef } from "react";
@@ -31,12 +35,16 @@ import type {
   LogicMode,
   Rule,
 } from "../../features/rules/types";
+import { isSyntheticRule } from "../../features/rules/colorBy";
 import {
   useRuleDraftStore,
   type RuleFormValues,
 } from "../../features/rules/ruleDraftStore";
-import { RULE_PRESETS } from "../../features/rules/presets";
-import { NEW_RULE_COLOR_HEX } from "../../scene/cityColors";
+import { RULE_PRESETS, type RulePreset } from "../../features/rules/presets";
+import {
+  NEW_RULE_COLOR_HEX,
+  UNMATCHED_COLOR_HEX,
+} from "../../scene/cityColors";
 import { downloadText } from "../../platform/download";
 
 export interface RulesEditorProps {
@@ -44,7 +52,13 @@ export interface RulesEditorProps {
   readonly layerId: string;
 }
 
-// Metric fields always available for conditions
+/** Roof metrics, always available for a condition whatever the file carries:
+ *  `evaluateRule` resolves a condition's `field` against `RoofMetrics` FIRST
+ *  and only then against the object's attributes, so these four names are
+ *  reserved. The spec writes them as `roof.area` / `roof.inclination` /
+ *  `roof.azimuth`; the engine's own keys are what a rule must STORE, and
+ *  showing the stored key here is what keeps the row's condition text
+ *  ("inclinationDeg < 10") readable as the thing that was chosen. */
 const METRIC_FIELDS = [
   "areaSqM",
   "inclinationDeg",
@@ -52,12 +66,27 @@ const METRIC_FIELDS = [
   "elevationM",
 ] as const;
 
+/** The CityGML/CityJSON attributes worth promoting above the alphabet when
+ *  the model actually carries them — the four the spec names. A model has
+ *  dozens of keys and these are the ones a rule is usually about. */
+const NAMED_ATTRIBUTES: ReadonlyArray<string> = [
+  "measuredHeight",
+  "yearOfConstruction",
+  "roofType",
+  "function",
+];
+
 const OPERATORS: ConditionOperator[] = [">", "<", "=", ">=", "<="];
 
 export function RulesEditor({ model, layerId }: RulesEditorProps) {
   const layer = useLayerStore((s) => s.layers.find((l) => l.id === layerId));
   const rules = layer?.rules ?? [];
+  // A synthetic catch-all is DERIVED (`effectiveRules`) and never enters the
+  // store — but if one ever did, it is a rendering device, not something the
+  // user wrote, and an Edit or a Delete on it would mean nothing.
+  const visibleRules = rules.filter((r) => !isSyntheticRule(r));
   const isStreaming = layer?.isStreaming ?? false;
+  const unmatchedColor = layer?.unmatchedColor ?? UNMATCHED_COLOR_HEX;
   // Under a texture theme the images cover their faces outright (the mesh
   // whites those vertices out), so a rule colour shows only on faces that
   // have no image. Said here, where the user would otherwise wonder why a
@@ -71,6 +100,8 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
   const addRule = useLayerStore((s) => s.addRule);
   const updateRule = useLayerStore((s) => s.updateRule);
   const deleteRule = useLayerStore((s) => s.deleteRule);
+  const reorderRules = useLayerStore((s) => s.reorderRules);
+  const updateLayer = useLayerStore((s) => s.updateLayer);
 
   // The unsaved editor's state, keyed by layerId — moved out of local
   // `useState` (Task 27). Nothing about the form lives in this component, so
@@ -97,7 +128,34 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
         getResidentModel(layerId, streamVersion ?? 0),
       )
     : collectAttributeFields(model);
-  const allFields = [...METRIC_FIELDS, ...attributeFields];
+  const allFields = orderFields(attributeFields);
+
+  /**
+   * A rule the user just created has to be able to PAINT, or the control that
+   * created it did nothing visible. Adding a preset or saving a first rule
+   * while the layer is still on "surface" is therefore also the decision to
+   * colour by rules (slice ruling, T28).
+   *
+   * Only from `"surface"`, the undecided mode: a layer deliberately set to
+   * `"single"` keeps its one colour, because there the user has already said
+   * what they want and a rule they are drafting is not yet a change of mind.
+   */
+  const ensureRulesMode = useCallback(() => {
+    const current = useLayerStore
+      .getState()
+      .layers.find((l) => l.id === layerId);
+    if (current?.colorBy === "surface") {
+      updateLayer(layerId, { colorBy: "rules" });
+    }
+  }, [layerId, updateLayer]);
+
+  const applyPreset = useCallback(
+    (preset: RulePreset) => {
+      addRule(layerId, preset.create());
+      ensureRulesMode();
+    },
+    [addRule, ensureRulesMode, layerId],
+  );
 
   const handleExport = useCallback(() => {
     const currentRules =
@@ -116,6 +174,8 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
           if (!Array.isArray(imported)) return;
           for (const rule of imported) {
             if (rule.name && rule.color && Array.isArray(rule.conditions)) {
+              // A fresh id on the way in, which is also what keeps an
+              // imported rule from ever wearing the synthetic prefix.
               addRule(layerId, { ...rule, id: crypto.randomUUID() });
             }
           }
@@ -127,6 +187,27 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
       e.target.value = "";
     },
     [addRule, layerId],
+  );
+
+  /** Precedence is first-match-wins, so the ORDER of the list is a setting.
+   *  Indices are looked up in the layer's own array rather than taken from
+   *  the rendered position: the rows are a filtered view of it. */
+  const moveRule = useCallback(
+    (ruleId: string, delta: -1 | 1) => {
+      const current =
+        useLayerStore.getState().layers.find((l) => l.id === layerId)?.rules ??
+        [];
+      const shown = current.filter((r) => !isSyntheticRule(r));
+      const at = shown.findIndex((r) => r.id === ruleId);
+      const neighbour = at < 0 ? undefined : shown[at + delta];
+      if (neighbour === undefined) return;
+      reorderRules(
+        layerId,
+        current.findIndex((r) => r.id === ruleId),
+        current.findIndex((r) => r.id === neighbour.id),
+      );
+    },
+    [layerId, reorderRules],
   );
 
   const openAddForm = useCallback(() => {
@@ -160,6 +241,8 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
     (form: RuleFormValues) => {
       if (draft === null) return;
       if (draft.editingId !== null) {
+        // An EDIT is not a decision about how the layer is coloured, so the
+        // mode is left exactly as it was.
         updateRule(layerId, draft.editingId, {
           name: form.name,
           color: form.color,
@@ -175,10 +258,11 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
           conditions: [...form.conditions],
           enabled: true,
         });
+        ensureRulesMode();
       }
       clearDraft(layerId);
     },
-    [addRule, clearDraft, draft, layerId, updateRule],
+    [addRule, clearDraft, draft, ensureRulesMode, layerId, updateRule],
   );
 
   const handleFormCancel = useCallback(() => {
@@ -186,91 +270,113 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
   }, [clearDraft, layerId]);
 
   return (
-    <>
-      <div className="attr-section">
-        {textureThemeActive && (
-          <p className="rule-appearance-note" role="note">
-            Texture theme active: rule colours show only on untextured surfaces.
-            Pick "None" in the layer row's appearance dropdown to colour every
-            surface.
-          </p>
-        )}
+    <div className="rules-editor">
+      {textureThemeActive && (
+        <p className="rule-appearance-note" role="note">
+          Texture theme active: rule colours show only on untextured surfaces.
+          Pick "None" in the layer row's appearance dropdown to colour every
+          surface.
+        </p>
+      )}
 
-        <div className="rule-header">
-          {/* The layer is NAMED here rather than assumed: rules are per-layer,
-              and a tab that showed one layer's rules under a generic heading is
-              how a user comes to apply Delft's colours to Rotterdam. */}
-          <div className="attr-section-title">
-            Rules &middot; {layer?.name ?? "no layer"}
-          </div>
-        </div>
-
-        {rules.length === 0 && !showForm && (
-          <div className="rule-empty">No rules defined. Add one below.</div>
-        )}
-
-        {rules.map((rule) => (
-          <div key={rule.id}>
-            {showForm && editingId === rule.id && draft !== null ? (
-              <RuleForm
-                values={draft.form}
-                fields={allFields}
-                saveLabel="Update"
-                onChange={handleFormChange}
-                onSave={handleFormSave}
-                onCancel={handleFormCancel}
-              />
-            ) : (
-              <RuleRow
-                rule={rule}
-                onEdit={() => openEditForm(rule)}
-                onDelete={() => deleteRule(layerId, rule.id)}
-                onToggle={() =>
-                  updateRule(layerId, rule.id, { enabled: !rule.enabled })
-                }
-              />
-            )}
-          </div>
-        ))}
-
-        {showForm && editingId === null && draft !== null ? (
-          <RuleForm
-            values={draft.form}
-            fields={allFields}
-            saveLabel="Add"
-            onChange={handleFormChange}
-            onSave={handleFormSave}
-            onCancel={handleFormCancel}
-          />
-        ) : (
-          <button className="rule-add-btn" onClick={openAddForm}>
-            + Add Rule
+      {/* Presets FIRST: the readable path into rule colouring is picking one,
+          not writing a condition. */}
+      <div className="rule-presets" role="group" aria-label="Rule presets">
+        {RULE_PRESETS.map((preset) => (
+          <button
+            type="button"
+            key={preset.label}
+            className="preset-chip"
+            title={preset.description}
+            onClick={() => applyPreset(preset)}
+          >
+            <span
+              className="preset-chip-swatch"
+              style={{ backgroundColor: preset.color }}
+              aria-hidden
+            />
+            {preset.label}
           </button>
-        )}
+        ))}
       </div>
 
-      {/* Preset rules */}
-      <div className="attr-section">
-        <div className="attr-section-title">Presets</div>
-        <div className="preset-grid">
-          {RULE_PRESETS.map((preset) => (
-            <button
-              key={preset.label}
-              className="preset-btn"
-              title={preset.description}
-              onClick={() => addRule(layerId, preset.create())}
-            >
-              {preset.label}
-            </button>
+      {visibleRules.length === 0 && !showForm && (
+        <p className="rule-empty">
+          No rules yet — pick a preset above, or add one below.
+        </p>
+      )}
+
+      {visibleRules.length > 0 && (
+        <ul className="rule-list" aria-label="Rules">
+          {visibleRules.map((rule, idx) => (
+            <li className="rule-item" key={rule.id}>
+              {showForm && editingId === rule.id && draft !== null ? (
+                <RuleForm
+                  values={draft.form}
+                  fields={allFields}
+                  saveLabel="Update"
+                  onChange={handleFormChange}
+                  onSave={handleFormSave}
+                  onCancel={handleFormCancel}
+                />
+              ) : (
+                <RuleRow
+                  rule={rule}
+                  isFirst={idx === 0}
+                  isLast={idx === visibleRules.length - 1}
+                  onToggle={() =>
+                    updateRule(layerId, rule.id, { enabled: !rule.enabled })
+                  }
+                  onMoveUp={() => moveRule(rule.id, -1)}
+                  onMoveDown={() => moveRule(rule.id, 1)}
+                  onEdit={() => openEditForm(rule)}
+                  onDelete={() => deleteRule(layerId, rule.id)}
+                />
+              )}
+            </li>
           ))}
-        </div>
-      </div>
+        </ul>
+      )}
 
-      {/* Import / Export */}
-      <div className="attr-section">
-        <div className="attr-section-title">Import / Export</div>
+      {/* The two facts a rule list cannot show on its own: what wins when two
+          rules match, and what the roofs no rule reached are wearing. */}
+      <p className="rule-unmatched">
+        First matching rule wins. Unmatched roofs:
+        <input
+          type="color"
+          className="rule-unmatched-swatch"
+          aria-label="Unmatched roofs"
+          value={unmatchedColor}
+          onChange={(e) =>
+            updateLayer(layerId, { unmatchedColor: e.target.value })
+          }
+        />
+        <span className="rule-unmatched-name">{colorName(unmatchedColor)}</span>
+      </p>
+
+      {showForm && editingId === null && draft !== null ? (
+        <RuleForm
+          values={draft.form}
+          fields={allFields}
+          saveLabel="Add"
+          onChange={handleFormChange}
+          onSave={handleFormSave}
+          onCancel={handleFormCancel}
+        />
+      ) : (
+        <button type="button" className="rule-add-btn" onClick={openAddForm}>
+          + Add rule
+        </button>
+      )}
+
+      {/* Import / Export is the escape hatch, not the workflow: a native
+          disclosure keeps it one Tab and one Enter away without spending two
+          buttons of the panel's width on it at rest. */}
+      <details className="rule-more">
+        <summary className="rule-more-summary">More</summary>
         <div className="rule-io-row">
           <button
+            type="button"
             className="rule-io-btn"
             onClick={handleExport}
             disabled={rules.length === 0}
@@ -278,6 +384,7 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
             Export rules
           </button>
           <button
+            type="button"
             className="rule-io-btn"
             onClick={() => importRef.current?.click()}
           >
@@ -291,8 +398,8 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
             hidden
           />
         </div>
-      </div>
-    </>
+      </details>
+    </div>
   );
 }
 
@@ -302,41 +409,105 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
 
 function RuleRow({
   rule,
+  isFirst,
+  isLast,
   onEdit,
   onDelete,
   onToggle,
+  onMoveUp,
+  onMoveDown,
 }: {
   rule: Rule;
+  isFirst: boolean;
+  isLast: boolean;
   onEdit: () => void;
   onDelete: () => void;
   onToggle: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
 }) {
   return (
-    <div className={`rule-item ${!rule.enabled ? "rule-disabled" : ""}`}>
-      <div className="rule-swatch" style={{ background: rule.color }} />
-      <div className="rule-info">
-        <div className="rule-name">{rule.name}</div>
-        <div className="rule-summary">
-          {rule.conditions.length === 0
-            ? "All roofs"
-            : rule.conditions
-                .map((c) => `${c.field} ${c.operator} ${c.value}`)
-                .join(` ${rule.logic} `)}
-        </div>
+    <div className={`rule-body ${rule.enabled ? "" : "rule-disabled"}`}>
+      <div className="rule-head">
+        <span
+          className="rule-swatch"
+          style={{ backgroundColor: rule.color }}
+          aria-hidden
+        />
+        <span className="rule-info">
+          <span className="rule-name">{rule.name}</span>
+          <span className="rule-summary">{conditionText(rule)}</span>
+        </span>
+        {/* The rule's OWN enabled flag — "does THIS rule apply?", not "do
+            rules apply?", which is the section's `Color by`. */}
+        <input
+          type="checkbox"
+          className="rule-enabled"
+          checked={rule.enabled}
+          aria-label={`Enabled: ${rule.name}`}
+          onChange={onToggle}
+        />
       </div>
+      {/* Every accessible name STARTS with the button's own words, so the
+          visible label is a prefix of what a screen reader announces. */}
       <div className="rule-actions">
-        <button className="rule-action-btn" onClick={onToggle} title="Toggle">
-          {rule.enabled ? "on" : "off"}
+        <button
+          type="button"
+          className="rule-action-btn"
+          aria-label={`Move up: ${rule.name}`}
+          disabled={isFirst}
+          onClick={onMoveUp}
+        >
+          Move up
         </button>
-        <button className="rule-action-btn" onClick={onEdit} title="Edit">
-          edit
+        <button
+          type="button"
+          className="rule-action-btn"
+          aria-label={`Move down: ${rule.name}`}
+          disabled={isLast}
+          onClick={onMoveDown}
+        >
+          Move down
         </button>
-        <button className="rule-action-btn" onClick={onDelete} title="Delete">
-          del
+        <button
+          type="button"
+          className="rule-action-btn"
+          aria-label={`Edit: ${rule.name}`}
+          onClick={onEdit}
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          className="rule-action-btn"
+          aria-label={`Delete: ${rule.name}`}
+          onClick={onDelete}
+        >
+          Delete
         </button>
       </div>
     </div>
   );
+}
+
+/** The row's one-line condition, in the same words the form wrote it with. A
+ *  rule with no conditions matches everything — `evaluateRule` short-circuits
+ *  to true — so it is described, not left blank. */
+function conditionText(rule: Rule): string {
+  if (rule.conditions.length === 0) return "All roofs";
+  return rule.conditions
+    .map((c) => `${c.field} ${c.operator} ${c.value}`)
+    .join(` ${rule.logic} `);
+}
+
+/** The unmatched swatch's label: the palette's NAME while it is the palette's
+ *  colour, the hex once the user has picked their own. A name is what makes
+ *  the default legible ("Unassigned grey" is a fact about the design); a hex
+ *  is all that can honestly be said about an arbitrary colour. */
+function colorName(hex: string): string {
+  return hex.toLowerCase() === UNMATCHED_COLOR_HEX.toLowerCase()
+    ? "Unassigned grey"
+    : hex;
 }
 
 // ---------------------------------------------------------------------------
@@ -358,8 +529,8 @@ interface RuleFormProps {
 /**
  * Controlled by the caller's draft (`RuleDraft.form`): every keystroke calls
  * {@link RuleFormProps.onChange} rather than touching local state, which is
- * what lets the draft survive this component unmounting when the active
- * layer changes (Task 27) — there is no local state here to lose.
+ * what lets the draft survive this component being rendered for another layer
+ * and back (Task 27) — there is no local state here to leak or to lose.
  */
 function RuleForm({
   values,
@@ -405,12 +576,14 @@ function RuleForm({
         <input
           className="rule-input"
           placeholder="Rule name"
+          aria-label="Rule name"
           value={name}
           onChange={(e) => onChange({ ...values, name: e.target.value })}
         />
         <input
           type="color"
           className="rule-color-picker"
+          aria-label="Rule colour"
           value={color}
           onChange={(e) => onChange({ ...values, color: e.target.value })}
         />
@@ -420,6 +593,7 @@ function RuleForm({
         <div className="rule-form-row">
           <select
             className="rule-select"
+            aria-label="Combine conditions"
             value={logic}
             onChange={(e) =>
               onChange({ ...values, logic: e.target.value as LogicMode })
@@ -432,9 +606,15 @@ function RuleForm({
       )}
 
       {conditions.map((cond, idx) => (
-        <div key={idx} className="condition-row">
+        <div
+          key={idx}
+          className="condition-row"
+          role="group"
+          aria-label={`Condition ${idx + 1}`}
+        >
           <select
             className="rule-select"
+            aria-label="Attribute"
             value={cond.field}
             onChange={(e) => updateCondition(idx, { field: e.target.value })}
           >
@@ -446,6 +626,7 @@ function RuleForm({
           </select>
           <select
             className="rule-select rule-select-sm"
+            aria-label="Operator"
             value={cond.operator}
             onChange={(e) =>
               updateCondition(idx, {
@@ -461,6 +642,7 @@ function RuleForm({
           </select>
           <input
             className="rule-input rule-input-sm"
+            aria-label="Value"
             value={String(cond.value)}
             onChange={(e) => {
               const raw = e.target.value;
@@ -480,7 +662,9 @@ function RuleForm({
           />
           {conditions.length > 1 && (
             <button
+              type="button"
               className="rule-action-btn"
+              aria-label={`Remove condition ${idx + 1}`}
               onClick={() => removeCondition(idx)}
             >
               x
@@ -489,15 +673,19 @@ function RuleForm({
         </div>
       ))}
 
-      <button className="rule-add-condition" onClick={addCondition}>
+      <button
+        type="button"
+        className="rule-add-condition"
+        onClick={addCondition}
+      >
         + Condition
       </button>
 
       <div className="rule-form-actions">
-        <button className="rule-save-btn" onClick={handleSave}>
+        <button type="button" className="rule-save-btn" onClick={handleSave}>
           {saveLabel}
         </button>
-        <button className="rule-cancel-btn" onClick={onCancel}>
+        <button type="button" className="rule-cancel-btn" onClick={onCancel}>
           Cancel
         </button>
       </div>
@@ -505,8 +693,7 @@ function RuleForm({
   );
 }
 
-/** The "+ Add Rule" form's starting values — same defaults the old
- *  uncontrolled `RuleForm` seeded itself with when `initial` was absent. */
+/** The "+ Add rule" form's starting values. */
 function defaultRuleFormValues(): RuleFormValues {
   return {
     name: "",
@@ -529,6 +716,25 @@ function ruleFormValuesFromRule(rule: Rule): RuleFormValues {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * The condition field list, in the order a rule is usually about: the four
+ * roof metrics (always present, whatever the file carries), then the named
+ * attributes the model actually has, then everything else alphabetically.
+ *
+ * Alphabetical alone put `areaSqM` next to a CityGML `class` and buried
+ * `measuredHeight` in the middle of the file's own keys — a list of forty
+ * entries in which the four a user wants are not findable is a list nobody
+ * reads.
+ */
+function orderFields(attributeFields: ReadonlyArray<string>): string[] {
+  const metrics: ReadonlyArray<string> = METRIC_FIELDS;
+  const named = NAMED_ATTRIBUTES.filter((k) => attributeFields.includes(k));
+  const rest = attributeFields.filter(
+    (k) => !metrics.includes(k) && !named.includes(k),
+  );
+  return [...metrics, ...named, ...rest];
+}
 
 function collectAttributeFields(model: CityModel): string[] {
   const fields = new Set<string>();

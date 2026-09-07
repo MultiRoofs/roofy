@@ -6,13 +6,12 @@
  * What that means differs by kind, and the section answers in the kind's own
  * terms rather than showing a lowest-common-denominator form:
  *
- *  - a CITY layer (static or streaming) is coloured by RULES, so this is the
- *    whole {@link RulesEditor} — the thing that used to be the inspector's
- *    fifth tab, five clicks away from the layer it colours. The `model` prop
- *    is the layer's own, exactly as `InspectorPanel` passed it: the editor
- *    branches on `isStreaming` internally and reads a streaming layer's
- *    fields from the resident model, because a streaming layer's `model` is
- *    a stub (see residentModel.ts);
+ *  - a CITY layer (static or streaming) opens on ONE question, `Color by`:
+ *    the semantic surface palette, the user's rules, or one colour for the
+ *    whole layer. The select is the layer's `colorBy` and nothing else reads
+ *    or writes that mode — it replaced the rule editor's own On/Off checkbox
+ *    (R10), which was a second answer to the same question and could disagree
+ *    with this one;
  *  - a VECTOR layer has the flat per-layer style plus its opacity;
  *  - a RASTER layer has opacity and nothing else: its pixels arrive already
  *    drawn;
@@ -22,13 +21,38 @@
  * engine offers no handle for either (see `docs/architecture-notes.md`), and
  * a control that cannot do anything is worse than its absence.
  */
+import { useLayerStore } from "../../features/layers/layerStore";
+import { COLOR_BY_MODES, type ColorBy } from "../../features/rules/colorBy";
+import { SINGLE_COLOR_HEX } from "../../scene/cityColors";
 import type { ActiveLayer } from "../../features/workspace/activeLayer";
 import { RulesEditor } from "./RulesEditor";
+import { SurfaceTypePalette } from "./SurfaceTypePalette";
 import { GeoOpacityControl, GeoVectorStyleFields } from "./GeoStyleControls";
+
+/** The select's options, in the order a user meets them: the default first,
+ *  then the powerful one, then the blunt one. */
+const MODE_LABELS: Readonly<Record<ColorBy, string>> = {
+  surface: "Surface type",
+  rules: "Rules",
+  single: "Single colour",
+};
+
+/**
+ * The affected-unit line — "Delft · Color roof surfaces by rules".
+ *
+ * Named rather than assumed: a user with three city layers open is one click
+ * away from painting Rotterdam's roofs while reading Delft's name in the list,
+ * and this line is what makes the mistake visible before the map does.
+ */
+const MODE_PHRASES: Readonly<Record<ColorBy, string>> = {
+  surface: "Color roof surfaces by surface type",
+  rules: "Color roof surfaces by rules",
+  single: "Color roof surfaces with one colour",
+};
 
 export function StyleSection({ item }: { readonly item: ActiveLayer }) {
   if (item.kind === "city") {
-    return <RulesEditor model={item.layer.model} layerId={item.layer.id} />;
+    return <CityStyleFields layerId={item.layer.id} />;
   }
 
   const layer = item.layer;
@@ -48,6 +72,74 @@ export function StyleSection({ item }: { readonly item: ActiveLayer }) {
         <GeoOpacityControl layer={layer} />
       </div>
       {layer.kind === "geojson" && <GeoVectorStyleFields layer={layer} />}
+    </div>
+  );
+}
+
+/**
+ * Subscribed to the STORE by id rather than reading the `ActiveLayer` record
+ * it was rendered from: that record was captured by `ActiveLayerPanel` at its
+ * own render, so the moment this select writes a new mode the prop is one
+ * mode behind — and the section would show the old mode's body under the new
+ * mode's select until something else happened to re-render the panel.
+ *
+ * `RulesEditor` already reads the layer this way, for the same reason.
+ */
+function CityStyleFields({ layerId }: { readonly layerId: string }) {
+  const layer = useLayerStore((s) => s.layers.find((l) => l.id === layerId));
+  const updateLayer = useLayerStore((s) => s.updateLayer);
+  if (layer === undefined) return null;
+
+  // `?? "surface"` for a record that predates the field: the mode that paints
+  // nothing is the safe reading of "we do not know", the same fail-safe
+  // `effectiveRules` applies to an unrecognised mode.
+  const colorBy: ColorBy = layer.colorBy ?? "surface";
+
+  return (
+    <div className="style-city">
+      <label className="style-field">
+        <span className="style-field-label">Color by</span>
+        <select
+          className="rule-select"
+          value={colorBy}
+          onChange={(e) =>
+            updateLayer(layerId, { colorBy: e.target.value as ColorBy })
+          }
+        >
+          {COLOR_BY_MODES.map((mode) => (
+            <option key={mode} value={mode}>
+              {MODE_LABELS[mode]}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <p className="style-affected">
+        {layer.name} &middot; {MODE_PHRASES[colorBy]}
+      </p>
+
+      {colorBy === "surface" && <SurfaceTypePalette />}
+
+      {/* The editor branches on `isStreaming` internally and reads a streaming
+          layer's attribute keys from the resident model, because a streaming
+          layer's `model` is a stub (see residentModel.ts). */}
+      {colorBy === "rules" && (
+        <RulesEditor model={layer.model} layerId={layerId} />
+      )}
+
+      {colorBy === "single" && (
+        <label className="style-field">
+          <span className="style-field-label">Single colour</span>
+          <input
+            type="color"
+            className="rule-color-picker"
+            value={layer.singleColor ?? SINGLE_COLOR_HEX}
+            onChange={(e) =>
+              updateLayer(layerId, { singleColor: e.target.value })
+            }
+          />
+        </label>
+      )}
     </div>
   );
 }

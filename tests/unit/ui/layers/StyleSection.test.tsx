@@ -22,6 +22,17 @@ import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 import type { ActiveLayer } from "../../../../src/features/workspace/activeLayer";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
+import {
+  SINGLE_COLOR_HEX,
+  SURFACE_COLOR_HEX,
+  UNMATCHED_COLOR_HEX,
+} from "../../../../src/scene/cityColors";
+
+/** jsdom reports an inline `backgroundColor` back as `rgb(r, g, b)`. */
+function rgb(hex: string): string {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+}
 
 afterEach(() => {
   cleanup();
@@ -49,7 +60,10 @@ function cityLayer(overrides: Partial<Layer> = {}): Layer {
     modelRef: { type: "url", url: "https://x/a.city.json" },
     visible: true,
     rules: [],
-    rulesEnabled: true,
+    rulesEnabled: false,
+    colorBy: "surface",
+    singleColor: SINGLE_COLOR_HEX,
+    unmatchedColor: UNMATCHED_COLOR_HEX,
     selectedLod: null,
     availableLods: [],
     lodMode: "auto",
@@ -100,28 +114,149 @@ function GeoHost({ id }: { readonly id: string }) {
   return layer ? <StyleSection item={{ kind: "geo", layer }} /> : null;
 }
 
-describe("StyleSection — a city layer's style is its rules", () => {
-  it("renders the rules editor for the layer it was given", () => {
+/** The `Color by` select, by its accessible name. */
+function colorBySelect(): HTMLSelectElement {
+  return screen.getByRole("combobox", {
+    name: "Color by",
+  }) as HTMLSelectElement;
+}
+
+function readLayer(id = "L") {
+  return useLayerStore.getState().layers.find((l) => l.id === id)!;
+}
+
+describe("StyleSection — a city layer is coloured three ways", () => {
+  it("offers exactly Surface type, Rules and Single colour", () => {
+    render(<StyleSection item={city(cityLayer())} />);
+    expect([...colorBySelect().options].map((o) => o.textContent)).toEqual([
+      "Surface type",
+      "Rules",
+      "Single colour",
+    ]);
+  });
+
+  it("writes the mode the select is set to", () => {
+    render(<StyleSection item={city(cityLayer({ id: "L" }))} />);
+
+    fireEvent.change(colorBySelect(), { target: { value: "rules" } });
+    expect(readLayer().colorBy).toBe("rules");
+
+    fireEvent.change(colorBySelect(), { target: { value: "single" } });
+    expect(readLayer().colorBy).toBe("single");
+
+    fireEvent.change(colorBySelect(), { target: { value: "surface" } });
+    expect(readLayer().colorBy).toBe("surface");
+  });
+
+  it("names the affected unit in the mode's own words", () => {
+    // The section is the one place that says WHAT is being recoloured. A user
+    // who has three layers open needs the layer's name here, not just in the
+    // list above.
     render(<StyleSection item={city(cityLayer({ name: "Delft" }))} />);
-    expect(screen.getByText("Rules · Delft")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "+ Add Rule" })).toBeTruthy();
+    expect(
+      screen.getByText("Delft · Color roof surfaces by surface type"),
+    ).toBeTruthy();
+
+    fireEvent.change(colorBySelect(), { target: { value: "rules" } });
+    expect(
+      screen.getByText("Delft · Color roof surfaces by rules"),
+    ).toBeTruthy();
+
+    fireEvent.change(colorBySelect(), { target: { value: "single" } });
+    expect(
+      screen.getByText("Delft · Color roof surfaces with one colour"),
+    ).toBeTruthy();
+  });
+
+  it("follows the STORE, not the item it was handed", () => {
+    // `ActiveLayerPanel` hands down a record captured at render time; the mode
+    // this section just wrote lives in the store. Reading the prop would show
+    // the previous mode's body under the new mode's select.
+    render(<StyleSection item={city(cityLayer({ colorBy: "surface" }))} />);
+    fireEvent.change(colorBySelect(), { target: { value: "single" } });
+    expect(screen.getByLabelText("Single colour")).toBeTruthy();
+  });
+});
+
+describe("StyleSection — Surface type", () => {
+  it("shows the read-only Roof / Wall / Ground palette and no rule controls", () => {
+    render(<StyleSection item={city(cityLayer({ colorBy: "surface" }))} />);
+
+    const rows = screen.getAllByRole("listitem");
+    expect(rows.map((r) => r.textContent)).toEqual(["Roof", "Wall", "Ground"]);
+    expect(
+      rows.map(
+        (r) =>
+          (r.querySelector(".surface-palette-swatch") as HTMLElement).style
+            .backgroundColor,
+      ),
+    ).toEqual([
+      rgb(SURFACE_COLOR_HEX.RoofSurface),
+      rgb(SURFACE_COLOR_HEX.WallSurface),
+      rgb(SURFACE_COLOR_HEX.GroundSurface),
+    ]);
+
+    expect(screen.queryByRole("button", { name: /Flat roofs/ })).toBeNull();
+    expect(screen.queryByText("+ Add rule")).toBeNull();
+  });
+});
+
+describe("StyleSection — Single colour", () => {
+  it("offers one colour input, seeded from the layer and writing back to it", () => {
+    render(
+      <StyleSection item={city(cityLayer({ id: "L", colorBy: "single" }))} />,
+    );
+
+    const input = screen.getByLabelText("Single colour");
+    expect(input).toHaveProperty("value", SINGLE_COLOR_HEX);
+
+    fireEvent.change(input, { target: { value: "#123456" } });
+    expect(readLayer().singleColor).toBe("#123456");
+    // The mode is untouched: this is the colour of the mode, not a mode.
+    expect(readLayer().colorBy).toBe("single");
+  });
+
+  it("shows no rule list: one colour has no precedence to explain", () => {
+    render(<StyleSection item={city(cityLayer({ colorBy: "single" }))} />);
+    expect(screen.queryByText("+ Add rule")).toBeNull();
+  });
+});
+
+describe("StyleSection — Rules", () => {
+  it("renders the rule editor for the layer it was given", () => {
+    render(
+      <StyleSection
+        item={city(cityLayer({ name: "Delft", colorBy: "rules" }))}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "+ Add rule" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Flat roofs/ })).toBeTruthy();
   });
 
   it("renders the same editor for a streaming layer", () => {
     render(
       <StyleSection
-        item={city(cityLayer({ name: "Delft stream", isStreaming: true }))}
+        item={city(
+          cityLayer({
+            name: "Delft stream",
+            isStreaming: true,
+            colorBy: "rules",
+          }),
+        )}
       />,
     );
-    expect(screen.getByText("Rules · Delft stream")).toBeTruthy();
+    expect(
+      screen.getByText("Delft stream · Color roof surfaces by rules"),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "+ Add rule" })).toBeTruthy();
   });
 
   it("edits land on the active layer", () => {
-    render(<StyleSection item={city(cityLayer({ id: "L" }))} />);
-    fireEvent.click(screen.getByRole("button", { name: "Flat roofs" }));
-    expect(
-      useLayerStore.getState().layers.find((l) => l.id === "L")!.rules,
-    ).toHaveLength(1);
+    render(
+      <StyleSection item={city(cityLayer({ id: "L", colorBy: "rules" }))} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Flat roofs/ }));
+    expect(readLayer().rules).toHaveLength(1);
   });
 });
 

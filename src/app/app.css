@@ -123,7 +123,7 @@
 .view-mode-btn:focus-visible,
 .camera-ctl-btn:focus-visible,
 .legend-toggle:focus-visible,
-.preset-btn:focus-visible,
+.preset-chip:focus-visible,
 .layer-item:focus-visible,
 .layer-row:focus-visible {
   outline-offset: -2px;
@@ -2128,31 +2128,43 @@ body {
   border-radius: var(--radius-sm);
 }
 
-.rule-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
 .rule-empty {
   font-size: 0.75rem;
   color: var(--fg-muted);
   padding: 0.5rem 0;
 }
 
-.rule-item {
+.rule-list {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rule-item {
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  margin-bottom: 0.35rem;
   font-size: 0.75rem;
 }
 
-.rule-item.rule-disabled {
-  opacity: 0.5;
+/* A rule that is off still has to be readable — this is the state you switch
+   back on — so it dims to 0.6, not to the 0.5 a disabled control wears. */
+.rule-body.rule-disabled {
+  opacity: 0.6;
+}
+
+.rule-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.rule-enabled {
+  flex-shrink: 0;
+  accent-color: var(--accent);
 }
 
 .rule-swatch {
@@ -2163,8 +2175,10 @@ body {
 }
 
 .rule-info {
+  display: flex;
   flex: 1;
   min-width: 0;
+  flex-direction: column;
 }
 
 .rule-name {
@@ -2182,10 +2196,13 @@ body {
   text-overflow: ellipsis;
 }
 
+/* Under the name, wrapping: "Move up" reads as itself, where an arrow glyph
+   needs a tooltip to. */
 .rule-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.2rem;
-  flex-shrink: 0;
+  margin-top: 0.3rem;
 }
 
 .rule-action-btn {
@@ -2201,9 +2218,14 @@ body {
     color 0.15s;
 }
 
-.rule-action-btn:hover {
+.rule-action-btn:hover:not(:disabled) {
   background: var(--bg-panel-hover);
   color: var(--fg);
+}
+
+.rule-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .rule-add-btn {
@@ -2348,18 +2370,23 @@ body {
   color: var(--fg);
 }
 
-/* Preset grid */
+/* Preset chips — the readable path into rule colouring. Pills rather than a
+   grid: the labels are of very different lengths, and a grid cell wide enough
+   for "Solar suitable" leaves "Flat roofs" floating in it. */
 
-.preset-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
+.rule-presets {
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.25rem;
 }
 
-.preset-btn {
-  padding: 0.35rem 0.4rem;
+.preset-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.5rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--fg-muted);
   font-size: 0.7rem;
@@ -2368,13 +2395,20 @@ body {
     background 0.15s,
     color 0.15s,
     border-color 0.15s;
-  text-align: center;
 }
 
-.preset-btn:hover {
+.preset-chip:hover {
   background: var(--bg-panel-hover);
   color: var(--fg);
   border-color: var(--accent);
+}
+
+/* The swatch is the point of the chip: the colour this preset will paint. */
+.preset-chip-swatch {
+  width: 0.6rem;
+  height: 0.6rem;
+  flex-shrink: 0;
+  border-radius: 2px;
 }
 
 /* Rule import / export */
@@ -5784,4 +5818,124 @@ button.file-label:disabled {
   font-family: var(--font-mono);
   font-size: 0.62rem;
   line-height: 1.5;
+}
+
+/* ── STYLE, for a city layer (12.3) ───────────────────────────────────────
+   One question — `Color by` — then the body of whichever answer is chosen.
+   The select is the layer's mode and the ONLY control that writes it; the
+   rule editor below lost its own On/Off switch to it (R10).
+   ─────────────────────────────────────────────────────────────────────── */
+
+.style-city {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* Label above control, not beside it: the panel is 240 px at its narrowest
+   and a select needs all of it. */
+.style-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.style-field-label {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--fg-muted);
+}
+
+/* The affected unit — "Delft · Color roof surfaces by rules". Muted, not dim:
+   it is the sentence that says which layer is about to change colour. */
+.style-affected {
+  margin: 0;
+  font-size: 0.68rem;
+  color: var(--fg-muted);
+}
+
+/* The `Surface type` body: a legend, not a form. Read-only in v1 — these are
+   `CITY_COLORS`, the app's one palette, not a per-layer setting. */
+.surface-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.surface-palette-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.7rem;
+  color: var(--fg);
+}
+
+.surface-palette-swatch {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex-shrink: 0;
+  border-radius: 2px;
+}
+
+/* The `Rules` body. */
+.rules-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* Precedence and the unmatched colour, on one line: both are facts about the
+   list above that the list cannot show. The swatch sits INSIDE the sentence
+   so the colour is read where it is named. */
+.rule-unmatched {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0;
+  font-size: 0.68rem;
+  color: var(--fg-muted);
+}
+
+.rule-unmatched-swatch {
+  width: 1.1rem;
+  height: 1.1rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.rule-unmatched-name {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--fg);
+}
+
+/* Import / Export: reachable, not resident. A native disclosure, so it is one
+   Tab and one Enter away with no JavaScript of its own. */
+.rule-more-summary {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.rule-more-summary:hover {
+  color: var(--fg);
+}
+
+.rule-more[open] .rule-io-row {
+  margin-top: 0.35rem;
 }
