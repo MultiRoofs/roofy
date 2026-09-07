@@ -11,13 +11,13 @@
  *
  * It is a SEPARATE store from `useLayerStore` on purpose. `layerStore`'s
  * `layers` array is subscribed to WHOLE by `NavaraViewport.tsx`,
- * `InspectorPanel.tsx`, `TablePanel.tsx`, and read field-by-field by
+ * `DetailsPanel.tsx`, `TablePanel.tsx`, and read field-by-field by
  * `App.tsx` for object counts — and Zustand re-evaluates every selector on
  * every store notification to decide whether to re-render. A cell commit
  * happens far more often than a layer is added or removed (every pan/zoom
  * settle, vs. once per file load), so if committing a cell replaced the
  * `layers` array or a `Layer` object, every one of those consumers would
- * re-render — and several of them (InspectorPanel, TablePanel, App's object
+ * re-render — and several of them (DetailsPanel, TablePanel, App's object
  * counts) touch `layer.model`, which is exactly the resident-model
  * materialization this streaming design exists to avoid doing eagerly.
  * Keeping stream state here means a commit only ever changes `streams`,

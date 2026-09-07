@@ -1,13 +1,17 @@
 /**
- * Statistics tab in the inspector panel.
+ * Model and object statistics.
  *
- * Shows model-level aggregate stats when nothing is selected,
- * and per-object stats when a building is selected.
+ * UNMOUNTED since 12.3: its host (`InspectorPanel`) was deleted when the
+ * details panel replaced it. Kept, with its test, because 12.4 folds this
+ * content into the drawer's Summary view — that is where these model/object
+ * aggregates come back. Do not delete without first building that view.
  *
- * The DuckDB section summarises the DISPLAYED LAYER'S OWN table — the one
- * `layerTables` built for it — grouped by `object_type`. There is no global
- * `city_objects` table any more, so nothing DuckDB-ish renders until that
- * layer's entry in `useLayerTableStore` reaches `ready`.
+ * Shows model-level aggregate stats when nothing is selected, and per-object
+ * stats when a building is selected. The DuckDB section summarises the
+ * DISPLAYED LAYER'S OWN table — the one `layerTables` built for it — grouped
+ * by `object_type`. There is no global `city_objects` table any more, so
+ * nothing DuckDB-ish renders until that layer's entry in `useLayerTableStore`
+ * reaches `ready`.
  */
 
 import { useEffect, useMemo, useState } from "react";

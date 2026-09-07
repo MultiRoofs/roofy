@@ -21,7 +21,7 @@
  *  3. Register the `StreamState` and subscribe the store to the handle's
  *     four reports. The plugin owns the streaming state machine and only
  *     tells us what it did; the store mirrors what the UI reads (LodSelector,
- *     LayerPanel, StatusBar, InspectorPanel).
+ *     LayerPanel, StatusBar, DetailsPanel).
  *
  * The **caller must pass a `Blob`, never an `ArrayBuffer`**, for a local
  * file — the worker's `openFcb` uses `FcbReader.fromBlob` for true range
