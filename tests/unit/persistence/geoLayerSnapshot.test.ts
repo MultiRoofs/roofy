@@ -28,6 +28,20 @@ const CUSTOM_STYLE: GeoLayerStyle = {
   fillOpacity: 0.35,
 };
 
+/** A layer the user recoloured per attribute: the categories are as much a
+ *  user choice as the base colour, so they ride the same snapshot field. */
+const CATEGORIZED_STYLE: GeoLayerStyle = {
+  ...DEFAULT_GEO_LAYER_STYLE,
+  colorByAttribute: {
+    attribute: "zone",
+    categories: [
+      { value: "residential", color: "#8fd020" },
+      { value: "retail", color: "#4b8ef7" },
+      { value: null, color: "#8a93a0" },
+    ],
+  },
+};
+
 const CAMERA = {
   lng: 4.35,
   lat: 52.01,
@@ -161,6 +175,51 @@ describe("normalizeGeoLayers", () => {
     ) as unknown;
 
     expect(normalizeGeoLayers([saved])[0]?.style).toEqual(CUSTOM_STYLE);
+  });
+
+  it("round-trips a colorByAttribute without a schema bump", () => {
+    const layer: GeoLayer = {
+      id: "g1",
+      name: "parcels",
+      kind: "geojson",
+      visible: true,
+      opacity: 1,
+      style: CATEGORIZED_STYLE,
+      config: { url: "https://x/parcels.geojson" },
+    };
+
+    // The FULL path a workspace save takes: capture -> JSON -> restore.
+    const snapshot = capture([geoLayerSnapshot(layer)]);
+    const reread = JSON.parse(JSON.stringify(snapshot)) as typeof snapshot;
+
+    expect(normalizeGeoLayers(reread.geoLayers)[0]?.style).toEqual(
+      CATEGORIZED_STYLE,
+    );
+  });
+
+  it("drops a hand-edited colorByAttribute rather than a whole layer", () => {
+    const [restored] = normalizeGeoLayers([
+      {
+        name: "parcels",
+        kind: "geojson",
+        visible: true,
+        opacity: 1,
+        style: {
+          color: "#00c2ff",
+          colorByAttribute: { attribute: 5, categories: "junk" },
+        },
+        config: { url: "https://x/parcels.geojson" },
+      },
+    ]);
+
+    expect(restored).toEqual({
+      name: "parcels",
+      kind: "geojson",
+      visible: true,
+      opacity: 1,
+      style: { ...DEFAULT_GEO_LAYER_STYLE, color: "#00c2ff" },
+      config: { url: "https://x/parcels.geojson" },
+    });
   });
 
   it("defaults the style of a snapshot saved before styles existed", () => {
