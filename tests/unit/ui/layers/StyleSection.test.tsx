@@ -25,10 +25,13 @@ import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceS
 import type { ActiveLayer } from "../../../../src/features/workspace/activeLayer";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 import {
+  CATEGORY_OTHER_HEX,
+  CATEGORY_PALETTE_HEX,
   SINGLE_COLOR_HEX,
   SURFACE_COLOR_HEX,
   UNMATCHED_COLOR_HEX,
 } from "../../../../src/scene/cityColors";
+import { DEFAULT_GEO_LAYER_STYLE } from "../../../../src/features/geoLayers/geoLayerStyle";
 
 /** jsdom reports an inline `backgroundColor` back as `rgb(r, g, b)`. */
 function rgb(hex: string): string {
@@ -281,6 +284,187 @@ describe("StyleSection — a vector layer", () => {
     expect(
       useGeoLayerStore.getState().layers.find((l) => l.id === id)!.style.color,
     ).toBe("#ff00aa");
+  });
+});
+
+describe("StyleSection — a vector layer's Color by attribute", () => {
+  /** A GeoJSON layer over inline parcels: `zone` twice, one feature without
+   *  it (the missing bucket). */
+  const PARCELS = {
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        properties: { zone: "residential", name: "A" },
+        geometry: null,
+      },
+      {
+        type: "Feature",
+        properties: { zone: "retail", name: "B" },
+        geometry: null,
+      },
+      { type: "Feature", properties: { name: "C" }, geometry: null },
+    ],
+  };
+
+  function addParcels(): string {
+    return useGeoLayerStore.getState().addGeoLayer({
+      name: "parcels",
+      kind: "geojson",
+      config: { data: PARCELS },
+    });
+  }
+
+  function readStyle(id: string) {
+    return useGeoLayerStore.getState().layers.find((l) => l.id === id)!.style;
+  }
+
+  /** The attribute select — labelled `Color by attribute`, not to be confused
+   *  with the city mode's `Color by`. */
+  function attributeSelect(): HTMLSelectElement {
+    return screen.getByRole("combobox", {
+      name: "Color by attribute",
+    }) as HTMLSelectElement;
+  }
+
+  it("offers None plus the document's attribute keys", () => {
+    render(<GeoHost id={addParcels()} />);
+
+    expect([...attributeSelect().options].map((o) => o.textContent)).toEqual([
+      "None",
+      "zone",
+      "name",
+    ]);
+    expect(attributeSelect().value).toBe("");
+  });
+
+  it("says that rules are for city models, and offers no stroke colour", () => {
+    render(<GeoHost id={addParcels()} />);
+
+    expect(
+      screen.getByText("Rules are available for city models."),
+    ).toBeTruthy();
+    // Stroke colour was PROBED (T29, Navara 0.1.1): the engine's
+    // PolygonMaterial outline does not render, so there is no control.
+    expect(screen.queryByLabelText("Stroke colour")).toBeNull();
+  });
+
+  it("picking an attribute writes colorByAttribute with the computed categories", () => {
+    const id = addParcels();
+    render(<GeoHost id={id} />);
+
+    fireEvent.change(attributeSelect(), { target: { value: "zone" } });
+
+    const cba = readStyle(id).colorByAttribute;
+    expect(cba?.attribute).toBe("zone");
+    expect(cba?.categories).toEqual([
+      { value: "residential", color: CATEGORY_PALETTE_HEX[0] },
+      { value: "retail", color: CATEGORY_PALETTE_HEX[1] },
+      { value: null, color: CATEGORY_PALETTE_HEX[2] },
+    ]);
+    // The rest of the style is untouched — the store's whole-object door.
+    expect(readStyle(id).color).toBe(DEFAULT_GEO_LAYER_STYLE.color);
+  });
+
+  it("lists the categories with one colour input each, labelling the null one Missing", () => {
+    const id = addParcels();
+    render(<GeoHost id={id} />);
+    fireEvent.change(attributeSelect(), { target: { value: "zone" } });
+
+    expect(screen.getByLabelText('Colour for "residential"')).toHaveProperty(
+      "value",
+      CATEGORY_PALETTE_HEX[0],
+    );
+    expect(screen.getByLabelText('Colour for "retail"')).toHaveProperty(
+      "value",
+      CATEGORY_PALETTE_HEX[1],
+    );
+    expect(screen.getByLabelText("Colour for Missing")).toHaveProperty(
+      "value",
+      CATEGORY_PALETTE_HEX[2],
+    );
+    expect(screen.getByText("Missing")).toBeTruthy();
+  });
+
+  it("editing a category swatch writes the whole categories array back", () => {
+    const id = addParcels();
+    render(<GeoHost id={id} />);
+    fireEvent.change(attributeSelect(), { target: { value: "zone" } });
+
+    fireEvent.change(screen.getByLabelText('Colour for "retail"'), {
+      target: { value: "#123456" },
+    });
+
+    expect(readStyle(id).colorByAttribute?.categories).toEqual([
+      { value: "residential", color: CATEGORY_PALETTE_HEX[0] },
+      { value: "retail", color: "#123456" },
+      { value: null, color: CATEGORY_PALETTE_HEX[2] },
+    ]);
+  });
+
+  it("picking a DIFFERENT attribute recomputes the categories from scratch", () => {
+    const id = addParcels();
+    render(<GeoHost id={id} />);
+    fireEvent.change(attributeSelect(), { target: { value: "zone" } });
+    // A swatch edit on the old attribute must not survive the switch.
+    fireEvent.change(screen.getByLabelText('Colour for "retail"'), {
+      target: { value: "#123456" },
+    });
+
+    fireEvent.change(attributeSelect(), { target: { value: "name" } });
+
+    expect(readStyle(id).colorByAttribute?.attribute).toBe("name");
+    expect(
+      readStyle(id).colorByAttribute?.categories.map((c) => c.color),
+    ).toEqual([
+      CATEGORY_PALETTE_HEX[0],
+      CATEGORY_PALETTE_HEX[1],
+      CATEGORY_PALETTE_HEX[2],
+    ]);
+  });
+
+  it("picking None clears colorByAttribute (and the field goes absent)", () => {
+    const id = addParcels();
+    render(<GeoHost id={id} />);
+    fireEvent.change(attributeSelect(), { target: { value: "zone" } });
+
+    fireEvent.change(attributeSelect(), { target: { value: "" } });
+
+    expect(readStyle(id).colorByAttribute).toBeUndefined();
+    expect("colorByAttribute" in readStyle(id)).toBe(false);
+  });
+
+  it("shows the fixed Other row only when the data overflows the palette", () => {
+    const twelve = {
+      type: "FeatureCollection",
+      features: Array.from({ length: 11 }, (_, i) => ({
+        type: "Feature",
+        properties: { zone: `zone-${i}` },
+        geometry: null,
+      })),
+    };
+    const id = useGeoLayerStore.getState().addGeoLayer({
+      name: "zoned",
+      kind: "geojson",
+      config: { data: twelve },
+    });
+    render(<GeoHost id={id} />);
+    fireEvent.change(attributeSelect(), { target: { value: "zone" } });
+
+    expect(screen.getByText("Other")).toBeTruthy();
+    expect(screen.getByLabelText("Colour for Other")).toHaveProperty(
+      "value",
+      CATEGORY_OTHER_HEX,
+    );
+    // Nine values but only eight palette colours: three overflow, one row.
+    expect(readStyle(id).colorByAttribute?.categories).toHaveLength(9);
+
+    // A small layer has no overflow — and no Other row.
+    cleanup();
+    useGeoLayerStore.setState({ layers: [] });
+    render(<GeoHost id={addParcels()} />);
+    fireEvent.change(attributeSelect(), { target: { value: "zone" } });
+    expect(screen.queryByText("Other")).toBeNull();
   });
 });
 

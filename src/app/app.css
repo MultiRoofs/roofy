@@ -3188,6 +3188,55 @@ body {
   cursor: pointer;
 }
 
+/* "Color by attribute": the select sits in the same label|control grid row as
+   the other fields; the category rows and the notes span the full width. */
+.geo-style-select {
+  max-width: 9rem;
+  padding: 0.05rem 0.2rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 0.62rem;
+}
+
+.geo-style-categories {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0.1rem 0 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.geo-style-category {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  color: var(--fg-muted);
+  font-size: 0.62rem;
+}
+
+.geo-style-category-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The "Rules are available for city models." / "Loading attributes…" lines:
+   full-width rows of the same grid, in the muted note voice. */
+.geo-style-note {
+  grid-column: 1 / -1;
+}
+
+.geo-style-color:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
 .geo-source-error {
   width: 100%;
   margin: 0;
