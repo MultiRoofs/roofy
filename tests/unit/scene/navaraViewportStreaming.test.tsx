@@ -855,15 +855,17 @@ describe("NavaraViewport streaming wiring", () => {
     );
   });
 
-  it("fits the first stream of a scene even when geo rows outlived the last one", async () => {
-    // Geo records survive a viewport that is gone: the layer panel's trash
-    // button removes only the city layer, so closing the last one unmounts the
-    // viewport (App mounts it on `hasLayers || engineBooting`) and leaves the
-    // overlays in their store. Opening a `.fcb` next remounts the scene with
-    // those rows already present — and that stream still has to be framed, or
-    // it never fetches a cell and the user sits on the default globe camera
-    // with nothing on screen (Task 6 review finding).
-    //
+  // DELETED (Task 22, M12.2): "fits the first stream of a scene even when geo
+  // rows outlived the last one". It pinned the geo term's ABSENCE from the
+  // stream predicate, on the grounds that a geo row could only ever be a
+  // leftover from a scene that had already been closed — the viewport used to
+  // unmount the moment the last CITY layer went (App mounted it on
+  // `hasLayers`), so a mounted geo-only workspace was unreachable. It is
+  // reachable now: `hasWorkspace` puts a geo-only workspace in the viewer, the
+  // user frames it, and a `.fcb` opened next must not fly away from it. The
+  // case the deleted test defended cannot arise any more, and the case it
+  // broke is the one below.
+  it("does not fit when a stream joins a geo-only workspace", async () => {
     // The engine mock here has no `addSource`, so the pair build fails and is
     // caught by `geoLayerSync` (it logs and carries on). Irrelevant to the
     // fit — what is under test is the STORE row — but the log is muted so the
@@ -881,11 +883,46 @@ describe("NavaraViewport streaming wiring", () => {
       registerStreamingLayer("S1", streamHandle);
       render(<NavaraViewport onTriangleCount={() => {}} />);
 
-      await waitFor(() => expect(flyTo).toHaveBeenCalledTimes(1));
-      expect(streamHandle.getBoundsGeodetic).toHaveBeenCalled();
+      // The stream really did register — `onCommit` is subscribed by exactly
+      // the effect under test — and the camera stayed on the view the user
+      // arranged around their overlay.
+      await waitFor(() => expect(streamHandle.onCommit).toHaveBeenCalled());
+      expect(flyTo).not.toHaveBeenCalled();
     } finally {
       consoleError.mockRestore();
     }
+  });
+
+  it("does not fit when a stream joins a static row whose handle has not registered yet", async () => {
+    // The registry-based predicate this replaced read "no live handles and no
+    // streams" as "empty workspace" — but a static layer that has not reached
+    // `liveRef` yet (its add is still in flight, or the engine refused it) is
+    // a ROW the user can already see in the layer list, and a workspace with a
+    // row in it is not empty. Here the city plugin refuses the add, so
+    // `liveRef` stays empty for good and the two predicates disagree for as
+    // long as the test runs.
+    cityPluginInstance.addCityModel.mockImplementation(() => {
+      throw new Error("no reference system");
+    });
+    useLayerStore.setState({ layers: [makeLayer({ id: "a" })] });
+    const onTriangleCount = vi.fn();
+    render(
+      <NavaraViewport
+        onTriangleCount={onTriangleCount}
+        onLayerError={() => {}}
+      />,
+    );
+    // The sync effect's own footprint: it runs to the end of every pass, past
+    // the `engineReady` gate. The static layer earned no fit (it never became
+    // a handle), which is what leaves the camera untouched below.
+    await waitFor(() => expect(onTriangleCount).toHaveBeenCalled());
+    expect(flyTo).not.toHaveBeenCalled();
+
+    const streamHandle = makeFakeStreamHandle({ triangles: 10 });
+    act(() => registerStreamingLayer("S1", streamHandle));
+
+    await waitFor(() => expect(streamHandle.onCommit).toHaveBeenCalled());
+    expect(flyTo).not.toHaveBeenCalled();
   });
 
   it("pushes the selection to a streaming handle, hidden or not", async () => {

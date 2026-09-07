@@ -2434,40 +2434,42 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       const store = useStreamStore.getState();
       const unsubscribes: Array<() => void> = [];
       const present = new Set<string>();
-      /** A streaming layer joined the registry on this pass — the streaming
-       *  half of the layer effect's "only a NEW layer earns a camera move". */
-      let added = false;
       /**
-       * Whether this SCENE had any city content before this pass — read from
-       * the two live registries, not from the row count the layer effect keeps
-       * and not from the geo store.
-       *
-       * Not the row count, because `openStreamingLayer` mints the layer ROW
-       * first and registers the handle only when the header lands: by the time
-       * this effect can see a stream, a row-based test has long said "not
-       * empty" and would drop the very fit a first `.fcb` needs most. Both
-       * registries here are still pre-add — `streams` is written in the loop
-       * below, `liveRef` by the layer effect, which is declared first, so a
-       * static layer arriving in the SAME commit is already counted and wins
-       * the single fit.
-       *
-       * Not the geo store, because geo records outlive the scene that framed
-       * them: the layer panel's trash button removes only the city layer, so
-       * closing the last one unmounts the viewport (App mounts it on
-       * `hasLayers || engineBooting`) and leaves the overlays behind. A `.fcb`
-       * opened next would come up in a brand-new scene, see those rows, and
-       * skip its fit — and an unfitted stream fetches NOTHING, so the user
-       * would sit on the default globe camera with an empty viewport. The
-       * layer effect has no such problem: its ref is 0 on a fresh mount. A
-       * mounted geo-only workspace the user has framed is unreachable today,
-       * so the geo term defended a case that cannot happen while breaking one
-       * that can. The asymmetry with the static side is deliberate for the
-       * same reason its comment gives: a static layer that is not fitted is
-       * still fully loaded and findable with "Zoom to layer"; a stream that is
-       * not fitted never loads at all.
+       * A stream registered on this pass into a workspace that holds NOTHING
+       * but that stream's own row — the streaming half of "only the first
+       * layer of an empty workspace earns a camera move".
        */
-      const workspaceWasEmpty =
-        streams.size === 0 && liveRef.current.size === 0;
+      let fitFirstStream = false;
+      /**
+       * The workspace as ROWS, which is the one authority both fit producers
+       * answer to (Task 22, M12.2). The static side has always counted rows
+       * (`previousLayerCountRef`); this side used to count the two live
+       * REGISTRIES instead, and the two disagreed in both directions:
+       *
+       *   * a static row whose add is still in flight — or one the engine
+       *     refused — never reaches `liveRef`, so a registry test called a
+       *     workspace with a visible row in it empty and flew away from it;
+       *   * a geo-only workspace was invisible to it entirely.
+       *
+       * Read imperatively rather than from the effect's `layers`/`geoLayers`
+       * closures because what matters is the workspace AT REGISTRATION: this
+       * effect is re-entered by `streamIds` when an open lands, and the stores
+       * are the freshest account of what the user is looking at by then.
+       *
+       * The stream's OWN row already exists when its handle registers
+       * (`openStreamingLayer` mints the row first and registers the handle
+       * only when the header lands), which is why the predicate is "one row,
+       * and it is mine" rather than "no rows" — a plain emptiness test would
+       * drop the very fit a first `.fcb` needs most. Any OTHER city row —
+       * registered or not — means the workspace was not empty, and so does any
+       * geo row.
+       */
+      const cityRows = useLayerStore.getState().layers;
+      const geoRows = useGeoLayerStore.getState().layers;
+      const isOnlyRow = (layerId: string): boolean =>
+        cityRows.length === 1 &&
+        cityRows[0]!.id === layerId &&
+        geoRows.length === 0;
 
       for (const layer of layers) {
         if (!layer.isStreaming) continue;
@@ -2483,7 +2485,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         )?.handle;
         if (!handle) continue;
         present.add(layer.id);
-        if (!streams.has(layer.id)) added = true;
+        if (!streams.has(layer.id) && isOnlyRow(layer.id)) {
+          fitFirstStream = true;
+        }
         streams.set(layer.id, handle);
         // Rules, LoD and visibility — the streaming replacement for
         // `syncLayers` + `syncStyles`, memoised per layer (`handleSync.ts`).
@@ -2534,11 +2538,12 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       // header extent (plugin, Task C14), so this frames the file before a
       // single cell has arrived.
       //
-      // A stream joining a workspace that already has something in it does NOT
-      // fit: the rule is about layers, not formats, and the camera the user
-      // arranged around their first model outranks the new file (Task 6,
-      // M12.1). "Zoom to layer" is how they go and look at it.
-      if (added && workspaceWasEmpty) setFitToken((t) => t + 1);
+      // A stream joining a workspace that already has something in it — a city
+      // row, registered or not, or a geospatial overlay — does NOT fit: the
+      // rule is about layers, not formats, and the camera the user arranged
+      // around what is already there outranks the new file (Task 6, M12.1;
+      // Task 22, M12.2). "Zoom to layer" is how they go and look at it.
+      if (fitFirstStream) setFitToken((t) => t + 1);
       return () => {
         for (const off of unsubscribes) off();
       };
