@@ -552,10 +552,22 @@ no compatibility shims; saved workspaces migrate to schema v4.
   rows with Retry; the old toolbar, sidebar, layer panel and geo inspector
   are deleted. The 12.5 scene sheet also gets the pending Shadow quality
   control (see the 12.5 add-on).
-- 12.3 Styling and inspection: Rules under the active layer's Style as
-  `Color by`, presets first, per-layer drafts; legend grouped by layer;
-  the right details panel with the identity trail, summary and roof metrics,
-  rule match, raw attributes, parts, geometry, multi-selection aggregates.
+- 12.3 Styling and inspection (COMPLETE, 2026-09-07): Rules under the active
+  layer's Style as `Color by` (surface type / rules / single colour) with
+  presets first, per-layer drafts, an editable unmatched colour; vector
+  layers colour by attribute (typed categorical palette, a fixed Other
+  bucket, first-eight + overflow); a legend grouped by layer whose heading
+  opens the layer's Style and that grows to presentation size when both
+  side panels are collapsed; the right details panel (identity trail,
+  summary, rule match by identity, raw attributes with search, parts,
+  geometry, multi-selection aggregates, geo feature) replacing the
+  inspector and its Analysis tab; `Layer.rulesEnabled` deleted (colorBy is
+  the one answer). EXCEPTIONS: rule-list drag handle (12.6), legend row
+  counts (12.4), GEOMETRY's Raw object (12.4), raster colormap (deferred),
+  stroke colour for vectors (the engine's polygon outline probed and does
+  not render — deferred), and a streaming SURFACE pick shows identity and
+  attributes without its roof metrics (the ring fetch is not wired; a
+  streaming BUILDING summary is complete).
 - 12.4 Linked data and filtering: Records / Summary drawer titled by the
   active layer, building-oriented rows with part expansion and Raw objects,
   column chooser, counts total · matching · selected, Show selected records

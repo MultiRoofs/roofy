@@ -214,6 +214,14 @@ active — colours overridden".
 
 ### Right panel (Selection)
 
+> **Implemented (12.3, 2026-09-07).** The details panel ships the identity
+> trail, SUMMARY, RULE MATCH, ATTRIBUTES, PARTS, GEOMETRY, the multi-selection
+> summary and the geo feature view. Recorded exceptions: stroke colour for
+> vectors (the engine's polygon outline does not render — deferred), rule-list
+> drag handle (12.6), legend counts and GEOMETRY's Raw object (12.4), and a
+> streaming SURFACE pick shows identity + attributes without its roof metrics
+> (the ring fetch is not wired; streaming BUILDING summaries are complete).
+
 Rendered only when the selection is non-empty (`display:none` otherwise;
 the map column takes the space). Header: identity trail as breadcrumbs,
 "Delft → Building …25028 → Roof surface 12", where the layer crumb activates
