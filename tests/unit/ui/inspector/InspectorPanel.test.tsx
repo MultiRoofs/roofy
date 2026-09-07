@@ -47,6 +47,10 @@ import type {
 } from "../../../../src/domain/citymodel/types";
 import type { Selection } from "../../../../src/domain/selection/types";
 import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
+import {
+  SINGLE_COLOR_HEX,
+  UNMATCHED_COLOR_HEX,
+} from "../../../../src/scene/cityColors";
 
 /** The streaming layer's plugin handle, reduced to the one method the UI
  *  reaches: the resident-model merge (which the plugin owns and memoises on
@@ -86,6 +90,11 @@ function baseLayer(overrides: Partial<Layer>): Layer {
     visible: true,
     rules: [],
     rulesEnabled: true,
+    // Defaults, like every other field of this fixture: a layer with no
+    // rules colours by surface type. A case that needs a mode sets one.
+    colorBy: "surface",
+    singleColor: SINGLE_COLOR_HEX,
+    unmatchedColor: UNMATCHED_COLOR_HEX,
     selectedLod: null,
     availableLods: [],
     lodMode: "auto",

@@ -408,6 +408,7 @@ import type { CityModel } from "../../../src/domain/citymodel/types";
 // screen (Task C17 / Global Constraints -> Vertical datum).
 import { GEOID_ATTRIBUTION } from "@cityjson/navara-core";
 import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
+import { normalizeColorBy } from "../../../src/features/rules/colorBy";
 
 /**
  * jsdom has no `ResizeObserver`, and the container-resize wiring is exactly
@@ -486,7 +487,18 @@ function makeModel(referenceSystem?: string): CityModel {
 const CRS_URI = "https://www.opengis.net/def/crs/EPSG/0/7415";
 
 function makeLayer(patch: Partial<Layer> & { id: string }): Layer {
+  // Same derivation the store applies: rules + rulesEnabled reads as "Color by
+  // rules", so every case written before the mode existed still means what it
+  // said.
+  const colorBy = normalizeColorBy({
+    colorBy: patch.colorBy,
+    singleColor: patch.singleColor,
+    unmatchedColor: patch.unmatchedColor,
+    rules: patch.rules,
+    rulesEnabled: patch.rulesEnabled ?? true,
+  });
   return {
+    ...colorBy,
     name: patch.id,
     model: makeModel(CRS_URI),
     modelRef: { type: "url", url: `https://example.test/${patch.id}` },

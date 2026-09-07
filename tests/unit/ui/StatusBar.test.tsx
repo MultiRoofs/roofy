@@ -19,6 +19,10 @@ import { useLayerStore } from "../../../src/features/layers/layerStore";
 import type { Layer } from "../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
+import {
+  SINGLE_COLOR_HEX,
+  UNMATCHED_COLOR_HEX,
+} from "../../../src/scene/cityColors";
 
 afterEach(() => {
   cleanup();
@@ -41,6 +45,11 @@ function layerWithCrs(id: string, referenceSystem?: string): Layer {
     visible: true,
     rules: [],
     rulesEnabled: true,
+    // Defaults, like every other field of this fixture: a layer with no
+    // rules colours by surface type. A case that needs a mode sets one.
+    colorBy: "surface",
+    singleColor: SINGLE_COLOR_HEX,
+    unmatchedColor: UNMATCHED_COLOR_HEX,
     selectedLod: null,
     availableLods: [],
     lodMode: "auto",

@@ -40,6 +40,7 @@ import {
   type StreamPlugin,
 } from "../streaming/streamPlugin";
 import type { Rule } from "../rules/types";
+import type { ColorBy } from "../rules/colorBy";
 
 /** Optional per-layer settings to apply instead of the usual fresh-layer
  *  defaults (rules: [], rulesEnabled: true, visible: true, lodMode: "auto")
@@ -49,6 +50,12 @@ import type { Rule } from "../rules/types";
 export interface LayerOverrides {
   readonly rules?: ReadonlyArray<Rule>;
   readonly rulesEnabled?: boolean;
+  /** A restored "Color by" choice — carried so re-selecting the file behind an
+   *  unavailable layer brings its colouring back, not just its rules. Absent
+   *  means DERIVED from the pair above (`rules/colorBy.ts`). */
+  readonly colorBy?: ColorBy;
+  readonly singleColor?: string;
+  readonly unmatchedColor?: string;
   readonly visible?: boolean;
   readonly lodMode?: "auto" | "manual";
   readonly selectedLod?: string | null;
@@ -327,6 +334,9 @@ export function useLayerFileLoader(
               modelRef: { type: "file", fileName: file.name },
               rules: overrides?.rules,
               rulesEnabled: overrides?.rulesEnabled,
+              colorBy: overrides?.colorBy,
+              singleColor: overrides?.singleColor,
+              unmatchedColor: overrides?.unmatchedColor,
               visible: overrides?.visible,
               hiddenTypes: overrides?.hiddenTypes,
               selectedAppearance: overrides?.selectedAppearance,
@@ -343,6 +353,9 @@ export function useLayerFileLoader(
               visible: overrides?.visible,
               rules: overrides?.rules,
               rulesEnabled: overrides?.rulesEnabled,
+              colorBy: overrides?.colorBy,
+              singleColor: overrides?.singleColor,
+              unmatchedColor: overrides?.unmatchedColor,
               hiddenTypes: overrides?.hiddenTypes,
               selectedAppearance: overrides?.selectedAppearance,
               // The parser produces the model and nothing else — a CityParquet
@@ -375,6 +388,9 @@ export function useLayerFileLoader(
               visible: overrides?.visible,
               rules: overrides?.rules,
               rulesEnabled: overrides?.rulesEnabled,
+              colorBy: overrides?.colorBy,
+              singleColor: overrides?.singleColor,
+              unmatchedColor: overrides?.unmatchedColor,
               hiddenTypes: overrides?.hiddenTypes,
               selectedAppearance: overrides?.selectedAppearance,
               duckdb: modelTableSource({
@@ -429,6 +445,9 @@ export function useLayerFileLoader(
             visible: overrides?.visible,
             rules: overrides?.rules,
             rulesEnabled: overrides?.rulesEnabled,
+            colorBy: overrides?.colorBy,
+            singleColor: overrides?.singleColor,
+            unmatchedColor: overrides?.unmatchedColor,
             hiddenTypes: overrides?.hiddenTypes,
             selectedAppearance: overrides?.selectedAppearance,
             duckdb: { kind: "model", model },

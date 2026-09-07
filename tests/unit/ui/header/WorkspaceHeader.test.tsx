@@ -35,6 +35,10 @@ import {
 import { useShellStore } from "../../../../src/ui/shell/shellStore";
 import { useSelectionStore } from "../../../../src/features/selection/selectionStore";
 import type { SnapshotSummary } from "../../../../src/persistence/types";
+import {
+  SINGLE_COLOR_HEX,
+  UNMATCHED_COLOR_HEX,
+} from "../../../../src/scene/cityColors";
 
 // jsdom ships no `matchMedia`, which the Preferences popover's theme store
 // reads when a preference is applied.
@@ -361,6 +365,11 @@ function loadedLayer(): Layer {
       },
     ],
     rulesEnabled: true,
+    // Defaults, like every other field of this fixture: a layer with no
+    // rules colours by surface type. A case that needs a mode sets one.
+    colorBy: "surface",
+    singleColor: SINGLE_COLOR_HEX,
+    unmatchedColor: UNMATCHED_COLOR_HEX,
     selectedLod: "2.2",
     availableLods: ["2.2"],
     lodMode: "manual",

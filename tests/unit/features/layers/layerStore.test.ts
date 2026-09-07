@@ -5,6 +5,10 @@ import {
 } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 import type { Rule } from "../../../../src/features/rules/types";
+import {
+  SINGLE_COLOR_HEX,
+  UNMATCHED_COLOR_HEX,
+} from "../../../../src/scene/cityColors";
 
 function makeModel(id = "m1"): CityModel {
   return {
@@ -221,18 +225,22 @@ describe("layerStore", () => {
       expect(layer.rules.map((r) => r.name)).toEqual(["B", "C", "A"]);
     });
 
-    it("toggles rulesEnabled for a specific layer", () => {
-      useLayerStore.getState().toggleRulesEnabled(layerId);
-      const layer = useLayerStore
-        .getState()
-        .layers.find((l) => l.id === layerId)!;
-      expect(layer.rulesEnabled).toBe(false);
+    it("toggles between colouring BY RULES and by surface type", () => {
+      // The editor's ON/OFF switch flips the MODE now — which is what it
+      // always meant — and carries the vestigial flag with it, so the two can
+      // never disagree. A fresh layer has no rules, so it starts OFF.
+      const read = () =>
+        useLayerStore.getState().layers.find((l) => l.id === layerId)!;
+      expect(read().colorBy).toBe("surface");
+      expect(read().rulesEnabled).toBe(false);
 
       useLayerStore.getState().toggleRulesEnabled(layerId);
-      const updated = useLayerStore
-        .getState()
-        .layers.find((l) => l.id === layerId)!;
-      expect(updated.rulesEnabled).toBe(true);
+      expect(read().colorBy).toBe("rules");
+      expect(read().rulesEnabled).toBe(true);
+
+      useLayerStore.getState().toggleRulesEnabled(layerId);
+      expect(read().colorBy).toBe("surface");
+      expect(read().rulesEnabled).toBe(false);
     });
 
     it("clears all rules from a specific layer", () => {
@@ -361,6 +369,62 @@ describe("layerStore", () => {
 
       const layer = useLayerStore.getState().layers.find((l) => l.id === id)!;
       expect(layer.availableObjectTypes).toEqual([]);
+    });
+  });
+
+  describe("colorBy", () => {
+    const add = (patch: Record<string, unknown> = {}) =>
+      useLayerStore.getState().addLayer({
+        name: "L",
+        model: makeModel(),
+        modelRef: { type: "file", fileName: "a.city.json" },
+        visible: true,
+        rules: [],
+        rulesEnabled: true,
+        ...patch,
+      });
+    const get = (id: string) =>
+      useLayerStore.getState().layers.find((l) => l.id === id)!;
+
+    it("opens a fresh layer on the semantic surface colours", () => {
+      const l = get(add());
+      expect(l.colorBy).toBe("surface");
+      expect(l.singleColor).toBe(SINGLE_COLOR_HEX);
+      expect(l.unmatchedColor).toBe(UNMATCHED_COLOR_HEX);
+    });
+
+    it("opens a layer that ARRIVES with rules on those rules", () => {
+      // A restore, a share link or a re-linked file hands rules in without a
+      // mode; reading that as "surface" would silently stop rendering them.
+      expect(
+        get(add({ rules: [makeRule()], rulesEnabled: true })).colorBy,
+      ).toBe("rules");
+      expect(
+        get(add({ rules: [makeRule()], rulesEnabled: false })).colorBy,
+      ).toBe("surface");
+    });
+
+    it("honours an explicit mode and validates the two colours", () => {
+      const l = get(
+        add({ colorBy: "single", singleColor: "#0a0b0c", unmatchedColor: "x" }),
+      );
+      expect(l.colorBy).toBe("single");
+      expect(l.singleColor).toBe("#0a0b0c");
+      expect(l.unmatchedColor).toBe(UNMATCHED_COLOR_HEX);
+    });
+
+    it("updateLayer sets the mode and the two colours", () => {
+      const id = add();
+      useLayerStore.getState().updateLayer(id, {
+        colorBy: "rules",
+        unmatchedColor: "#112233",
+        singleColor: "#445566",
+      });
+      expect(get(id)).toMatchObject({
+        colorBy: "rules",
+        unmatchedColor: "#112233",
+        singleColor: "#445566",
+      });
     });
   });
 });

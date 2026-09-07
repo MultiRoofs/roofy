@@ -221,6 +221,10 @@ import {
 } from "../../../src/scene/viewModePolicy";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
+import {
+  SINGLE_COLOR_HEX,
+  UNMATCHED_COLOR_HEX,
+} from "../../../src/scene/cityColors";
 
 class ResizeObserverStub {
   observe() {}
@@ -256,6 +260,11 @@ function makeLayer(id: string): Layer {
     visible: true,
     rules: [],
     rulesEnabled: true,
+    // Defaults, like every other field of this fixture: a layer with no
+    // rules colours by surface type. A case that needs a mode sets one.
+    colorBy: "surface",
+    singleColor: SINGLE_COLOR_HEX,
+    unmatchedColor: UNMATCHED_COLOR_HEX,
     selectedLod: "2.2",
     availableLods: ["2.2"],
     lodMode: "auto",

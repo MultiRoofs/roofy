@@ -33,6 +33,10 @@ import type {
 } from "@cityjson/navara-cityjson";
 import type { QueryRegion } from "@cityjson/navara-flatcitybuf";
 import type { Rule } from "../features/rules/types";
+import {
+  effectiveRules,
+  effectiveRulesEnabled,
+} from "../features/rules/colorBy";
 import type { Layer } from "../features/layers/layerStore";
 
 /** What the app remembers about a live static handle, so the next sync can
@@ -51,12 +55,15 @@ export interface LiveLayer {
    *  `addCityModel` option, so a handle built while a filter is on would
    *  otherwise draw everything. */
   visibleObjectIds?: ReadonlySet<string> | null;
-  /** The `rules` array last compiled into `handle.setStyle`, by IDENTITY —
-   *  `undefined` means "this handle has never been styled". `layerStore`
-   *  replaces the array on every rule edit, so reference equality is an exact
-   *  "did the rules change?" test and costs nothing per frame. */
+  /** The EFFECTIVE rule array last compiled into `handle.setStyle`, by
+   *  IDENTITY — `undefined` means "this handle has never been styled".
+   *  `effectiveRules` returns one memoised array per (rules identity,
+   *  rulesEnabled, colorBy, singleColor, unmatchedColor), so reference
+   *  equality is an exact "did the colouring change?" test — covering the
+   *  unmatched and single colours, which are not rule edits at all — and costs
+   *  nothing per frame. */
   styledRules?: ReadonlyArray<Rule>;
-  /** The `rulesEnabled` flag that went with {@link styledRules}. */
+  /** The `effectiveRulesEnabled` flag that went with {@link styledRules}. */
   styledRulesEnabled?: boolean;
   /** The scene theme's `ThemeStyle` last pushed, by IDENTITY —
    *  `sceneThemePolicy` hands out one frozen object per theme, so reference
@@ -189,9 +196,12 @@ export function syncLayers(
  * or the fit token, and an added layer must be styled only after its handle
  * exists. Call it right after `syncLayers`.
  *
- * Memoised on `(rules identity, rulesEnabled)`: `handle.setStyle` repaints
- * every vertex of the layer, so pushing on an unrelated store change (another
- * layer's visibility toggle, a selection) would be a full recolor per
+ * What is pushed is `effectiveRules(layer)` — the layer's "Color by" answer,
+ * which is the user's rules plus a trailing unmatched catch-all, one catch-all
+ * for a single colour, or nothing at all for the semantic palette. Memoised on
+ * that array's identity (so on all five of its inputs): `handle.setStyle`
+ * repaints every vertex of the layer, so pushing on an unrelated store change
+ * (another layer's visibility toggle, a selection) would be a full recolor per
  * keystroke.
  *
  * Two deliberate skips:
@@ -200,9 +210,11 @@ export function syncLayers(
  *   streaming handle (Shared Interface Contract -> Streaming styling). Task
  *   C13 gives them `setRules(rules, enabled)` instead;
  * - **the first push when nothing would be painted** — a layer with no rules
- *   (or `rulesEnabled: false`) leaves a freshly added handle untouched
- *   instead of calling `setStyle(null)` on a mesh that is already unstyled.
- *   The equivalent of the old `hasRules ? buildRuleColors(...) : null`.
+ *   (`colorBy: "surface"`) leaves a freshly added handle untouched instead of
+ *   calling `setStyle(null)` on a mesh that is already unstyled. The
+ *   equivalent of the old `hasRules ? buildRuleColors(...) : null`. Note the
+ *   skip is FIRST-PUSH only: switching a styled layer back to "surface" does
+ *   push `setStyle(null)`, which is what clears the rule colours off it.
  */
 export function syncStyles(
   layers: readonly Layer[],
@@ -215,18 +227,22 @@ export function syncStyles(
     // when it does, `styledRules` is undefined on the new entry and the style
     // is pushed then.
     if (!entry) continue;
-    if (
-      entry.styledRules === layer.rules &&
-      entry.styledRulesEnabled === layer.rulesEnabled
-    ) {
+    // The EFFECTIVE list, not `layer.rules`: what a layer paints is the mode's
+    // answer (`features/rules/colorBy.ts`), and the two are always read
+    // together. `effectiveRules` is memoised on all five inputs, so this stays
+    // the same cheap identity test it has always been — and it now also catches
+    // a changed unmatched or single colour, which no rule edit would.
+    const rules = effectiveRules(layer);
+    const enabled = effectiveRulesEnabled(layer);
+    if (entry.styledRules === rules && entry.styledRulesEnabled === enabled) {
       continue;
     }
 
     const neverStyled = entry.styledRules === undefined;
-    entry.styledRules = layer.rules;
-    entry.styledRulesEnabled = layer.rulesEnabled;
+    entry.styledRules = rules;
+    entry.styledRulesEnabled = enabled;
 
-    const evaluator = compileRuleEvaluator(layer.rules, layer.rulesEnabled);
+    const evaluator = compileRuleEvaluator(rules, enabled);
     if (evaluator === null && neverStyled) continue;
     entry.handle.setStyle(evaluator);
   }
@@ -364,10 +380,15 @@ export function syncStreamState(
     memos.set(layer.id, memo);
   }
 
-  if (memo.rules !== layer.rules || memo.rulesEnabled !== layer.rulesEnabled) {
-    memo.rules = layer.rules;
-    memo.rulesEnabled = layer.rulesEnabled;
-    handle.setRules(layer.rules, layer.rulesEnabled);
+  // The same effective list the static path compiles, for the same reason: a
+  // streamed cell and a resident mesh must be coloured from one answer, and the
+  // memo has to notice a colour that is not in any user rule.
+  const rules = effectiveRules(layer);
+  const rulesEnabled = effectiveRulesEnabled(layer);
+  if (memo.rules !== rules || memo.rulesEnabled !== rulesEnabled) {
+    memo.rules = rules;
+    memo.rulesEnabled = rulesEnabled;
+    handle.setRules(rules, rulesEnabled);
   }
   if (
     memo.lodMode !== layer.lodMode ||

@@ -13,6 +13,7 @@ import {
 import type { AppearanceTheme, CityModel } from "../../domain/citymodel/types";
 import type { CityModelReference } from "../../persistence/types";
 import type { Rule } from "../rules/types";
+import { normalizeColorBy, type ColorBy } from "../rules/colorBy";
 
 export interface Layer {
   readonly id: string;
@@ -21,7 +22,32 @@ export interface Layer {
   readonly modelRef: CityModelReference;
   readonly visible: boolean;
   readonly rules: ReadonlyArray<Rule>;
+  /**
+   * The pre-12.3 on/off flag.
+   *
+   * VESTIGIAL as of "Color by": {@link colorBy} decides whether rules paint,
+   * `effectiveRulesEnabled` never reads this, and a capture writes
+   * `colorBy === "rules"` rather than the stored value. It survives on the
+   * record because a document written before the mode existed carries it, and
+   * that is what `normalizeColorBy` derives the mode from on the way back in.
+   */
   readonly rulesEnabled: boolean;
+  /**
+   * What the layer's roof surfaces are coloured by: the semantic surface
+   * palette, the user's rules (with {@link unmatchedColor} under them), or one
+   * {@link singleColor} for the whole layer.
+   *
+   * All three are ONE `Rule[]` by the time a renderer sees them — see
+   * `features/rules/colorBy.ts`, which is the only thing that should ever read
+   * these three fields together.
+   */
+  readonly colorBy: ColorBy;
+  /** The colour "Color by a single colour" paints with. Kept while another
+   *  mode is active, so switching away and back does not lose the choice. */
+  readonly singleColor: string;
+  /** The colour a roof no rule matches wears in "Color by rules". Kept for the
+   *  same reason as {@link singleColor}. */
+  readonly unmatchedColor: string;
   readonly selectedLod: string | null;
   readonly availableLods: ReadonlyArray<string>;
   /** "auto": the viewport-streaming driver (Task 14) picks the LoD ladder
@@ -122,6 +148,9 @@ export interface LayerStoreActions {
       | "availableObjectTypes"
       | "appearanceThemes"
       | "selectedAppearance"
+      | "colorBy"
+      | "singleColor"
+      | "unmatchedColor"
     > & {
       /** Defaults to a fresh UUID. Supplied only by `openStreamingLayer`,
        *  where the plugin has already registered its handle under an id it
@@ -140,12 +169,27 @@ export interface LayerStoreActions {
        *  model actually carries that theme; `undefined` means "choose the
        *  load default", `null` means "plain colours, deliberately". */
       readonly selectedAppearance?: AppearanceTheme | null;
+      /**
+       * Supplied by a RESTORE or a share link. Absent means DERIVED from the
+       * `rules`/`rulesEnabled` pair beside it — a layer that arrives carrying
+       * rules opens on those rules, because that is the rendering it was saved
+       * from; a fresh layer, which arrives with none, opens on "surface".
+       * An unreadable colour falls back to the `cityColors` default.
+       */
+      readonly colorBy?: ColorBy;
+      readonly singleColor?: string;
+      readonly unmatchedColor?: string;
     },
   ) => string;
   removeLayer: (id: string) => void;
   updateLayer: (
     id: string,
-    patch: Partial<Pick<Layer, "name" | "visible">>,
+    patch: Partial<
+      Pick<
+        Layer,
+        "name" | "visible" | "colorBy" | "singleColor" | "unmatchedColor"
+      >
+    >,
   ) => void;
   removeAllLayers: () => void;
   setLayerLod: (layerId: string, lod: string | null) => void;
@@ -267,6 +311,10 @@ export const useLayerStore = create<LayerStore>((set) => ({
             appearanceThemes.some((t) => appearanceThemesEqual(t, restored))
           ? restored
           : defaultAppearanceTheme(input.model);
+    // Validated and DERIVED in one place, the same function both restore paths
+    // use — so a layer added from a snapshot, a share link or a fresh file all
+    // reach the store through one answer.
+    const colorBy = normalizeColorBy(input);
     set((state) => ({
       layers: [
         ...state.layers,
@@ -292,6 +340,11 @@ export const useLayerStore = create<LayerStore>((set) => ({
             : computeAvailableObjectTypes(input.model),
           appearanceThemes,
           selectedAppearance,
+          ...colorBy,
+          // DERIVED, so the vestigial flag can never disagree with the mode —
+          // the legend and the editor's badge still read it, and a capture
+          // writes exactly this.
+          rulesEnabled: colorBy.colorBy === "rules",
         },
       ],
     }));
@@ -305,7 +358,19 @@ export const useLayerStore = create<LayerStore>((set) => ({
 
   updateLayer: (id, patch) =>
     set((state) => ({
-      layers: state.layers.map((l) => (l.id === id ? { ...l, ...patch } : l)),
+      layers: state.layers.map((l) =>
+        l.id === id
+          ? {
+              ...l,
+              ...patch,
+              // A mode change carries the vestigial flag with it; see
+              // {@link Layer.rulesEnabled}.
+              ...(patch.colorBy === undefined
+                ? {}
+                : { rulesEnabled: patch.colorBy === "rules" }),
+            }
+          : l,
+      ),
     })),
 
   removeAllLayers: () => set({ layers: [] }),
@@ -406,11 +471,17 @@ export const useLayerStore = create<LayerStore>((set) => ({
       }),
     })),
 
+  // The editor's ON/OFF switch, which "Color by" replaces in 12.3. Until the
+  // select lands it keeps working by flipping the MODE between rules and
+  // surface — which is exactly what it always meant — rather than a flag the
+  // renderers no longer read.
   toggleRulesEnabled: (layerId) =>
     set((state) => ({
-      layers: state.layers.map((l) =>
-        l.id === layerId ? { ...l, rulesEnabled: !l.rulesEnabled } : l,
-      ),
+      layers: state.layers.map((l) => {
+        if (l.id !== layerId) return l;
+        const colorBy = l.colorBy === "rules" ? "surface" : "rules";
+        return { ...l, colorBy, rulesEnabled: colorBy === "rules" };
+      }),
     })),
 
   clearRules: (layerId) =>

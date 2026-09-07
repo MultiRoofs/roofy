@@ -28,6 +28,7 @@ import {
 } from "../../insights/layerTables";
 import type { Rule } from "../rules/types";
 import { useLayerStore } from "./layerStore";
+import type { ColorBy } from "../rules/colorBy";
 
 export interface AddCityLayerInput {
   readonly name: string;
@@ -36,6 +37,11 @@ export interface AddCityLayerInput {
   readonly visible?: boolean;
   readonly rules?: ReadonlyArray<Rule>;
   readonly rulesEnabled?: boolean;
+  /** A restored "Color by" choice. Absent means DERIVED from the pair above —
+   *  see `layerStore.addLayer` and `rules/colorBy.ts`. */
+  readonly colorBy?: ColorBy;
+  readonly singleColor?: string;
+  readonly unmatchedColor?: string;
   readonly hiddenTypes?: ReadonlyArray<string>;
   readonly selectedAppearance?: AppearanceTheme | null;
   /** What DuckDB should build this layer's table from. */
@@ -135,6 +141,9 @@ export function addCityLayer(input: AddCityLayerInput): string {
     visible: input.visible ?? true,
     rules: input.rules ?? [],
     rulesEnabled: input.rulesEnabled ?? true,
+    colorBy: input.colorBy,
+    singleColor: input.singleColor,
+    unmatchedColor: input.unmatchedColor,
     hiddenTypes: input.hiddenTypes,
     selectedAppearance: input.selectedAppearance,
   });

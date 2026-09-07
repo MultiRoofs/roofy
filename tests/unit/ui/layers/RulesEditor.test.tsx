@@ -24,6 +24,10 @@ import { CellCache } from "@cityjson/navara-flatcitybuf";
 import { buildResidentModel } from "@cityjson/navara-flatcitybuf";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
+import {
+  SINGLE_COLOR_HEX,
+  UNMATCHED_COLOR_HEX,
+} from "../../../../src/scene/cityColors";
 
 // The one download seam. Mocked rather than stubbing `URL.createObjectURL` and
 // an anchor: what this tab owes the user is "the rules, as rules.json", and
@@ -71,6 +75,11 @@ function baseLayer(overrides: Partial<Layer>): Layer {
     visible: true,
     rules: [],
     rulesEnabled: true,
+    // Defaults, like every other field of this fixture: a layer with no
+    // rules colours by surface type. A case that needs a mode sets one.
+    colorBy: "surface",
+    singleColor: SINGLE_COLOR_HEX,
+    unmatchedColor: UNMATCHED_COLOR_HEX,
     selectedLod: null,
     availableLods: [],
     lodMode: "auto",

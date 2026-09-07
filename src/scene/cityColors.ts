@@ -58,3 +58,68 @@ export const CITY_HIGHLIGHT_COLOR_HEX = resolved.highlightColor;
 
 /** Full palette, CSS hex, for the inspector's surface-type dots. */
 export const SURFACE_COLOR_HEX = resolved.surfaceColors;
+
+// ---------------------------------------------------------------------------
+// Color by — the colours the three modes need that are not rule colours
+//
+// Same collision constraint as everything above, now pinned by
+// `tests/unit/scene/cityColors.test.ts`: none of these may be byte-equal to
+// the highlight, the hover, a base surface colour, the default geospatial
+// colour, a rule preset or the new-rule default. What is left of the brand
+// after those are spoken for is what chose the four values below.
+// ---------------------------------------------------------------------------
+
+/**
+ * What a roof wears in "Color by rules" when NO rule matches it — the editable
+ * trailing catch-all's default.
+ *
+ * `--fg-muted` from the LIGHT sheet: a slate grey that says "nothing to report"
+ * in the same voice the chrome's secondary text does. Deliberately darker than
+ * `--layer-unassigned` (the `unknown` surface colour, #8b93a3): "no rule
+ * applies to this roof" and "this surface has no type" are different facts and
+ * must not arrive in the same grey.
+ */
+export const UNMATCHED_COLOR_HEX = "#5c636e";
+
+/**
+ * The default for "Color by a single colour" — the mode a user picks to tell
+ * one layer from another at a glance, so it wants a saturated brand hue rather
+ * than a neutral.
+ *
+ * `--lime-900`, the ramp's darkest rung and the only lime not already spoken
+ * for: lime-500 is the selection, lime-300 the hover, lime-700 both the "Large
+ * roofs" preset and the new-rule default.
+ */
+export const SINGLE_COLOR_HEX = "#4a7a0f";
+
+/**
+ * Eight categorical colours for "Color by attribute" (geospatial layers,
+ * T29), in the order distinct values are first seen.
+ *
+ * DERIVED from the brand rather than lifted from it: the four layer hues are
+ * each shifted off their token (which is taken by a preset or an interaction
+ * accent) and joined by four neighbours — teal, violet, rose and moss — chosen
+ * for hue separation, because a categorical scale's whole job is that two
+ * adjacent entries never read as the same category. Ordered so the first few
+ * values a small dataset uses are maximally far apart.
+ */
+export const CATEGORY_PALETTE_HEX: readonly string[] = [
+  "#8fd020", // lime, off the nature hue
+  "#4b8ef7", // blue, off the water hue
+  "#ff7a45", // orange, off the social hue
+  "#8b5cf6", // violet
+  "#ffb020", // amber, off the energy hue
+  "#17a2a2", // teal
+  "#e8467c", // rose
+  "#2f7d5c", // moss
+];
+
+/**
+ * The reserved bucket every value past the eighth falls into.
+ *
+ * `--fg-muted` from the DARK sheet — a muted grey, so "Other" reads as the
+ * absence of a category rather than as a ninth one. A literal "Other" in the
+ * data is an ordinary value and takes a palette colour like any other; only
+ * the overflow lands here.
+ */
+export const CATEGORY_OTHER_HEX = "#8a93a0";

@@ -375,7 +375,10 @@ describe("useLayerFileLoader — addLayerFromFile overrides", () => {
 
     const layer = useLayerStore.getState().layers[0]!;
     expect(layer.rules).toEqual([]);
-    expect(layer.rulesEnabled).toBe(true);
+    // A fresh layer has no rules, so it colours by surface type — and the
+    // vestigial flag is derived from that, never set independently.
+    expect(layer.colorBy).toBe("surface");
+    expect(layer.rulesEnabled).toBe(false);
     expect(layer.visible).toBe(true);
     expect(layer.lodMode).toBe("auto");
   });

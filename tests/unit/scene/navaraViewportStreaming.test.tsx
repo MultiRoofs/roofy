@@ -211,6 +211,7 @@ import type { Rule } from "../../../src/features/rules/types";
 import type { Selection } from "../../../src/domain/selection/types";
 import { useWorkspaceStore } from "../../../src/features/workspace/workspaceStore";
 import { useGeoLayerStore } from "../../../src/features/geoLayers/geoLayerStore";
+import { normalizeColorBy } from "../../../src/features/rules/colorBy";
 
 const CRS_URI = "https://www.opengis.net/def/crs/EPSG/0/7415";
 
@@ -243,7 +244,17 @@ function makeModel(): CityModel {
 }
 
 function makeLayer(patch: Partial<Layer> & { id: string }): Layer {
+  // Same derivation the store applies, so a fixture is never left with an
+  // undefined mode or an undefined catch-all colour.
+  const colorBy = normalizeColorBy({
+    colorBy: patch.colorBy,
+    singleColor: patch.singleColor,
+    unmatchedColor: patch.unmatchedColor,
+    rules: patch.rules,
+    rulesEnabled: patch.rulesEnabled ?? true,
+  });
   return {
+    ...colorBy,
     name: patch.id,
     model: makeModel(),
     modelRef: { type: "url", url: `https://example.test/${patch.id}` },
@@ -962,12 +973,25 @@ describe("NavaraViewport streaming wiring", () => {
 
     act(() => {
       useLayerStore.setState((s) => ({
-        layers: s.layers.map((l) => (l.id === "S1" ? { ...l, rules } : l)),
+        layers: s.layers.map((l) =>
+          // The MODE is what makes rules paint now; the array alone is inert.
+          l.id === "S1" ? { ...l, rules, colorBy: "rules" as const } : l,
+        ),
       }));
     });
     await waitFor(() =>
-      expect(streamHandle.setRules).toHaveBeenCalledWith(rules, true),
+      expect(streamHandle.setRules).toHaveBeenLastCalledWith(
+        expect.anything(),
+        true,
+      ),
     );
+    const calls = streamHandle.setRules.mock.calls;
+    const [pushed] = calls[calls.length - 1]! as [ReadonlyArray<Rule>, boolean];
+    // The user's rule, then the trailing unmatched catch-all — the EFFECTIVE
+    // list, still plain data, still never a compiled evaluator.
+    expect(pushed[0]).toBe(rules[0]);
+    expect(pushed).toHaveLength(2);
+    expect(pushed[1]!.color).toMatch(/^#[0-9a-f]{6}$/i);
     // An unrelated store change must not re-push: every push re-bakes every
     // resident cell in the worker.
     streamHandle.setRules.mockClear();

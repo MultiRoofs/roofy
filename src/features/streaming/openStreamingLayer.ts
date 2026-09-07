@@ -36,6 +36,12 @@ import { useLayerStore } from "../layers/layerStore";
 import type { CityModel } from "../../domain/citymodel/types";
 import type { CityModelReference } from "../../persistence/types";
 import type { Rule } from "../rules/types";
+import {
+  effectiveRules,
+  effectiveRulesEnabled,
+  normalizeColorBy,
+  type ColorBy,
+} from "../rules/colorBy";
 
 export interface OpenStreamingLayerInput {
   /** The live `FlatCityBufPlugin`, passed in rather than read from
@@ -47,6 +53,11 @@ export interface OpenStreamingLayerInput {
   readonly modelRef: CityModelReference;
   readonly rules?: ReadonlyArray<Rule>;
   readonly rulesEnabled?: boolean;
+  /** A restored "Color by" choice. Absent means DERIVED from the pair above,
+   *  the same rule `layerStore.addLayer` applies — see `rules/colorBy.ts`. */
+  readonly colorBy?: ColorBy;
+  readonly singleColor?: string;
+  readonly unmatchedColor?: string;
   readonly visible?: boolean;
   /** First-level object groups to stream without geometry, seeded into the
    *  plugin before its first commit — a restored layer's very first fetch is
@@ -65,11 +76,22 @@ export async function openStreamingLayer(
   // layer exists: `openStream` registers the handle under this id, and every
   // later lookup (`getHandle`, `remove`, a pick's `layerId`) goes through it.
   const id = crypto.randomUUID();
+  // Hoisted, not defaulted twice: the plugin seed and the store record must
+  // agree by IDENTITY, or the first `syncStreamState` would see a different
+  // array than the one the stream was opened with and re-bake every cell it
+  // had just baked.
+  const rules = input.rules ?? [];
+  const rulesEnabled = input.rulesEnabled ?? true;
+  const colorBy = normalizeColorBy({ ...input, rules, rulesEnabled });
+  const styling = { rules, rulesEnabled, ...colorBy };
   const handle = await input.plugin.openStream({
     id,
     source: input.source,
-    rules: input.rules ?? [],
-    rulesEnabled: input.rulesEnabled ?? true,
+    // The EFFECTIVE list, so the very first cell is baked exactly like every
+    // cell that arrives after it — a rule with zero conditions colours a
+    // streamed roof, which is the whole premise of "Color by".
+    rules: effectiveRules(styling),
+    rulesEnabled: effectiveRulesEnabled(styling),
     visible: input.visible ?? true,
     hiddenTypes: input.hiddenTypes ?? [],
     // Seeded before the first commit, so a restored textured layer's first
@@ -91,8 +113,12 @@ export async function openStreamingLayer(
     model,
     modelRef: input.modelRef,
     visible: input.visible ?? true,
-    rules: input.rules ?? [],
-    rulesEnabled: input.rulesEnabled ?? true,
+    // The layer keeps the USER's rules; the synthetic catch-alls live only
+    // inside `effectiveRules` and never reach the store, the editor or a
+    // snapshot.
+    rules,
+    rulesEnabled,
+    ...colorBy,
     hiddenTypes: input.hiddenTypes ?? [],
     isStreaming: true,
     // A streaming layer's model is a stub, so the store cannot pick a load

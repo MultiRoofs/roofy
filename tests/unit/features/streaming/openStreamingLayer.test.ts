@@ -19,6 +19,8 @@ import {
   openStreamingLayer,
 } from "../../../../src/features/streaming/openStreamingLayer";
 import type { StreamPlugin } from "../../../../src/features/streaming/streamPlugin";
+import { effectiveRules } from "../../../../src/features/rules/colorBy";
+import type { Rule } from "../../../../src/features/rules/types";
 import type {
   FcbStreamLayerHandle,
   Grid,
@@ -246,6 +248,45 @@ describe("openStreamingLayer", () => {
     expect(opts.rules).toEqual([]);
   });
 
+  it("seeds the plugin with the EFFECTIVE rules, so the first cell is baked like every later one", async () => {
+    const plugin = fakePlugin();
+    const rule: Rule = {
+      id: "r1",
+      name: "Flat",
+      color: "#3b82f6",
+      logic: "AND",
+      conditions: [],
+      enabled: true,
+    };
+    const layerId = await openStreamingLayer({
+      plugin,
+      source: { url: "https://x/a.fcb" },
+      name: "a.fcb",
+      modelRef: { type: "url", url: "https://x/a.fcb" },
+      rules: [rule],
+      colorBy: "rules",
+      unmatchedColor: "#010203",
+    });
+
+    const layer = useLayerStore
+      .getState()
+      .layers.find((l) => l.id === layerId)!;
+    // The LAYER keeps the user's rules only — a synthetic catch-all in the
+    // store would reach the editor, the legend and the next snapshot.
+    expect(layer.rules).toEqual([rule]);
+    expect(layer.colorBy).toBe("rules");
+    expect(layer.unmatchedColor).toBe("#010203");
+
+    const opts = plugin.openStream.mock.calls[0]![0];
+    expect(opts.rulesEnabled).toBe(true);
+    const seeded = opts.rules!;
+    expect(seeded).toEqual(effectiveRules(layer));
+    expect(seeded[seeded.length - 1]!.color).toBe("#010203");
+    // ...and the very same array the first `syncStreamState` will compare
+    // against, so opening a stream does not cost an immediate re-bake.
+    expect(opts.rules).toBe(effectiveRules(layer));
+  });
+
   it("seeds hiddenTypes into the plugin AND onto the layer, so a restored layer's very first fetch is already filtered", async () => {
     const plugin = fakePlugin();
     const layerId = await openStreamingLayer({
@@ -280,7 +321,7 @@ describe("openStreamingLayer", () => {
     ).toEqual([]);
   });
 
-  it("defaults rulesEnabled/visible to true in BOTH the layer and the plugin — the handle's own default is false, so an unseeded first fetch would bake no rule colours", async () => {
+  it("defaults visible to true, and seeds the plugin with what the layer actually paints", async () => {
     const plugin = fakePlugin();
     const layerId = await openStreamingLayer({
       plugin,
@@ -291,10 +332,15 @@ describe("openStreamingLayer", () => {
     const layer = useLayerStore
       .getState()
       .layers.find((l) => l.id === layerId)!;
-    expect(layer.rulesEnabled).toBe(true);
     expect(layer.visible).toBe(true);
+    // A fresh stream carries no rules, so it opens colouring by surface type
+    // and the seed says so. `rulesEnabled: true` with an empty array would be
+    // the same rendering said less honestly — and the memo in
+    // `syncStreamState` compares against exactly this pair.
+    expect(layer.colorBy).toBe("surface");
     const opts = plugin.openStream.mock.calls[0]![0];
-    expect(opts.rulesEnabled).toBe(true);
+    expect(opts.rulesEnabled).toBe(false);
+    expect(opts.rules).toEqual([]);
     expect(opts.visible).toBe(true);
   });
 });
