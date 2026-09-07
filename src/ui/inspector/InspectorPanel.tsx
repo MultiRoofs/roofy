@@ -3,7 +3,14 @@
  *
  * Shows details about the selected CityObject(s) or surface.
  * Supports multi-select with statistical aggregation.
- * Tabs: Object, Surfaces, Analysis, Rules, Stats.
+ * Tabs: Object, Surfaces, Analysis, Stats.
+ *
+ * Rules and layer style now live under the layer (`RulesEditor` in the layer
+ * row, `GeoLayerInspector`'s successor in Task 23) — this panel is about the
+ * SELECTION only, never the workspace's active layer's configuration. A geo
+ * feature pick has no city-object identity, so it never reaches this
+ * component at all: `App` renders `GeoFeatureDetailsTemp` for that case
+ * instead (see its own doc comment).
  *
  * There is no Solar tab: the scene clock, the seasonal presets and the sun
  * readout are all scene-wide configuration, so they live outside this panel —
@@ -33,15 +40,15 @@ import {
 } from "../../features/streaming/useResidentSurfaces";
 import { ErrorBoundary } from "../ErrorBoundary";
 import { AnalysisTab } from "./AnalysisTab";
-import { GeoLayerInspector } from "./GeoLayerInspector";
-import { RulesEditor } from "../layers/RulesEditor";
 import { StatsTab } from "./StatsTab";
+import { AttrRow } from "./attrDisplay";
+import { formatValue } from "./formatAttrValue";
 import {
   computeTotalRoofArea,
   computeVolume,
 } from "../../domain/geometry/derived";
 
-type Tab = "object" | "surfaces" | "analysis" | "rules" | "stats";
+type Tab = "object" | "surfaces" | "analysis" | "stats";
 type AggMode = "sum" | "avg" | "min" | "max";
 
 interface InspectorPanelProps {
@@ -127,11 +134,12 @@ export function InspectorPanel({ selections, onClose }: InspectorPanelProps) {
 
   const layers = useLayerStore((s) => s.layers);
 
-  // Subscribed unconditionally, alongside the other store reads, and branched
-  // on only in the returned JSX: every hook below this point must keep running
-  // in the same order whether a geo layer is active or not.
+  // Subscribed unconditionally, alongside the other store reads: this panel
+  // is never mounted for a geo-layer-active/no-city-selection state any more
+  // (App renders GeoFeatureDetailsTemp or nothing instead), but `active` is
+  // still the fallback for `displayLayer` below when a city layer is active
+  // and nothing is selected.
   const active = useActiveLayer();
-  const activeGeoLayer = active?.kind === "geo" ? active.layer : null;
 
   const selection = selections.length > 0 ? selections[0]! : null;
   const isMultiSelect = selections.length > 1;
@@ -275,119 +283,91 @@ export function InspectorPanel({ selections, onClose }: InspectorPanelProps) {
         </button>
       </div>
 
-      {/* A geo layer replaces the whole city view: it has no objects, no
-          surfaces and no rules, so there is nothing for the tab strip to tab
-          between. Only the RENDER branches — every hook above ran already. */}
-      {activeGeoLayer ? (
-        <div className="inspector-body">
-          <ErrorBoundary fallback="inline" key={activeGeoLayer.id}>
-            <GeoLayerInspector layer={activeGeoLayer} />
-          </ErrorBoundary>
-        </div>
-      ) : (
-        <>
-          <div className="inspector-tabs">
-            <button
-              className={`inspector-tab ${activeTab === "object" ? "active" : ""}`}
-              onClick={() => setActiveTab("object")}
-            >
-              Object
-            </button>
-            <button
-              className={`inspector-tab ${activeTab === "surfaces" ? "active" : ""}`}
-              onClick={() => setActiveTab("surfaces")}
-            >
-              Surfaces
-            </button>
-            <button
-              className={`inspector-tab ${activeTab === "analysis" ? "active" : ""}`}
-              onClick={() => setActiveTab("analysis")}
-            >
-              Analysis
-            </button>
-            <button
-              className={`inspector-tab ${activeTab === "rules" ? "active" : ""}`}
-              onClick={() => setActiveTab("rules")}
-            >
-              Rules
-            </button>
-            <button
-              className={`inspector-tab ${activeTab === "stats" ? "active" : ""}`}
-              onClick={() => setActiveTab("stats")}
-            >
-              Stats
-            </button>
-          </div>
-          <div className="inspector-body">
-            <ErrorBoundary fallback="inline" key={activeTab}>
-              {activeTab === "rules" ? (
-                displayLayer ? (
-                  <RulesEditor
-                    model={displayLayer.model}
-                    layerId={displayLayer.id}
-                  />
-                ) : (
-                  <div className="inspector-placeholder">No layer selected</div>
-                )
-              ) : activeTab === "stats" ? (
-                model ? (
-                  <StatsTab
-                    model={model}
-                    selection={selection}
-                    layerId={displayLayer?.id ?? null}
-                  />
-                ) : (
-                  <div className="inspector-placeholder">No layer selected</div>
-                )
-              ) : selectedObjectsData.length === 0 ? (
-                <div className="inspector-placeholder">
-                  Select an object to inspect
-                </div>
-              ) : isMultiSelect ? (
-                <MultiSelectView
-                  data={selectedObjectsData}
-                  activeTab={activeTab}
-                  surfaceBreakdown={multiSelectSurfaceBreakdown}
-                />
-              ) : activeTab === "object" ? (
-                <ObjectTab data={selectedObjectsData[0]!} />
-              ) : activeTab === "surfaces" ? (
-                isStreaming ? (
-                  <SurfacesFetchGate
-                    fetch={surfacesFetch}
-                    render={(surfaces) => (
-                      <SurfacesTab
-                        surfaces={surfaces}
-                        selectedSurfaceIndex={selectedSurfaceIndex}
-                      />
-                    )}
-                  />
-                ) : (
+      <div className="inspector-tabs">
+        <button
+          className={`inspector-tab ${activeTab === "object" ? "active" : ""}`}
+          onClick={() => setActiveTab("object")}
+        >
+          Object
+        </button>
+        <button
+          className={`inspector-tab ${activeTab === "surfaces" ? "active" : ""}`}
+          onClick={() => setActiveTab("surfaces")}
+        >
+          Surfaces
+        </button>
+        <button
+          className={`inspector-tab ${activeTab === "analysis" ? "active" : ""}`}
+          onClick={() => setActiveTab("analysis")}
+        >
+          Analysis
+        </button>
+        <button
+          className={`inspector-tab ${activeTab === "stats" ? "active" : ""}`}
+          onClick={() => setActiveTab("stats")}
+        >
+          Stats
+        </button>
+      </div>
+      <div className="inspector-body">
+        <ErrorBoundary fallback="inline" key={activeTab}>
+          {activeTab === "stats" ? (
+            model ? (
+              <StatsTab
+                model={model}
+                selection={selection}
+                layerId={displayLayer?.id ?? null}
+              />
+            ) : (
+              <div className="inspector-placeholder">No layer selected</div>
+            )
+          ) : selectedObjectsData.length === 0 ? (
+            <div className="inspector-placeholder">
+              Select an object to inspect
+            </div>
+          ) : isMultiSelect ? (
+            <MultiSelectView
+              data={selectedObjectsData}
+              activeTab={activeTab}
+              surfaceBreakdown={multiSelectSurfaceBreakdown}
+            />
+          ) : activeTab === "object" ? (
+            <ObjectTab data={selectedObjectsData[0]!} />
+          ) : activeTab === "surfaces" ? (
+            isStreaming ? (
+              <SurfacesFetchGate
+                fetch={surfacesFetch}
+                render={(surfaces) => (
                   <SurfacesTab
-                    surfaces={selectedObject!.surfaces}
+                    surfaces={surfaces}
                     selectedSurfaceIndex={selectedSurfaceIndex}
                   />
-                )
-              ) : isStreaming ? (
-                <SurfacesFetchGate
-                  fetch={surfacesFetch}
-                  render={(surfaces) => (
-                    <AnalysisTab
-                      surfaces={surfaces}
-                      selectedSurfaceIndex={selectedSurfaceIndex}
-                    />
-                  )}
-                />
-              ) : (
+                )}
+              />
+            ) : (
+              <SurfacesTab
+                surfaces={selectedObject!.surfaces}
+                selectedSurfaceIndex={selectedSurfaceIndex}
+              />
+            )
+          ) : isStreaming ? (
+            <SurfacesFetchGate
+              fetch={surfacesFetch}
+              render={(surfaces) => (
                 <AnalysisTab
-                  surfaces={selectedObject!.surfaces}
+                  surfaces={surfaces}
                   selectedSurfaceIndex={selectedSurfaceIndex}
                 />
               )}
-            </ErrorBoundary>
-          </div>
-        </>
-      )}
+            />
+          ) : (
+            <AnalysisTab
+              surfaces={selectedObject!.surfaces}
+              selectedSurfaceIndex={selectedSurfaceIndex}
+            />
+          )}
+        </ErrorBoundary>
+      </div>
     </aside>
   );
 }
@@ -655,23 +635,5 @@ function SurfacesTab({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function AttrRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="attr-row">
-      <span className="attr-key">{label}</span>
-      <span className="attr-value" title={value}>
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function formatValue(value: unknown): string {
-  if (value === null || value === undefined) return "\u2014";
-  if (typeof value === "object") return JSON.stringify(value);
-  return typeof value === "string" ? value : JSON.stringify(value);
-}
+// AttrRow / formatValue moved to ./attrDisplay so GeoFeatureDetailsTemp (and
+// GeoLayerInspector) can reuse them without importing this whole component.

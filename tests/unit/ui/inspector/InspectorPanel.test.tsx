@@ -47,7 +47,6 @@ import type {
 } from "../../../../src/domain/citymodel/types";
 import type { Selection } from "../../../../src/domain/selection/types";
 import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
-import { activateLayer } from "../../../../src/features/workspace/layerCoordination";
 
 /** The streaming layer's plugin handle, reduced to the one method the UI
  *  reaches: the resident-model merge (which the plugin owns and memoises on
@@ -187,13 +186,19 @@ describe("InspectorPanel — static layer", () => {
   // The Solar tab is gone: the scene clock, the seasonal presets and the sun
   // readout are scene-wide configuration and now live in the toolbar's solar
   // cluster. This panel is about the current selection.
-  it("offers no Solar tab", () => {
+  //
+  // The Rules tab is gone too (Task 20): rules now live under the layer
+  // (`RulesEditor` in the layer row, its own suite in
+  // tests/unit/ui/layers/RulesEditor.test.tsx) — this panel shows only what
+  // is SELECTED.
+  it("offers no Solar tab and no Rules tab", () => {
     render(<InspectorPanel selections={[]} onClose={() => {}} />);
 
     const tabs = [...document.querySelectorAll(".inspector-tab")].map(
       (b) => b.textContent,
     );
-    expect(tabs).toEqual(["Object", "Surfaces", "Analysis", "Rules", "Stats"]);
+    expect(tabs).toEqual(["Object", "Surfaces", "Analysis", "Stats"]);
+    expect(screen.queryByRole("button", { name: "Rules" })).toBeNull();
   });
 });
 
@@ -360,102 +365,33 @@ describe("InspectorPanel — streaming layer", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Geospatial layer mode — one selection across both sections, so an active
-// geo layer replaces the city tabs entirely (a geo layer has no objects,
-// surfaces or rules to tab between).
+// The layer this panel describes -- `displayLayer`'s own regression guard.
+//
+// This used to be proven through the Rules tab (now gone: Task 20 moved
+// rules under the layer). The Stats tab is gated on the same `displayLayer`
+// resolution (`model ? <StatsTab .../> : "No layer selected"`), so it is the
+// remaining witness for "no `?? layers[0]` fallback" -- the one behaviour
+// this suite still needs to pin. Rules' own target-layer naming is proven in
+// tests/unit/ui/layers/RulesEditor.test.tsx now.
+//
+// The geo layer mode describe block that used to live here (an ACTIVE geo
+// layer replacing the city tabs with `GeoLayerInspector`) is gone too:
+// `InspectorPanel` no longer imports `GeoLayerInspector` at all (Task 20).
+// That component still exists -- and is still covered by its own suite,
+// tests/unit/ui/inspector/GeoLayerInspector.test.tsx -- pending Task 23.
 // ---------------------------------------------------------------------------
 
 describe("InspectorPanel — the layer it describes", () => {
   it("describes NOTHING when no layer is active and nothing is selected", () => {
-    // It used to fall back to `layers[0]`, so the Rules tab happily edited the
-    // first layer in the list while the sidebar highlighted none of them.
+    // It used to fall back to `layers[0]`, so the Stats tab happily
+    // summarised the first layer in the list while the sidebar highlighted
+    // none of them.
     useLayerStore.setState({ layers: [baseLayer({ id: "L", name: "Delft" })] });
     useWorkspaceStore.setState({ activeLayerId: null });
 
     render(<InspectorPanel selections={[]} onClose={() => {}} />);
 
-    fireEvent.click(tabButton("Rules"));
+    fireEvent.click(tabButton("Stats"));
     expect(screen.getByText("No layer selected")).toBeTruthy();
-  });
-
-  it("names the ACTIVE layer in the Rules tab, and offers no picker", () => {
-    useLayerStore.setState({
-      layers: [
-        baseLayer({ id: "L", name: "Delft" }),
-        baseLayer({ id: "R", name: "Rotterdam" }),
-      ],
-    });
-    useWorkspaceStore.setState({ activeLayerId: "R" });
-
-    render(<InspectorPanel selections={[]} onClose={() => {}} />);
-
-    fireEvent.click(tabButton("Rules"));
-    expect(screen.getByText("Rules \u00b7 Rotterdam")).toBeTruthy();
-    expect(
-      screen.queryByRole("combobox", { name: /rules target layer/i }),
-    ).toBeNull();
-  });
-
-  it("follows the SELECTION's layer when one is selected", () => {
-    useLayerStore.setState({
-      layers: [
-        baseLayer({ id: "L", name: "Delft" }),
-        baseLayer({ id: "R", name: "Rotterdam" }),
-      ],
-    });
-    useWorkspaceStore.setState({ activeLayerId: "L" });
-
-    render(
-      <InspectorPanel
-        selections={[{ kind: "object", layerId: "R", objectId: "x" }]}
-        onClose={() => {}}
-      />,
-    );
-
-    fireEvent.click(tabButton("Rules"));
-    expect(screen.getByText("Rules \u00b7 Rotterdam")).toBeTruthy();
-  });
-});
-
-describe("InspectorPanel — geo layer mode", () => {
-  it("shows the geo layer view instead of the city tabs while a geo layer is active", () => {
-    const id = useGeoLayerStore.getState().addGeoLayer({
-      name: "roads",
-      kind: "geojson",
-      config: { url: "https://x/roads.geojson" },
-    });
-    activateLayer(id);
-
-    render(<InspectorPanel selections={[]} onClose={() => {}} />);
-
-    expect(screen.getByText("roads")).toBeTruthy();
-    expect(screen.getByLabelText("Layer color")).toBeTruthy();
-    // The city tab strip is not offered for a geo layer.
-    expect(screen.queryByRole("button", { name: "Rules" })).toBeNull();
-  });
-
-  it("returns to the city view when the geo selection clears", () => {
-    const id = useGeoLayerStore.getState().addGeoLayer({
-      name: "roads",
-      kind: "geojson",
-      config: { url: "https://x/roads.geojson" },
-    });
-    activateLayer(id);
-    render(<InspectorPanel selections={[]} onClose={() => {}} />);
-
-    act(() => {
-      activateLayer(null);
-    });
-
-    expect(screen.queryByLabelText("Layer color")).toBeNull();
-    expect(screen.getByRole("button", { name: "Rules" })).toBeTruthy();
-  });
-
-  it("ignores a stale active id that no longer names a layer", () => {
-    activateLayer("gone");
-
-    render(<InspectorPanel selections={[]} onClose={() => {}} />);
-
-    expect(screen.getByRole("button", { name: "Rules" })).toBeTruthy();
   });
 });

@@ -14,6 +14,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
 } from "@testing-library/react";
 import { forwardRef, useImperativeHandle } from "react";
 import type { CitySceneHandle } from "../../../src/scene/NavaraViewport";
@@ -116,7 +117,9 @@ function renderViewer() {
 
 /** A picked feature of a real geo layer: `App` drops a geo selection whose
  *  layer is gone, so the layer has to exist. */
-function selectGeoFeature(): void {
+function selectGeoFeature(
+  properties: Readonly<Record<string, unknown>> = {},
+): void {
   const geoLayerId = useGeoLayerStore.getState().addGeoLayer({
     name: "roads",
     kind: "geojson",
@@ -125,7 +128,7 @@ function selectGeoFeature(): void {
   act(() => {
     useSelectionStore
       .getState()
-      .selectGeoFeature({ geoLayerId, batchId: 7, properties: {} });
+      .selectGeoFeature({ geoLayerId, batchId: 7, properties });
   });
 }
 
@@ -204,18 +207,44 @@ describe("App viewer shell", () => {
     expect(shell().querySelector(".inspector")).not.toBeNull();
   });
 
-  it("keeps the selection when the details panel is closed, and offers it back", () => {
+  // A geo feature pick has no city-object identity (`GeoFeatureSelection` is
+  // deliberately outside the `Selection` union — see its doc comment), so it
+  // never reaches `InspectorPanel`. `App` renders `GeoFeatureDetailsTemp`
+  // instead — the layer's name plus the feature's own properties, the old
+  // `GeoAttributes` list from the deleted viewport overlay, minimal until
+  // Task 12.3.
+  it("shows the picked geo feature's layer name and properties", () => {
+    const shell = renderViewer();
+
+    selectGeoFeature({ highway: "residential", lanes: 2 });
+
+    const right = shell().querySelector(".shell-right") as HTMLElement;
+    expect(right).not.toBeNull();
+    expect(within(right).getByText("roads")).toBeTruthy();
+    expect(within(right).getByText("highway")).toBeTruthy();
+    expect(within(right).getByText("residential")).toBeTruthy();
+    expect(within(right).getByText("lanes")).toBeTruthy();
+    expect(within(right).getByText("2")).toBeTruthy();
+    // No city tabs for a geo feature: there is nothing for them to tab
+    // between.
+    expect(within(right).queryByRole("button", { name: "Object" })).toBeNull();
+  });
+
+  // The close button is NOT the same affordance as the header's collapse
+  // chevron (WorkspaceHeader.test.tsx covers that one): closing the panel
+  // from its own "×" clears the selection outright, same as Escape
+  // (`useEscapeClearsSelection`) — Task 20 reverses the T14 "collapse only"
+  // behaviour on purpose, so there is no pill to bring the panel back.
+  it("clears the selection when the details panel's own close button is used", () => {
     const shell = renderViewer();
     select();
 
     fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
 
     expect(shell().querySelector(".inspector")).toBeNull();
-    expect(useSelectionStore.getState().selections).toHaveLength(1);
-
-    const pill = screen.getByRole("button", { name: /^Details ·/ });
-    fireEvent.click(pill);
-    expect(shell().querySelector(".inspector")).not.toBeNull();
+    expect(shell().querySelector(".shell-right")).toBeNull();
+    expect(useSelectionStore.getState().selections).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: /^Details ·/ })).toBeNull();
   });
 
   it("collapses the left panel to the rail through the shell store", () => {

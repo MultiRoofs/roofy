@@ -76,6 +76,7 @@ import {
 } from "../features/streaming/streamPlugin";
 import { useSolarStore } from "../features/solar/solarStore";
 import { InspectorPanel } from "../ui/inspector/InspectorPanel";
+import { GeoFeatureDetailsTemp } from "../ui/inspector/GeoFeatureDetailsTemp";
 import { WorkspaceHeader } from "../ui/header/WorkspaceHeader";
 import { SceneControlsTemp } from "../ui/header/SceneControlsTemp";
 import { LeftPanel } from "../ui/sidebar/LeftPanel";
@@ -527,14 +528,16 @@ export function App({
 
   // The shell's layout state (what `inspectorOpen`, `leftSidebarCollapsed`,
   // `leftSidebarWidth`, `tableOpen` and `tableHeight` used to be). `App` reads
-  // only the three facts its own render forks on: which component the left
-  // column gets, whether the drawer is mounted, and what closing the details
-  // panel does. The SIZES belong to `ViewerShell` and to the panels that own
-  // their own edges — `LeftPanel` writes `leftWidth` itself, which is why
-  // there is no `onWidthChange` to thread through any more.
+  // only the two facts its own render forks on: which component the left
+  // column gets and whether the drawer is mounted. The details panel's own
+  // collapse (`rightCollapsed`) is read and written entirely by `ViewerShell`
+  // and `WorkspaceHeader` — closing the panel itself clears the selection
+  // instead (see the `right` prop's comment below). The SIZES belong to
+  // `ViewerShell` and to the panels that own their own edges — `LeftPanel`
+  // writes `leftWidth` itself, which is why there is no `onWidthChange` to
+  // thread through any more.
   const leftCollapsed = useShellStore((s) => s.leftCollapsed);
   const drawerOpen = useShellStore((s) => s.drawerOpen);
-  const setRightCollapsed = useShellStore((s) => s.setRightCollapsed);
 
   // The two effects that used to steer the geo store's own active id from the
   // selection are gone: `installWorkspaceInvariants` holds that rule now (a
@@ -1465,9 +1468,13 @@ export function App({
     const hasUrlLayers = layers.some((l) => l.modelRef.type === "url");
 
     /* The right column follows the SELECTION: there is no inspector toggle
-       any more, and closing the panel collapses it (`rightCollapsed`) without
-       touching what is selected — the pill on the map's edge brings it back. */
-    const hasSelection = selections.length > 0 || geoSelection !== null;
+       any more, and the `right` prop below is null exactly when both
+       `selections` and `geoSelection` are empty. The header's chevron
+       (`rightCollapsed`) still collapses the panel without touching what is
+       selected — the pill on the map's edge brings it back — but the
+       panel's OWN close button clears the selection outright, same as
+       Escape (`useEscapeClearsSelection`): two different affordances for two
+       different intents, "hide this" versus "I'm done with this". */
 
     return (
       <>
@@ -1554,10 +1561,15 @@ export function App({
             ) : null
           }
           right={
-            hasSelection ? (
+            selections.length > 0 ? (
               <InspectorPanel
                 selections={selections}
-                onClose={() => setRightCollapsed(true)}
+                onClose={clearSelection}
+              />
+            ) : geoSelection !== null ? (
+              <GeoFeatureDetailsTemp
+                selection={geoSelection}
+                onClose={clearSelection}
               />
             ) : null
           }
