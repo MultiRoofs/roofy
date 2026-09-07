@@ -34,11 +34,9 @@ import { resolveInheritedAttributes } from "../../domain/citymodel/inheritedAttr
 import { useStreamStore } from "../../features/streaming/streamStore";
 import { getResidentModel } from "../../features/streaming/residentModel";
 import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
-import {
-  useObjectSurfaces,
-  type SurfacesFetchState,
-} from "../../features/streaming/useResidentSurfaces";
+import { useObjectSurfaces } from "../../features/streaming/useResidentSurfaces";
 import { ErrorBoundary } from "../ErrorBoundary";
+import { SurfacesGate } from "../details/SurfacesGate";
 import { AnalysisTab } from "./AnalysisTab";
 import { StatsTab } from "./StatsTab";
 import { AttrRow } from "./attrDisplay";
@@ -335,7 +333,7 @@ export function InspectorPanel({ selections, onClose }: InspectorPanelProps) {
             <ObjectTab data={selectedObjectsData[0]!} />
           ) : activeTab === "surfaces" ? (
             isStreaming ? (
-              <SurfacesFetchGate
+              <SurfacesGate
                 fetch={surfacesFetch}
                 render={(surfaces) => (
                   <SurfacesTab
@@ -351,7 +349,7 @@ export function InspectorPanel({ selections, onClose }: InspectorPanelProps) {
               />
             )
           ) : isStreaming ? (
-            <SurfacesFetchGate
+            <SurfacesGate
               fetch={surfacesFetch}
               render={(surfaces) => (
                 <AnalysisTab
@@ -369,31 +367,6 @@ export function InspectorPanel({ selections, onClose }: InspectorPanelProps) {
         </ErrorBoundary>
       </div>
     </aside>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Streaming surfaces-fetch gate — shared loading/error/ready rendering for
-// the Surfaces and Analysis tabs when the displayed layer is streaming.
-// ---------------------------------------------------------------------------
-
-function SurfacesFetchGate({
-  fetch,
-  render,
-}: {
-  readonly fetch: SurfacesFetchState;
-  readonly render: (surfaces: ReadonlyArray<Surface>) => React.ReactNode;
-}) {
-  if (fetch.status === "ready") return <>{render(fetch.surfaces)}</>;
-  if (fetch.status === "error") {
-    return (
-      <div className="inspector-placeholder">
-        Failed to load surfaces: {fetch.message}
-      </div>
-    );
-  }
-  return (
-    <div className="inspector-placeholder">{"Loading surfaces\u2026"}</div>
   );
 }
 
