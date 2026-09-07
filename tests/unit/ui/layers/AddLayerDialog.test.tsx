@@ -280,6 +280,19 @@ describe("AddLayerDialog — the File tab", () => {
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
+  it("does not offer the two formats a FILE cannot be", () => {
+    openDialog();
+
+    drop(new File(["{}"], "tile.json"));
+
+    const options = Array.from(changeSelect().options).map((o) => o.value);
+    // A tile template and a tileset are remote by definition; offering them
+    // for a local pick would be a choice this tab could not honour.
+    expect(options).toContain("geo:geojson");
+    expect(options).not.toContain("geo:raster-xyz");
+    expect(options).not.toContain("geo:3d-tiles");
+  });
+
   it("disables browsing while a load is in flight", () => {
     openDialog({ loading: true });
 
@@ -334,6 +347,39 @@ describe("AddLayerDialog — the URL tab", () => {
       kind: "city",
       encoding: "flatcitybuf",
     });
+  });
+
+  it("keeps a correction through a re-blur of the untouched field", () => {
+    const onAddUrl = vi.fn(
+      async (_url: string, _override?: DetectedSource) =>
+        ({ ok: true }) as const,
+    );
+    openUrlTab({ onAddUrl });
+
+    typeUrl("https://example.com/model.json");
+    fireEvent.change(changeSelect(), { target: { value: "city:flatcitybuf" } });
+
+    // Back into the field and out again, without editing it: re-detecting
+    // there would silently undo what the user just told us.
+    const field = screen.getByLabelText("Source URL");
+    fireEvent.focus(field);
+    fireEvent.blur(field);
+    expect(detectionLine()).toContain("FlatCityBuf");
+
+    fireEvent.click(addLayerButton());
+    expect(onAddUrl.mock.calls[0]![1]).toMatchObject({
+      encoding: "flatcitybuf",
+    });
+  });
+
+  it("re-detects when the URL itself changes", () => {
+    openUrlTab();
+
+    typeUrl("https://example.com/model.json");
+    fireEvent.change(changeSelect(), { target: { value: "city:flatcitybuf" } });
+
+    typeUrl("https://example.com/tile.city.jsonl");
+    expect(detectionLine()).toContain("CityJSONSeq");
   });
 
   it("classifies an XYZ template, adds it to the geo store and activates it", () => {

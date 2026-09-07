@@ -4437,11 +4437,6 @@ button.file-label:disabled {
   font-size: 0.72rem;
 }
 
-.detected-change-select:focus-visible {
-  outline: none;
-  border-color: var(--accent);
-}
-
 /* The staged pick, under the drop zone: what you dropped, what it is, and the
    button that commits it. A raised card, because it is a step that has begun
    and not finished. */

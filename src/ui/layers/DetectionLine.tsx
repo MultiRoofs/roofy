@@ -27,6 +27,14 @@ export interface DetectionLineProps {
    *  count). Omitted on the URL tab, where the field itself is right there. */
   readonly subject?: string;
   /**
+   * The formats the select may be corrected TO. Defaults to every format the
+   * app loads; the File tab passes a narrower list, because two of the
+   * geospatial kinds are remote by definition (a tile template and a tileset
+   * are URLs, not files) and a control that offers a choice it cannot honour
+   * is worse than one that does not offer it.
+   */
+  readonly options?: ReadonlyArray<DetectedSource>;
+  /**
    * Offer the correction select at all.
    *
    * Off for a MULTI-FILE pick: several files are one CityParquet package by
@@ -40,6 +48,7 @@ export function DetectionLine({
   detected,
   onChange,
   subject,
+  options = SOURCE_OVERRIDES,
   changeable = true,
 }: DetectionLineProps) {
   const selectId = useId();
@@ -85,7 +94,7 @@ export function DetectionLine({
               {detected.kind === "unknown" && (
                 <option value="unknown">Choose a format…</option>
               )}
-              {SOURCE_OVERRIDES.map((option) => (
+              {options.map((option) => (
                 <option key={sourceKey(option)} value={sourceKey(option)}>
                   {option.label}
                 </option>

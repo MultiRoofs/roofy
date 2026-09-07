@@ -49,6 +49,7 @@ import { UrlSourceForm } from "./UrlSourceForm";
 import { DetectionLine } from "./DetectionLine";
 import { StacBrowser, type AddUrlResult } from "../stac/StacBrowser";
 import {
+  SOURCE_OVERRIDES,
   detectSourceFromName,
   type DetectedSource,
 } from "../../features/layers/detectSource";
@@ -93,6 +94,15 @@ interface StagedFiles {
   readonly files: ReadonlyArray<File>;
   readonly detected: DetectedSource;
 }
+
+/** What a FILE can be corrected to. GeoJSON is the only geospatial format a
+ *  file carries: an XYZ template and a 3D Tiles tileset are remote sources by
+ *  definition, and offering them for a local pick would be a choice the tab
+ *  could not honour. */
+const FILE_SOURCE_OVERRIDES: ReadonlyArray<DetectedSource> =
+  SOURCE_OVERRIDES.filter(
+    (source) => source.kind !== "geo" || source.geoKind === "geojson",
+  );
 
 /** A multi-file selection is a CityParquet package by construction: it is the
  *  only format this app reads as a directory of files. */
@@ -163,9 +173,16 @@ export function AddLayerDialog({
     if (staged === null || staged.detected.kind === "unknown") return;
     const { files, detected } = staged;
     if (detected.kind === "geo") {
-      // GeoJSON is the only geospatial format a FILE can carry — a tile
-      // template and a tileset are URLs by definition, and the select cannot
-      // offer them here.
+      // Unreachable through the select (see FILE_SOURCE_OVERRIDES), and stated
+      // anyway: reading a tile template out of a local file is not a thing
+      // this tab could do, and a silent GeoJSON parse of one would report the
+      // wrong failure.
+      if (detected.geoKind !== "geojson") {
+        setError(
+          "XYZ tiles and 3D Tiles are remote sources — add them on the URL tab.",
+        );
+        return;
+      }
       void addGeoSourceFromFile(files[0]!).then((result) => {
         if (result.ok) onClose();
         else setError(result.error);
@@ -290,6 +307,7 @@ export function AddLayerDialog({
                 <div className="staged-source">
                   <DetectionLine
                     detected={staged.detected}
+                    options={FILE_SOURCE_OVERRIDES}
                     subject={
                       staged.files.length > 1
                         ? `${staged.files.length} files`

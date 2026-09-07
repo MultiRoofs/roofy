@@ -100,7 +100,14 @@ export function UrlSourceForm({
             setDetected(null);
             setError(null);
           }}
-          onBlur={detect}
+          // Only when there is no answer yet. `onChange` clears the answer,
+          // so an EDITED URL still re-detects on the way out — but simply
+          // clicking back into an untouched field must not overwrite a format
+          // the user corrected by hand. Detect and Enter stay the explicit
+          // "classify this again".
+          onBlur={() => {
+            if (detected === null) detect();
+          }}
         />
         <button
           type="submit"
