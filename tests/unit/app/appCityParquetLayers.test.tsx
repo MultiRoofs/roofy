@@ -303,7 +303,7 @@ describe("App snapshot restore — CityParquet layers", () => {
     expect(layer.model.sourceEncoding).toBe("cityparquet");
     expect(layer.modelRef).toEqual({ type: "url", url: PARQUET_URL });
     expect(layer.rules).toEqual([RULE]);
-    expect(layer.rulesEnabled).toBe(false);
+    expect(layer.colorBy).toBe("surface");
     expect(layer.visible).toBe(false);
     expect(layer.hiddenTypes).toEqual(["Building"]);
   });
@@ -440,7 +440,6 @@ describe("App — a failed group add is reported", () => {
       modelRef: { type: "url", url: JSON_URL },
       visible: true,
       rules: [],
-      rulesEnabled: true,
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Add layer" }));

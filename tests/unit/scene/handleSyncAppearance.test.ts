@@ -49,7 +49,6 @@ function layer(patch: Partial<Layer> & { id: string }): Layer {
     modelRef: { type: "url", url: "https://host/x.jsonl" },
     visible: true,
     rules: [],
-    rulesEnabled: true,
     // Defaults, like every other field of this fixture: a layer with no
     // rules colours by surface type. A case that needs a mode sets one.
     colorBy: "surface",

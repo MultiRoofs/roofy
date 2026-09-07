@@ -212,7 +212,6 @@ describe("the share hash", () => {
     expect(
       effectiveRules({
         rules: layer!.rules,
-        rulesEnabled: layer!.rulesEnabled,
         colorBy: layer!.colorBy!,
         singleColor: layer!.singleColor!,
         unmatchedColor: layer!.unmatchedColor!,

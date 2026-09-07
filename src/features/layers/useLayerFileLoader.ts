@@ -43,16 +43,15 @@ import type { Rule } from "../rules/types";
 import type { ColorBy } from "../rules/colorBy";
 
 /** Optional per-layer settings to apply instead of the usual fresh-layer
- *  defaults (rules: [], rulesEnabled: true, visible: true, lodMode: "auto")
- *  — used when re-linking a file to a layer restored from a snapshot, so
- *  the saved rules/visibility/LoD survive the re-selection (see App.tsx's
- *  "unavailable layers" resolve flow). */
+ *  defaults (rules: [], visible: true, lodMode: "auto") — used when re-linking
+ *  a file to a layer restored from a snapshot, so the saved
+ *  rules/visibility/LoD survive the re-selection (see App.tsx's "unavailable
+ *  layers" resolve flow). */
 export interface LayerOverrides {
   readonly rules?: ReadonlyArray<Rule>;
-  readonly rulesEnabled?: boolean;
   /** A restored "Color by" choice — carried so re-selecting the file behind an
    *  unavailable layer brings its colouring back, not just its rules. Absent
-   *  means DERIVED from the pair above (`rules/colorBy.ts`). */
+   *  means DERIVED from {@link rules} (`rules/colorBy.ts`). */
   readonly colorBy?: ColorBy;
   readonly singleColor?: string;
   readonly unmatchedColor?: string;
@@ -333,7 +332,6 @@ export function useLayerFileLoader(
               name: file.name,
               modelRef: { type: "file", fileName: file.name },
               rules: overrides?.rules,
-              rulesEnabled: overrides?.rulesEnabled,
               colorBy: overrides?.colorBy,
               singleColor: overrides?.singleColor,
               unmatchedColor: overrides?.unmatchedColor,
@@ -352,7 +350,6 @@ export function useLayerFileLoader(
               modelRef: { type: "file", fileName: file.name },
               visible: overrides?.visible,
               rules: overrides?.rules,
-              rulesEnabled: overrides?.rulesEnabled,
               colorBy: overrides?.colorBy,
               singleColor: overrides?.singleColor,
               unmatchedColor: overrides?.unmatchedColor,
@@ -387,7 +384,6 @@ export function useLayerFileLoader(
               modelRef: { type: "file", fileName: file.name },
               visible: overrides?.visible,
               rules: overrides?.rules,
-              rulesEnabled: overrides?.rulesEnabled,
               colorBy: overrides?.colorBy,
               singleColor: overrides?.singleColor,
               unmatchedColor: overrides?.unmatchedColor,
@@ -444,7 +440,6 @@ export function useLayerFileLoader(
             modelRef: { type: "file", fileName: name },
             visible: overrides?.visible,
             rules: overrides?.rules,
-            rulesEnabled: overrides?.rulesEnabled,
             colorBy: overrides?.colorBy,
             singleColor: overrides?.singleColor,
             unmatchedColor: overrides?.unmatchedColor,

@@ -52,8 +52,7 @@ export interface OpenStreamingLayerInput {
   readonly name: string;
   readonly modelRef: CityModelReference;
   readonly rules?: ReadonlyArray<Rule>;
-  readonly rulesEnabled?: boolean;
-  /** A restored "Color by" choice. Absent means DERIVED from the pair above,
+  /** A restored "Color by" choice. Absent means DERIVED from {@link rules},
    *  the same rule `layerStore.addLayer` applies — see `rules/colorBy.ts`. */
   readonly colorBy?: ColorBy;
   readonly singleColor?: string;
@@ -82,13 +81,12 @@ export async function openStreamingLayer(
   // had just baked.
   const rules = input.rules ?? [];
   const colorBy = normalizeColorBy({ ...input, rules });
-  // DERIVED from the settled mode, never from `input.rulesEnabled`: the store
-  // derives it the same way, and a seed built from a different answer would be
-  // an equal-but-distinct array that the first `syncStreamState` reads as a
-  // change. `normalizeColorBy` above is the one place the caller's legacy flag
-  // is still consulted — to derive a mode when the caller named none.
-  const rulesEnabled = colorBy.colorBy === "rules";
-  const styling = { rules, rulesEnabled, ...colorBy };
+  // `effectiveRulesEnabled` answers "does this paint?" from the mode alone,
+  // and `effectiveRules` reads the mode and the two colours — the settled
+  // `colorBy` is the one answer both the plugin seed and the store record
+  // draw from, so a seed built from a different answer would be an
+  // equal-but-distinct array the first `syncStreamState` reads as a change.
+  const styling = { rules, ...colorBy };
   const handle = await input.plugin.openStream({
     id,
     source: input.source,
@@ -122,7 +120,6 @@ export async function openStreamingLayer(
     // inside `effectiveRules` and never reach the store, the editor or a
     // snapshot.
     rules,
-    rulesEnabled,
     ...colorBy,
     hiddenTypes: input.hiddenTypes ?? [],
     isStreaming: true,

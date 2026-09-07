@@ -364,7 +364,6 @@ function loadedLayer(): Layer {
         enabled: true,
       },
     ],
-    rulesEnabled: true,
     // Defaults, like every other field of this fixture: a layer with no
     // rules colours by surface type. A case that needs a mode sets one.
     colorBy: "surface",

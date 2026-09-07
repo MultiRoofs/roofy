@@ -81,7 +81,6 @@ describe("layerStore", () => {
         modelRef: { type: "file", fileName: "a.city.json" },
         visible: true,
         rules: [],
-        rulesEnabled: true,
       });
 
       const { layers } = useLayerStore.getState();
@@ -98,7 +97,6 @@ describe("layerStore", () => {
         modelRef: { type: "file", fileName: "a.city.json" },
         visible: true,
         rules: [],
-        rulesEnabled: true,
       });
 
       useLayerStore.getState().removeLayer(id);
@@ -114,7 +112,6 @@ describe("layerStore", () => {
         modelRef: { type: "file", fileName: "a.city.json" },
         visible: true,
         rules: [],
-        rulesEnabled: true,
       });
 
       useLayerStore.getState().updateLayer(id, { name: "New" });
@@ -128,7 +125,6 @@ describe("layerStore", () => {
         modelRef: { type: "file", fileName: "a.city.json" },
         visible: true,
         rules: [],
-        rulesEnabled: true,
       });
 
       useLayerStore.getState().updateLayer(id, { visible: false });
@@ -144,7 +140,6 @@ describe("layerStore", () => {
         modelRef: { type: "file", fileName: "a.city.json" },
         visible: true,
         rules: [],
-        rulesEnabled: true,
       });
       useLayerStore.getState().addLayer({
         name: "L2",
@@ -152,7 +147,6 @@ describe("layerStore", () => {
         modelRef: { type: "file", fileName: "b.city.json" },
         visible: true,
         rules: [],
-        rulesEnabled: true,
       });
 
       useLayerStore.getState().removeAllLayers();
@@ -170,7 +164,6 @@ describe("layerStore", () => {
         modelRef: { type: "file", fileName: "a.city.json" },
         visible: true,
         rules: [],
-        rulesEnabled: true,
       });
     });
 
@@ -243,7 +236,6 @@ describe("layerStore", () => {
         modelRef: { type: "file", fileName: "b.city.json" },
         visible: true,
         rules: [],
-        rulesEnabled: true,
       });
 
       const rule = makeRule();
@@ -286,7 +278,6 @@ describe("layerStore", () => {
         modelRef: { type: "file", fileName: "a.city.json" },
         visible: true,
         rules: [],
-        rulesEnabled: true,
       });
 
       const layer = useLayerStore.getState().layers.find((l) => l.id === id)!;
@@ -301,7 +292,6 @@ describe("layerStore", () => {
         modelRef: { type: "file", fileName: "a.city.json" },
         visible: true,
         rules: [],
-        rulesEnabled: true,
       });
       const before = useLayerStore.getState().layers[0]!.hiddenTypes;
 
@@ -319,7 +309,6 @@ describe("layerStore", () => {
         modelRef: { type: "file", fileName: "a.city.json" },
         visible: true,
         rules: [],
-        rulesEnabled: true,
       });
       const second = useLayerStore.getState().addLayer({
         name: "B",
@@ -327,7 +316,6 @@ describe("layerStore", () => {
         modelRef: { type: "file", fileName: "b.city.json" },
         visible: true,
         rules: [],
-        rulesEnabled: true,
       });
 
       useLayerStore.getState().setHiddenTypes(first, ["Building"]);
@@ -345,7 +333,6 @@ describe("layerStore", () => {
         modelRef: { type: "url", url: "https://x/a.fcb" },
         visible: true,
         rules: [],
-        rulesEnabled: true,
         isStreaming: true,
       });
 
@@ -362,7 +349,6 @@ describe("layerStore", () => {
         modelRef: { type: "file", fileName: "a.city.json" },
         visible: true,
         rules: [],
-        rulesEnabled: true,
         ...patch,
       });
     const get = (id: string) =>

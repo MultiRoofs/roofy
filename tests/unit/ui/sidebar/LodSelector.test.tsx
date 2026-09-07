@@ -51,7 +51,6 @@ function baseLayer(overrides: Partial<Layer>): Layer {
     modelRef: { type: "url", url: "https://x/a.city.json" },
     visible: true,
     rules: [],
-    rulesEnabled: true,
     // Defaults, like every other field of this fixture: a layer with no
     // rules colours by surface type. A case that needs a mode sets one.
     colorBy: "surface",

@@ -384,7 +384,6 @@ describe("a geospatial-only workspace", () => {
         modelRef: { type: "url", url: "https://example.test/delft.city.json" },
         visible: true,
         rules: [],
-        rulesEnabled: true,
         isStreaming: false,
       });
     });
@@ -434,7 +433,6 @@ describe("a geospatial-only workspace", () => {
         modelRef: { type: "url", url: "https://example.test/delft.city.json" },
         visible: true,
         rules: [],
-        rulesEnabled: true,
         isStreaming: false,
       });
     });
@@ -491,7 +489,6 @@ describe("a geospatial-only workspace", () => {
         modelRef: { type: "url", url: "https://example.test/delft.city.json" },
         visible: true,
         rules: [],
-        rulesEnabled: true,
         isStreaming: false,
       });
     });

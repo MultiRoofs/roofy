@@ -20,7 +20,6 @@ function addLayer(): string {
     modelRef: { type: "url", url: "https://x/a.city.json" },
     visible: true,
     rules: [],
-    rulesEnabled: true,
   });
 }
 

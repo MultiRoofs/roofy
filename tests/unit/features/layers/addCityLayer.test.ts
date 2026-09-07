@@ -145,13 +145,13 @@ describe("addCityLayer", () => {
       model: model(),
       modelRef: { type: "file", fileName: "delft.city.json" },
       visible: false,
-      rulesEnabled: false,
+      colorBy: "surface",
       hiddenTypes: ["Building"],
       duckdb: { kind: "model", model: model() },
     });
     const layer = useLayerStore.getState().layers.find((l) => l.id === id)!;
     expect(layer.visible).toBe(false);
-    expect(layer.rulesEnabled).toBe(false);
+    expect(layer.colorBy).toBe("surface");
     expect(layer.hiddenTypes).toEqual(["Building"]);
   });
 

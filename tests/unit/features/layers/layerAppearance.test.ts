@@ -75,7 +75,6 @@ describe("layerStore appearance", () => {
       modelRef: { type: "url", url: "https://host/x.jsonl" },
       visible: true,
       rules: [],
-      rulesEnabled: true,
       ...extra,
     });
   }

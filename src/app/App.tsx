@@ -206,7 +206,6 @@ interface UnavailableLayer {
    *  restores them instead of silently reverting to defaults — see
    *  handleResolveUnavailableLayer. */
   readonly rules: ReadonlyArray<Rule>;
-  readonly rulesEnabled: boolean;
   readonly colorBy: ColorBy;
   readonly singleColor: string;
   readonly unmatchedColor: string;
@@ -1034,10 +1033,8 @@ export function App({
             if (!modelRef) continue; // malformed saved entry — nothing to restore
 
             const rules = (sl.rules as Rule[] | undefined) ?? [];
-            // Already validated and derived by `normalizeLayers`; the store's
-            // `rulesEnabled` follows the mode, never the saved flag.
+            // Already validated and derived by `normalizeLayers`.
             const { colorBy, singleColor, unmatchedColor } = sl;
-            const rulesEnabled = colorBy === "rules";
             const visible = (sl.visible as boolean | undefined) ?? true;
             const lodMode =
               (sl.lodMode as "auto" | "manual" | undefined) ?? "auto";
@@ -1055,7 +1052,6 @@ export function App({
                 name,
                 fileName,
                 rules,
-                rulesEnabled,
                 colorBy,
                 singleColor,
                 unmatchedColor,
@@ -1079,7 +1075,6 @@ export function App({
                   name,
                   modelRef,
                   rules,
-                  rulesEnabled,
                   colorBy,
                   singleColor,
                   unmatchedColor,
@@ -1102,7 +1097,6 @@ export function App({
                 modelRef,
                 visible,
                 rules,
-                rulesEnabled,
                 colorBy,
                 singleColor,
                 unmatchedColor,
@@ -1119,7 +1113,6 @@ export function App({
                 modelRef,
                 visible,
                 rules,
-                rulesEnabled,
                 colorBy,
                 singleColor,
                 unmatchedColor,
@@ -1345,10 +1338,8 @@ export function App({
           const name = sl.name ?? fileNameFromUrl(sl.modelUrl);
           const rules = (sl.rules ?? []) as (typeof layers)[number]["rules"];
           // `readShareHash` has already validated the three, and derived a
-          // mode for a link minted before they existed; the store's
-          // `rulesEnabled` follows the mode, never the link's own flag.
+          // mode for a link minted before they existed.
           const { colorBy, singleColor, unmatchedColor } = sl;
-          const rulesEnabled = colorBy === "rules";
           const visible = sl.visible ?? true;
 
           if (detectEncoding(sl.modelUrl) === "flatcitybuf") {
@@ -1360,7 +1351,6 @@ export function App({
                 name,
                 modelRef: { type: "url", url: modelUrl },
                 rules,
-                rulesEnabled,
                 colorBy,
                 singleColor,
                 unmatchedColor,
@@ -1379,7 +1369,6 @@ export function App({
               modelRef: { type: "url", url: sl.modelUrl },
               visible,
               rules,
-              rulesEnabled,
               colorBy,
               singleColor,
               unmatchedColor,
@@ -1394,7 +1383,6 @@ export function App({
               modelRef: { type: "url", url: sl.modelUrl },
               visible,
               rules,
-              rulesEnabled,
               colorBy,
               singleColor,
               unmatchedColor,
@@ -1575,7 +1563,6 @@ export function App({
           entry
             ? {
                 rules: entry.rules,
-                rulesEnabled: entry.rulesEnabled,
                 colorBy: entry.colorBy,
                 singleColor: entry.singleColor,
                 unmatchedColor: entry.unmatchedColor,

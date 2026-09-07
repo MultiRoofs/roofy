@@ -265,7 +265,6 @@ beforeEach(() => {
       modelRef: { type: "url", url: FCB_URL },
       visible: true,
       rules: [],
-      rulesEnabled: true,
       isStreaming: true,
     });
     return "stream-1";
@@ -671,7 +670,6 @@ async function mountShellWithLayer(): Promise<void> {
     modelRef: { type: "url", url: JSON_URL },
     visible: true,
     rules: [],
-    rulesEnabled: true,
   });
   await waitFor(() =>
     expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),

@@ -45,7 +45,7 @@ function layerInput(name: string): LayerInput {
     modelRef: { type: "url", url: `https://x/${name}` },
     visible: true,
     rules: [],
-    rulesEnabled: false,
+    colorBy: "surface",
   };
 }
 

@@ -2501,7 +2501,17 @@ body {
   margin-top: 0.4rem;
 }
 
+/* The group heading is a BUTTON (opens the layer's Style), so it carries the
+   button reset alongside the text it inherits from the div it replaced. */
 .legend-group-name {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
   font-size: 0.65rem;
   font-weight: 600;
   color: var(--fg);
@@ -2510,6 +2520,10 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 12rem;
+}
+
+.legend-group-name:hover {
+  text-decoration: underline;
 }
 
 .legend-item {
@@ -2525,6 +2539,27 @@ body {
   height: 0.6rem;
   border-radius: 2px;
   flex-shrink: 0;
+}
+
+/* Presentation size — the projector state: both side panels collapsed (or the
+   right one absent because nothing is selected), so the legend is the only
+   chrome left and its rows grow to 14px to read from across a room. */
+.legend-presentation .legend-card {
+  font-size: 0.875rem;
+}
+
+.legend-presentation .legend-group-name {
+  font-size: 0.875rem;
+  max-width: 16rem;
+}
+
+.legend-presentation .legend-item {
+  font-size: 0.875rem;
+}
+
+.legend-presentation .legend-dot {
+  width: 0.75rem;
+  height: 0.75rem;
 }
 
 /* ═══════════════════════════════════════════════════════════════

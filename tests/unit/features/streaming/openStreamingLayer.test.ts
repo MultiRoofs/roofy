@@ -233,13 +233,13 @@ describe("openStreamingLayer", () => {
       name: "a.fcb",
       modelRef: { type: "url", url: "https://x/a.fcb" },
       visible: false,
-      rulesEnabled: false,
+      colorBy: "surface",
     });
     const layer = useLayerStore
       .getState()
       .layers.find((l) => l.id === layerId)!;
     expect(layer.visible).toBe(false);
-    expect(layer.rulesEnabled).toBe(false);
+    expect(layer.colorBy).toBe("surface");
     expect(layer.rules).toEqual([]);
 
     const opts = plugin.openStream.mock.calls[0]![0];
@@ -302,7 +302,6 @@ describe("openStreamingLayer", () => {
       .getState()
       .layers.find((l) => l.id === layerId)!;
     expect(layer.colorBy).toBe("single");
-    expect(layer.rulesEnabled).toBe(false);
 
     const opts = plugin.openStream.mock.calls[0]![0];
     expect(opts.rulesEnabled).toBe(true);

@@ -42,15 +42,14 @@ function fakeHandle(id: string, triangles = 100) {
 }
 
 function layer(patch: Partial<Layer> & { id: string }): Layer {
-  // `colorBy` is DERIVED from the old pair unless the case states one, so
+  // `colorBy` is DERIVED from the rules unless the case states a mode, so
   // every test written before "Color by" existed still means what it said:
-  // rules + rulesEnabled reads as "Color by rules".
+  // rules read as "Color by rules".
   const colorBy = normalizeColorBy({
     colorBy: patch.colorBy,
     singleColor: patch.singleColor,
     unmatchedColor: patch.unmatchedColor,
     rules: patch.rules,
-    rulesEnabled: patch.rulesEnabled,
   });
   return {
     name: patch.id,
@@ -64,7 +63,6 @@ function layer(patch: Partial<Layer> & { id: string }): Layer {
     modelRef: { kind: "url", url: "x" },
     visible: true,
     rules: [],
-    rulesEnabled: false,
     selectedLod: "2",
     availableLods: ["2", "1"],
     lodMode: "manual",
@@ -406,10 +404,7 @@ describe("syncStyles", () => {
   it("compiles the layer's rules and pushes them to the handle", () => {
     const handle = fakeHandle("L1");
     const entries = live(handle);
-    syncStyles(
-      [layer({ id: "L1", rules: [roofRule], rulesEnabled: true })],
-      entries,
-    );
+    syncStyles([layer({ id: "L1", rules: [roofRule] })], entries);
 
     expect(handle.setStyle).toHaveBeenCalledTimes(1);
     // What was pushed is a working evaluator, not just "some function":
@@ -444,7 +439,7 @@ describe("syncStyles", () => {
   it("never styles a layer whose rules are switched off", () => {
     const handle = fakeHandle("L1");
     syncStyles(
-      [layer({ id: "L1", rules: [roofRule], rulesEnabled: false })],
+      [layer({ id: "L1", rules: [roofRule], colorBy: "surface" })],
       live(handle),
     );
     expect(handle.setStyle).not.toHaveBeenCalled();
@@ -454,11 +449,11 @@ describe("syncStyles", () => {
     const handle = fakeHandle("L1");
     const entries = live(handle);
     const rules = [roofRule];
-    const l = layer({ id: "L1", rules, rulesEnabled: true });
+    const l = layer({ id: "L1", rules });
     syncStyles([l], entries);
     // A re-render with the same rules array (any unrelated store change) must
     // not recompile or repaint.
-    syncStyles([layer({ id: "L1", rules, rulesEnabled: true })], entries);
+    syncStyles([layer({ id: "L1", rules })], entries);
     syncStyles([l], entries);
     expect(handle.setStyle).toHaveBeenCalledTimes(1);
   });
@@ -466,16 +461,12 @@ describe("syncStyles", () => {
   it("re-pushes when the rules array changes", () => {
     const handle = fakeHandle("L1");
     const entries = live(handle);
-    syncStyles(
-      [layer({ id: "L1", rules: [roofRule], rulesEnabled: true })],
-      entries,
-    );
+    syncStyles([layer({ id: "L1", rules: [roofRule] })], entries);
     syncStyles(
       [
         layer({
           id: "L1",
           rules: [{ ...roofRule, color: "#ff0000" }],
-          rulesEnabled: true,
         }),
       ],
       entries,
@@ -490,8 +481,8 @@ describe("syncStyles", () => {
     const handle = fakeHandle("L1");
     const entries = live(handle);
     const rules = [roofRule];
-    syncStyles([layer({ id: "L1", rules, rulesEnabled: true })], entries);
-    syncStyles([layer({ id: "L1", rules, rulesEnabled: false })], entries);
+    syncStyles([layer({ id: "L1", rules })], entries);
+    syncStyles([layer({ id: "L1", rules, colorBy: "surface" })], entries);
     expect(handle.setStyle).toHaveBeenCalledTimes(2);
     expect(handle.setStyle).toHaveBeenLastCalledWith(null);
   });
@@ -526,7 +517,7 @@ describe("syncStyles", () => {
     const first = fakeHandle("L1");
     const entries = live(first);
     const rules = [roofRule];
-    syncStyles([layer({ id: "L1", rules, rulesEnabled: true })], entries);
+    syncStyles([layer({ id: "L1", rules })], entries);
 
     const second = fakeHandle("L1");
     entries.set("L1", {
@@ -535,7 +526,7 @@ describe("syncStyles", () => {
       visible: true,
       hiddenTypes: [],
     });
-    syncStyles([layer({ id: "L1", rules, rulesEnabled: true })], entries);
+    syncStyles([layer({ id: "L1", rules })], entries);
     expect(second.setStyle).toHaveBeenCalledTimes(1);
   });
 
@@ -553,7 +544,6 @@ describe("syncStyles", () => {
           id: "S1",
           isStreaming: true,
           rules: [roofRule],
-          rulesEnabled: true,
         }),
       ],
       entries,
@@ -563,10 +553,7 @@ describe("syncStyles", () => {
 
   it("skips a layer that has no live handle (its add was refused)", () => {
     expect(() =>
-      syncStyles(
-        [layer({ id: "L1", rules: [roofRule], rulesEnabled: true })],
-        new Map(),
-      ),
+      syncStyles([layer({ id: "L1", rules: [roofRule] })], new Map()),
     ).not.toThrow();
   });
 
@@ -578,7 +565,6 @@ describe("syncStyles", () => {
           id: "L1",
           visible: false,
           rules: [roofRule],
-          rulesEnabled: true,
         }),
       ],
       live(handle),
@@ -882,7 +868,6 @@ describe("syncStreamState", () => {
       id: "S1",
       isStreaming: true,
       rules,
-      rulesEnabled: true,
       visible: false,
       lodMode: "auto",
       selectedLod: null,

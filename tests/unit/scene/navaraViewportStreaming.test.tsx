@@ -251,7 +251,6 @@ function makeLayer(patch: Partial<Layer> & { id: string }): Layer {
     singleColor: patch.singleColor,
     unmatchedColor: patch.unmatchedColor,
     rules: patch.rules,
-    rulesEnabled: patch.rulesEnabled ?? true,
   });
   return {
     ...colorBy,
@@ -260,7 +259,6 @@ function makeLayer(patch: Partial<Layer> & { id: string }): Layer {
     modelRef: { type: "url", url: `https://example.test/${patch.id}` },
     visible: true,
     rules: [],
-    rulesEnabled: true,
     selectedLod: "2.2",
     availableLods: ["2.2"],
     lodMode: "auto",

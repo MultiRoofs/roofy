@@ -264,14 +264,14 @@ describe("useLayerFileLoader — addLayerFromFile overrides", () => {
     await act(async () => {
       await result.current.addLayerFromFile(file, {
         rules: [rule],
-        rulesEnabled: false,
+        colorBy: "surface",
         visible: false,
       });
     });
 
     const layer = useLayerStore.getState().layers[0]!;
     expect(layer.rules).toEqual([rule]);
-    expect(layer.rulesEnabled).toBe(false);
+    expect(layer.colorBy).toBe("surface");
     expect(layer.visible).toBe(false);
   });
 
@@ -281,13 +281,13 @@ describe("useLayerFileLoader — addLayerFromFile overrides", () => {
 
     await act(async () => {
       await result.current.addLayerFromFile(file, {
-        rulesEnabled: false,
+        colorBy: "surface",
         visible: false,
       });
     });
 
     const layer = useLayerStore.getState().layers[0]!;
-    expect(layer.rulesEnabled).toBe(false);
+    expect(layer.colorBy).toBe("surface");
     expect(layer.visible).toBe(false);
   });
 
@@ -375,10 +375,8 @@ describe("useLayerFileLoader — addLayerFromFile overrides", () => {
 
     const layer = useLayerStore.getState().layers[0]!;
     expect(layer.rules).toEqual([]);
-    // A fresh layer has no rules, so it colours by surface type — and the
-    // vestigial flag is derived from that, never set independently.
+    // A fresh layer has no rules, so it colours by surface type.
     expect(layer.colorBy).toBe("surface");
-    expect(layer.rulesEnabled).toBe(false);
     expect(layer.visible).toBe(true);
     expect(layer.lodMode).toBe("auto");
   });
@@ -480,12 +478,12 @@ describe("useLayerFileLoader — CityParquet routing", () => {
     await act(async () => {
       await result.current.addLayerFromFiles(
         [pickedFile("delft/building.parquet")],
-        { rulesEnabled: false, visible: false },
+        { colorBy: "surface", visible: false },
       );
     });
 
     const layer = useLayerStore.getState().layers[0]!;
-    expect(layer.rulesEnabled).toBe(false);
+    expect(layer.colorBy).toBe("surface");
     expect(layer.visible).toBe(false);
   });
 
@@ -809,7 +807,7 @@ describe("useLayerFileLoader — several adds at once, and retrying", () => {
 
     await act(async () => {
       await result.current.addLayerFromFile(file, {
-        rulesEnabled: false,
+        colorBy: "surface",
         visible: false,
       });
     });
@@ -820,7 +818,7 @@ describe("useLayerFileLoader — several adds at once, and retrying", () => {
     });
 
     const layer = useLayerStore.getState().layers[0]!;
-    expect(layer.rulesEnabled).toBe(false);
+    expect(layer.colorBy).toBe("surface");
     expect(layer.visible).toBe(false);
   });
 

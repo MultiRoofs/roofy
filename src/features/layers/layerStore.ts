@@ -23,16 +23,6 @@ export interface Layer {
   readonly visible: boolean;
   readonly rules: ReadonlyArray<Rule>;
   /**
-   * The pre-12.3 on/off flag.
-   *
-   * VESTIGIAL as of "Color by": {@link colorBy} decides whether rules paint,
-   * `effectiveRulesEnabled` never reads this, and a capture writes
-   * `colorBy === "rules"` rather than the stored value. It survives on the
-   * record because a document written before the mode existed carries it, and
-   * that is what `normalizeColorBy` derives the mode from on the way back in.
-   */
-  readonly rulesEnabled: boolean;
-  /**
    * What the layer's roof surfaces are coloured by: the semantic surface
    * palette, the user's rules (with {@link unmatchedColor} under them), or one
    * {@link singleColor} for the whole layer.
@@ -170,11 +160,11 @@ export interface LayerStoreActions {
        *  load default", `null` means "plain colours, deliberately". */
       readonly selectedAppearance?: AppearanceTheme | null;
       /**
-       * Supplied by a RESTORE or a share link. Absent means DERIVED from the
-       * `rules`/`rulesEnabled` pair beside it — a layer that arrives carrying
-       * rules opens on those rules, because that is the rendering it was saved
-       * from; a fresh layer, which arrives with none, opens on "surface".
-       * An unreadable colour falls back to the `cityColors` default.
+       * Supplied by a RESTORE or a share link. Absent means DERIVED from
+       * {@link rules} — a layer that arrives carrying rules opens on those
+       * rules, because that is the rendering it was saved from; a fresh
+       * layer, which arrives with none, opens on "surface". An unreadable
+       * colour falls back to the `cityColors` default.
        */
       readonly colorBy?: ColorBy;
       readonly singleColor?: string;
@@ -340,10 +330,6 @@ export const useLayerStore = create<LayerStore>((set) => ({
           appearanceThemes,
           selectedAppearance,
           ...colorBy,
-          // DERIVED, so the vestigial flag can never disagree with the mode —
-          // the legend and the editor's badge still read it, and a capture
-          // writes exactly this.
-          rulesEnabled: colorBy.colorBy === "rules",
         },
       ],
     }));
@@ -362,11 +348,6 @@ export const useLayerStore = create<LayerStore>((set) => ({
           ? {
               ...l,
               ...patch,
-              // A mode change carries the vestigial flag with it; see
-              // {@link Layer.rulesEnabled}.
-              ...(patch.colorBy === undefined
-                ? {}
-                : { rulesEnabled: patch.colorBy === "rules" }),
             }
           : l,
       ),

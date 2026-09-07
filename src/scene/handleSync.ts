@@ -57,11 +57,10 @@ export interface LiveLayer {
   visibleObjectIds?: ReadonlySet<string> | null;
   /** The EFFECTIVE rule array last compiled into `handle.setStyle`, by
    *  IDENTITY — `undefined` means "this handle has never been styled".
-   *  `effectiveRules` returns one memoised array per (rules identity,
-   *  rulesEnabled, colorBy, singleColor, unmatchedColor), so reference
-   *  equality is an exact "did the colouring change?" test — covering the
-   *  unmatched and single colours, which are not rule edits at all — and costs
-   *  nothing per frame. */
+   *  `effectiveRules` returns one memoised array per (rules identity, colorBy,
+   *  singleColor, unmatchedColor), so reference equality is an exact "did the
+   *  colouring change?" test — covering the unmatched and single colours,
+   *  which are not rule edits at all — and costs nothing per frame. */
   styledRules?: ReadonlyArray<Rule>;
   /** The `effectiveRulesEnabled` flag that went with {@link styledRules}. */
   styledRulesEnabled?: boolean;

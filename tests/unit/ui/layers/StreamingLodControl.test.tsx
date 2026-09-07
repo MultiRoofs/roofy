@@ -26,7 +26,6 @@ function makeLayer(id: string, isStreaming: boolean): Layer {
     modelRef: { type: "url", url: `https://example.com/${id}.fcb` },
     visible: true,
     rules: [],
-    rulesEnabled: true,
     // Defaults, like every other field of this fixture: a layer with no
     // rules colours by surface type. A case that needs a mode sets one.
     colorBy: "surface",

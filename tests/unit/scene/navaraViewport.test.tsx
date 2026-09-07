@@ -487,15 +487,13 @@ function makeModel(referenceSystem?: string): CityModel {
 const CRS_URI = "https://www.opengis.net/def/crs/EPSG/0/7415";
 
 function makeLayer(patch: Partial<Layer> & { id: string }): Layer {
-  // Same derivation the store applies: rules + rulesEnabled reads as "Color by
-  // rules", so every case written before the mode existed still means what it
-  // said.
+  // Same derivation the store applies: rules read as "Color by rules", so
+  // every case written before the mode existed still means what it said.
   const colorBy = normalizeColorBy({
     colorBy: patch.colorBy,
     singleColor: patch.singleColor,
     unmatchedColor: patch.unmatchedColor,
     rules: patch.rules,
-    rulesEnabled: patch.rulesEnabled ?? true,
   });
   return {
     ...colorBy,
@@ -504,7 +502,6 @@ function makeLayer(patch: Partial<Layer> & { id: string }): Layer {
     modelRef: { type: "url", url: `https://example.test/${patch.id}` },
     visible: true,
     rules: [],
-    rulesEnabled: true,
     selectedLod: "2.2",
     availableLods: ["2.2"],
     lodMode: "auto",
@@ -1248,7 +1245,7 @@ describe("NavaraViewport lifecycle", () => {
 
     // Switching the layer's rules off clears the style.
     useLayerStore.setState({
-      layers: [makeLayer({ id: "a", rules, rulesEnabled: false })],
+      layers: [makeLayer({ id: "a", rules, colorBy: "surface" })],
     });
     await waitFor(() => expect(handle.setStyle).toHaveBeenCalledTimes(2));
     expect(handle.setStyle).toHaveBeenLastCalledWith(null);

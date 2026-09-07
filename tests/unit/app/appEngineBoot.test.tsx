@@ -209,7 +209,6 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
         modelRef: { type: "url", url: FCB_URL },
         visible: true,
         rules: [],
-        rulesEnabled: true,
         isStreaming: true,
       });
       return "stream-1";
@@ -362,7 +361,6 @@ describe("App object count across static and streaming layers", () => {
       modelRef: { type: "url", url: FCB_URL },
       visible: true,
       rules: [],
-      rulesEnabled: true,
       isStreaming: true,
     });
     useStreamStore.setState({
@@ -426,7 +424,6 @@ describe("App inspector follows viewport picks across the geo/city split", () =>
       modelRef: { type: "url", url: JSON_URL },
       visible: true,
       rules: [],
-      rulesEnabled: true,
       isStreaming: false,
     });
     const geoLayerId = useGeoLayerStore.getState().addGeoLayer({
@@ -474,7 +471,6 @@ describe("App inspector follows viewport picks across the geo/city split", () =>
       modelRef: { type: "url", url: JSON_URL },
       visible: true,
       rules: [],
-      rulesEnabled: true,
       isStreaming: false,
     });
     useGeoLayerStore.getState().addGeoLayer({
@@ -537,7 +533,6 @@ describe("App renders exactly one attribute view for a selection", () => {
       modelRef: { type: "url", url: JSON_URL },
       visible: true,
       rules: [],
-      rulesEnabled: true,
       isStreaming: false,
     });
 

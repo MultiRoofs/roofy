@@ -64,7 +64,6 @@ function addLayer(): string {
     modelRef: { type: "url", url: "https://x/s.fcb" },
     visible: true,
     rules: [],
-    rulesEnabled: true,
   });
 }
 

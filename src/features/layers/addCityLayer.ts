@@ -36,8 +36,7 @@ export interface AddCityLayerInput {
   readonly modelRef: CityModelReference;
   readonly visible?: boolean;
   readonly rules?: ReadonlyArray<Rule>;
-  readonly rulesEnabled?: boolean;
-  /** A restored "Color by" choice. Absent means DERIVED from the pair above —
+  /** A restored "Color by" choice. Absent means DERIVED from {@link rules} —
    *  see `layerStore.addLayer` and `rules/colorBy.ts`. */
   readonly colorBy?: ColorBy;
   readonly singleColor?: string;
@@ -140,7 +139,6 @@ export function addCityLayer(input: AddCityLayerInput): string {
     modelRef: input.modelRef,
     visible: input.visible ?? true,
     rules: input.rules ?? [],
-    rulesEnabled: input.rulesEnabled ?? true,
     colorBy: input.colorBy,
     singleColor: input.singleColor,
     unmatchedColor: input.unmatchedColor,

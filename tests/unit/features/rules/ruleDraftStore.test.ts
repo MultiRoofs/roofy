@@ -33,7 +33,7 @@ function addLayer(id: string): void {
     modelRef: { type: "url", url: `https://x/${id}` },
     visible: true,
     rules: [],
-    rulesEnabled: false,
+    colorBy: "surface",
   });
 }
 

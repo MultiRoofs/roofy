@@ -108,7 +108,6 @@ function renderViewer() {
     modelRef: { type: "url", url: "https://example.test/delft.city.json" },
     visible: true,
     rules: [],
-    rulesEnabled: true,
     isStreaming: false,
   });
   const { container } = render(<App persistenceStore={emptyStore} />);
