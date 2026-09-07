@@ -541,11 +541,17 @@ no compatibility shims; saved workspaces migrate to schema v4.
   the inspector's rule-target override, the status-bar table entrance and
   the fit-all flight on every added layer are removed. Persistence v4 with an
   explicit v3 migration (`persistence/migrateSnapshot.ts`).
-- 12.2 Shell and layers: header (workspace, Save, Share, Preferences), full-
+- 12.2 Shell and layers (COMPLETE, 2026-09-07): header (workspace, Save, Share, Preferences), full-
   height left and right panels, the data drawer under the map column only,
   collapse and resize; one layer list for every layer type with one Add
   layer dialog (File / URL / Catalog, detection with correction); the active
   layer's configuration (Style / Filter / Details) under the list.
+  Landed with: a geospatial-only workspace enters the viewer and its first
+  content fits once; the interface appearance is a System / Light / Dark
+  preference (new storage key, everyone starts on System); failed adds are
+  rows with Retry; the old toolbar, sidebar, layer panel and geo inspector
+  are deleted. The 12.5 scene sheet also gets the pending Shadow quality
+  control (see the 12.5 add-on).
 - 12.3 Styling and inspection: Rules under the active layer's Style as
   `Color by`, presets first, per-layer drafts; legend grouped by layer;
   the right details panel with the identity trail, summary and roof metrics,

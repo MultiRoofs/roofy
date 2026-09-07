@@ -32,6 +32,8 @@ Every panel that concerns a layer is titled with that layer's name.
 
 ## Shell layout
 
+> Implemented in slice 12.2 (2026-09-07) as `src/ui/shell/ViewerShell.tsx` + `shellStore.ts`: grid rows `--header-h / 1fr / --statusbar-h`, columns `--left-w / 1fr / --right-w`; the drawer is a flex child under the map inside the middle column; the left column is 40 px when collapsed (rail), the right column 0 when nothing is selected or when collapsed (pill on the map edge). Default widths 300 / 340 (272 / 320 below 1360 px wide), drawer 280 (220 below 800 px tall), limits in `SHELL_LIMITS`; the viewer has `min-width: 1024px`, the landing page does not.
+
 CSS grid on `#roofy`:
 
 ```
