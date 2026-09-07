@@ -77,9 +77,6 @@ export const SURFACE_COLOR_HEX = resolved.surfaceColors;
  * them: a user's very first rule wears this, so a base surface or an accent
  * equal to it would be exactly the confusion the rule exists to prevent
  * (`tests/unit/scene/cityColors.test.ts` pins it).
- *
- * `RulesEditor.tsx` still spells the literal for now — Task 28 rewrites that
- * file and makes it import this constant.
  */
 export const NEW_RULE_COLOR_HEX = "#7cb518";
 
