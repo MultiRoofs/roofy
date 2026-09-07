@@ -42,7 +42,10 @@ import {
 import { useSelectionStore } from "../features/selection/selectionStore";
 import type { Selection } from "../domain/selection/types";
 import { useLayerStore } from "../features/layers/layerStore";
-import { useGeoLayerStore } from "../features/geoLayers/geoLayerStore";
+import {
+  useGeoLayerStore,
+  type GeoLayer,
+} from "../features/geoLayers/geoLayerStore";
 import { resolveGeoLayerBounds } from "../features/geoLayers/geoLayerBounds";
 import { installLayerTableLifecycle } from "../features/layers/layerTableLifecycle";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
@@ -325,6 +328,14 @@ export function App({
   const hasWorkspace = layers.length > 0 || geoLayers.length > 0;
 
   /**
+   * How many rows the workspace held when the fit effect below last ran, so it
+   * can see the 0 → 1 edge rather than a level. Declared up here because
+   * `handleRestore` marks it too — a restore's rows are not the first content
+   * of a scene.
+   */
+  const previousWorkspaceSizeRef = useRef(0);
+
+  /**
    * Close the catalog on ANY transition into the viewer shell — the one place
    * that enforces "`catalogOpen` is false whenever the shell is up".
    *
@@ -496,6 +507,40 @@ export function App({
     },
     [awaitSceneHandle],
   );
+
+  /**
+   * The scene handle, once ITS engine has come up — or `null` if none did.
+   *
+   * Not simply `await scene.ready`, and this is the whole of Task 22's live
+   * defect. `NavaraViewport`'s lifecycle cleanup SETTLES the ready gate its
+   * mount owned — rejecting it, since the engine had not finished starting —
+   * and re-arms a fresh one for the mount that follows. StrictMode does
+   * exactly that to every newly mounted viewport, immediately. An effect that
+   * runs in the very commit that mounts the viewport therefore reads the
+   * handle, awaits the gate that is a moment away from being thrown out, and
+   * watches its work disappear into a catch: in the browser the viewer came up
+   * with the geo row active and the camera never moved.
+   *
+   * So a rejected gate is read for what it means — "that mount is gone" — and
+   * the wait is made again against whichever viewport is mounted NOW, whose
+   * `ready` getter answers with the live gate. Bounded at one retry: an engine
+   * that genuinely cannot start rejects both times and gives up quietly,
+   * rather than spinning against a viewport that will never be ready.
+   */
+  const awaitSceneReady =
+    useCallback(async (): Promise<CitySceneHandle | null> => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const scene = sceneRef.current ?? (await awaitSceneHandle());
+        try {
+          await scene.ready;
+          return scene;
+        } catch {
+          // No viewport left at all: nothing to wait for a second time.
+          if (sceneRef.current === null) return null;
+        }
+      }
+      return null;
+    }, [awaitSceneHandle]);
 
   /**
    * Run a layer open with the 3D engine mounted, when the source needs it.
@@ -912,6 +957,17 @@ export function App({
               : useGeoLayerStore.getState().addGeoLayer(input),
           );
         }
+        const hasGeoLayer = addedGeoIds.some(Boolean);
+        // The first-content fit is keyed on the workspace going from empty to
+        // one row, and a restore's rows are not "the first content of a scene"
+        // — they are a scene the user already framed and saved. The
+        // suppression scope below says so too, but it is released in a
+        // `finally` that can, for a workspace that awaits nothing, run before
+        // React has flushed the effect that reads it. Moving the mark here
+        // makes the answer independent of that ordering.
+        previousWorkspaceSizeRef.current =
+          useLayerStore.getState().layers.length +
+          useGeoLayerStore.getState().layers.length;
 
         // Restore layers from snapshot. A v1 single-model save (`modelRef`
         // at the top level, no `layers`) is not handled here: it is a v1
@@ -1069,7 +1125,17 @@ export function App({
             null,
         );
 
-        if (!hasUrlLayer && newUnavailable.length === 0 && failedCount === 0) {
+        // "Drop file(s)" is the prompt for a workspace that restored its rows
+        // but has nothing on screen — every city layer file-backed, so the
+        // viewer is empty until the user re-links one. A geospatial layer that
+        // came back complete IS on screen (`hasGeoLayer`), so asking for a
+        // file would be asking for something nothing is waiting on.
+        if (
+          !hasUrlLayer &&
+          !hasGeoLayer &&
+          newUnavailable.length === 0 &&
+          failedCount === 0
+        ) {
           showToast(
             "Workspace restored. Drop file(s) to view the model.",
             STATUS_TOAST_MS,
@@ -1536,11 +1602,6 @@ export function App({
     [showToast],
   );
 
-  /**
-   * How many rows the workspace held when this render's effects last ran, so
-   * the effect below can see the 0 → 1 edge rather than a level.
-   */
-  const previousWorkspaceSizeRef = useRef(0);
   const workspaceSize = unifiedLayerOrder(layers, geoLayers).length;
 
   /**
@@ -1584,28 +1645,28 @@ export function App({
     if (!geoLayer || useLayerStore.getState().layers.length > 0) return;
     if (isAutoFitSuppressed()) return;
     const geoLayerId = geoLayer.id;
+    /** The workspace this fit was computed for must still be the one on
+     *  screen: the SAME single geo row, and nothing else. A row removed,
+     *  replaced, or joined by another while the engine was coming up is a
+     *  different scene, and the camera belongs to whatever framed that one. */
+    const stillTheOnlyRow = (): GeoLayer | null => {
+      const geo = useGeoLayerStore.getState().layers;
+      if (useLayerStore.getState().layers.length > 0) return null;
+      if (geo.length !== 1 || geo[0]!.id !== geoLayerId) return null;
+      return geo[0]!;
+    };
     void (async () => {
       try {
-        // The handle FIRST — this effect runs in the very commit that mounts
-        // the viewport, so the ref is already attached by the time a passive
-        // effect runs; the gate is the fallback for a mount that has not
-        // published yet. Then the engine's own `ready`: a `flyTo` on a view
-        // that has not finished `init()` does nothing (the same wait
-        // `applyCameraWhenReady` makes, for the same reason).
-        const scene = sceneRef.current ?? (await awaitSceneHandle());
-        await scene.ready;
-        const still = useGeoLayerStore
-          .getState()
-          .layers.find((l) => l.id === geoLayerId);
-        if (!still) return;
-        const bounds = await resolveGeoLayerBounds(still);
+        const scene = await awaitSceneReady();
+        if (scene === null) return;
+        const layer = stillTheOnlyRow();
+        if (layer === null) return;
+        const bounds = await resolveGeoLayerBounds(layer);
         // A raster tile template names no extent, and neither does an
         // unlinked GeoJSON row: nothing to frame, so nothing happens.
         if (!bounds) return;
-        if (
-          !useGeoLayerStore.getState().layers.some((l) => l.id === geoLayerId)
-        )
-          return;
+        // Asked again after the fetch, which is a wait of its own.
+        if (stillTheOnlyRow() === null) return;
         // Through the handle, which brackets every camera move in the
         // streaming plugin's settle suppression.
         sceneRef.current?.fitBounds(bounds);
@@ -1613,7 +1674,7 @@ export function App({
         // See the doc comment: an unasked-for fit fails quietly.
       }
     })();
-  }, [workspaceSize, awaitSceneHandle]);
+  }, [workspaceSize, awaitSceneReady]);
 
   /** Zoom to whichever layer the left panel asks about. Stable, and that
    *  matters here: `App` re-renders on every cursor-position update from the

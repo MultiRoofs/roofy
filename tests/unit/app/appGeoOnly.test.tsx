@@ -35,7 +35,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { forwardRef, useImperativeHandle } from "react";
+import { StrictMode, forwardRef, useEffect, useImperativeHandle } from "react";
 import type { CitySceneHandle } from "../../../src/scene/NavaraViewport";
 import type {
   GeographicCamera,
@@ -91,14 +91,20 @@ const FEATURE_COLLECTION = {
 interface Gate {
   readonly promise: Promise<void>;
   readonly resolve: () => void;
+  readonly reject: (error: unknown) => void;
 }
 
 function createGate(): Gate {
   let resolve!: () => void;
-  const promise = new Promise<void>((res) => {
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<void>((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  // Nobody may await a rejected gate (the re-arm below throws one away on
+  // every unmount), so keep it from being reported as unhandled.
+  promise.catch(() => undefined);
+  return { promise, resolve, reject };
 }
 
 /** The engine's `ready`, controlled per test: these cases are ABOUT what
@@ -123,11 +129,29 @@ vi.mock("../../../src/scene/NavaraViewport", () => ({
             getStreamingPlugin: async () => {
               throw new Error("no streaming in this suite");
             },
-            // A getter, like the real handle: the gate is re-armed per test.
+            // A GETTER over the CURRENT gate, exactly like the real handle: the
+            // lifecycle below rejects the gate its mount owned and re-arms a
+            // fresh one, so a captured promise would be a dead one.
             get ready() {
               return readyGate.promise;
             },
           }) as unknown as CitySceneHandle,
+        [],
+      );
+      // The real viewport's lifecycle cleanup, reduced to the half that
+      // matters here: a mount torn down before its engine finished starting
+      // SETTLES the gate it owned (resolve-or-reject, never a hang) and
+      // re-arms one for the next mount. StrictMode does that to every new
+      // viewport immediately, which is what the live defect fell into.
+      useEffect(
+        () => () => {
+          readyGate.reject(
+            new Error(
+              "NavaraViewport was unmounted before the 3D engine finished starting.",
+            ),
+          );
+          readyGate = createGate();
+        },
         [],
       );
       return <div data-testid="navara-viewport" />;
@@ -386,25 +410,72 @@ describe("a geospatial-only workspace", () => {
     expect(fitBounds).not.toHaveBeenCalled();
   });
 
-  it("cancels the fit when the layer is removed before the engine is ready", async () => {
+  it("cancels the fit when the workspace changes before the engine is ready", async () => {
     render(<App persistenceStore={emptyStore} />);
     addUrlFromLandingPage(GEOJSON_URL);
     await waitFor(() =>
       expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
     );
 
-    // Gone before the engine ever reported ready — flying to a layer that is
-    // no longer in the workspace would frame nothing at all.
+    // The geo row goes and a city model takes its place, in one beat — so the
+    // viewport STAYS MOUNTED and `fitBounds` is genuinely reachable when the
+    // engine finally reports ready. (Removing the only row instead would
+    // unmount the viewport and make this pass for the wrong reason.) The scene
+    // the pending fit was computed for no longer exists: it is dropped, and
+    // the city layer's own framing is the viewport's business.
     const geoId = useGeoLayerStore.getState().layers[0]!.id;
-    act(() => useGeoLayerStore.getState().removeGeoLayer(geoId));
-    readyGate.resolve();
+    act(() => {
+      useGeoLayerStore.getState().removeGeoLayer(geoId);
+      useLayerStore.getState().addLayer({
+        id: "city-1",
+        name: "delft.city.json",
+        model,
+        modelRef: { type: "url", url: "https://example.test/delft.city.json" },
+        visible: true,
+        rules: [],
+        rulesEnabled: true,
+        isStreaming: false,
+      });
+    });
+    act(() => readyGate.resolve());
 
-    // The workspace is empty again, so the landing page is back.
     await waitFor(() =>
-      expect(screen.queryByTestId("navara-viewport")).not.toBeInTheDocument(),
+      expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
     );
-    await Promise.resolve();
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(fitBounds).not.toHaveBeenCalled();
+  });
+
+  // The live defect of Task 22's first browser run: from the landing page a
+  // `.geojson` URL brought up the viewer with the row active, and the camera
+  // never moved — the fixture server logged only the layer's own request, so
+  // the effect never reached `resolveGeoLayerBounds`.
+  //
+  // The app runs under `<React.StrictMode>` (main.tsx), which tears every
+  // newly mounted component down once and remounts it. `NavaraViewport`'s
+  // lifecycle cleanup settles the `ready` gate its mount owned — REJECTING it,
+  // since the engine had not finished starting — and re-arms a fresh one for
+  // the mount that follows. This effect runs in the very commit that mounts
+  // the viewport, so it was awaiting the gate that was about to be thrown
+  // away, and the rejection vanished into its (deliberately quiet) catch.
+  it("fits a geo layer even when the new viewport is torn down and remounted under StrictMode", async () => {
+    render(
+      <StrictMode>
+        <App persistenceStore={emptyStore} />
+      </StrictMode>,
+    );
+    addUrlFromLandingPage(GEOJSON_URL);
+    await waitFor(() =>
+      expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
+    );
+
+    // The gate the effect first awaited was rejected by StrictMode's teardown;
+    // this resolves the one the SURVIVING mount owns, which is what the engine
+    // coming up looks like.
+    act(() => readyGate.resolve());
+    await waitFor(() => expect(fitBounds).toHaveBeenCalledTimes(1));
   });
 
   it("keeps a restored camera: a geo-only restore applies its viewpoint and does not fit", async () => {
@@ -418,11 +489,24 @@ describe("a geospatial-only workspace", () => {
       expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
     );
 
-    readyGate.resolve();
+    act(() => readyGate.resolve());
     // The saved camera is applied — a geo-only workspace has a viewport to
     // apply it to now — and the fit that would have replaced it is dropped,
     // because the whole restore runs inside the auto-fit suppression scope.
     await waitFor(() => expect(setCameraState).toHaveBeenCalledWith(CAM));
     expect(fitBounds).not.toHaveBeenCalled();
+  });
+
+  it("does not tell a geo-only restore to drop a file: the workspace is on screen", async () => {
+    render(<App persistenceStore={storeWith(geoOnlySnapshot())} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
+    );
+    // "Drop file(s) to view the model" is the CITY prompt for a workspace
+    // whose layers are all file-backed and therefore unavailable. Nothing here
+    // is waiting for a file: the overlay restored completely and is drawn.
+    expect(screen.queryByText(/Drop file\(s\) to view the model/)).toBeNull();
   });
 });
