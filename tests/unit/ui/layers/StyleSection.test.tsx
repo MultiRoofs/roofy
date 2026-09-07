@@ -2,10 +2,12 @@
  * The active layer's Style section: what "how is this drawn?" means for each
  * kind of layer.
  *
- * A city layer's answer is its RULES — the editor that used to be the
- * inspector's fifth tab, five clicks from the layer it colours. A vector
- * layer's is the flat per-layer style. A raster's is one slider. A tileset's
- * is nothing, said out loud rather than left as an empty box.
+ * A city layer's answer is `Color by`: the semantic surface palette, the
+ * user's rules, or one colour for the whole layer — one select, an
+ * affected-unit line naming what is about to change, and the chosen mode's
+ * own body under it. A vector layer's answer is the flat per-layer style. A
+ * raster's is one slider. A tileset's is nothing, said out loud rather than
+ * left as an empty box.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";

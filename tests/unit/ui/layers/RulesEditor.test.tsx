@@ -9,9 +9,12 @@
  * precomputed `surfaceAttrKeys`) — never from a `CityModel`, since a
  * streaming layer's `model` prop has no real objects.
  *
- * Second, that the editor NAMES the layer it edits and offers no way to
- * re-point itself: rules are per-layer, and the layer is the workspace's
- * active one.
+ * Second, the `Rules` branch's own anatomy: preset chips, the rule rows with
+ * their precedence controls, the unmatched colour, and the ordering of the
+ * attribute select. The editor offers no way to re-point itself — rules are
+ * per-layer, and the layer is chosen in the list — and no On/Off switch: the
+ * layer's NAME and its MODE both belong to `StyleSection` above it, and are
+ * tested there.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
