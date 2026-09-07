@@ -783,6 +783,170 @@ Scope: the new grid and regions with the OLD contents where the new ones do not 
 - `src/ui/details/DetailsPanel.tsx` (+ `IdentityTrail`, `SummarySection`, `RuleMatchSection`, `AttributesSection`, `PartsSection`, `GeometrySection`, `MultiSelectionSummary`, `GeoFeatureDetails`): replaces `InspectorPanel`, `GeoLayerInspector`, `AnalysisTab` (its content becomes an `ANALYSIS` section), `StatsTab` (moves to 12.4's Summary view). Roof metrics through `computeObjectStats`.
 - Tests per component; the rule-match section against a compiled evaluator.
 
+## Slice 12.3 — Styling and inspection (detailed, 2026-09-07)
+
+Written against the code as it exists after 12.2 (origin/develop a0a4616). Line references are deliberately absent: find code by content. Same process as 12.2: one implementer per task, a reviewer per task, rulings in the ledger. Tasks are numbered T25+ because `task-brief` keys on `### Task N`.
+
+**Slice rulings (binding, spec beats outline):**
+
+- R1. **No submodule change in 12.3.** `evaluateRule` returns true for a rule with zero conditions, so `Single colour` is ONE catch-all rule and the editable unmatched colour is a TRAILING catch-all rule. A pure, memoised `effectiveRules(layer)` in `src/features/rules/colorBy.ts` is the ONE array handed to `compileRuleEvaluator` by BOTH consumers: `handleSync`'s static path (`compileRuleEvaluator(layer.rules, layer.rulesEnabled)`) and the streaming handle feed (`setRules(rules, enabled)` in `handleSync`, memoised on `memo.rules`). Memoise per `(rules, colorBy, singleColor, unmatchedColor)` identity so the repaint does not fire on every render.
+- R2. `rulesEnabled` stays in the v4 snapshot; `colorBy`, `singleColor`, `unmatchedColor` are OPTIONAL snapshot fields with derived defaults (absent → `colorBy = rulesEnabled && rules.length > 0 ? "rules" : "surface"`), no version bump. Share links stay v3 and carry the EFFECTIVE rules array, so a shared single colour or unmatched colour renders on the other side as `Rules` (edit state is lossy across a share — accepted).
+- R3. The right panel's sections are the spec's: identity trail, SUMMARY, RULE MATCH, ATTRIBUTES, PARTS, GEOMETRY (and the multi-selection summary). The Analysis tab's content folds into SUMMARY; there is no ANALYSIS section. "Avg solar score" stays as a SUMMARY row for buildings when the metric exists (it is the one derived number the presets use).
+- R4. RULE MATCH: a roof-surface subject shows the one matching rule (or "Unmatched — no rule applies"); a building subject shows per-rule roof-surface counts ("Flat roofs · 3 surfaces · Unmatched · 1"), computed with `compileRuleEvaluator(effectiveRules(layer))` from core (engine-free).
+- R5. Rule precedence: Move up / Move down buttons in 12.3 (keyboard-reachable); the spec's drag handle is deferred to 12.6 polish.
+- R6. Unmatched grey, the single-colour default and the categorical palette come from `src/scene/cityColors.ts`, the app's one colour answer; the hard rule applies (none may equal highlight, hover, a base surface colour or the default geo colour) and the existing test that pins it is extended.
+- R7. `StatsTab` has no host between 12.3 and 12.4: the file stays, unmounted, with a comment pointing at 12.4's Summary view. GEOMETRY's "Raw object" button renders disabled with `data-temporary="12.4"` (the drawer's Raw objects view lands in 12.4).
+- R8. Geo `Color by attribute` is planned as feasible but gated on a real-browser probe (T29 step 1): the engine's evaluator callback carries `properties` (three d.ts: `properties: Record<string, unknown> | undefined`), while the app's `GeoFeatureEvaluator` narrows `info` to `{ batchId }`. If `info.properties` is populated for polygon AND polyline feature sets, colour per feature through the SAME evaluator path `applyHighlight` uses (highlight wins over the category colour). Fallback 1: the layer's GeoJSON data (inline, or the cached fetch the bounds path already does) mapped batchId → feature index. Fallback 2: defer with the spec's muted line. Stroke colour: only if the engine's vector description exposes a polygon outline colour; otherwise the single `color` stays for both fills and lines and "stroke colour" is deferred (say so in the section).
+- R9. The geo re-link gap left by 12.2 (the list's geo "Needs re-link" placeholder has no action since `GeoLayerRow` was deleted) is closed FIRST (T25), before any styling work.
+
+### Task 25: Loose ends from 12.2
+
+**Files:** modify `src/ui/layers/LayerList.tsx` / `LayerRow.tsx` (geo unavailable placeholder gets `Re-link` (file picker → `useGeoLayerStore.relinkGeoJsonLayer(id, data)` via `parseGeoJsonText(await file.text())`) and `Remove`), `src/ui/shell/LeftRail.tsx` + `App.tsx` (a state dot on the rail button when `failed.length > 0`, tooltip "N failed adds"), `src/ui/shell/shellStore.ts` (`installShellListeners()` installed once by `App`: on `window` resize, re-clamp `drawerHeight` through `clampDrawerHeight`, and re-clamp `leftWidth`/`rightWidth` against `SHELL_LIMITS`), tests `tests/unit/ui/layers/LayerList.test.tsx`, `tests/unit/ui/shell/LeftRail.test.tsx`, `tests/unit/ui/shell/shellStore.test.ts`, `tests/unit/app/appGeoOnly.test.tsx` (the missing case: a city row joins while the first-geo fit is in flight → no fit; pins the single-row recheck).
+Tests: geo placeholder Re-link calls `relinkGeoJsonLayer` with the parsed data and the row becomes a live vector row; the rail shows the dot only while `failed` is non-empty; a resize below the drawer height re-clamps it; the in-flight case.
+
+- [ ] Steps: failing tests → implement → commit `fix(shell): re-link for geo placeholders, a rail dot for failed adds, re-clamp on resize; pin the in-flight geo fit`.
+
+### Task 26: `colorBy` — the effective rules and their persistence
+
+**Files:** create `src/features/rules/colorBy.ts`; modify `src/features/layers/layerStore.ts` (`Layer.colorBy: "surface" | "rules" | "single"`, `singleColor: string`, `unmatchedColor: string`; defaults `"surface"`, `SINGLE_COLOR_DEFAULT`, `UNMATCHED_COLOR_DEFAULT` from `cityColors`; `updateLayer` accepts them), `src/scene/cityColors.ts` (export `UNMATCHED_COLOR_HEX`, `SINGLE_COLOR_HEX`, `CATEGORY_PALETTE_HEX: readonly string[]` (8 entries) derived from the brand tokens), `src/scene/handleSync.ts` (both consumers take `effectiveRules(layer)`; memo keys include the three new fields), `src/features/streaming/openStreamingLayer.ts` (the initial `rules` handed to the stream is `effectiveRules`), `src/persistence/{types,captureSnapshot,restoreSnapshot,urlShare}.ts` (optional fields; share carries effective rules), tests `tests/unit/features/rules/colorBy.test.ts`, `tests/unit/scene/handleSync.test.ts`, the cityColors rule test, persistence tests.
+
+```ts
+export type ColorBy = "surface" | "rules" | "single";
+export interface ColorByInput {
+  readonly rules: ReadonlyArray<Rule>;
+  readonly rulesEnabled: boolean;
+  readonly colorBy: ColorBy;
+  readonly singleColor: string;
+  readonly unmatchedColor: string;
+}
+export function effectiveRules(input: ColorByInput): ReadonlyArray<Rule>; // "surface" → [] ; "single" → [catchAll(singleColor)] ; "rules" → [...enabled user rules, catchAll(unmatchedColor)] — memoised on the five inputs' identity (WeakMap on `rules` + a small key)
+export function effectiveRulesEnabled(input: ColorByInput): boolean; // colorBy !== "surface"
+export const CATCH_ALL_RULE_ID_PREFIX = "__roofy_"; // the synthetic rules never reach the editor or the legend's user rows
+export function isSyntheticRule(rule: Rule): boolean;
+```
+
+Tests: each mode's array; memoisation (same identity for the same inputs); `handleSync` repaints when only `unmatchedColor` changes; snapshot round-trip with and without the new fields; a v4 snapshot lacking them restores `colorBy` by the derived default; a share link carries the effective array and restores as `rules`.
+
+- [ ] Steps: failing tests → implement → commit `feat(rules): Color by — surface type, rules with an unmatched colour, or a single colour — as one effective rule list`.
+
+### Task 27: Per-layer rule drafts
+
+**Files:** create `src/features/rules/ruleDraftStore.ts` (Zustand; `drafts: Record<layerId, RuleDraft | null>` where `RuleDraft = { editingId: string | null; form: RuleFormValues; open: boolean }`; `setDraft(layerId, draft)`, `clearDraft(layerId)`; drafts are session-only, never persisted); modify `src/ui/layers/RulesEditor.tsx` (its `showForm`/`editingId`/form state moves into the store keyed by `layerId`; `RuleForm` is controlled by the draft); test `tests/unit/features/rules/ruleDraftStore.test.ts`, update `tests/unit/ui/layers/RulesEditor.test.tsx` (switch layer A → B → A restores the unsaved editor with its values; Save/Cancel clears the draft; removing the layer clears it via `installWorkspaceInvariants`' removal hook or a store subscription in the draft store — pick one, test it).
+
+- [ ] Steps: failing tests → implement → commit `feat(rules): unsaved rule editors survive switching layers`.
+
+### Task 28: StyleSection for city layers — Color by, presets, rules, unmatched, single colour
+
+**Files:** modify `src/ui/layers/StyleSection.tsx`, `src/ui/layers/RulesEditor.tsx` (becomes the `Rules` branch's body: preset chips row (swatch + label + tooltip description), the rule list rows (swatch, name, condition in mono via the existing condition text, enabled toggle, Move up / Move down, Edit, Delete), the unmatched line "First matching rule wins. Unmatched roofs: [swatch input]" writing `updateLayer(id, { unmatchedColor })`, "+ Add rule" → the inline `RuleForm` (Name, Attribute select listing roof metrics `roof.area` / `roof.inclination` / `roof.azimuth` first then the model's attribute keys, Operator, Value, Colour, Save / Cancel); Import / Export under a small "More" disclosure), create `src/ui/layers/SurfaceTypePalette.tsx` (read-only rows Roof / Wall / Ground with the `SURFACE_COLOR_HEX` swatches), `src/app/app.css`; tests `tests/unit/ui/layers/StyleSection.test.tsx`, `RulesEditor.test.tsx`.
+Anatomy: `Color by` select (`Surface type` | `Rules` | `Single colour`) → `updateLayer(id, { colorBy })`; affected-unit line "<name> · Color roof surfaces by rules" / "… by surface type" / "… with one colour"; streaming layers identical (the resident model supplies the attribute keys as today). Changing a preset chip appends the preset rule and switches `colorBy` to `"rules"` if it was `"surface"`.
+Tests: the select writes `colorBy`; presets append and switch; Move up/down reorders; the unmatched swatch writes `unmatchedColor`; single colour input writes `singleColor`; synthetic rules never render as rows.
+
+- [ ] Steps: failing tests → implement → commit `feat(style): Color by — surface type, rules with presets and an unmatched colour, or a single colour`.
+
+### Task 29: StyleSection for geo layers — fill, opacity, Color by attribute (probe first)
+
+**Step 1 (browser probe, before any UI):** widen `GeoFeatureEvaluator`'s callback info to `{ batchId: number; properties?: Record<string, unknown> }` in `src/scene/geoLayerSync.ts`, log `Object.keys(info.properties ?? {})` once per feature set for the parcels fixture (`http://127.0.0.1:5390/parcels.geojson`, server in `/tmp/roofy-ui-prototype.rExpRq/smoke-12.2/static-server.mjs`) through the CDP harness, and record in the report whether `properties` is populated for the polygon and the polyline feature sets. Then follow R8's ladder.
+
+**Files:** modify `src/features/geoLayers/geoLayerStyle.ts` (`GeoLayerStyle.colorByAttribute?: { readonly attribute: string; readonly categories: Readonly<Record<string, string>> }`, `normalizeGeoLayerStyle` tolerates its absence), `src/features/geoLayers/geoLayerStore.ts` (`editStyle` accepts it), create `src/features/geoLayers/categorize.ts` (`categoriesFor(features, attribute, palette): Record<string, string>` — up to 8 distinct values in first-seen order, the rest "Other"; `attributeKeys(features): string[]`), `src/scene/geoLayerSync.ts` (per-feature colour through the evaluator path; highlight wins; a `colorByAttribute` change re-evaluates every feature set, like `applyHighlight`), `src/ui/layers/StyleSection.tsx` (vector: Fill colour, Fill opacity, Line width, Point size (existing controls), then `Color by attribute` select (`None` + the attribute keys from the inline data or the cached fetch) and, when set, the category rows with swatches (editable colour inputs writing `categories`); a muted "Rules are available for city models."; raster: opacity only; tiles: "No style options"), `src/app/app.css`; tests `tests/unit/features/geoLayers/categorize.test.ts`, `tests/unit/scene/geoLayerSync.test.ts` (evaluator returns the category colour per feature, highlight precedence), `tests/unit/ui/layers/StyleSection.test.tsx`.
+Persistence: `GeoLayerSnapshot.style` already carries the style object — confirm `colorByAttribute` round-trips (test) without a version bump.
+
+- [ ] Steps: probe → failing tests → implement (or defer per R8 with the muted line and a ledger entry) → commit `feat(style): vector layers colour by attribute with a categorical palette`.
+
+### Task 30: LegendOverlay rebuilt
+
+**Files:** rewrite `src/ui/viewport/LegendOverlay.tsx` (+ `src/ui/viewport/legendModel.ts`, pure: `legendGroups(layers, geoLayers): LegendGroup[]` where a group is `{ layerId; name; kind; rows: { label; color; kind: "surface" | "rule" | "unmatched" | "single" | "category" | "fill" }[] }` — city `surface` → Roof / Wall / Ground rows; `rules` → user rules in order + "Unmatched"; `single` → one row; vector → categories or one fill row; raster/tiles → no group; hidden layers → no group), `src/app/app.css`; tests `tests/unit/ui/viewport/legendModel.test.ts`, `tests/unit/ui/viewport/LegendOverlay.test.tsx`.
+Behaviour: heading click → `useShellStore.getState().requestSection(layerId, "style")` (activates + opens Style + un-collapses the left panel); the existing Hide legend toggle stays; presentation size (`.legend-presentation`, 14 px rows) when `leftCollapsed && (rightCollapsed || no selection)` from `shellStore`; no counts (12.4 adds them); the cyber-look warning chip stays as today.
+Tests: groups per kind; hidden layers excluded; heading click requests the section; presentation class from the store.
+
+- [ ] Steps: failing tests → implement → commit `feat(legend): grouped by layer, a heading opens the layer's Style, presentation size when both panels are collapsed`.
+
+### Task 31: DetailsPanel — identity trail, Summary, Attributes (built beside the inspector, unmounted)
+
+**Files:** create `src/ui/details/{DetailsPanel,IdentityTrail,SummarySection,AttributesSection,subject.ts}.tsx|ts`; reuse `src/ui/inspector/attrDisplay.tsx` (`AttrRow`, `formatValue`) and `useResidentSurfaces`/`SurfacesFetchGate` (move the gate into `src/ui/details/SurfacesGate.tsx`); `src/app/app.css` (`DETAILS PANEL` section); tests `tests/unit/ui/details/{subject,IdentityTrail,SummarySection,AttributesSection}.test.tsx|ts`.
+
+```ts
+// subject.ts — pure
+export type Subject =
+  | {
+      kind: "building";
+      layerId: string;
+      objectId: string;
+      object: CityObject;
+      parts: ReadonlyArray<CityObject>;
+    }
+  | {
+      kind: "surface";
+      layerId: string;
+      objectId: string;
+      surfaceIndex: number;
+      surface: Surface;
+      owner: CityObject;
+    }
+  | {
+      kind: "multi";
+      layerId: string;
+      objectIds: ReadonlyArray<string>;
+      objects: ReadonlyArray<CityObject>;
+    }
+  | {
+      kind: "geo";
+      geoLayerId: string;
+      batchId: number;
+      properties: Readonly<Record<string, unknown>>;
+    };
+export function subjectOf(
+  selections: ReadonlyArray<Selection>,
+  geoSelection: GeoFeatureSelection | null,
+  resolveObject: (layerId, id) => CityObject | null,
+): Subject | null;
+export function identityTrail(
+  subject: Subject,
+  layerName: string,
+): ReadonlyArray<{
+  label: string;
+  act: "activate-layer" | "narrow-to-building" | "current";
+}>; // "Delft → Building …25028 → Roof surface 12" (ids shortened to their last 5 characters after an ellipsis)
+export function buildingSummary(
+  object: CityObject,
+  roofMetrics: ReadonlyArray<RoofMetrics>,
+): ReadonlyArray<{ label: string; value: string }>; // Roof area (sum m²), Mean roof slope, Main orientation (compass word + degrees via computeAverageAzimuth), Height (measuredHeight), Roof type, Parts (n), Avg solar score when present
+export function surfaceSummary(surface, metrics): rows; // Area, Slope, Azimuth, Type, Belongs to
+export function geoSummary(properties): rows; // Name, Zone, Area (ha) when present, else the first three properties
+```
+
+`DetailsPanel({ onClose })` reads the selection store, the layer stores and the workspace store, resolves the subject (static: `model.objects`; streaming: the resident model through the gate), renders `IdentityTrail` (layer crumb → `activateLayer`; building crumb → `select({kind:"object"…})`; copy-id icon button; × → `onClose`), the full id in mono, then SUMMARY and ATTRIBUTES (two-column table; a search field when > 8 rows filtering by key). Streaming subjects wait on the gate exactly as `InspectorPanel` does today (do not drop it: the SUMMARY of a streamed building would be blank).
+Tests: `subjectOf` for the four kinds + null; trail labels and actions; building summary numbers against a hand-built object with two roof surfaces; attributes search.
+
+- [ ] Steps: failing tests → implement → commit `feat(details): the selection's identity trail, summary and attributes` (InspectorPanel still mounted; nothing in App changes).
+
+### Task 32: DetailsPanel — Rule match, Parts, Geometry, multi-selection, geo feature
+
+**Files:** create `src/ui/details/{RuleMatchSection,PartsSection,GeometrySection,MultiSelectionSummary,GeoFeatureDetails}.tsx`, `src/ui/details/ruleMatch.ts` (pure: `ruleMatchFor(subject, layer): { kind: "surface"; rule: Rule | null } | { kind: "building"; counts: ReadonlyArray<{ rule: Rule | null; surfaces: number }> } | null` using `compileRuleEvaluator(effectiveRules(layer), true)` and the roof metrics per surface; null when `colorBy !== "rules"`); tests per component + `ruleMatch.test.ts`.
+PARTS: rows "Part 1 · 12.4 m · 3 roof surfaces" expanding to the part's attributes; a roof-surface row click → `setMode("surface")` + `select({ kind: "surface", … })`. GEOMETRY: LoD, geometry type, surfaces by type (roof / wall / ground counts), vertices, bounding box in mono, "Raw object" disabled with `data-temporary="12.4"`. MULTI: heading "3 buildings selected", "Aggregates over the 3 selected buildings", Roof area (total), Height (mean · min–max), Roof types (counts), the id list with × → `toggleSelect`. GEO: layer name, `geoSummary`, the properties table; replaces `GeoFeatureDetailsTemp`'s content (the temp file is deleted in T33).
+Tests: rule match for a surface and a building against a compiled evaluator; parts expand and select; multi aggregates; geo feature rows.
+
+- [ ] Steps: failing tests → implement → commit `feat(details): rule match, parts, geometry and multi-selection aggregates`.
+
+### Task 33: Swap — the right column renders DetailsPanel
+
+**Files:** modify `src/app/App.tsx` (right slot: `hasSelection ? <DetailsPanel onClose={clearSelection}/> : null` for every selection kind; `selectionTitle` unchanged; the `rightTitle` pill text unchanged), delete `src/ui/inspector/GeoFeatureDetailsTemp.tsx` + test; update `tests/unit/app/appViewerShell.test.tsx` (the geo test asserts the new panel). `InspectorPanel` is now unmounted but still compiles.
+
+- [ ] Steps: failing tests → implement → commit `feat(app): the details panel replaces the inspector for every selection`.
+
+### Task 34: Delete the inspector and the analysis tab
+
+**Files:** delete `src/ui/inspector/{InspectorPanel,AnalysisTab}.tsx` and their tests; keep `attrDisplay.tsx`, `StatsTab.tsx` (unmounted, comment → 12.4) and its test; CSS by surviving consumer (`INSPECTOR PANEL` rules that only the deleted files used; move `.attr-*` rules the details panel still uses under `DETAILS PANEL`); audit table in the report; gate grep `grep -rn "inspector-\|InspectorPanel\|AnalysisTab" src` lists only survivors.
+
+- [ ] Steps: delete → fix references → suite → commit `refactor(inspector): removed — the details panel and the layer's Style own its content`.
+
+### Task 35: Slice gate
+
+- [ ] `npx vp check src tests`, `npx tsc -b --noEmit`, `npx vitest run`; submodule unchanged (R1).
+- [ ] Browser smoke (Delft sample + the parcels fixture) at 1440×900: apply the "Flat roofs" preset → roofs recolour on the map and the legend shows the rule rows + Unmatched; switch to Single colour → one colour, legend one row; Surface type → palette; edit the unmatched swatch → map updates; a rule draft survives switching layers; legend heading opens Style; select a building → identity trail, SUMMARY numbers, RULE MATCH counts, PARTS expand, GEOMETRY; select a surface via PARTS; shift-click two buildings → multi summary; select a parcel → geo feature details; Color by attribute `use` → two colours on the map and in the legend (or the deferred muted line, per T29's probe). Both themes for the details panel and the legend.
+- [ ] Docs: `docs/roadmap.md` 12.3 complete; `docs/architecture-notes.md` records `effectiveRules` (one array, two consumers, synthetic catch-all rules) and the geo per-feature colour path (or its deferral); the design spec's Right panel section gets an "Implemented" note. Push.
+
+**Order: T25 → T26 → T27 → T28 → T29 → T30 → T31 → T32 → T33 → T34 → T35.** Models: T25/T27/T30/T34 sonnet; T26/T28/T29/T31/T32/T33 opus. Reviewers: opus for T26/T29/T31/T32/T33, sonnet elsewhere.
+
 ## Slice 12.4 — Linked data and filtering (outline)
 
 - `src/ui/drawer/DataDrawer.tsx` (header: active layer name, Records / Summary tabs, counts `total · matching · selected` with units, Show selected records toggle, Export, Expand, Close; footer mirrors the attribution when expanded), `RecordsView.tsx` (FilterBar; `Buildings | Raw objects` view — buildings = root-type rows via `buildRootTypeWhere`, parts by expansion through a children query on the flat table's parent column (verify the column name in `layerRows.ts`); `Columns` chooser with structural columns off by default; `DataGrid`; `Pagination` at 20 / 50 / 100), `SummaryView.tsx` (from `StatsTab`, scoped All | Matching, streaming wording "currently loaded").
