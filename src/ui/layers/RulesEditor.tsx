@@ -17,7 +17,7 @@
  * only place a layer is chosen.
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef } from "react";
 import type { CityModel } from "../../domain/citymodel/types";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useStreamStore } from "../../features/streaming/streamStore";
@@ -31,6 +31,10 @@ import type {
   LogicMode,
   Rule,
 } from "../../features/rules/types";
+import {
+  useRuleDraftStore,
+  type RuleFormValues,
+} from "../../features/rules/ruleDraftStore";
 import { RULE_PRESETS } from "../../features/rules/presets";
 import { downloadText } from "../../platform/download";
 
@@ -69,8 +73,15 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
   const deleteRule = useLayerStore((s) => s.deleteRule);
   const toggleRulesEnabled = useLayerStore((s) => s.toggleRulesEnabled);
 
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
+  // The unsaved editor's state, keyed by layerId — moved out of local
+  // `useState` (Task 27) so switching the active layer and back does not
+  // unmount-and-lose it. See `features/rules/ruleDraftStore.ts`.
+  const draft = useRuleDraftStore((s) => s.drafts[layerId] ?? null);
+  const setDraft = useRuleDraftStore((s) => s.setDraft);
+  const clearDraft = useRuleDraftStore((s) => s.clearDraft);
+  const showForm = draft?.open ?? false;
+  const editingId = draft?.editingId ?? null;
+
   const importRef = useRef<HTMLInputElement>(null);
 
   // Collect attribute fields from all objects for the field dropdown. A
@@ -116,6 +127,62 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
     [addRule, layerId],
   );
 
+  const openAddForm = useCallback(() => {
+    setDraft(layerId, {
+      editingId: null,
+      open: true,
+      form: defaultRuleFormValues(),
+    });
+  }, [layerId, setDraft]);
+
+  const openEditForm = useCallback(
+    (rule: Rule) => {
+      setDraft(layerId, {
+        editingId: rule.id,
+        open: true,
+        form: ruleFormValuesFromRule(rule),
+      });
+    },
+    [layerId, setDraft],
+  );
+
+  const handleFormChange = useCallback(
+    (form: RuleFormValues) => {
+      if (draft === null) return;
+      setDraft(layerId, { ...draft, form });
+    },
+    [draft, layerId, setDraft],
+  );
+
+  const handleFormSave = useCallback(
+    (form: RuleFormValues) => {
+      if (draft === null) return;
+      if (draft.editingId !== null) {
+        updateRule(layerId, draft.editingId, {
+          name: form.name,
+          color: form.color,
+          logic: form.logic,
+          conditions: [...form.conditions],
+        });
+      } else {
+        addRule(layerId, {
+          id: crypto.randomUUID(),
+          name: form.name,
+          color: form.color,
+          logic: form.logic,
+          conditions: [...form.conditions],
+          enabled: true,
+        });
+      }
+      clearDraft(layerId);
+    },
+    [addRule, clearDraft, draft, layerId, updateRule],
+  );
+
+  const handleFormCancel = useCallback(() => {
+    clearDraft(layerId);
+  }, [clearDraft, layerId]);
+
   return (
     <>
       <div className="attr-section">
@@ -150,20 +217,19 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
 
         {rules.map((rule) => (
           <div key={rule.id}>
-            {editingId === rule.id ? (
+            {showForm && editingId === rule.id && draft !== null ? (
               <RuleForm
-                initial={rule}
+                values={draft.form}
                 fields={allFields}
-                onSave={(updated) => {
-                  updateRule(layerId, rule.id, updated);
-                  setEditingId(null);
-                }}
-                onCancel={() => setEditingId(null)}
+                saveLabel="Update"
+                onChange={handleFormChange}
+                onSave={handleFormSave}
+                onCancel={handleFormCancel}
               />
             ) : (
               <RuleRow
                 rule={rule}
-                onEdit={() => setEditingId(rule.id)}
+                onEdit={() => openEditForm(rule)}
                 onDelete={() => deleteRule(layerId, rule.id)}
                 onToggle={() =>
                   updateRule(layerId, rule.id, { enabled: !rule.enabled })
@@ -173,20 +239,17 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
           </div>
         ))}
 
-        {showForm ? (
+        {showForm && editingId === null && draft !== null ? (
           <RuleForm
+            values={draft.form}
             fields={allFields}
-            onSave={(rule) => {
-              addRule(layerId, {
-                ...rule,
-                id: crypto.randomUUID(),
-              });
-              setShowForm(false);
-            }}
-            onCancel={() => setShowForm(false)}
+            saveLabel="Add"
+            onChange={handleFormChange}
+            onSave={handleFormSave}
+            onCancel={handleFormCancel}
           />
         ) : (
-          <button className="rule-add-btn" onClick={() => setShowForm(true)}>
+          <button className="rule-add-btn" onClick={openAddForm}>
             + Add Rule
           </button>
         )}
@@ -287,49 +350,59 @@ function RuleRow({
 // ---------------------------------------------------------------------------
 
 interface RuleFormProps {
-  initial?: Rule;
+  values: RuleFormValues;
   fields: string[];
-  onSave: (rule: Rule) => void;
+  /** "Add" for a new rule, "Update" for an existing one — the caller already
+   *  knows which (it is the one that knows the draft's `editingId`), so the
+   *  form does not have to infer it from `values`. */
+  saveLabel: string;
+  onChange: (values: RuleFormValues) => void;
+  onSave: (values: RuleFormValues) => void;
   onCancel: () => void;
 }
 
-function RuleForm({ initial, fields, onSave, onCancel }: RuleFormProps) {
-  const [name, setName] = useState(initial?.name ?? "");
-  const [color, setColor] = useState(initial?.color ?? "#7cb518");
-  const [logic, setLogic] = useState<LogicMode>(initial?.logic ?? "AND");
-  const [conditions, setConditions] = useState<Condition[]>(
-    initial
-      ? [...initial.conditions]
-      : [{ field: "inclinationDeg", operator: "<", value: 10 }],
-  );
+/**
+ * Controlled by the caller's draft (`RuleDraft.form`): every keystroke calls
+ * {@link RuleFormProps.onChange} rather than touching local state, which is
+ * what lets the draft survive this component unmounting when the active
+ * layer changes (Task 27) — there is no local state here to lose.
+ */
+function RuleForm({
+  values,
+  fields,
+  saveLabel,
+  onChange,
+  onSave,
+  onCancel,
+}: RuleFormProps) {
+  const { name, color, logic, conditions } = values;
 
   const addCondition = () => {
-    setConditions([
-      ...conditions,
-      { field: "inclinationDeg", operator: "<", value: 0 },
-    ]);
+    onChange({
+      ...values,
+      conditions: [
+        ...conditions,
+        { field: "inclinationDeg", operator: "<", value: 0 },
+      ],
+    });
   };
 
   const removeCondition = (idx: number) => {
-    setConditions(conditions.filter((_, i) => i !== idx));
+    onChange({ ...values, conditions: conditions.filter((_, i) => i !== idx) });
   };
 
   const updateCondition = (idx: number, patch: Partial<Condition>) => {
-    setConditions(
-      conditions.map((c, i) => (i === idx ? { ...c, ...patch } : c)),
-    );
+    onChange({
+      ...values,
+      conditions: conditions.map((c, i) =>
+        i === idx ? { ...c, ...patch } : c,
+      ),
+    });
   };
 
   const handleSave = () => {
     if (!name.trim()) return;
-    onSave({
-      id: initial?.id ?? "",
-      name: name.trim(),
-      color,
-      logic,
-      conditions,
-      enabled: initial?.enabled ?? true,
-    });
+    onSave({ ...values, name: name.trim() });
   };
 
   return (
@@ -339,13 +412,13 @@ function RuleForm({ initial, fields, onSave, onCancel }: RuleFormProps) {
           className="rule-input"
           placeholder="Rule name"
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => onChange({ ...values, name: e.target.value })}
         />
         <input
           type="color"
           className="rule-color-picker"
           value={color}
-          onChange={(e) => setColor(e.target.value)}
+          onChange={(e) => onChange({ ...values, color: e.target.value })}
         />
       </div>
 
@@ -354,7 +427,9 @@ function RuleForm({ initial, fields, onSave, onCancel }: RuleFormProps) {
           <select
             className="rule-select"
             value={logic}
-            onChange={(e) => setLogic(e.target.value as LogicMode)}
+            onChange={(e) =>
+              onChange({ ...values, logic: e.target.value as LogicMode })
+            }
           >
             <option value="AND">AND (all must match)</option>
             <option value="OR">OR (any must match)</option>
@@ -426,7 +501,7 @@ function RuleForm({ initial, fields, onSave, onCancel }: RuleFormProps) {
 
       <div className="rule-form-actions">
         <button className="rule-save-btn" onClick={handleSave}>
-          {initial ? "Update" : "Add"}
+          {saveLabel}
         </button>
         <button className="rule-cancel-btn" onClick={onCancel}>
           Cancel
@@ -434,6 +509,27 @@ function RuleForm({ initial, fields, onSave, onCancel }: RuleFormProps) {
       </div>
     </div>
   );
+}
+
+/** The "+ Add Rule" form's starting values — same defaults the old
+ *  uncontrolled `RuleForm` seeded itself with when `initial` was absent. */
+function defaultRuleFormValues(): RuleFormValues {
+  return {
+    name: "",
+    color: "#7cb518",
+    logic: "AND",
+    conditions: [{ field: "inclinationDeg", operator: "<", value: 10 }],
+  };
+}
+
+/** The "Edit" form's starting values, seeded from the rule being edited. */
+function ruleFormValuesFromRule(rule: Rule): RuleFormValues {
+  return {
+    name: rule.name,
+    color: rule.color,
+    logic: rule.logic,
+    conditions: [...rule.conditions],
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -73,6 +73,7 @@ import {
   activateLayer,
   installWorkspaceInvariants,
 } from "../features/workspace/layerCoordination";
+import { installRuleDraftInvariants } from "../features/rules/ruleDraftStore";
 import { useWorkspaceStore } from "../features/workspace/workspaceStore";
 import { useStreamStore } from "../features/streaming/streamStore";
 import { useTotalObjectCount } from "../features/streaming/useTotalObjectCount";
@@ -694,6 +695,15 @@ export function App({
    * and a restored selection would have nothing holding it to its layer.
    */
   useEffect(() => installWorkspaceInvariants(), []);
+
+  /**
+   * Drops a layer's unsaved rule-editor draft the moment that layer leaves
+   * `useLayerStore` — same installed-once shape as the invariants above.
+   * Without it a removed layer's draft would sit in `useRuleDraftStore`
+   * forever: unreachable (its `layerId` never renders again), but never
+   * freed. See `features/rules/ruleDraftStore.ts`.
+   */
+  useEffect(() => installRuleDraftInvariants(), []);
 
   /**
    * The interface appearance, installed ONCE — the same shape as the

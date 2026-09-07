@@ -24,6 +24,7 @@ import { CellCache } from "@cityjson/navara-flatcitybuf";
 import { buildResidentModel } from "@cityjson/navara-flatcitybuf";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
+import { useRuleDraftStore } from "../../../../src/features/rules/ruleDraftStore";
 import {
   SINGLE_COLOR_HEX,
   UNMATCHED_COLOR_HEX,
@@ -54,6 +55,7 @@ afterEach(() => {
   useLayerStore.setState({ layers: [] });
   useWorkspaceStore.setState({ activeLayerId: null });
   useStreamStore.setState({ streams: {} });
+  useRuleDraftStore.setState({ drafts: {} });
 });
 
 function emptyModel(): CityModel {
@@ -259,5 +261,81 @@ describe("RulesEditor — the layer it edits", () => {
     const state = useLayerStore.getState();
     expect(state.layers.find((l) => l.id === "R")!.rules).toHaveLength(1);
     expect(state.layers.find((l) => l.id === "L")!.rules).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unsaved draft survives switching layers (Task 27)
+// ---------------------------------------------------------------------------
+
+describe("RulesEditor — unsaved draft survives switching layers", () => {
+  beforeEach(() => {
+    useLayerStore.setState({
+      layers: [
+        baseLayer({ id: "A", name: "Delft" }),
+        baseLayer({ id: "B", name: "Rotterdam" }),
+      ],
+    });
+  });
+
+  it("restores the unsaved form's values when the layer is revisited", () => {
+    const { rerender } = render(
+      <RulesEditor model={emptyModel()} layerId="A" />,
+    );
+
+    fireEvent.click(screen.getByText("+ Add Rule"));
+    fireEvent.change(screen.getByPlaceholderText("Rule name"), {
+      target: { value: "Steep south roofs" },
+    });
+    fireEvent.click(screen.getByText("+ Condition"));
+
+    // Two condition rows now (the default one plus the added one).
+    expect(screen.getAllByText("x")).toHaveLength(2);
+
+    // Switch to layer B: its editor starts closed and empty, not carrying
+    // A's half-typed form.
+    rerender(<RulesEditor model={emptyModel()} layerId="B" />);
+    expect(screen.queryByPlaceholderText("Rule name")).toBeNull();
+    expect(screen.getByText("+ Add Rule")).toBeTruthy();
+
+    // Back to A: the same in-progress values are still there.
+    rerender(<RulesEditor model={emptyModel()} layerId="A" />);
+    expect(screen.getByPlaceholderText("Rule name")).toHaveProperty(
+      "value",
+      "Steep south roofs",
+    );
+    expect(screen.getAllByText("x")).toHaveLength(2);
+  });
+
+  it("clears the draft on Save", () => {
+    render(<RulesEditor model={emptyModel()} layerId="A" />);
+
+    fireEvent.click(screen.getByText("+ Add Rule"));
+    fireEvent.change(screen.getByPlaceholderText("Rule name"), {
+      target: { value: "New rule" },
+    });
+    fireEvent.click(screen.getByText("Add"));
+
+    expect(useRuleDraftStore.getState().drafts.A).toBeNull();
+    expect(screen.queryByPlaceholderText("Rule name")).toBeNull();
+    expect(
+      useLayerStore.getState().layers.find((l) => l.id === "A")!.rules,
+    ).toHaveLength(1);
+  });
+
+  it("clears the draft on Cancel", () => {
+    render(<RulesEditor model={emptyModel()} layerId="A" />);
+
+    fireEvent.click(screen.getByText("+ Add Rule"));
+    fireEvent.change(screen.getByPlaceholderText("Rule name"), {
+      target: { value: "Discarded" },
+    });
+    fireEvent.click(screen.getByText("Cancel"));
+
+    expect(useRuleDraftStore.getState().drafts.A).toBeNull();
+    expect(screen.queryByPlaceholderText("Rule name")).toBeNull();
+    expect(
+      useLayerStore.getState().layers.find((l) => l.id === "A")!.rules,
+    ).toHaveLength(0);
   });
 });
