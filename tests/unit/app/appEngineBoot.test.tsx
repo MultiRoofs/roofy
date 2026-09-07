@@ -141,7 +141,14 @@ vi.mock(
       await importOriginal<
         typeof import("../../../src/domain/citymodel/loadCityModel")
       >();
-    return { ...actual, loadFromUrl: (url: string) => loadFromUrl(url) };
+    // ALL of them: the third argument is the encoding the Add Layer dialog's
+    // correction resolved to, and a mock that forwarded only the URL would
+    // hide an app that dropped it on the way through.
+    return {
+      ...actual,
+      loadFromUrl: (...args: Parameters<typeof actual.loadFromUrl>) =>
+        loadFromUrl(...args),
+    };
   },
 );
 
@@ -271,7 +278,12 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
     render(<App persistenceStore={emptyStore} />);
     loadFromUrlBox(JSON_URL);
 
-    await waitFor(() => expect(loadFromUrl).toHaveBeenCalledWith(JSON_URL));
+    // Three arguments: the URL, the default http client, and the encoding the
+    // landing page's detection resolved to — a `.city.json` reaching the
+    // reader as CityJSON rather than being re-derived there.
+    await waitFor(() =>
+      expect(loadFromUrl).toHaveBeenCalledWith(JSON_URL, undefined, "cityjson"),
+    );
     // Still parsing: a CityJSON layer mounts the viewport as a CONSEQUENCE of
     // existing, so there is nothing to boot early for.
     expect(screen.queryByTestId("navara-viewport")).toBeNull();

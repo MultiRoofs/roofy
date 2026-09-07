@@ -55,6 +55,36 @@ vi.mock("../../../../src/insights/layerTables", () => ({
   enqueueLayerTable: tables.enqueueLayerTable,
 }));
 
+/**
+ * `loadFromUrl` PASSED THROUGH, with its arguments recorded.
+ *
+ * The URL city path hands the resolved encoding to the parser as a third
+ * argument, and nothing else in this file can see that it did — the fetch
+ * fails under Node either way, so a dropped override would look exactly like
+ * an honoured one. The real function still runs, so every other test in this
+ * file behaves as it did.
+ */
+const loadCityModel = vi.hoisted(() => ({
+  loadFromUrlArgs: vi.fn<(...args: unknown[]) => void>(),
+}));
+
+vi.mock(
+  "../../../../src/domain/citymodel/loadCityModel",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("../../../../src/domain/citymodel/loadCityModel")
+      >();
+    return {
+      ...actual,
+      loadFromUrl: (...args: Parameters<typeof actual.loadFromUrl>) => {
+        loadCityModel.loadFromUrlArgs(...args);
+        return actual.loadFromUrl(...args);
+      },
+    };
+  },
+);
+
 vi.mock(
   "../../../../src/features/cityparquet/loadCityParquet",
   async (importOriginal) => ({
@@ -848,18 +878,42 @@ describe("useLayerFileLoader — the encoding override", () => {
     expect(textSpy).not.toHaveBeenCalled();
   });
 
-  it("keeps a `.fcb` URL OFF the streaming route when the override says CityJSON", async () => {
+  it("keeps a `.fcb` FILE off the streaming route when the override says CityJSON — and really parses it", async () => {
     const { result } = renderHook(() => useLayerFileLoader());
+    // CityJSON bytes under a `.fcb` name: the override is the only thing that
+    // can route this, and the layer that lands is the proof it was honoured —
+    // "openStream was not called" alone would also be true of a crash.
+    const file = new File([MINIMAL_CITYJSON], "model.fcb");
 
-    // The fetch fails in this environment, which is fine: what is pinned is
-    // that the streaming plugin was never asked.
     await act(async () => {
-      await result.current.addLayerFromUrl("https://x/model.fcb", {
-        encoding: "cityjson",
-      });
+      await result.current.addLayerFromFile(file, { encoding: "cityjson" });
     });
 
     expect(openStream).not.toHaveBeenCalled();
+    const layers = useLayerStore.getState().layers;
+    expect(layers).toHaveLength(1);
+    expect(layers[0]!.isStreaming).toBe(false);
+    expect(layers[0]!.model.sourceEncoding).toBe("cityjson");
+  });
+
+  it("hands the override to `loadFromUrl` for a remote city model", async () => {
+    loadCityModel.loadFromUrlArgs.mockClear();
+    const { result } = renderHook(() => useLayerFileLoader());
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/model.json", {
+        encoding: "cityjsonseq",
+      });
+    });
+
+    // The fetch fails here (no network), which is beside the point: what is
+    // pinned is that the corrected encoding reached the reader rather than
+    // being re-derived from the URL's `.json`.
+    expect(loadCityModel.loadFromUrlArgs.mock.calls[0]).toEqual([
+      "https://x/model.json",
+      undefined,
+      "cityjsonseq",
+    ]);
   });
 
   it("routes an extensionless URL into the CityParquet arm when the override says so", async () => {
