@@ -31,7 +31,7 @@ import {
   hexColorToNumber,
   styleColorNumber,
 } from "../features/geoLayers/geoLayerStyle";
-import { CITY_HIGHLIGHT_COLOR_HEX } from "./cityColors";
+import { CATEGORY_OTHER_HEX, CITY_HIGHLIGHT_COLOR_HEX } from "./cityColors";
 import type { GeoLayer } from "../features/geoLayers/geoLayerStore";
 import {
   geoLayerDescription,
@@ -59,9 +59,9 @@ export interface GeoSourceHandle {
  * `properties` is the source feature's own GeoJSON `properties`, and a real
  * browser (Task 26 step 0, probe b, Navara 0.1.1) confirmed it is populated
  * with DISTINCT values per feature for all three feature-set kinds a mixed
- * GeoJSON produces — point, polyline and polygon. Optional here because
- * nothing in this module needs it yet and a feature without properties is a
- * legal GeoJSON feature; it is what a per-attribute colouring reads (T29).
+ * GeoJSON produces — point, polyline and polygon. Optional because a feature
+ * without properties is a legal GeoJSON feature; it is what "Color by
+ * attribute" reads (T29) to paint a feature its category colour.
  * `batchId`, by contrast, is NOT stable across feature-set recreation: the
  * same probe watched every `update()` mint a fresh set with fresh batch ids,
  * so a value keyed on a batch id must be re-derived on `featureCreated`,
@@ -157,9 +157,11 @@ export interface LiveGeoLayer {
    *  (an `update()` recreates them) can be brought up to date immediately. */
   highlightedBatchId: number | null;
   /** Whether this layer ever carried an evaluated colour. A layer that never
-   *  did is never touched on a clear: an evaluated colour OVERRIDES the layer
-   *  default, so writing one would shadow every future style edit. */
-  hadHighlight: boolean;
+   *  did is never touched by a clear or a paint: an evaluated colour
+   *  OVERRIDES the layer default, so writing one would shadow every future
+   *  style edit. (Was `hadHighlight` before T29 widened what an evaluation
+   *  can paint — a category colour overrides the same default.) */
+  hadFeatureColors: boolean;
   /** The `Color` factory from the last {@link syncGeoHighlight} pass, kept so
    *  the feature-set subscription can re-apply a live highlight on its own.
    *  Per ENTRY rather than module-global: a factory belongs to a view's
@@ -168,50 +170,84 @@ export interface LiveGeoLayer {
 }
 
 /**
- * Push the desired highlight into ONE evaluator.
+ * ONE feature's colour, in priority order: the highlight when the feature is
+ * the picked one; else its category colour when the layer colours by an
+ * attribute; else the layer's own colour.
  *
- * The else-branch returns the layer's own colour rather than omitting `color`,
- * because an omitted key leaves a previous override in place — see
- * {@link GeoFeatureEvaluator}. `entry.highlightedBatchId` is read inside the
- * callback, not captured, so an evaluation the engine re-runs later still
- * answers the current state.
+ * The category lookup is a Map keyed on `String(value)` (or `null` for a
+ * missing attribute), so a value that matches no entry — which, by
+ * `categoriesFor`'s construction, can only happen past the eighth distinct
+ * value, the only way an observed value is absent from the list — falls into
+ * the OTHER bucket. Highlight wins over category, and the base colour is
+ * returned explicitly rather than omitted because an omitted key leaves a
+ * previous override in place (see {@link GeoFeatureEvaluator}).
  */
-function evaluateHighlight(
+function evaluateFeatureColors(
   entry: LiveGeoLayer,
   evaluator: GeoFeatureEvaluator,
+  makeColor: GeoColorFactory,
   highlight: unknown,
   base: unknown,
 ): void {
-  evaluator.evaluate((info) => ({
-    color: info.batchId === entry.highlightedBatchId ? highlight : base,
-  }));
+  const colorByAttribute = entry.style.colorByAttribute;
+  const categoryColors = new Map<string | null, number>();
+  let otherNumber = 0;
+  if (colorByAttribute !== undefined) {
+    for (const category of colorByAttribute.categories) {
+      // A stored category colour always parses (the store normalizes on
+      // write); one that somehow does not is skipped, which reads as OTHER.
+      const number = hexColorToNumber(category.color);
+      if (number !== null) categoryColors.set(category.value, number);
+    }
+    // Non-null: the constant is a literal `#rrggbb`, pinned by
+    // `cityColors.test.ts`.
+    otherNumber = hexColorToNumber(CATEGORY_OTHER_HEX)!;
+  }
+  evaluator.evaluate((info) => {
+    if (info.batchId === entry.highlightedBatchId) {
+      return { color: highlight };
+    }
+    if (colorByAttribute !== undefined) {
+      const raw = info.properties?.[colorByAttribute.attribute];
+      const value = raw === undefined || raw === null ? null : String(raw);
+      // No match in the map can only mean overflow — see `categoriesFor` —
+      // which the OTHER bucket exists for.
+      const number = categoryColors.get(value) ?? otherNumber;
+      return { color: makeColor(number) };
+    }
+    return { color: base };
+  });
 }
 
 /**
- * Re-evaluate every feature set of one layer against `entry.highlightedBatchId`
- * and ask for one update.
+ * Re-evaluate every feature set of one layer against the desired highlight
+ * and the style's `colorByAttribute`, and ask for one update.
  *
- * Skipped entirely for a layer that is not highlighted and never was — see
- * `hadHighlight`. Reported and swallowed like every other engine call here.
+ * Skipped entirely for a layer that has nothing to paint and never did —
+ * see `hadFeatureColors`. Reported and swallowed like every other engine
+ * call here.
  */
-function applyHighlight(
+function applyFeatureColors(
   entry: LiveGeoLayer,
   name: string,
   makeColor: GeoColorFactory,
   highlight: () => unknown,
 ): void {
-  if (entry.highlightedBatchId === null && !entry.hadHighlight) return;
-  if (entry.highlightedBatchId !== null) entry.hadHighlight = true;
+  const paints =
+    entry.highlightedBatchId !== null ||
+    entry.style.colorByAttribute !== undefined;
+  if (!paints && !entry.hadFeatureColors) return;
+  if (paints) entry.hadFeatureColors = true;
   try {
     const base = makeColor(styleColorNumber(entry.style));
     const accent = highlight();
     for (const evaluator of entry.evaluators.values()) {
-      evaluateHighlight(entry, evaluator, accent, base);
+      evaluateFeatureColors(entry, evaluator, makeColor, accent, base);
     }
     entry.layer.forceUpdate?.();
   } catch (error) {
     console.error(
-      `NavaraViewport: the geospatial layer "${name}" could not be highlighted.`,
+      `NavaraViewport: the geospatial layer "${name}" could not be coloured.`,
       error,
     );
   }
@@ -275,7 +311,7 @@ export function syncGeoHighlight(
     // The layer's NAME, not the store id `id`: the same identity every other
     // engine-failure message in this module reports, and the same one the
     // feature-set subscription's own highlight failure uses.
-    applyHighlight(entry, entry.name, makeColor, highlightColor);
+    applyFeatureColors(entry, entry.name, makeColor, highlightColor);
   }
 }
 
@@ -321,15 +357,16 @@ function addPair(view: GeoLayerView, layer: GeoLayer): LiveGeoLayer | null {
       style: layer.style,
       evaluators: new Map(),
       highlightedBatchId: null,
-      hadHighlight: false,
+      hadFeatureColors: false,
       colorFactory: null,
     };
 
     // One subscription per PAIR, for the lifetime of the pair: the engine
     // creates a feature set per material and recreates them on `update()`, so
     // this fires several times and again after every re-describe. A fresh
-    // feature set carries no stale override, so a live highlight is pushed
-    // into it and nothing needs clearing.
+    // feature set carries no stale override, so the DESIRED colours — the
+    // live highlight, and the style's categories (which an `update()` minted
+    // this fresh set for) — are pushed into it and nothing needs clearing.
     const remember = (params: {
       readonly featureSetId?: unknown;
       readonly evaluator: GeoFeatureEvaluator;
@@ -337,21 +374,24 @@ function addPair(view: GeoLayerView, layer: GeoLayer): LiveGeoLayer | null {
       const { evaluator } = params;
       if (evaluator === undefined || evaluator === null) return;
       entry.evaluators.set(params.featureSetId ?? evaluator, evaluator);
-      if (entry.highlightedBatchId === null || entry.colorFactory === null) {
-        return;
-      }
+      if (entry.colorFactory === null) return;
+      const paints =
+        entry.highlightedBatchId !== null ||
+        entry.style.colorByAttribute !== undefined;
+      if (!paints) return;
       const makeColor = entry.colorFactory;
       try {
-        evaluateHighlight(
+        evaluateFeatureColors(
           entry,
           evaluator,
+          makeColor,
           makeColor(GEO_HIGHLIGHT_COLOR_HEX),
           makeColor(styleColorNumber(entry.style)),
         );
         entry.layer.forceUpdate?.();
       } catch (error) {
         console.error(
-          `NavaraViewport: the geospatial layer "${entry.name}" could not be highlighted.`,
+          `NavaraViewport: the geospatial layer "${entry.name}" could not be coloured.`,
           error,
         );
       }
