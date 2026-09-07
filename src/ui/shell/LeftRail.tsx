@@ -45,6 +45,12 @@ export interface LeftRailProps {
   readonly extraRows?: ReadonlyArray<UnavailableRow>;
   readonly pending?: ReadonlyArray<PendingAdd>;
   readonly failed?: ReadonlyArray<FailedAdd>;
+  /** `useLayerFileLoader().failed.length` — separate from `failed` above
+   *  (which the rail already counts INTO the badge) because a failure is not
+   *  merely one more row: it is the one state on this button that deserves
+   *  its own glyph, so a user staring at a closed rail still learns that
+   *  something needs attention. */
+  readonly failedCount?: number;
 }
 
 const NO_ROWS: ReadonlyArray<never> = [];
@@ -53,11 +59,14 @@ export function LeftRail({
   extraRows = NO_ROWS,
   pending = NO_ROWS,
   failed = NO_ROWS,
+  failedCount = 0,
 }: LeftRailProps = {}) {
   const layers = useLayerStore((s) => s.layers);
   const geoLayers = useGeoLayerStore((s) => s.layers);
   const activeItem = useActiveLayer();
   const countId = useId();
+  const failedId = useId();
+  const hasFailed = failedCount > 0;
 
   // Through `unifiedLayerOrder`, like the list itself: the badge counts what
   // the panel would show, not what one store happens to hold.
@@ -78,8 +87,22 @@ export function LeftRail({
         // either — a name that changes with every add is a name a
         // screen-reader user cannot learn — so it is the DESCRIPTION below.
         aria-label="Show layers panel"
-        data-tooltip="Show layers panel"
-        aria-describedby={countId}
+        // The dot below sits INSIDE this button rather than beside it (the
+        // rail is 40px wide; there is no "beside"), so it cannot carry its
+        // own `data-tooltip` — hovering a child hovers the parent too, and
+        // both bubbles would fire over the same corner. The button's own
+        // tooltip says both sentences instead, when there is a dot to
+        // explain.
+        data-tooltip={
+          hasFailed
+            ? `Show layers panel · ${failedCount} failed add${failedCount === 1 ? "" : "s"}`
+            : "Show layers panel"
+        }
+        // `aria-describedby` takes a SPACE-SEPARATED id list — appending
+        // `failedId` rather than replacing `countId` keeps both sentences
+        // reachable, exactly as the visible dot sits beside the badge
+        // rather than covering it.
+        aria-describedby={hasFailed ? `${countId} ${failedId}` : countId}
         onClick={() => useShellStore.getState().setLeftCollapsed(false)}
       >
         <svg viewBox="0 0 24 24" aria-hidden>
@@ -93,6 +116,18 @@ export function LeftRail({
         <span className="left-rail-count" id={countId}>
           {count} layer{count === 1 ? "" : "s"}
         </span>
+        {hasFailed && (
+          <>
+            {/* Decorative only — no `data-tooltip` of its own (see the
+                comment on the button above); the sentence a screen reader
+                gets is the visually-hidden span below, on the same idiom as
+                the count above. */}
+            <span className="left-rail-dot" aria-hidden />
+            <span className="left-rail-count" id={failedId}>
+              {failedCount} failed add{failedCount === 1 ? "" : "s"}
+            </span>
+          </>
+        )}
       </button>
 
       {activeItem !== null && (

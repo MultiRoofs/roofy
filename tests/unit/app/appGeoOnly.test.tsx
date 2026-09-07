@@ -395,6 +395,64 @@ describe("a geospatial-only workspace", () => {
     expect(fitBounds).toHaveBeenCalledTimes(1);
   });
 
+  it("does not fit when a city layer joins while the geo fit's bounds fetch is still in flight", async () => {
+    // The other "joins" case above lets the fit complete FIRST, then adds
+    // the city row — this one pins the narrower window Task 25 is about:
+    // the recheck between `resolveGeoLayerBounds`'s await and `fitBounds`.
+    // A held fetch is what puts the effect inside that window on demand.
+    let resolveFetch!: () => void;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = () =>
+            resolve({
+              ok: true,
+              status: 200,
+              json: async () => FEATURE_COLLECTION,
+            });
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App persistenceStore={emptyStore} />);
+    addUrlFromLandingPage(GEOJSON_URL);
+    await waitFor(() =>
+      expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
+    );
+    readyGate.resolve();
+
+    // The engine is ready and the first `stillTheOnlyRow()` check has
+    // passed (still one geo row) — the effect is now awaiting the fetch.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    // A city layer joins WHILE that fetch is still pending.
+    act(() => {
+      useLayerStore.getState().addLayer({
+        id: "city-1",
+        name: "delft.city.json",
+        model,
+        modelRef: { type: "url", url: "https://example.test/delft.city.json" },
+        visible: true,
+        rules: [],
+        rulesEnabled: true,
+        isStreaming: false,
+      });
+    });
+    await waitFor(() =>
+      expect(useLayerStore.getState().layers).toHaveLength(1),
+    );
+
+    // Only now does the bounds fetch settle — after the workspace stopped
+    // being "one geo row and nothing else". The second `stillTheOnlyRow()`
+    // check must catch this and skip the fit.
+    await act(async () => {
+      resolveFetch();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(fitBounds).not.toHaveBeenCalled();
+  });
+
   it("does not fit an XYZ raster, which has no extent to fit to", async () => {
     render(<App persistenceStore={emptyStore} />);
     addUrlFromLandingPage(RASTER_URL);

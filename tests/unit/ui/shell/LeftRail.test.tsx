@@ -155,4 +155,22 @@ describe("LeftRail", () => {
     expect(container.querySelector(".left-rail-kind")).toBeNull();
     expect(container.querySelector(".left-rail-badge")?.textContent).toBe("0");
   });
+
+  it("shows a state dot only while there are failed adds", () => {
+    const { container, rerender } = render(<LeftRail failedCount={0} />);
+
+    expect(container.querySelector(".left-rail-dot")).toBeNull();
+
+    rerender(<LeftRail failedCount={2} />);
+
+    expect(container.querySelector(".left-rail-dot")).not.toBeNull();
+    const button = screen.getByRole("button", { name: "Show layers panel" });
+    const described = button.getAttribute("aria-describedby");
+    expect(described).toBeTruthy();
+    const ids = described!.split(" ");
+    const failedText = ids
+      .map((id) => document.getElementById(id)?.textContent)
+      .find((text) => text?.includes("failed"));
+    expect(failedText).toBe("2 failed adds");
+  });
 });

@@ -172,3 +172,73 @@ export const useShellStore = create<ShellStore>((set, get) => ({
     }));
   },
 }));
+
+/** One listener installed at a time, same shape as `installThemeListener`:
+ *  a second call tears down the first rather than stacking two. */
+let disposeInstalled: (() => void) | null = null;
+
+/**
+ * Keep the drawer, left panel and right panel inside their own bounds
+ * whenever the window is resized.
+ *
+ * A resize alone never runs `setDrawerHeight` / `setLeftWidth` /
+ * `setRightWidth` — nothing calls them — so a drawer opened tall on a big
+ * monitor, or a width the user dragged to an edge, would sit there
+ * unclamped after the window shrank (a maximize/restore, a monitor change, a
+ * DevTools panel opening). This is the one subscription that re-applies the
+ * SAME ceilings those setters already enforce on every drag, on the event
+ * that is not a drag.
+ *
+ * `leftWidth`/`rightWidth` are clamped against the fixed `SHELL_LIMITS`
+ * (they do not depend on the viewport, unlike the drawer's ceiling) — so a
+ * resize cannot itself make them invalid, but the listener still corrects
+ * whatever got there another way, and does so opportunistically rather than
+ * only guarding the one field the viewport actually affects.
+ *
+ * Writes only the fields that actually changed value, in ONE `set` call —
+ * not three — so a resize that leaves every dimension in range produces no
+ * store update at all.
+ */
+export function installShellListeners(): () => void {
+  disposeInstalled?.();
+
+  const handleResize = (): void => {
+    const innerHeight =
+      typeof window === "undefined" ? 900 : window.innerHeight;
+    const state = useShellStore.getState();
+    // A locally MUTABLE shape, not `Partial<ShellState>`: every field on
+    // `ShellState` is declared `readonly` (so nothing outside a store action
+    // can mutate it in place), and that modifier survives `Partial<>`. This
+    // object is still assignable to it when handed to `setState` below —
+    // only building it in place needs the readonly stripped.
+    const patch: { -readonly [K in keyof ShellState]?: ShellState[K] } = {};
+
+    const drawerHeight = clampDrawerHeight(state.drawerHeight, innerHeight);
+    if (drawerHeight !== state.drawerHeight) patch.drawerHeight = drawerHeight;
+
+    const leftWidth = clamp(
+      state.leftWidth,
+      SHELL_LIMITS.leftMin,
+      SHELL_LIMITS.leftMax,
+    );
+    if (leftWidth !== state.leftWidth) patch.leftWidth = leftWidth;
+
+    const rightWidth = clamp(
+      state.rightWidth,
+      SHELL_LIMITS.rightMin,
+      SHELL_LIMITS.rightMax,
+    );
+    if (rightWidth !== state.rightWidth) patch.rightWidth = rightWidth;
+
+    if (Object.keys(patch).length > 0) useShellStore.setState(patch);
+  };
+
+  window.addEventListener("resize", handleResize);
+
+  const dispose = (): void => {
+    window.removeEventListener("resize", handleResize);
+    if (disposeInstalled === dispose) disposeInstalled = null;
+  };
+  disposeInstalled = dispose;
+  return dispose;
+}

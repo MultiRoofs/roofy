@@ -3,6 +3,7 @@ import {
   useShellStore,
   defaultShellState,
   clampDrawerHeight,
+  installShellListeners,
   SHELL_LIMITS,
 } from "../../../../src/ui/shell/shellStore";
 import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
@@ -240,5 +241,75 @@ describe("useShellStore", () => {
         "details",
       ]);
     });
+  });
+});
+
+describe("installShellListeners", () => {
+  beforeEach(() => {
+    Object.defineProperty(window, "innerHeight", {
+      value: 900,
+      configurable: true,
+      writable: true,
+    });
+    useShellStore.setState(defaultShellState(1440, 900));
+  });
+
+  it("re-clamps drawerHeight when the window shrinks", () => {
+    useShellStore.getState().setDrawerHeight(2000);
+    expect(useShellStore.getState().drawerHeight).toBe(700);
+
+    const dispose = installShellListeners();
+    Object.defineProperty(window, "innerHeight", {
+      value: 600,
+      configurable: true,
+      writable: true,
+    });
+    window.dispatchEvent(new Event("resize"));
+
+    expect(useShellStore.getState().drawerHeight).toBe(400);
+    dispose();
+  });
+
+  it("re-clamps leftWidth and rightWidth against SHELL_LIMITS on resize", () => {
+    // Bypasses the setters' own clamp, to simulate a stray out-of-range
+    // value the listener still has to fix.
+    useShellStore.setState({ leftWidth: 1000, rightWidth: 50 });
+
+    const dispose = installShellListeners();
+    window.dispatchEvent(new Event("resize"));
+
+    expect(useShellStore.getState().leftWidth).toBe(SHELL_LIMITS.leftMax);
+    expect(useShellStore.getState().rightWidth).toBe(SHELL_LIMITS.rightMin);
+    dispose();
+  });
+
+  it("writes nothing when every value is already in range", () => {
+    let calls = 0;
+    const unsubscribe = useShellStore.subscribe(() => {
+      calls += 1;
+    });
+
+    const dispose = installShellListeners();
+    window.dispatchEvent(new Event("resize"));
+
+    expect(calls).toBe(0);
+    unsubscribe();
+    dispose();
+  });
+
+  it("stops listening once disposed", () => {
+    useShellStore.getState().setDrawerHeight(2000);
+    const dispose = installShellListeners();
+    dispose();
+
+    Object.defineProperty(window, "innerHeight", {
+      value: 300,
+      configurable: true,
+      writable: true,
+    });
+    window.dispatchEvent(new Event("resize"));
+
+    // Unchanged: the listener was removed before this resize fired.
+    expect(useShellStore.getState().drawerHeight).toBe(700);
   });
 });

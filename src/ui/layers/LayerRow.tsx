@@ -46,6 +46,17 @@ export interface LayerRowProps {
   readonly onZoom: (() => void) | null;
   readonly onOpenTable: (() => void) | null;
   readonly onRemove: () => void;
+  /** Vector kind only: true while the layer's data has not survived a
+   *  reload (`isGeoLayerUnavailable`) — gates the face Re-link/Remove pair
+   *  below, the same pair `PlaceholderRow`'s "unavailable" kind offers for a
+   *  file-backed city model with no store entry at all. A geo layer keeps
+   *  its store row through this state, so it gets the pair on the ROW
+   *  itself rather than a placeholder swapped in for it. */
+  readonly unavailable?: boolean;
+  /** Vector kind only, paired with `unavailable`. Same shape as
+   *  `PlaceholderRow.onRelink`: a raw `File`, so the caller (which already
+   *  reads a store) owns the parse and the write. */
+  readonly onRelink?: (file: File) => void;
 }
 
 export function LayerRow({
@@ -60,9 +71,12 @@ export function LayerRow({
   onZoom,
   onOpenTable,
   onRemove,
+  unavailable,
+  onRelink,
 }: LayerRowProps) {
   const { name, visible } = item.layer;
   const rowRef = useRef<HTMLDivElement>(null);
+  const relinkInputRef = useRef<HTMLInputElement>(null);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(name);
   // A REF beside the state, read synchronously inside one event: ending the
@@ -179,6 +193,55 @@ export function LayerRow({
           {filterChip}
         </span>
       </span>
+
+      {kind === "vector" && unavailable && onRelink && (
+        <>
+          {/* Same shape as `PlaceholderRow`'s pair: a button that clicks a
+              hidden input (a `<label>` is not a tab stop), plus a Remove
+              beside it — this row still has a store entry (unlike a
+              placeholder), so Remove is `removeGeoLayer`, not a local
+              dismiss. Both stop propagation: the row's own `onClick`
+              activates the layer, which a click aimed at either button did
+              not ask for. */}
+          <button
+            type="button"
+            className="layer-row-link-btn"
+            aria-label={`Re-link ${name}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              relinkInputRef.current?.click();
+            }}
+          >
+            Re-link
+          </button>
+          <input
+            ref={relinkInputRef}
+            type="file"
+            accept=".geojson,.json"
+            data-testid="relink-input"
+            hidden
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              // Cleared so re-picking the SAME file after a parse failure
+              // fires `change` again.
+              e.target.value = "";
+              if (file) onRelink(file);
+            }}
+          />
+          <button
+            type="button"
+            className="layer-row-link-btn layer-row-dismiss"
+            aria-label={`Remove ${name}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
+          >
+            Remove
+          </button>
+        </>
+      )}
 
       <LayerRowMenu
         name={name}

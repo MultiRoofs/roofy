@@ -27,7 +27,7 @@
  * would change the number of hooks whenever a layer is added — the same
  * reason `LayerPanel` has a `LayerObjectCount` component.
  */
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   resolveActiveLayer,
   unifiedLayerOrder,
@@ -47,6 +47,7 @@ import {
   useGeoLayerStore,
   type GeoJsonLayerConfig,
 } from "../../features/geoLayers/geoLayerStore";
+import { parseGeoJsonText } from "../../features/geoLayers/classifyGeoSource";
 import { useStreamStore } from "../../features/streaming/streamStore";
 import { getResidentModel } from "../../features/streaming/residentModel";
 import { closeStreamingLayer } from "../../features/streaming/openStreamingLayer";
@@ -181,6 +182,14 @@ function StoreLayerRow({
   const removeLayer = useLayerStore((s) => s.removeLayer);
   const updateGeoLayer = useGeoLayerStore((s) => s.updateGeoLayer);
   const removeGeoLayer = useGeoLayerStore((s) => s.removeGeoLayer);
+  const relinkGeoJsonLayer = useGeoLayerStore((s) => s.relinkGeoJsonLayer);
+
+  // A failed RE-LINK attempt, not a failed load: the layer already has a
+  // store row (unlike `useLayerFileLoader`'s `failed`, which is for adds
+  // that never got one), so its own state carries the error rather than a
+  // second list. Cleared at the start of every attempt so a second, good
+  // file replaces a stale message rather than sitting beside it.
+  const [relinkError, setRelinkError] = useState<string | null>(null);
 
   const streamVersion = useStreamStore((s) => s.streams[id]?.version);
   const streamStatus = useStreamStore((s) => s.streams[id]?.status);
@@ -226,6 +235,10 @@ function StoreLayerRow({
       // The same bargain a file-backed city model gets: the document was too
       // big for localStorage, so the row kept the name and asks for the file.
       unavailable: geo !== null && isGeoLayerUnavailable(geo),
+      // Wins over `unavailable` in `layerStateLine`'s own precedence — a
+      // failed re-link is worded exactly like a failed add, "Error · …",
+      // rather than a bespoke message this row would own alone.
+      error: relinkError,
     };
   } else {
     input = { kind };
@@ -262,6 +275,19 @@ function StoreLayerRow({
         closeStreamingLayer(getStreamPlugin(), id);
         removeLayer(id);
       }}
+      unavailable={kind === "vector" && input.unavailable === true}
+      onRelink={
+        kind === "vector"
+          ? (file) => {
+              setRelinkError(null);
+              void (async () => {
+                const parsed = parseGeoJsonText(await file.text());
+                if (parsed.ok) relinkGeoJsonLayer(id, parsed.data);
+                else setRelinkError(parsed.error);
+              })();
+            }
+          : undefined
+      }
     />
   );
 }

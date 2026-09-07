@@ -1301,6 +1301,26 @@ body {
   border: 0;
 }
 
+/* A failed add, on the rail button: the same `--danger` the status bar's
+   own error dot uses. Bottom-right so it never collides with the layer-count
+   badge in the top-right corner. Decorative (`aria-hidden`) — the sentence a
+   screen reader gets is the visually-hidden span beside it, on the same
+   idiom as `.left-rail-count`.
+   Selector is two classes deep, not one: it also carries `data-tooltip`
+   (for the hover bubble), and `[data-tooltip] { position: relative }` below
+   has the same specificity as a single class — declared LATER in this file,
+   it would win the position property and strand the dot at the button's own
+   origin. `.left-rail-btn .left-rail-dot` outweighs it. */
+.left-rail-btn .left-rail-dot {
+  position: absolute;
+  bottom: -0.1rem;
+  right: -0.1rem;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
 .left-rail-kind {
   display: flex;
   align-items: center;

@@ -102,7 +102,7 @@ import type { AddUrlResult } from "../ui/stac/StacBrowser";
 import { ShareDialog } from "../ui/ShareDialog";
 import { StatusBar } from "../ui/StatusBar";
 import { ViewerShell } from "../ui/shell/ViewerShell";
-import { useShellStore } from "../ui/shell/shellStore";
+import { installShellListeners, useShellStore } from "../ui/shell/shellStore";
 import { LeftRail } from "../ui/shell/LeftRail";
 import { PreferencesMenu } from "../ui/header/PreferencesMenu";
 import { installThemeListener } from "../features/theme/themeStore";
@@ -699,6 +699,14 @@ export function App({
    * attribute.
    */
   useEffect(() => installThemeListener(), []);
+
+  /**
+   * Keeps the drawer height and the two side panels inside their own
+   * bounds across a window resize — a maximize/restore, a monitor change,
+   * DevTools opening — the same shape as the two installs above: a
+   * subscription to something outside React, installed once.
+   */
+  useEffect(() => installShellListeners(), []);
 
   // Initialize DuckDB-wasm on mount, and subscribe the layer-table registry to
   // the stores. One install, torn down with the app: the subscriptions are
@@ -1761,6 +1769,7 @@ export function App({
                 extraRows={unavailableRows}
                 pending={pending}
                 failed={failed}
+                failedCount={failed.length}
               />
             ) : (
               <LeftPanel

@@ -15,7 +15,13 @@
  * always leave a visible row, never a silence.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { LayerList } from "../../../../src/ui/layers/LayerList";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import type { Layer } from "../../../../src/features/layers/layerStore";
@@ -242,6 +248,59 @@ describe("LayerList — the rows", () => {
     renderList();
 
     expect(screen.getByText("Needs re-link")).toBeTruthy();
+  });
+
+  it("re-links a snapshot-restored geo layer from its own row, and becomes live", async () => {
+    geoStore().addGeoLayer({ name: "Roads", kind: "geojson", config: {} });
+    renderList();
+
+    const file = new File(
+      [JSON.stringify({ type: "FeatureCollection", features: [{}] })],
+      "roads.geojson",
+    );
+    fireEvent.change(screen.getByTestId("relink-input"), {
+      target: { files: [file] },
+    });
+
+    await waitFor(() => expect(screen.getByText("1 feature")).toBeTruthy());
+    expect(screen.queryByText("Needs re-link")).toBeNull();
+    // The row is a live vector row now: the data it was given is what a real
+    // add would have produced, so the geo store holds it.
+    expect(geoStore().layers[0]).toMatchObject({
+      kind: "geojson",
+      config: { data: { type: "FeatureCollection", features: [{}] } },
+    });
+  });
+
+  it("shows a re-link parse failure inline, and keeps offering Re-link", async () => {
+    geoStore().addGeoLayer({ name: "Roads", kind: "geojson", config: {} });
+    renderList();
+
+    fireEvent.change(screen.getByTestId("relink-input"), {
+      target: { files: [new File(["not json"], "roads.geojson")] },
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Error · This file is not valid JSON."),
+      ).toBeTruthy(),
+    );
+    // Still unavailable — a failed re-link must not strand the user without
+    // a way to try again.
+    expect(screen.getByRole("button", { name: "Re-link Roads" })).toBeTruthy();
+  });
+
+  it("removes a snapshot-restored geo layer from its own row", () => {
+    const id = geoStore().addGeoLayer({
+      name: "Roads",
+      kind: "geojson",
+      config: {},
+    });
+    renderList();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Roads" }));
+
+    expect(geoStore().layers.find((l) => l.id === id)).toBeUndefined();
   });
 });
 
