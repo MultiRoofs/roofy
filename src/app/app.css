@@ -3171,10 +3171,12 @@ body {
 
 /* ═══════════════════════════════════════════════════════════════
    LAYER LIST (12.2) — the redesign's ONE list, for every kind of layer.
-   The LAYER PANEL block above still dresses the incumbent two-section
-   pane; Task 23 removes it. Nothing here is shared with it: the row is a
-   two-line block (name over a state line) rather than a one-line strip of
-   controls, so a rule reused between them would have to fight itself.
+   The LAYER ROW PARTS block above is what survived the incumbent
+   two-section pane after Task 23 (GoogleTilesPanel's row chrome, the
+   LoD/appearance selects, the shared geo style controls). Nothing here
+   is shared with it: the row is a two-line block (name over a state
+   line) rather than a one-line strip of controls, so a rule reused
+   between them would have to fight itself.
    ═══════════════════════════════════════════════════════════════ */
 
 .layer-list {
