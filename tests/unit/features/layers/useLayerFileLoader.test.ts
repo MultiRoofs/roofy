@@ -805,3 +805,145 @@ describe("useLayerFileLoader — several adds at once, and retrying", () => {
     expect(result.current.error).toBe("Failed to load remote file.");
   });
 });
+
+// ---------------------------------------------------------------------------
+// The ENCODING override — the Add Layer dialog's correction control.
+//
+// Detection from a name is a guess (a server that serves FlatCityBuf from
+// `/model.json` is not exotic), so the dialog shows what it guessed and lets
+// the user correct it. That correction is worth nothing unless it reaches the
+// ROUTING: which arm of the loader takes the source, and which parser reads
+// the bytes. These are the end-to-end checks that it does.
+// ---------------------------------------------------------------------------
+
+describe("useLayerFileLoader — the encoding override", () => {
+  it("takes the STREAMING route for a `.json` URL overridden to FlatCityBuf", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/model.json", {
+        encoding: "flatcitybuf",
+      });
+    });
+
+    expect(openStream).toHaveBeenCalledTimes(1);
+    expect(
+      (openStream.mock.calls[0]![0] as { source: unknown }).source,
+    ).toEqual({ url: "https://x/model.json" });
+    expect(useLayerStore.getState().layers[0]!.isStreaming).toBe(true);
+  });
+
+  it("takes the STREAMING route for a `.json` FILE overridden to FlatCityBuf, as a Blob", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    const file = new File(["fake fcb bytes"], "model.json");
+    const textSpy = vi.spyOn(file, "text");
+
+    await act(async () => {
+      await result.current.addLayerFromFile(file, { encoding: "flatcitybuf" });
+    });
+
+    const source = (openStream.mock.calls[0]![0] as { source: { blob: Blob } })
+      .source;
+    expect(source.blob).toBe(file);
+    expect(textSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps a `.fcb` URL OFF the streaming route when the override says CityJSON", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+
+    // The fetch fails in this environment, which is fine: what is pinned is
+    // that the streaming plugin was never asked.
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/model.fcb", {
+        encoding: "cityjson",
+      });
+    });
+
+    expect(openStream).not.toHaveBeenCalled();
+  });
+
+  it("routes an extensionless URL into the CityParquet arm when the override says so", async () => {
+    cityparquet.loadCityParquetFromUrl.mockResolvedValue(PARQUET_MODEL);
+    const { result } = renderHook(() => useLayerFileLoader());
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/delft-package", {
+        encoding: "cityparquet",
+      });
+    });
+
+    expect(cityparquet.loadCityParquetFromUrl).toHaveBeenCalledWith(
+      "https://x/delft-package",
+    );
+    expect(useLayerStore.getState().layers[0]!.model.sourceEncoding).toBe(
+      "cityparquet",
+    );
+  });
+
+  it("keeps a `.parquet` URL OUT of the CityParquet arm when the override says CityJSON", async () => {
+    // The reader fake is module-level and keeps its calls across this file.
+    cityparquet.loadCityParquetFromUrl.mockClear();
+    const { result } = renderHook(() => useLayerFileLoader());
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/building.parquet", {
+        encoding: "cityjson",
+      });
+    });
+
+    expect(cityparquet.loadCityParquetFromUrl).not.toHaveBeenCalled();
+  });
+
+  it("hands the override to the PARSER: one text, two readings", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    // A single CityJSON line IS a one-line CityJSONSeq document, so the same
+    // bytes parse under either reader — which makes the resulting model's
+    // `sourceEncoding` a clean witness for which one ran.
+    const file = new File([MINIMAL_CITYJSON], "ambiguous.city.json");
+
+    await act(async () => {
+      await result.current.addLayerFromFile(file, {
+        encoding: "cityjsonseq",
+      });
+    });
+
+    expect(useLayerStore.getState().layers[0]!.model.sourceEncoding).toBe(
+      "cityjsonseq",
+    );
+  });
+
+  it("routes a `.city.json` file with NO override as CityJSON, exactly as before", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    const file = new File([MINIMAL_CITYJSON], "delft.city.json");
+
+    await act(async () => {
+      await result.current.addLayerFromFile(file);
+    });
+
+    expect(openStream).not.toHaveBeenCalled();
+    expect(useLayerStore.getState().layers[0]!.model.sourceEncoding).toBe(
+      "cityjson",
+    );
+  });
+
+  it("a retry re-runs the add with the SAME override", async () => {
+    const { result } = renderHook(() => useLayerFileLoader());
+    openStream.mockRejectedValueOnce(new Error("network down"));
+
+    await act(async () => {
+      await result.current.addLayerFromUrl("https://x/model.json", {
+        encoding: "flatcitybuf",
+      });
+    });
+    expect(useLayerStore.getState().layers).toHaveLength(0);
+
+    await act(async () => {
+      result.current.failed[0]!.retry();
+    });
+
+    // Twice: the retry took the streaming route too. Without the override in
+    // the closure it would have fetched `/model.json` as CityJSON instead.
+    expect(openStream).toHaveBeenCalledTimes(2);
+    expect(useLayerStore.getState().layers[0]!.isStreaming).toBe(true);
+  });
+});

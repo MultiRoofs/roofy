@@ -11,6 +11,7 @@ import {
   parseCityJSON,
   parseCityJSONSeq,
   type CityJSONRoot,
+  type CityModelEncoding,
 } from "@cityjson/navara-core";
 import { parseCityGML } from "./citygml/parseCityGML";
 import { isZipBytes, parseCityGmlArchive } from "./cityGmlArchive";
@@ -18,9 +19,18 @@ import { detectEncoding } from "./detectEncoding";
 
 /**
  * Parse city model text content. Format is detected from the name/URL.
+ *
+ * `encoding` overrides that detection — the Add Layer dialog's correction
+ * control, which the user reaches when a name lies about its contents (a
+ * CityJSONSeq tile published as `.json`). Detection from a name is a guess and
+ * is presented as one; this is where the corrected answer lands.
  */
-export function parseText(nameOrUrl: string, text: string): CityModel {
-  const encoding = detectEncoding(nameOrUrl);
+export function parseText(
+  nameOrUrl: string,
+  text: string,
+  encodingOverride?: CityModelEncoding,
+): CityModel {
+  const encoding = encodingOverride ?? detectEncoding(nameOrUrl);
 
   if (encoding === "cityjsonseq") {
     return parseCityJSONSeq(text);
@@ -204,13 +214,16 @@ async function decodeOrExplain(
  * bytes, so `*.city.json.gz` assets work whether the server hands back the
  * compressed file verbatim or already decompressed it via Content-Encoding.
  *
- * Accepts an optional HttpClient for platform abstraction (Tauri, testing).
+ * Accepts an optional HttpClient for platform abstraction (Tauri, testing),
+ * and an optional `encodingOverride` — the dialog's correction control, for a
+ * URL whose path does not say what the server really serves.
  */
 export async function loadFromUrl(
   url: string,
   http: HttpClient = defaultHttp,
+  encodingOverride?: CityModelEncoding,
 ): Promise<LoadedModel> {
-  const encoding = detectEncoding(url);
+  const encoding = encodingOverride ?? detectEncoding(url);
 
   if (encoding === "flatcitybuf") {
     throw new Error(

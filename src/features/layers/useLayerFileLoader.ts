@@ -5,7 +5,7 @@
  * reused by both the landing page and the "add layer" UI.
  */
 
-import type { AppearanceTheme } from "@cityjson/navara-core";
+import type { AppearanceTheme, CityModelEncoding } from "@cityjson/navara-core";
 import { useCallback, useRef, useState } from "react";
 import type { CityModel } from "../../domain/citymodel/types";
 import { detectEncoding } from "../../domain/citymodel/detectEncoding";
@@ -57,6 +57,20 @@ export interface LayerOverrides {
   readonly hiddenTypes?: ReadonlyArray<string>;
   /** Applied at creation; kept only if the file carries that theme. */
   readonly selectedAppearance?: AppearanceTheme | null;
+  /**
+   * What this source really IS, overriding what its name suggests.
+   *
+   * The Add Layer dialog detects a format from the name, SHOWS it, and lets
+   * the user correct it before anything is loaded — a correction that is worth
+   * nothing unless it reaches the routing here (which arm takes the source)
+   * and the parser (which reader gets the bytes). Both branches below consult
+   * it before `detectEncoding` / `isCityParquetUrl`.
+   *
+   * It rides in `LayerOverrides` rather than in a parameter of its own so a
+   * RETRY keeps it: `runTracked` re-invokes the captured closure, and the
+   * overrides are part of that closure.
+   */
+  readonly encoding?: CityModelEncoding;
 }
 
 function applyPostCreateOverrides(
@@ -109,7 +123,10 @@ export interface LayerFileLoader {
     files: ReadonlyArray<File>,
     overrides?: LayerOverrides,
   ) => Promise<string | null>;
-  addLayerFromUrl: (url: string) => Promise<string | null>;
+  addLayerFromUrl: (
+    url: string,
+    overrides?: LayerOverrides,
+  ) => Promise<string | null>;
   loading: boolean;
   error: string | null;
   /**
@@ -295,7 +312,10 @@ export function useLayerFileLoader(
         },
         async () => {
           let layerId: string;
-          const encoding = detectEncoding(file.name);
+          // The override FIRST, everywhere: a name is a guess, and the user
+          // has already been shown that guess and given the chance to correct
+          // it (see LayerOverrides.encoding).
+          const encoding = overrides?.encoding ?? detectEncoding(file.name);
           if (encoding === "flatcitybuf") {
             // A `File` IS a `Blob` — passed straight through, never read into
             // an ArrayBuffer first (see openStreamingLayer.ts's doc comment
@@ -344,7 +364,7 @@ export function useLayerFileLoader(
             const text = zipped ? "" : await decodeModelBytes(bytes);
             const parsed: CityModel = zipped
               ? parseCityGmlArchive(bytes, file.name)
-              : parseText(file.name, text);
+              : parseText(file.name, text, encoding);
             // Fetch-and-gate the CRS while we are still async — a refusal here
             // reads as a load error instead of a dead layer in the scene sync.
             await ensureModelCrsLoadable(parsed);
@@ -421,7 +441,7 @@ export function useLayerFileLoader(
   );
 
   const addLayerFromUrl = useCallback(
-    (url: string): Promise<string | null> =>
+    (url: string, overrides?: LayerOverrides): Promise<string | null> =>
       runTracked(
         {
           name: fileNameFromUrl(url),
@@ -429,7 +449,8 @@ export function useLayerFileLoader(
           fallback: "Failed to load remote file.",
         },
         async () => {
-          if (detectEncoding(url) === "flatcitybuf") {
+          const encoding = overrides?.encoding ?? detectEncoding(url);
+          if (encoding === "flatcitybuf") {
             return await openStreamingLayer({
               plugin: await resolveStreamPlugin.current(),
               source: { url },
@@ -443,7 +464,16 @@ export function useLayerFileLoader(
           // and answers true for an unlistable https wildcard as well, so the
           // classifier's explanation of why it cannot be served is thrown from
           // the load below and lands in `error` — which is the point.
-          if (isCityParquetUrl(url)) {
+          //
+          // An OVERRIDE replaces the predicate outright rather than widening
+          // it: a `.parquet` URL corrected to CityJSON must leave this arm, and
+          // an extensionless package directory the classifier cannot see (a
+          // path with no trailing "/") must be able to enter it.
+          const isParquet =
+            overrides?.encoding !== undefined
+              ? overrides.encoding === "cityparquet"
+              : isCityParquetUrl(url);
+          if (isParquet) {
             const model = await loadCityParquetFromUrl(url);
             await ensureModelCrsLoadable(model);
             return addCityLayer({
@@ -454,7 +484,7 @@ export function useLayerFileLoader(
             });
           }
 
-          const parsed = await loadFromUrl(url);
+          const parsed = await loadFromUrl(url, undefined, encoding);
           await ensureModelCrsLoadable(parsed.model);
           return addCityLayer({
             name: fileNameFromUrl(url),
