@@ -22,9 +22,13 @@ import {
   UnsupportedSnapshotVersionError,
 } from "../persistence/types";
 import { LocalStorageProjectStateStore } from "../persistence/localStorage";
-import { captureSnapshot } from "../persistence/captureSnapshot";
+import {
+  captureColorBy,
+  captureSnapshot,
+} from "../persistence/captureSnapshot";
 import { restoreSnapshot } from "../persistence/restoreSnapshot";
 import { readShareHash, buildShareUrl } from "../persistence/urlShare";
+import type { ColorBy } from "../features/rules/colorBy";
 import type { ShareableViewState } from "../persistence/urlShare";
 import { getDuckDBStatus } from "../insights/duckdb";
 import type { DuckDBStatus } from "../insights/duckdb";
@@ -202,6 +206,9 @@ interface UnavailableLayer {
    *  handleResolveUnavailableLayer. */
   readonly rules: ReadonlyArray<Rule>;
   readonly rulesEnabled: boolean;
+  readonly colorBy: ColorBy;
+  readonly singleColor: string;
+  readonly unmatchedColor: string;
   readonly visible: boolean;
   readonly lodMode: "auto" | "manual";
   readonly selectedLod: string | null;
@@ -863,7 +870,9 @@ export function App({
         name: l.name,
         modelRef: l.modelRef,
         rules: [...l.rules],
-        rulesEnabled: l.rulesEnabled,
+        // The mode and its two colours, with `rulesEnabled` derived from the
+        // mode — one place decides what a layer's colouring looks like on disk.
+        ...captureColorBy(l),
         visible: l.visible,
         selectedLod: l.selectedLod,
         lodMode: l.lodMode,
@@ -1015,8 +1024,10 @@ export function App({
             if (!modelRef) continue; // malformed saved entry — nothing to restore
 
             const rules = (sl.rules as Rule[] | undefined) ?? [];
-            const rulesEnabled =
-              (sl.rulesEnabled as boolean | undefined) ?? true;
+            // Already validated and derived by `normalizeLayers`; the store's
+            // `rulesEnabled` follows the mode, never the saved flag.
+            const { colorBy, singleColor, unmatchedColor } = sl;
+            const rulesEnabled = colorBy === "rules";
             const visible = (sl.visible as boolean | undefined) ?? true;
             const lodMode =
               (sl.lodMode as "auto" | "manual" | undefined) ?? "auto";
@@ -1035,6 +1046,9 @@ export function App({
                 fileName,
                 rules,
                 rulesEnabled,
+                colorBy,
+                singleColor,
+                unmatchedColor,
                 visible,
                 lodMode,
                 selectedLod,
@@ -1056,6 +1070,9 @@ export function App({
                   modelRef,
                   rules,
                   rulesEnabled,
+                  colorBy,
+                  singleColor,
+                  unmatchedColor,
                   visible,
                   hiddenTypes,
                   selectedAppearance: appearance,
@@ -1076,6 +1093,9 @@ export function App({
                 visible,
                 rules,
                 rulesEnabled,
+                colorBy,
+                singleColor,
+                unmatchedColor,
                 hiddenTypes,
                 selectedAppearance: appearance,
                 duckdb: { kind: "model", model: parsed },
@@ -1090,6 +1110,9 @@ export function App({
                 visible,
                 rules,
                 rulesEnabled,
+                colorBy,
+                singleColor,
+                unmatchedColor,
                 hiddenTypes,
                 selectedAppearance: appearance,
                 duckdb: modelTableSource({
@@ -1252,7 +1275,9 @@ export function App({
           name: l.name,
           modelUrl: (l.modelRef as { type: "url"; url: string }).url,
           rules: [...l.rules],
-          rulesEnabled: l.rulesEnabled,
+          // The USER's rules plus the mode; the synthetic catch-alls are
+          // rebuilt on the other side, never sent.
+          ...captureColorBy(l),
           visible: l.visible,
         })),
       cam: cameraState,
@@ -1309,7 +1334,11 @@ export function App({
         try {
           const name = sl.name ?? fileNameFromUrl(sl.modelUrl);
           const rules = (sl.rules ?? []) as (typeof layers)[number]["rules"];
-          const rulesEnabled = sl.rulesEnabled ?? true;
+          // `readShareHash` has already validated the three, and derived a
+          // mode for a link minted before they existed; the store's
+          // `rulesEnabled` follows the mode, never the link's own flag.
+          const { colorBy, singleColor, unmatchedColor } = sl;
+          const rulesEnabled = colorBy === "rules";
           const visible = sl.visible ?? true;
 
           if (detectEncoding(sl.modelUrl) === "flatcitybuf") {
@@ -1322,6 +1351,9 @@ export function App({
                 modelRef: { type: "url", url: modelUrl },
                 rules,
                 rulesEnabled,
+                colorBy,
+                singleColor,
+                unmatchedColor,
                 visible,
               }),
             );
@@ -1338,6 +1370,9 @@ export function App({
               visible,
               rules,
               rulesEnabled,
+              colorBy,
+              singleColor,
+              unmatchedColor,
               duckdb: { kind: "model", model: parsed },
             });
           } else {
@@ -1350,6 +1385,9 @@ export function App({
               visible,
               rules,
               rulesEnabled,
+              colorBy,
+              singleColor,
+              unmatchedColor,
               duckdb: modelTableSource({
                 model: parsed.model,
                 bytes: parsed.bytes,
@@ -1528,6 +1566,9 @@ export function App({
             ? {
                 rules: entry.rules,
                 rulesEnabled: entry.rulesEnabled,
+                colorBy: entry.colorBy,
+                singleColor: entry.singleColor,
+                unmatchedColor: entry.unmatchedColor,
                 visible: entry.visible,
                 lodMode: entry.lodMode,
                 selectedLod: entry.selectedLod,

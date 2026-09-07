@@ -8,6 +8,7 @@
 
 import type { AppearanceTheme } from "@cityjson/navara-core";
 import type { Rule } from "../features/rules/types";
+import { normalizeColorBy, type ColorBy } from "../features/rules/colorBy";
 import type { PickMode } from "../domain/selection/types";
 import type { ViewMode } from "../features/viewMode/viewModeStore";
 import type { SceneTheme } from "../features/sceneTheme/sceneThemeStore";
@@ -55,8 +56,34 @@ export type StreamSourceSnapshot =
 export interface LayerSnapshot {
   readonly name: string;
   readonly modelRef: CityModelReference;
+  /**
+   * The USER's rules, never the effective list — the catch-alls that carry the
+   * single and unmatched colours are derived from {@link colorBy} and would be
+   * the same fact written twice.
+   */
   readonly rules: ReadonlyArray<Rule>;
+  /**
+   * Written as `colorBy === "rules"` since 12.3, and read back ONLY when
+   * {@link colorBy} is absent — which is exactly what an older document is.
+   * Kept required so a v4 document written by this build is still readable by
+   * one that predates the mode.
+   */
   readonly rulesEnabled: boolean;
+  /**
+   * What the layer's roofs are coloured by, and the two colours the modes that
+   * need them use.
+   *
+   * OPTIONAL, and the version stays "4", on exactly the terms `appearance` and
+   * `style` set: absent means the derived default (`rulesEnabled &&
+   * rules.length > 0 ? "rules" : "surface"`), which is the rendering an older
+   * document was saved from. Both colours are written even when they equal the
+   * current defaults — a saved workspace should keep the colours it was saved
+   * with if a future build retunes `cityColors`. Validated on the way back in
+   * by `normalizeLayers` (enum, `#rrggbb`).
+   */
+  readonly colorBy?: ColorBy;
+  readonly singleColor?: string;
+  readonly unmatchedColor?: string;
   readonly visible: boolean;
   readonly selectedLod?: string | null;
   /** Defaults to "auto" on restore (via `normalizeLayers`) when absent from
@@ -102,6 +129,12 @@ export interface RawLayersDocument {
 export interface NormalizedLayerSnapshot extends RawLayerSnapshot {
   readonly lodMode: "auto" | "manual";
   readonly hiddenTypes: readonly string[];
+  /** Defaulted and VALIDATED by `normalizeLayers`, so nothing downstream ever
+   *  sees an absent mode, an unknown one or a colour that is not `#rrggbb`.
+   *  See {@link LayerSnapshot.colorBy} for where the default comes from. */
+  readonly colorBy: ColorBy;
+  readonly singleColor: string;
+  readonly unmatchedColor: string;
   /** True when this layer streamed from a local `File`/`Blob` — that byte
    *  source cannot survive a reload, so the layer must be presented as an
    *  explicit "needs re-selection" placeholder rather than silently
@@ -130,9 +163,18 @@ export function normalizeLayers(
   return (raw.layers ?? []).map((l): NormalizedLayerSnapshot => {
     const lodMode = l.lodMode ?? "auto";
     const hiddenTypes = l.hiddenTypes ?? [];
+    // The same validator the share hash and the store use, so one document
+    // cannot restore differently depending on which door it came through.
+    const colorBy = normalizeColorBy({
+      colorBy: l.colorBy,
+      singleColor: l.singleColor,
+      unmatchedColor: l.unmatchedColor,
+      rules: l.rules,
+      rulesEnabled: l.rulesEnabled,
+    });
     return l.stream?.kind === "file"
-      ? { ...l, lodMode, hiddenTypes, unavailable: true }
-      : { ...l, lodMode, hiddenTypes };
+      ? { ...l, lodMode, hiddenTypes, ...colorBy, unavailable: true }
+      : { ...l, lodMode, hiddenTypes, ...colorBy };
   });
 }
 

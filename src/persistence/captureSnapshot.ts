@@ -14,8 +14,53 @@ import type {
   ViewState,
 } from "./types";
 import { SNAPSHOT_VERSION } from "./types";
+import type { ColorBy } from "../features/rules/colorBy";
 import type { ViewMode } from "../features/viewMode/viewModeStore";
 import type { SceneTheme } from "../features/sceneTheme/sceneThemeStore";
+
+/** The half of a layer {@link captureColorBy} reads. */
+export interface ColorByLayerFields {
+  readonly colorBy: ColorBy;
+  readonly singleColor: string;
+  readonly unmatchedColor: string;
+}
+
+/**
+ * The four styling fields a layer is written down with — the counterpart of
+ * `geoLayerSnapshot`, and here for the same reason: exactly one place decides
+ * what a layer's colouring looks like on disk.
+ *
+ * Two decisions live in these four lines.
+ *
+ * `rulesEnabled` is DERIVED, not copied. The editor's on/off toggle is gone as
+ * of 12.3 — the mode replaced it — so the store's flag is vestigial and
+ * writing it would save a value nothing maintains. What an older build needs
+ * from that field is "were the rules painting?", and `colorBy === "rules"` is
+ * the honest answer to exactly that question.
+ *
+ * Both colours are ALWAYS written, even when they equal the current defaults.
+ * The convention elsewhere in this file is to omit a default (`viewMode`,
+ * `sceneTheme`), but those are behaviour and these are appearance: a workspace
+ * saved today should come back in the colours it was saved in even if a later
+ * build retunes `cityColors`, and two hex strings per layer cost nothing.
+ *
+ * Note what is NOT here: the synthetic catch-all rules. They are derived from
+ * the mode by `effectiveRules`, and a serialised one would reach the editor,
+ * the legend and the next capture as if the user had written it.
+ */
+export function captureColorBy(layer: ColorByLayerFields): {
+  readonly rulesEnabled: boolean;
+  readonly colorBy: ColorBy;
+  readonly singleColor: string;
+  readonly unmatchedColor: string;
+} {
+  return {
+    rulesEnabled: layer.colorBy === "rules",
+    colorBy: layer.colorBy,
+    singleColor: layer.singleColor,
+    unmatchedColor: layer.unmatchedColor,
+  };
+}
 
 export interface CaptureInput {
   readonly label: string;

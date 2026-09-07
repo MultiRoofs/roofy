@@ -8,6 +8,7 @@
  */
 
 import type { Rule } from "../features/rules/types";
+import { normalizeColorBy, type ColorBy } from "../features/rules/colorBy";
 import type { PickMode } from "../domain/selection/types";
 import type { GeographicCamera } from "./types";
 
@@ -18,8 +19,29 @@ import type { GeographicCamera } from "./types";
 export interface ShareableLayerState {
   readonly name: string;
   readonly modelUrl: string;
+  /** The USER's rules. A shared link never carries the synthetic catch-alls
+   *  the modes below are drawn with: they are derived on the other side, from
+   *  the three fields under them. */
   readonly rules: ReadonlyArray<Rule>;
+  /** Written as `colorBy === "rules"`, and the only thing a link minted before
+   *  "Color by" existed said about the styling — which is why
+   *  {@link readShareHash} can still derive a mode for one. */
   readonly rulesEnabled: boolean;
+  /**
+   * The layer's "Color by" mode and the two colours it may need.
+   *
+   * OPTIONAL, because a link minted before they existed carries none of them
+   * and every link ever minted still has to open. {@link readShareHash} fills
+   * all three in — validated, and with the mode derived from `rulesEnabled`
+   * when it is absent — before anything downstream sees the state, the same
+   * repair it already performs for a camera-only link's missing `layers`, so
+   * in practice a decoded layer always has them. The hash schema therefore
+   * stays v3: nothing about an existing link's meaning changed, and a build
+   * that predates these fields ignores them.
+   */
+  readonly colorBy?: ColorBy;
+  readonly singleColor?: string;
+  readonly unmatchedColor?: string;
   readonly visible: boolean;
 }
 
@@ -179,11 +201,14 @@ export function readShareHash(hash: string): ShareHashResult {
   if (!isGeographicCamera(parsed.cam)) return NO_SHARE_HASH;
   if (typeof parsed.dt !== "string") return NO_SHARE_HASH;
 
-  // Normalize: a camera-only link (no layers at all) is still valid.
-  return {
-    kind: "ok",
-    state: Array.isArray(parsed.layers) ? parsed : { ...parsed, layers: [] },
-  };
+  // Normalize: a camera-only link (no layers at all) is still valid, and every
+  // layer gets its three styling fields validated and defaulted here — through
+  // the SAME function the snapshot path uses, so one workspace cannot come back
+  // differently depending on which door it arrived by.
+  const layers = Array.isArray(parsed.layers)
+    ? parsed.layers.map((l) => ({ ...l, ...normalizeColorBy(l) }))
+    : [];
+  return { kind: "ok", state: { ...parsed, layers } };
 }
 
 /**
