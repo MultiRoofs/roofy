@@ -27,7 +27,11 @@ import {
   DEFAULT_GEO_LAYER_STYLE,
   hexColorToNumber,
 } from "../../../src/features/geoLayers/geoLayerStyle";
-import { CITY_HIGHLIGHT_COLOR_HEX } from "../../../src/scene/cityColors";
+import {
+  CATEGORY_OTHER_HEX,
+  CATEGORY_PALETTE_HEX,
+  CITY_HIGHLIGHT_COLOR_HEX,
+} from "../../../src/scene/cityColors";
 
 /** A feature-set listener the fake layer handle recorded, so a test can play
  *  the engine and fire `featureCreated`/`featureUpdated` itself. */
@@ -670,6 +674,54 @@ describe("syncGeoHighlight — Color by attribute", () => {
       color: { hex: RETAIL_HEX },
     });
     expect(handle.forceUpdate).toHaveBeenCalled();
+  });
+
+  it("keeps the missing bucket distinct from the OTHER sentinel when both are null-valued", () => {
+    // `categoriesFor` emits this exact shape when the attribute has BOTH a
+    // missing value that made the first-eight cut AND a ninth distinct value:
+    // the missing bucket is `{ value: null, color: palette[0] }`, and the
+    // trailing OTHER sentinel is ALSO null-valued. The two must not collapse:
+    // a missing feature wears its palette slot, only an overflow value wears
+    // CATEGORY_OTHER_HEX.
+    const missingPlusOverflow: GeoLayer["style"] = {
+      ...DEFAULT_GEO_LAYER_STYLE,
+      colorByAttribute: {
+        attribute: "zone",
+        categories: [
+          { value: null, color: CATEGORY_PALETTE_HEX[0]! },
+          { value: "a", color: CATEGORY_PALETTE_HEX[1]! },
+          { value: "b", color: CATEGORY_PALETTE_HEX[2]! },
+          { value: "c", color: CATEGORY_PALETTE_HEX[3]! },
+          { value: "d", color: CATEGORY_PALETTE_HEX[4]! },
+          { value: "e", color: CATEGORY_PALETTE_HEX[5]! },
+          { value: "f", color: CATEGORY_PALETTE_HEX[6]! },
+          { value: "g", color: CATEGORY_PALETTE_HEX[7]! },
+          { value: null, color: CATEGORY_OTHER_HEX },
+        ],
+      },
+    };
+    const { view, layers } = fakeView();
+    const live = new Map<string, LiveGeoLayer>();
+    syncGeoLayers(view, [geojson({ style: missingPlusOverflow })], live);
+    const handle = layers[0]!;
+    const evaluator = fakeEvaluator();
+    fireFeatureEvent(handle, "featureCreated", evaluator, 1n);
+    // A highlight change paints (the first pass supplies the colour factory);
+    // the clear returns to the category path, which is what this test reads.
+    syncGeoHighlight({ geoLayerId: "g1", batchId: 7 }, live, makeColor);
+    syncGeoHighlight(null, live, makeColor);
+
+    const missingHex = hexColorToNumber(CATEGORY_PALETTE_HEX[0]!)!;
+    // Missing — explicit null or an absent properties bag — paints its own
+    // palette slot, not the grey the OTHER sentinel would overwrite it with.
+    expect(evaluator.run(1, { zone: null })).toEqual({
+      color: { hex: missingHex },
+    });
+    expect(evaluator.run(2)).toEqual({ color: { hex: missingHex } });
+    // An overflow value (the ninth distinct) still paints OTHER.
+    expect(evaluator.run(3, { zone: "overflow" })).toEqual({
+      color: { hex: hexColorToNumber(CATEGORY_OTHER_HEX) },
+    });
   });
 
   it("removing colorByAttribute leaves fresh feature sets un-overridden", () => {

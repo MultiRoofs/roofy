@@ -194,6 +194,19 @@ function evaluateFeatureColors(
   let otherNumber = 0;
   if (colorByAttribute !== undefined) {
     for (const category of colorByAttribute.categories) {
+      // The OTHER sentinel (`categoriesFor` mints it as a trailing
+      // `{ value: null, color: CATEGORY_OTHER_HEX }` row) is a UI/legend
+      // marker, NOT a lookup key: a genuine missing bucket is ALSO
+      // null-valued, and letting the sentinel overwrite it would paint
+      // missing features grey while their "Missing" swatch shows the palette
+      // slot. The `?? otherNumber` fallback below still paints every
+      // overflow value, so skipping the sentinel loses nothing.
+      if (
+        category.value === null &&
+        category.color.toLowerCase() === CATEGORY_OTHER_HEX.toLowerCase()
+      ) {
+        continue;
+      }
       // A stored category colour always parses (the store normalizes on
       // write); one that somehow does not is skipped, which reads as OTHER.
       const number = hexColorToNumber(category.color);

@@ -9,8 +9,14 @@
  * raster's is one slider. A tileset's is nothing, said out loud rather than
  * left as an empty box.
  */
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { StyleSection } from "../../../../src/ui/layers/StyleSection";
 import {
   useLayerStore,
@@ -32,6 +38,7 @@ import {
   UNMATCHED_COLOR_HEX,
 } from "../../../../src/scene/cityColors";
 import { DEFAULT_GEO_LAYER_STYLE } from "../../../../src/features/geoLayers/geoLayerStyle";
+import { resetGeoJsonDocumentCache } from "../../../../src/features/geoLayers/geoLayerDocument";
 
 /** jsdom reports an inline `backgroundColor` back as `rgb(r, g, b)`. */
 function rgb(hex: string): string {
@@ -45,6 +52,7 @@ afterEach(() => {
   useGeoLayerStore.setState({ layers: [] });
   useStreamStore.setState({ streams: {} });
   useWorkspaceStore.setState({ activeLayerId: null });
+  resetGeoJsonDocumentCache();
 });
 
 function emptyModel(): CityModel {
@@ -465,6 +473,70 @@ describe("StyleSection — a vector layer's Color by attribute", () => {
     render(<GeoHost id={addParcels()} />);
     fireEvent.change(attributeSelect(), { target: { value: "zone" } });
     expect(screen.queryByText("Other")).toBeNull();
+  });
+
+  it("picks an attribute on a URL layer from the fetched document", async () => {
+    const document = {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: { zone: "residential" },
+          geometry: null,
+        },
+        { type: "Feature", properties: { zone: "retail" }, geometry: null },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => document })),
+    );
+    const id = useGeoLayerStore.getState().addGeoLayer({
+      name: "parcels",
+      kind: "geojson",
+      config: { url: "https://x/parcels.geojson" },
+    });
+    render(<GeoHost id={id} />);
+
+    const select = attributeSelect();
+    await waitFor(() =>
+      expect([...select.options].map((o) => o.textContent)).toContain("zone"),
+    );
+    fireEvent.change(select, { target: { value: "zone" } });
+
+    await waitFor(() =>
+      expect(readStyle(id).colorByAttribute?.attribute).toBe("zone"),
+    );
+    expect(readStyle(id).colorByAttribute?.categories).toEqual([
+      { value: "residential", color: CATEGORY_PALETTE_HEX[0] },
+      { value: "retail", color: CATEGORY_PALETTE_HEX[1] },
+    ]);
+    vi.unstubAllGlobals();
+  });
+
+  it("a failed fetch during a pick writes nothing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network down");
+      }),
+    );
+    const id = useGeoLayerStore.getState().addGeoLayer({
+      name: "parcels",
+      kind: "geojson",
+      config: { url: "https://x/parcels-down.geojson" },
+    });
+    render(<GeoHost id={id} />);
+
+    const select = attributeSelect();
+    await waitFor(() =>
+      expect([...select.options].map((o) => o.textContent)).toEqual(["None"]),
+    );
+    fireEvent.change(select, { target: { value: "zone" } });
+
+    // Nothing to compute from: the store is left untouched.
+    await waitFor(() => expect(readStyle(id).colorByAttribute).toBeUndefined());
+    vi.unstubAllGlobals();
   });
 });
 

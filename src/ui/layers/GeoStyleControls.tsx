@@ -245,12 +245,19 @@ function GeoColorByAttribute({
       apply(layer.config.data);
       return;
     }
-    void resolveGeoJsonDocument(layer.config).then((document) => {
-      // A failed fetch has no keys to compute from: leave the store
-      // untouched (and the select on its previous value) rather than
-      // writing an empty colouring the normalize door would drop anyway.
-      if (document !== null) apply(document);
-    });
+    void resolveGeoJsonDocument(layer.config).then(
+      (document) => {
+        // A failed fetch has no keys to compute from: leave the store
+        // untouched (and the select on its previous value) rather than
+        // writing an empty colouring the normalize door would drop anyway.
+        if (document !== null) apply(document);
+      },
+      () => {
+        // The document cache evicts a failed fetch; nothing to write. The
+        // rejection handler (rather than a `.catch`) keeps a network failure
+        // from surfacing as an unhandled rejection.
+      },
+    );
   };
 
   const editCategory = (index: number, color: string) => {
