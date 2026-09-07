@@ -132,4 +132,66 @@ describe("normalizeGeoLayerStyle", () => {
   it("accepts the shorthand hex form as a colour", () => {
     expect(normalizeGeoLayerStyle({ color: "#f53" }).color).toBe("#f53");
   });
+
+  it("carries a valid colorByAttribute through, categories and all", () => {
+    const style = normalizeGeoLayerStyle({
+      colorByAttribute: {
+        attribute: "zone",
+        categories: [
+          { value: "residential", color: "#8fd020" },
+          { value: null, color: "#4b8ef7" },
+        ],
+      },
+    });
+
+    expect(style.colorByAttribute).toEqual({
+      attribute: "zone",
+      categories: [
+        { value: "residential", color: "#8fd020" },
+        { value: null, color: "#4b8ef7" },
+      ],
+    });
+  });
+
+  it("drops the invalid category entries but keeps the valid ones", () => {
+    const style = normalizeGeoLayerStyle({
+      colorByAttribute: {
+        attribute: "zone",
+        categories: [
+          { value: "residential", color: "#8fd020" },
+          { value: "retail", color: "not-a-colour" },
+          { value: 5, color: "#4b8ef7" },
+          "junk",
+        ],
+      },
+    });
+
+    expect(style.colorByAttribute).toEqual({
+      attribute: "zone",
+      categories: [{ value: "residential", color: "#8fd020" }],
+    });
+  });
+
+  it("drops the whole colorByAttribute when its attribute or list is unusable", () => {
+    for (const bad of [
+      { attribute: "", categories: [{ value: "a", color: "#8fd020" }] },
+      { attribute: 5, categories: [{ value: "a", color: "#8fd020" }] },
+      { attribute: "zone", categories: [] },
+      { attribute: "zone", categories: "nope" },
+      { attribute: "zone" },
+      "zone",
+    ]) {
+      expect(normalizeGeoLayerStyle({ colorByAttribute: bad })).toEqual(
+        DEFAULT_GEO_LAYER_STYLE,
+      );
+    }
+  });
+
+  it("leaves colorByAttribute ABSENT when the input never named it", () => {
+    // Absent, not null: an untouched style must not grow a field (the
+    // snapshot schema stays put for exactly this reason).
+    expect(
+      "colorByAttribute" in normalizeGeoLayerStyle({ color: "#00aaff" }),
+    ).toBe(false);
+  });
 });

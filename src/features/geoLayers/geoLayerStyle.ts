@@ -29,6 +29,30 @@ export interface GeoLayerStyle {
   readonly lineWidthPx: number;
   /** 0…1 for GeoJSON polygons; MULTIPLIES the layer's own opacity. */
   readonly fillOpacity: number;
+  /**
+   * "Color by attribute": paint each feature by the value of one property.
+   *
+   * OPTIONAL, and absent (not null) when the layer is drawn in the flat
+   * `color` — an untouched style must not grow a field, so the snapshot
+   * schema stays put (the normalize door tolerates its absence; no version
+   * bump). `categories` is what the user edited and what the evaluator reads:
+   * computed from the document by `categorize.ts` when the attribute is
+   * picked, rewritten wholesale on every swatch edit, and RECOMPUTED from
+   * scratch when the attribute changes — colours on the old attribute do not
+   * follow the new one.
+   *
+   * There is deliberately no `strokeColor` here: the engine's polygon
+   * outline (`PolygonMaterial.outlineShow/outlineColor/outlineWidth`, GeoJSON
+   * only) was probed against a live browser (T29, Navara 0.1.1) and renders
+   * NOTHING, so the one `color` stays the answer for fills and lines alike.
+   */
+  readonly colorByAttribute?: {
+    readonly attribute: string;
+    readonly categories: ReadonlyArray<{
+      readonly value: string | null;
+      readonly color: string;
+    }>;
+  };
 }
 
 /**
@@ -134,11 +158,12 @@ function opacity(value: unknown, fallback: number): number {
  */
 export function normalizeGeoLayerStyle(value: unknown): GeoLayerStyle {
   if (!isRecord(value)) return DEFAULT_GEO_LAYER_STYLE;
+  const cba = normalizeColorByAttribute(value.colorByAttribute);
   const color =
     typeof value.color === "string" && HEX_COLOR.test(value.color)
       ? value.color
       : DEFAULT_GEO_LAYER_STYLE.color;
-  return {
+  const style: GeoLayerStyle = {
     color,
     pointSizePx: size(value.pointSizePx, DEFAULT_GEO_LAYER_STYLE.pointSizePx),
     lineWidthPx: size(value.lineWidthPx, DEFAULT_GEO_LAYER_STYLE.lineWidthPx),
@@ -146,5 +171,33 @@ export function normalizeGeoLayerStyle(value: unknown): GeoLayerStyle {
       value.fillOpacity,
       DEFAULT_GEO_LAYER_STYLE.fillOpacity,
     ),
+    // Added only when real: absent stays absent, so the snapshot field below
+    // remains purely additive (see `GeoLayerStyle.colorByAttribute`).
+    ...(cba === undefined ? {} : { colorByAttribute: cba }),
   };
+  return style;
+}
+
+/** One category survives intact or is dropped; the attribute names a real
+ *  key and the list must not be empty — either being wrong drops the WHOLE
+ *  `colorByAttribute`, because a colouring with nothing valid to paint is a
+ *  hand-edit to be discarded, not repaired into a half-list. */
+function normalizeColorByAttribute(
+  value: unknown,
+): GeoLayerStyle["colorByAttribute"] {
+  if (!isRecord(value)) return undefined;
+  if (typeof value.attribute !== "string" || value.attribute === "") {
+    return undefined;
+  }
+  if (!Array.isArray(value.categories)) return undefined;
+  const categories = value.categories.flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    if (entry.value !== null && typeof entry.value !== "string") return [];
+    if (typeof entry.color !== "string" || !HEX_COLOR.test(entry.color)) {
+      return [];
+    }
+    return [{ value: entry.value, color: entry.color }];
+  });
+  if (categories.length === 0) return undefined;
+  return { attribute: value.attribute, categories };
 }
