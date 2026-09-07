@@ -4,9 +4,9 @@
  * Both decisions are made from user input alone — no request is issued to find
  * out — so they are pure functions with a table test rather than UI behaviour.
  * The CityJSON rejection is the one that matters most in practice: a `.json`
- * city model dropped on the geospatial tab is the likeliest mistake in this
- * app, and "0 features" would be a far worse answer than a pointer to the
- * other tab.
+ * city model corrected to GeoJSON in the Add Layer dialog is the likeliest
+ * mistake in this app, and "0 features" would be a far worse answer than a
+ * sentence naming the format and the control that undoes it.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -107,7 +107,7 @@ describe("parseGeoJsonText", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("rejects a CityJSON document and points at the city-model tab", () => {
+  it("rejects a CityJSON document and names the format it really is", () => {
     const result = parseGeoJsonText(
       JSON.stringify({ type: "CityJSON", version: "2.0", CityObjects: {} }),
     );

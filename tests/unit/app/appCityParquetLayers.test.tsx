@@ -444,10 +444,11 @@ describe("App — a failed group add is reported", () => {
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "+ Add layer" }));
-    // The dialog opens on the geospatial tab; the city-model drop zone is the
-    // one this group add goes through.
-    fireEvent.click(screen.getByRole("tab", { name: /city model/i }));
+    // The dialog opens on the File tab, which is where a group of files is
+    // dropped; a multi-file selection is a CityParquet package by
+    // construction, so the confirming click is all it needs.
     dropTwoFiles();
+    fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
 
     await waitFor(() =>
       expect(loadCityParquetFromFiles).toHaveBeenCalledTimes(1),

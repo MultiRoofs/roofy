@@ -1,4 +1,4 @@
-import type { AppearanceTheme } from "@cityjson/navara-core";
+import type { AppearanceTheme, CityModelEncoding } from "@cityjson/navara-core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./brand.css";
 import "./app.css";
@@ -81,6 +81,9 @@ import { WorkspaceHeader } from "../ui/header/WorkspaceHeader";
 import { SceneControlsTemp } from "../ui/header/SceneControlsTemp";
 import { LeftPanel } from "../ui/sidebar/LeftPanel";
 import { SourcePicker } from "../ui/layers/SourcePicker";
+import { UrlSourceForm } from "../ui/layers/UrlSourceForm";
+import { addGeoSourceFromUrl } from "../features/geoLayers/addGeoSource";
+import type { DetectedSource } from "../features/layers/detectSource";
 import { StacBrowserDialog } from "../ui/stac/StacBrowserDialog";
 import type { AddUrlResult } from "../ui/stac/StacBrowser";
 import { ShareDialog } from "../ui/ShareDialog";
@@ -95,6 +98,19 @@ import { LegendOverlay } from "../ui/viewport/LegendOverlay";
 import { RenderingPanel } from "../ui/viewport/RenderingPanel";
 import { TablePanel } from "../ui/table/TablePanel";
 import type { Rule } from "../features/rules/types";
+
+/**
+ * The loader's encoding override, from what the Add Layer dialog detected.
+ *
+ * Only a CITY source has one: a geospatial layer never reaches this loading
+ * path (the dialog and the landing page write it to `geoLayerStore`
+ * themselves), and an unknown format is never added at all.
+ */
+function cityEncoding(
+  detected: DetectedSource | undefined,
+): CityModelEncoding | undefined {
+  return detected?.kind === "city" ? detected.encoding : undefined;
+}
 
 const defaultStore = new LocalStorageProjectStateStore();
 const SAMPLE_DATA_URL =
@@ -472,8 +488,18 @@ export function App({
    * layer keeps the shell mounted on its own.
    */
   const withEngineBooting = useCallback(
-    async <T,>(source: string, open: () => Promise<T>): Promise<T> => {
-      if (detectEncoding(source) !== "flatcitybuf") return await open();
+    async <T,>(
+      source: string,
+      open: () => Promise<T>,
+      encoding?: CityModelEncoding,
+    ): Promise<T> => {
+      // The OVERRIDE first, when the caller has one: the Add Layer dialog lets
+      // a user correct a `.json` that is really FlatCityBuf, and a boot gate
+      // that re-derived the format from the name would leave that add waiting
+      // for an engine nobody started.
+      if ((encoding ?? detectEncoding(source)) !== "flatcitybuf") {
+        return await open();
+      }
       bootHoldsRef.current += 1;
       setEngineBooting(true);
       try {
@@ -642,9 +668,14 @@ export function App({
   }, []);
 
   const handleFile = useCallback(
-    async (file: File) => {
+    async (file: File, override?: DetectedSource) => {
       clearError();
-      await withEngineBooting(file.name, () => addLayerFromFile(file));
+      const encoding = cityEncoding(override);
+      await withEngineBooting(
+        file.name,
+        () => addLayerFromFile(file, encoding ? { encoding } : undefined),
+        encoding,
+      );
     },
     [addLayerFromFile, clearError, withEngineBooting],
   );
@@ -657,9 +688,10 @@ export function App({
    * `loadError`, exactly as for {@link handleFile}.
    */
   const handleFiles = useCallback(
-    async (files: File[]) => {
+    async (files: File[], override?: DetectedSource) => {
       clearError();
-      await addLayerFromFiles(files);
+      const encoding = cityEncoding(override);
+      await addLayerFromFiles(files, encoding ? { encoding } : undefined);
     },
     [addLayerFromFiles, clearError],
   );
@@ -673,9 +705,14 @@ export function App({
    * Layer dialog, where `loadError` is rendered nowhere at all.
    */
   const handleUrl = useCallback(
-    async (url: string): Promise<boolean> => {
+    async (url: string, override?: DetectedSource): Promise<boolean> => {
       clearError();
-      const layerId = await withEngineBooting(url, () => addLayerFromUrl(url));
+      const encoding = cityEncoding(override);
+      const layerId = await withEngineBooting(
+        url,
+        () => addLayerFromUrl(url, encoding ? { encoding } : undefined),
+        encoding,
+      );
       return layerId !== null;
     },
     [addLayerFromUrl, clearError, withEngineBooting],
@@ -1268,22 +1305,32 @@ export function App({
    *  `File`/`string` back; the promise is fire-and-forget either way, exactly
    *  as it was when these were inline handlers (errors land in `loadError`). */
   const handlePickedFile = useCallback(
-    (file: File) => {
-      void handleFile(file);
+    (file: File, override?: DetectedSource) => {
+      void handleFile(file, override);
     },
     [handleFile],
   );
 
   const handlePickedFiles = useCallback(
-    (files: File[]) => {
-      void handleFiles(files);
+    (files: File[], override?: DetectedSource) => {
+      void handleFiles(files, override);
     },
     [handleFiles],
   );
 
-  const handlePickedUrl = useCallback(
-    (url: string) => {
-      void handleUrl(url);
+  /** The landing page's URL field, which detects exactly as the dialog does:
+   *  a city model goes into the loading path, a geospatial source is written
+   *  to its store and activated. Returns the sentence to show in place, or
+   *  null. */
+  const handleSubmitUrl = useCallback(
+    (url: string, detected: DetectedSource, name?: string): string | null => {
+      if (detected.kind === "unknown") return null;
+      if (detected.kind === "geo") {
+        const added = addGeoSourceFromUrl(url, detected.geoKind, name);
+        return added.ok ? null : added.error;
+      }
+      void handleUrl(url, detected);
+      return null;
     },
     [handleUrl],
   );
@@ -1293,8 +1340,8 @@ export function App({
    *  `lastError()` the moment the add resolves rather than the (async) error
    *  state. */
   const handleAddUrl = useCallback(
-    async (url: string): Promise<AddUrlResult> => {
-      const landed = await handleUrl(url);
+    async (url: string, override?: DetectedSource): Promise<AddUrlResult> => {
+      const landed = await handleUrl(url, override);
       if (landed) return { ok: true };
       return {
         ok: false,
@@ -1655,7 +1702,14 @@ export function App({
               variant="hero"
               onFile={handlePickedFile}
               onFiles={handlePickedFiles}
-              onUrl={handlePickedUrl}
+              loading={loading}
+            />
+            {/* The URL field is its own component now — a paste is a
+                different beat from a drop (see what it is, correct it, add) —
+                and it is the same one the dialog's URL tab renders. */}
+            <UrlSourceForm
+              variant="hero"
+              onSubmit={handleSubmitUrl}
               loading={loading}
             />
           </section>

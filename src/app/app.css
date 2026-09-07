@@ -3446,31 +3446,10 @@ body {
   line-height: 1.4;
 }
 
-/* ── Geospatial tab of the Add Layer dialog ──────────────────── */
-
-.geo-source-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-
-.geo-kind-select {
-  flex: 1;
-  padding: 0.3rem;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--fg);
-  font-family: inherit;
-  font-size: 0.72rem;
-}
-
-.geo-source-hint {
-  margin: 0;
-  color: var(--fg-muted);
-  font-size: 0.62rem;
-  line-height: 1.4;
-}
+/* The geospatial tab is gone (the Add Layer dialog's tabs are PLACES now, and
+   the format is detected), and with it `.geo-source-form`, `.geo-kind-select`
+   and `.geo-source-hint`. `.geo-source-error` above stays: it is the refusal
+   line for a geospatial add, wherever the add was made. */
 
 .layer-add-btn {
   display: block;
@@ -4376,6 +4355,188 @@ button.file-label:disabled {
 
 .source-picker-panel .fcb-url-btn:hover:not(:disabled) {
   background: var(--accent-fill-hover);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   WHAT THE SOURCE IS  (detection line, correction select, URL form)
+
+   The dialog names the format it detected and offers a select that
+   corrects it, on both the File and the URL tab — one line, one
+   control, one vocabulary. The line reads as a QUIET statement (the
+   format in full ink, the word "Detected" muted) because it is an
+   answer, not a warning; the correction sits at the end of the row,
+   where it is reachable but not the first thing read.
+   ═══════════════════════════════════════════════════════════════ */
+
+.detected-source {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+/* What was picked. Mono, because it is a literal file name, and clipped
+   rather than wrapped so a long name cannot push the row's control away. */
+.detected-subject {
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detected-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.detected-format {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.detected-label {
+  color: var(--fg-muted);
+}
+
+.detected-name {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* Not an error — the user has simply not told us yet, and the select beside
+   it is the answer — so it is muted rather than terracotta. */
+.detected-name.is-unknown {
+  color: var(--fg-muted);
+  font-weight: 500;
+}
+
+.detected-change {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.detected-change-label {
+  color: var(--fg-muted);
+  font-size: 0.72rem;
+}
+
+.detected-change-select {
+  max-width: 14rem;
+  padding: 0.25rem 0.35rem;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 0.72rem;
+}
+
+.detected-change-select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* The staged pick, under the drop zone: what you dropped, what it is, and the
+   button that commits it. A raised card, because it is a step that has begun
+   and not finished. */
+.staged-source {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+
+.staged-source .fcb-url-btn {
+  align-self: flex-start;
+  padding: 0.4rem 0.95rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+}
+
+/* ---- the URL form, in both skins ---- */
+
+.url-source-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+/* The landing page's field sits under the drop zone as a peer, so it takes the
+   column's gap rather than the standalone form's own top margin. */
+.url-source-form-hero {
+  margin-top: 0.4rem;
+}
+
+.url-source-name {
+  display: flex;
+  flex-direction: column;
+}
+
+.url-source-actions {
+  display: flex;
+}
+
+/* Detect is the SECOND action of the row (the field is the first), so it is
+   outlined rather than filled — the filled button in this form is "Add
+   layer", and two filled buttons would give the user no primary. */
+.fcb-url-btn.is-secondary {
+  border: 1px solid var(--border-accent);
+  background: transparent;
+  color: var(--fg);
+}
+
+.fcb-url-btn.is-secondary:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: transparent;
+  color: var(--accent-text);
+}
+
+/* The dialog's scale, matching `.source-picker-panel` above — the two are one
+   surface and must not read as two type sizes. */
+.url-source-form-panel {
+  width: 100%;
+  margin-top: 0;
+}
+
+.url-source-form-panel .fcb-url-label {
+  margin-bottom: 0.35rem;
+  color: var(--fg-label);
+  font-size: 0.72rem;
+}
+
+.url-source-form-panel .fcb-url-input {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--fg);
+  font-size: 0.78rem;
+}
+
+.url-source-form-panel .fcb-url-input::placeholder {
+  color: var(--fg-dim);
+}
+
+.url-source-form-panel .fcb-url-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.url-source-form-panel .fcb-url-btn {
+  padding: 0.4rem 0.95rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  font-weight: 600;
 }
 
 /* ═══════════════════════════════════════════════════════════════

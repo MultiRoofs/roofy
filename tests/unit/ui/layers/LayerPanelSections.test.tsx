@@ -150,10 +150,12 @@ describe("LayerPanel — two sections", () => {
   it("each section header opens the add dialog on its own tab", () => {
     renderPanel();
 
+    // The dialog's tabs are PLACES now, not families: a city model most often
+    // arrives as a file, a geospatial layer as a URL.
     fireEvent.click(
       screen.getByRole("button", { name: /add city model layer/i }),
     );
-    expect(screen.getByRole("tab", { name: /city model/i })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "File" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -162,7 +164,7 @@ describe("LayerPanel — two sections", () => {
     fireEvent.click(
       screen.getByRole("button", { name: /add geospatial layer/i }),
     );
-    expect(screen.getByRole("tab", { name: /geospatial/i })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "URL" })).toHaveAttribute(
       "aria-selected",
       "true",
     );

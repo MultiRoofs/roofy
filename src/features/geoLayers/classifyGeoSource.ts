@@ -109,10 +109,10 @@ export type GeoJsonParseResult =
  *
  * The CityJSON branch is the reason this is not a one-line `JSON.parse`. A
  * CityJSON file is valid JSON with a `type` of its own, and this viewer's
- * primary format is CityJSON — so dropping one on the geospatial tab is the
- * likeliest mistake anybody will make here. Rendering it as an empty layer, or
- * saying "not GeoJSON", both leave the user stuck at the wrong tab; naming the
- * format and the tab that reads it does not.
+ * primary format is CityJSON — so correcting one to GeoJSON in the dialog's
+ * "Change…" select is the likeliest mistake anybody will make here. Rendering
+ * it as an empty layer, or saying "not GeoJSON", both leave the user stuck;
+ * naming the format and the control that undoes the mistake does not.
  *
  * A bare `Geometry` is refused as well, even though the GeoJSON spec allows
  * one as a document: the engine's vector layer renders FEATURES, and a lone
@@ -134,8 +134,9 @@ export function parseGeoJsonText(text: string): GeoJsonParseResult {
     return {
       ok: false,
       error:
-        "This is a CityJSON file, not GeoJSON. Add it on the City model tab, " +
-        "where it is parsed, georeferenced and styled by rules.",
+        "This is a CityJSON file, not GeoJSON. Set the format back to " +
+        "CityJSON with “Change…” and add it as a city model, where it is " +
+        "parsed, georeferenced and styled by rules.",
     };
   }
   if (type === "FeatureCollection") {

@@ -121,7 +121,7 @@ export function LayerPanel({
           data-tooltip="Add city model layer"
           data-tooltip-pos="top"
           data-tooltip-align="end"
-          onClick={() => setAddDialogTab("city")}
+          onClick={() => setAddDialogTab("file")}
         >
           +
         </button>
@@ -326,7 +326,7 @@ export function LayerPanel({
           data-tooltip="Add geospatial layer"
           data-tooltip-pos="top"
           data-tooltip-align="end"
-          onClick={() => setAddDialogTab("geo")}
+          onClick={() => setAddDialogTab("url")}
         >
           +
         </button>
@@ -354,7 +354,7 @@ export function LayerPanel({
         className="layer-add-btn"
         aria-haspopup="dialog"
         aria-expanded={addDialogTab !== null}
-        onClick={() => setAddDialogTab("geo")}
+        onClick={() => setAddDialogTab("url")}
       >
         + Add Layer
       </button>

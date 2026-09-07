@@ -162,13 +162,16 @@ const emptyStore: ProjectStateStore = {
   remove: async () => {},
 };
 
-/** Type the URL into the landing page's URL box and submit it. */
+/** Type the URL into the landing page's URL box, let it be classified (the
+ *  field detects on blur), and add it — the two beats the redesigned form
+ *  asks for. */
 function loadFromUrlBox(url: string): void {
   const input = screen.getByPlaceholderText(
     "https://example.com/model.city.json",
   );
   fireEvent.change(input, { target: { value: url } });
-  fireEvent.click(screen.getByRole("button", { name: "Load" }));
+  fireEvent.blur(input);
+  fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
 }
 
 const model = {

@@ -1,15 +1,29 @@
 /**
- * The "+ Add Layer" modal.
+ * The "Add layer" modal: WHERE the source is, then WHAT it is.
  *
- * Replaces the cramped inline form that used to unfold inside the sidebar's
- * layer list: adding a source is a deliberate, two-affordance act (drop a
- * local file, or paste a remote URL) and the sidebar is 180–480 px wide.
- * Rendered as a real modal so the drop zone gets room, and so a drag that
- * misses it cannot be handed to the 3D viewport underneath.
+ * Its tabs used to be FAMILIES — "City model", "Geospatial", "Catalog" — which
+ * asked the user to answer a question they should never have been asked. A
+ * person with a file in their hand knows where it is, not which of this app's
+ * two loading pipelines reads it; and being on the wrong tab was silently
+ * fatal (a GeoJSON dropped on the city tab failed as malformed CityJSON). So
+ * the tabs are the three PLACES a source comes from — File, URL, Catalog — and
+ * the format is DETECTED, shown in one line, and correctable before anything
+ * is loaded.
  *
- * The loading path is unchanged — `onAddFile`/`onAddUrl` are `App`'s
- * `handleFile`/`handleUrl`, the same pair the landing page uses, and the body
- * is the same {@link SourcePicker} the landing page renders.
+ * The two-beat rhythm is the point. A pick or a paste stages the source and
+ * names it ("Detected: CityJSON [Change…]"); the filled "Add layer" button is
+ * the second beat, so a wrong guess costs a click rather than a failed load.
+ * Detection is a pure function of the name ({@link detectSourceFromName}),
+ * shared with the landing page.
+ *
+ * Routing, once the user confirms:
+ *  - a CITY format goes out through `onAddFile` / `onAddFiles` / `onAddUrl`
+ *    with the detection attached, which the loader takes as its encoding
+ *    override — the correction reaching the parser is the whole point of
+ *    showing it;
+ *  - a GEOSPATIAL one never touches that path: a geo layer has no parsing
+ *    step, so {@link addGeoSourceFromUrl} / {@link addGeoSourceFromFile} write
+ *    it straight to the store and activate it.
  *
  * Modal behaviour, all of it deliberate:
  *  - a PORTAL to `document.body`, so no ancestor's `overflow`, `transform` or
@@ -31,36 +45,62 @@ import { useCallback, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useModalChrome } from "../useModalChrome";
 import { SourcePicker } from "./SourcePicker";
-import { GeospatialSourceForm } from "./GeospatialSourceForm";
+import { UrlSourceForm } from "./UrlSourceForm";
+import { DetectionLine } from "./DetectionLine";
 import { StacBrowser, type AddUrlResult } from "../stac/StacBrowser";
+import {
+  detectSourceFromName,
+  type DetectedSource,
+} from "../../features/layers/detectSource";
+import {
+  addGeoSourceFromFile,
+  addGeoSourceFromUrl,
+} from "../../features/geoLayers/addGeoSource";
 
 interface AddLayerDialogProps {
   readonly onClose: () => void;
-  readonly onAddFile: (file: File) => void;
+  /** The file, and what the user confirmed it is — the loader's encoding
+   *  override. */
+  readonly onAddFile: (file: File, override?: DetectedSource) => void;
   /** Several files as ONE layer — a CityParquet package folder, or a
    *  multi-file drop. Closes the dialog exactly like `onAddFile`. */
-  readonly onAddFiles: (files: File[]) => void;
-  /** Resolves `{ok: true}` once a layer has landed. The URL field ignores the
+  readonly onAddFiles: (files: File[], override?: DetectedSource) => void;
+  /** Resolves `{ok: true}` once a layer has landed. The URL tab ignores the
    *  answer (it closes the dialog either way, and the app reports the
    *  failure); the catalog tab needs it to roll a failed "Added ✓" back and
    *  to show the loader's sentence beside the item. */
-  readonly onAddUrl: (url: string) => Promise<AddUrlResult>;
+  readonly onAddUrl: (
+    url: string,
+    override?: DetectedSource,
+  ) => Promise<AddUrlResult>;
   readonly loading: boolean;
-  /** Which tab to open on. Defaults to `"geo"` — see {@link SourceTab}. */
+  /** Which tab to open on. Defaults to `"file"` — see {@link SourceTab}. */
   readonly initialTab?: SourceTab;
 }
 
-/** Which family of source the dialog is offering.
+/**
+ * Where the source is.
  *
- *  `"geo"` is the DEFAULT as of the 2026-08-10 spec (user request): the plain
- *  "+ Add Layer" button is reached most often to drape context — GeoJSON, XYZ
- *  tiles, a tileset — over a city model that is already loaded, so opening on
- *  the city tab cost a click every time. The city model is still what this
- *  viewer is FOR, and the catalog is still a place to go looking when the user
- *  has no URL of their own yet; both are one click away, and `LayerPanel`'s
- *  two section headers each carry their own add button that names the tab it
- *  wants, so neither family is buried. */
-export type SourceTab = "city" | "geo" | "stac";
+ * `"file"` is the default because it is the shortest path for the commonest
+ * act (a model on disk), and because the drop zone doubles as the affordance
+ * that TEACHES the gesture. The other two are one click away.
+ */
+export type SourceTab = "file" | "url" | "catalog";
+
+/** A local pick, waiting to be confirmed. `files` is the whole selection; a
+ *  group of them is one CityParquet package. */
+interface StagedFiles {
+  readonly files: ReadonlyArray<File>;
+  readonly detected: DetectedSource;
+}
+
+/** A multi-file selection is a CityParquet package by construction: it is the
+ *  only format this app reads as a directory of files. */
+const PACKAGE: DetectedSource = {
+  kind: "city",
+  encoding: "cityparquet",
+  label: "CityParquet",
+};
 
 export function AddLayerDialog({
   onClose,
@@ -71,7 +111,12 @@ export function AddLayerDialog({
   initialTab,
 }: AddLayerDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  const [tab, setTab] = useState<SourceTab>(initialTab ?? "geo");
+  const [tab, setTab] = useState<SourceTab>(initialTab ?? "file");
+  const [staged, setStaged] = useState<StagedFiles | null>(null);
+  /** A refusal from the geospatial path (a CityJSON dropped and corrected to
+   *  GeoJSON, a URL that is not one). Shown in place; the dialog stays open,
+   *  because the answer to it is right here. */
+  const [error, setError] = useState<string | null>(null);
   const tabIdPrefix = useId();
 
   useModalChrome(dialogRef, onClose);
@@ -100,32 +145,67 @@ export function AddLayerDialog({
     e.stopPropagation();
   }, []);
 
-  const handleFile = useCallback(
-    (file: File) => {
-      onAddFile(file);
-      onClose();
-    },
-    [onAddFile, onClose],
-  );
+  /** A pick STAGES; it does not load. The user has not seen what the app
+   *  thinks the file is yet. */
+  const stageFile = useCallback((file: File) => {
+    setError(null);
+    setStaged({ files: [file], detected: detectSourceFromName(file.name) });
+  }, []);
 
-  const handleFiles = useCallback(
-    (files: File[]) => {
-      onAddFiles(files);
-      onClose();
-    },
-    [onAddFiles, onClose],
-  );
+  const stageFiles = useCallback((files: File[]) => {
+    setError(null);
+    setStaged({ files, detected: PACKAGE });
+  }, []);
 
-  const handleUrl = useCallback(
-    (url: string) => {
-      // Fire-and-forget on purpose: this affordance closes the dialog
-      // immediately, so there is nothing left on screen to report the outcome
-      // to. The app's own error state has it.
-      void onAddUrl(url);
+  /** The second beat: load what was staged, as whatever it was confirmed to
+   *  be. */
+  const addStaged = useCallback(() => {
+    if (staged === null || staged.detected.kind === "unknown") return;
+    const { files, detected } = staged;
+    if (detected.kind === "geo") {
+      // GeoJSON is the only geospatial format a FILE can carry — a tile
+      // template and a tileset are URLs by definition, and the select cannot
+      // offer them here.
+      void addGeoSourceFromFile(files[0]!).then((result) => {
+        if (result.ok) onClose();
+        else setError(result.error);
+      });
+      return;
+    }
+    if (files.length > 1) onAddFiles([...files], detected);
+    else onAddFile(files[0]!, detected);
+    onClose();
+  }, [onAddFile, onAddFiles, onClose, staged]);
+
+  /**
+   * A URL the user confirmed.
+   *
+   * City sources go out to the app's one loading path, fire-and-forget on
+   * purpose: this closes immediately, so there is nothing left on screen to
+   * report the outcome to (the app's own error state has it). A geospatial one
+   * is added here and reports its refusal in place.
+   */
+  const submitUrl = useCallback(
+    (url: string, detected: DetectedSource, name?: string): string | null => {
+      if (detected.kind === "unknown") return null;
+      if (detected.kind === "geo") {
+        const result = addGeoSourceFromUrl(url, detected.geoKind, name);
+        if (!result.ok) return result.error;
+        onClose();
+        return null;
+      }
+      void onAddUrl(url, detected);
       onClose();
+      return null;
     },
     [onAddUrl, onClose],
   );
+
+  const tabs: ReadonlyArray<readonly [SourceTab, string]> = [
+    ["file", "File"],
+    ["url", "URL"],
+    ["catalog", "Catalog"],
+  ];
 
   return createPortal(
     <div
@@ -140,7 +220,7 @@ export function AddLayerDialog({
         // The catalog is a card grid and a map, not a form: inside `.modal`'s
         // 30 rem the grid collapses to a single column. Same widening the
         // standalone `StacBrowserDialog` wears.
-        className={`modal add-layer-dialog${tab === "stac" ? " modal-wide" : ""}`}
+        className={`modal add-layer-dialog${tab === "catalog" ? " modal-wide" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-layer-dialog-title"
@@ -160,81 +240,97 @@ export function AddLayerDialog({
             ×
           </button>
         </div>
-        {/* Three source families, one dialog. A tablist rather than three
-            buttons so the keyboard and a screen reader get the relationship
-            between the choice and the panel it changes. */}
-        <div className="modal-tabs" role="tablist" aria-label="Source type">
-          <button
-            type="button"
-            role="tab"
-            id={`${tabIdPrefix}-city-tab`}
-            aria-selected={tab === "city"}
-            aria-controls={`${tabIdPrefix}-city-panel`}
-            className={`modal-tab ${tab === "city" ? "is-active" : ""}`}
-            onClick={() => setTab("city")}
-          >
-            City model
-          </button>
-          <button
-            type="button"
-            role="tab"
-            id={`${tabIdPrefix}-geo-tab`}
-            aria-selected={tab === "geo"}
-            aria-controls={`${tabIdPrefix}-geo-panel`}
-            className={`modal-tab ${tab === "geo" ? "is-active" : ""}`}
-            onClick={() => setTab("geo")}
-          >
-            Geospatial
-          </button>
-          <button
-            type="button"
-            role="tab"
-            id={`${tabIdPrefix}-stac-tab`}
-            aria-selected={tab === "stac"}
-            aria-controls={`${tabIdPrefix}-stac-panel`}
-            className={`modal-tab ${tab === "stac" ? "is-active" : ""}`}
-            onClick={() => setTab("stac")}
-          >
-            Catalog
-          </button>
+        {/* Three places a source comes from, one dialog. A tablist rather than
+            three buttons so the keyboard and a screen reader get the
+            relationship between the choice and the panel it changes. */}
+        <div className="modal-tabs" role="tablist" aria-label="Source">
+          {tabs.map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              id={`${tabIdPrefix}-${value}-tab`}
+              aria-selected={tab === value}
+              aria-controls={`${tabIdPrefix}-${value}-panel`}
+              className={`modal-tab ${tab === value ? "is-active" : ""}`}
+              onClick={() => setTab(value)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
         <div className="modal-body">
-          {tab === "stac" ? (
+          {tab === "catalog" ? (
             <div
               role="tabpanel"
-              id={`${tabIdPrefix}-stac-panel`}
-              aria-labelledby={`${tabIdPrefix}-stac-tab`}
+              id={`${tabIdPrefix}-catalog-panel`}
+              aria-labelledby={`${tabIdPrefix}-catalog-tab`}
             >
-              {/* `onAddUrl`, NOT `handleUrl`: adding from the catalog must not
+              {/* `onAddUrl`, NOT `submitUrl`: adding from the catalog must not
                   close the dialog. Picking several tiles out of one collection
                   is the normal case, and a dialog that shut after the first
-                  would make the second a five-click round trip. */}
+                  would make the second a five-click round trip. The catalog's
+                  items are typed CityJSON assets it has already identified, so
+                  they need no detection pass. */}
               <StacBrowser onAddUrl={onAddUrl} />
             </div>
-          ) : tab === "city" ? (
+          ) : tab === "file" ? (
             <div
               role="tabpanel"
-              id={`${tabIdPrefix}-city-panel`}
-              aria-labelledby={`${tabIdPrefix}-city-tab`}
+              id={`${tabIdPrefix}-file-panel`}
+              aria-labelledby={`${tabIdPrefix}-file-tab`}
             >
               <SourcePicker
                 variant="panel"
-                onFile={handleFile}
-                onFiles={handleFiles}
-                onUrl={handleUrl}
+                onFile={stageFile}
+                onFiles={stageFiles}
                 loading={loading}
               />
+              {staged !== null && (
+                <div className="staged-source">
+                  <DetectionLine
+                    detected={staged.detected}
+                    subject={
+                      staged.files.length > 1
+                        ? `${staged.files.length} files`
+                        : staged.files[0]!.name
+                    }
+                    // A group is a package by construction, so there is
+                    // nothing to correct it to.
+                    changeable={staged.files.length === 1}
+                    onChange={(detected) =>
+                      setStaged((current) =>
+                        current === null ? current : { ...current, detected },
+                      )
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="fcb-url-btn"
+                    onClick={addStaged}
+                    disabled={loading || staged.detected.kind === "unknown"}
+                  >
+                    {loading ? "Loading…" : "Add layer"}
+                  </button>
+                </div>
+              )}
+              {error !== null && (
+                <p className="geo-source-error" role="alert">
+                  {error}
+                </p>
+              )}
             </div>
           ) : (
             <div
               role="tabpanel"
-              id={`${tabIdPrefix}-geo-panel`}
-              aria-labelledby={`${tabIdPrefix}-geo-tab`}
+              id={`${tabIdPrefix}-url-panel`}
+              aria-labelledby={`${tabIdPrefix}-url-tab`}
             >
-              {/* Adds to `geoLayerStore` itself: a geospatial layer has no
-                  parsing step, so there is no app-level loading path for it to
-                  be routed through. The dialog only needs to know it happened. */}
-              <GeospatialSourceForm onAdded={onClose} />
+              <UrlSourceForm
+                variant="panel"
+                onSubmit={submitUrl}
+                loading={loading}
+              />
             </div>
           )}
         </div>

@@ -37,6 +37,7 @@ import { AddLayerDialog } from "../layers/AddLayerDialog";
 import { ActiveLayerPanel } from "../layers/ActiveLayerPanel";
 import { LayerList, type UnavailableRow } from "../layers/LayerList";
 import type { AddUrlResult } from "../stac/StacBrowser";
+import type { DetectedSource } from "../../features/layers/detectSource";
 import type {
   FailedAdd,
   PendingAdd,
@@ -51,11 +52,18 @@ import { useLayerStore } from "../../features/layers/layerStore";
 import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
 
 export interface LeftPanelProps {
-  readonly onAddFile: (file: File) => void;
+  /** The file and the format the user confirmed it is — see
+   *  {@link AddLayerDialog}; the second argument is the loader's encoding
+   *  override, and it is threaded rather than re-derived so what the user saw
+   *  named is what is parsed. */
+  readonly onAddFile: (file: File, override?: DetectedSource) => void;
   /** Several picked files as ONE layer — see {@link AddLayerDialog}. */
-  readonly onAddFiles: (files: File[]) => void;
+  readonly onAddFiles: (files: File[], override?: DetectedSource) => void;
   /** Resolves `{ok: true}` once a layer has landed — see {@link AddLayerDialog}. */
-  readonly onAddUrl: (url: string) => Promise<AddUrlResult>;
+  readonly onAddUrl: (
+    url: string,
+    override?: DetectedSource,
+  ) => Promise<AddUrlResult>;
   readonly loading: boolean;
   /** The whole item, not an id: only `App` can tell a city `fitLayer` from a
    *  geo bounds walk, and both the list's rows and the active layer's panel

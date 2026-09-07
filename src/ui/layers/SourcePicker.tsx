@@ -1,16 +1,21 @@
 /**
- * The one way into the viewer: a real drop zone plus a remote-URL field.
+ * The one way into the viewer for a LOCAL source: a real drop zone, a browse
+ * button and a folder button.
  *
  * Both entry points render THIS component — the landing page's hero (before
- * anything is loaded) and the sidebar's "+ Add Layer" dialog (once something
- * is) — so the two feel like one product rather than two different loaders
- * with two different vocabularies. The copy, the accepted extensions and the
- * drag behaviour live here once; only the skin differs, through `variant`.
+ * anything is loaded) and the Add Layer dialog's File tab (once something is)
+ * — so the two feel like one product rather than two different loaders with
+ * two different vocabularies. The copy, the accepted extensions and the drag
+ * behaviour live here once; only the skin differs, through `variant`.
  *
- * Nothing here knows how a source is loaded. It hands a `File`, a GROUP of
- * files, or a URL string to its caller, which routes it into the app's single
- * loading path (`useLayerFileLoader` via `App`'s `handleFile` / `handleFiles`
- * / `handleUrl`).
+ * The remote-URL field it used to carry is {@link UrlSourceForm} now: a URL is
+ * a different beat with a different shape (paste, see what it is, correct it,
+ * add), and folding it in here made "Load" a button that had to guess in
+ * silence.
+ *
+ * Nothing here knows how a source is loaded, or even what format it is. It
+ * hands a `File` or a GROUP of files to its caller, which detects the format
+ * and routes it (`AddLayerDialog`, or `App`'s `handleFile` / `handleFiles`).
  *
  * The group is what a CityParquet package needs: it is a DIRECTORY of parquet
  * tables plus a `metadata.json`, not one file, so both the folder button and a
@@ -18,19 +23,19 @@
  * members it can use.
  */
 
-import { useCallback, useId, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 /** The extensions the file picker offers. `.json`/`.jsonl` are listed
  *  alongside the compound `.city.*` forms because a browser file dialog
  *  matches on the LAST dot only — without them a plain `foo.city.json`
  *  is still fine, but a file saved as `foo.json` would be greyed out. */
 const ACCEPT =
-  ".json,.city.json,.jsonl,.city.jsonl,.fcb,.gml,.citygml,.parquet";
+  ".json,.city.json,.jsonl,.city.jsonl,.fcb,.gml,.citygml,.zip,.parquet,.geojson";
 
 /** Stated in the UI, not just in the docs: the formats this viewer reads.
  *  Kept next to {@link ACCEPT} so the two cannot drift. */
 export const SUPPORTED_FORMATS =
-  ".city.json · .city.jsonl · .fcb · .gml · .parquet";
+  ".city.json · .city.jsonl · .fcb · .gml · .parquet · .geojson";
 
 export interface SourcePickerProps {
   /** A local file was dropped or browsed to. */
@@ -45,8 +50,6 @@ export interface SourcePickerProps {
    * rather than a silently ignored drop.
    */
   readonly onFiles?: (files: File[]) => void;
-  /** A remote URL was submitted. Already trimmed and non-empty. */
-  readonly onUrl: (url: string) => void;
   /** A load is in flight: every control that would start a second one is
    *  disabled and the primary button says so. */
   readonly loading: boolean;
@@ -65,7 +68,6 @@ export interface SourcePickerProps {
 export function SourcePicker({
   onFile,
   onFiles,
-  onUrl,
   loading,
   variant = "hero",
   showFormatHint = true,
@@ -74,11 +76,6 @@ export function SourcePicker({
   /** A gesture this picker cannot honour, explained in place. Cleared by the
    *  next drop or folder pick — it is about the LAST attempt, not a state. */
   const [dropHint, setDropHint] = useState<string | null>(null);
-  const [url, setUrl] = useState("");
-  /** Unique per instance: the label/field pairing must survive two pickers
-   *  being mounted at once (a hero behind a dialog is not possible today, but
-   *  a duplicated `id` silently breaks the label click on any day it is). */
-  const urlFieldId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   /**
@@ -201,17 +198,6 @@ export function SourcePicker({
     [onFile],
   );
 
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault();
-      const trimmed = url.trim();
-      if (!trimmed) return;
-      onUrl(trimmed);
-      setUrl("");
-    },
-    [onUrl, url],
-  );
-
   return (
     <div className={`source-picker source-picker-${variant}`}>
       <div
@@ -225,7 +211,7 @@ export function SourcePicker({
         <p>
           {dragging
             ? "Release to load this file"
-            : "Drop a CityJSON, CityJSONSeq, FlatCityBuf, or CityGML file here — or the files of a CityParquet folder"}
+            : "Drop a CityJSON, CityJSONSeq, FlatCityBuf, CityGML or GeoJSON file here — or the files of a CityParquet folder"}
         </p>
         <p className="drop-or">or</p>
         {/* A real button, not the usual `<label>` wrapping a hidden input: a
@@ -279,30 +265,6 @@ export function SourcePicker({
           <p className="source-picker-formats">{SUPPORTED_FORMATS}</p>
         )}
       </div>
-
-      <form className="fcb-url-form" onSubmit={handleSubmit}>
-        <label className="fcb-url-label" htmlFor={urlFieldId}>
-          Or load from URL:
-        </label>
-        <div className="fcb-url-row">
-          <input
-            id={urlFieldId}
-            type="url"
-            className="fcb-url-input"
-            placeholder="https://example.com/model.city.json"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            disabled={loading}
-          />
-          <button
-            type="submit"
-            className="fcb-url-btn"
-            disabled={loading || !url.trim()}
-          >
-            {loading ? "Loading…" : "Load"}
-          </button>
-        </div>
-      </form>
     </div>
   );
 }
