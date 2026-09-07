@@ -35,7 +35,10 @@ import { NavaraViewport } from "../scene/NavaraViewport";
 import type { CitySceneHandle } from "../scene/NavaraViewport";
 import { useViewModeStore } from "../features/viewMode/viewModeStore";
 import { useSceneThemeStore } from "../features/sceneTheme/sceneThemeStore";
-import { suppressAutoFit } from "../scene/autoFitSuppression";
+import {
+  isAutoFitSuppressed,
+  suppressAutoFit,
+} from "../scene/autoFitSuppression";
 import { useSelectionStore } from "../features/selection/selectionStore";
 import type { Selection } from "../domain/selection/types";
 import { useLayerStore } from "../features/layers/layerStore";
@@ -56,6 +59,7 @@ import { useEscapeClearsSelection } from "../features/selection/useEscapeClearsS
 import {
   useActiveCityLayer,
   resolveActiveLayer,
+  unifiedLayerOrder,
   type ActiveLayer,
 } from "../features/workspace/activeLayer";
 import {
@@ -82,8 +86,14 @@ import { SceneControlsTemp } from "../ui/header/SceneControlsTemp";
 import { LeftPanel } from "../ui/sidebar/LeftPanel";
 import { SourcePicker } from "../ui/layers/SourcePicker";
 import { UrlSourceForm } from "../ui/layers/UrlSourceForm";
-import { addGeoSourceFromUrl } from "../features/geoLayers/addGeoSource";
-import type { DetectedSource } from "../features/layers/detectSource";
+import {
+  addGeoSourceFromFile,
+  addGeoSourceFromUrl,
+} from "../features/geoLayers/addGeoSource";
+import {
+  detectSourceFromName,
+  type DetectedSource,
+} from "../features/layers/detectSource";
 import { StacBrowserDialog } from "../ui/stac/StacBrowserDialog";
 import type { AddUrlResult } from "../ui/stac/StacBrowser";
 import { ShareDialog } from "../ui/ShareDialog";
@@ -299,7 +309,20 @@ export function App({
    *  active reads here as "none" rather than as some other layer's. */
   const activeCityLayer = useActiveCityLayer();
   const activeCityLayerId = activeCityLayer?.id ?? null;
-  const hasLayers = layers.length > 0;
+  /** The user's geospatial overlays. Read HERE, above the branch, because they
+   *  are half of what a workspace is (Task 22, M12.2) — the selection panels
+   *  below read the same store again for their own reasons. */
+  const geoLayers = useGeoLayerStore((s) => s.layers);
+  /**
+   * Anything at all in the workspace, of EITHER kind.
+   *
+   * This used to be `layers.length > 0` — city models only — which made a
+   * GeoJSON added from the landing page write a row into a store nobody could
+   * see: the page stayed on the drop zone, and the overlay only appeared once
+   * a city model was opened beside it. A workspace with geospatial content in
+   * it is a workspace, and it belongs in the viewer.
+   */
+  const hasWorkspace = layers.length > 0 || geoLayers.length > 0;
 
   /**
    * Close the catalog on ANY transition into the viewer shell — the one place
@@ -317,8 +340,8 @@ export function App({
    * already unmounted by the time this runs.
    */
   useEffect(() => {
-    if (hasLayers || engineBooting) setCatalogOpen(false);
-  }, [hasLayers, engineBooting]);
+    if (hasWorkspace || engineBooting) setCatalogOpen(false);
+  }, [hasWorkspace, engineBooting]);
 
   // Active layer's streaming state, if any. Selected as individual
   // primitive fields (not the whole `StreamState` object) so this component
@@ -550,7 +573,6 @@ export function App({
   const clearSelection = useSelectionStore((s) => s.clear);
   const geoSelection = useSelectionStore((s) => s.geoSelection);
   const selectGeoFeature = useSelectionStore((s) => s.selectGeoFeature);
-  const geoLayers = useGeoLayerStore((s) => s.layers);
 
   // The shell's layout state (what `inspectorOpen`, `leftSidebarCollapsed`,
   // `leftSidebarWidth`, `tableOpen` and `tableHeight` used to be). `App` reads
@@ -1070,7 +1092,17 @@ export function App({
         // for it — but only when a layer actually landed: a workspace of
         // nothing but unavailable local files mounts no viewport at all, and
         // there is no camera to restore into an empty drop zone.
-        if (useLayerStore.getState().layers.length > 0) {
+        //
+        // EITHER kind of layer counts (Task 22, M12.2). A geo-only workspace
+        // mounts a viewport now, so it has somewhere to put its saved camera —
+        // and this await is also what holds the auto-fit suppression open
+        // across the render that mounts that viewport, so the first-content fit
+        // above sees a suppressed scope and drops its flight rather than
+        // replacing the viewpoint the user saved.
+        if (
+          useLayerStore.getState().layers.length > 0 ||
+          useGeoLayerStore.getState().layers.length > 0
+        ) {
           try {
             await applyCameraWhenReady(viewState.camera);
           } catch (e) {
@@ -1301,14 +1333,39 @@ export function App({
     // viewport is the boot gate rather than a re-run on some readiness state.
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** The landing page's picker and the Add Layer dialog both hand a plain
-   *  `File`/`string` back; the promise is fire-and-forget either way, exactly
-   *  as it was when these were inline handlers (errors land in `loadError`). */
+  /**
+   * A dropped or browsed file, from the landing page's picker or the Add Layer
+   * dialog. The promise is fire-and-forget either way, exactly as it was when
+   * these were inline handlers (errors land in `loadError`).
+   *
+   * DETECTED here, which the landing page's half was missing: the URL field
+   * has routed a `.geojson` to the geo store since Task 21, but a `.geojson`
+   * DROPPED on the hero went to the city loader and came back as "Invalid
+   * CityJSON" — one file, two answers, depending on which door it came
+   * through. The dialog's File tab has always made this choice for itself
+   * (`AddLayerDialog.addStaged`), so its `override` — always a city format by
+   * the time it reaches here — passes through untouched.
+   *
+   * ONLY GeoJSON: an XYZ template and a 3D Tiles tileset are remote sources
+   * the engine walks, not documents this app can read out of a local file, so
+   * a file named like one keeps going to the loader and fails there, as today.
+   * A refusal (a CityJSON file named `.geojson`, malformed JSON) is raised as
+   * a toast — the landing page renders one, and its inline `.error-message`
+   * belongs to the loader's own state.
+   */
   const handlePickedFile = useCallback(
     (file: File, override?: DetectedSource) => {
+      const detected = override ?? detectSourceFromName(file.name);
+      if (detected.kind === "geo" && detected.geoKind === "geojson") {
+        clearError();
+        void addGeoSourceFromFile(file).then((result) => {
+          if (!result.ok) showToast(result.error, EXPLANATION_TOAST_MS);
+        });
+        return;
+      }
       void handleFile(file, override);
     },
-    [handleFile],
+    [clearError, handleFile, showToast],
   );
 
   const handlePickedFiles = useCallback(
@@ -1479,6 +1536,85 @@ export function App({
     [showToast],
   );
 
+  /**
+   * How many rows the workspace held when this render's effects last ran, so
+   * the effect below can see the 0 → 1 edge rather than a level.
+   */
+  const previousWorkspaceSizeRef = useRef(0);
+  const workspaceSize = unifiedLayerOrder(layers, geoLayers).length;
+
+  /**
+   * The first content of a SCENE is framed once, whatever its kind.
+   *
+   * The viewport does this for city models (static rows through
+   * `previousLayerCountRef`, streams through the row predicate beside it), and
+   * it cannot do it for a geospatial layer: Navara exposes no bounds API for
+   * one, so the extent is the app's to compute (`resolveGeoLayerBounds`) —
+   * which is also why this is here rather than there. Without it a geo-only
+   * workspace opens on a whole-globe camera with the user's data somewhere
+   * over the horizon, and the only way to find it is "Zoom to layer".
+   *
+   * The EDGE, not the level: exactly one row, arriving where there were none.
+   * A geo layer added beside anything else does not fit, for the same reason a
+   * second city model does not — the camera the user has arranged outranks the
+   * new row. When that one row is a CITY layer this stands aside: the viewport
+   * frames its own.
+   *
+   * Suppressed by a restore, like every other automatic fit: a restore is
+   * nothing but new layers arriving and it carries its own camera
+   * (`autoFitSuppression.ts`, Task C26). The scope is held across the restore's
+   * `applyCameraWhenReady`, which is what keeps it open while this effect runs.
+   *
+   * Cancellation is a re-READ of the store after the waits, not the effect's
+   * cleanup: this effect re-runs on every size change, so a cleanup would
+   * cancel a legitimate pending fit the moment a second layer landed. What must
+   * be dropped is a fit whose LAYER is gone — the user removed it while the
+   * engine was still coming up — and the store is the authority on that.
+   *
+   * Failures are silent, deliberately: nobody asked for this flight. A source
+   * that will not load is reported when the user asks for it by hand
+   * ({@link handleFlyToGeoLayer}), and an engine that never starts has louder
+   * symptoms than a camera that stayed put.
+   */
+  useEffect(() => {
+    const previous = previousWorkspaceSizeRef.current;
+    previousWorkspaceSizeRef.current = workspaceSize;
+    if (previous !== 0 || workspaceSize !== 1) return;
+    const geoLayer = useGeoLayerStore.getState().layers[0];
+    if (!geoLayer || useLayerStore.getState().layers.length > 0) return;
+    if (isAutoFitSuppressed()) return;
+    const geoLayerId = geoLayer.id;
+    void (async () => {
+      try {
+        // The handle FIRST — this effect runs in the very commit that mounts
+        // the viewport, so the ref is already attached by the time a passive
+        // effect runs; the gate is the fallback for a mount that has not
+        // published yet. Then the engine's own `ready`: a `flyTo` on a view
+        // that has not finished `init()` does nothing (the same wait
+        // `applyCameraWhenReady` makes, for the same reason).
+        const scene = sceneRef.current ?? (await awaitSceneHandle());
+        await scene.ready;
+        const still = useGeoLayerStore
+          .getState()
+          .layers.find((l) => l.id === geoLayerId);
+        if (!still) return;
+        const bounds = await resolveGeoLayerBounds(still);
+        // A raster tile template names no extent, and neither does an
+        // unlinked GeoJSON row: nothing to frame, so nothing happens.
+        if (!bounds) return;
+        if (
+          !useGeoLayerStore.getState().layers.some((l) => l.id === geoLayerId)
+        )
+          return;
+        // Through the handle, which brackets every camera move in the
+        // streaming plugin's settle suppression.
+        sceneRef.current?.fitBounds(bounds);
+      } catch {
+        // See the doc comment: an unasked-for fit fails quietly.
+      }
+    })();
+  }, [workspaceSize, awaitSceneHandle]);
+
   /** Zoom to whichever layer the left panel asks about. Stable, and that
    *  matters here: `App` re-renders on every cursor-position update from the
    *  viewport, and an inline arrow would hand `LeftPanel` a new prop — and
@@ -1511,7 +1647,7 @@ export function App({
   // the first thing opened. Everything below already reads `activeLayer`
   // optional-chained, so an empty workspace renders an empty globe rather than
   // throwing.
-  if (hasLayers || engineBooting) {
+  if (hasWorkspace || engineBooting) {
     const hasUrlLayers = layers.some((l) => l.modelRef.type === "url");
 
     /* The right column follows the SELECTION: there is no inspector toggle
@@ -1785,7 +1921,7 @@ export function App({
 
       {/* Adding does not close it, deliberately: the user queues several tiles
           and watches them arrive. Nothing has to close it either — once the
-          first layer lands, `hasLayers` flips and this whole branch (dialog
+          first layer lands, `hasWorkspace` flips and this whole branch (dialog
           included) is replaced by the viewer shell. */}
       {catalogOpen && (
         <StacBrowserDialog
