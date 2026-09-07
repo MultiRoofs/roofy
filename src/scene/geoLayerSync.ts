@@ -55,10 +55,24 @@ export interface GeoSourceHandle {
  * `image` ("omit the key to leave it unchanged") and the same applies to every
  * key — so clearing a highlight means returning the layer's own colour
  * explicitly, never `{}`.
+ *
+ * `properties` is the source feature's own GeoJSON `properties`, and a real
+ * browser (Task 26 step 0, probe b, Navara 0.1.1) confirmed it is populated
+ * with DISTINCT values per feature for all three feature-set kinds a mixed
+ * GeoJSON produces — point, polyline and polygon. Optional here because
+ * nothing in this module needs it yet and a feature without properties is a
+ * legal GeoJSON feature; it is what a per-attribute colouring reads (T29).
+ * `batchId`, by contrast, is NOT stable across feature-set recreation: the
+ * same probe watched every `update()` mint a fresh set with fresh batch ids,
+ * so a value keyed on a batch id must be re-derived on `featureCreated`,
+ * never cached across one.
  */
 export interface GeoFeatureEvaluator {
   evaluate(
-    cb: (info: { readonly batchId: number }) => Record<string, unknown>,
+    cb: (info: {
+      readonly batchId: number;
+      readonly properties?: Record<string, unknown>;
+    }) => Record<string, unknown>,
   ): void;
 }
 
