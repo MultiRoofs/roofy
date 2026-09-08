@@ -63,6 +63,10 @@ const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
 const { useLayerTableStore } =
   await import("../../../../src/insights/layerTables");
+const { useLayerStore } =
+  await import("../../../../src/features/layers/layerStore");
+const { useSelectionStore } =
+  await import("../../../../src/features/selection/selectionStore");
 
 const READER_TABLE = {
   table: "layer_1",
@@ -127,6 +131,8 @@ beforeEach(() => {
   refreshStreamingTable.mockResolvedValue({ ok: true });
   useQueryStore.setState({ queries: {} });
   useLayerTableStore.setState({ tables: {}, tablePanelOpen: false });
+  useLayerStore.setState({ layers: [] });
+  useSelectionStore.setState({ selections: [] });
 });
 
 afterEach(cleanup);
@@ -401,6 +407,15 @@ describe("ExportDialog", () => {
     await waitFor(() => expect(downloadBlob).toHaveBeenCalled());
   });
 
+  it("warns that streaming exports include only currently loaded records", async () => {
+    open({ table: FALLBACK_TABLE, isStreaming: true });
+    expect(
+      await screen.findByText(
+        "Exports include currently loaded records only, not the whole dataset.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("forces one table rebuild when it opens on a streaming layer", async () => {
     open({ table: FALLBACK_TABLE, isStreaming: true });
     await waitFor(() =>
@@ -467,6 +482,48 @@ describe("ExportDialog", () => {
     expect(
       (screen.getByLabelText("Current filter") as HTMLInputElement).checked,
     ).toBe(true);
+  });
+
+  it("disables selected export with no active-layer selection", async () => {
+    open();
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    expect(
+      (screen.getByLabelText("Selected records") as HTMLInputElement).disabled,
+    ).toBe(true);
+  });
+
+  it("exports a selected child as its complete root feature, independent of the filter", async () => {
+    useLayerStore.setState({
+      layers: [
+        {
+          id: "L",
+          name: "delft",
+          isStreaming: false,
+          model: {
+            objects: {
+              B1: { id: "B1", parents: [], children: ["P1"] },
+              P1: { id: "P1", parents: ["B1"], children: [] },
+            },
+          },
+        },
+      ] as never,
+    });
+    useSelectionStore
+      .getState()
+      .select({ kind: "object", layerId: "L", objectId: "P1" });
+    useQueryStore.getState().setFilter("L", {
+      logic: "AND",
+      conditions: [{ id: "c", column: "b3_h_dak_max", op: ">", value: 99 }],
+    });
+    useQueryStore.getState().applyFilter("L");
+    open();
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    fireEvent.click(screen.getByLabelText("Selected records"));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    await waitFor(() => expect(runExport).toHaveBeenCalled());
+    expect((runExport.mock.calls[0]![0] as { where: string }).where).toBe(
+      'COALESCE("feature_id", "id") IN (\'B1\')',
+    );
   });
 
   it("runs an attribute export with the chosen columns and downloads it", async () => {

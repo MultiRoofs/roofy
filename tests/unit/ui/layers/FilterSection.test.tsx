@@ -135,17 +135,26 @@ describe("FilterSection — a filter applied", () => {
   });
 });
 
-describe("FilterSection — layers with no table behind them", () => {
-  it("says a raster cannot be filtered", () => {
+describe("FilterSection — record capabilities", () => {
+  it("truthfully says a raster has no browsable records", () => {
     render(<FilterSection item={geo("raster-xyz")} />);
-    expect(screen.getByText("This layer cannot be filtered.")).toBeTruthy();
+    expect(
+      screen.getByText("This layer has no browsable records."),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit in table" })).toBeNull();
   });
 
-  it("says the same for a tileset and a vector layer", () => {
+  it("keeps a tileset non-browsable while GeoJSON gets the shared filter", () => {
     render(<FilterSection item={geo("3d-tiles")} />);
-    expect(screen.getByText("This layer cannot be filtered.")).toBeTruthy();
+    expect(
+      screen.getByText("This layer has no browsable records."),
+    ).toBeTruthy();
     cleanup();
     render(<FilterSection item={geo("geojson")} />);
-    expect(screen.getByText("This layer cannot be filtered.")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "No filter. Filters apply to the map and the table together.",
+      ),
+    ).toBeTruthy();
   });
 });

@@ -30,9 +30,9 @@
  * fact about the whole panel (nothing to list AND nothing in flight), and the
  * answer to it is the Add layer button, which is the panel's.
  */
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { ResizeHandle } from "../shell/ResizeHandle";
-import { useShellStore } from "../shell/shellStore";
+import { SHELL_LIMITS, useShellStore } from "../shell/shellStore";
 import { AddLayerDialog } from "../layers/AddLayerDialog";
 import { ActiveLayerPanel } from "../layers/ActiveLayerPanel";
 import { LayerList, type UnavailableRow } from "../layers/LayerList";
@@ -107,27 +107,11 @@ export function LeftPanel({
     pending.length === 0 &&
     failed.length === 0;
 
-  // Identity-stable so a re-render of the panel does not re-render every row:
-  // `ResizeHandle` and `LayerList` both take callbacks, and `leftWidth` is
-  // read from the store at pointerdown rather than subscribed to — a panel
-  // that re-rendered on every pixel of its own drag would re-render the list
-  // with it.
-  const handlers = useMemo(() => {
-    let dragOrigin = 0;
-    return {
-      onStart: () => {
-        dragOrigin = useShellStore.getState().leftWidth;
-      },
-      // The handle is on the panel's RIGHT edge: dragging right (a positive
-      // delta) widens it — the mirror of the details panel's left-edge one.
-      onDelta: (dx: number) =>
-        useShellStore.getState().setLeftWidth(dragOrigin + dx),
-      onOpenTable: (layerId: string) => {
-        activateLayer(layerId);
-        useShellStore.getState().openDrawer();
-      },
-    };
-  }, []);
+  const leftWidth = useShellStore((state) => state.leftWidth);
+  const openTable = (layerId: string) => {
+    activateLayer(layerId);
+    useShellStore.getState().openDrawer();
+  };
 
   return (
     <aside className="left-panel" aria-label="Layers panel">
@@ -150,7 +134,7 @@ export function LeftPanel({
         ) : (
           <LayerList
             onZoomToLayer={onZoomToLayer}
-            onOpenTable={handlers.onOpenTable}
+            onOpenTable={openTable}
             extraRows={extraRows}
             pending={pending}
             failed={failed}
@@ -171,8 +155,11 @@ export function LeftPanel({
       <ResizeHandle
         axis="x"
         label="Resize layers panel"
-        onStart={handlers.onStart}
-        onDelta={handlers.onDelta}
+        current={leftWidth}
+        min={SHELL_LIMITS.leftMin}
+        max={SHELL_LIMITS.leftMax}
+        direction={1}
+        onResize={(width) => useShellStore.getState().setLeftWidth(width)}
       />
 
       {addOpen && (

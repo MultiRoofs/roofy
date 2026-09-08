@@ -90,15 +90,15 @@ describe("Pagination", () => {
     expect(onPage).toHaveBeenNthCalledWith(2, 2);
   });
 
-  it("offers 100 / 500 / 1000 and reports the choice as a number", () => {
+  it("offers 20 / 50 / 100 and reports the choice as a number", () => {
     const { onPageSize } = setup();
     const select = screen.getByLabelText("Rows per page") as HTMLSelectElement;
     expect([...select.options].map((o) => o.value)).toEqual([
+      "20",
+      "50",
       "100",
-      "500",
-      "1000",
     ]);
-    fireEvent.change(select, { target: { value: "1000" } });
-    expect(onPageSize).toHaveBeenCalledWith(1000);
+    fireEvent.change(select, { target: { value: "50" } });
+    expect(onPageSize).toHaveBeenCalledWith(50);
   });
 });

@@ -118,7 +118,6 @@ describe("removals", () => {
 
   it("forgets the layer's query along with its table", () => {
     useLayerStore.setState({ layers: [layer({ id: "A" })] });
-    useQueryStore.getState().setSyncToMap("A", true);
     useLayerStore.setState({ layers: [] });
     expect(useQueryStore.getState().queries.A).toBeUndefined();
   });

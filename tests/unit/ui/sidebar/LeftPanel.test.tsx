@@ -224,6 +224,22 @@ describe("LeftPanel", () => {
     expect(useShellStore.getState().leftWidth).toBe(340);
   });
 
+  it("widens the layers panel with ArrowRight and clamps keyboard bounds", () => {
+    seed(layer({ id: "l1", name: "Delft" }));
+    renderPanel();
+    const handle = screen.getByRole("separator", {
+      name: "Resize layers panel",
+    });
+
+    handle.focus();
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+    expect(useShellStore.getState().leftWidth).toBe(316);
+    fireEvent.keyDown(handle, { key: "PageUp" });
+    expect(useShellStore.getState().leftWidth).toBe(380);
+    fireEvent.keyDown(handle, { key: "End" });
+    expect(useShellStore.getState().leftWidth).toBe(420);
+  });
+
   it("opens a row's table by activating it and opening the drawer", () => {
     seed(layer({ id: "l1", name: "Delft" }), layer({ id: "l2", name: "Rome" }));
     renderPanel();

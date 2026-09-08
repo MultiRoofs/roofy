@@ -40,9 +40,10 @@ export interface FilterGroup {
   readonly conditions: ReadonlyArray<FilterCondition>;
 }
 
-export type PageSize = 100 | 500 | 1000;
+/** 500/1000 are accepted only to read an in-session pre-12.4 query. */
+export type PageSize = 20 | 50 | 100 | 500 | 1000;
 
-export const PAGE_SIZES: ReadonlyArray<PageSize> = [100, 500, 1000];
+export const PAGE_SIZES: ReadonlyArray<PageSize> = [20, 50, 100];
 
 export interface LayerQuery {
   /** The DRAFT edited in the bar — never itself queried. */
@@ -56,7 +57,14 @@ export interface LayerQuery {
   } | null;
   readonly page: number;
   readonly pageSize: PageSize;
-  readonly syncToMap: boolean;
+  /** Drawer presentation state; kept session-local with the query. */
+  readonly view: "buildings" | "raw";
+  readonly showSelectedOnly: boolean;
+  /** Exact Raw-object request from Details; independent of applied filters. */
+  readonly rawObjectId: string | null;
+  /** null means the stable drawer default column policy. */
+  readonly columns: ReadonlyArray<string> | null;
+  /** Compatibility field while old table consumers migrate; map filtering is automatic. */
 }
 
 export const EMPTY_FILTER: FilterGroup = Object.freeze({
@@ -69,8 +77,11 @@ export const DEFAULT_LAYER_QUERY: LayerQuery = Object.freeze({
   applied: null,
   sort: null,
   page: 0,
-  pageSize: 100 as PageSize,
-  syncToMap: false,
+  pageSize: 20 as PageSize,
+  view: "buildings",
+  showSelectedOnly: false,
+  rawObjectId: null,
+  columns: null,
 });
 
 /** Whether an operator takes no value — the bar hides its value input. */

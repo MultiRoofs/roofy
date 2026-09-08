@@ -24,10 +24,9 @@ describe("layerQuery", () => {
     );
   });
 
-  it("defaults page size to 100 and applies nothing", () => {
-    expect(DEFAULT_LAYER_QUERY.pageSize).toBe(100);
+  it("defaults page size to 20 and applies nothing", () => {
+    expect(DEFAULT_LAYER_QUERY.pageSize).toBe(20);
     expect(DEFAULT_LAYER_QUERY.applied).toBeNull();
-    expect(DEFAULT_LAYER_QUERY.syncToMap).toBe(false);
   });
 });
 
@@ -119,18 +118,39 @@ describe("paging", () => {
   });
 });
 
-describe("syncToMap and reset", () => {
-  it("records the toggle", () => {
-    useQueryStore.getState().setSyncToMap("L1", true);
-    expect(layerQuery(useQueryStore.getState(), "L1").syncToMap).toBe(true);
-  });
-
+describe("resetQuery", () => {
   it("resetQuery drops the layer's entry entirely", () => {
-    useQueryStore.getState().setSyncToMap("L1", true);
     useQueryStore.getState().resetQuery("L1");
     expect(useQueryStore.getState().queries.L1).toBeUndefined();
     expect(layerQuery(useQueryStore.getState(), "L1")).toEqual(
       DEFAULT_LAYER_QUERY,
     );
   });
+});
+
+describe("navigateRawObject", () => {
+  it("targets one raw object without changing the applied filter, and returns to it", () => {
+    useQueryStore.getState().setFilter("L1", FILTER);
+    useQueryStore.getState().applyFilter("L1");
+    const applied = layerQuery(useQueryStore.getState(), "L1").applied;
+    useQueryStore.getState().setColumns("L1", ["id", "derived_height"]);
+
+    useQueryStore.getState().navigateRawObject("L1", "child-off-page");
+    let query = layerQuery(useQueryStore.getState(), "L1");
+    expect(query.view).toBe("raw");
+    expect(query.columns).toBeNull();
+    expect(query.rawObjectId).toBe("child-off-page");
+    expect(query.applied).toBe(applied);
+
+    useQueryStore.getState().clearRawObject("L1");
+    query = layerQuery(useQueryStore.getState(), "L1");
+    expect(query.rawObjectId).toBeNull();
+    expect(query.applied).toBe(applied);
+  });
+});
+
+it("resets custom columns when switching to raw objects", () => {
+  useQueryStore.getState().setColumns("layer", ["id", "derived_height"]);
+  useQueryStore.getState().setView("layer", "raw");
+  expect(layerQuery(useQueryStore.getState(), "layer").columns).toBeNull();
 });

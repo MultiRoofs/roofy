@@ -26,6 +26,10 @@ import type {
   Selection,
   ToolMode,
 } from "../domain/selection/types";
+import {
+  publicGeoProperties,
+  readGeoStableFeatureId,
+} from "../features/geoLayers/geoJsonRecords";
 import type {
   EcefRay,
   PickedFeatureLike,
@@ -341,6 +345,7 @@ export function geoSelectionFromStash(
   return {
     geoLayerId,
     batchId: stash.batchId,
-    properties: stash.properties ?? {},
+    stableFeatureId: readGeoStableFeatureId(stash.properties) ?? undefined,
+    properties: publicGeoProperties(stash.properties ?? {}),
   };
 }

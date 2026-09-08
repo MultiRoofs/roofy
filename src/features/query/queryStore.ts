@@ -32,7 +32,12 @@ export interface QueryStoreActions {
   toggleSort: (layerId: string, column: string) => void;
   setPage: (layerId: string, page: number) => void;
   setPageSize: (layerId: string, pageSize: PageSize) => void;
-  setSyncToMap: (layerId: string, on: boolean) => void;
+  setView: (layerId: string, view: LayerQuery["view"]) => void;
+  setShowSelectedOnly: (layerId: string, on: boolean) => void;
+  /** Opens Raw view on this exact object without changing the applied filter. */
+  navigateRawObject: (layerId: string, objectId: string) => void;
+  clearRawObject: (layerId: string) => void;
+  setColumns: (layerId: string, columns: ReadonlyArray<string> | null) => void;
   resetQuery: (layerId: string) => void;
 }
 
@@ -106,8 +111,33 @@ export const useQueryStore = create<QueryStore>((set) => ({
   setPageSize: (layerId, pageSize) =>
     set((s) => patch(s, layerId, (q) => ({ ...q, pageSize, page: 0 }))),
 
-  setSyncToMap: (layerId, on) =>
-    set((s) => patch(s, layerId, (q) => ({ ...q, syncToMap: on }))),
+  setView: (layerId, view) =>
+    set((s) =>
+      patch(s, layerId, (q) => ({ ...q, view, columns: null, page: 0 })),
+    ),
+
+  setShowSelectedOnly: (layerId, showSelectedOnly) =>
+    set((s) => patch(s, layerId, (q) => ({ ...q, showSelectedOnly, page: 0 }))),
+
+  navigateRawObject: (layerId, objectId) =>
+    set((s) =>
+      patch(s, layerId, (q) => ({
+        ...q,
+        view: "raw",
+        columns: null,
+        showSelectedOnly: false,
+        rawObjectId: objectId,
+        page: 0,
+      })),
+    ),
+
+  clearRawObject: (layerId) =>
+    set((s) =>
+      patch(s, layerId, (q) => ({ ...q, rawObjectId: null, page: 0 })),
+    ),
+
+  setColumns: (layerId, columns) =>
+    set((s) => patch(s, layerId, (q) => ({ ...q, columns, page: 0 }))),
 
   resetQuery: (layerId) =>
     set((s) => {

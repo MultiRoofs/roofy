@@ -50,8 +50,10 @@ import {
   useGeoLayerStore,
   type GeoLayer,
 } from "../features/geoLayers/geoLayerStore";
+import { installGeoJsonPreparation } from "../features/geoLayers/geoJsonPreparation";
 import { resolveGeoLayerBounds } from "../features/geoLayers/geoLayerBounds";
 import { installLayerTableLifecycle } from "../features/layers/layerTableLifecycle";
+import { installMapFilterSync } from "../features/query/mapFilterSync";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
 import { ensureModelCrsLoadable } from "../features/layers/ensureCrs";
 import {
@@ -65,6 +67,7 @@ import { useFileDropGuard } from "../features/layers/useFileDropGuard";
 import { useEscapeClearsSelection } from "../features/selection/useEscapeClearsSelection";
 import {
   useActiveCityLayer,
+  useActiveLayer,
   resolveActiveLayer,
   unifiedLayerOrder,
   type ActiveLayer,
@@ -87,11 +90,12 @@ import {
   type StreamPlugin,
 } from "../features/streaming/streamPlugin";
 import { useSolarStore } from "../features/solar/solarStore";
+import { useSceneSheetStore } from "../features/sceneSheet/sceneSheetStore";
 import { DetailsPanel } from "../ui/details/DetailsPanel";
 import { WorkspaceHeader } from "../ui/header/WorkspaceHeader";
-import { SceneControlsTemp } from "../ui/header/SceneControlsTemp";
 import { LeftPanel } from "../ui/sidebar/LeftPanel";
 import { SourcePicker } from "../ui/layers/SourcePicker";
+import { AddLayerDialog, type SourceTab } from "../ui/layers/AddLayerDialog";
 import { UrlSourceForm } from "../ui/layers/UrlSourceForm";
 import {
   addGeoSourceFromFile,
@@ -112,8 +116,18 @@ import { PreferencesMenu } from "../ui/header/PreferencesMenu";
 import { installThemeListener } from "../features/theme/themeStore";
 import { RoofyLockup } from "../ui/RoofyLockup";
 import { LegendOverlay } from "../ui/viewport/LegendOverlay";
-import { RenderingPanel } from "../ui/viewport/RenderingPanel";
-import { TablePanel } from "../ui/table/TablePanel";
+import { FilterChip } from "../ui/viewport/FilterChip";
+import { HoverTooltip } from "../ui/viewport/HoverTooltip";
+import { SceneButtons } from "../ui/viewport/SceneButtons";
+import { SceneSettingsSheet } from "../ui/viewport/SceneSettingsSheet";
+import { SunShadeSheet } from "../ui/viewport/SunShadeSheet";
+import { SelectModeControl } from "../ui/viewport/SelectModeControl";
+import { AddressSearch } from "../ui/viewport/AddressSearch";
+import { CameraCluster } from "../ui/viewport/CameraCluster";
+import { selectedGeoJsonBounds } from "../features/geoLayers/geoLayerBounds";
+import { useGeoFeatureVisibilityStore } from "../features/geoLayers/geoFeatureVisibilityStore";
+import type { FlyToTarget } from "../scene/geographicCamera";
+import { DataDrawer } from "../ui/drawer/DataDrawer";
 import type { Rule } from "../features/rules/types";
 
 /**
@@ -224,7 +238,6 @@ export function App({
   persistenceStore = defaultStore,
   platform = browserPlatform,
 }: AppProps) {
-  const [triangleCount, setTriangleCount] = useState(0);
   const [savedSnapshots, setSavedSnapshots] = useState<SnapshotSummary[]>([]);
   const [unavailableLayers, setUnavailableLayers] = useState<
     ReadonlyArray<UnavailableLayer>
@@ -233,7 +246,9 @@ export function App({
     state: "uninitialized",
   });
   const [toast, setToast] = useState<string | null>(null);
-  const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
+  const [viewportAttribution, setViewportAttribution] = useState<
+    readonly string[]
+  >([]);
   /**
    * The LANDING page's catalog dialog — the viewer shell reaches the same
    * browser through the Add Layer dialog's "Catalog" tab instead.
@@ -244,6 +259,8 @@ export function App({
    * branch that renders it — it is plain state that outlives its own UI.
    */
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [emptyAddTab, setEmptyAddTab] = useState<SourceTab | null>(null);
+  const [hasEnteredViewer, setHasEnteredViewer] = useState(false);
   /** The minted share link currently on display, or null. Non-null IS the
    *  dialog's open state: the URL is a snapshot of the view at the moment
    *  Share was clicked, so a new click mints a new one rather than reopening
@@ -254,6 +271,7 @@ export function App({
     readonly [number, number, number] | null
   >(null);
   const sceneRef = useRef<CitySceneHandle | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   /**
    * A `.fcb` open is in flight and needs the 3D engine, so the viewer shell
    * (and with it `NavaraViewport`, and with that the FlatCityBuf plugin) must
@@ -317,6 +335,7 @@ export function App({
    *  streaming readout and its save label are CITY facts, so a geo layer being
    *  active reads here as "none" rather than as some other layer's. */
   const activeCityLayer = useActiveCityLayer();
+  const activeLayer = useActiveLayer();
   const activeCityLayerId = activeCityLayer?.id ?? null;
   /** The user's geospatial overlays. Read HERE, above the branch, because they
    *  are half of what a workspace is (Task 22, M12.2) — the selection panels
@@ -332,6 +351,24 @@ export function App({
    * it is a workspace, and it belongs in the viewer.
    */
   const hasWorkspace = layers.length > 0 || geoLayers.length > 0;
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const attribution = viewport?.querySelector(".attribution-overlay");
+    if (viewport === null || !(attribution instanceof HTMLElement)) return;
+    const update = () =>
+      viewport.style.setProperty(
+        "--attribution-height",
+        `${attribution.offsetHeight}px`,
+      );
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(attribution);
+    return () => {
+      observer.disconnect();
+      viewport.style.removeProperty("--attribution-height");
+    };
+  }, [engineBooting, hasWorkspace]);
 
   /**
    * How many rows the workspace held when the fit effect below last ran, so it
@@ -357,8 +394,24 @@ export function App({
    * already unmounted by the time this runs.
    */
   useEffect(() => {
-    if (hasWorkspace || engineBooting) setCatalogOpen(false);
+    if (hasWorkspace || engineBooting) {
+      setCatalogOpen(false);
+      setHasEnteredViewer(true);
+    }
   }, [hasWorkspace, engineBooting]);
+
+  /**
+   * A retained empty viewer is still a new workspace. It must not retain
+   * panels that describe the layer which was just removed, whether that was
+   * through the header's "New workspace" action or the final row's menu.
+   */
+  useEffect(() => {
+    if (hasWorkspace || engineBooting || !hasEnteredViewer) return;
+    useShellStore.getState().closeDrawer();
+    useSceneSheetStore.getState().setSheet(null);
+    useSelectionStore.getState().clear();
+    activateLayer(null);
+  }, [hasWorkspace, engineBooting, hasEnteredViewer]);
 
   // Active layer's streaming state, if any. Selected as individual
   // primitive fields (not the whole `StreamState` object) so this component
@@ -368,6 +421,9 @@ export function App({
   // narrowly rather than subscribing to the whole entry.
   const activeStreamStatus = useStreamStore((s) =>
     activeCityLayerId ? s.streams[activeCityLayerId]?.status : undefined,
+  );
+  const activeStream = useStreamStore((s) =>
+    activeCityLayerId ? s.streams[activeCityLayerId] : undefined,
   );
   const activeStreamMessage = useStreamStore((s) =>
     activeCityLayerId ? s.streams[activeCityLayerId]?.message : undefined,
@@ -675,6 +731,23 @@ export function App({
     }
   }, [geoLayers, geoSelection, selectGeoFeature]);
 
+  const geoVisibleIds = useGeoFeatureVisibilityStore((s) => s.visible);
+  useEffect(() => {
+    if (geoSelection?.stableFeatureId === undefined) return;
+    const allowed = geoVisibleIds[geoSelection.geoLayerId];
+    if (
+      allowed !== null &&
+      allowed !== undefined &&
+      !allowed.has(geoSelection.stableFeatureId)
+    ) {
+      selectGeoFeature(null);
+      showToast(
+        "Selected vector feature is excluded by the filter.",
+        EXPLANATION_TOAST_MS,
+      );
+    }
+  }, [geoSelection, geoVisibleIds, selectGeoFeature, showToast]);
+
   const refreshSnapshots = useCallback(async () => {
     const list = await persistenceStore.list();
     setSavedSnapshots(list);
@@ -702,6 +775,18 @@ export function App({
    * freed. See `features/rules/ruleDraftStore.ts`.
    */
   useEffect(() => installRuleDraftInvariants(), []);
+  useEffect(() => installGeoJsonPreparation(), []);
+
+  useEffect(
+    () =>
+      installMapFilterSync((count) =>
+        showToast(
+          `${count} selected ${count === 1 ? "building was" : "buildings were"} excluded by the filter`,
+          EXPLANATION_TOAST_MS,
+        ),
+      ),
+    [showToast],
+  );
 
   /**
    * The interface appearance, installed ONCE — the same shape as the
@@ -831,7 +916,7 @@ export function App({
       return false;
     }
 
-    const { datetime } = useSolarStore.getState();
+    const { datetime, timeZone } = useSolarStore.getState();
     const { layers: allLayers } = useLayerStore.getState();
     const { mode: pickMode } = useSelectionStore.getState();
     const { mode: viewMode } = useViewModeStore.getState();
@@ -893,6 +978,7 @@ export function App({
       geoLayers: allGeoLayers.map(geoLayerSnapshot),
       camera: cameraState,
       datetime,
+      timeZone,
       pickMode,
       viewMode,
       sceneTheme,
@@ -1265,7 +1351,7 @@ export function App({
       return;
     }
 
-    const { datetime } = useSolarStore.getState();
+    const { datetime, timeZone } = useSolarStore.getState();
     const { layers: allLayers } = useLayerStore.getState();
     const { mode: pickMode } = useSelectionStore.getState();
 
@@ -1284,6 +1370,7 @@ export function App({
         })),
       cam: cameraState,
       dt: datetime.toISOString(),
+      tz: timeZone,
       pm: pickMode,
     };
 
@@ -1406,6 +1493,7 @@ export function App({
       const dt = new Date(shared.dt);
       if (!isNaN(dt.getTime())) {
         useSolarStore.getState().setDatetime(dt);
+        useSolarStore.getState().setTimeZone(shared.tz);
       }
 
       // Said BEFORE the camera wait, so the news is on screen while the
@@ -1524,7 +1612,6 @@ export function App({
     // flag is false for as long as the shell is up, and this is only one of
     // the exits back to the landing page. Two half-rules for one invariant is
     // what let the sidebar's remove-last-layer path slip through.
-    setTriangleCount(0);
     // The drawer belongs to a workspace that no longer has any layers.
     useShellStore.getState().closeDrawer();
     setFps(undefined);
@@ -1542,6 +1629,7 @@ export function App({
     // "New workspace" in the header is this same exit, and a new workspace
     // does not inherit the old one's name.
     useWorkspaceStore.getState().resetName();
+    useSceneSheetStore.getState().setSheet(null);
   }, [clearSelection]);
 
   // Re-selecting a file for an "unavailable" (restored-but-file-backed)
@@ -1611,10 +1699,6 @@ export function App({
       handleDismissUnavailableLayer,
     ],
   );
-
-  const handleFitAll = useCallback(() => {
-    sceneRef.current?.fitAll();
-  }, []);
 
   /** Zoom to a GEO layer: its extent is the app's to compute (the engine has
    *  no bounds API for these), and may live behind a URL — hence async, with
@@ -1736,6 +1820,58 @@ export function App({
   /** A layer the engine refused (the CRS gate — no reference system, or a
    *  non-metric one). Stable identity on purpose: `NavaraViewport`'s layer-sync
    *  effect lists it as a dependency. */
+  const handleFlyToAddress = useCallback((target: FlyToTarget) => {
+    sceneRef.current?.flyTo(target);
+  }, []);
+
+  const handleFitActiveLayer = useCallback(() => {
+    if (activeLayer !== null) handleZoomToLayer(activeLayer);
+  }, [activeLayer, handleZoomToLayer]);
+
+  const selectedObjectIds = useMemo(
+    () =>
+      activeLayer?.kind === "city"
+        ? [
+            ...new Set(
+              selections
+                .filter(
+                  (selection) => selection.layerId === activeLayer.layer.id,
+                )
+                .map((selection) => selection.objectId),
+            ),
+          ]
+        : [],
+    [activeLayer, selections],
+  );
+  const selectedGeoBounds = useMemo(
+    () =>
+      activeLayer?.kind === "geo" &&
+      activeLayer.layer.kind === "geojson" &&
+      geoSelection?.geoLayerId === activeLayer.layer.id &&
+      geoSelection.stableFeatureId !== undefined
+        ? selectedGeoJsonBounds(
+            activeLayer.layer.config.preparedData,
+            new Set([geoSelection.stableFeatureId]),
+          )
+        : null,
+    [activeLayer, geoSelection],
+  );
+  const handleFitSelection = useCallback(() => {
+    if (activeLayer?.kind === "city" && selectedObjectIds.length > 0) {
+      sceneRef.current?.fitObjects(activeLayer.layer.id, selectedObjectIds);
+      return;
+    }
+    if (
+      activeLayer?.kind === "geo" &&
+      activeLayer.layer.kind === "geojson" &&
+      geoSelection?.geoLayerId === activeLayer.layer.id &&
+      geoSelection.stableFeatureId !== undefined
+    ) {
+      if (selectedGeoBounds !== null)
+        sceneRef.current?.fitBounds(selectedGeoBounds);
+    }
+  }, [activeLayer, geoSelection, selectedGeoBounds, selectedObjectIds]);
+
   const handleLayerError = useCallback(
     (layerId: string, message: string) => {
       showToast(`Layer ${layerId}: ${message}`, EXPLANATION_TOAST_MS);
@@ -1753,7 +1889,7 @@ export function App({
   // the first thing opened. Everything below already reads `activeLayer`
   // optional-chained, so an empty workspace renders an empty globe rather than
   // throwing.
-  if (hasWorkspace || engineBooting) {
+  if (hasWorkspace || engineBooting || hasEnteredViewer) {
     const hasUrlLayers = layers.some((l) => l.modelRef.type === "url");
 
     /* The right column follows the SELECTION: there is no inspector toggle
@@ -1779,20 +1915,6 @@ export function App({
               onNewWorkspace={handleClose}
               onOpenWorkspace={(id) => void handleRestore(id)}
               snapshots={savedSnapshots}
-              /* Lodgers until 12.5 gives the scene its own home. */
-              sceneControls={
-                <SceneControlsTemp
-                  pickMode={mode}
-                  toolMode={toolMode}
-                  onSetPickMode={setMode}
-                  onSetToolMode={setToolMode}
-                  onFitAll={handleFitAll}
-                  advancedSettingsOpen={advancedSettingsOpen}
-                  onToggleAdvancedSettings={() =>
-                    setAdvancedSettingsOpen((o) => !o)
-                  }
-                />
-              }
             />
           }
           /* The rail is not a collapsed panel: it is a different component
@@ -1826,25 +1948,112 @@ export function App({
             )
           }
           map={
-            <div className="viewport">
+            <div className="viewport" ref={viewportRef}>
+              {!hasWorkspace && !engineBooting && (
+                <div className="empty-workspace-overlay">
+                  <div className="empty-workspace-overlay__card">
+                    <strong>Add a layer to start</strong>
+                    {loadError && (
+                      <p className="error-message" role="alert">
+                        {loadError}
+                      </p>
+                    )}
+                    <div className="empty-workspace-overlay__actions">
+                      <button
+                        className="primary"
+                        type="button"
+                        onClick={() => setEmptyAddTab("file")}
+                      >
+                        Add layer
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEmptyAddTab("file")}
+                      >
+                        File
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEmptyAddTab("url")}
+                      >
+                        URL
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEmptyAddTab("catalog")}
+                      >
+                        Catalog
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {emptyAddTab !== null && (
+                <AddLayerDialog
+                  onClose={() => setEmptyAddTab(null)}
+                  onAddFile={handlePickedFile}
+                  onAddFiles={handlePickedFiles}
+                  onAddUrl={handleAddUrl}
+                  loading={loading}
+                  initialTab={emptyAddTab}
+                />
+              )}
               <NavaraViewport
                 ref={attachScene}
-                onTriangleCount={setTriangleCount}
+                onTriangleCount={() => {}}
                 onFps={setFps}
                 onCursorPosition={setCursorPosition}
                 onLayerError={handleLayerError}
+                onAttributionChange={setViewportAttribution}
+              />
+              <AddressSearch onFlyTo={handleFlyToAddress} />
+              <CameraCluster
+                onZoomIn={() => sceneRef.current?.zoomIn()}
+                onZoomOut={() => sceneRef.current?.zoomOut()}
+                onResetNorth={() => sceneRef.current?.resetNorth()}
+                onFit={handleFitActiveLayer}
+                fitDisabled={activeLayer === null}
+                fitTitle={
+                  activeLayer === null
+                    ? "Choose a layer to fit"
+                    : "Fit active layer"
+                }
+                onFitSelection={handleFitSelection}
+                selectionPresent={
+                  selectedObjectIds.length > 0 || geoSelection !== null
+                }
+                selectionDisabled={
+                  selectedObjectIds.length === 0 && selectedGeoBounds === null
+                }
+                selectionTitle={
+                  geoSelection !== null
+                    ? selectedGeoBounds === null
+                      ? "Selected geo feature has no coordinates"
+                      : "Zoom to selected geo feature"
+                    : "Zoom to selection"
+                }
+              />
+              <SelectModeControl
+                mode={mode}
+                toolMode={toolMode}
+                cityActive={activeCityLayer !== null}
+                onSetMode={setMode}
+                onSetToolMode={setToolMode}
               />
               <LegendOverlay />
-              {advancedSettingsOpen && (
-                <RenderingPanel
-                  onClose={() => setAdvancedSettingsOpen(false)}
-                />
-              )}
+              <FilterChip />
+              <HoverTooltip />
+              <SceneButtons
+                renderSun={(onClose) => <SunShadeSheet onClose={onClose} />}
+                renderSettings={(onClose) => (
+                  <SceneSettingsSheet onClose={onClose} />
+                )}
+              />
             </div>
           }
           drawer={
             drawerOpen ? (
-              <TablePanel
+              <DataDrawer
                 duckdbStatus={duckdbStatus}
                 onRetryDuckDB={handleRetryDuckDB}
               />
@@ -1856,12 +2065,10 @@ export function App({
             ) : null
           }
           rightTitle={selectionTitle(selections, geoSelection !== null)}
+          attributionLines={viewportAttribution}
           status={
             <StatusBar
               objectCount={totalObjects}
-              triangleCount={triangleCount}
-              selectedCount={selections.length}
-              duckdbStatus={duckdbStatus}
               fps={fps}
               cursorPosition={cursorPosition}
               streamStatus={
@@ -1873,6 +2080,11 @@ export function App({
                 activeCityLayer?.isStreaming
                   ? (activeStreamMessage ?? null)
                   : null
+              }
+              residentCellCount={
+                activeCityLayer?.isStreaming
+                  ? activeStream?.handle.getResidentModel().cellCount
+                  : undefined
               }
             />
           }

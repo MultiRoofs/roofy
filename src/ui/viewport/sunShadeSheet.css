@@ -1,0 +1,107 @@
+.sun-shade-sheet {
+  box-sizing: border-box;
+  width: 320px;
+  max-width: calc(100% - 1rem);
+  max-height: 100%;
+  padding: 0.75rem;
+  overflow: auto;
+  color: var(--fg);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-lg, 14px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.32);
+}
+
+.sun-shade-sheet header,
+.sun-shade-actions,
+.sun-shade-presets,
+.sun-shade-shadows {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.sun-shade-sheet header {
+  justify-content: space-between;
+}
+
+.sun-shade-sheet h2 {
+  margin: 0;
+  font: 600 0.9rem var(--font-display);
+}
+
+.sun-shade-sheet button,
+.sun-shade-sheet input,
+.sun-shade-sheet select {
+  color: var(--fg);
+  font: inherit;
+  background: var(--bg-input);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+}
+
+.sun-shade-sheet button {
+  padding: 0.3rem 0.45rem;
+  cursor: pointer;
+}
+
+.sun-shade-sheet button[aria-pressed="true"] {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.sun-shade-sheet label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-top: 0.55rem;
+  color: var(--fg-muted);
+  font-size: 0.7rem;
+}
+
+.sun-shade-sheet input,
+.sun-shade-sheet select {
+  padding: 0.3rem 0.4rem;
+}
+
+.sun-shade-time {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  margin: 0.55rem 0;
+  font: 2rem var(--font-mono) !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.sun-shade-ticks {
+  display: flex;
+  justify-content: space-between;
+  color: var(--fg-muted);
+  font: 0.62rem var(--font-mono);
+}
+
+.sun-shade-ticks i {
+  flex: 1;
+}
+
+.sun-shade-actions,
+.sun-shade-presets {
+  flex-wrap: wrap;
+  margin-top: 0.6rem;
+}
+
+.sun-shade-zone,
+.sun-shade-error {
+  margin: 0.45rem 0 0;
+  font-size: 0.7rem;
+}
+
+.sun-shade-error {
+  color: var(--danger);
+}
+
+.sun-shade-shadows {
+  flex-direction: row;
+  justify-content: space-between;
+}

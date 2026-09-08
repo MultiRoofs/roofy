@@ -1,87 +1,81 @@
 /**
- * The shell's one drag handle: a 4px strip that reports pointer movement
- * along ONE axis and knows nothing about what it resizes.
- *
- * `onDelta` receives the movement SINCE POINTERDOWN, and `onStart` fires at
- * pointerdown so the consumer can record the size the drag began from. That
- * pairing is what keeps a drag honest across a clamp: a per-move increment
- * added to the CLAMPED value would make a pointer dragged past a limit and
- * back ignore the whole overshoot's worth of the return journey.
- *
- * `setPointerCapture` is guarded: jsdom has no pointer capture, and calling
- * it there throws where the drag would otherwise work fine.
+ * A panel resize separator that supports pointer and keyboard resizing.
+ * Pointer movement is always measured from pointerdown: returning from an
+ * overshoot therefore returns to the original size rather than a clamped
+ * intermediate value. `direction` maps physical movement to size changes.
  */
 
 import { useCallback, useEffect, useRef } from "react";
 
+const KEY_STEP = 16;
+const PAGE_STEP = 64;
+
 export interface ResizeHandleProps {
-  /** "x" for a vertical handle on a panel's side edge, "y" for a horizontal
-   *  one on the drawer's top edge. */
+  /** "x" for a vertical panel edge, "y" for the drawer's top edge. */
   readonly axis: "x" | "y";
-  /** Pixels moved along `axis` since pointerdown: positive is right (x) or
-   *  down (y). */
-  readonly onDelta: (px: number) => void;
-  /** Fired at pointerdown, before any `onDelta` — where a consumer records
-   *  the size the drag starts from. */
-  readonly onStart?: () => void;
+  /** Current, bounded size represented by the separator. */
+  readonly current: number;
+  readonly min: number;
+  readonly max: number;
+  /** +1 grows with right/down movement; -1 grows with left/up movement. */
+  readonly direction: 1 | -1;
+  /** Consumers clamp through their store before committing this value. */
+  readonly onResize: (px: number) => void;
   /** The handle's accessible name — "Resize details panel". */
   readonly label: string;
 }
 
 export function ResizeHandle({
   axis,
-  onDelta,
-  onStart,
+  current,
+  min,
+  max,
+  direction,
+  onResize,
   label,
 }: ResizeHandleProps) {
   const draggingRef = useRef(false);
-  const originRef = useRef(0);
+  const originPositionRef = useRef(0);
+  const originSizeRef = useRef(current);
   const cleanupRef = useRef<(() => void) | null>(null);
 
-  // A drag that outlives the handle (a panel closing under it) would leave
-  // its window listeners behind.
   useEffect(() => {
-    return () => {
-      if (cleanupRef.current) cleanupRef.current();
-    };
+    return () => cleanupRef.current?.();
   }, []);
 
   const handlePointerDown = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      e.preventDefault();
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
       draggingRef.current = true;
-      originRef.current = axis === "x" ? e.clientX : e.clientY;
-      onStart?.();
+      originPositionRef.current = axis === "x" ? event.clientX : event.clientY;
+      originSizeRef.current = current;
 
-      const target = e.currentTarget;
-      const pointerId = e.pointerId;
-      if (typeof target.setPointerCapture === "function") {
-        try {
-          target.setPointerCapture(pointerId);
-        } catch {
-          // No capture available (jsdom, or a pointer already gone): the
-          // window listeners below carry the drag on their own.
-        }
+      const target = event.currentTarget;
+      const pointerId = event.pointerId;
+      try {
+        target.setPointerCapture?.(pointerId);
+      } catch {
+        // jsdom and a departed pointer have no capture to release.
       }
 
-      const onMove = (ev: PointerEvent) => {
+      const onMove = (moveEvent: PointerEvent) => {
         if (!draggingRef.current) return;
-        const position = axis === "x" ? ev.clientX : ev.clientY;
-        onDelta(position - originRef.current);
+        const position = axis === "x" ? moveEvent.clientX : moveEvent.clientY;
+        onResize(
+          originSizeRef.current +
+            direction * (position - originPositionRef.current),
+        );
       };
-
       const stop = () => {
         draggingRef.current = false;
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", stop);
         window.removeEventListener("pointercancel", stop);
         cleanupRef.current = null;
-        if (typeof target.releasePointerCapture === "function") {
-          try {
-            target.releasePointerCapture(pointerId);
-          } catch {
-            // Never captured, or the pointer is already gone.
-          }
+        try {
+          target.releasePointerCapture?.(pointerId);
+        } catch {
+          // The pointer may already have been released.
         }
       };
 
@@ -90,7 +84,32 @@ export function ResizeHandle({
       window.addEventListener("pointercancel", stop);
       cleanupRef.current = stop;
     },
-    [axis, onDelta, onStart],
+    [axis, current, direction, onResize],
+  );
+
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      let next: number | null = null;
+      if (event.key === "Home") next = min;
+      if (event.key === "End") next = max;
+      if (event.key === "PageUp") next = current + PAGE_STEP;
+      if (event.key === "PageDown") next = current - PAGE_STEP;
+
+      const physicalDelta =
+        (axis === "x" && event.key === "ArrowRight") ||
+        (axis === "y" && event.key === "ArrowDown")
+          ? KEY_STEP
+          : (axis === "x" && event.key === "ArrowLeft") ||
+              (axis === "y" && event.key === "ArrowUp")
+            ? -KEY_STEP
+            : null;
+      if (physicalDelta !== null) next = current + direction * physicalDelta;
+      if (next === null) return;
+
+      event.preventDefault();
+      onResize(Math.min(max, Math.max(min, next)));
+    },
+    [axis, current, direction, max, min, onResize],
   );
 
   return (
@@ -99,6 +118,11 @@ export function ResizeHandle({
       role="separator"
       aria-orientation={axis === "x" ? "vertical" : "horizontal"}
       aria-label={label}
+      aria-valuemin={min}
+      aria-valuemax={max}
+      aria-valuenow={current}
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
       onPointerDown={handlePointerDown}
     />
   );

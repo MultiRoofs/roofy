@@ -85,7 +85,20 @@ export function useResolvedBuilding(
     }
 
     const residentModel = getResidentModel(subject.layerId, streamVersion ?? 0);
-    const ids = [subject.objectId, ...subject.object.children];
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    const visit = (id: string) => {
+      if (seen.has(id)) return;
+      seen.add(id);
+      const record = residentModel?.objects[id];
+      if (record === undefined) {
+        ids.push(id);
+        return;
+      }
+      ids.push(id);
+      for (const childId of record.children) visit(childId);
+    };
+    visit(subject.objectId);
     const records: Array<{
       record: ResidentObjectRecord;
       object: CityObject;

@@ -37,4 +37,13 @@ describe("AttributesSection", () => {
     expect(screen.getByText("No attributes")).toBeTruthy();
     cleanup();
   });
+
+  it("keeps a long raw attribute value available for wrapping", () => {
+    const value = "NL.IMBAG.Pand.0503100000033310-0-with-an-unbroken-suffix";
+    render(<AttributesSection attributes={{ identifier: value }} />);
+
+    const rendered = screen.getByText(value);
+    expect(rendered).toHaveClass("attr-value");
+    expect(rendered).toHaveAttribute("title", value);
+  });
 });

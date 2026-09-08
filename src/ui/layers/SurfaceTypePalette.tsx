@@ -28,20 +28,21 @@ const ROWS: ReadonlyArray<{ readonly label: string; readonly color: string }> =
 
 export function SurfaceTypePalette() {
   return (
-    <ul className="surface-palette" aria-label="Surface type palette">
-      {ROWS.map(({ label, color }) => (
-        <li className="surface-palette-row" key={label}>
-          {/* The swatch is decoration: the row's text already names the
-              surface, and a reader who cannot see the colour is not helped by
-              hearing its hex. */}
-          <span
-            className="surface-palette-swatch"
-            style={{ backgroundColor: color }}
-            aria-hidden
-          />
-          {label}
-        </li>
-      ))}
-    </ul>
+    <div className="surface-palette-wrap">
+      <ul className="surface-palette" aria-label="Surface type palette">
+        {ROWS.map(({ label, color }) => (
+          <li className="surface-palette-row" key={label}>
+            <span
+              className="surface-palette-swatch"
+              style={{ backgroundColor: color }}
+              aria-hidden
+            />
+            <span>{label}</span>
+            <code className="surface-palette-hex">{color.toUpperCase()}</code>
+          </li>
+        ))}
+      </ul>
+      <p className="surface-palette-note">Palette is read-only.</p>
+    </div>
   );
 }

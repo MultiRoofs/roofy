@@ -28,7 +28,7 @@
  * answers `false` when the camera was not readable yet or the store refused,
  * and a tick over a save that never landed is worse than no tick at all.
  */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RoofyLockup } from "../RoofyLockup";
 import { useShellStore } from "../shell/shellStore";
 import { useSelectionStore } from "../../features/selection/selectionStore";
@@ -49,8 +49,6 @@ export interface WorkspaceHeaderProps {
   readonly onNewWorkspace: () => void;
   readonly onOpenWorkspace: (id: string) => void;
   readonly snapshots: ReadonlyArray<SnapshotSummary>;
-  /** `<SceneControlsTemp …/>` until 12.5 gives the scene its own home. */
-  readonly sceneControls: ReactNode;
 }
 
 export function WorkspaceHeader({
@@ -60,7 +58,6 @@ export function WorkspaceHeader({
   onNewWorkspace,
   onOpenWorkspace,
   snapshots,
-  sceneControls,
 }: WorkspaceHeaderProps) {
   const leftCollapsed = useShellStore((s) => s.leftCollapsed);
   const toggleLeftCollapsed = useShellStore((s) => s.toggleLeftCollapsed);
@@ -125,10 +122,6 @@ export function WorkspaceHeader({
           <path d={leftCollapsed ? "M13 9l3 3-3 3" : "M16 9l-3 3 3 3"} />
         </svg>
       </button>
-
-      <div className="header-spacer" />
-
-      {sceneControls}
 
       <div className="header-spacer" />
 

@@ -11,6 +11,8 @@
  */
 import { useMemo, useState } from "react";
 import { useSelectionStore } from "../../features/selection/selectionStore";
+import { useQueryStore } from "../../features/query/queryStore";
+import { useShellStore } from "../shell/shellStore";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
 import { activateLayer } from "../../features/workspace/layerCoordination";
@@ -124,6 +126,12 @@ export function DetailsPanel({ onClose }: { readonly onClose: () => void }) {
         ) : subject.kind === "multi" ? (
           <MultiSelectionSummary
             objects={subject.objects}
+            partsByObjectId={partsForMulti(subject, layers, streamVersion)}
+            roofAreaByObjectId={roofAreasForMulti(
+              subject,
+              layers,
+              streamVersion,
+            )}
             onToggle={(objectId) =>
               useSelectionStore.getState().toggleSelect({
                 kind: "object",
@@ -178,7 +186,12 @@ function DetailsHeader({
           {copied ? "Copied" : "Copy"}
         </button>
       )}
-      <button className="details-close" title="Close panel" onClick={onClose}>
+      <button
+        className="details-close"
+        aria-label="Clear selection"
+        title="Clear selection"
+        onClick={onClose}
+      >
         <svg viewBox="0 0 24 24">
           <path d="M18 6L6 18M6 6l12 12" />
         </svg>
@@ -198,6 +211,76 @@ function fullIdOf(subject: Subject): string | null {
     case "geo":
       return null;
   }
+}
+
+function partsForMulti(
+  subject: Extract<Subject, { kind: "multi" }>,
+  layers: ReturnType<typeof useLayerStore.getState>["layers"],
+  _streamVersion: number | undefined,
+): Readonly<Record<string, ReadonlyArray<CityObject>>> {
+  const layer = layers.find((candidate) => candidate.id === subject.layerId);
+  // Streaming resident records deliberately have no rings. Their area belongs
+  // to the resident-metrics path, never to a fake CityObject conversion here.
+  if (!layer || layer.isStreaming) return {};
+  const descendants = (root: CityObject) => {
+    const found: CityObject[] = [];
+    const seen = new Set([root.id]);
+    const visit = (object: CityObject) => {
+      for (const id of object.children) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const child = layer.model.objects[id];
+        if (!child) continue;
+        found.push(child);
+        visit(child);
+      }
+    };
+    visit(root);
+    return found;
+  };
+  return Object.fromEntries(
+    subject.objects.map((object) => [object.id, descendants(object)]),
+  );
+}
+
+function roofAreasForMulti(
+  subject: Extract<Subject, { kind: "multi" }>,
+  layers: ReturnType<typeof useLayerStore.getState>["layers"],
+  streamVersion: number | undefined,
+): Readonly<Record<string, number | null>> | undefined {
+  const layer = layers.find((candidate) => candidate.id === subject.layerId);
+  if (!layer?.isStreaming) return undefined;
+  const records = getResidentModel(layer.id, streamVersion ?? 0).objects;
+  const areas: Record<string, number | null> = {};
+  for (const root of subject.objects) {
+    const seen = new Set<string>();
+    let area = 0;
+    let missing = false;
+    const visit = (id: string) => {
+      if (seen.has(id)) return;
+      seen.add(id);
+      const record = records[id];
+      if (!record || !Array.isArray(record.roofMetrics)) {
+        missing = true;
+        return;
+      }
+      area += record.roofMetrics.reduce(
+        (sum, metric) => sum + metric.areaSqM,
+        0,
+      );
+      for (const child of record.children) visit(child);
+    };
+    visit(root.id);
+    areas[root.id] = missing ? null : area;
+  }
+  return areas;
+}
+
+function openRawObject(layerId: string, objectId: string): void {
+  // The drawer query is session state: opening Raw never mutates a saved layer.
+  useQueryStore.getState().navigateRawObject(layerId, objectId);
+  useShellStore.getState().openDrawer();
+  useSelectionStore.getState().select({ kind: "object", layerId, objectId });
 }
 
 function BuildingDetails({
@@ -236,7 +319,11 @@ function BuildingDetails({
               });
             }}
           />
-          <GeometrySection object={resolved.object} />
+          <GeometrySection
+            object={resolved.object}
+            parts={resolved.parts}
+            onRawObject={(objectId) => openRawObject(subject.layerId, objectId)}
+          />
         </>
       )}
     </>
@@ -252,6 +339,21 @@ function SurfaceDetails({
     s.layers.find((l) => l.id === subject.layerId),
   );
   if (layer === undefined) return null;
+
+  if (subject.surface === null) {
+    return (
+      <>
+        <section className="details-section">
+          <h3 className="details-section-title">Summary</h3>
+          <p className="details-note">
+            Surface geometry is not resident, so roof metrics are unavailable.
+          </p>
+        </section>
+        <AttributesSection attributes={subject.owner.attributes} />
+        <GeometrySection object={subject.owner} geometryAvailable={false} />
+      </>
+    );
+  }
 
   const metrics = computeRoofMetrics(subject.surface);
   const match = ruleMatchFor(

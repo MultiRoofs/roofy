@@ -34,7 +34,8 @@ export type Subject =
       readonly layerId: string;
       readonly objectId: string;
       readonly surfaceIndex: number;
-      readonly surface: Surface;
+      /** Streaming records retain surface identity but not rings. */
+      readonly surface: Surface | null;
       readonly owner: CityObject;
     }
   | {
@@ -81,7 +82,7 @@ export function subjectOf(
   const object = resolveObject(first.layerId, first.objectId);
   if (first.kind === "surface") {
     const surface = object?.surfaces[first.surfaceIndex] ?? null;
-    if (object === null || surface === null) return null;
+    if (object === null) return null;
     return {
       kind: "surface",
       layerId: first.layerId,
@@ -93,9 +94,19 @@ export function subjectOf(
   }
 
   if (object === null) return null;
-  const parts = object.children
-    .map((id) => resolveObject(first.layerId, id))
-    .filter((o): o is CityObject => o !== null);
+  const parts: CityObject[] = [];
+  const seen = new Set([object.id]);
+  const visit = (parent: CityObject) => {
+    for (const childId of parent.children) {
+      if (seen.has(childId)) continue;
+      seen.add(childId);
+      const child = resolveObject(first.layerId, childId);
+      if (child === null) continue;
+      parts.push(child);
+      visit(child);
+    }
+  };
+  visit(object);
   return {
     kind: "building",
     layerId: first.layerId,
@@ -140,7 +151,7 @@ export function identityTrail(
           act: "narrow-to-building",
         },
         {
-          label: `${formatSurfaceType(subject.surface.type)} ${subject.surfaceIndex}`,
+          label: `${subject.surface ? formatSurfaceType(subject.surface.type) : "Roof surface"} ${subject.surfaceIndex}`,
           act: "current",
         },
       ];

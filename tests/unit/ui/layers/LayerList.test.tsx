@@ -27,6 +27,7 @@ import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import { useGeoLayerStore } from "../../../../src/features/geoLayers/geoLayerStore";
 import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
+import { useQueryStore } from "../../../../src/features/query/queryStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import type { StreamState } from "../../../../src/features/streaming/streamStore";
 import type {
@@ -48,6 +49,7 @@ beforeEach(() => {
   useLayerStore.setState({ layers: [] });
   useGeoLayerStore.setState({ layers: [] });
   useWorkspaceStore.setState({ activeLayerId: null });
+  useQueryStore.setState({ queries: {} });
   useStreamStore.setState({ streams: {} });
 });
 
@@ -57,6 +59,7 @@ afterEach(() => {
   useLayerStore.setState({ layers: [] });
   useGeoLayerStore.setState({ layers: [] });
   useWorkspaceStore.setState({ activeLayerId: null });
+  useQueryStore.setState({ queries: {} });
   useStreamStore.setState({ streams: {} });
 });
 
@@ -241,6 +244,22 @@ describe("LayerList — the rows", () => {
 
     expect(screen.getByText("6 features")).toBeTruthy();
     expect(screen.getByText("Raster")).toBeTruthy();
+  });
+
+  it("keeps a GeoJSON row's applied-filter chip visible while inactive", () => {
+    const id = geoStore().addGeoLayer({
+      name: "Roads",
+      kind: "geojson",
+      config: { data: { type: "FeatureCollection", features: [{}, {}] } },
+    });
+    useQueryStore.getState().setFilter(id, {
+      logic: "AND",
+      conditions: [{ id: "name", column: "name", op: "contains", value: "A" }],
+    });
+    useQueryStore.getState().applyFilter(id);
+    renderList();
+
+    expect(rowFor("Roads").textContent).toContain("1 filter");
   });
 
   it("says a snapshot-restored geo layer needs its file back", () => {
@@ -458,7 +477,7 @@ describe("LayerList — what a row does", () => {
     });
   });
 
-  it("opens the table for a city row, and offers none for a vector row", () => {
+  it("opens the table for city and GeoJSON rows", () => {
     seedCity(layer({ id: "l1", name: "Delft" }));
     geoStore().addGeoLayer({
       name: "Roads",
@@ -468,12 +487,14 @@ describe("LayerList — what a row does", () => {
     const { onOpenTable } = renderList();
 
     menuOf("Roads");
-    expect(screen.queryByRole("button", { name: "Open table" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open table" }));
+    const roadsId = geoStore().layers[0]!.id;
+    expect(onOpenTable).toHaveBeenCalledWith(roadsId);
     fireEvent.keyDown(document, { key: "Escape" });
 
     menuOf("Delft");
     fireEvent.click(screen.getByRole("button", { name: "Open table" }));
-    expect(onOpenTable).toHaveBeenCalledWith("l1");
+    expect(onOpenTable).toHaveBeenLastCalledWith("l1");
   });
 });
 

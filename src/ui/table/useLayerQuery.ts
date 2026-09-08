@@ -21,11 +21,21 @@ import {
 } from "../../insights/layerTables";
 import {
   buildCountSql,
+  buildFeatureScopeWhere,
   buildPageSql,
   compileFilter,
   gridColumns,
+  quoteLiteral,
 } from "../../insights/sql";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
+import { useSelectionStore } from "../../features/selection/selectionStore";
+import { useLayerStore } from "../../features/layers/layerStore";
+import {
+  parentsIndexOf,
+  rootFeatureId,
+} from "../../domain/citymodel/featureId";
+import { getResidentModel } from "../../features/streaming/residentModel";
+import { useStreamStore } from "../../features/streaming/streamStore";
 
 export interface LayerQueryView {
   /** `"no-layer"` means NOTHING is selected. A selected layer whose registry
@@ -71,6 +81,15 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
   const query = useQueryStore((s) =>
     layerId === null ? null : layerQuery(s, layerId),
   );
+  const selections = useSelectionStore((s) => s.selections);
+  const layer = useLayerStore((s) =>
+    layerId === null
+      ? null
+      : (s.layers.find((candidate) => candidate.id === layerId) ?? null),
+  );
+  const streamVersion = useStreamStore((s) =>
+    layerId === null ? undefined : s.streams[layerId]?.version,
+  );
 
   const [rows, setRows] =
     useState<ReadonlyArray<Record<string, unknown>>>(NO_ROWS);
@@ -89,7 +108,21 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
   const applied = query?.applied ?? null;
   const sort = query?.sort ?? null;
   const page = query?.page ?? 0;
-  const pageSize = query?.pageSize ?? 100;
+  const pageSize = query?.pageSize ?? 20;
+  const viewMode = query?.view ?? "buildings";
+  const showSelectedOnly = query?.showSelectedOnly ?? false;
+  const rawObjectId = query?.rawObjectId ?? null;
+  const selectedIds = selections
+    .filter((selection) => selection.layerId === layerId)
+    .map((selection) => selection.objectId);
+  const selectedFeatureIds = useMemo(() => {
+    if (viewMode !== "buildings" || layer === null) return selectedIds;
+    const objects = layer.isStreaming
+      ? getResidentModel(layer.id, streamVersion ?? 0).objects
+      : layer.model.objects;
+    const parents = parentsIndexOf(objects);
+    return selectedIds.map((id) => rootFeatureId(id, parents));
+  }, [layer, selectedIds.join("\u0000"), streamVersion, viewMode]);
 
   /**
    * MEMOISED on the table's own column list.
@@ -154,6 +187,35 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
       return;
     }
 
+    const rootBuildings = '"parents" IS NULL AND "object_type" = \'Building\'';
+    const filteredWhere =
+      viewMode === "buildings"
+        ? buildFeatureScopeWhere(table.table, compiled.where)
+        : compiled.where;
+    const terms: string[] = [];
+    if (rawObjectId !== null) {
+      // Details may target a child outside the current filter. This is a
+      // temporary record scope only; it never changes `applied` or map membership.
+      terms.push(`"id" = ${quoteLiteral(rawObjectId)}`);
+    } else if (filteredWhere !== null) terms.push(`(${filteredWhere})`);
+    // Buildings is intentionally semantic roots only.  A table without
+    // Buildings remains useful through Raw objects rather than lying about a
+    // count of every parentless object.
+    if (viewMode === "buildings" && rawObjectId === null)
+      terms.push(rootBuildings);
+    if (showSelectedOnly && rawObjectId === null) {
+      const ids = [...new Set(selectedFeatureIds)];
+      terms.push(
+        ids.length === 0
+          ? "FALSE"
+          : viewMode === "buildings"
+            ? `COALESCE("feature_id", "id") IN (${ids.map(quoteLiteral).join(", ")})`
+            : `"id" IN (${ids.map(quoteLiteral).join(", ")})`,
+      );
+    }
+    const scopedWhere = terms.length === 0 ? null : terms.join(" AND ");
+    const unfilteredWhere = viewMode === "buildings" ? rootBuildings : null;
+
     setLoading(true);
     setQueryMessage(null);
 
@@ -163,16 +225,16 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
           buildPageSql(
             table.table,
             gridColumns(table.columns),
-            compiled.where,
+            scopedWhere,
             sort,
             page,
             pageSize,
           ),
         ),
-        runQuery(buildCountSql(table.table, compiled.where)),
-        compiled.where === null
+        runQuery(buildCountSql(table.table, scopedWhere)),
+        scopedWhere === unfilteredWhere
           ? Promise.resolve(null)
-          : runQuery(buildCountSql(table.table, null)),
+          : runQuery(buildCountSql(table.table, unfilteredWhere)),
       ]);
       if (gen !== generation.current) return;
 
@@ -224,7 +286,19 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
       );
       setLoading(false);
     })();
-  }, [layerId, table, applied, sort, page, pageSize, reloadToken]);
+  }, [
+    layerId,
+    table,
+    applied,
+    sort,
+    page,
+    pageSize,
+    viewMode,
+    showSelectedOnly,
+    rawObjectId,
+    selectedFeatureIds.join("\u0000"),
+    reloadToken,
+  ]);
 
   if (layerId === null) {
     return {

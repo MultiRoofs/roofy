@@ -30,6 +30,7 @@ vi.mock("../../../../src/insights/duckdb", () => ({
 }));
 
 const { TablePanel } = await import("../../../../src/ui/table/TablePanel");
+const { SummaryView } = await import("../../../../src/ui/drawer/SummaryView");
 const { useLayerStore } =
   await import("../../../../src/features/layers/layerStore");
 const { useLayerTableStore } =
@@ -40,10 +41,13 @@ const { useSelectionStore } =
   await import("../../../../src/features/selection/selectionStore");
 const { useShellStore, defaultShellState } =
   await import("../../../../src/ui/shell/shellStore");
+const { useStreamStore } =
+  await import("../../../../src/features/streaming/streamStore");
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 import type { DuckDBStatus } from "../../../../src/insights/duckdb";
 import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
+import { DEFAULT_LAYER_QUERY } from "../../../../src/features/query/types";
 
 const READY_STATUS: DuckDBStatus = {
   state: "ready",
@@ -108,6 +112,22 @@ function panel(status: DuckDBStatus = READY_STATUS) {
   return { onRetry };
 }
 
+function buildingModel(id: string): CityModel {
+  return {
+    ...emptyModel(),
+    objects: {
+      [id]: {
+        id,
+        objectType: "Building",
+        attributes: {},
+        surfaces: [],
+        children: [],
+        parents: [],
+      },
+    },
+  } as unknown as CityModel;
+}
+
 beforeEach(() => {
   runQuery.mockReset();
   runQuery.mockImplementation(async (sql: string) =>
@@ -127,6 +147,7 @@ beforeEach(() => {
   useLayerTableStore.setState({ tables: {}, tablePanelOpen: false });
   useQueryStore.setState({ queries: {} });
   useSelectionStore.setState({ selections: [] });
+  useStreamStore.setState({ streams: {} });
   // jsdom is 1024×768, below both of `defaultShellState`'s breakpoints.
   useShellStore.setState({ ...defaultShellState(1440, 900), drawerOpen: true });
 });
@@ -249,7 +270,7 @@ describe("TablePanel states", () => {
     expect(screen.getByText("1–2 of 2")).toBeTruthy();
     // The header counts the LAYER, before any filter — see (D).
     expect(document.querySelector(".table-count")!.getAttribute("title")).toBe(
-      "Rows in this layer's table, before any filter",
+      "All buildings, before any filter",
     );
   });
 
@@ -281,9 +302,11 @@ describe("TablePanel states", () => {
     useQueryStore.getState().applyFilter("L");
     panel();
 
-    expect(await screen.findByText("(2,231 rows)")).toBeTruthy();
+    expect(
+      await screen.findByText(/All 1 · Matching 1 · Selected 1 buildings/),
+    ).toBeTruthy();
     expect(screen.getByText("1–1 of 1")).toBeTruthy();
-    expect(screen.getByText("filtered from 2,231")).toBeTruthy();
+    expect(screen.getByText("filtered from 1")).toBeTruthy();
   });
 
   it("selects a city object when a row is clicked", async () => {
@@ -329,7 +352,7 @@ describe("TablePanel states", () => {
     ]);
   });
 
-  it("explains an EMPTY filtered result while Filter map is on", async () => {
+  it("explains an EMPTY filtered result with no matching map features", async () => {
     runQuery.mockImplementation(async (sql: string) =>
       sql.includes("COUNT(*)")
         ? {
@@ -344,7 +367,6 @@ describe("TablePanel states", () => {
     useLayerTableStore.setState({
       tables: { L: { state: "ready", info: TABLE } },
     });
-    useQueryStore.getState().setSyncToMap("L", true);
     useQueryStore.getState().setFilter("L", {
       logic: "AND",
       conditions: [
@@ -356,7 +378,7 @@ describe("TablePanel states", () => {
     panel();
     expect(
       await screen.findByText(
-        "0 of 2,231 rows match; the map shows nothing while Filter map is on",
+        "0 of 0 rows match; the map shows no matching features",
       ),
     ).toBeTruthy();
   });
@@ -380,66 +402,31 @@ describe("TablePanel states", () => {
     expect(await screen.findByText("This layer has no rows yet.")).toBeTruthy();
   });
 
-  it("says only 'no rows match' when the map is NOT being filtered", async () => {
-    runQuery.mockImplementation(async (sql: string) =>
-      sql.includes("COUNT(*)")
-        ? {
-            ok: true,
-            columns: ["n"],
-            rows: [{ n: sql.includes("WHERE") ? 0 : 2231 }],
-          }
-        : { ok: true, columns: [], rows: [] },
-    );
-    useLayerStore.setState({ layers: [layer()] });
-    useWorkspaceStore.setState({ activeLayerId: "L" });
-    useLayerTableStore.setState({
-      tables: { L: { state: "ready", info: TABLE } },
-    });
-    useQueryStore.getState().setFilter("L", {
-      logic: "AND",
-      conditions: [
-        { id: "c", column: "object_type", op: "=", value: "Nothing" },
-      ],
-    });
-    useQueryStore.getState().applyFilter("L");
-
-    panel();
-    expect(await screen.findByText("No rows match this filter.")).toBeTruthy();
-  });
-
-  it("disables the Filter map toggle for a streaming layer, and says why", () => {
-    useLayerStore.setState({
-      layers: [layer({ isStreaming: true })],
-    });
-    useWorkspaceStore.setState({ activeLayerId: "L" });
-    useLayerTableStore.setState({
-      tables: { L: { state: "ready", info: TABLE } },
-    });
-    panel();
-    const toggle = screen.getByLabelText("Filter map") as HTMLInputElement;
-    expect(toggle.disabled).toBe(true);
-    expect(toggle.closest("label")!.title).toBe(
-      "Map filtering is not available for streaming layers yet",
-    );
-  });
-
-  it("ENABLES the Filter map toggle for a static layer with a ready table", async () => {
+  it("states that static filters apply to map and table automatically", async () => {
     useLayerStore.setState({ layers: [layer()] });
     useWorkspaceStore.setState({ activeLayerId: "L" });
     useLayerTableStore.setState({
       tables: { L: { state: "ready", info: TABLE } },
     });
     panel();
-    const toggle = screen.getByLabelText("Filter map") as HTMLInputElement;
-    await waitFor(() => expect(toggle.disabled).toBe(false));
-    // No streaming reason on a layer that is not streaming.
-    expect(toggle.closest("label")!.title).toBe("");
-
-    fireEvent.click(toggle);
-    expect(useQueryStore.getState().queries.L?.syncToMap).toBe(true);
+    expect(await screen.findByText("Map + table")).toBeTruthy();
+    expect(screen.queryByLabelText("Filter map")).toBeNull();
   });
 
-  it("drives the map filter from the applied filter, and again when the table is REBUILT", async () => {
+  it("keeps a streaming filter table-only", async () => {
+    useLayerStore.setState({ layers: [layer({ isStreaming: true })] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    panel();
+    expect(
+      await screen.findByText("Table only · currently loaded"),
+    ).toBeTruthy();
+    expect(screen.queryByLabelText("Filter map")).toBeNull();
+  });
+
+  it("does not own map-filter synchronization", async () => {
     runQuery.mockImplementation(async (sql: string) =>
       sql.includes("COUNT(*)")
         ? { ok: true, columns: ["n"], rows: [{ n: 1 }] }
@@ -452,7 +439,6 @@ describe("TablePanel states", () => {
     useLayerTableStore.setState({
       tables: { L: { state: "ready", info: TABLE } },
     });
-    useQueryStore.getState().setSyncToMap("L", true);
     useQueryStore.getState().setFilter("L", {
       logic: "AND",
       conditions: [
@@ -462,23 +448,8 @@ describe("TablePanel states", () => {
     useQueryStore.getState().applyFilter("L");
 
     panel();
-    await waitFor(() => {
-      const ids = useLayerStore.getState().layers[0]!.visibleObjectIds;
-      expect(ids === null ? null : [...ids]).toEqual(["B1"]);
-    });
-
-    // A REBUILD mints a new `layer_<n>`, and the effect keys on the table
-    // OBJECT so the ids are recomputed against the table that now exists.
-    const idQueries = () =>
-      runQuery.mock.calls
-        .map((args) => String(args[0]))
-        .filter((sql) => sql.startsWith('SELECT "id" FROM'));
-    expect(idQueries().at(-1)).toContain('FROM "layer_1"');
-
-    useLayerTableStore.setState({
-      tables: { L: { state: "ready", info: { ...TABLE, table: "layer_2" } } },
-    });
-    await waitFor(() => expect(idQueries().at(-1)).toContain('FROM "layer_2"'));
+    await screen.findByText("delft");
+    expect(useLayerStore.getState().layers[0]!.visibleObjectIds).toBeNull();
   });
 
   it("tells the registry the panel is open, and shut on unmount", async () => {
@@ -507,5 +478,294 @@ describe("TablePanel — the shell's drawer", () => {
     );
     expect(useShellStore.getState().drawerHeight).toBe(320);
     window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 }));
+  });
+
+  it("widens the drawer with ArrowUp and respects its viewport ceiling", () => {
+    panel();
+    const handle = screen.getByRole("separator", { name: "Resize table" });
+
+    handle.focus();
+    fireEvent.keyDown(handle, { key: "ArrowUp" });
+    expect(useShellStore.getState().drawerHeight).toBe(296);
+    fireEvent.keyDown(handle, { key: "End" });
+    expect(useShellStore.getState().drawerHeight).toBe(568);
+    fireEvent.keyDown(handle, { key: "PageUp" });
+    expect(useShellStore.getState().drawerHeight).toBe(568);
+  });
+});
+
+describe("SummaryView matching state", () => {
+  const applied = {
+    logic: "AND" as const,
+    conditions: [
+      { id: "type", column: "object_type", op: "=", value: "Building" },
+    ],
+  } as const;
+
+  it("shows a query failure instead of a false zero matching count", async () => {
+    runQuery.mockResolvedValue({ ok: false, message: "Binder Error: broken" });
+    render(
+      <SummaryView
+        layer={layer({ model: buildingModel("B1") })}
+        query={{ ...DEFAULT_LAYER_QUERY, applied }}
+        table={TABLE}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Matching" }));
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Binder Error: broken",
+    );
+  });
+
+  it("resets Matching to All when the filter is cleared", async () => {
+    runQuery.mockResolvedValue({
+      ok: true,
+      columns: ["id"],
+      rows: [{ id: "B1" }],
+    });
+    const { rerender } = render(
+      <SummaryView
+        layer={layer({ model: buildingModel("B1") })}
+        query={{ ...DEFAULT_LAYER_QUERY, applied }}
+        table={TABLE}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Matching" }));
+    await screen.findByText("1 matching buildings");
+    rerender(
+      <SummaryView
+        layer={layer({ model: buildingModel("B1") })}
+        query={DEFAULT_LAYER_QUERY}
+        table={TABLE}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "All" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(screen.getByText("1 buildings")).toBeTruthy();
+  });
+
+  it("does not retain matching state after switching layers", async () => {
+    runQuery.mockResolvedValue({
+      ok: true,
+      columns: ["id"],
+      rows: [{ id: "B1" }],
+    });
+    const { rerender } = render(
+      <SummaryView
+        layer={layer({ id: "L", model: buildingModel("B1") })}
+        query={{ ...DEFAULT_LAYER_QUERY, applied }}
+        table={TABLE}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Matching" }));
+    await screen.findByText("1 matching buildings");
+    rerender(
+      <SummaryView
+        layer={layer({ id: "L2", model: buildingModel("B2") })}
+        query={DEFAULT_LAYER_QUERY}
+        table={TABLE}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "All" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(screen.getByText("1 buildings")).toBeTruthy();
+  });
+});
+
+describe("TablePanel raw target", () => {
+  it("shows and clears an exact raw-object target without clearing the applied filter", () => {
+    useLayerStore.setState({ layers: [layer()] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    useQueryStore.getState().setFilter("L", {
+      logic: "AND",
+      conditions: [
+        { id: "height", column: "object_type", op: "=", value: "Building" },
+      ],
+    });
+    useQueryStore.getState().applyFilter("L");
+    const applied = useQueryStore.getState().queries.L!.applied;
+    useQueryStore.getState().navigateRawObject("L", "child-off-page");
+    panel();
+    expect(screen.getByText("Viewing raw object child-off-page")).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Return to filtered records" }),
+    );
+    expect(useQueryStore.getState().queries.L!.rawObjectId).toBeNull();
+    expect(useQueryStore.getState().queries.L!.applied).toBe(applied);
+  });
+});
+
+describe("TablePanel columns and child records", () => {
+  const extendedTable = {
+    ...TABLE,
+    columns: [
+      { name: "id", type: "VARCHAR", kind: "scalar" as const },
+      { name: "object_type", type: "VARCHAR", kind: "scalar" as const },
+      { name: "custom_source", type: "VARCHAR", kind: "scalar" as const },
+      { name: "__roofy_roof_area", type: "DOUBLE", kind: "scalar" as const },
+      { name: "height", type: "DOUBLE", kind: "scalar" as const },
+    ],
+  };
+
+  it("keeps selected derived columns when a custom source field is chosen", async () => {
+    runQuery.mockImplementation(async (sql: string) =>
+      sql.includes("COUNT(*)")
+        ? { ok: true, columns: ["n"], rows: [{ n: 1 }] }
+        : {
+            ok: true,
+            columns: [],
+            rows: [
+              { id: "B1", object_type: "Building", custom_source: "kept" },
+            ],
+          },
+    );
+    useLayerStore.setState({ layers: [layer({ model: buildingModel("B1") })] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: extendedTable } },
+    });
+    panel();
+    await screen.findByText("B1");
+    fireEvent.click(screen.getByRole("button", { name: "Columns" }));
+    const derived = screen.getByLabelText("___roofy_roof_area");
+    expect(derived).toBeChecked();
+    fireEvent.click(screen.getByLabelText("custom_source"));
+    expect(screen.getByLabelText("___roofy_roof_area")).toBeChecked();
+    expect(await screen.findByText("Roof area")).toBeTruthy();
+  });
+
+  it("keeps a raw source __roofy collision literal and exposes structural columns", async () => {
+    runQuery.mockImplementation(async (sql: string) =>
+      sql.includes("COUNT(*)")
+        ? { ok: true, columns: ["n"], rows: [{ n: 1 }] }
+        : {
+            ok: true,
+            columns: [],
+            rows: [
+              {
+                id: "P1",
+                object_type: "BuildingPart",
+                __roofy_roof_area: 77,
+                custom_source: "raw",
+              },
+            ],
+          },
+    );
+    useLayerStore.setState({ layers: [layer()] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: extendedTable } },
+    });
+    useQueryStore.getState().setView("L", "raw");
+    panel();
+    expect(await screen.findByText("P1")).toBeTruthy();
+    expect(screen.getByText("__roofy_roof_area")).toBeTruthy();
+    expect(screen.getByText("77")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Columns" }));
+    expect(screen.getByLabelText("object_type")).toBeChecked();
+  });
+
+  it("expands a resident child with its loaded attributes and selects its exact id", async () => {
+    runQuery.mockImplementation(async (sql: string) =>
+      sql.includes("COUNT(*)")
+        ? { ok: true, columns: ["n"], rows: [{ n: 1 }] }
+        : {
+            ok: true,
+            columns: [],
+            rows: [{ id: "B1", object_type: "Building", height: 10 }],
+          },
+    );
+    const resident = {
+      objects: {
+        B1: {
+          id: "B1",
+          objectType: "Building",
+          attributes: {},
+          surfaces: [],
+          children: ["P1"],
+          parents: [],
+        },
+        P1: {
+          id: "P1",
+          objectType: "BuildingPart",
+          attributes: { height: 23 },
+          surfaces: [],
+          children: [],
+          parents: ["B1"],
+        },
+      },
+      cellCount: 1,
+      featureCount: 1,
+      surfaceAttrKeys: [],
+    };
+    useLayerStore.setState({ layers: [layer({ isStreaming: true })] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: extendedTable } },
+    });
+    useQueryStore.getState().setColumns("L", ["id", "height"]);
+    useStreamStore.setState({
+      streams: {
+        L: { handle: { getResidentModel: () => resident }, version: 0 },
+      } as never,
+    });
+    panel();
+    fireEvent.click(await screen.findByLabelText("Toggle parts for B1"));
+    expect(screen.getByText("23")).toBeTruthy();
+    fireEvent.click(screen.getByText("↳ P1"));
+    expect(useSelectionStore.getState().selections).toEqual([
+      { kind: "object", layerId: "L", objectId: "P1" },
+    ]);
+  });
+
+  it("expands a static child with its attributes and selects its exact id", async () => {
+    runQuery.mockImplementation(async (sql: string) =>
+      sql.includes("COUNT(*)")
+        ? { ok: true, columns: ["n"], rows: [{ n: 1 }] }
+        : {
+            ok: true,
+            columns: [],
+            rows: [{ id: "B1", object_type: "Building", height: 10 }],
+          },
+    );
+    const model = {
+      ...emptyModel(),
+      objects: {
+        B1: {
+          id: "B1",
+          objectType: "Building",
+          attributes: {},
+          surfaces: [],
+          children: ["P1"],
+          parents: [],
+        },
+        P1: {
+          id: "P1",
+          objectType: "BuildingPart",
+          attributes: { height: 22 },
+          surfaces: [],
+          children: [],
+          parents: ["B1"],
+        },
+      },
+    } as unknown as CityModel;
+    useLayerStore.setState({ layers: [layer({ model })] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: extendedTable } },
+    });
+    useQueryStore.getState().setColumns("L", ["id", "height"]);
+    panel();
+    fireEvent.click(await screen.findByLabelText("Toggle parts for B1"));
+    expect(screen.getByText("22")).toBeTruthy();
+    fireEvent.click(screen.getByText("↳ P1"));
+    expect(useSelectionStore.getState().selections).toEqual([
+      { kind: "object", layerId: "L", objectId: "P1" },
+    ]);
   });
 });

@@ -20,6 +20,7 @@ import {
   normalizeGeoLayerStyle,
   type GeoLayerStyle,
 } from "./geoLayerStyle";
+import { normalizeGeoJsonDocument } from "./geoJsonRecords";
 
 export type GeoLayerKind = "geojson" | "raster-xyz" | "3d-tiles";
 
@@ -38,6 +39,11 @@ export interface GeoJsonLayerConfig {
    *  once at the door by `parseGeoJsonText`. */
   readonly data?: unknown;
   readonly url?: string;
+  /** Engine-only normalized clone; never persisted. */
+  readonly preparedData?: unknown;
+  readonly preparation?: "loading" | "ready" | "failed";
+  readonly preparationError?: string;
+  readonly preparationEpoch?: number;
 }
 
 export interface RasterXyzLayerConfig {
@@ -170,6 +176,9 @@ export interface GeoLayerActions {
    * written onto a GeoJSON layer. A layer of another kind is left untouched.
    */
   relinkGeoJsonLayer: (id: string, data: unknown) => void;
+  setPreparedGeoJson: (id: string, data: unknown) => void;
+  setGeoJsonPreparationError: (id: string, message: string) => void;
+  retryGeoJsonPreparation: (id: string) => void;
 }
 
 export type GeoLayerStore = GeoLayerState & GeoLayerActions;
@@ -214,7 +223,22 @@ export const useGeoLayerStore = create<GeoLayerStore>((set) => ({
     // the trip through the loosely-typed input.
     const layer: GeoLayer =
       input.kind === "geojson"
-        ? { ...base, kind: "geojson", config: input.config }
+        ? {
+            ...base,
+            kind: "geojson",
+            config:
+              input.config.data === undefined
+                ? {
+                    ...input.config,
+                    preparation: input.config.url ? "loading" : undefined,
+                  }
+                : {
+                    ...input.config,
+                    preparedData: normalizeGeoJsonDocument(input.config.data)
+                      .data,
+                    preparation: "ready",
+                  },
+          }
         : input.kind === "raster-xyz"
           ? { ...base, kind: "raster-xyz", config: input.config }
           : { ...base, kind: "3d-tiles", config: input.config };
@@ -254,7 +278,66 @@ export const useGeoLayerStore = create<GeoLayerStore>((set) => ({
   relinkGeoJsonLayer: (id, data) =>
     set((state) => ({
       layers: replaceLayer(state.layers, id, (layer) =>
-        layer.kind === "geojson" ? { ...layer, config: { data } } : null,
+        layer.kind === "geojson"
+          ? {
+              ...layer,
+              config: {
+                data,
+                preparedData: normalizeGeoJsonDocument(data).data,
+                preparation: "ready",
+              },
+            }
+          : null,
+      ),
+    })),
+
+  setPreparedGeoJson: (id, data) =>
+    set((state) => ({
+      layers: replaceLayer(state.layers, id, (layer) =>
+        layer.kind === "geojson"
+          ? {
+              ...layer,
+              config: {
+                ...layer.config,
+                preparedData: data,
+                preparation: "ready",
+                preparationError: undefined,
+              },
+            }
+          : null,
+      ),
+    })),
+  setGeoJsonPreparationError: (id, message) =>
+    set((state) => ({
+      layers: replaceLayer(state.layers, id, (layer) =>
+        layer.kind === "geojson"
+          ? {
+              ...layer,
+              config: {
+                ...layer.config,
+                preparedData: undefined,
+                preparation: "failed",
+                preparationError: message,
+              },
+            }
+          : null,
+      ),
+    })),
+  retryGeoJsonPreparation: (id) =>
+    set((state) => ({
+      layers: replaceLayer(state.layers, id, (layer) =>
+        layer.kind === "geojson"
+          ? {
+              ...layer,
+              config: {
+                ...layer.config,
+                preparedData: undefined,
+                preparation: "loading",
+                preparationError: undefined,
+                preparationEpoch: (layer.config.preparationEpoch ?? 0) + 1,
+              },
+            }
+          : null,
       ),
     })),
 }));

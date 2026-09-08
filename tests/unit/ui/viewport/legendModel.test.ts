@@ -104,6 +104,11 @@ describe("legendGroups — city layers", () => {
             color: SURFACE_COLOR_HEX.GroundSurface,
             kind: "surface",
           },
+          {
+            label: "Other",
+            color: SURFACE_COLOR_HEX.unknown,
+            kind: "surface",
+          },
         ],
       },
     ]);

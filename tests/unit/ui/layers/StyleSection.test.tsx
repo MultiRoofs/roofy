@@ -196,7 +196,11 @@ describe("StyleSection — Surface type", () => {
     render(<StyleSection item={city(cityLayer({ colorBy: "surface" }))} />);
 
     const rows = screen.getAllByRole("listitem");
-    expect(rows.map((r) => r.textContent)).toEqual(["Roof", "Wall", "Ground"]);
+    expect(rows.map((r) => r.textContent)).toEqual([
+      `Roof${SURFACE_COLOR_HEX.RoofSurface.toUpperCase()}`,
+      `Wall${SURFACE_COLOR_HEX.WallSurface.toUpperCase()}`,
+      `Ground${SURFACE_COLOR_HEX.GroundSurface.toUpperCase()}`,
+    ]);
     expect(
       rows.map(
         (r) =>
@@ -209,6 +213,7 @@ describe("StyleSection — Surface type", () => {
       rgb(SURFACE_COLOR_HEX.GroundSurface),
     ]);
 
+    expect(screen.getByText("Palette is read-only.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Flat roofs/ })).toBeNull();
     expect(screen.queryByText("+ Add rule")).toBeNull();
   });

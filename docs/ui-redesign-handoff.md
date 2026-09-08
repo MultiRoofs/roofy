@@ -1,5 +1,7 @@
 # Roofy UI redesign: implementation handoff
 
+Implementation status (2026-09-08): the approved prototype has been implemented and reconciled in the working tree. The original proposal/approval instructions below are historical; do not restart prototyping. Continue from `docs/superpowers/plans/2026-09-07-ui-redesign-reconciliation.md` and the ignored progress ledger for verification, current capabilities and remaining external review. No commit or push is implied by local completion.
+
 ## Goal and authority
 
 Redesign the viewer around a clear relationship between layers, the map, selected features, styling, and data. Prioritize layout and predictable behavior over cosmetic adjustments. Breaking changes, replacement of existing components, and removal of features are welcome when they improve the experience.

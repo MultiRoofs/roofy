@@ -6,9 +6,10 @@
  * `IntersectionObserver` sentinel is gone with the in-memory paths it fed.)
  */
 
-import { memo } from "react";
+import { Fragment, memo, useState } from "react";
 import type { ColumnInfo } from "../../insights/columnKind";
 import { formatCell, rawCellTitle } from "./tableText";
+import { columnLabel, derivedColumnTitle } from "../drawer/columnPolicy";
 
 /** The id a row is selected by. Every layer table has an `id` column, but a
  *  hand-built one may not, so the index is the fallback. */
@@ -34,6 +35,14 @@ export interface DataGridProps {
   readonly onSort: (column: string) => void;
   readonly onRowClick: (rowId: string, shiftKey: boolean) => void;
   readonly emptyMessage?: string;
+  readonly partsById?: Readonly<Record<string, ReadonlyArray<string>>>;
+  readonly getRowId?: (row: Record<string, unknown>, index: number) => string;
+  /** Optional resident/source records for expanded child rows. */
+  readonly partRows?: Readonly<
+    Record<string, Readonly<Record<string, unknown>>>
+  >;
+  /** Generated derived keys only; source attributes keep their literal labels. */
+  readonly derivedColumnNames?: ReadonlySet<string>;
 }
 
 /**
@@ -53,7 +62,14 @@ export const DataGrid = memo(function DataGrid({
   onSort,
   onRowClick,
   emptyMessage = "No rows match this filter.",
+  partsById = {},
+  getRowId,
+  partRows = {},
+  derivedColumnNames = new Set(),
 }: DataGridProps) {
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const hasParts = Object.keys(partsById).length > 0;
+
   if (rows.length === 0) {
     return <div className="table-empty">{emptyMessage}</div>;
   }
@@ -62,6 +78,7 @@ export const DataGrid = memo(function DataGrid({
     <table className="data-table">
       <thead>
         <tr>
+          {hasParts && <th className="data-th-static" aria-label="Parts" />}
           {columns.map((col) => {
             const canSort = sortable(col);
             const sorted = sort?.column === col.name;
@@ -69,7 +86,11 @@ export const DataGrid = memo(function DataGrid({
               <th
                 key={col.name}
                 className={`data-th ${sorted ? "sorted" : ""} ${canSort ? "" : "data-th-static"}`}
-                title={`${col.name} (${col.type})`}
+                title={
+                  derivedColumnNames.has(col.name)
+                    ? derivedColumnTitle(col.name)
+                    : `${col.name} (${col.type})`
+                }
                 onClick={canSort ? () => onSort(col.name) : undefined}
                 aria-sort={
                   sorted
@@ -79,7 +100,11 @@ export const DataGrid = memo(function DataGrid({
                     : "none"
                 }
               >
-                <span>{col.name}</span>
+                <span>
+                  {derivedColumnNames.has(col.name)
+                    ? columnLabel(col.name)
+                    : col.name}
+                </span>
                 {sorted && (
                   <span className="sort-indicator">
                     {sort.dir === "asc" ? "▲" : "▼"}
@@ -92,30 +117,80 @@ export const DataGrid = memo(function DataGrid({
       </thead>
       <tbody>
         {rows.map((row, i) => {
-          const rowId = rowIdOf(row, i);
+          const rowId = getRowId?.(row, i) ?? rowIdOf(row, i);
           const isSelected = selectedIds.has(rowId);
+          const parts = partsById[rowId] ?? [];
+          const canExpand = parts.length > 0;
           return (
-            <tr
-              key={`${rowId}:${i}`}
-              className={`data-row ${isSelected ? "data-row-selected" : ""}`}
-              onClick={(e) => onRowClick(rowId, e.shiftKey)}
-            >
-              {columns.map((col) => {
-                const value = row[col.name];
-                return (
-                  <td
-                    key={col.name}
-                    className="data-td"
-                    // The RAW value on hover: the cell TEXT rounds a float to
-                    // two places, and a tooltip that repeats the rounding is a
-                    // tooltip that hides the number the user hovered to see.
-                    title={rawCellTitle(value)}
-                  >
-                    {formatCell(value)}
+            <Fragment key={`${rowId}:${i}`}>
+              <tr
+                className={`data-row ${isSelected ? "data-row-selected" : ""}`}
+                onClick={(e) => onRowClick(rowId, e.shiftKey)}
+              >
+                {hasParts && (
+                  <td>
+                    {canExpand && (
+                      <button
+                        type="button"
+                        aria-label={`Toggle parts for ${rowId}`}
+                        aria-expanded={expanded.has(rowId)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setExpanded((current) => {
+                            const next = new Set(current);
+                            if (next.has(rowId)) next.delete(rowId);
+                            else next.add(rowId);
+                            return next;
+                          });
+                        }}
+                      >
+                        {expanded.has(rowId) ? "▾" : "▸"}
+                      </button>
+                    )}
                   </td>
-                );
-              })}
-            </tr>
+                )}
+                {columns.map((col) => {
+                  const value = row[col.name];
+                  return (
+                    <td
+                      key={col.name}
+                      className="data-td"
+                      // The RAW value on hover: the cell TEXT rounds a float to
+                      // two places, and a tooltip that repeats the rounding is a
+                      // tooltip that hides the number the user hovered to see.
+                      title={rawCellTitle(value)}
+                    >
+                      {formatCell(value)}
+                    </td>
+                  );
+                })}
+              </tr>
+              {expanded.has(rowId) &&
+                parts.map((part) => (
+                  <tr
+                    key={`${rowId}:${part}`}
+                    className="data-row data-row-part"
+                    onClick={(event) => onRowClick(part, event.shiftKey)}
+                  >
+                    {columns.map((column, index) => {
+                      const value =
+                        index === 0
+                          ? `↳ ${part}`
+                          : partRows[part]?.[column.name];
+                      return (
+                        <td
+                          key={column.name}
+                          className="data-td"
+                          aria-label={index === 0 ? "Part" : undefined}
+                          title={rawCellTitle(value)}
+                        >
+                          {formatCell(value)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+            </Fragment>
           );
         })}
       </tbody>

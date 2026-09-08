@@ -361,6 +361,8 @@ export interface GeographicCamera {
 export interface ViewState {
   readonly camera: GeographicCamera;
   readonly datetime: string; // ISO 8601
+  /** Optional v4 addition; omitted documents use Europe/Amsterdam. */
+  readonly timeZone?: import("../features/solar/solarTimeZone").SolarTimeZone;
   /**
    * The camera policy the workspace was saved in ("2d" | "2.5d" | "3d").
    *

@@ -8,6 +8,7 @@
  */
 
 import type { Rule } from "../features/rules/types";
+import { normalizeSolarTimeZone } from "../features/solar/solarTimeZone";
 import { normalizeColorBy, type ColorBy } from "../features/rules/colorBy";
 import type { PickMode } from "../domain/selection/types";
 import type { GeographicCamera } from "./types";
@@ -76,6 +77,8 @@ export interface ShareableViewState {
   readonly cam: GeographicCamera;
   /** ISO 8601 datetime. */
   readonly dt: string;
+  /** Optional selected-zone display for the shared instant. */
+  readonly tz?: import("../features/solar/solarTimeZone").SolarTimeZone;
   /** Pick mode. */
   readonly pm: PickMode;
 }
@@ -217,7 +220,10 @@ export function readShareHash(hash: string): ShareHashResult {
           : l,
       )
     : [];
-  return { kind: "ok", state: { ...parsed, layers } };
+  return {
+    kind: "ok",
+    state: { ...parsed, tz: normalizeSolarTimeZone(parsed.tz), layers },
+  };
 }
 
 /**

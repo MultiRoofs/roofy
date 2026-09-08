@@ -30,7 +30,10 @@ import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { Rule } from "../../../../src/features/rules/types";
 import { RULE_PRESETS } from "../../../../src/features/rules/presets";
-import { CATCH_ALL_RULE_ID_PREFIX } from "../../../../src/features/rules/colorBy";
+import {
+  CATCH_ALL_RULE_ID_PREFIX,
+  firstMatchingRule,
+} from "../../../../src/features/rules/colorBy";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
 import { CellCache } from "@cityjson/navara-flatcitybuf";
 import { buildResidentModel } from "@cityjson/navara-flatcitybuf";
@@ -401,6 +404,21 @@ describe("RulesEditor — unsaved draft survives switching layers", () => {
       useLayerStore.getState().layers.find((l) => l.id === "A")!.rules,
     ).toHaveLength(0);
   });
+
+  it("does not let Add rule replace an in-progress edit draft", () => {
+    useLayerStore.setState({
+      layers: [baseLayer({ id: "A", rules: [makeRule({ id: "one" })] })],
+    });
+    render(<RulesEditor model={emptyModel()} layerId="A" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit: A rule" }));
+
+    expect(screen.getByPlaceholderText("Rule name")).toHaveProperty(
+      "value",
+      "A rule",
+    );
+    expect(screen.getByRole("button", { name: "+ Add rule" })).toBeDisabled();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -528,6 +546,63 @@ describe("RulesEditor — rule rows", () => {
     ]);
   });
 
+  it("drags a user rule into precedence order and changes the first-match winner", () => {
+    useLayerStore.setState({
+      layers: [
+        baseLayer({
+          colorBy: "rules",
+          rules: [
+            makeRule({ id: "a", name: "Alpha", conditions: [] }),
+            makeRule({ id: "b", name: "Beta", conditions: [] }),
+          ],
+        }),
+      ],
+    });
+    render(<RulesEditor model={emptyModel()} layerId="L" />);
+
+    const transfer = {
+      effectAllowed: "",
+      dropEffect: "",
+    } as unknown as DataTransfer;
+    fireEvent.dragStart(
+      screen.getByRole("button", { name: "Drag rule: Beta" }),
+      {
+        dataTransfer: transfer,
+      },
+    );
+    const alpha = ruleRows()[0]!;
+    fireEvent.dragOver(alpha, { dataTransfer: transfer });
+    expect(alpha).toHaveClass("rule-item-drag-target");
+    fireEvent.drop(alpha, { dataTransfer: transfer });
+
+    expect(readLayer().rules.map((rule) => rule.name)).toEqual([
+      "Beta",
+      "Alpha",
+    ]);
+    expect(firstMatchingRule({}, {} as never, readLayer().rules)?.name).toBe(
+      "Beta",
+    );
+  });
+
+  it("cancels a pending drag with Escape without changing order", () => {
+    render(<RulesEditor model={emptyModel()} layerId="L" />);
+    const betaHandle = screen.getByRole("button", { name: "Drag rule: Beta" });
+    const transfer = {
+      effectAllowed: "",
+      dropEffect: "",
+    } as unknown as DataTransfer;
+    fireEvent.dragStart(betaHandle, { dataTransfer: transfer });
+    fireEvent.dragOver(ruleRows()[0]!, { dataTransfer: transfer });
+    fireEvent.keyDown(betaHandle, { key: "Escape" });
+    fireEvent.drop(ruleRows()[0]!, { dataTransfer: transfer });
+
+    expect(readLayer().rules.map((rule) => rule.name)).toEqual([
+      "Alpha",
+      "Beta",
+      "Gamma",
+    ]);
+  });
+
   it("disables the first row's Move up and the last row's Move down", () => {
     render(<RulesEditor model={emptyModel()} layerId="L" />);
     expect(
@@ -538,6 +613,15 @@ describe("RulesEditor — rule rows", () => {
     ).toHaveProperty("disabled", false);
     expect(
       screen.getByRole("button", { name: "Move down: Gamma" }),
+    ).toHaveProperty("disabled", true);
+  });
+
+  it("disables remaining drag affordances while an edit draft is open", () => {
+    render(<RulesEditor model={emptyModel()} layerId="L" />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit: Alpha" }));
+
+    expect(
+      screen.getByRole("button", { name: "Drag rule: Beta" }),
     ).toHaveProperty("disabled", true);
   });
 

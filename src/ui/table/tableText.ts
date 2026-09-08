@@ -146,9 +146,9 @@ export function emptyGridMessage(
   if (!filtered) return "This layer has no rows yet.";
   if (!syncToMap) return "No rows match this filter.";
   if (unfilteredRows === null) {
-    return "Nothing matches this filter; the map shows nothing while Filter map is on";
+    return "Nothing matches this filter; the map shows no matching features";
   }
-  return `0 of ${formatCount(unfilteredRows)} rows match; the map shows nothing while Filter map is on`;
+  return `0 of ${formatCount(unfilteredRows)} rows match; the map shows no matching features`;
 }
 
 // ---------------------------------------------------------------------------

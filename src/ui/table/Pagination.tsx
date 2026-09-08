@@ -67,6 +67,16 @@ export function Pagination({
       <button
         type="button"
         className="tb-btn table-action-btn"
+        aria-label="First page"
+        title="First page"
+        disabled={page <= 0}
+        onClick={() => onPage(0)}
+      >
+        «
+      </button>
+      <button
+        type="button"
+        className="tb-btn table-action-btn"
         aria-label="Previous page"
         title="Previous page"
         disabled={page <= 0}
@@ -83,6 +93,16 @@ export function Pagination({
         onClick={() => onPage(page + 1)}
       >
         ›
+      </button>
+      <button
+        type="button"
+        className="tb-btn table-action-btn"
+        aria-label="Last page"
+        title="Last page"
+        disabled={page >= lastPage || !Number.isFinite(lastPage)}
+        onClick={() => onPage(lastPage)}
+      >
+        »
       </button>
     </div>
   );

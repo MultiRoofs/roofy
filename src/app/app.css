@@ -687,14 +687,42 @@ body {
   display: flex;
 }
 
-/* Expand (12.4): the drawer takes the whole column and the map steps aside.
-   Nothing writes `drawerExpanded` yet. */
+/* Expand (12.4): the drawer takes the whole column and the map steps aside. */
 .viewer-shell.drawer-expanded .map-area {
   display: none;
 }
 
 .viewer-shell.drawer-expanded .drawer-area {
   flex: 1 1 auto;
+}
+
+.viewer-shell.drawer-expanded .drawer-area {
+  flex-direction: column;
+}
+
+/* Credits remain readable while the map is expanded, but belong to the
+   drawer's document flow. An absolute footer covered table pagination as
+   provider credits wrapped onto a second line. */
+.viewer-shell.drawer-expanded .data-drawer {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.viewer-shell.drawer-expanded .drawer-attribution {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.5rem;
+  padding: 0.35rem 0.75rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--fg-muted);
+  font-size: 0.65rem;
+}
+
+.viewer-shell.drawer-expanded .drawer-attribution a {
+  color: var(--accent-text);
+  text-decoration-color: color-mix(in srgb, var(--accent) 60%, transparent);
 }
 
 /* The one thing left of a collapsed details panel: a glass pill on the map's
@@ -734,6 +762,11 @@ body {
 .resize-handle:hover,
 .resize-handle:active {
   background: var(--accent);
+}
+
+.resize-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
 }
 
 .resize-handle-x {
@@ -963,16 +996,6 @@ body {
   white-space: nowrap;
   pointer-events: none;
 }
-
-/* ── The scene's temporary lodgings ─────────────────────────────────────────
-   Deleted whole by 12.5 along with `SceneControlsTemp`. */
-.scene-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  min-width: 0;
-}
-
 .header-menu {
   position: relative;
   display: flex;
@@ -1996,6 +2019,10 @@ body {
   font-size: 0.75rem;
 }
 
+.rule-item-drag-target {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
 /* A rule that is off still has to be readable — this is the state you switch
    back on — so it dims to 0.6, not to the 0.5 a disabled control wears. */
 .rule-body.rule-disabled {
@@ -2006,6 +2033,46 @@ body {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.rule-drag-handle {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.5rem;
+  padding: 0;
+  color: var(--fg-muted);
+  cursor: grab;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+}
+
+.rule-drag-handle:active {
+  cursor: grabbing;
+}
+
+.rule-drag-handle:hover:not(:disabled),
+.rule-drag-handle:focus-visible {
+  color: var(--fg);
+  background: var(--bg-panel-hover);
+  outline: none;
+}
+
+.rule-drag-handle:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.rule-drag-handle:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.rule-drag-handle svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  fill: currentColor;
 }
 
 .rule-enabled {
@@ -2294,12 +2361,13 @@ body {
 
 .legend-overlay {
   position: absolute;
-  bottom: 0.75rem;
+  bottom: calc(var(--attribution-height, 1.5rem) + 0.75rem);
   left: 0.75rem;
   z-index: 10;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  max-height: calc(100% - var(--attribution-height, 1.5rem) - 1.5rem);
   gap: 0.35rem;
 }
 
@@ -2307,14 +2375,18 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.75rem;
-  height: 1.75rem;
+  width: auto;
+  height: 1.5rem;
+  gap: 0.25rem;
+  padding: 0 0.4rem;
   border: 1px solid var(--border-accent);
   border-radius: var(--radius-sm);
   background: rgba(11, 14, 19, 0.85);
   backdrop-filter: blur(12px);
   color: var(--fg-muted);
   cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: 0.68rem;
   transition: color 0.15s;
 }
 
@@ -2323,7 +2395,9 @@ body {
 }
 
 .legend-card {
-  padding: 0.5rem 0.6rem;
+  min-width: 10.5rem;
+  max-width: 16.25rem;
+  padding: 0.4rem 0.55rem;
   background: rgba(11, 14, 19, 0.9);
   backdrop-filter: blur(12px);
   border: 1px solid var(--border-accent);
@@ -2350,26 +2424,55 @@ body {
 /* The group heading is a BUTTON (opens the layer's Style), so it carries the
    button reset alongside the text it inherits from the div it replaced. */
 .legend-group-name {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
   width: 100%;
   background: none;
   border: none;
-  padding: 0;
+  padding: 0.05rem 0.1rem;
   text-align: left;
   cursor: pointer;
-  font-family: inherit;
+  font-family: var(--font-mono);
   font-size: 0.65rem;
-  font-weight: 600;
-  color: var(--fg);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
   margin-bottom: 0.15rem;
+  white-space: nowrap;
+  max-width: 16rem;
+}
+
+.legend-group-name > span:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 12rem;
+}
+
+.legend-group-chevron {
+  margin-left: auto;
+  color: var(--fg-muted);
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  line-height: 1;
 }
 
 .legend-group-name:hover {
   text-decoration: underline;
+}
+
+.legend-scope-note {
+  margin: 0.15rem 0 0;
+  color: var(--fg-muted);
+  font-size: 0.6rem;
+}
+
+.legend-count {
+  margin-left: auto;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .legend-item {
@@ -2946,6 +3049,11 @@ body {
   flex-shrink: 0;
 }
 
+.layer-filter-chip {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .lod-selector-streaming {
   display: flex;
   align-items: center;
@@ -3149,8 +3257,8 @@ body {
 .layer-row {
   display: flex;
   align-items: flex-start;
-  gap: 0.4rem;
-  padding: 0.35rem 0.5rem;
+  gap: 0.35rem;
+  padding: 0.125rem 0.4rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   font-size: 0.75rem;
@@ -3240,7 +3348,7 @@ body {
 .layer-row-body {
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
+  gap: 0.05rem;
   /* `min-width: 0` so the name can ellipsise instead of forcing the row
      wider than the panel — the whole point of the two-line block is that
      the row never has to grow sideways. */
@@ -3252,7 +3360,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  line-height: 1.25rem;
+  line-height: 1.1rem;
   color: var(--fg);
   font-weight: 500;
 }
@@ -3280,6 +3388,7 @@ body {
   gap: 0.3rem;
   min-width: 0;
   font-size: 0.68rem;
+  line-height: 0.85rem;
   color: var(--fg-muted);
 }
 
@@ -3478,16 +3587,40 @@ body {
   min-height: 0;
 }
 
-.table-panel-header {
+.table-raw-target {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  padding: 0.25rem 0.75rem;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.3rem 0.6rem;
+  color: var(--fg-muted);
+  font: 0.68rem var(--font-mono);
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border-accent);
+}
+
+.table-raw-target button {
+  color: var(--accent-text);
+  font: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.table-panel-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.4rem;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  min-width: 0;
 }
 
 .table-panel-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-family: var(--font-mono);
   font-size: 0.66rem;
   font-weight: 500;
@@ -3524,9 +3657,14 @@ body {
 .table-action-btn {
   display: inline-flex;
   align-items: center;
+  width: auto;
+  min-width: 24px;
+  height: 24px;
+  flex-shrink: 0;
   gap: 0.2rem;
-  font-size: 0.65rem;
   padding: 0.15rem 0.4rem;
+  font-size: 0.65rem;
+  white-space: nowrap;
 }
 
 .table-panel-body {
@@ -3640,8 +3778,8 @@ body {
 .filter-bar {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  padding: 0.4rem 0.75rem;
+  gap: 4px;
+  padding: 4px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
   flex-shrink: 0;
@@ -3650,7 +3788,11 @@ body {
 .filter-bar-rows {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 4px;
+}
+
+.filter-bar-rows:empty {
+  display: none;
 }
 
 .filter-row {
@@ -3701,12 +3843,148 @@ body {
 
 .filter-bar-actions {
   display: flex;
-  gap: 0.35rem;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .filter-error {
   font-size: 0.65rem;
   color: var(--danger);
+}
+
+.geo-record-selection,
+.geo-record-actions {
+  margin: 4px;
+}
+
+.geo-record-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.geo-record-actions label {
+  color: var(--fg-label);
+  font-size: 0.65rem;
+}
+
+.geo-record-scope {
+  min-height: 24px;
+  padding: 0.15rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-toolbar);
+  color: var(--fg);
+  font: inherit;
+}
+
+.geo-record-selection input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.data-drawer-summary {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.5rem;
+  color: var(--fg);
+  font-size: 0.7rem;
+}
+
+.data-drawer-summary > div > strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: var(--fg-label);
+  font: 600 0.65rem var(--font-mono);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.summary-scope {
+  display: inline-flex;
+  justify-self: start;
+  overflow: hidden;
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+}
+
+.summary-scope button {
+  min-height: 24px;
+  padding: 0.15rem 0.45rem;
+  border: 0;
+  border-right: 1px solid var(--border-accent);
+  background: var(--bg-toolbar);
+  color: var(--fg-muted);
+  font: 600 0.65rem var(--font-ui);
+  cursor: pointer;
+}
+
+.summary-scope button:last-child {
+  border-right: 0;
+}
+
+.summary-scope button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.summary-scope button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.summary-scope-label,
+.data-drawer-summary > p {
+  margin: 0;
+}
+
+.summary-definition-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.2rem 0.6rem;
+  margin: 0;
+  padding: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-toolbar);
+}
+
+.summary-definition-grid dt {
+  color: var(--fg-muted);
+}
+
+.summary-definition-grid dd {
+  margin: 0;
+  color: var(--fg);
+  font-family: var(--font-data);
+  text-align: right;
+}
+
+.summary-bars {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.summary-bar {
+  display: grid;
+  grid-template-columns: minmax(3rem, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--fg-muted);
+  font-size: 0.65rem;
+}
+
+.summary-bar i {
+  height: 0.35rem;
+  min-width: 1px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.summary-bar b {
+  color: var(--fg);
+  font-family: var(--font-data);
+  font-weight: 500;
 }
 
 /* Footer */
@@ -5734,12 +6012,12 @@ button.file-label:disabled {
 }
 
 .style-field-label {
-  font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
   font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-label);
-  color: var(--fg-muted);
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--fg);
 }
 
 /* The affected unit — "Delft · Color roof surfaces by rules". Muted, not dim:
@@ -5774,6 +6052,26 @@ button.file-label:disabled {
   height: 0.75rem;
   flex-shrink: 0;
   border-radius: 2px;
+}
+
+.surface-palette-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.surface-palette-hex {
+  margin-left: auto;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.surface-palette-note {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 0.66rem;
 }
 
 /* The `Rules` body. */
@@ -5840,6 +6138,8 @@ button.file-label:disabled {
 .details-panel {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  min-width: 0;
   height: 100%;
   min-height: 0;
 }
@@ -5848,9 +6148,15 @@ button.file-label:disabled {
   display: flex;
   align-items: flex-start;
   gap: 0.4rem;
+  min-width: 0;
   padding: 0.6rem 0.7rem 0.5rem;
   border-bottom: 1px solid var(--border-accent);
   flex-shrink: 0;
+}
+
+.details-header > .identity-trail {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .details-header-title {
@@ -5864,12 +6170,14 @@ button.file-label:disabled {
 
 .details-body {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
   padding: 0.5rem 0.7rem 0.9rem;
 }
 
 .details-section {
+  min-width: 0;
   margin-bottom: 1rem;
 }
 
@@ -5953,6 +6261,10 @@ button.file-label:disabled {
   width: 1rem;
   height: 1rem;
   display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
 }
 
 /* A summary row whose value is a link (the "Belongs to" building link). */
@@ -5968,6 +6280,23 @@ button.file-label:disabled {
 
 .attr-value-link:hover {
   text-decoration: underline;
+}
+
+.details-panel .attr-row {
+  min-width: 0;
+}
+
+.details-panel .attr-key,
+.details-panel .attr-value,
+.details-panel .attr-value-link {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.details-panel .attr-value,
+.details-panel .attr-value-link {
+  flex: 0 1 auto;
+  white-space: normal;
 }
 
 .attr-value-mono {
@@ -6089,4 +6418,111 @@ button.file-label:disabled {
 
 .details-id-remove:hover {
   color: var(--danger, var(--fg));
+}
+
+.preferences-trigger {
+  width: auto;
+  gap: 0.3rem;
+  padding: 0 0.45rem;
+  flex-shrink: 0;
+}
+.preferences-trigger span {
+  font: 600 0.68rem var(--font-ui);
+  white-space: nowrap;
+}
+
+.statusbar--map {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 0 0.75rem;
+  font: 11px var(--font-mono);
+}
+.statusbar__left,
+.statusbar__centre,
+.statusbar__right {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.statusbar__centre {
+  text-align: center;
+}
+.statusbar__right {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.3rem;
+  text-align: right;
+}
+.empty-workspace-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.empty-workspace-overlay__card {
+  pointer-events: auto;
+  width: 18rem;
+  padding: 1rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  text-align: center;
+  backdrop-filter: blur(12px);
+}
+.empty-workspace-overlay__actions {
+  display: flex;
+  justify-content: center;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+}
+.empty-workspace-overlay button {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  padding: 0.45rem 0.65rem;
+  background: var(--bg-raised);
+  color: var(--fg);
+}
+.empty-workspace-overlay .primary {
+  background: var(--brand-primary);
+  color: #10150d;
+}
+
+/* Records drawer fills the map column; its grid owns the available width. */
+.data-drawer,
+.data-drawer > .table-panel {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+}
+
+.data-drawer-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 2rem;
+  padding: 0.2rem 0.4rem;
+  border-bottom: 1px solid var(--border-accent);
+}
+
+.data-drawer-tab {
+  min-height: 24px;
+  padding: 0.15rem 0.4rem;
+  color: var(--fg-muted);
+  font: 0.68rem var(--font-ui);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.data-drawer-tab[aria-selected="true"] {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }

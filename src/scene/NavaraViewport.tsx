@@ -59,6 +59,8 @@ import { ToneMappingMode } from "postprocessing";
 // importable from Node (Global Constraints -> NODE_IMPORT_SAFE = false).
 import { CityJSONPlugin } from "@cityjson/navara-cityjson/plugin";
 import { FlatCityBufPlugin } from "@cityjson/navara-flatcitybuf/plugin";
+import { geodeticBoundsFromBBox } from "@cityjson/navara-cityjson";
+import type { BBox3 } from "@cityjson/navara-core";
 import type {
   EcefRay,
   GeodeticBounds,
@@ -71,6 +73,13 @@ import { useSolarStore } from "../features/solar/solarStore";
 import { useStreamStore } from "../features/streaming/streamStore";
 import { useTilesStore } from "../features/tiles/tilesStore";
 import { useGeoLayerStore } from "../features/geoLayers/geoLayerStore";
+import {
+  filterGeoRecords,
+  geoRecordId,
+  geoRecords,
+} from "../features/geoLayers/geoRecords";
+import { useGeoFeatureVisibilityStore } from "../features/geoLayers/geoFeatureVisibilityStore";
+import { layerQuery, useQueryStore } from "../features/query/queryStore";
 import {
   useBasemapStore,
   type HeatmapSettings,
@@ -87,7 +96,6 @@ import { CITY_COLORS } from "./cityColors";
 import {
   allInteractionHandles,
   interactionHandles,
-  layerHeightOffset,
   syncHighlight,
   syncLayers,
   syncStreamState,
@@ -111,11 +119,7 @@ import {
   sameSelection,
   type EnginePickStash,
 } from "./pickEventHandlers";
-import {
-  createThrottle,
-  crsFromGeodetic,
-  epsgForLayer,
-} from "./cursorCrsReadout";
+import { createThrottle, epsgForLayer } from "./cursorCrsReadout";
 import {
   createNavaraSession,
   NavaraSessionDisposedError,
@@ -133,21 +137,21 @@ import {
 } from "./geographicCamera";
 import {
   northedCamera,
-  tiltedCamera,
   zoomedCamera,
-  TILT_STEP_DEG,
   ZOOM_IN_FACTOR,
   ZOOM_OUT_FACTOR,
 } from "./cameraControls";
 import {
   geoLayerIdForEngineLayerId,
   removeAllGeoLayerHandles,
+  syncGeoFeatureVisibility,
   syncGeoHighlight,
   syncGeoLayers,
   type LiveGeoLayer,
 } from "./geoLayerSync";
 import { publishCameraPose } from "./cameraPose";
 import { useViewModeStore } from "../features/viewMode/viewModeStore";
+import { selectedObjectBounds } from "./selectedObjectBounds";
 import {
   entryCameraFor,
   VIEW_MODE_ENTRY_MS,
@@ -162,9 +166,7 @@ import { basemapById, type BasemapOption } from "./basemaps";
 import { TERRAIN, TERRAIN_ATTRIBUTION } from "./terrain";
 import { isAutoFitSuppressed } from "./autoFitSuppression";
 import { addQueryBox, type QueryBoxMesh } from "./streamQueryBox";
-import { AddressSearch } from "../ui/viewport/AddressSearch";
 import { AttributionOverlay } from "../ui/viewport/AttributionOverlay";
-import { CameraControls } from "../ui/viewport/CameraControls";
 import { ScaleBar } from "../ui/viewport/ScaleBar";
 import { StreamQueryBoxOverlay } from "../ui/viewport/StreamQueryBoxOverlay";
 
@@ -188,11 +190,17 @@ const makeEngineColor = (hex: number): unknown => new Color().setHex(hex);
 export interface CitySceneHandle {
   fitAll: () => void;
   fitLayer: (layerId: string) => void;
+  /** Frame exactly the selected source objects and their child parts. */
+  fitObjects: (layerId: string, objectIds: readonly string[]) => void;
   /** Fly to frame caller-supplied bounds — the geo-layer fit, whose extents
    *  the app computes itself (`geoLayerBounds.ts`); the engine has no bounds
    *  API for its own geo layers. Same framing and settle suppression as
    *  `fitLayer`. */
   fitBounds: (bounds: GeodeticBounds) => void;
+  /** Imperative camera commands for App-owned map controls. */
+  zoomIn: () => void;
+  zoomOut: () => void;
+  resetNorth: () => void;
   alignView: (direction: ViewDirection) => void;
   getCameraState: () => GeographicCameraState | null;
   setCameraState: (state: GeographicCameraState) => void;
@@ -226,10 +234,13 @@ export interface CitySceneHandle {
 export interface NavaraViewportProps {
   readonly onTriangleCount: (count: number) => void;
   readonly onFps?: (fps: number) => void;
+  /** WGS84 [longitude, latitude, ellipsoidal height] from the depth hit. */
   readonly onCursorPosition?: (
-    pos: readonly [number, number, number] | null,
+    pos: readonly [lng: number, lat: number, ellipsoidalHeight: number] | null,
   ) => void;
   readonly onLayerError?: (layerId: string, message: string) => void;
+  /** Active licence lines, mirrored in the expanded data drawer. */
+  readonly onAttributionChange?: (lines: readonly string[]) => void;
 }
 
 type ViewInstance = InstanceType<typeof ThreeView>;
@@ -1174,7 +1185,13 @@ function removeGoogleTiles(handles: SourceLayerHandles): void {
 
 export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
   function NavaraViewport(props, ref) {
-    const { onFps, onTriangleCount, onLayerError, onCursorPosition } = props;
+    const {
+      onFps,
+      onTriangleCount,
+      onLayerError,
+      onCursorPosition,
+      onAttributionChange,
+    } = props;
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<ViewInstance | null>(null);
     const cityPluginRef = useRef<CityJSONPlugin | null>(null);
@@ -1252,9 +1269,38 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     /** The user's own GeoJSON / XYZ / 3D-Tiles layers. Reconciled into engine
      *  source+layer pairs by `geoLayerSync.ts`. */
     const geoLayers = useGeoLayerStore((s) => s.layers);
+    const geoQueries = useQueryStore((s) => s.queries);
+    const geoVisibleFeatureIds = useMemo(
+      () =>
+        Object.fromEntries(
+          geoLayers
+            .filter((layer) => layer.kind === "geojson")
+            .map((layer) => {
+              const applied = layerQuery(
+                { queries: geoQueries },
+                layer.id,
+              ).applied;
+              return [
+                layer.id,
+                applied === null
+                  ? null
+                  : new Set<string>(
+                      filterGeoRecords(
+                        geoRecords(layer.config.preparedData),
+                        applied,
+                      ).map((row) => geoRecordId(row)),
+                    ),
+              ];
+            }),
+        ),
+      [geoLayers, geoQueries],
+    );
     /** Pulled out as a scalar so the layer-sync effect can count the workspace
      *  (and re-run when a geo layer comes or goes) without depending on the
      *  array itself. */
+    useEffect(() => {
+      useGeoFeatureVisibilityStore.setState({ visible: geoVisibleFeatureIds });
+    }, [geoVisibleFeatureIds]);
     const geoLayerCount = geoLayers.length;
     /** 2D / 2.5D / 3D. What it MEANS is `viewModePolicy.ts`; this component
      *  only applies it to the engine (controller flags + one entry flight). */
@@ -2236,6 +2282,38 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       [boundsOf, framedForMode, withSettleSuppressed],
     );
 
+    const fitObjects = useCallback(
+      (layerId: string, objectIds: readonly string[]) => {
+        if (objectIds.length === 0) return;
+        const view = viewRef.current;
+        const layer = layers.find((entry) => entry.id === layerId);
+        if (!view || !layer) return;
+        // A stream only retains cells near the camera. A missing selection must
+        // stay unavailable; falling back to its header would be a whole-layer fit.
+        const model = layer.isStreaming
+          ? useStreamStore
+              .getState()
+              .streams[layerId]?.handle.getResidentModel()
+          : layer.model;
+        if (!model) return;
+        const bbox: BBox3 | null = selectedObjectBounds(model, objectIds);
+        const epsg = epsgForLayer(layer.model.metadata.referenceSystem);
+        if (!bbox || epsg === null) return;
+        const rawBounds = geodeticBoundsFromBBox(bbox, epsg);
+        const heightOffset =
+          liveRef.current.get(layerId)?.handle.heightOffset?.() ??
+          streamsRef.current.get(layerId)?.heightOffset?.() ??
+          0;
+        const bounds: GeodeticBounds = {
+          ...rawBounds,
+          minHeight: rawBounds.minHeight + heightOffset,
+          maxHeight: rawBounds.maxHeight + heightOffset,
+        };
+        withSettleSuppressed(() => view.flyTo(framedForMode(bounds)));
+      },
+      [framedForMode, layers, withSettleSuppressed],
+    );
+
     const fitBounds = useCallback(
       (bounds: GeodeticBounds) => {
         const view = viewRef.current;
@@ -3020,11 +3098,24 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       // geo sync effect uses, because `geoLayerSync` keeps it on the entry to
       // re-apply through when the engine recreates a feature set.
       syncGeoHighlight(geoSelection, geoLiveRef.current, makeEngineColor);
+      syncGeoFeatureVisibility(
+        geoVisibleFeatureIds,
+        geoLiveRef.current,
+        makeEngineColor,
+      );
       // `streamIds`: a handle that joins the registry AFTER its layer appeared
       // (the open resolves a tick later) must be told the current selection,
       // not only whatever arrives next. The memo is keyed by handle identity,
       // so this costs one push per newly opened stream and nothing else.
-    }, [engineReady, layers, streamIds, selections, hovered, geoSelection]);
+    }, [
+      engineReady,
+      layers,
+      streamIds,
+      selections,
+      hovered,
+      geoSelection,
+      geoVisibleFeatureIds,
+    ]);
 
     // --- engine pointer events -> pick intents + the cursor readout ---
     useEffect(() => {
@@ -3068,7 +3159,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       const throttleCursor = createThrottle(66);
       const clickGate = createClickGate();
 
-      const reportCursor = (point: ScreenPoint, hitLayerId?: string) => {
+      const reportCursor = (point: ScreenPoint) => {
         if (!onCursorPosition) return;
         throttleCursor(() => {
           const ecef = view.pickDepthPosition(point.x, point.y);
@@ -3079,35 +3170,10 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
             onCursorPosition(null);
             return;
           }
-          // No hit means the cursor is on the terrain rather than a model; the
-          // readout then speaks the first layer's CRS, which is the only CRS
-          // the user has asked to see.
-          const layerId = hitLayerId ?? layers[0]?.id;
-          const layer = layers.find((l) => l.id === layerId);
-          const epsg = epsgForLayer(layer?.model.metadata.referenceSystem);
-          if (epsg === null) {
-            onCursorPosition(null);
-            return;
-          }
-          // DEGREES out. Navara 0.1.0 unified its public API on degrees
-          // (`vector3ToGeodetic`, `geodeticToVector3`, the terrain samplers
-          // and `EllipsoidGeodesic` all changed together); 0.0.5 returned
-          // radians here and this call converted. `crsFromGeodetic` takes
-          // degrees, so the value now passes straight through.
+          // Status coordinates are always WGS84, including terrain with no
+          // city layer. Do not reuse the source-CRS cursor conversion here.
           const lle = vector3ToGeodetic(ecef);
-          onCursorPosition(
-            crsFromGeodetic(
-              lle.lng,
-              lle.lat,
-              // ELLIPSOIDAL -> ORTHOMETRIC. The layer sits `heightOffset`
-              // metres up because its geodetic heights were raised by the geoid
-              // undulation (Global Constraints -> Vertical datum); subtracting
-              // it again yields the z the source file actually contains.
-              lle.height -
-                layerHeightOffset(layerId, liveRef.current, streamsRef.current),
-              epsg,
-            ),
-          );
+          onCursorPosition([lle.lng, lle.lat, lle.height]);
         });
       };
 
@@ -3186,7 +3252,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
             store,
           );
         }
-        reportCursor(point, hit?.layerId);
+        reportCursor(point);
       };
 
       const onClick = (e: PointerEvent) => {
@@ -3499,29 +3565,6 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       () => nudgeCamera((s) => zoomedCamera(s, ZOOM_OUT_FACTOR)),
       [nudgeCamera],
     );
-    // The tilt buttons carry the MODE's clamp, not their own: `viewModePolicy`
-    // pins min === max in 2D and 2.5D, so a click there lands back on exactly
-    // the mode's angle instead of stepping out of it.
-    const tiltUp = useCallback(
-      () =>
-        nudgeCamera((s) =>
-          tiltedCamera(s, TILT_STEP_DEG, {
-            minDeg: viewModePolicy(viewMode).minPitchDeg,
-            maxDeg: viewModePolicy(viewMode).maxPitchDeg,
-          }),
-        ),
-      [nudgeCamera, viewMode],
-    );
-    const tiltDown = useCallback(
-      () =>
-        nudgeCamera((s) =>
-          tiltedCamera(s, -TILT_STEP_DEG, {
-            minDeg: viewModePolicy(viewMode).minPitchDeg,
-            maxDeg: viewModePolicy(viewMode).maxPitchDeg,
-          }),
-        ),
-      [nudgeCamera, viewMode],
-    );
     const resetNorth = useCallback(
       () => nudgeCamera(northedCamera),
       [nudgeCamera],
@@ -3554,7 +3597,11 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       () => ({
         fitAll,
         fitLayer,
+        fitObjects,
         fitBounds,
+        zoomIn,
+        zoomOut,
+        resetNorth,
         alignView,
         getCameraState,
         setCameraState,
@@ -3577,7 +3624,11 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       [
         fitAll,
         fitLayer,
+        fitObjects,
         fitBounds,
+        zoomIn,
+        zoomOut,
+        resetNorth,
         alignView,
         getCameraState,
         setCameraState,
@@ -3596,23 +3647,6 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
             The 3D engine failed to start: {initError}
           </div>
         )}
-        {/* Top-left, the one free corner (legend and scale bottom-left,
-            compass bottom-right, panels top-right) and where a map's search
-            belongs — on the map, not in the chrome. Takes `flyTo` directly
-            rather than through the app, exactly as the compass cluster below
-            takes `zoomIn`. */}
-        <AddressSearch onFlyTo={flyTo} />
-        {/* Bottom-right, above the attribution strip: the top-right is the
-            panels that open over the scene, and the bottom left is the legend
-            and the sun scrubber. Subscribes to the camera's pose itself, so a
-            moving camera never re-renders this component. */}
-        <CameraControls
-          onResetNorth={resetNorth}
-          onZoomIn={zoomIn}
-          onZoomOut={zoomOut}
-          onTiltUp={tiltUp}
-          onTiltDown={tiltDown}
-        />
         {/* The numbers behind the blue ground outline the effect above draws.
             Renders nothing unless the diagnostic is on AND a streaming layer
             has actually queried. */}
@@ -3629,6 +3663,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           googleTiles={tilesEnabled}
           basemapAttribution={activeBasemap?.attribution}
           terrainAttribution={terrainEnabled ? TERRAIN_ATTRIBUTION : undefined}
+          onLinesChange={onAttributionChange}
         />
       </div>
     );

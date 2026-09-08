@@ -1490,7 +1490,7 @@ describe("NavaraViewport lifecycle", () => {
     expect(useSelectionStore.getState().selections).toEqual([]);
   });
 
-  it("reports the cursor in the layer's source CRS at ORTHOMETRIC height", async () => {
+  it("reports the cursor in WGS84 at ellipsoidal height", async () => {
     const onCursorPosition = vi.fn();
     const { handles } = await mountTwoLayers(
       { a: null, b: 12 },
@@ -1514,11 +1514,11 @@ describe("NavaraViewport lifecycle", () => {
       number,
       number,
     ];
-    // RD New metres for Delft (PROJ ground truth), and the file's own z back —
-    // NOT 57.2.
-    expect(out[0]).toBeCloseTo(83647.09, 1);
-    expect(out[1]).toBeCloseTo(446913.56, 1);
-    expect(out[2]).toBeCloseTo(14, 6);
+    // WGS84 directly from the depth hit; the status readout does not adopt a
+    // layer CRS or subtract its geoid offset.
+    expect(out[0]).toBeCloseTo(4.348, 6);
+    expect(out[1]).toBeCloseTo(52.006, 6);
+    expect(out[2]).toBeCloseTo(57.2, 6);
   });
 
   it("reports no position when the cursor is on the sky", async () => {

@@ -64,7 +64,7 @@ export function legendGroups(
 
 /** A city layer's rows, from its own `colorBy` — the three modes the Style
  *  section offers, and nothing read off the effective rule list. */
-function cityRows(layer: Layer): LegendRow[] {
+export function cityRows(layer: Layer): LegendRow[] {
   switch (layer.colorBy) {
     case "rules":
       return [
@@ -107,6 +107,11 @@ function cityRows(layer: Layer): LegendRow[] {
           color: SURFACE_COLOR_HEX.GroundSurface,
           kind: "surface",
         },
+        {
+          label: "Other",
+          color: SURFACE_COLOR_HEX.unknown,
+          kind: "surface",
+        },
       ];
   }
 }
@@ -114,7 +119,7 @@ function cityRows(layer: Layer): LegendRow[] {
 /** A vector layer's rows: the category list when the layer colours by an
  *  attribute, else one fill row in the layer's own colour. A raster or a 3D
  *  tileset has no legend entry at all. */
-function geoRows(layer: GeoLayer): LegendRow[] {
+export function geoRows(layer: GeoLayer): LegendRow[] {
   if (layer.kind !== "geojson") return [];
   const colorByAttribute = layer.style.colorByAttribute;
   if (colorByAttribute !== undefined) {

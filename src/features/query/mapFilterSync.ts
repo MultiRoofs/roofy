@@ -16,6 +16,7 @@ import {
 } from "../../insights/layerTables";
 import { buildFeatureIdsSql, compileFilter } from "../../insights/sql";
 import { useLayerStore } from "../layers/layerStore";
+import { useSelectionStore } from "../selection/selectionStore";
 import { layerQuery, useQueryStore } from "./queryStore";
 
 /**
@@ -29,6 +30,7 @@ import { layerQuery, useQueryStore } from "./queryStore";
  * cannot undo the filter that overtook it.
  */
 const generations = new Map<string, number>();
+let onExcludedSelection: ((count: number) => void) | null = null;
 
 /** Take the layer's next generation. Every entry point starts here, so no
  *  caller can write the drawn set without invalidating what is in flight. */
@@ -63,6 +65,55 @@ export function clearMapFilter(layerId: string): void {
  */
 export function forgetMapFilter(layerId: string): void {
   generations.delete(layerId);
+}
+
+/**
+ * Keeps map membership in sync with an applied query even while the drawer is
+ * closed. Only the applied predicate and the ready table identity participate:
+ * paging, sorting and grid presentation cannot change scene membership.
+ */
+export function installMapFilterSync(
+  notifyExcludedSelection: (count: number) => void,
+): () => void {
+  onExcludedSelection = notifyExcludedSelection;
+  const seen = new Map<
+    string,
+    {
+      readonly applied: unknown;
+      readonly table: LayerTable | null;
+    }
+  >();
+
+  const reconcile = () => {
+    const queryState = useQueryStore.getState();
+    const tables = useLayerTableStore.getState().tables;
+    const ids = new Set([
+      ...Object.keys(queryState.queries),
+      ...Object.keys(tables),
+    ]);
+    for (const layerId of ids) {
+      const applied = layerQuery(queryState, layerId).applied;
+      const entry = tables[layerId];
+      const table = entry?.state === "ready" ? entry.info : null;
+      const prior = seen.get(layerId);
+      if (prior?.applied === applied && prior.table === table) continue;
+      seen.set(layerId, { applied, table });
+      void syncFilterToMap(layerId);
+    }
+  };
+
+  const unsubscribeQuery = useQueryStore.subscribe(reconcile);
+  const unsubscribeTables = useLayerTableStore.subscribe(reconcile);
+  reconcile();
+  return () => {
+    unsubscribeQuery();
+    unsubscribeTables();
+    // Invalidate every query this coordinator started. A stale DuckDB answer
+    // must not change geometry after the lifecycle that requested it is gone.
+    for (const layerId of seen.keys()) nextGeneration(layerId);
+    if (onExcludedSelection === notifyExcludedSelection)
+      onExcludedSelection = null;
+  };
 }
 
 /**
@@ -112,7 +163,12 @@ export async function syncFilterToMap(layerId: string): Promise<void> {
     useLayerStore.getState().setVisibleObjectIds(layerId, null);
 
   const query = layerQuery(useQueryStore.getState(), layerId);
-  if (!query.syncToMap || query.applied === null) {
+  const layer = useLayerStore
+    .getState()
+    .layers.find((candidate) => candidate.id === layerId);
+  // FlatCityBuf only represents currently resident rows in its table. It must
+  // never use that partial table to hide map geometry.
+  if (layer?.isStreaming || query.applied === null) {
     // The store's own identity guard already makes `clear()` free, but this is
     // the path taken on EVERY Apply, toggle and table rebuild for every layer
     // that is not being map-filtered — which is nearly all of them — so return
@@ -165,4 +221,16 @@ export async function syncFilterToMap(layerId: string): Promise<void> {
   // Written even when EMPTY — that is "the filter matched nothing", and the
   // mesh draws nothing for it. Only `null` means "no filter".
   useLayerStore.getState().setVisibleObjectIds(layerId, ids);
+  // A visible-id filter answers in object ids, including children belonging
+  // to retained features. Drop only selections owned by this layer that the
+  // result excluded; other layers are retained defensively.
+  const selection = useSelectionStore.getState();
+  const retained = selection.selections.filter(
+    (picked) => picked.layerId !== layerId || ids.has(picked.objectId),
+  );
+  if (retained.length !== selection.selections.length && isCurrent()) {
+    const excluded = selection.selections.length - retained.length;
+    selection.selectMany([...retained]);
+    onExcludedSelection?.(excluded);
+  }
 }

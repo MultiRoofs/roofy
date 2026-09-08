@@ -34,6 +34,10 @@ import {
 import { CATEGORY_OTHER_HEX, CITY_HIGHLIGHT_COLOR_HEX } from "./cityColors";
 import type { GeoLayer } from "../features/geoLayers/geoLayerStore";
 import {
+  publicGeoProperties,
+  readGeoStableFeatureId,
+} from "../features/geoLayers/geoJsonRecords";
+import {
   geoLayerDescription,
   geoSourceDescription,
 } from "./geoLayerDescriptions";
@@ -156,6 +160,11 @@ export interface LiveGeoLayer {
   /** The DESIRED highlight, kept on the entry so a feature set created later
    *  (an `update()` recreates them) can be brought up to date immediately. */
   highlightedBatchId: number | null;
+  /** Stable prepared-GeoJSON identity. Batch IDs are only a legacy fallback. */
+  highlightedStableFeatureId: string | null;
+  visibleStableFeatureIds: ReadonlySet<string> | null;
+  /** Once filtered, explicitly restore `show: true` on clear. */
+  everFiltered: boolean;
   /** Whether this layer ever carried an evaluated colour. A layer that never
    *  did is never touched by a clear or a paint: an evaluated colour
    *  OVERRIDES the layer default, so writing one would shadow every future
@@ -217,18 +226,30 @@ function evaluateFeatureColors(
     otherNumber = hexColorToNumber(CATEGORY_OTHER_HEX)!;
   }
   evaluator.evaluate((info) => {
-    if (info.batchId === entry.highlightedBatchId) {
-      return { color: highlight };
+    const stableId = readGeoStableFeatureId(info.properties);
+    const filtered = entry.visibleStableFeatureIds !== null;
+    const show =
+      !filtered ||
+      (stableId !== null && entry.visibleStableFeatureIds!.has(stableId));
+    const showResult = entry.everFiltered ? { show } : {};
+    const publicProperties = publicGeoProperties(info.properties ?? {});
+    const highlighted =
+      entry.highlightedStableFeatureId !== null
+        ? readGeoStableFeatureId(info.properties) ===
+          entry.highlightedStableFeatureId
+        : info.batchId === entry.highlightedBatchId;
+    if (highlighted) {
+      return { ...showResult, color: highlight };
     }
     if (colorByAttribute !== undefined) {
-      const raw = info.properties?.[colorByAttribute.attribute];
+      const raw = publicProperties[colorByAttribute.attribute];
       const value = raw === undefined || raw === null ? null : String(raw);
       // No match in the map can only mean overflow — see `categoriesFor` —
       // which the OTHER bucket exists for.
       const number = categoryColors.get(value) ?? otherNumber;
-      return { color: makeColor(number) };
+      return { ...showResult, color: makeColor(number) };
     }
-    return { color: base };
+    return { ...showResult, color: base };
   });
 }
 
@@ -247,6 +268,8 @@ function applyFeatureColors(
   highlight: () => unknown,
 ): void {
   const paints =
+    entry.visibleStableFeatureIds !== null ||
+    entry.highlightedStableFeatureId !== null ||
     entry.highlightedBatchId !== null ||
     entry.style.colorByAttribute !== undefined;
   if (!paints && !entry.hadFeatureColors) return;
@@ -294,7 +317,11 @@ export function geoLayerIdForEngineLayerId(
  * every feature in the scene.
  */
 export function syncGeoHighlight(
-  selection: { readonly geoLayerId: string; readonly batchId: number } | null,
+  selection: {
+    readonly geoLayerId: string;
+    readonly batchId?: number;
+    readonly stableFeatureId?: string;
+  } | null,
   live: Map<string, LiveGeoLayer>,
   makeColor: GeoColorFactory,
 ): void {
@@ -315,16 +342,42 @@ export function syncGeoHighlight(
     // subscription re-applies through it, whenever the engine gets round to
     // recreating features.
     entry.colorFactory = makeColor;
-    const desired =
-      selection !== null && selection.geoLayerId === id
-        ? selection.batchId
-        : null;
-    if (desired === entry.highlightedBatchId) continue;
-    entry.highlightedBatchId = desired;
+    const selected =
+      selection !== null && selection.geoLayerId === id ? selection : null;
+    const stableFeatureId = selected?.stableFeatureId ?? null;
+    // Old persisted/picked selections only have batch IDs. Never use that
+    // transient identity once a prepared document supplied a stable one.
+    const batchId =
+      stableFeatureId === null ? (selected?.batchId ?? null) : null;
+    if (
+      batchId === entry.highlightedBatchId &&
+      stableFeatureId === entry.highlightedStableFeatureId
+    )
+      continue;
+    entry.highlightedBatchId = batchId;
+    entry.highlightedStableFeatureId = stableFeatureId;
     // The layer's NAME, not the store id `id`: the same identity every other
     // engine-failure message in this module reports, and the same one the
     // feature-set subscription's own highlight failure uses.
     applyFeatureColors(entry, entry.name, makeColor, highlightColor);
+  }
+}
+
+/** Update vector filter membership without rebuilding sources or layers. */
+export function syncGeoFeatureVisibility(
+  visible: Readonly<Record<string, ReadonlySet<string> | null>>,
+  live: Map<string, LiveGeoLayer>,
+  makeColor: GeoColorFactory,
+): void {
+  for (const [id, entry] of live) {
+    const ids = visible[id] ?? null;
+    if (ids === entry.visibleStableFeatureIds) continue;
+    entry.visibleStableFeatureIds = ids;
+    if (ids !== null) entry.everFiltered = true;
+    entry.colorFactory = makeColor;
+    applyFeatureColors(entry, entry.name, makeColor, () =>
+      makeColor(GEO_HIGHLIGHT_COLOR_HEX),
+    );
   }
 }
 
@@ -370,6 +423,9 @@ function addPair(view: GeoLayerView, layer: GeoLayer): LiveGeoLayer | null {
       style: layer.style,
       evaluators: new Map(),
       highlightedBatchId: null,
+      highlightedStableFeatureId: null,
+      visibleStableFeatureIds: null,
+      everFiltered: false,
       hadFeatureColors: false,
       colorFactory: null,
     };
@@ -389,6 +445,8 @@ function addPair(view: GeoLayerView, layer: GeoLayer): LiveGeoLayer | null {
       entry.evaluators.set(params.featureSetId ?? evaluator, evaluator);
       if (entry.colorFactory === null) return;
       const paints =
+        entry.visibleStableFeatureIds !== null ||
+        entry.highlightedStableFeatureId !== null ||
         entry.highlightedBatchId !== null ||
         entry.style.colorByAttribute !== undefined;
       if (!paints) return;

@@ -115,7 +115,8 @@ export function ActiveLayerPanel({ onZoomToLayer }: ActiveLayerPanelProps) {
           </button>
           {/* City kinds only: a geospatial layer has no attribute table
               behind it, so the drawer would open on nothing. */}
-          {item.kind === "city" && (
+          {(item.kind === "city" ||
+            (item.kind === "geo" && item.layer.kind === "geojson")) && (
             <button
               type="button"
               className={`active-layer-action ${drawerOpen ? "is-on" : ""}`}

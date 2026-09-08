@@ -247,7 +247,7 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
     expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
   });
 
-  it("returns to the landing page when the .fcb open fails", async () => {
+  it("retains the empty viewer and reports a failed .fcb open", async () => {
     openStreamingLayerImpl = async () => {
       throw new Error("Streaming refused: non-metric CRS");
     };
@@ -257,11 +257,11 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
     await waitFor(() =>
       expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
     );
-    // The hold is released in `finally`, so the user gets the drop zone back
-    // instead of being stranded on an empty globe.
+    // The hold is released while the entered viewer retains its canvas.
     await waitFor(() =>
-      expect(screen.queryByTestId("navara-viewport")).toBeNull(),
+      expect(screen.getByText("Add a layer to start")).toBeInTheDocument(),
     );
+    expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
     expect(
       screen.getByText("Streaming refused: non-metric CRS"),
     ).toBeInTheDocument();
@@ -391,7 +391,7 @@ describe("App object count across static and streaming layers", () => {
     // The status bar is the ONE readout now — the toolbar's Objects pill was
     // deleted as a duplicate of it — and `getByText` throwing on a second
     // match is what keeps it that way.
-    await waitFor(() => expect(screen.getByText("2123")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/2,123/)).toBeTruthy());
   });
 });
 

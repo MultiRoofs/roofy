@@ -43,6 +43,28 @@ export const DEFAULT_EXPOSURE = 10;
 
 /** Slider bounds. 0.5 is "nearly black", 30 is "blown out" — both useful when
  *  diagnosing a scene, neither a sensible resting place. */
+export const SHADOW_QUALITY_PREFERENCE_KEY = "roofy.shadowQuality";
+function storedShadowQuality(): ShadowQuality {
+  try {
+    const value =
+      typeof localStorage === "undefined"
+        ? null
+        : localStorage.getItem(SHADOW_QUALITY_PREFERENCE_KEY);
+    return value === "low" || value === "medium" || value === "high"
+      ? value
+      : DEFAULT_SHADOW_QUALITY;
+  } catch {
+    return DEFAULT_SHADOW_QUALITY;
+  }
+}
+function persistShadowQuality(value: ShadowQuality): void {
+  try {
+    localStorage.setItem(SHADOW_QUALITY_PREFERENCE_KEY, value);
+  } catch {
+    /* preference storage is optional */
+  }
+}
+
 export const EXPOSURE_RANGE = { min: 0.5, max: 30, step: 0.5 } as const;
 
 export interface RenderDebugState {
@@ -112,6 +134,7 @@ function clamp(value: number, min: number, max: number): number {
 
 export const useRenderDebugStore = create<RenderDebugStore>((set) => ({
   ...DEFAULT_RENDER_DEBUG_STATE,
+  shadowQuality: storedShadowQuality(),
 
   setPostProcessingEnabled: (postProcessingEnabled) =>
     set({ postProcessingEnabled }),
@@ -119,7 +142,10 @@ export const useRenderDebugStore = create<RenderDebugStore>((set) => ({
   setAerialPerspectiveEnabled: (aerialPerspectiveEnabled) =>
     set({ aerialPerspectiveEnabled }),
   setSunShadowsEnabled: (sunShadowsEnabled) => set({ sunShadowsEnabled }),
-  setShadowQuality: (shadowQuality) => set({ shadowQuality }),
+  setShadowQuality: (shadowQuality) => {
+    persistShadowQuality(shadowQuality);
+    set({ shadowQuality });
+  },
   // Clamped in the STORE, not at the slider: the dev-console handle
   // (`window.__roofyRenderDebug`) writes here too, and an exposure of NaN
   // makes the engine render a black frame with no error anywhere.
@@ -127,7 +153,10 @@ export const useRenderDebugStore = create<RenderDebugStore>((set) => ({
     set({ exposure: clamp(exposure, EXPOSURE_RANGE.min, EXPOSURE_RANGE.max) }),
   setStreamQueryBoxEnabled: (streamQueryBoxEnabled) =>
     set({ streamQueryBoxEnabled }),
-  reset: () => set(DEFAULT_RENDER_DEBUG_STATE),
+  reset: () => {
+    persistShadowQuality(DEFAULT_SHADOW_QUALITY);
+    set(DEFAULT_RENDER_DEBUG_STATE);
+  },
 }));
 
 declare global {

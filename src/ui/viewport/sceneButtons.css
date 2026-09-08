@@ -1,0 +1,55 @@
+.scene-buttons {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  bottom: calc(var(--attribution-height, 1.5rem) + 0.75rem);
+  /* Reserve the full lower-right camera stack, scale gap, and trigger row. */
+  --camera-cluster-clearance: 10.5rem;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  max-width: calc(100% - 24px);
+  pointer-events: none;
+}
+.scene-buttons__triggers,
+.scene-buttons__sheet {
+  pointer-events: auto;
+}
+.scene-buttons__triggers {
+  display: flex;
+  gap: 0.35rem;
+}
+.scene-buttons__triggers button {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  padding: 0.45rem 0.6rem;
+  background: color-mix(in srgb, var(--bg-panel) 80%, transparent);
+  color: var(--fg);
+  font: 600 0.72rem var(--font-ui);
+  backdrop-filter: blur(12px);
+}
+.scene-buttons svg {
+  width: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+}
+.scene-buttons button[aria-pressed="true"] {
+  background: var(--brand-primary);
+  color: #10150d;
+}
+.scene-buttons__sheet {
+  width: 340px;
+  max-width: 100%;
+  min-height: 0;
+  max-height: calc(100% - var(--camera-cluster-clearance) - 3rem);
+  overflow: auto;
+  margin-top: 0.45rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}

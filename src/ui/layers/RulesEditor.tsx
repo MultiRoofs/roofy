@@ -21,7 +21,7 @@
  * UI was describing; the layer list is now the only place a layer is chosen.
  */
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { CityModel } from "../../domain/citymodel/types";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useStreamStore } from "../../features/streaming/streamStore";
@@ -116,6 +116,8 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
   const editingId = draft?.editingId ?? null;
 
   const importRef = useRef<HTMLInputElement>(null);
+  const [draggingRuleId, setDraggingRuleId] = useState<string | null>(null);
+  const [dragTargetId, setDragTargetId] = useState<string | null>(null);
 
   // Collect attribute fields from all objects for the field dropdown. A
   // streaming layer has no complete `CityModel` to walk — only whatever
@@ -206,6 +208,19 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
         current.findIndex((r) => r.id === ruleId),
         current.findIndex((r) => r.id === neighbour.id),
       );
+    },
+    [layerId, reorderRules],
+  );
+
+  const moveRuleTo = useCallback(
+    (ruleId: string, targetId: string) => {
+      const current =
+        useLayerStore.getState().layers.find((layer) => layer.id === layerId)
+          ?.rules ?? [];
+      const from = current.findIndex((rule) => rule.id === ruleId);
+      const to = current.findIndex((rule) => rule.id === targetId);
+      if (from < 0 || to < 0 || from === to) return;
+      reorderRules(layerId, from, to);
     },
     [layerId, reorderRules],
   );
@@ -309,7 +324,36 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
       {visibleRules.length > 0 && (
         <ul className="rule-list" aria-label="Rules">
           {visibleRules.map((rule, idx) => (
-            <li className="rule-item" key={rule.id}>
+            <li
+              className={`rule-item ${dragTargetId === rule.id ? "rule-item-drag-target" : ""}`}
+              key={rule.id}
+              onDragOver={(event) => {
+                if (draggingRuleId === null || draggingRuleId === rule.id)
+                  return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                setDragTargetId(rule.id);
+              }}
+              onDragLeave={(event) => {
+                if (
+                  event.currentTarget.contains(
+                    event.relatedTarget as Node | null,
+                  )
+                )
+                  return;
+                setDragTargetId((target) =>
+                  target === rule.id ? null : target,
+                );
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                if (draggingRuleId !== null && draggingRuleId !== rule.id) {
+                  moveRuleTo(draggingRuleId, rule.id);
+                }
+                setDraggingRuleId(null);
+                setDragTargetId(null);
+              }}
+            >
               {showForm && editingId === rule.id && draft !== null ? (
                 <RuleForm
                   values={draft.form}
@@ -324,6 +368,16 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
                   rule={rule}
                   isFirst={idx === 0}
                   isLast={idx === visibleRules.length - 1}
+                  dragDisabled={showForm}
+                  onDragStart={() => setDraggingRuleId(rule.id)}
+                  onDragEnd={() => {
+                    setDraggingRuleId(null);
+                    setDragTargetId(null);
+                  }}
+                  onDragCancel={() => {
+                    setDraggingRuleId(null);
+                    setDragTargetId(null);
+                  }}
                   onToggle={() =>
                     updateRule(layerId, rule.id, { enabled: !rule.enabled })
                   }
@@ -364,7 +418,15 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
           onCancel={handleFormCancel}
         />
       ) : (
-        <button type="button" className="rule-add-btn" onClick={openAddForm}>
+        <button
+          type="button"
+          className="rule-add-btn"
+          onClick={openAddForm}
+          disabled={showForm}
+          title={
+            showForm ? "Finish or cancel the current rule first" : undefined
+          }
+        >
           + Add rule
         </button>
       )}
@@ -416,6 +478,10 @@ function RuleRow({
   onToggle,
   onMoveUp,
   onMoveDown,
+  dragDisabled,
+  onDragStart,
+  onDragEnd,
+  onDragCancel,
 }: {
   rule: Rule;
   isFirst: boolean;
@@ -425,10 +491,39 @@ function RuleRow({
   onToggle: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
+  dragDisabled: boolean;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onDragCancel: () => void;
 }) {
   return (
     <div className={`rule-body ${rule.enabled ? "" : "rule-disabled"}`}>
       <div className="rule-head">
+        <button
+          type="button"
+          className="rule-drag-handle"
+          aria-label={`Drag rule: ${rule.name}`}
+          title="Drag to change precedence"
+          draggable={!dragDisabled}
+          disabled={dragDisabled}
+          onDragStart={(event) => {
+            event.dataTransfer.effectAllowed = "move";
+            onDragStart();
+          }}
+          onDragEnd={onDragEnd}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") onDragCancel();
+          }}
+        >
+          <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+            <circle cx="3" cy="2.5" r="1" />
+            <circle cx="9" cy="2.5" r="1" />
+            <circle cx="3" cy="6" r="1" />
+            <circle cx="9" cy="6" r="1" />
+            <circle cx="3" cy="9.5" r="1" />
+            <circle cx="9" cy="9.5" r="1" />
+          </svg>
+        </button>
         <span
           className="rule-swatch"
           style={{ backgroundColor: rule.color }}

@@ -312,3 +312,18 @@ describe("readShareHash outcomes", () => {
     expect(result.state.cam).toEqual(CAM);
   });
 });
+
+describe("share timezone", () => {
+  it("round trips an optional timezone and keeps legacy links valid", () => {
+    const state = makeState({ tz: "UTC" });
+    expect(decodeShareState(encodeShareState(state))?.tz).toBe("UTC");
+    const legacy = makeState();
+    expect(decodeShareState(encodeShareState(legacy))?.tz).toBe(
+      "Europe/Amsterdam",
+    );
+    expect(
+      decodeShareState(encodeShareState(makeState({ tz: "invalid" as never })))
+        ?.tz,
+    ).toBe("Europe/Amsterdam");
+  });
+});

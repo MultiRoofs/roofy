@@ -19,12 +19,16 @@
  * the rows grow to 14px — the legend is then the only chrome left and reads
  * from across a room.
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
+import { getResidentModel } from "../../features/streaming/residentModel";
+import { useStreamStore } from "../../features/streaming/streamStore";
 import { useShellStore } from "../shell/shellStore";
 import { useSelectionStore } from "../../features/selection/selectionStore";
-import { legendGroups } from "./legendModel";
+import { countedLegendGroups } from "./legendCounts";
+import { useSceneThemeStore } from "../../features/sceneTheme/sceneThemeStore";
+import { useGeoFeatureVisibilityStore } from "../../features/geoLayers/geoFeatureVisibilityStore";
 
 export function LegendOverlay() {
   const layers = useLayerStore((s) => s.layers);
@@ -36,9 +40,42 @@ export function LegendOverlay() {
   const hasSelection = useSelectionStore(
     (s) => s.selections.length > 0 || s.geoSelection !== null,
   );
+  const streams = useStreamStore((state) => state.streams);
   const [visible, setVisible] = useState(true);
+  const cyber = useSceneThemeStore((s) => s.theme === "cyber");
+  const geoVisibleIds = useGeoFeatureVisibilityStore((s) => s.visible);
+  const geoDocuments = useMemo(
+    () =>
+      new Map(
+        geoLayers
+          .filter((layer) => layer.kind === "geojson")
+          .map((layer) => [layer.id, layer.config.preparedData ?? null]),
+      ),
+    [geoLayers],
+  );
 
-  const groups = legendGroups(layers, geoLayers);
+  const residents = useMemo(() => {
+    const next = new Map();
+    for (const layer of layers) {
+      if (!layer.isStreaming) continue;
+      next.set(
+        layer.id,
+        getResidentModel(layer.id, streams[layer.id]?.version ?? 0),
+      );
+    }
+    return next;
+  }, [layers, streams]);
+  const groups = useMemo(
+    () =>
+      countedLegendGroups(
+        layers,
+        geoLayers,
+        residents,
+        geoDocuments,
+        geoVisibleIds,
+      ),
+    [geoDocuments, geoLayers, geoVisibleIds, layers, residents],
+  );
   if (groups.length === 0) return null;
 
   const presentation = leftCollapsed && (rightCollapsed || !hasSelection);
@@ -49,26 +86,14 @@ export function LegendOverlay() {
         presentation ? "legend-overlay legend-presentation" : "legend-overlay"
       }
     >
-      <button
-        className="legend-toggle"
-        onClick={() => setVisible((v) => !v)}
-        title={visible ? "Hide legend" : "Show legend"}
-        aria-label={visible ? "Hide legend" : "Show legend"}
-      >
-        <svg viewBox="0 0 24 24" width="14" height="14">
-          <path
-            d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </button>
       {visible && (
         <div className="legend-card">
           <div className="legend-title">Legend</div>
+          {cyber && (
+            <p className="legend-warning">
+              Cyber presentation overrides layer colours.
+            </p>
+          )}
           {groups.map((group) => (
             <div
               key={group.layerId}
@@ -85,12 +110,15 @@ export function LegendOverlay() {
                     .requestSection(group.layerId, "style")
                 }
               >
-                {group.name}
+                <span>{group.name}</span>
+                <span className="legend-group-chevron" aria-hidden>
+                  ›
+                </span>
               </button>
+              {group.rows.some((row) => row.currentlyLoaded) && (
+                <p className="legend-scope-note">Currently loaded</p>
+              )}
               {group.rows.map((row, index) => (
-                // Rule ids are only unique WITHIN a layer, and a category row
-                // has no id at all, so the key is the layer id plus the row's
-                // position — a legend is append-only within a render.
                 <div
                   key={`${group.layerId}:${row.kind}:${index}`}
                   className="legend-item"
@@ -100,12 +128,33 @@ export function LegendOverlay() {
                     style={{ background: row.color }}
                   />
                   <span>{row.label}</span>
+                  <span className="legend-count">
+                    {row.count === null ? "Unavailable" : row.count}
+                  </span>
                 </div>
               ))}
             </div>
           ))}
         </div>
       )}
+      <button
+        className="legend-toggle"
+        onClick={() => setVisible((v) => !v)}
+        title={visible ? "Hide legend" : "Show legend"}
+        aria-label={visible ? "Hide legend" : "Show legend"}
+      >
+        <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden>
+          <path
+            d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        <span>{visible ? "Hide legend" : "Show legend"}</span>
+      </button>
     </div>
   );
 }

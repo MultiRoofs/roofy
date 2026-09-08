@@ -164,10 +164,11 @@ describe("ActiveLayerPanel — the action row", () => {
     expect(useShellStore.getState().drawerOpen).toBe(false);
   });
 
-  it("offers no table for a geospatial layer: there is none behind it", () => {
+  it("opens records for a GeoJSON layer and still offers zoom", () => {
     activateGeo();
     render(<ActiveLayerPanel onZoomToLayer={noZoom} />);
-    expect(screen.queryByRole("button", { name: "Open table" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open table" }));
+    expect(useShellStore.getState().drawerOpen).toBe(true);
     expect(screen.getByRole("button", { name: "Zoom to layer" })).toBeTruthy();
   });
 });

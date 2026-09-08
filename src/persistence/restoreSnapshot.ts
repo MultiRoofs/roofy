@@ -14,6 +14,7 @@ import { normalizeSceneTheme, normalizeViewMode } from "./types";
 import { migrateSnapshot } from "./migrateSnapshot";
 import { useSelectionStore } from "../features/selection/selectionStore";
 import { useSolarStore } from "../features/solar/solarStore";
+import { normalizeSolarTimeZone } from "../features/solar/solarTimeZone";
 
 export interface RestoredSnapshot {
   readonly viewState: ViewState;
@@ -47,6 +48,9 @@ export function restoreSnapshot(snapshot: ProjectSnapshot): RestoredSnapshot {
   const dt = new Date(migrated.viewState.datetime);
   if (!isNaN(dt.getTime())) {
     useSolarStore.getState().setDatetime(dt);
+    useSolarStore
+      .getState()
+      .setTimeZone(normalizeSolarTimeZone(migrated.viewState.timeZone));
   }
 
   // Neither the view mode nor the scene theme is written to its store here,

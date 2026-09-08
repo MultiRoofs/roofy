@@ -187,6 +187,21 @@ describe("ViewerShell right-panel resize", () => {
     move(860);
     expect(useShellStore.getState().rightWidth).toBe(380);
   });
+
+  it("maps physical keys and bounds to the details panel", () => {
+    const handle = grabHandle();
+    handle.focus();
+    expect(handle).toHaveAttribute("aria-valuenow", "340");
+
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+    expect(useShellStore.getState().rightWidth).toBe(324);
+    fireEvent.keyDown(handle, { key: "PageUp" });
+    expect(useShellStore.getState().rightWidth).toBe(388);
+    fireEvent.keyDown(handle, { key: "Home" });
+    expect(useShellStore.getState().rightWidth).toBe(SHELL_LIMITS.rightMin);
+    fireEvent.keyDown(handle, { key: "End" });
+    expect(useShellStore.getState().rightWidth).toBe(SHELL_LIMITS.rightMax);
+  });
 });
 
 describe("ViewerShell expanded drawer", () => {
@@ -224,6 +239,7 @@ describe("ViewerShell map identity", () => {
           right={<div data-testid="the-right" />}
           rightTitle="Building 1"
           status={<div />}
+          attributionLines={["Drawer terrain credit"]}
         />
       );
     }
@@ -232,6 +248,16 @@ describe("ViewerShell map identity", () => {
     const mapNode = screen.getByTestId("the-map");
 
     act(() => useShellStore.getState().openDrawer());
+    act(() => useShellStore.getState().setDrawerExpanded(true));
+    const credit = screen.getByText("Drawer terrain credit");
+    const drawer = screen.getByTestId("the-drawer");
+    expect(credit).toBeInTheDocument();
+    // The map toggle lives in TablePanel's header. The shell owns only the
+    // in-flow licence footer, after the drawer content, so credits cannot
+    // cover pagination and this component never duplicates the toggle.
+    expect(credit.parentElement?.previousElementSibling).toBe(drawer);
+    expect(screen.queryByRole("button", { name: "Show map" })).toBeNull();
+    act(() => useShellStore.getState().setDrawerExpanded(false));
     act(() => useShellStore.getState().closeDrawer());
     act(() => useShellStore.getState().setRightCollapsed(true));
     act(() => useShellStore.getState().setRightCollapsed(false));

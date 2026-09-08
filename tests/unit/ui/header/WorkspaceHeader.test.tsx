@@ -25,7 +25,6 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { WorkspaceHeader } from "../../../../src/ui/header/WorkspaceHeader";
-import { SceneControlsTemp } from "../../../../src/ui/header/SceneControlsTemp";
 import { useLayerStore } from "../../../../src/features/layers/layerStore";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import {
@@ -123,12 +122,7 @@ describe("WorkspaceHeader — the workspace's own controls", () => {
   });
 
   it("carries no theme toggle — appearance lives in Preferences alone", () => {
-    render(
-      <WorkspaceHeader
-        {...baseProps}
-        sceneControls={<SceneControlsTemp {...sceneProps} />}
-      />,
-    );
+    render(<WorkspaceHeader {...baseProps} />);
     expect(
       screen
         .getAllByRole("button")
@@ -382,14 +376,6 @@ function loadedLayer(): Layer {
   };
 }
 
-const sceneProps = {
-  pickMode: "object" as const,
-  toolMode: "select" as const,
-  onSetPickMode: () => undefined,
-  onSetToolMode: () => undefined,
-  onFitAll: () => undefined,
-};
-
 describe("WorkspaceHeader — controls only, no scene information", () => {
   for (const [what, text] of [
     ["the object count", "Objects"],
@@ -400,12 +386,7 @@ describe("WorkspaceHeader — controls only, no scene information", () => {
     it(`does not restate ${what}, which another surface already shows`, () => {
       useLayerStore.setState({ layers: [loadedLayer()] });
       useWorkspaceStore.setState({ activeLayerId: "L" });
-      render(
-        <WorkspaceHeader
-          {...baseProps}
-          sceneControls={<SceneControlsTemp {...sceneProps} />}
-        />,
-      );
+      render(<WorkspaceHeader {...baseProps} />);
       expect(screen.queryByText(text)).toBeNull();
     });
   }
@@ -413,108 +394,11 @@ describe("WorkspaceHeader — controls only, no scene information", () => {
   it("does not carry the file name, the CRS or a separate sun pill", () => {
     useLayerStore.setState({ layers: [loadedLayer()] });
     useWorkspaceStore.setState({ activeLayerId: "L" });
-    const { container } = render(
-      <WorkspaceHeader
-        {...baseProps}
-        sceneControls={<SceneControlsTemp {...sceneProps} />}
-      />,
-    );
+    const { container } = render(<WorkspaceHeader {...baseProps} />);
     expect(container.querySelector(".toolbar-file")).toBeNull();
     expect(container.querySelector(".meta-pills")).toBeNull();
     expect(container.querySelector(".sun-pill")).toBeNull();
     // The CRS is not deleted, it MOVED — see StatusBar.test.tsx.
     expect(screen.queryByText("EPSG:7415")).toBeNull();
-  });
-});
-
-describe("SceneControlsTemp", () => {
-  it("keeps the pick-mode pair live", () => {
-    const onSetPickMode = vi.fn();
-    const onSetToolMode = vi.fn();
-    render(
-      <SceneControlsTemp
-        {...sceneProps}
-        onSetPickMode={onSetPickMode}
-        onSetToolMode={onSetToolMode}
-      />,
-    );
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Select surfaces (S)" }),
-    );
-
-    expect(onSetPickMode).toHaveBeenCalledWith("surface");
-    expect(onSetToolMode).toHaveBeenCalledWith("select");
-  });
-
-  it("carries no place search — that is a scene overlay now", () => {
-    render(<SceneControlsTemp {...sceneProps} />);
-    expect(screen.queryByTitle("Search for a place")).toBeNull();
-  });
-
-  it("labels its icon buttons with aria-label and the CSS bubble, never `title`", () => {
-    // Rule 1 of the tooltip pattern (app.css, HOVER TOOLTIPS): `data-tooltip`
-    // REPLACES `title`, or the browser draws the native tip on top of ours.
-    // Rule 2: the `aria-label` must survive, or `content: attr(data-tooltip)`
-    // becomes the button's accessible name.
-    render(<SceneControlsTemp {...sceneProps} />);
-    for (const label of [
-      "Select objects (V)",
-      "Select surfaces (S)",
-      "Zoom to fit (F)",
-      "Scene",
-    ]) {
-      const button = screen.getByRole("button", { name: label });
-      expect(button.getAttribute("title")).toBeNull();
-      expect(button.getAttribute("data-tooltip")).toBe(label);
-    }
-  });
-
-  it("keeps Zoom to fit", () => {
-    const onFitAll = vi.fn();
-    render(<SceneControlsTemp {...sceneProps} onFitAll={onFitAll} />);
-    fireEvent.click(screen.getByRole("button", { name: "Zoom to fit (F)" }));
-    expect(onFitAll).toHaveBeenCalledTimes(1);
-  });
-
-  for (const dead of ["Box select", "Measure"]) {
-    it(`no longer renders ${dead}, which had no implementation to reach`, () => {
-      render(<SceneControlsTemp {...sceneProps} />);
-      const found = screen
-        .getAllByRole("button")
-        .find((b) => (b.getAttribute("aria-label") ?? "").startsWith(dead));
-      // A disabled button is still a promise; removing it is the honest form.
-      expect(found).toBeUndefined();
-    });
-  }
-
-  it("hosts the basemap and Google 3D controls behind one Scene popover", () => {
-    render(<SceneControlsTemp {...sceneProps} />);
-    expect(screen.queryByLabelText("Basemap")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Scene" }));
-
-    expect(screen.getByLabelText("Basemap")).toBeInTheDocument();
-    expect(screen.getByText("Background")).toBeInTheDocument();
-  });
-
-  it("marks itself as furniture that 12.5 removes", () => {
-    const { container } = render(<SceneControlsTemp {...sceneProps} />);
-    expect(
-      container.querySelector('[data-temporary="12.5"]'),
-    ).toBeInTheDocument();
-  });
-
-  it("opens the rendering settings", () => {
-    const onToggleAdvancedSettings = vi.fn();
-    render(
-      <SceneControlsTemp
-        {...sceneProps}
-        advancedSettingsOpen={false}
-        onToggleAdvancedSettings={onToggleAdvancedSettings}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Rendering settings" }));
-    expect(onToggleAdvancedSettings).toHaveBeenCalledTimes(1);
   });
 });

@@ -20,13 +20,26 @@ import {
   type LayerTable,
 } from "../../insights/layerTables";
 import { runExport, type ExportRequest } from "../../insights/export";
-import { buildRootTypesSql, compileFilter } from "../../insights/sql";
+import {
+  buildRootTypesSql,
+  compileFilter,
+  quoteLiteral,
+} from "../../insights/sql";
+import { useSelectionStore } from "../../features/selection/selectionStore";
+import { useLayerStore } from "../../features/layers/layerStore";
+import {
+  parentsIndexOf,
+  rootFeatureId,
+} from "../../domain/citymodel/featureId";
+import { getResidentModel } from "../../features/streaming/residentModel";
+import { useStreamStore } from "../../features/streaming/streamStore";
 import { FLAT_PREFIX_COLUMNS } from "../../insights/layerRows";
 import { refreshStreamingTable } from "../../features/layers/layerTableLifecycle";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 import { downloadBlob } from "../../platform/download";
 import { useModalChrome } from "../useModalChrome";
 import { exportFileName } from "./exportFileName";
+import { useLayerCounts } from "./useLayerCounts";
 
 /**
  * The columns that are never offered as "attributes".
@@ -126,6 +139,27 @@ export function ExportDialog({
   // dialog must not dismiss itself out from under an export in flight.
 
   const query = useQueryStore((s) => layerQuery(s, layerId));
+  const counts = useLayerCounts(layerId);
+  const selections = useSelectionStore((s) => s.selections);
+  const selectedObjectIds = useMemo(
+    () =>
+      selections
+        .filter((selection) => selection.layerId === layerId)
+        .map((selection) => selection.objectId),
+    [selections, layerId],
+  );
+  const layer = useLayerStore((s) =>
+    s.layers.find((candidate) => candidate.id === layerId),
+  );
+  const streamVersion = useStreamStore((s) => s.streams[layerId]?.version);
+  const selectedFeatureIds = useMemo(() => {
+    if (!layer) return selectedObjectIds;
+    const objects = layer.isStreaming
+      ? getResidentModel(layerId, streamVersion ?? 0).objects
+      : layer.model.objects;
+    const parents = parentsIndexOf(objects);
+    return selectedObjectIds.map((id) => rootFeatureId(id, parents));
+  }, [layer, layerId, selectedObjectIds.join("\u0000"), streamVersion]);
 
   const attributeColumns = useMemo(
     () => table.columns.filter((c) => !FIXED_COLUMNS.has(c.name)),
@@ -168,7 +202,7 @@ export function ExportDialog({
   useEffect(() => {
     setSelectedAttributes(new Set(attributeColumns.map((c) => c.name)));
   }, [attributeColumns]);
-  const [scope, setScope] = useState<"all" | "filter">(
+  const [scope, setScope] = useState<"all" | "filter" | "selected">(
     query.applied === null ? "all" : "filter",
   );
   const [chosenFormat, setChosenFormat] = useState<Format>("csv");
@@ -289,8 +323,8 @@ export function ExportDialog({
    * radio still claimed otherwise — so "there is no applied filter" resolves
    * to "whole layer" everywhere, in the radio and in the request alike.
    */
-  const effectiveScope: "all" | "filter" =
-    query.applied === null ? "all" : scope;
+  const effectiveScope: "all" | "filter" | "selected" =
+    scope === "filter" && query.applied === null ? "all" : scope;
 
   /** Escape and a backdrop click are dismissals; an export in flight is not
    *  something to dismiss — closing would throw away the warnings or the error
@@ -313,6 +347,14 @@ export function ExportDialog({
         const compiled = compileFilter(query.applied, table.columns);
         if (!compiled.ok) throw new Error(compiled.message);
         where = compiled.where;
+      } else if (effectiveScope === "selected") {
+        const ids = [...new Set(selectedFeatureIds)];
+        if (ids.length === 0)
+          throw new Error(
+            "Select at least one building to export selected records.",
+          );
+        // Feature scope deliberately does not intersect the current filter.
+        where = `COALESCE("feature_id", "id") IN (${ids.map(quoteLiteral).join(", ")})`;
       }
 
       const attributes = attributeColumns
@@ -441,6 +483,12 @@ export function ExportDialog({
         </div>
 
         <div className="modal-body export-body">
+          {isStreaming && (
+            <p className="export-streaming-note">
+              Exports include currently loaded records only, not the whole
+              dataset.
+            </p>
+          )}
           <fieldset className="export-group">
             <legend>Rows</legend>
             <label>
@@ -451,7 +499,25 @@ export function ExportDialog({
                 checked={effectiveScope === "all"}
                 onChange={() => setScope("all")}
               />
-              <span>Whole layer</span>
+              <span>
+                {query.view === "raw"
+                  ? "Whole raw-object layer"
+                  : `Whole layer · ${counts.all === null ? "?" : counts.all} buildings including parts`}
+              </span>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="export-scope"
+                aria-label="Selected records"
+                disabled={selectedObjectIds.length === 0}
+                checked={effectiveScope === "selected"}
+                onChange={() => setScope("selected")}
+              />
+              <span>
+                Selected records · {new Set(selectedFeatureIds).size} buildings
+                including parts
+              </span>
             </label>
             <label>
               <input
@@ -462,7 +528,11 @@ export function ExportDialog({
                 checked={effectiveScope === "filter"}
                 onChange={() => setScope("filter")}
               />
-              <span>Current filter</span>
+              <span>
+                {query.view === "raw"
+                  ? "Current raw-object filter"
+                  : `Current filter · ${counts.matching === null ? "?" : counts.matching} buildings including parts`}
+              </span>
             </label>
           </fieldset>
 

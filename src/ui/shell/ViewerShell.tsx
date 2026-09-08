@@ -16,10 +16,10 @@
  * is not clearing the selection.
  */
 
-import { useRef } from "react";
 import type { CSSProperties, ReactElement, ReactNode } from "react";
-import { useShellStore } from "./shellStore";
+import { SHELL_LIMITS, useShellStore } from "./shellStore";
 import { ResizeHandle } from "./ResizeHandle";
+import { AttributionLines } from "../viewport/AttributionOverlay";
 
 /** The width of the collapsed left column, which `LeftRail` fills. */
 const LEFT_RAIL_WIDTH = "40px";
@@ -38,6 +38,8 @@ export interface ViewerShellProps {
   /** What the collapsed-details pill names — "Building …25028". */
   readonly rightTitle: string;
   readonly status: ReactNode;
+  /** The viewport's active licence credits, mirrored in the expanded drawer. */
+  readonly attributionLines?: readonly string[];
 }
 
 export function ViewerShell({
@@ -48,6 +50,7 @@ export function ViewerShell({
   right,
   rightTitle,
   status,
+  attributionLines = [],
 }: ViewerShellProps): ReactElement {
   const leftCollapsed = useShellStore((s) => s.leftCollapsed);
   const leftWidth = useShellStore((s) => s.leftWidth);
@@ -55,10 +58,6 @@ export function ViewerShell({
   const rightCollapsed = useShellStore((s) => s.rightCollapsed);
   const drawerHeight = useShellStore((s) => s.drawerHeight);
   const drawerExpanded = useShellStore((s) => s.drawerExpanded);
-
-  /** The width the current resize drag started from — `ResizeHandle` reports
-   *  its movement from pointerdown, not from the previous move. */
-  const rightDragOrigin = useRef(0);
 
   const rightOpen = right !== null && !rightCollapsed;
 
@@ -97,7 +96,17 @@ export function ViewerShell({
             </button>
           )}
         </div>
-        {drawer !== null && <div className="drawer-area">{drawer}</div>}
+        {drawer !== null && (
+          <div className="drawer-area">
+            {drawer}
+            {drawerExpanded && (
+              <AttributionLines
+                lines={attributionLines}
+                className="drawer-attribution"
+              />
+            )}
+          </div>
+        )}
       </div>
 
       {rightOpen && (
@@ -107,16 +116,11 @@ export function ViewerShell({
           <ResizeHandle
             axis="x"
             label="Resize details panel"
-            onStart={() => {
-              rightDragOrigin.current = useShellStore.getState().rightWidth;
-            }}
-            /* The handle is on the panel's LEFT edge: dragging left (a
-               negative delta) widens it. */
-            onDelta={(dx) =>
-              useShellStore
-                .getState()
-                .setRightWidth(rightDragOrigin.current - dx)
-            }
+            current={rightWidth}
+            min={SHELL_LIMITS.rightMin}
+            max={SHELL_LIMITS.rightMax}
+            direction={-1}
+            onResize={(width) => useShellStore.getState().setRightWidth(width)}
           />
           {right}
         </div>

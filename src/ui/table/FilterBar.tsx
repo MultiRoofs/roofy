@@ -104,7 +104,7 @@ export function FilterBar({
   }, [filter, onChange, onApply]);
 
   return (
-    <div className="filter-bar">
+    <div className="filter-bar" tabIndex={-1}>
       <div className="filter-bar-rows">
         {filter.conditions.map((condition, index) => {
           const column = byName.get(condition.column);

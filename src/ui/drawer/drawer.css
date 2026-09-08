@@ -1,0 +1,77 @@
+/* Drawer-specific polish.  Kept separate from app.css so scene work can merge independently. */
+.data-drawer {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  color: var(--fg);
+}
+.data-drawer-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 10px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.data-drawer-tab[aria-selected="true"] {
+  color: var(--fg);
+  border-bottom: 2px solid currentColor;
+}
+.data-drawer-summary {
+  overflow: auto;
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+}
+.data-drawer-note {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.summary-scope {
+  display: flex;
+  gap: 6px;
+}
+.summary-scope button {
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--fg);
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+.summary-scope button[aria-pressed="true"] {
+  background: var(--fg);
+  color: var(--bg-panel);
+}
+.summary-definition-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0;
+}
+.summary-definition-grid dt {
+  color: var(--fg-muted);
+}
+.summary-definition-grid dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.summary-bars {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+}
+.summary-bar {
+  display: grid;
+  grid-template-columns: minmax(70px, 1fr) minmax(8px, 3fr) max-content;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.summary-bar i {
+  height: 8px;
+  min-width: 1px;
+  background: var(--fg);
+  opacity: 0.6;
+}
+.summary-bar b {
+  font-variant-numeric: tabular-nums;
+}

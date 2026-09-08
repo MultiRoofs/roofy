@@ -57,6 +57,7 @@ import type {
   PendingAdd,
 } from "../../features/layers/useLayerFileLoader";
 import { LayerRow, PlaceholderRow } from "./LayerRow";
+import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 
 /**
  * A city layer that a restored snapshot could not rebuild, because its source
@@ -177,6 +178,12 @@ function StoreLayerRow({
 }) {
   const id = item.layer.id;
   const kind = layerKindOf(item);
+  const appliedFilter = useQueryStore((state) =>
+    item.kind === "city" ||
+    (item.kind === "geo" && item.layer.kind === "geojson")
+      ? layerQuery(state, id).applied
+      : null,
+  );
 
   const updateLayer = useLayerStore((s) => s.updateLayer);
   const removeLayer = useLayerStore((s) => s.removeLayer);
@@ -250,7 +257,14 @@ function StoreLayerRow({
       active={active}
       kind={kind}
       stateLine={layerStateLine(input)}
-      filterChip={null}
+      filterChip={
+        appliedFilter !== null && appliedFilter.conditions.length > 0 ? (
+          <span className="layer-filter-chip">
+            {appliedFilter.conditions.length} filter
+            {appliedFilter.conditions.length === 1 ? "" : "s"}
+          </span>
+        ) : null
+      }
       onActivate={() => activateLayer(id)}
       onToggleVisible={() => {
         if (item.kind === "city")
@@ -263,7 +277,12 @@ function StoreLayerRow({
       }}
       onZoom={canZoom(item) ? () => onZoomToLayer(item) : null}
       // City kinds only: a geospatial layer has no attribute table behind it.
-      onOpenTable={item.kind === "city" ? () => onOpenTable(id) : null}
+      onOpenTable={
+        item.kind === "city" ||
+        (item.kind === "geo" && item.layer.kind === "geojson")
+          ? () => onOpenTable(id)
+          : null
+      }
       onRemove={() => {
         if (item.kind === "geo") {
           removeGeoLayer(id);

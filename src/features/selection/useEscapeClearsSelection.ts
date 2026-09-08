@@ -27,6 +27,7 @@
  */
 import { useEffect } from "react";
 import { useSelectionStore } from "./selectionStore";
+import { useSceneSheetStore } from "../sceneSheet/sceneSheetStore";
 
 const TEXT_ENTRY = new Set(["INPUT", "TEXTAREA", "SELECT"]);
 
@@ -37,6 +38,10 @@ export function useEscapeClearsSelection(): void {
       // Capture phase, so this sees the modal BEFORE the modal's own handler
       // has closed it and React has flushed the backdrop out of the DOM.
       if (document.querySelector(".modal-backdrop")) return;
+      if (useSceneSheetStore.getState().sheet !== null) {
+        useSceneSheetStore.getState().setSheet(null);
+        return;
+      }
       const target = e.target;
       if (
         target instanceof HTMLElement &&

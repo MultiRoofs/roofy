@@ -128,10 +128,10 @@ describe("useLayerQuery", () => {
       "id,feature_id,object_type",
     );
     expect(runQuery).toHaveBeenCalledWith(
-      'SELECT "id", "feature_id", "object_type" FROM "layer_1" LIMIT 100 OFFSET 0',
+      'SELECT "id", "feature_id", "object_type" FROM "layer_1" WHERE "parents" IS NULL AND "object_type" = \'Building\' LIMIT 20 OFFSET 0',
     );
     expect(runQuery).toHaveBeenCalledWith(
-      'SELECT COUNT(*) AS "n" FROM "layer_1"',
+      'SELECT COUNT(*) AS "n" FROM "layer_1" WHERE "parents" IS NULL AND "object_type" = \'Building\'',
     );
     expect(screen.getByTestId("rows").textContent).toBe("1");
     expect(screen.getByTestId("total").textContent).toBe("42");
@@ -144,7 +144,7 @@ describe("useLayerQuery", () => {
         ? {
             ok: true,
             columns: ["n"],
-            rows: [{ n: sql.includes("WHERE") ? 7 : 42 }],
+            rows: [{ n: sql.includes("COALESCE") ? 7 : 42 }],
           }
         : { ok: true, columns: [], rows: [] },
     );
@@ -171,7 +171,7 @@ describe("useLayerQuery", () => {
     );
     expect(screen.getByTestId("unfiltered").textContent).toBe("42");
     expect(runQuery).toHaveBeenCalledWith(
-      'SELECT "id", "feature_id", "object_type" FROM "layer_1" WHERE "object_type" = \'Building\' LIMIT 100 OFFSET 0',
+      'SELECT "id", "feature_id", "object_type" FROM "layer_1" WHERE (COALESCE("feature_id", "id") IN (SELECT COALESCE("feature_id", "id") FROM "layer_1" WHERE "object_type" = \'Building\')) AND "parents" IS NULL AND "object_type" = \'Building\' LIMIT 20 OFFSET 0',
     );
   });
 
@@ -231,7 +231,7 @@ describe("useLayerQuery", () => {
 
     await waitFor(() =>
       expect(runQuery).toHaveBeenCalledWith(
-        'SELECT "id", "feature_id", "object_type" FROM "layer_1" LIMIT 500 OFFSET 1000',
+        'SELECT "id", "feature_id", "object_type" FROM "layer_1" WHERE "parents" IS NULL AND "object_type" = \'Building\' LIMIT 500 OFFSET 1000',
       ),
     );
   });
@@ -253,14 +253,14 @@ describe("useLayerQuery", () => {
     });
     render(<Probe layerId="L" />);
 
-    // 50 rows at the default page size of 100 is ONE page, so the only valid
-    // index is 0 — written back to the store, which is what re-runs the query.
+    // 50 rows at the default page size of 20 has three pages, so page 9 is
+    // clamped to index 2 and re-runs against that real final page.
     await waitFor(() =>
-      expect(useQueryStore.getState().queries.L?.page).toBe(0),
+      expect(useQueryStore.getState().queries.L?.page).toBe(2),
     );
     await waitFor(() =>
       expect(runQuery).toHaveBeenCalledWith(
-        'SELECT "id", "feature_id", "object_type" FROM "layer_1" LIMIT 100 OFFSET 0',
+        'SELECT "id", "feature_id", "object_type" FROM "layer_1" WHERE "parents" IS NULL AND "object_type" = \'Building\' LIMIT 20 OFFSET 40',
       ),
     );
     // And the rows on screen are that page's, not the empty one that provoked
@@ -358,7 +358,7 @@ describe("useLayerQuery", () => {
 
     await waitFor(() =>
       expect(runQuery).toHaveBeenCalledWith(
-        'SELECT "id", "feature_id", "object_type" FROM "layer_1" LIMIT 100 OFFSET 0',
+        'SELECT "id", "feature_id", "object_type" FROM "layer_1" WHERE "parents" IS NULL AND "object_type" = \'Building\' LIMIT 20 OFFSET 0',
       ),
     );
   });

@@ -31,14 +31,16 @@ export function FilterSection({ item }: { readonly item: ActiveLayer }) {
   const applied = useQueryStore((s) => layerQuery(s, layerId).applied);
   const clearFilter = useQueryStore((s) => s.clearFilter);
 
-  if (item.kind === "geo") {
-    return <p className="active-layer-note">This layer cannot be filtered.</p>;
+  if (item.kind === "geo" && item.layer.kind !== "geojson") {
+    return (
+      <p className="active-layer-note">This layer has no browsable records.</p>
+    );
   }
 
   if (applied === null || applied.conditions.length === 0) {
     return (
       <p className="active-layer-note">
-        {item.layer.isStreaming
+        {item.kind === "city" && item.layer.isStreaming
           ? "No filter. Table only — map filtering for streaming layers is not available yet."
           : "No filter. Filters apply to the map and the table together."}
       </p>
@@ -88,7 +90,7 @@ export function FilterSection({ item }: { readonly item: ActiveLayer }) {
             // BOTH halves, always. The query alone would leave the map drawn
             // from a predicate nothing is showing any more — a stale id set
             // is worse than no filter, because it looks like one that works.
-            clearMapFilter(layerId);
+            if (item.kind === "city") clearMapFilter(layerId);
           }}
         >
           Clear filter

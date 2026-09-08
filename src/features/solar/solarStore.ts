@@ -12,6 +12,11 @@
  */
 
 import { create } from "zustand";
+import {
+  DEFAULT_SOLAR_TIME_ZONE,
+  normalizeSolarTimeZone,
+  type SolarTimeZone,
+} from "./solarTimeZone";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,6 +41,7 @@ export interface LatLon {
 
 export interface SolarState {
   readonly datetime: Date;
+  readonly timeZone: SolarTimeZone;
   readonly latLon: LatLon | null;
   readonly sunPosition: SunPosition | null;
   readonly timeAnimating: boolean;
@@ -44,6 +50,7 @@ export interface SolarState {
 
 export interface SolarActions {
   setDatetime: (dt: Date) => void;
+  setTimeZone: (zone: unknown) => void;
   setLatLon: (latLon: LatLon | null) => void;
   /** Record the sun position the atmosphere reported for the current datetime. */
   setSunPosition: (sun: SunPosition | null) => void;
@@ -114,12 +121,15 @@ export function defaultSolarDatetime(now: Date = new Date()): Date {
 
 export const useSolarStore = create<SolarStore>((set) => ({
   datetime: defaultSolarDatetime(),
+  timeZone: DEFAULT_SOLAR_TIME_ZONE,
   latLon: null,
   sunPosition: null,
   timeAnimating: false,
   timeSpeed: 60,
 
   setDatetime: (dt) => set({ datetime: dt }),
+  setTimeZone: (timeZone) =>
+    set({ timeZone: normalizeSolarTimeZone(timeZone) }),
 
   setLatLon: (latLon) => set({ latLon }),
 

@@ -5,7 +5,7 @@
  * `null` and an EMPTY set mean different things, and a slow answer must never
  * overwrite a fast one that came after it.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const runQuery = vi.fn();
 vi.mock("../../../../src/insights/duckdb", () => ({
@@ -24,8 +24,12 @@ vi.mock("../../../../src/insights/duckdb", () => ({
   queryParquetBuffer: vi.fn(async () => null),
 }));
 
-const { clearMapFilter, forgetMapFilter, syncFilterToMap } =
-  await import("../../../../src/features/query/mapFilterSync");
+const {
+  clearMapFilter,
+  forgetMapFilter,
+  installMapFilterSync,
+  syncFilterToMap,
+} = await import("../../../../src/features/query/mapFilterSync");
 const { useLayerTableStore } =
   await import("../../../../src/insights/layerTables");
 const { useQueryStore } =
@@ -87,6 +91,12 @@ beforeEach(() => {
   useLayerTableStore.setState({ tables: {}, tablePanelOpen: false });
 });
 
+let stopLifecycle: (() => void) | null = null;
+afterEach(() => {
+  stopLifecycle?.();
+  stopLifecycle = null;
+});
+
 describe("syncFilterToMap", () => {
   it("does NOTHING when sync is off and the layer is already unfiltered", async () => {
     const id = addLayer();
@@ -119,8 +129,6 @@ describe("syncFilterToMap", () => {
     useLayerTableStore.setState({
       tables: { [id]: { state: "ready", info: TABLE } },
     });
-    useQueryStore.getState().setSyncToMap(id, true);
-
     await syncFilterToMap(id);
     expect(visibleIds(id)).toBeNull();
     expect(runQuery).not.toHaveBeenCalled();
@@ -136,7 +144,6 @@ describe("syncFilterToMap", () => {
     useLayerTableStore.setState({
       tables: { [id]: { state: "ready", info: TABLE } },
     });
-    useQueryStore.getState().setSyncToMap(id, true);
     useQueryStore.getState().setFilter(id, FILTER);
     useQueryStore.getState().applyFilter(id);
 
@@ -153,7 +160,6 @@ describe("syncFilterToMap", () => {
     useLayerTableStore.setState({
       tables: { [id]: { state: "ready", info: TABLE } },
     });
-    useQueryStore.getState().setSyncToMap(id, true);
     useQueryStore.getState().setFilter(id, FILTER);
     useQueryStore.getState().applyFilter(id);
 
@@ -168,7 +174,6 @@ describe("syncFilterToMap", () => {
     useLayerTableStore.setState({
       tables: { [id]: { state: "ready", info: TABLE } },
     });
-    useQueryStore.getState().setSyncToMap(id, true);
     useQueryStore.getState().setFilter(id, FILTER);
     useQueryStore.getState().applyFilter(id);
 
@@ -181,7 +186,6 @@ describe("syncFilterToMap", () => {
     useLayerTableStore.setState({
       tables: { [id]: { state: "ready", info: TABLE } },
     });
-    useQueryStore.getState().setSyncToMap(id, true);
     useQueryStore.getState().setFilter(id, FILTER);
     useQueryStore.getState().applyFilter(id);
 
@@ -215,13 +219,126 @@ describe("syncFilterToMap", () => {
   it("clears when the layer has no table (a rebuild in flight)", async () => {
     const id = addLayer();
     useLayerStore.getState().setVisibleObjectIds(id, new Set(["OLD"]));
-    useQueryStore.getState().setSyncToMap(id, true);
     useQueryStore.getState().setFilter(id, FILTER);
     useQueryStore.getState().applyFilter(id);
 
     await syncFilterToMap(id);
     expect(visibleIds(id)).toBeNull();
     expect(runQuery).not.toHaveBeenCalled();
+  });
+});
+
+describe("automatic map-filter lifecycle", () => {
+  it("updates an applied filter without mounting TablePanel", async () => {
+    runQuery.mockResolvedValue({
+      ok: true,
+      columns: ["id"],
+      rows: [{ id: "B1" }],
+    });
+    const id = addLayer();
+    useLayerTableStore.setState({
+      tables: { [id]: { state: "ready", info: TABLE } },
+    });
+    stopLifecycle = installMapFilterSync(vi.fn());
+
+    useQueryStore.getState().setFilter(id, FILTER);
+    useQueryStore.getState().applyFilter(id);
+    await vi.waitFor(() => expect([...visibleIds(id)!]).toEqual(["B1"]));
+  });
+
+  it("does not resync for page, sort, columns, or selected-grid changes", async () => {
+    runQuery.mockResolvedValue({
+      ok: true,
+      columns: ["id"],
+      rows: [{ id: "B1" }],
+    });
+    const id = addLayer();
+    useLayerTableStore.setState({
+      tables: { [id]: { state: "ready", info: TABLE } },
+    });
+    stopLifecycle = installMapFilterSync(vi.fn());
+    useQueryStore.getState().setFilter(id, FILTER);
+    useQueryStore.getState().applyFilter(id);
+    await vi.waitFor(() => expect(runQuery).toHaveBeenCalledTimes(1));
+
+    useQueryStore.getState().setPage(id, 2);
+    useQueryStore.getState().toggleSort(id, "id");
+    useQueryStore.getState().setColumns(id, ["id"]);
+    useQueryStore.getState().setShowSelectedOnly(id, true);
+    await Promise.resolve();
+    expect(runQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalidates a slow old result when the filter is cleared", async () => {
+    const id = addLayer();
+    useLayerTableStore.setState({
+      tables: { [id]: { state: "ready", info: TABLE } },
+    });
+    stopLifecycle = installMapFilterSync(vi.fn());
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    runQuery.mockImplementationOnce(async () => {
+      await held;
+      return { ok: true, columns: ["id"], rows: [{ id: "OLD" }] };
+    });
+    useQueryStore.getState().setFilter(id, FILTER);
+    useQueryStore.getState().applyFilter(id);
+    useQueryStore.getState().clearFilter(id);
+    release();
+    await vi.waitFor(() => expect(visibleIds(id)).toBeNull());
+  });
+
+  it("keeps streaming filters table-only", async () => {
+    const id = useLayerStore.getState().addLayer({
+      name: "stream",
+      model: {
+        sourceEncoding: "cityjson",
+        metadata: {},
+        bbox: null,
+        objects: {},
+        vertexCount: 0,
+      } as unknown as CityModel,
+      modelRef: { type: "url", url: "https://x/a.fcb" },
+      visible: true,
+      rules: [],
+      isStreaming: true,
+    });
+    useLayerTableStore.setState({
+      tables: { [id]: { state: "ready", info: TABLE } },
+    });
+    stopLifecycle = installMapFilterSync(vi.fn());
+    useQueryStore.getState().setFilter(id, FILTER);
+    useQueryStore.getState().applyFilter(id);
+    await Promise.resolve();
+    expect(runQuery).not.toHaveBeenCalled();
+    expect(visibleIds(id)).toBeNull();
+  });
+
+  it("clears excluded selections and notifies through the feature callback", async () => {
+    runQuery.mockResolvedValue({
+      ok: true,
+      columns: ["id"],
+      rows: [{ id: "B1" }],
+    });
+    const notify = vi.fn();
+    const id = addLayer();
+    useLayerTableStore.setState({
+      tables: { [id]: { state: "ready", info: TABLE } },
+    });
+    const { useSelectionStore } =
+      await import("../../../../src/features/selection/selectionStore");
+    useSelectionStore
+      .getState()
+      .select({ kind: "object", layerId: id, objectId: "B2" });
+    stopLifecycle = installMapFilterSync(notify);
+    useQueryStore.getState().setFilter(id, FILTER);
+    useQueryStore.getState().applyFilter(id);
+    await vi.waitFor(() =>
+      expect(useSelectionStore.getState().selections).toEqual([]),
+    );
+    expect(notify).toHaveBeenCalledWith(1);
   });
 });
 
@@ -237,7 +354,6 @@ function heldSync(rows: ReadonlyArray<Record<string, unknown>>): {
   useLayerTableStore.setState({
     tables: { [id]: { state: "ready", info: TABLE } },
   });
-  useQueryStore.getState().setSyncToMap(id, true);
   useQueryStore.getState().setFilter(id, FILTER);
   useQueryStore.getState().applyFilter(id);
 
@@ -302,7 +418,6 @@ describe("non-string ids", () => {
     useLayerTableStore.setState({
       tables: { [id]: { state: "ready", info: TABLE } },
     });
-    useQueryStore.getState().setSyncToMap(id, true);
     useQueryStore.getState().setFilter(id, FILTER);
     useQueryStore.getState().applyFilter(id);
 
@@ -324,7 +439,6 @@ describe("non-string ids", () => {
     useLayerTableStore.setState({
       tables: { [id]: { state: "ready", info: TABLE } },
     });
-    useQueryStore.getState().setSyncToMap(id, true);
     useQueryStore.getState().setFilter(id, FILTER);
     useQueryStore.getState().applyFilter(id);
 

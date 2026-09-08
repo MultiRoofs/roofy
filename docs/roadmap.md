@@ -527,7 +527,7 @@ omitting the one it just fetched — exactly the drift the tooltip exists to mak
 visible. The fix is a `subscribeDuckDBStatus(listener)` in `duckdb.ts` which
 `publishReady` notifies, with `App` subscribing rather than snapshotting.
 
-## Milestone 12: UI Redesign — One Active Layer, One Selection (In Progress)
+## Milestone 12: UI Redesign — One Active Layer, One Selection (Implemented; local verification)
 
 Approved design: `docs/superpowers/specs/2026-09-06-ui-redesign-design.md`
 (from the interactive prototype required by `docs/ui-redesign-handoff.md`).
@@ -536,7 +536,7 @@ no compatibility shims; saved workspaces migrate to schema v4.
 
 - 12.1 Shared context (COMPLETE, bc2d1d9..f06e325): selection belongs to
   exactly one layer; activating another layer, hiding or removing the owner
-  clears it (a filter that excludes it clears it in 12.4); picking a feature
+  clears it; an applied static-city/vector filter also clears excluded selections; picking a feature
   activates its layer; Escape clears. Attribute overlay, `Sync selection`,
   the inspector's rule-target override, the status-bar table entrance and
   the fit-all flight on every added layer are removed. Persistence v4 with an
@@ -562,35 +562,14 @@ no compatibility shims; saved workspaces migrate to schema v4.
   summary, rule match by identity, raw attributes with search, parts,
   geometry, multi-selection aggregates, geo feature) replacing the
   inspector and its Analysis tab; `Layer.rulesEnabled` deleted (colorBy is
-  the one answer). EXCEPTIONS: rule-list drag handle (12.6), legend row
-  counts (12.4), GEOMETRY's Raw object (12.4), raster colormap (deferred),
+  the one answer). Remaining engine limitations: raster colormap (deferred),
   stroke colour for vectors (the engine's polygon outline probed and does
   not render — deferred), and a streaming SURFACE pick shows identity and
   attributes without its roof metrics (the ring fetch is not wired; a
   streaming BUILDING summary is complete).
-- 12.4 Linked data and filtering: Records / Summary drawer titled by the
-  active layer, building-oriented rows with part expansion and Raw objects,
-  column chooser, counts total · matching · selected, Show selected records
-  as a view, export scopes with the same numbers, `Table only` for streaming
-  layers, filter indicators with Clear when the drawer is closed, Expand.
-- 12.5 Scene controls: Select Feature / Surface on the map, camera cluster
-  with Top-down / Angled / Free 3D and explicit Zoom to layer / selection,
-  Sun & shade and Scene settings as nonmodal sheets, interface appearance
-  under Preferences, Cyber under Presentation looks, weather as a visual
-  effect. PENDING ADD-ON (deferred 2026-09-06 so it lands in the redesigned
-  sheet, not the old panel): a Shadow quality control beside the sun-shadows
-  switch. The knob already exists — `renderDebugStore.shadowQuality`
-  (`"low" | "medium" | "high"`, default medium) selects a row of
-  `src/scene/shadowQuality.ts` (shadow map 1024/2048/4096 per cascade, bias
-  scaled to the texel, 500 m margin) and `NavaraViewport` writes it live.
-  The control adds a select (disabled while shadows are off), a one-line
-  cost hint per level (4096 is 64 MB of GPU memory per cascade, four
-  cascades), persistence of the choice (the store is not persisted today)
-  and a test that the select drives the store. Until then the dev-console
-  handle `window.__roofyRenderDebug.getState().setShadowQuality("high")`
-  is the way in.
-- 12.6 Verification: browser smokes for the nine acceptance scenarios at
-  1440×900 and 1280×720, Codex review of the milestone, docs.
+- 12.4 Linked data and filtering (IMPLEMENTED, 2026-09-08): Records / Summary drawer follows the active city or vector layer; building rows include derived roof metrics and part expansion, Raw objects, columns, counts, selected-only and export scopes. Static city and GeoJSON filters update map membership automatically, with clearable indicators outside the drawer. Streaming filters remain table-only over currently loaded records. Summary, details and legends aggregate real root/part geometry and distinguish unavailable values.
+- 12.5 Scene controls (IMPLEMENTED, 2026-09-08): Select Feature / Surface, compact camera controls and explicit layer/selection fit; exclusive nonmodal Sun & shade and Scene settings sheets; timezone-aware civil-time editing, seasonal presets and playback; persisted Shadow quality; interface appearance under Preferences. Weather and presentation looks retain their explanatory labels. Sheets scroll within the available map height, preserving camera and attribution access.
+- 12.6 Verification (LOCAL GATE, 2026-09-08): full suite 2,531 passed / 17 skipped before final wording and CSS polish; subsequent focused regression checks recorded in the reconciliation ledger. Browser checks cover city/vector records, filtering, selection, sheet interactions, resizing, expanded attribution and light/dark desktop/laptop layouts. See `scripts/smoke/ui-redesign.md` for reproducible scenarios and the reconciliation ledger for exact evidence and limitations. External Codex CLI review was rejected by automatic approval review because it would send source to an external service; local review completed. No commit or push performed.
 
 ## Cross-Cutting Workstreams
 

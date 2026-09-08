@@ -254,3 +254,77 @@ describe("geoSummary", () => {
     ]);
   });
 });
+
+describe("subjectOf nested parts", () => {
+  it("collects nested parts once, including through a cycle", () => {
+    const root = {
+      id: "root",
+      objectType: "Building",
+      attributes: {},
+      surfaces: [],
+      bbox: null,
+      children: ["part"],
+      parents: [],
+      lod: null,
+    } as never;
+    const part = {
+      id: "part",
+      objectType: "BuildingPart",
+      attributes: {},
+      surfaces: [],
+      bbox: null,
+      children: ["root", "leaf"],
+      parents: ["root"],
+      lod: null,
+    } as never;
+    const leaf = {
+      id: "leaf",
+      objectType: "BuildingPart",
+      attributes: {},
+      surfaces: [],
+      bbox: null,
+      children: [],
+      parents: ["part"],
+      lod: null,
+    } as never;
+    const objects = { root, part, leaf } as Record<string, typeof root>;
+    const subject = subjectOf(
+      [{ kind: "object", layerId: "L", objectId: "root" }],
+      null,
+      (_layer, id) => objects[id] ?? null,
+    );
+    expect(subject?.kind).toBe("building");
+    if (subject?.kind === "building")
+      expect(subject.parts.map((item) => item.id)).toEqual(["part", "leaf"]);
+  });
+});
+
+describe("streaming surface identity", () => {
+  it("keeps a ring-less surface selection and its identity trail", () => {
+    const owner = {
+      id: "part",
+      objectType: "BuildingPart",
+      attributes: {},
+      surfaces: [],
+      bbox: null,
+      children: [],
+      parents: ["root"],
+      lod: null,
+    } as never;
+    const subject = subjectOf(
+      [{ kind: "surface", layerId: "L", objectId: "part", surfaceIndex: 7 }],
+      null,
+      () => owner,
+    );
+    expect(subject).toMatchObject({
+      kind: "surface",
+      objectId: "part",
+      surfaceIndex: 7,
+      surface: null,
+    });
+    if (subject)
+      expect(
+        identityTrail(subject, "Layer").map((crumb) => crumb.label),
+      ).toContain("Roof surface 7");
+  });
+});

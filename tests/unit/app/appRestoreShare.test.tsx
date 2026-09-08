@@ -654,8 +654,8 @@ describe("App share-hash restore", () => {
       ).toBeInTheDocument(),
     );
     expect(useLayerStore.getState().layers).toHaveLength(0);
-    // No viewport to point, so no camera was pushed and no 15 s wait for one.
-    expect(screen.queryByTestId("navara-viewport")).toBeNull();
+    // The retained empty viewer keeps its original engine and shows the failure inline.
+    expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
     expect(setCameraState).not.toHaveBeenCalled();
   });
 });

@@ -249,3 +249,32 @@ export function resolveGeoLayerBounds(
       return Promise.resolve(null);
   }
 }
+
+/** Bounds of selected prepared GeoJSON features, or null without coordinates. */
+export function selectedGeoJsonBounds(
+  data: unknown,
+  selectedIds: ReadonlySet<string>,
+): GeodeticBounds | null {
+  const source = data as { type?: unknown; features?: unknown[] } | null;
+  const features =
+    source?.type === "FeatureCollection" && Array.isArray(source.features)
+      ? source.features
+      : source?.type === "Feature"
+        ? [source]
+        : [];
+  const selected = features.filter((feature) => {
+    const properties = (feature as { properties?: unknown }).properties;
+    // Late import avoids pushing selection identity into the generic walker.
+    return (
+      typeof properties === "object" &&
+      properties !== null &&
+      typeof (properties as Record<string, unknown>)
+        .__roofy_stable_feature_id === "object" &&
+      selectedIds.has(
+        (properties as Record<string, { stableId?: unknown }>)
+          .__roofy_stable_feature_id!.stableId as string,
+      )
+    );
+  });
+  return geoJsonBounds({ type: "FeatureCollection", features: selected });
+}

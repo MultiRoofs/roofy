@@ -15,22 +15,9 @@ import {
   screen,
 } from "@testing-library/react";
 import { SolarMenu } from "../../../../src/ui/toolbar/SolarMenu";
-import { SceneControlsTemp } from "../../../../src/ui/header/SceneControlsTemp";
 import { useSolarStore } from "../../../../src/features/solar/solarStore";
 
 const BASE = new Date(2026, 5, 21, 13, 45, 0, 0);
-
-/** What the trigger's compact clock must read for {@link BASE}. Derived rather
- *  than hardcoded because `formatDatetimePill` formats in the RUNNER's locale
- *  (`toLocaleString(undefined, …)`), so a literal "Jun 21, 01:45 PM" would pin
- *  en-US rather than the contract, which is "month, day, hour and minute of
- *  the store's datetime". */
-const EXPECTED_TRIGGER_LABEL = BASE.toLocaleString(undefined, {
-  month: "short",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
 
 afterEach(() => {
   cleanup();
@@ -168,63 +155,5 @@ describe("SolarMenu", () => {
     fireEvent.click(screen.getByTitle("Winter Noon"));
     const dt = useSolarStore.getState().datetime;
     expect([dt.getMonth(), dt.getDate(), dt.getHours()]).toEqual([11, 21, 12]);
-  });
-});
-
-describe("SceneControlsTemp solar cluster", () => {
-  const baseProps = {
-    pickMode: "object" as const,
-    toolMode: "select" as const,
-    onSetPickMode: () => undefined,
-    onSetToolMode: () => undefined,
-    onFitAll: () => undefined,
-  };
-
-  it("offers ONE sun button, not a separate presets one beside it", () => {
-    render(<SceneControlsTemp {...baseProps} />);
-    expect(screen.getByLabelText("Sun position")).not.toBeNull();
-    expect(screen.queryByLabelText("Solar presets")).toBeNull();
-    // The clock is in the popover; the header must not carry a second copy.
-    expect(screen.queryByLabelText("Scene date")).toBeNull();
-    expect(screen.queryByLabelText("Play time")).toBeNull();
-  });
-
-  it("puts the clock ON the sun button, not in a pill beside it", () => {
-    useSolarStore.setState({
-      datetime: BASE,
-      sunPosition: { altitudeDeg: 42, azimuthDeg: 180, direction: [0, 0, 1] },
-    });
-    const { container } = render(<SceneControlsTemp {...baseProps} />);
-    expect(container.querySelector(".sun-pill")).toBeNull();
-    const trigger = screen.getByLabelText("Sun position");
-    expect(trigger.querySelector(".sun-trigger-label")?.textContent).toBe(
-      EXPECTED_TRIGGER_LABEL,
-    );
-    // Sun-up state travels with the label onto the same button.
-    expect(trigger.querySelector(".solar-scrubber-dot.is-up")).not.toBeNull();
-    expect(trigger.getAttribute("data-tooltip")).toBe(
-      "Sun 42.0° above horizon",
-    );
-  });
-
-  it("says below-horizon in the trigger tooltip when the sun has set", () => {
-    useSolarStore.setState({
-      datetime: BASE,
-      sunPosition: { altitudeDeg: -8.4, azimuthDeg: 300, direction: [0, 0, 1] },
-    });
-    const { container } = render(<SceneControlsTemp {...baseProps} />);
-    const trigger = screen.getByLabelText("Sun position");
-    expect(trigger.getAttribute("data-tooltip")).toBe("Sun 8.4° below horizon");
-    expect(container.querySelector(".solar-scrubber-dot.is-up")).toBeNull();
-  });
-
-  it("still shows the clock before the engine has reported a sun position", () => {
-    useSolarStore.setState({ datetime: BASE, sunPosition: null });
-    render(<SceneControlsTemp {...baseProps} />);
-    const trigger = screen.getByLabelText("Sun position");
-    expect(trigger.querySelector(".sun-trigger-label")?.textContent).toBe(
-      EXPECTED_TRIGGER_LABEL,
-    );
-    expect(trigger.getAttribute("data-tooltip")).toBe("Sun position");
   });
 });

@@ -362,7 +362,13 @@ describe("scene theme round trip", () => {
   });
 
   it("reads a snapshot written before themes existed as photoreal", () => {
-    const snapshot = captureSnapshot(base);
+    const snapshot = captureSnapshot({
+      label: "Legacy timezone",
+      layers: [],
+      camera: CAM,
+      datetime: new Date("2026-07-15T12:00:00Z"),
+      pickMode: "object",
+    });
     expect(snapshot.viewState.sceneTheme).toBeUndefined();
     expect(restoreSnapshot(snapshot).viewState.sceneTheme).toBe("photoreal");
   });
@@ -380,5 +386,36 @@ describe("scene theme round trip", () => {
     expect(restoreSnapshot(tampered as never).viewState.sceneTheme).toBe(
       "photoreal",
     );
+  });
+});
+
+describe("snapshot timezone", () => {
+  it("captures and restores a timezone without changing the instant", () => {
+    const snapshot = captureSnapshot({
+      label: "Timezone",
+      layers: [],
+      camera: CAM,
+      datetime: new Date("2026-07-15T12:00:00Z"),
+      pickMode: "object",
+      timeZone: "UTC",
+    });
+    useSolarStore.setState({ timeZone: "Europe/Amsterdam" });
+    restoreSnapshot(snapshot);
+    expect(useSolarStore.getState().timeZone).toBe("UTC");
+  });
+
+  it("defaults legacy v4 snapshots and normalizes invalid zones", () => {
+    const snapshot = captureSnapshot({
+      label: "Legacy timezone",
+      layers: [],
+      camera: CAM,
+      datetime: new Date("2026-07-15T12:00:00Z"),
+      pickMode: "object",
+    });
+    restoreSnapshot({
+      ...snapshot,
+      viewState: { ...snapshot.viewState, timeZone: "invalid" as never },
+    });
+    expect(useSolarStore.getState().timeZone).toBe("Europe/Amsterdam");
   });
 });

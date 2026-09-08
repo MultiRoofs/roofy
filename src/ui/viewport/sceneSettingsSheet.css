@@ -1,0 +1,80 @@
+.scene-settings-sheet {
+  width: 340px;
+  max-width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--bg-panel) 86%, transparent);
+  color: var(--fg);
+  font: 11px var(--font-ui);
+  backdrop-filter: blur(14px);
+}
+.scene-settings-sheet header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+.scene-settings-sheet h2 {
+  margin: 0;
+  font: 600 14px var(--font-display);
+}
+.scene-settings-sheet h3,
+.scene-settings-sheet summary {
+  margin: 0;
+  font: 600 10px var(--font-mono);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+.scene-settings-sheet__body {
+  overflow: auto;
+  padding: 9px 0;
+}
+.scene-settings-sheet section,
+.scene-settings-sheet details {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 11px;
+}
+.scene-settings-sheet label {
+  display: grid;
+  gap: 4px;
+}
+.scene-settings-sheet__toggle {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+}
+.scene-settings-sheet input,
+.scene-settings-sheet select,
+.scene-settings-sheet button {
+  font: inherit;
+  accent-color: var(--brand-primary);
+}
+.scene-settings-sheet select,
+.scene-settings-sheet button {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--bg-raised);
+  color: var(--fg);
+  padding: 5px;
+}
+.scene-settings-sheet__hint {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 10px;
+}
+.scene-settings-sheet output {
+  float: right;
+  font-family: var(--font-mono);
+}
+.scene-settings-sheet details button {
+  margin: 2px;
+}
+.scene-settings-sheet footer {
+  display: none;
+}

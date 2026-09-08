@@ -14,6 +14,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { forwardRef, useImperativeHandle } from "react";
@@ -73,6 +74,8 @@ const { useWorkspaceStore } =
   await import("../../../src/features/workspace/workspaceStore");
 const { useShellStore, defaultShellState } =
   await import("../../../src/ui/shell/shellStore");
+const { useSceneSheetStore } =
+  await import("../../../src/features/sceneSheet/sceneSheetStore");
 
 const emptyStore: ProjectStateStore = {
   list: async (): Promise<SnapshotSummary[]> => [],
@@ -146,6 +149,7 @@ beforeEach(() => {
   useWorkspaceStore.setState({ activeLayerId: null });
   useSelectionStore.setState({ selections: [], geoSelection: null });
   useGeoLayerStore.setState({ layers: [] });
+  useSceneSheetStore.setState({ sheet: null });
   // jsdom is 1024×768, below both of `defaultShellState`'s breakpoints.
   useShellStore.setState(defaultShellState(1440, 900));
 });
@@ -237,7 +241,7 @@ describe("App viewer shell", () => {
     const shell = renderViewer();
     select();
 
-    fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
 
     expect(shell().querySelector(".details-panel")).toBeNull();
     expect(shell().querySelector(".shell-right")).toBeNull();
@@ -295,5 +299,47 @@ describe("App viewer shell", () => {
       shell().querySelector(".map-column > .drawer-area .table-panel"),
     ).not.toBeNull();
     expect(shell().style.getPropertyValue("--drawer-h")).toBe("280px");
+  });
+  it("retains the viewport for a new empty workspace and routes its add actions", async () => {
+    const shell = renderViewer();
+    const viewport = screen.getByTestId("navara-viewport");
+    select();
+    act(() => {
+      useShellStore.getState().openDrawer();
+      useSceneSheetStore.getState().setSheet("sun");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Untitled workspace" }));
+    fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("Add a layer to start")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("navara-viewport")).toBe(viewport);
+    expect(screen.queryByRole("button", { name: "Browse catalog" })).toBeNull();
+    expect(shell().querySelector(".drawer-area")).toBeNull();
+    expect(shell().querySelector(".shell-right")).toBeNull();
+    expect(useSelectionStore.getState().selections).toHaveLength(0);
+    expect(useSceneSheetStore.getState().sheet).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
+    expect(screen.getByRole("tab", { name: "File" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "URL" }));
+    expect(screen.getByRole("tab", { name: "URL" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Catalog" }));
+    expect(screen.getByRole("tab", { name: "Catalog" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 });

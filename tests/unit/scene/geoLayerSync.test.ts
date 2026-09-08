@@ -27,6 +27,7 @@ import {
   DEFAULT_GEO_LAYER_STYLE,
   hexColorToNumber,
 } from "../../../src/features/geoLayers/geoLayerStyle";
+import { GEO_STABLE_FEATURE_KEY } from "../../../src/features/geoLayers/geoJsonRecords";
 import {
   CATEGORY_OTHER_HEX,
   CATEGORY_PALETTE_HEX,
@@ -481,6 +482,64 @@ describe("syncGeoHighlight", () => {
       expect(evaluator.run(8)).toEqual({ color: { hex: OWN_COLOR_HEX } });
     }
     expect(handle.forceUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("matches a stable feature after engine batches are reminted", () => {
+    const { live, handle, points } = highlightable();
+    syncGeoHighlight(
+      { geoLayerId: "g1", stableFeatureId: "id:string:roof-a" },
+      live,
+      makeColor,
+    );
+
+    expect(
+      points.run(7, {
+        [GEO_STABLE_FEATURE_KEY]: {
+          stableId: "id:string:roof-a",
+          hasOriginal: false,
+        },
+      }),
+    ).toEqual({
+      color: { hex: GEO_HIGHLIGHT_COLOR_HEX },
+    });
+    // An update recreates a feature set and batch IDs; identity stays with
+    // the prepared feature property rather than the transient batch.
+    const reminted = fakeEvaluator();
+    fireFeatureEvent(handle, "featureCreated", reminted, 3n);
+    expect(
+      reminted.run(91, {
+        [GEO_STABLE_FEATURE_KEY]: {
+          stableId: "id:string:roof-a",
+          hasOriginal: false,
+        },
+      }),
+    ).toEqual({
+      color: { hex: GEO_HIGHLIGHT_COLOR_HEX },
+    });
+  });
+
+  it("does not fall back to a matching batch when a stable identity is present", () => {
+    const { live, points } = highlightable();
+    syncGeoHighlight(
+      { geoLayerId: "g1", batchId: 7, stableFeatureId: "index:0" },
+      live,
+      makeColor,
+    );
+
+    expect(
+      points.run(7, {
+        [GEO_STABLE_FEATURE_KEY]: { stableId: "index:1", hasOriginal: false },
+      }),
+    ).toEqual({
+      color: { hex: OWN_COLOR_HEX },
+    });
+    expect(
+      points.run(22, {
+        [GEO_STABLE_FEATURE_KEY]: { stableId: "index:0", hasOriginal: false },
+      }),
+    ).toEqual({
+      color: { hex: GEO_HIGHLIGHT_COLOR_HEX },
+    });
   });
 
   it("costs nothing when the same selection is re-applied", () => {

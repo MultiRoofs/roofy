@@ -1,6 +1,5 @@
 /**
- * NavaraViewport camera-control wiring: the compass and the map-control
- * cluster.
+ * NavaraViewport camera wiring and its imperative handle.
  *
  * Companion to `navaraViewport.test.tsx` (the static half),
  * `navaraViewportSolar.test.tsx` and `navaraViewportStreaming.test.tsx`, and it
@@ -13,16 +12,15 @@
  *
  *  - the compass follows the camera through the engine's `movestart`/`move`/
  *    `moveend` events, which live on `view.camera`, NOT on the view;
- *  - it also follows the moves that emit NO events — `setCamera`, i.e. an
- *    alignment, a restore and every button in the cluster — because those
- *    publish their own pose;
- *  - EVERY button's move goes through the streaming settle suppression, so a
- *    zoom or a tilt cannot masquerade as a pan and re-trigger FCB fetches;
- *  - the dial is idle until the engine has a camera to report, and idle again
- *    once it is gone.
+ *  - it also follows the moves that emit NO events — `setCamera`, such as an
+ *    alignment — because those publish their own pose;
+ *  - imperative zoom and north-reset moves go through streaming settle
+ *    suppression, so they cannot masquerade as pans and re-trigger FCB fetches;
+ *  - no pose is exposed until the engine has a camera to report, and it is
+ *    cleared once the engine is gone.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 
 const init = vi.fn(async () => {});
 const dispose = vi.fn();
@@ -200,11 +198,7 @@ vi.mock("@cityjson/navara-flatcitybuf/plugin", () => ({
 const { NavaraViewport } = await import("../../../src/scene/NavaraViewport");
 import type { CitySceneHandle } from "../../../src/scene/NavaraViewport";
 import { getCameraPose } from "../../../src/scene/cameraPose";
-import {
-  formatBearing,
-  TILT_STEP_DEG,
-  ZOOM_IN_FACTOR,
-} from "../../../src/scene/cameraControls";
+import { ZOOM_IN_FACTOR } from "../../../src/scene/cameraControls";
 import type { GeographicCameraState } from "../../../src/scene/geographicCamera";
 import {
   useLayerStore,
@@ -307,10 +301,6 @@ function lastCamera(): GeographicCameraState {
   return call![0] as GeographicCameraState;
 }
 
-function compass(): HTMLElement {
-  return screen.getByRole("button", { name: /reset heading/i });
-}
-
 /** Mount, let the engine come up, and give it the first rendered frame that
  *  makes the camera readable. */
 async function mount(withLayer = false) {
@@ -365,11 +355,9 @@ describe("NavaraViewport camera controls", () => {
   });
 
   it("stays idle until the engine has rendered a frame it can read", async () => {
-    const { container } = await mount();
-    // `positionGeographic` still throws — no camera to report, so the cluster
-    // is dimmed and every button refuses.
+    await mount();
+    // `positionGeographic` still throws — no camera pose is available yet.
     expect(getCameraPose()).toBeNull();
-    expect(container.querySelector(".camera-controls.is-idle")).not.toBeNull();
 
     cameraThrows = false;
     fireView("postRender");
@@ -379,21 +367,15 @@ describe("NavaraViewport camera controls", () => {
       lat: 52,
       zoom: 15.5,
     });
-    expect(compass().textContent).toContain("045°");
-    expect(container.querySelector(".camera-controls.is-idle")).toBeNull();
   });
 
   it("follows a gesture: the dial tracks the camera's own move events", async () => {
     await mount();
     cameraThrows = false;
     fireView("postRender");
-    expect(compass().textContent).toContain("045°");
-
     pose = { heading: 200, pitch: -30, roll: 0 };
     fireCamera("moveend");
-    expect(compass().textContent).toContain("200°");
-    expect(compass().textContent).toContain("S");
-    expect(screen.getByTitle("Tilt below the horizon").textContent).toBe("30°");
+    expect(getCameraPose()).toMatchObject({ heading: 200, pitch: -30 });
   });
 
   it("follows an alignment too, though `setCamera` emits no events", async () => {
@@ -409,17 +391,17 @@ describe("NavaraViewport camera controls", () => {
 
     act(() => ref.current!.alignView("left"));
     const aligned = lastCamera();
-    expect(compass().textContent).toContain(formatBearing(aligned.heading));
+    expect(getCameraPose()).toMatchObject({ heading: aligned.heading });
     // A view from the left is a view towards the east.
     expect(aligned.heading).toBeCloseTo(90, 6);
   });
 
   it("zooms towards what the camera is looking at, inside the settle window", async () => {
-    await mount();
+    const { ref } = await mount();
     cameraThrows = false;
     fireView("postRender");
 
-    act(() => screen.getByRole("button", { name: "Zoom in" }).click());
+    act(() => ref.current!.zoomIn());
 
     expect(suppressSettleThenCommit).toHaveBeenCalled();
     const next = lastCamera();
@@ -430,52 +412,25 @@ describe("NavaraViewport camera controls", () => {
   });
 
   it("zooms out by exactly the inverse step", async () => {
-    await mount();
+    const { ref } = await mount();
     cameraThrows = false;
     fireView("postRender");
 
-    act(() => screen.getByRole("button", { name: "Zoom out" }).click());
+    act(() => ref.current!.zoomOut());
     expect(suppressSettleThenCommit).toHaveBeenCalled();
     expect(lastCamera().height).toBeCloseTo(500 / ZOOM_IN_FACTOR, 6);
   });
 
-  it("tilts by one step per click, in the settle window, and says so", async () => {
-    await mount();
+  it("faces north through the imperative API inside the settle window", async () => {
+    const { ref } = await mount();
     cameraThrows = false;
     fireView("postRender");
 
-    act(() =>
-      screen.getByRole("button", { name: /towards the horizon/i }).click(),
-    );
-    expect(suppressSettleThenCommit).toHaveBeenCalled();
-    expect(lastCamera().pitch).toBeCloseTo(-60 + TILT_STEP_DEG, 6);
-    // The readout follows the commanded pose without waiting for a frame.
-    expect(screen.getByTitle("Tilt below the horizon").textContent).toBe("50°");
-
-    // The engine applies the move it was handed; the next click starts from
-    // there, so the pair is a round trip rather than two clicks off one state.
-    const tilted = lastCamera();
-    pose = { heading: tilted.heading, pitch: tilted.pitch, roll: tilted.roll };
-    position = { lng: tilted.lng, lat: tilted.lat, height: tilted.height };
-    act(() =>
-      screen.getByRole("button", { name: /towards a plan view/i }).click(),
-    );
-    expect(lastCamera().pitch).toBeCloseTo(-60, 6);
-    expect(lastCamera().height).toBeCloseTo(500, 4);
-  });
-
-  it("faces north when the compass is clicked, and reads 000 immediately", async () => {
-    await mount();
-    cameraThrows = false;
-    fireView("postRender");
-    expect(compass().textContent).toContain("045°");
-
-    act(() => compass().click());
+    act(() => ref.current!.resetNorth());
 
     expect(suppressSettleThenCommit).toHaveBeenCalled();
     expect(lastCamera().heading).toBe(0);
-    expect(compass().textContent).toContain("000°");
-    expect(compass().textContent).toContain("N");
+    expect(getCameraPose()).toMatchObject({ heading: 0 });
   });
 
   it("hands the camera back and unsubscribes when the engine goes away", async () => {
@@ -613,34 +568,6 @@ describe("NavaraViewport view modes and flyTo", () => {
       enableSpin: true,
       enableTilt: true,
     });
-  });
-
-  it("clamps the tilt buttons to the mode's angle", async () => {
-    await mount();
-    cameraThrows = false;
-    fireView("postRender");
-    act(() => useViewModeStore.getState().setViewMode("2.5d"));
-    setCamera.mockClear();
-
-    // 2.5D pins the pitch: a tilt click lands back on exactly -60 instead of
-    // stepping away from the mode.
-    act(() =>
-      screen.getByRole("button", { name: /towards the horizon/i }).click(),
-    );
-    expect(lastCamera().pitch).toBe(TILTED_PITCH_DEG);
-  });
-
-  it("mounts the place search IN the scene, wired to the same flyTo", async () => {
-    // It lived in the toolbar until 2026-08-06. The relocation is what this
-    // pins: the search is a canvas overlay like the compass and the scale bar,
-    // and it reaches the engine through the viewport's own `flyTo` rather than
-    // through a prop the app threads down from the chrome.
-    const { container } = await mount();
-    const search = container.querySelector(".address-search");
-    expect(search).not.toBeNull();
-    expect(
-      search!.querySelector("button[aria-label='Search for a place']"),
-    ).not.toBeNull();
   });
 
   it("flies to a searched place, animated, and lets the mode pin the angle", async () => {

@@ -280,9 +280,8 @@ describe("App landing page — catalog entry point", () => {
       fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     });
 
-    expect(
-      screen.getByRole("button", { name: "Browse catalog" }),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Add a layer to start")).toBeInTheDocument();
+    expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
     expect(screen.queryByTestId("stac-dialog-stub")).toBeNull();
   });
 
@@ -311,9 +310,8 @@ describe("App landing page — catalog entry point", () => {
       fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
     });
 
-    expect(
-      screen.getByRole("button", { name: "Browse catalog" }),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Add a layer to start")).toBeInTheDocument();
+    expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
     expect(screen.queryByTestId("stac-dialog-stub")).toBeNull();
   });
 });

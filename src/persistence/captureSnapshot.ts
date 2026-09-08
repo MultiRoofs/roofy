@@ -72,6 +72,7 @@ export interface CaptureInput {
   /** The viewport's own `getCameraState()` result — geographic since v3. */
   readonly camera: GeographicCamera;
   readonly datetime: Date;
+  readonly timeZone?: import("../features/solar/solarTimeZone").SolarTimeZone;
   readonly pickMode: PickMode;
   /** The camera policy in force. Written only when it is not the default —
    *  see {@link ViewState.viewMode}. */
@@ -94,6 +95,7 @@ export function captureSnapshot(input: CaptureInput): ProjectSnapshot {
   const viewState: ViewState = {
     camera: input.camera,
     datetime: input.datetime.toISOString(),
+    ...(input.timeZone !== undefined ? { timeZone: input.timeZone } : {}),
     // Absent for the default mode: an optional field means "the default", so
     // a 3D workspace writes nothing rather than writing the default down.
     ...(input.viewMode !== undefined && input.viewMode !== "3d"

@@ -23,7 +23,7 @@
  * link, because "CC BY 4.0" and "ODbL" are obligations to point AT a licence,
  * not just to name one.
  */
-import type { ReactElement, ReactNode } from "react";
+import { useEffect, useMemo, type ReactElement, type ReactNode } from "react";
 import { GEOID_ATTRIBUTION } from "@cityjson/navara-core";
 
 /** Phrases that must reach the licence they name. Longest-first is not needed:
@@ -86,29 +86,59 @@ export interface AttributionOverlayProps {
    * credited.
    */
   readonly terrainAttribution?: readonly string[];
+  /** Receives the exact rendered credit lines for the expanded data drawer. */
+  readonly onLinesChange?: (lines: readonly string[]) => void;
+}
+
+export function attributionLines({
+  googleTiles,
+  basemapAttribution = [],
+  terrainAttribution = [],
+}: Pick<
+  AttributionOverlayProps,
+  "googleTiles" | "basemapAttribution" | "terrainAttribution"
+>): readonly string[] {
+  return [
+    ...new Set([
+      ...(googleTiles ? ["Imagery © Google"] : []),
+      ...basemapAttribution,
+      ...terrainAttribution,
+      ...GEOID_ATTRIBUTION,
+    ]),
+  ];
+}
+
+export function AttributionLines({
+  lines,
+  className = "attribution-overlay",
+}: {
+  readonly lines: readonly string[];
+  readonly className?: string;
+}): ReactElement {
+  return (
+    <div className={className}>
+      {lines.map((line) => (
+        <span key={line}>{linkify(line)}</span>
+      ))}
+    </div>
+  );
 }
 
 export function AttributionOverlay({
   googleTiles,
   basemapAttribution = [],
   terrainAttribution = [],
+  onLinesChange,
 }: AttributionOverlayProps): ReactElement {
-  // DEDUPED, in source order. The geoid line already credits OpenStreetMap
-  // (the undulation tiles are OSM-derived), so an OSM or CARTO basemap would
-  // otherwise print "© OpenStreetMap contributors" twice — which reads as a
-  // bug, not as a stronger credit. A Set preserves insertion order, so the
-  // first occurrence of each obligation wins its position.
-  const lines = [
-    ...(googleTiles ? ["Imagery © Google"] : []),
-    ...basemapAttribution,
-    ...terrainAttribution,
-    ...GEOID_ATTRIBUTION,
-  ];
-  return (
-    <div className="attribution-overlay">
-      {[...new Set(lines)].map((line) => (
-        <span key={line}>{linkify(line)}</span>
-      ))}
-    </div>
+  const lines = useMemo(
+    () =>
+      attributionLines({ googleTiles, basemapAttribution, terrainAttribution }),
+    [googleTiles, basemapAttribution, terrainAttribution],
   );
+
+  useEffect(() => {
+    onLinesChange?.(lines);
+  }, [lines, onLinesChange]);
+
+  return <AttributionLines lines={lines} />;
 }

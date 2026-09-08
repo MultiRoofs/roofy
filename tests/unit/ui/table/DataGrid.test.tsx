@@ -96,6 +96,19 @@ describe("DataGrid", () => {
     expect(header.getAttribute("aria-sort")).toBe("descending");
   });
 
+  it("uses readable unit titles only for generated derived columns", () => {
+    setup({
+      columns: [
+        { name: "__roofy_roof_area", type: "DERIVED", kind: "nested" },
+        { name: "source_area", type: "DOUBLE", kind: "scalar" },
+      ],
+      derivedColumnNames: new Set(["__roofy_roof_area"]),
+    });
+    const headers = screen.getAllByRole("columnheader");
+    expect(headers[0]?.getAttribute("title")).toBe("Roof area (m²)");
+    expect(headers[1]?.getAttribute("title")).toBe("source_area (DOUBLE)");
+  });
+
   it("does not offer sorting on a nested column", () => {
     const { onSort } = setup({
       columns: [{ name: "parents", type: "VARCHAR[]", kind: "nested" }],
@@ -125,5 +138,83 @@ describe("DataGrid", () => {
   it("uses the caller's empty message when it supplies one", () => {
     setup({ rows: [], emptyMessage: "0 of 2,231 rows match" });
     expect(screen.getByText("0 of 2,231 rows match")).toBeTruthy();
+  });
+
+  it("can change from empty to rows without changing hook order", () => {
+    const { rerender } = render(
+      <DataGrid
+        columns={COLUMNS}
+        rows={[]}
+        sort={null}
+        selectedIds={new Set()}
+        onSort={vi.fn()}
+        onRowClick={vi.fn()}
+      />,
+    );
+
+    rerender(
+      <DataGrid
+        columns={COLUMNS}
+        rows={[ROWS[0]!]}
+        sort={null}
+        selectedIds={new Set()}
+        onSort={vi.fn()}
+        onRowClick={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("B1")).toBeTruthy();
+  });
+});
+
+describe("DataGrid parts", () => {
+  it("expands actual child ids, selects the child, and collapses", () => {
+    const onRowClick = vi.fn();
+    render(
+      <DataGrid
+        columns={COLUMNS}
+        rows={[ROWS[0]!]}
+        sort={null}
+        selectedIds={new Set()}
+        onSort={vi.fn()}
+        onRowClick={onRowClick}
+        partsById={{ B1: ["B1-part-1"] }}
+      />,
+    );
+    const toggle = screen.getByLabelText("Toggle parts for B1");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(onRowClick).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("↳ B1-part-1"));
+    expect(onRowClick).toHaveBeenCalledWith("B1-part-1", false);
+    fireEvent.click(toggle);
+    expect(onRowClick).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("B1-part-1")).toBeNull();
+  });
+});
+
+describe("DataGrid actual child rows", () => {
+  it("renders supplied child attributes and selects the exact child id", () => {
+    const onRowClick = vi.fn();
+    render(
+      <DataGrid
+        columns={[
+          { name: "id", type: "VARCHAR", kind: "scalar" },
+          { name: "height", type: "DOUBLE", kind: "scalar" },
+        ]}
+        rows={[{ id: "root", height: 10 }]}
+        sort={null}
+        selectedIds={new Set()}
+        onSort={() => {}}
+        onRowClick={onRowClick}
+        partsById={{ root: ["child"] }}
+        partRows={{ child: { id: "child", height: 22 } }}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("Toggle parts for root"));
+    expect(screen.getByText("22")).toBeTruthy();
+    fireEvent.click(screen.getByText("↳ child"));
+    expect(onRowClick).toHaveBeenCalledWith("child", false);
   });
 });

@@ -250,7 +250,10 @@ describe("relinkGeoJsonLayer", () => {
     store().relinkGeoJsonLayer(id, data);
 
     const layer = store().layers[0]!;
-    expect(layer.config).toEqual({ data });
+    expect(layer.config).toMatchObject({ data, preparation: "ready" });
+    expect(
+      (layer as Extract<GeoLayer, { kind: "geojson" }>).config.preparedData,
+    ).toBeDefined();
     expect(isGeoLayerUnavailable(layer)).toBe(false);
   });
 

@@ -217,8 +217,7 @@ active — colours overridden".
 > **Implemented (12.3, 2026-09-07).** The details panel ships the identity
 > trail, SUMMARY, RULE MATCH, ATTRIBUTES, PARTS, GEOMETRY, the multi-selection
 > summary and the geo feature view. Recorded exceptions: stroke colour for
-> vectors (the engine's polygon outline does not render — deferred), rule-list
-> drag handle (12.6), legend counts and GEOMETRY's Raw object (12.4), and a
+> vectors (the engine's polygon outline does not render — deferred), and a
 > streaming SURFACE pick shows identity + attributes without its roof metrics
 > (the ring fetch is not wired; streaming BUILDING summaries are complete).
 
@@ -484,3 +483,9 @@ after ~1.5 s. A geospatial-only add (GeoJSON) opens the viewer just the same.
 - Expressive scene backgrounds (Day sky / Dusk / Night) — no engine support.
 
 Slice 12.3 scheduling exceptions (plan review 2026-09-07): the rule list's drag handle for precedence ships as Move up / Move down in 12.3 and drag in 12.6 polish; legend row counts arrive with 12.4's `useLayerCounts`; GEOMETRY's "Raw object" opens the drawer's Raw objects view once 12.4 builds it (disabled with a note until then); the legend's presentation size also applies when the right panel is absent (no selection) and the left panel is collapsed; vector "Color by attribute" and "stroke colour" depend on an engine probe and are deferred with a note here if the engine cannot paint per feature or draw polygon outlines.
+
+## Reconciliation implementation notes (2026-09-08)
+
+The working tree now includes linked city/vector records and filters, All/Matching Summary, legend row counts, descendant geometry, exact Raw object navigation, rule drag ordering, scene sheets, camera controls and persisted timezone/shadow quality. The detailed reconciliation rulings in `docs/superpowers/plans/2026-09-07-ui-redesign-reconciliation.md` supersede the scheduling exceptions above. Vector colour-by-attribute is supported by the verified evaluator path; polygon outlines remain deferred.
+
+Scene implementation uses available engine controls: terrain remains enabled, rain/snow/clouds/lens flare have a visual-effect note, and existing presentation presets are under a collapsed disclosure. It does not invent terrain/background/fog controls unsupported by the engine. Sheet scrolling and measured attribution clearance preserve access at laptop height with the drawer open.
