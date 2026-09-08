@@ -183,19 +183,14 @@ const NO_ENVIRONMENT: ThemeEnvironment = {
 };
 
 /**
- * Photoreal's ink: a dark warm grey, read as sRGB, drawn UNLIT (the edge
- * material is a plain line material, so it ignores the sun) at the scene's
- * exposure. Dark enough to read as the crease between two lit faces, never
- * as a glow; not pure black, which reads as an artefact against a lit wall.
- * Every face keeps its own hue (the tint below is a neutral albedo) and the
- * sun, its shadows and the sky probe do the shading — the line only says
- * where a face ends.
- */
-const PHOTOREAL_INK = 0x3a3632;
-
-/**
  * Photoreal's mesh style: the palette's own colours, scaled to an albedo,
- * plus an outline.
+ * and NO outline. Issue #13 first asked for "more distinctive outlines" and
+ * an unlit dark ink line was drawn here; once the faces were actually lit
+ * (the albedo below, the shadow tuning) the maintainer dropped it (2026-09-08):
+ * a hairline drawn unlit at the scene's exposure glows white at night and
+ * reads as a wire over a photograph by day, and lit faces that meet at
+ * different brightnesses no longer need a line to say where they end.
+ * Cartoon, wireframe and cyber keep theirs — there the line IS the look.
  *
  * `fill: "tint"` with a NEUTRAL grey is not a colour cast: `material.color`
  * multiplies the vertex colours before the lighting equation, so this is the
@@ -227,7 +222,7 @@ const PHOTOREAL_STYLE: ThemeStyle = Object.freeze({
     PHOTOREAL_ALBEDO,
     PHOTOREAL_ALBEDO,
   ]) as readonly [number, number, number],
-  edges: Object.freeze({ color: PHOTOREAL_INK }),
+  edges: null,
 });
 
 /** Near-black ink, read as sRGB. Not pure black: a hairline of pure 0 against

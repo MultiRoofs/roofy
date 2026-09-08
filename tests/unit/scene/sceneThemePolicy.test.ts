@@ -7,8 +7,8 @@
  *
  *   - photoreal's ENVIRONMENT is a provable no-op — every override null, every
  *     "off" flag false, so applying it pushes nothing anywhere; its mesh style
- *     is the palette's own colours scaled to a physical albedo, plus the
- *     outline every theme draws;
+ *     is the palette's own colours scaled to a physical albedo, with no
+ *     outline — the sun, its shadows and the sky probe draw the creases;
  *   - every theme's `meshStyle` is ONE frozen object, because `handleSync`
  *     compares by identity to decide whether to re-extract every edge of every
  *     layer;
@@ -48,25 +48,14 @@ describe("sceneThemePolicy", () => {
     expect(env.lensFlareOff).toBe(false);
   });
 
-  it("outlines photoreal's buildings in a dark, non-HDR ink over their own colours", () => {
-    // Issue #13: a lit block with no edge line still reads as a paper cut-out
-    // where two faces meet at the same brightness. The outline is the
-    // plugin's structural-edge extraction (the same lines cartoon draws),
-    // in an ink dark enough to read as a crease and never as a glow.
-    const style = sceneThemePolicy("photoreal").meshStyle;
-    const edges = style.edges!;
-    expect(edges).not.toBeNull();
-    expect(edges.hdr).toBeUndefined();
-    const [r, g, b] = [
-      (edges.color >> 16) & 0xff,
-      (edges.color >> 8) & 0xff,
-      edges.color & 0xff,
-    ];
-    for (const channel of [r, g, b]) {
-      // Dark, but not pure black: a hairline of 0 reads as an artefact.
-      expect(channel).toBeGreaterThan(0);
-      expect(channel).toBeLessThan(0x60);
-    }
+  it("draws no outline in photoreal", () => {
+    // Issue #13 first asked for "more distinctive outlines", and an unlit
+    // ink line was added; once the buildings were actually lit (albedo
+    // headroom, shadow tuning) the maintainer judged the line a distraction
+    // — a hairline drawn at the scene's exposure glows white at night and
+    // reads as a wire over a photograph by day. The lit faces meet at
+    // different brightnesses now, which is what an outline stood in for.
+    expect(sceneThemePolicy("photoreal").meshStyle.edges).toBeNull();
   });
 
   it("scales photoreal's buildings to a physical albedo, neutral and below the clip", () => {
@@ -116,14 +105,18 @@ describe("sceneThemePolicy", () => {
 
     for (const theme of SCENE_THEMES) {
       const style = sceneThemePolicy(theme).meshStyle;
-      // Every look draws edges: the three stylised ones because the line IS
-      // the look, photoreal because a block without one reads flat (#13).
-      expect(style.edges).not.toBeNull();
-      const edges = style.edges!;
-      // A colour is always present as the non-HDR fallback, even when an HDR
-      // triple is what the theme actually renders with.
-      expect(typeof edges.color).toBe("number");
-      if (edges.hdr !== undefined) expect(edges.hdr).toHaveLength(3);
+      // The three stylised looks draw edges, because the line IS the look;
+      // photoreal draws none (its faces are lit, see the test above).
+      if (theme === "photoreal") {
+        expect(style.edges).toBeNull();
+      } else {
+        expect(style.edges).not.toBeNull();
+        const edges = style.edges!;
+        // A colour is always present as the non-HDR fallback, even when an
+        // HDR triple is what the theme actually renders with.
+        expect(typeof edges.color).toBe("number");
+        if (edges.hdr !== undefined) expect(edges.hdr).toHaveLength(3);
+      }
       // A "tint" fill with no colour would multiply by `undefined`.
       if (style.fill === "tint") expect(style.tintRGB).toHaveLength(3);
       else expect(style.tintRGB).toBeUndefined();
