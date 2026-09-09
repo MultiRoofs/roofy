@@ -277,8 +277,9 @@ function extractSemanticSurfaces(
         const lod = detectLodFromElementName(geomName);
         const geomNode = geomValue as XMLNode;
 
-        const ms = (geomNode["gml:MultiSurface"] ??
-          geomNode["MultiSurface"]) as GMLMultiSurface | undefined;
+        const ms = (geomNode["gml:MultiSurface"] ?? geomNode["MultiSurface"]) as
+          | GMLMultiSurface
+          | undefined;
         if (ms) {
           const containers = [ms["@_gml:id"], surfaceId, objectId];
           for (const poly of collectPolygonsFromMultiSurface(ms)) {
