@@ -143,6 +143,11 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
         )}
       </div>
 
+      <div className="active-layer-group active-layer-types">
+        <h4 className="active-layer-group-title">Object visibility</h4>
+        <LayerTypeToggles layer={layer} expanded />
+      </div>
+
       <div className="active-layer-group">
         <h4 className="active-layer-group-title">Display</h4>
         <div className="active-layer-controls">
@@ -203,12 +208,6 @@ export function DetailsSection({ item }: { readonly item: ActiveLayer }) {
               </button>
             </div>
           )}
-
-          {/* Renders nothing at all for a static layer with one group — it
-              decides that for itself, so no label is hung above an absence. */}
-          <div className="active-layer-types">
-            <LayerTypeToggles layer={layer} />
-          </div>
         </div>
       </div>
 

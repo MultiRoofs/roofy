@@ -1,3 +1,11 @@
+import {
+  normalizeTablePresentation,
+  type TablePresentation,
+} from "../features/query/tablePresentation";
+import {
+  normalizeAttributeOrders,
+  type AttributeOrders,
+} from "../features/attributes/attributeOrder";
 /**
  * Persistence layer interfaces.
  *
@@ -94,6 +102,8 @@ export interface LayerSnapshot {
    *  `availableObjectTypes` is NOT saved: it is derived from the model on
    *  load, and rediscovered cell by cell for a streaming layer. */
   readonly hiddenTypes?: readonly string[];
+  readonly attributeOrders?: AttributeOrders;
+  readonly tablePresentation?: TablePresentation;
   /** The appearance theme drawn (texture or material), `null` for plain
    *  colours. Absent in older snapshots — restore then picks the model's
    *  load default, exactly like a fresh load. Additive; version stays "3". */
@@ -118,6 +128,8 @@ export interface RawLayerSnapshot {
   readonly [key: string]: unknown;
   readonly lodMode?: "auto" | "manual";
   readonly hiddenTypes?: readonly string[];
+  readonly attributeOrders?: AttributeOrders;
+  readonly tablePresentation?: TablePresentation;
   readonly stream?: StreamSourceSnapshot;
 }
 
@@ -129,6 +141,8 @@ export interface RawLayersDocument {
 export interface NormalizedLayerSnapshot extends RawLayerSnapshot {
   readonly lodMode: "auto" | "manual";
   readonly hiddenTypes: readonly string[];
+  readonly attributeOrders?: AttributeOrders;
+  readonly tablePresentation?: TablePresentation;
   /** Defaulted and VALIDATED by `normalizeLayers`, so nothing downstream ever
    *  sees an absent mode, an unknown one or a colour that is not `#rrggbb`.
    *  See {@link LayerSnapshot.colorBy} for where the default comes from. */
@@ -163,6 +177,8 @@ export function normalizeLayers(
   return (raw.layers ?? []).map((l): NormalizedLayerSnapshot => {
     const lodMode = l.lodMode ?? "auto";
     const hiddenTypes = l.hiddenTypes ?? [];
+    const attributeOrders = normalizeAttributeOrders(l.attributeOrders);
+    const tablePresentation = normalizeTablePresentation(l.tablePresentation);
     // The same validator the share hash and the store use, so one document
     // cannot restore differently depending on which door it came through.
     const colorBy = normalizeColorBy({
@@ -173,8 +189,23 @@ export function normalizeLayers(
       rulesEnabled: l.rulesEnabled,
     });
     return l.stream?.kind === "file"
-      ? { ...l, lodMode, hiddenTypes, ...colorBy, unavailable: true }
-      : { ...l, lodMode, hiddenTypes, ...colorBy };
+      ? {
+          ...l,
+          lodMode,
+          hiddenTypes,
+          attributeOrders,
+          tablePresentation,
+          ...colorBy,
+          unavailable: true,
+        }
+      : {
+          ...l,
+          lodMode,
+          hiddenTypes,
+          attributeOrders,
+          tablePresentation,
+          ...colorBy,
+        };
   });
 }
 
@@ -359,6 +390,7 @@ export interface GeographicCamera {
 }
 
 export interface ViewState {
+  readonly basemap?: import("../features/basemap/basemapStore").BasemapState;
   readonly camera: GeographicCamera;
   readonly datetime: string; // ISO 8601
   /** Optional v4 addition; omitted documents use Europe/Amsterdam. */
@@ -500,6 +532,7 @@ export interface SnapshotSummary {
 
 export interface ProjectStateStore {
   save(snapshot: ProjectSnapshot): Promise<string>;
+  update?(id: string, snapshot: ProjectSnapshot): Promise<void>;
   load(id: string): Promise<ProjectSnapshot | null>;
   list(): Promise<SnapshotSummary[]>;
   remove(id: string): Promise<void>;

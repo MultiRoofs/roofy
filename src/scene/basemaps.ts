@@ -23,6 +23,7 @@
 
 /** The stable id persisted in the store and shown in the picker. */
 export type BasemapId =
+  | "custom"
   | "none"
   | "osm"
   | "esri-imagery"

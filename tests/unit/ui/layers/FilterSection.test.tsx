@@ -158,3 +158,10 @@ describe("FilterSection — record capabilities", () => {
     ).toBeTruthy();
   });
 });
+
+it("opens filter setup from the empty state", () => {
+  render(<FilterSection item={city()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Add filter" }));
+  expect(useShellStore.getState().drawerOpen).toBe(true);
+  expect(useShellStore.getState().filterRequest).toBe(1);
+});

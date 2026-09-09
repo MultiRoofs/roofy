@@ -1,3 +1,4 @@
+import { restoreBasemap } from "../features/basemap/basemapPersistence";
 /**
  * Restore viewer state from a ProjectSnapshot.
  *
@@ -32,6 +33,7 @@ export function restoreSnapshot(snapshot: ProjectSnapshot): RestoredSnapshot {
   const outcome = migrateSnapshot(snapshot);
   if (!outcome.ok) throw outcome.error;
   const migrated = outcome.snapshot;
+  restoreBasemap(migrated.viewState.basemap);
 
   // Restore pick mode (clear selection — it's transient). `geoSelection` is
   // cleared with the rest: a restore replaces every geo layer, so a retained

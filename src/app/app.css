@@ -575,6 +575,9 @@ body {
    rather than for the theme toggle it used to hold — appearance is a
    preference now, not a button. */
 .landing-preferences {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
   position: fixed;
   top: 1rem;
   right: 1rem;
@@ -6420,13 +6423,15 @@ button.file-label:disabled {
   color: var(--danger, var(--fg));
 }
 
-.preferences-trigger {
+.preferences-trigger,
+.workspaces-trigger {
   width: auto;
   gap: 0.3rem;
   padding: 0 0.45rem;
   flex-shrink: 0;
 }
-.preferences-trigger span {
+.preferences-trigger span,
+.workspaces-trigger span {
   font: 600 0.68rem var(--font-ui);
   white-space: nowrap;
 }
@@ -6456,40 +6461,14 @@ button.file-label:disabled {
   gap: 0.3rem;
   text-align: right;
 }
-.empty-workspace-overlay {
+.empty-workspace-error {
   position: absolute;
-  inset: 0;
+  top: 56px;
+  left: 12px;
+  right: 12px;
   z-index: 4;
-  display: grid;
-  place-items: center;
-  pointer-events: none;
-}
-.empty-workspace-overlay__card {
-  pointer-events: auto;
-  width: 18rem;
-  padding: 1rem;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-lg);
-  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
-  text-align: center;
-  backdrop-filter: blur(12px);
-}
-.empty-workspace-overlay__actions {
-  display: flex;
-  justify-content: center;
-  gap: 0.4rem;
-  margin-top: 0.75rem;
-}
-.empty-workspace-overlay button {
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-sm);
-  padding: 0.45rem 0.65rem;
-  background: var(--bg-raised);
-  color: var(--fg);
-}
-.empty-workspace-overlay .primary {
-  background: var(--brand-primary);
-  color: #10150d;
+  padding: 12px;
+  background: var(--bg-panel);
 }
 
 /* Records drawer fills the map column; its grid owns the available width. */

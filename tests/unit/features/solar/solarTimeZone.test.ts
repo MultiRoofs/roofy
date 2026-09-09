@@ -71,3 +71,17 @@ describe("solarTimeZone", () => {
     expect(useSolarStore.getState().timeZone).toBe("UTC");
   });
 });
+
+it("accepts IANA zones across regions, including fractional offsets", () => {
+  expect(normalizeSolarTimeZone("Asia/Tokyo")).toBe("Asia/Tokyo");
+  expect(
+    civilTimeFor(new Date("2026-01-15T12:00:00Z"), "Asia/Kolkata").time,
+  ).toBe("17:30");
+  expect(
+    civilToInstant(
+      "2026-01-15",
+      "07:00",
+      "America/New_York",
+    ).date?.toISOString(),
+  ).toBe("2026-01-15T12:00:00.000Z");
+});

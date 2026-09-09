@@ -4,31 +4,37 @@
   bottom: calc(var(--attribution-height, 1.5rem) + 3.75rem);
   z-index: 3;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 0.25rem;
   align-items: center;
-  max-width: 14.5rem;
+  width: 2.75rem;
+  box-sizing: border-box;
   padding: 0.35rem;
   border: 1px solid var(--border-strong);
-  border-radius: var(--r-lg);
-  background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
-  box-shadow: 0 0.65rem 1.8rem rgb(0 0 0 / 24%);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-panel) 94%, transparent);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 12%);
   backdrop-filter: blur(14px);
   color: var(--fg);
 }
 .camera-cluster button {
-  min-height: 1.9rem;
+  min-height: 2rem;
+  width: 2rem;
+  padding: 0;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--bg-raised) 76%, transparent);
   color: inherit;
-  font: 600 0.7rem/1 var(--font-ui);
+  font: 500 0.6875rem/1.25 var(--font-ui);
   cursor: pointer;
 }
-.camera-cluster button:hover:not(:disabled),
+.camera-cluster button:hover:not(:disabled) {
+  background: var(--bg-raised);
+}
 .camera-cluster button[aria-pressed="true"] {
-  background: var(--brand-primary);
-  color: #10150d;
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-text);
 }
 .camera-cluster button:disabled {
   opacity: 0.45;
@@ -36,7 +42,8 @@
 }
 .camera-cluster__zoom {
   display: flex;
-  gap: 0.2rem;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 .camera-cluster__zoom button,
 .camera-cluster__north {
@@ -53,28 +60,10 @@
   vertical-align: middle;
 }
 .camera-cluster__action,
-.camera-cluster__modes button {
+.camera-cluster__mode {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.28rem;
-}
-.camera-cluster__north {
-  font-family: var(--font-mono) !important;
-}
-.camera-cluster__action {
-  padding: 0 0.5rem;
-}
-.camera-cluster__modes {
-  display: flex;
-  flex-basis: 100%;
-  gap: 0.2rem;
-  padding-top: 0.2rem;
-  border-top: 1px solid var(--border);
-}
-.camera-cluster__modes button {
-  flex: 1;
-  padding: 0 0.35rem;
 }
 .scale-bar {
   left: auto;
@@ -93,9 +82,9 @@
   padding: 0.35rem 0.45rem;
   border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
-  background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
+  background: color-mix(in srgb, var(--bg-panel) 94%, transparent);
   color: var(--fg);
-  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 20%);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 12%);
   backdrop-filter: blur(14px);
   max-width: calc(100% - 3.75rem);
   white-space: nowrap;
@@ -104,7 +93,7 @@
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  font: 700 0.7rem/1 var(--font-ui);
+  font: 500 0.6875rem/1.25 var(--font-ui);
 }
 .select-mode-segment {
   display: flex;
@@ -119,12 +108,13 @@
   padding: 0.32rem 0.48rem;
   background: transparent;
   color: inherit;
-  font: 600 0.68rem/1 var(--font-ui);
+  font: 500 0.6875rem/1.25 var(--font-ui);
   cursor: pointer;
 }
 .select-mode-segment button[aria-pressed="true"] {
-  background: var(--brand-primary);
-  color: #10150d;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 .select-mode-segment button:disabled {
   opacity: 0.45;

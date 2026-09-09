@@ -2183,6 +2183,24 @@ describe("NavaraViewport clouds", () => {
     );
   });
 
+  it("applies the shadow switch to cloud shadows without rebuilding clouds", async () => {
+    useRenderDebugStore.setState({
+      cloudsEnabled: true,
+      sunShadowsEnabled: true,
+    });
+    render(<NavaraViewport onTriangleCount={() => {}} />);
+    await waitFor(() => expect(addEffect).toHaveBeenCalledTimes(1));
+    act(() => useRenderDebugStore.getState().setSunShadowsEnabled(false));
+    await waitFor(() =>
+      expect(updateEffect).toHaveBeenCalledWith({ clouds: { shadows: false } }),
+    );
+    act(() => useRenderDebugStore.getState().setSunShadowsEnabled(true));
+    await waitFor(() =>
+      expect(updateEffect).toHaveBeenCalledWith({ clouds: { shadows: true } }),
+    );
+    expect(addEffect).toHaveBeenCalledTimes(1);
+  });
+
   it("pushes coverage to the live pass instead of rebuilding it", async () => {
     useRenderDebugStore.setState({ cloudsEnabled: true });
     render(<NavaraViewport onTriangleCount={() => {}} />);

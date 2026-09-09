@@ -1,3 +1,6 @@
+import { ColumnsPanel } from "./ColumnsPanel";
+import { columnLabel } from "../drawer/columnPolicy";
+import { orderedColumns, moveColumn } from "./columnOrder";
 /**
  * The bottom panel: one layer's DuckDB table, filtered, sorted and paged.
  *
@@ -9,7 +12,7 @@
  * happened.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import type { DuckDBStatus } from "../../insights/duckdb";
 import { useLayerTableStore } from "../../insights/layerTables";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
@@ -83,8 +86,15 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
     ),
   );
 
-  const [summaryOpen, setSummaryOpen] = useState(false);
+  const summaryOpen = query?.drawerTab === "summary";
+  const setSummaryOpen = (open: boolean) => {
+    if (layerId !== null)
+      useQueryStore
+        .getState()
+        .setDrawerTab(layerId, open ? "summary" : "records");
+  };
   const [columnsOpen, setColumnsOpen] = useState(false);
+  const columnsButtonRef = useRef<HTMLButtonElement>(null);
   const [exportOpen, setExportOpen] = useState(false);
 
   // The dialog is about ONE layer — its table, its types, its LoD ladder — and
@@ -92,7 +102,6 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
   // closes rather than silently re-pointing at a different layer's data.
   useEffect(() => {
     setExportOpen(false);
-    setSummaryOpen(false);
     setColumnsOpen(false);
   }, [active?.layer.id]);
 
@@ -154,7 +163,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
           .filter((s) => s.layerId === layerId)
           .map((s) => s.objectId),
       ),
-    [sceneSelections],
+    [sceneSelections, layerId],
   );
 
   const handleRowClick = useCallback(
@@ -218,9 +227,23 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
   const visibleColumns = useMemo(() => {
     if (!query?.columns)
       return defaultColumns(view.columns, query?.view ?? "buildings");
-    const wanted = new Set(["id", ...query.columns]);
-    return selectableColumns.filter((column) => wanted.has(column.name));
+    return orderedColumns(selectableColumns, query.columns);
   }, [query?.columns, query?.view, selectableColumns, view.columns]);
+
+  const reorderColumn = useCallback(
+    (source: string, target: string) => {
+      if (layerId === null) return;
+      useQueryStore.getState().setColumns(
+        layerId,
+        moveColumn(
+          visibleColumns.map((column) => column.name),
+          source,
+          target,
+        ),
+      );
+    },
+    [layerId, visibleColumns],
+  );
 
   const engineDown =
     duckdbStatus.state === "failed" || duckdbStatus.state === "uninitialized";
@@ -307,48 +330,43 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
             ? "Table only · currently loaded"
             : "Map + table"}
         </span>
-
+      </div>
+      <div
+        className="table-panel-actions"
+        role="toolbar"
+        aria-label="Table actions"
+      >
         {activeLayer !== null && (
           <>
             <button
               type="button"
               className="tb-btn table-action-btn"
+              ref={columnsButtonRef}
+              aria-expanded={columnsOpen}
               onClick={() => setColumnsOpen((open) => !open)}
               disabled={view.status !== "ready"}
             >
               Columns
             </button>
             {columnsOpen && layerId !== null && (
-              <div
-                className="columns-popover"
-                role="group"
-                aria-label="Columns"
-              >
-                {selectableColumns.map((column) => (
-                  <label key={column.name}>
-                    <input
-                      type="checkbox"
-                      checked={(
-                        query?.columns ??
-                        visibleColumns.map((item) => item.name)
-                      ).includes(column.name)}
-                      onChange={() => {
-                        const current = new Set(
-                          query?.columns ??
-                            visibleColumns.map((item) => item.name),
-                        );
-                        if (current.has(column.name))
-                          current.delete(column.name);
-                        else current.add(column.name);
-                        useQueryStore
-                          .getState()
-                          .setColumns(layerId, [...current]);
-                      }}
-                    />
-                    {column.name}
-                  </label>
-                ))}
-              </div>
+              <ColumnsPanel
+                anchorRef={columnsButtonRef}
+                columns={selectableColumns}
+                visible={visibleColumns}
+                label={(name) =>
+                  derivedKeys.some((key) => key.name === name)
+                    ? columnLabel(name)
+                    : name
+                }
+                onChange={(names) =>
+                  useQueryStore.getState().setColumns(layerId, names)
+                }
+                onMove={reorderColumn}
+                onClose={() => {
+                  setColumnsOpen(false);
+                  columnsButtonRef.current?.focus();
+                }}
+              />
             )}
 
             <button
@@ -551,6 +569,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
                       view.unfilteredRows,
                     )}
                     onSort={handleSort}
+                    onReorder={reorderColumn}
                     onRowClick={handleRowClick}
                   />
                 )}

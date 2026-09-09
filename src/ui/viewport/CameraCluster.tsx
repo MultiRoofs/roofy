@@ -105,6 +105,10 @@ export function CameraCluster({
 }: CameraClusterProps) {
   const mode = useViewModeStore((s) => s.mode);
   const setViewMode = useViewModeStore((s) => s.setViewMode);
+  const index = modes.findIndex(([value]) => value === mode);
+  const current = modes[index]!;
+  const next = modes[(index + 1) % modes.length]!;
+  const modeTitle = `Camera view: ${current[1]}. Switch to ${next[1]}`;
   return (
     <div className="camera-cluster" aria-label="Camera controls">
       <div className="camera-cluster__zoom">
@@ -140,35 +144,31 @@ export function CameraCluster({
         onClick={onFit}
         disabled={fitDisabled}
         title={fitTitle}
+        aria-label={fitTitle}
       >
         <Icon name="fit" />
-        <span>Fit</span>
       </button>
       {selectionPresent && (
         <button
           type="button"
-          className="camera-cluster__action"
+          className="camera-cluster__action camera-cluster__selection"
+          aria-label="Zoom to selection"
           onClick={onFitSelection}
           disabled={selectionDisabled}
           title={selectionTitle}
         >
           <Icon name="target" />
-          <span>Zoom to selection</span>
         </button>
       )}
-      <div className="camera-cluster__modes" aria-label="Camera view">
-        {modes.map(([value, label, icon]) => (
-          <button
-            key={value}
-            type="button"
-            aria-pressed={mode === value}
-            onClick={() => setViewMode(value)}
-          >
-            <Icon name={icon} />
-            <span>{label}</span>
-          </button>
-        ))}
-      </div>
+      <button
+        type="button"
+        className="camera-cluster__mode"
+        title={modeTitle}
+        aria-label={modeTitle}
+        onClick={() => setViewMode(next[0])}
+      >
+        <Icon name={current[2]} />
+      </button>
     </div>
   );
 }

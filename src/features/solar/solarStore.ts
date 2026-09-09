@@ -136,5 +136,7 @@ export const useSolarStore = create<SolarStore>((set) => ({
   setSunPosition: (sunPosition) => set({ sunPosition }),
 
   setTimeAnimating: (v) => set({ timeAnimating: v }),
-  setTimeSpeed: (v) => set({ timeSpeed: v }),
+  setTimeSpeed: (v) => {
+    if (Number.isFinite(v) && v > 0 && v <= 86400) set({ timeSpeed: v });
+  },
 }));

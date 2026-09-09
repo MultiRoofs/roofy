@@ -282,3 +282,20 @@ describe("LegendOverlay", () => {
     expect(container.querySelector(".legend-presentation")).toBeNull();
   });
 });
+
+it("collapses and expands through an icon in the legend header", () => {
+  useLayerStore.setState({ layers: [baseLayer({ id: "a", name: "Delft" })] });
+  render(<LegendOverlay />);
+  const collapse = screen.getByRole("button", { name: "Collapse legend" });
+  expect(collapse.textContent).toBe("");
+  expect(collapse.closest(".legend-header")).toBeTruthy();
+  expect(collapse).toHaveAttribute("aria-expanded", "true");
+  fireEvent.click(collapse);
+  expect(screen.queryByRole("group", { name: "Delft" })).toBeNull();
+  expect(screen.getByText("Legend")).toBeTruthy();
+  const expand = screen.getByRole("button", { name: "Expand legend" });
+  expect(expand).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(expand);
+  expect(screen.getByRole("group", { name: "Delft" })).toBeTruthy();
+  expect(screen.queryByText("Hide legend")).toBeNull();
+});

@@ -23,12 +23,6 @@ export function SelectModeControl({
     : "Surface picking is not available for planning areas";
   return (
     <div className="select-mode-control" aria-label="Select mode">
-      <span className="select-mode-label">
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M8 1v14M1 8h14M8 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z" />
-        </svg>
-        Select
-      </span>
       <div className="select-mode-segment">
         <button
           type="button"

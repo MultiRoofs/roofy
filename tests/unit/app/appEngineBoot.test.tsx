@@ -259,7 +259,9 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
     );
     // The hold is released while the entered viewer retains its canvas.
     await waitFor(() =>
-      expect(screen.getByText("Add a layer to start")).toBeInTheDocument(),
+      expect(
+        screen.getByRole("dialog", { name: "Add layer" }),
+      ).toBeInTheDocument(),
     );
     expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
     expect(

@@ -25,12 +25,14 @@ describe("BasemapPanel", () => {
   it("lists every catalogue option and selects the store's current one", () => {
     render(<BasemapPanel />);
     const select = screen.getByLabelText("Basemap") as HTMLSelectElement;
-    expect([...select.options].map((o) => o.value)).toEqual(
-      BASEMAPS.filter((b) => !b.hidden).map((b) => b.id),
-    );
-    expect([...select.options].map((o) => o.textContent)).toEqual(
-      BASEMAPS.filter((b) => !b.hidden).map((b) => b.label),
-    );
+    expect([...select.options].map((o) => o.value)).toEqual([
+      ...BASEMAPS.filter((b) => !b.hidden).map((b) => b.id),
+      "custom",
+    ]);
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      ...BASEMAPS.filter((b) => !b.hidden).map((b) => b.label),
+      "Custom…",
+    ]);
     expect(select.value).toBe(DEFAULT_BASEMAP_ID);
   });
 

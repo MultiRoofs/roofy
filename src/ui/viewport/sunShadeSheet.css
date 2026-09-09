@@ -1,76 +1,25 @@
-.sun-shade-sheet {
-  box-sizing: border-box;
-  width: 320px;
-  max-width: calc(100% - 1rem);
-  max-height: 100%;
-  padding: 0.75rem;
-  overflow: auto;
-  color: var(--fg);
-  background: var(--bg-panel);
-  border: 1px solid var(--border-accent);
-  border-radius: var(--radius-lg, 14px);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.32);
-}
-
-.sun-shade-sheet header,
-.sun-shade-actions,
-.sun-shade-presets,
-.sun-shade-shadows {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.sun-shade-sheet header {
-  justify-content: space-between;
-}
-
-.sun-shade-sheet h2 {
-  margin: 0;
-  font: 600 0.9rem var(--font-display);
-}
-
-.sun-shade-sheet button,
-.sun-shade-sheet input,
-.sun-shade-sheet select {
-  color: var(--fg);
-  font: inherit;
-  background: var(--bg-input);
-  border: 1px solid var(--border-accent);
-  border-radius: var(--radius-sm);
-}
-
-.sun-shade-sheet button {
-  padding: 0.3rem 0.45rem;
-  cursor: pointer;
-}
-
-.sun-shade-sheet button[aria-pressed="true"] {
-  color: var(--accent-text);
-  background: var(--accent-soft);
-  border-color: var(--accent);
-}
-
-.sun-shade-sheet label {
+.sun-shade-body {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  margin-top: 0.55rem;
-  color: var(--fg-muted);
-  font-size: 0.7rem;
+  gap: 1rem;
 }
 
-.sun-shade-sheet input,
-.sun-shade-sheet select {
-  padding: 0.3rem 0.4rem;
+.sun-shade-body label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 0.75rem;
+}
+
+.sun-shade-datetime {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 0.75rem;
 }
 
 .sun-shade-time {
-  box-sizing: border-box;
-  display: block;
-  width: 100%;
-  margin: 0.55rem 0;
-  font: 2rem var(--font-mono) !important;
   font-variant-numeric: tabular-nums;
 }
 
@@ -78,30 +27,109 @@
   display: flex;
   justify-content: space-between;
   color: var(--fg-muted);
-  font: 0.62rem var(--font-mono);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .sun-shade-ticks i {
   flex: 1;
 }
 
-.sun-shade-actions,
-.sun-shade-presets {
+.sun-shade-actions {
+  display: flex;
   flex-wrap: wrap;
-  margin-top: 0.6rem;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.sun-shade-actions > button:first-child {
+  margin-right: auto;
+  min-width: 4rem;
+}
+
+.sun-shade-presets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.375rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
 }
 
 .sun-shade-zone,
 .sun-shade-error {
-  margin: 0.45rem 0 0;
-  font-size: 0.7rem;
+  margin: -0.625rem 0 0;
+  color: var(--fg-muted);
+  font-size: 0.6875rem;
+  overflow-wrap: anywhere;
 }
 
 .sun-shade-error {
   color: var(--danger);
 }
 
-.sun-shade-shadows {
+.sun-shade-position {
+  margin: 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+
+.sun-shade-body .sun-shade-shadows {
   flex-direction: row;
+  align-items: center;
   justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--fg);
+}
+.sun-shade-sheet input[type="range"] {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  height: 20px;
+  min-height: 20px;
+  padding: 0;
+  cursor: pointer;
+}
+.sun-shade-sheet input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px;
+  background: var(--fg-dim);
+  border: 0;
+  border-radius: 0;
+}
+.sun-shade-sheet input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4.5px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.sun-shade-sheet input[type="range"]::-moz-range-track {
+  height: 3px;
+  background: var(--fg-dim);
+  border: 0;
+}
+.sun-shade-sheet input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.sun-shade-sheet input[type="range"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.sun-speed-custom {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: end;
+}
+.sun-speed-custom p {
+  grid-column: 1/-1;
+  margin: 0;
+  color: var(--danger);
 }

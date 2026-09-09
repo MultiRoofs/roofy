@@ -59,6 +59,7 @@ export interface LayerQuery {
   readonly pageSize: PageSize;
   /** Drawer presentation state; kept session-local with the query. */
   readonly view: "buildings" | "raw";
+  readonly drawerTab?: "records" | "summary";
   readonly showSelectedOnly: boolean;
   /** Exact Raw-object request from Details; independent of applied filters. */
   readonly rawObjectId: string | null;

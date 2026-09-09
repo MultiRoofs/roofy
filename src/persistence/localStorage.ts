@@ -60,6 +60,25 @@ export class LocalStorageProjectStateStore implements ProjectStateStore {
     return id;
   }
 
+  async update(id: string, snapshot: ProjectSnapshot): Promise<void> {
+    const key = STORAGE_PREFIX + id;
+    const previous = localStorage.getItem(key);
+    if (previous === null) throw new Error("Workspace no longer exists.");
+    localStorage.setItem(key, JSON.stringify(snapshot));
+    try {
+      writeIndex(
+        readIndex().map((entry) =>
+          entry.id === id
+            ? { id, label: snapshot.label, savedAt: snapshot.savedAt }
+            : entry,
+        ),
+      );
+    } catch (error) {
+      localStorage.setItem(key, previous);
+      throw error;
+    }
+  }
+
   async load(id: string): Promise<ProjectSnapshot | null> {
     try {
       const raw = localStorage.getItem(STORAGE_PREFIX + id);

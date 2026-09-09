@@ -885,3 +885,42 @@ describe("App toast timers", () => {
     expect(screen.queryByText(/try sharing again/)).toBeNull();
   });
 });
+
+it("does not prompt to add a layer when opening a populated saved workspace from management", async () => {
+  render(<App persistenceStore={storeWith(snapshotWithUrlLayer())} />);
+  fireEvent.click(screen.getByRole("button", { name: "Workspaces" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+  await waitFor(() => expect(useLayerStore.getState().layers).toHaveLength(1));
+  readyGate.resolve();
+  await waitFor(() => expect(setCameraState).toHaveBeenCalledWith(CAM));
+  expect(screen.queryByRole("dialog", { name: "Add layer" })).toBeNull();
+  window.history.replaceState(null, "", "/");
+});
+
+it("saves a partial restore as a new workspace instead of overwriting missing layers", async () => {
+  const snapshot = snapshotWithUrlLayer();
+  const partial = {
+    ...snapshot,
+    layers: [
+      ...snapshot.layers!,
+      {
+        ...snapshot.layers![0]!,
+        name: "Local file",
+        modelRef: { type: "file" as const, fileName: "local.city.json" },
+      },
+    ],
+  };
+  const store = {
+    ...storeWith(partial),
+    update: vi.fn(async () => {}),
+    save: vi.fn(async () => "new-save"),
+  };
+  render(<App persistenceStore={store} />);
+  await clickRestore();
+  await waitFor(() => expect(useLayerStore.getState().layers).toHaveLength(1));
+  readyGate.resolve();
+  await waitFor(() => expect(setCameraState).toHaveBeenCalledWith(CAM));
+  fireEvent.click(screen.getByRole("button", { name: "Save workspace" }));
+  await waitFor(() => expect(store.save).toHaveBeenCalled());
+  expect(store.update).not.toHaveBeenCalled();
+});

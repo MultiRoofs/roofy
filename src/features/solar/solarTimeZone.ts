@@ -1,5 +1,23 @@
-export const SOLAR_TIME_ZONES = ["Europe/Amsterdam", "UTC", "browser"] as const;
-export type SolarTimeZone = (typeof SOLAR_TIME_ZONES)[number];
+const supportedZones = (
+  Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] }
+).supportedValuesOf?.("timeZone") ?? [
+  "America/New_York",
+  "America/Los_Angeles",
+  "America/Sao_Paulo",
+  "Europe/London",
+  "Europe/Paris",
+  "Africa/Johannesburg",
+  "Asia/Dubai",
+  "Asia/Kolkata",
+  "Asia/Tokyo",
+  "Australia/Sydney",
+  "Pacific/Auckland",
+];
+export const SOLAR_TIME_ZONES: readonly string[] = [
+  ...new Set(["Europe/Amsterdam", "UTC", "browser", ...supportedZones]),
+];
+export type SolarTimeZone = string;
+const validatedZones = new Set(SOLAR_TIME_ZONES);
 export const DEFAULT_SOLAR_TIME_ZONE: SolarTimeZone = "Europe/Amsterdam";
 
 export interface CivilTime {
@@ -12,10 +30,16 @@ export type CivilConversion =
   | { readonly date: null; readonly error: string };
 
 export function normalizeSolarTimeZone(value: unknown): SolarTimeZone {
-  return typeof value === "string" &&
-    (SOLAR_TIME_ZONES as readonly string[]).includes(value)
-    ? (value as SolarTimeZone)
-    : DEFAULT_SOLAR_TIME_ZONE;
+  if (typeof value === "string" && validatedZones.has(value)) return value;
+  if (typeof value !== "string" || !value.trim())
+    return DEFAULT_SOLAR_TIME_ZONE;
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value });
+    validatedZones.add(value);
+    return value;
+  } catch {
+    return DEFAULT_SOLAR_TIME_ZONE;
+  }
 }
 
 function resolvedZone(zone: SolarTimeZone): string {

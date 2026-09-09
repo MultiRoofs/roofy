@@ -14,7 +14,6 @@ import {
   fireEvent,
   render,
   screen,
-  waitFor,
   within,
 } from "@testing-library/react";
 import { forwardRef, useImperativeHandle } from "react";
@@ -312,34 +311,39 @@ describe("App viewer shell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Untitled workspace" }));
     fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
 
-    await waitFor(() =>
-      expect(screen.getByText("Add a layer to start")).toBeInTheDocument(),
-    );
+    await screen.findByRole("dialog", { name: "Add layer" });
+    expect(screen.queryByText("Add a layer to start")).toBeNull();
     expect(screen.getByTestId("navara-viewport")).toBe(viewport);
-    expect(screen.queryByRole("button", { name: "Browse catalog" })).toBeNull();
-    expect(shell().querySelector(".drawer-area")).toBeNull();
-    expect(shell().querySelector(".shell-right")).toBeNull();
-    expect(useSelectionStore.getState().selections).toHaveLength(0);
-    expect(useSceneSheetStore.getState().sheet).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
     expect(screen.getByRole("tab", { name: "File" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
+    fireEvent.click(screen.getByRole("tab", { name: "URL" }));
+    expect(
+      screen.getByRole("textbox", { name: "Source URL" }),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
-
-    fireEvent.click(screen.getByRole("button", { name: "URL" }));
-    expect(screen.getByRole("tab", { name: "URL" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
-
-    fireEvent.click(screen.getByRole("button", { name: "Catalog" }));
-    expect(screen.getByRole("tab", { name: "Catalog" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    expect(screen.queryByRole("dialog", { name: "Add layer" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "+ Add layer" }));
+    expect(
+      screen.getByRole("dialog", { name: "Add layer" }),
+    ).toBeInTheDocument();
+    expect(shell().querySelector(".drawer-area")).toBeNull();
+    expect(useSelectionStore.getState().selections).toHaveLength(0);
   });
+});
+
+it("keeps the same viewport mounted while managing workspaces", async () => {
+  window.history.replaceState(null, "", "/");
+  renderViewer();
+  const viewport = screen.getByTestId("navara-viewport");
+  fireEvent.click(screen.getByRole("button", { name: "Untitled workspace" }));
+  fireEvent.click(screen.getByRole("link", { name: "Manage workspaces" }));
+  expect(
+    await screen.findByRole("heading", { name: "Workspaces" }),
+  ).toBeInTheDocument();
+  expect(screen.getByTestId("navara-viewport")).toBe(viewport);
+  fireEvent.click(screen.getByRole("button", { name: "Back to viewer" }));
+  expect(screen.getByTestId("navara-viewport")).toBe(viewport);
+  cleanup();
 });

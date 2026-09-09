@@ -39,11 +39,22 @@ export function FilterSection({ item }: { readonly item: ActiveLayer }) {
 
   if (applied === null || applied.conditions.length === 0) {
     return (
-      <p className="active-layer-note">
-        {item.kind === "city" && item.layer.isStreaming
-          ? "No filter. Table only — map filtering for streaming layers is not available yet."
-          : "No filter. Filters apply to the map and the table together."}
-      </p>
+      <>
+        <p className="active-layer-note">
+          {item.kind === "city" && item.layer.isStreaming
+            ? "No filter. Table only — map filtering for streaming layers is not available yet."
+            : "No filter. Filters apply to the map and the table together."}
+        </p>
+        <div className="active-layer-actions">
+          <button
+            type="button"
+            className="active-layer-action"
+            onClick={() => useShellStore.getState().openFilter()}
+          >
+            Add filter
+          </button>
+        </div>
+      </>
     );
   }
 
@@ -78,7 +89,7 @@ export function FilterSection({ item }: { readonly item: ActiveLayer }) {
         <button
           type="button"
           className="active-layer-action"
-          onClick={() => useShellStore.getState().openDrawer()}
+          onClick={() => useShellStore.getState().openFilter()}
         >
           Edit in table
         </button>

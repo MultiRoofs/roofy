@@ -531,14 +531,20 @@ describe("RulesEditor — rule rows", () => {
   it("moves a rule up and down, because precedence is first-match-wins", () => {
     render(<RulesEditor model={emptyModel()} layerId="L" />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Move up: Gamma" }));
+    fireEvent.keyDown(
+      screen.getByRole("button", { name: "Drag rule: Gamma" }),
+      { key: "ArrowUp" },
+    );
     expect(readLayer().rules.map((r) => r.name)).toEqual([
       "Alpha",
       "Gamma",
       "Beta",
     ]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Move down: Alpha" }));
+    fireEvent.keyDown(
+      screen.getByRole("button", { name: "Drag rule: Alpha" }),
+      { key: "ArrowDown" },
+    );
     expect(readLayer().rules.map((r) => r.name)).toEqual([
       "Gamma",
       "Alpha",
@@ -603,17 +609,24 @@ describe("RulesEditor — rule rows", () => {
     ]);
   });
 
-  it("disables the first row's Move up and the last row's Move down", () => {
+  it("omits move buttons and keeps keyboard reordering within the list", () => {
     render(<RulesEditor model={emptyModel()} layerId="L" />);
     expect(
-      screen.getByRole("button", { name: "Move up: Alpha" }),
-    ).toHaveProperty("disabled", true);
-    expect(
-      screen.getByRole("button", { name: "Move down: Alpha" }),
-    ).toHaveProperty("disabled", false);
-    expect(
-      screen.getByRole("button", { name: "Move down: Gamma" }),
-    ).toHaveProperty("disabled", true);
+      screen.queryByRole("button", { name: /Move (up|down):/ }),
+    ).toBeNull();
+    fireEvent.keyDown(
+      screen.getByRole("button", { name: "Drag rule: Alpha" }),
+      { key: "ArrowUp" },
+    );
+    fireEvent.keyDown(
+      screen.getByRole("button", { name: "Drag rule: Gamma" }),
+      { key: "ArrowDown" },
+    );
+    expect(readLayer().rules.map((rule) => rule.name)).toEqual([
+      "Alpha",
+      "Beta",
+      "Gamma",
+    ]);
   });
 
   it("disables remaining drag affordances while an edit draft is open", () => {

@@ -47,3 +47,21 @@ describe("AttributesSection", () => {
     expect(rendered).toHaveAttribute("title", value);
   });
 });
+
+it("offers reordering without losing attributes absent from this object", () => {
+  cleanup();
+  let saved: readonly string[] = [];
+  render(
+    <AttributesSection
+      attributes={{ a: 1, c: 3 }}
+      order={["b", "a", "c"]}
+      onOrderChange={(order) => {
+        saved = order;
+      }}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Reorder attributes" }));
+  fireEvent.click(screen.getByRole("button", { name: "Move c up" }));
+  expect(saved).toEqual(["b", "c", "a"]);
+  cleanup();
+});

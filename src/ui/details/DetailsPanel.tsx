@@ -32,7 +32,7 @@ import { useResolvedBuilding } from "./useResolvedSubject";
 import { ruleMatchFor } from "./ruleMatch";
 import { IdentityTrail } from "./IdentityTrail";
 import { SummarySection } from "./SummarySection";
-import { AttributesSection } from "./AttributesSection";
+import { LayerAttributesSection } from "./LayerAttributesSection";
 import { RuleMatchSection } from "./RuleMatchSection";
 import { PartsSection } from "./PartsSection";
 import { GeometrySection } from "./GeometrySection";
@@ -306,7 +306,11 @@ function BuildingDetails({
         <>
           <SummarySection rows={buildingSummary(resolved)} />
           {match !== null && <RuleMatchSection result={match} />}
-          <AttributesSection attributes={resolved.object.attributes} />
+          <LayerAttributesSection
+            layerId={subject.layerId}
+            objectType={resolved.object.objectType}
+            attributes={resolved.object.attributes}
+          />
           <PartsSection
             parts={resolved.parts}
             onSelectSurface={(part, surfaceIndex) => {
@@ -349,7 +353,11 @@ function SurfaceDetails({
             Surface geometry is not resident, so roof metrics are unavailable.
           </p>
         </section>
-        <AttributesSection attributes={subject.owner.attributes} />
+        <LayerAttributesSection
+          layerId={subject.layerId}
+          objectType={subject.owner.objectType}
+          attributes={subject.owner.attributes}
+        />
         <GeometrySection object={subject.owner} geometryAvailable={false} />
       </>
     );
@@ -374,7 +382,11 @@ function SurfaceDetails({
         }
       />
       {match !== null && <RuleMatchSection result={match} />}
-      <AttributesSection attributes={subject.owner.attributes} />
+      <LayerAttributesSection
+        layerId={subject.layerId}
+        objectType={subject.owner.objectType}
+        attributes={subject.owner.attributes}
+      />
       <GeometrySection object={subject.owner} />
     </>
   );

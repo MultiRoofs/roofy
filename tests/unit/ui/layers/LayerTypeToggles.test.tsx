@@ -172,3 +172,20 @@ describe("LayerTypeToggles — streaming layer", () => {
     expect(screen.queryByRole("checkbox")).toBeNull();
   });
 });
+
+it("shows a single type directly in the details panel", () => {
+  const layer = seed(makeLayer({ availableObjectTypes: ["Building"] }));
+  render(<LayerTypeToggles layer={layer} expanded />);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Building" }));
+  expect(hiddenTypesOf("L")).toEqual(["Building"]);
+});
+
+it("describes an empty static layer without promising streaming", () => {
+  render(
+    <LayerTypeToggles
+      layer={makeLayer({ availableObjectTypes: [] })}
+      expanded
+    />,
+  );
+  expect(screen.getByText("No object types in this layer")).toBeTruthy();
+});

@@ -1,3 +1,4 @@
+import { customBasemapOption } from "../features/basemap/customBasemap";
 /**
  * Navara viewport: owns the `ThreeView` lifecycle and exposes the imperative
  * {@link CitySceneHandle} `App.tsx` drives the camera through.
@@ -1245,6 +1246,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     const tilesWanted = useTilesStore((s) => s.enabled);
     /** Which basemap the user picked. */
     const basemapId = useBasemapStore((s) => s.basemapId);
+    const customBasemap = useBasemapStore((s) => s.custom);
     const heatmapSettings = useBasemapStore((s) => s.heatmap);
     /** Photoreal / cartoon / cyber / wireframe. What it MEANS is
      *  `sceneThemePolicy.ts`; this component only applies it. */
@@ -1771,7 +1773,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       // The theme's override wins over the picker while it is in force, and
       // the picker wins again the moment it is not.
       const option = applyHeatmapSettings(
-        basemapById(effectiveBasemapId),
+        (effectiveBasemapId === "custom"
+          ? customBasemapOption(customBasemap)
+          : null) ?? basemapById(effectiveBasemapId),
         heatmapSettings,
       );
       const handles = addBasemap(view, option);
@@ -1782,7 +1786,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         setActiveBasemap(null);
         if (viewRef.current === view) removeBasemap(handles);
       };
-    }, [engineReady, effectiveBasemapId, heatmapSettings]);
+    }, [engineReady, effectiveBasemapId, heatmapSettings, customBasemap]);
 
     // --- The user's geospatial layers (GeoJSON / XYZ raster / 3D Tiles) ---
     //
@@ -1868,6 +1872,15 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       // would tear the pass down and rebuild it (and re-load its 3D textures)
       // per pointer move. The separate effect below pushes it instead.
     }, [engineReady, postProcessingEnabled, cloudsWanted]);
+
+    // Cloud shadows are a separate engine flag from the sun's geometry maps.
+    useEffect(() => {
+      const handle = cloudsHandleRef.current;
+      if (!handle) return;
+      applyToEngine("cloud shadows", () =>
+        handle.update({ clouds: { shadows: sunShadowsEnabled } }),
+      );
+    }, [engineReady, cloudsWanted, postProcessingEnabled, sunShadowsEnabled]);
 
     // Coverage -> the live pass, without rebuilding it.
     useEffect(() => {

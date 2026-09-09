@@ -34,6 +34,8 @@ import {
   type FlyToTarget,
 } from "../../scene/geographicCamera";
 
+import { useSceneSheetStore } from "../../features/sceneSheet/sceneSheetStore";
+
 export interface AddressSearchProps {
   /** Fly the camera to a point. REQUIRED, unlike in the toolbar it came from:
    *  this renders inside the viewport, so there is always an engine — and a
@@ -43,12 +45,36 @@ export interface AddressSearchProps {
 
 export function AddressSearch({ onFlyTo }: AddressSearchProps) {
   const [expanded, setExpanded] = useState(false);
+  const sheet = useSceneSheetStore((state) => state.sheet);
+  const setSheet = useSceneSheetStore((state) => state.setSheet);
+  useEffect(() => {
+    if (sheet !== null) {
+      setExpanded(false);
+      setOpen(false);
+      setActiveIndex(-1);
+    }
+  }, [sheet]);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listboxId = useId();
+  const restoreFocus = useRef(false);
+  useEffect(() => {
+    if (!expanded && restoreFocus.current) {
+      rootRef.current
+        ?.querySelector<HTMLButtonElement>(".address-search-toggle")
+        ?.focus();
+      restoreFocus.current = false;
+    }
+  }, [expanded]);
+  const collapse = () => {
+    restoreFocus.current = true;
+    setExpanded(false);
+    setOpen(false);
+    setActiveIndex(-1);
+  };
 
   const { results, loading, error } = useAddressSearch(query);
 
@@ -100,7 +126,7 @@ export function AddressSearch({ onFlyTo }: AddressSearchProps) {
         // The options are gone, so the highlight (and the
         // aria-activedescendant it drives) must go with them.
         setActiveIndex(-1);
-      } else setExpanded(false);
+      } else collapse();
       return;
     }
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -143,13 +169,14 @@ export function AddressSearch({ onFlyTo }: AddressSearchProps) {
           title="Search for a place"
           aria-label="Search for a place"
           onClick={() => {
+            setSheet(null);
             setExpanded(true);
             setOpen(true);
             // The point of the click was to type.
             requestAnimationFrame(() => inputRef.current?.focus());
           }}
         >
-          <svg viewBox="0 0 24 24">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
             <circle cx="11" cy="11" r="7" />
             <path d="M20 20l-3.5-3.5" />
           </svg>
@@ -203,6 +230,17 @@ export function AddressSearch({ onFlyTo }: AddressSearchProps) {
           ×
         </button>
       )}
+      <button
+        type="button"
+        className="address-search-close"
+        aria-label="Close place search"
+        title="Close place search"
+        onClick={collapse}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m7 7 10 10M17 7 7 17" />
+        </svg>
+      </button>
       {showList && (
         <ul className="address-search-list" id={listboxId} role="listbox">
           {results.map((result, index) => (

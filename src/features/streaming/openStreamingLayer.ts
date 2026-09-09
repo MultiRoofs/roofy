@@ -1,3 +1,5 @@
+import { type TablePresentation } from "../query/tablePresentation";
+import { type AttributeOrders } from "../attributes/attributeOrder";
 /**
  * Opens a `.fcb` source (URL or local `File`/`Blob`) for viewport streaming
  * and registers it with the two stores the UI reads.
@@ -63,6 +65,8 @@ export interface OpenStreamingLayerInput {
    *  then already filtered, rather than fetching what it must immediately
    *  refetch without. */
   readonly hiddenTypes?: ReadonlyArray<string>;
+  readonly attributeOrders?: AttributeOrders;
+  readonly tablePresentation?: TablePresentation;
   /** A restored choice. `undefined` (a fresh open) means "the first texture
    *  theme the stream reports"; `null` means plain colours, deliberately. */
   readonly selectedAppearance?: AppearanceTheme | null;
@@ -122,6 +126,8 @@ export async function openStreamingLayer(
     rules,
     ...colorBy,
     hiddenTypes: input.hiddenTypes ?? [],
+    attributeOrders: input.attributeOrders,
+    tablePresentation: input.tablePresentation,
     isStreaming: true,
     // A streaming layer's model is a stub, so the store cannot pick a load
     // default here; `onAppearanceThemes` below does, once themes are known.

@@ -195,6 +195,17 @@ export function WorkspaceMenu({
             </div>
           )}
 
+          <a
+            className="menu-item"
+            href="/workspaces"
+            onClick={(e) => {
+              e.preventDefault();
+              window.history.pushState(null, "", "/workspaces");
+              window.dispatchEvent(new PopStateEvent("popstate"));
+            }}
+          >
+            Manage workspaces
+          </a>
           <hr className="menu-sep" />
 
           <button

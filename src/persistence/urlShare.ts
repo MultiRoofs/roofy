@@ -1,3 +1,11 @@
+import {
+  normalizeTablePresentation,
+  type TablePresentation,
+} from "../features/query/tablePresentation";
+import {
+  normalizeAttributeOrders,
+  type AttributeOrders,
+} from "../features/attributes/attributeOrder";
 /**
  * URL hash-based share state codec.
  *
@@ -44,6 +52,8 @@ export interface ShareableLayerState {
   readonly singleColor?: string;
   readonly unmatchedColor?: string;
   readonly visible: boolean;
+  readonly attributeOrders?: AttributeOrders;
+  readonly tablePresentation?: TablePresentation;
 }
 
 /**
@@ -57,6 +67,7 @@ export interface ShareableLayerState {
  * the link.
  */
 export interface ShareableViewState {
+  readonly basemap?: import("../features/basemap/basemapStore").BasemapState;
   /**
    * Schema version. Declared explicitly so a hash states which frame its
    * numbers live in rather than leaving that to be inferred from shape:
@@ -104,7 +115,12 @@ function fromBase64Url(b64: string): string {
 export function encodeShareState(state: ShareableViewState): string {
   // The version is stamped here rather than taken from the caller so that
   // every hash this build mints is tagged, whatever the caller passed.
-  const json = JSON.stringify({ ...state, v: SHARE_VERSION });
+  // ASCII JSON escapes preserve Unicode keys while remaining compatible
+  // with existing links whose base64 payload is Latin-1 JSON.
+  const json = JSON.stringify({ ...state, v: SHARE_VERSION }).replace(
+    /[\u0080-\uffff]/g,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
   return SHARE_PREFIX + toBase64Url(json);
 }
 
@@ -216,7 +232,14 @@ export function readShareHash(hash: string): ShareHashResult {
   const layers = Array.isArray(parsed.layers)
     ? parsed.layers.map((l) =>
         l !== null && typeof l === "object"
-          ? { ...l, ...normalizeColorBy(l) }
+          ? {
+              ...l,
+              ...normalizeColorBy(l),
+              attributeOrders: normalizeAttributeOrders(l.attributeOrders),
+              tablePresentation: normalizeTablePresentation(
+                l.tablePresentation,
+              ),
+            }
           : l,
       )
     : [];

@@ -1,3 +1,5 @@
+import { type TablePresentation } from "../query/tablePresentation";
+import { type AttributeOrders } from "../attributes/attributeOrder";
 /**
  * Hook for loading city model files into the layer store.
  *
@@ -61,6 +63,8 @@ export interface LayerOverrides {
   /** Applied at creation, not afterwards: the layer is built (or its first
    *  cell fetched) already filtered. */
   readonly hiddenTypes?: ReadonlyArray<string>;
+  readonly attributeOrders?: AttributeOrders;
+  readonly tablePresentation?: TablePresentation;
   /** Applied at creation; kept only if the file carries that theme. */
   readonly selectedAppearance?: AppearanceTheme | null;
   /**
@@ -337,6 +341,8 @@ export function useLayerFileLoader(
               unmatchedColor: overrides?.unmatchedColor,
               visible: overrides?.visible,
               hiddenTypes: overrides?.hiddenTypes,
+              attributeOrders: overrides?.attributeOrders,
+              tablePresentation: overrides?.tablePresentation,
               selectedAppearance: overrides?.selectedAppearance,
             });
           } else if (encoding === "cityparquet") {
@@ -354,6 +360,8 @@ export function useLayerFileLoader(
               singleColor: overrides?.singleColor,
               unmatchedColor: overrides?.unmatchedColor,
               hiddenTypes: overrides?.hiddenTypes,
+              attributeOrders: overrides?.attributeOrders,
+              tablePresentation: overrides?.tablePresentation,
               selectedAppearance: overrides?.selectedAppearance,
               // The parser produces the model and nothing else — a CityParquet
               // table is not something a cityjson reader can read.
@@ -388,6 +396,8 @@ export function useLayerFileLoader(
               singleColor: overrides?.singleColor,
               unmatchedColor: overrides?.unmatchedColor,
               hiddenTypes: overrides?.hiddenTypes,
+              attributeOrders: overrides?.attributeOrders,
+              tablePresentation: overrides?.tablePresentation,
               selectedAppearance: overrides?.selectedAppearance,
               duckdb: modelTableSource({
                 model: parsed,
@@ -444,6 +454,8 @@ export function useLayerFileLoader(
             singleColor: overrides?.singleColor,
             unmatchedColor: overrides?.unmatchedColor,
             hiddenTypes: overrides?.hiddenTypes,
+            attributeOrders: overrides?.attributeOrders,
+            tablePresentation: overrides?.tablePresentation,
             selectedAppearance: overrides?.selectedAppearance,
             duckdb: { kind: "model", model },
           });
@@ -470,6 +482,8 @@ export function useLayerFileLoader(
               source: { url },
               name: fileNameFromUrl(url),
               modelRef: { type: "url", url },
+              attributeOrders: overrides?.attributeOrders,
+              tablePresentation: overrides?.tablePresentation,
             });
           }
 
@@ -494,6 +508,8 @@ export function useLayerFileLoader(
               name: cityParquetLayerNameFromUrl(url),
               model,
               modelRef: { type: "url", url },
+              attributeOrders: overrides?.attributeOrders,
+              tablePresentation: overrides?.tablePresentation,
               duckdb: { kind: "model", model },
             });
           }
@@ -504,6 +520,8 @@ export function useLayerFileLoader(
             name: fileNameFromUrl(url),
             model: parsed.model,
             modelRef: { type: "url", url },
+            attributeOrders: overrides?.attributeOrders,
+            tablePresentation: overrides?.tablePresentation,
             duckdb: modelTableSource({
               model: parsed.model,
               bytes: parsed.bytes,

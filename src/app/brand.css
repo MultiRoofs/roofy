@@ -41,12 +41,11 @@
   --border: rgba(255, 255, 255, 0.09);
   --border-strong: rgba(255, 255, 255, 0.16);
 
-  /* Type. Outfit ships as a variable font from @fontsource-variable, which
-     registers it as "Outfit Variable"; the bare name is kept second for a
-     host that has the static family installed. */
-  --font-display: "Outfit Variable", Outfit, system-ui, sans-serif;
-  --font-ui: "IBM Plex Sans", system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* One family across headings, controls and data. */
+  --font-ui: "Source Sans 3", system-ui, sans-serif;
+  --font-display: var(--font-ui);
+  --font-mono: var(--font-ui);
+  --font-data: var(--font-ui);
   --tracking-display: -0.03em;
   --tracking-h1: -0.02em;
   --tracking-label: 0.16em;

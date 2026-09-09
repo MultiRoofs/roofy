@@ -169,3 +169,12 @@ describe("LocalStorageProjectStateStore", () => {
     expect(id1).not.toBe(id2);
   });
 });
+
+it("updates a saved workspace in place without adding a duplicate", async () => {
+  localStorage.clear();
+  const store = new LocalStorageProjectStateStore();
+  const id = await store.save(makeSnapshot());
+  await store.update(id, makeSnapshot({ label: "Renamed" }));
+  expect((await store.list()).map((s) => s.label)).toEqual(["Renamed"]);
+  expect((await store.load(id))?.label).toBe("Renamed");
+});

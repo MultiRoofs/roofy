@@ -1,3 +1,5 @@
+import { type TablePresentation } from "../query/tablePresentation";
+import { type AttributeOrders } from "../attributes/attributeOrder";
 /**
  * The ONE door every static city layer goes through.
  *
@@ -42,6 +44,8 @@ export interface AddCityLayerInput {
   readonly singleColor?: string;
   readonly unmatchedColor?: string;
   readonly hiddenTypes?: ReadonlyArray<string>;
+  readonly attributeOrders?: AttributeOrders;
+  readonly tablePresentation?: TablePresentation;
   readonly selectedAppearance?: AppearanceTheme | null;
   /** What DuckDB should build this layer's table from. */
   readonly duckdb: LayerTableSource;
@@ -143,6 +147,8 @@ export function addCityLayer(input: AddCityLayerInput): string {
     singleColor: input.singleColor,
     unmatchedColor: input.unmatchedColor,
     hiddenTypes: input.hiddenTypes,
+    attributeOrders: input.attributeOrders,
+    tablePresentation: input.tablePresentation,
     selectedAppearance: input.selectedAppearance,
   });
   const warn = (error: unknown): void => {

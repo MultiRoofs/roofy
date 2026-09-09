@@ -82,6 +82,12 @@ describe("DataGrid", () => {
     expect(cell.getAttribute("title")).toBe("12.3456");
   });
 
+  it("offers a named sort button before any sorting is applied", () => {
+    const { onSort } = setup();
+    fireEvent.click(screen.getByRole("button", { name: "Sort id ascending" }));
+    expect(onSort).toHaveBeenCalledWith("id");
+  });
+
   it("reports a header click as a sort request", () => {
     const { onSort } = setup();
     fireEvent.click(screen.getByText("object_type"));
@@ -200,8 +206,8 @@ describe("DataGrid actual child rows", () => {
     render(
       <DataGrid
         columns={[
-          { name: "id", type: "VARCHAR", kind: "scalar" },
           { name: "height", type: "DOUBLE", kind: "scalar" },
+          { name: "id", type: "VARCHAR", kind: "scalar" },
         ]}
         rows={[{ id: "root", height: 10 }]}
         sort={null}
@@ -214,6 +220,7 @@ describe("DataGrid actual child rows", () => {
     );
     fireEvent.click(screen.getByLabelText("Toggle parts for root"));
     expect(screen.getByText("22")).toBeTruthy();
+    expect(screen.getByText("22").parentElement?.children).toHaveLength(3);
     fireEvent.click(screen.getByText("↳ child"));
     expect(onRowClick).toHaveBeenCalledWith("child", false);
   });

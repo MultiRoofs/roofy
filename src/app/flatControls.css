@@ -1,0 +1,134 @@
+/* Approved direction A: flat, opaque controls. Visual-only overrides are
+   intentionally authoritative over component chrome; geometry stays local. */
+:root {
+  --control-rest: #252c32;
+  --control-hover: #343d42;
+  --control-selected: #35452c;
+  --control-selected-fg: #dcebcf;
+  --layer-selected: #28332b;
+}
+html[data-theme="light"] {
+  --control-rest: #edf0e8;
+  --control-hover: #e1e6da;
+  --control-selected: #dbe5cf;
+  --control-selected-fg: #304d1d;
+  --layer-selected: #e8ece3;
+}
+body button {
+  border-color: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  background: var(--control-rest) !important;
+  color: var(--fg) !important;
+}
+/* Inline actions and disclosure rows belong to their containing surface. */
+body
+  button:is(
+    .layer-row-eye,
+    .layer-row-menu-btn,
+    .active-layer-section-header,
+    .active-layer-subdisclosure,
+    .legend-collapse,
+    .legend-group-title,
+    .data-sort-button,
+    .rule-drag-handle,
+    .details-close,
+    .details-copy,
+    .map-sheet__close,
+    .modal-close,
+    .address-search-close,
+    .workspace-name-btn,
+    .menu-item
+  ) {
+  background: transparent !important;
+}
+body button:hover:not(:disabled) {
+  background: var(--control-hover) !important;
+}
+body
+  button:is(
+    [aria-pressed="true"],
+    [aria-selected="true"],
+    .is-active,
+    .is-selected,
+    .is-on,
+    .tb-btn-active,
+    .view-mode-btn-active,
+    .scene-theme-option-active
+  ),
+body .table-action-btn[aria-expanded="true"] {
+  background: var(--control-selected) !important;
+  color: var(--control-selected-fg) !important;
+}
+body button:disabled {
+  opacity: 0.45;
+}
+body button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.viewer-shell .left-panel-list {
+  padding-inline: 0;
+}
+.viewer-shell .layer-list {
+  gap: 0;
+}
+.viewer-shell .layer-row {
+  border: 0;
+  border-radius: 0;
+  padding: 0.625rem 0.75rem;
+  background: transparent;
+  box-shadow: none;
+}
+.viewer-shell .layer-row:hover {
+  background: var(--control-rest);
+}
+.viewer-shell .layer-row-active,
+.viewer-shell .layer-row-active:hover {
+  background: var(--layer-selected);
+}
+.viewer-shell
+  :is(
+    .camera-cluster,
+    .select-mode-control,
+    .legend-card,
+    .address-search-open,
+    .address-search-list,
+    .map-sheet,
+    .columns-popover
+  ) {
+  border-radius: 0;
+  background: var(--bg-panel);
+  backdrop-filter: none;
+  box-shadow: none;
+}
+.viewer-shell :is(.camera-cluster, .select-mode-control, .legend-card) {
+  border: 0;
+}
+.viewer-shell .select-mode-segment {
+  background: var(--control-rest);
+  border-radius: 0;
+}
+.viewer-shell .rule-item {
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--bg-panel);
+}
+body
+  :is(
+    input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+    select,
+    textarea
+  ) {
+  border-radius: 0;
+}
+body :is(.modal, .header-popover, .workspace-menu) {
+  border-radius: 0;
+  background: var(--bg-panel);
+}
+
+body button.menu-item-danger {
+  color: var(--danger) !important;
+}

@@ -1,3 +1,4 @@
+import { useState } from "react";
 /**
  * "How is this layer drawn?" — the first of the active layer's three
  * sections, and the one open by default, because it is the question a user
@@ -88,6 +89,11 @@ export function StyleSection({ item }: { readonly item: ActiveLayer }) {
 function CityStyleFields({ layerId }: { readonly layerId: string }) {
   const layer = useLayerStore((s) => s.layers.find((l) => l.id === layerId));
   const updateLayer = useLayerStore((s) => s.updateLayer);
+  const layers = useLayerStore((s) => s.layers);
+  const copyStyle = useLayerStore((s) => s.copyStyle);
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [sourceId, setSourceId] = useState("");
+  const [copied, setCopied] = useState("");
   if (layer === undefined) return null;
 
   // `?? "surface"` for a record that predates the field: the mode that paints
@@ -97,6 +103,58 @@ function CityStyleFields({ layerId }: { readonly layerId: string }) {
 
   return (
     <div className="style-city">
+      <button
+        type="button"
+        className="active-layer-action"
+        aria-expanded={copyOpen}
+        onClick={() => setCopyOpen(!copyOpen)}
+      >
+        Copy from…
+      </button>
+      {copyOpen && (
+        <div className="style-copy-fields">
+          <label>
+            Source layer
+            <select
+              value={sourceId}
+              onChange={(e) => setSourceId(e.target.value)}
+            >
+              <option value="">Choose a layer</option>
+              {layers
+                .filter((l) => l.id !== layerId)
+                .map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <p className="active-layer-note">
+            Replaces this layer’s style and rules. Attributes used by rules must
+            exist in this layer.
+          </p>
+          <button
+            type="button"
+            disabled={
+              !layers.some((l) => l.id === sourceId && l.id !== layerId)
+            }
+            onClick={() => {
+              copyStyle(layerId, sourceId);
+              setCopied(
+                `Style copied from ${layers.find((l) => l.id === sourceId)?.name}`,
+              );
+              setCopyOpen(false);
+            }}
+          >
+            Copy style
+          </button>
+        </div>
+      )}
+      {copied && (
+        <p role="status" className="active-layer-note">
+          {copied}
+        </p>
+      )}
       <label className="style-field">
         <span className="style-field-label">Color by</span>
         <select

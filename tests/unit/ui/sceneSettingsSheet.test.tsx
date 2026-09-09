@@ -18,6 +18,11 @@ describe("SceneSettingsSheet", () => {
     useSceneThemeStore.setState({ theme: "photoreal" });
   });
   afterEach(cleanup);
+  it("names the basemap section once and keeps its picker accessible", () => {
+    render(<SceneSettingsSheet onClose={() => {}} />);
+    expect(screen.getAllByText("Basemap")).toHaveLength(1);
+    expect(screen.getByRole("combobox", { name: "Basemap" })).toBeEnabled();
+  });
   it("updates exposure, shadows and shadow quality", () => {
     render(<SceneSettingsSheet onClose={() => {}} />);
     fireEvent.change(screen.getByRole("slider", { name: "Exposure" }), {
@@ -56,4 +61,20 @@ describe("SceneSettingsSheet", () => {
       DEFAULT_ATMOSPHERE_STATE,
     );
   });
+});
+
+import { act } from "@testing-library/react";
+import { useBasemapStore } from "../../../src/features/basemap/basemapStore";
+it("updates custom map drafts when a different workspace restores its map", () => {
+  useBasemapStore
+    .getState()
+    .setCustom({ title: "First", url: "https://first.test/{z}/{x}/{y}" });
+  render(<SceneSettingsSheet onClose={() => {}} />);
+  act(() =>
+    useBasemapStore
+      .getState()
+      .setCustom({ title: "Second", url: "https://second.test/{z}/{x}/{y}" }),
+  );
+  expect(screen.getByLabelText("Map title")).toHaveValue("Second");
+  cleanup();
 });

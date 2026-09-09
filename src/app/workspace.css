@@ -1,0 +1,622 @@
+/* Map workspace typography and density. */
+body:has(.viewer-shell) {
+  --tracking-label: 0;
+  --tracking-h1: 0;
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
+  --radius-sm: var(--r-sm);
+  --radius: var(--r-md);
+  --radius-lg: var(--r-lg);
+  color-scheme: dark;
+}
+
+html[data-theme="light"] body:has(.viewer-shell) {
+  color-scheme: light;
+}
+
+.viewer-shell {
+  font: 0.75rem/1.5 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+.viewer-shell :is(button, input, select, textarea),
+body:has(.viewer-shell) :is(.modal, .toast, .unavailable-layers) {
+  font-family: var(--font-ui);
+}
+
+.viewer-shell .roofy-lockup {
+  font-family: var(--font-ui);
+}
+
+.viewer-shell
+  :is(
+    .left-panel-title,
+    .active-layer-section-title,
+    .details-section-title,
+    .details-header-title,
+    .attr-section-title,
+    .rule-target-label,
+    .rule-more-summary,
+    .legend-title,
+    .legend-group-title,
+    .table-panel-title
+  ) {
+  font-family: var(--font-ui);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--fg);
+}
+
+.viewer-shell .left-panel-head {
+  padding: 1rem 0.75rem 0.625rem;
+}
+
+.viewer-shell .left-panel-list {
+  padding: 0 0.75rem 1rem;
+}
+
+.viewer-shell .left-panel-title {
+  text-transform: capitalize;
+}
+
+.viewer-shell .left-panel-add,
+.viewer-shell .active-layer-action {
+  min-height: 1.75rem;
+  padding: 0.3125rem 0.5rem;
+  font-size: 0.6875rem;
+}
+
+.viewer-shell .layer-row {
+  gap: 0.375rem;
+  padding: 0.375rem;
+}
+
+.viewer-shell .active-layer {
+  padding: 1rem 0.75rem;
+  gap: 1rem;
+}
+
+.viewer-shell .active-layer-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: normal;
+}
+
+.viewer-shell .active-layer-head {
+  gap: 0.375rem;
+}
+
+.viewer-shell .active-layer-actions {
+  gap: 0.375rem;
+  margin-top: 0.25rem;
+}
+
+.viewer-shell .active-layer-section-header {
+  padding: 0.75rem 0;
+  gap: 0.5rem;
+}
+
+.viewer-shell .active-layer-section-body {
+  padding: 0 0 1rem;
+}
+
+.viewer-shell .preset-chip {
+  border-radius: var(--radius-sm);
+  min-height: 1.75rem;
+}
+
+.viewer-shell .details-panel {
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+}
+
+.viewer-shell .details-header {
+  padding: 0.875rem 0.75rem;
+  gap: 0.5rem;
+}
+
+.viewer-shell .details-body {
+  padding: 1rem 0.875rem;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.viewer-shell .details-section {
+  margin: 0;
+}
+
+.viewer-shell .details-section + .details-section {
+  margin-top: 1.5rem;
+}
+
+.viewer-shell .details-section-title {
+  margin: 0 0 0.625rem;
+}
+
+.viewer-shell .identity-crumb {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.viewer-shell .identity-id {
+  color: var(--fg-muted);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+}
+
+.viewer-shell :is(.details-copy, .details-close) {
+  min-height: 1.5rem;
+  padding: 0.25rem;
+  border-radius: var(--radius-sm);
+}
+
+.viewer-shell :is(.details-copy, .details-close):hover {
+  background: var(--bg-raised);
+}
+
+.viewer-shell .details-panel .attr-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: 0.75rem;
+  padding: 0.3125rem 0;
+}
+
+.viewer-shell .details-panel :is(.attr-key, .attr-value, .attr-value-link) {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.viewer-shell .details-placeholder {
+  color: var(--fg-muted);
+}
+
+.viewer-shell .legend-group-name {
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+/* A map can be narrow even on a large monitor after both panels open. */
+.map-column > .map-area {
+  container-type: inline-size;
+}
+
+@container (max-width: 560px) {
+  .viewer-shell .scene-buttons__label {
+    display: none;
+  }
+
+  .viewer-shell .legend-overlay {
+    max-width: calc(100% - 4.75rem);
+  }
+
+  .viewer-shell .legend-overlay .legend-card {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .viewer-shell .legend-item > span:first-of-type {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .viewer-shell .scene-buttons {
+    --camera-cluster-clearance: 18rem;
+  }
+}
+
+/* Workspace title size selected in live mode. */
+.viewer-shell .workspace-name-btn {
+  font-family: var(--font-ui);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+/* Selection and search share one compact row. Search results open below it. */
+.viewer-shell .viewport-tools {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 100px;
+  z-index: 4;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+.viewer-shell .viewport-tools > * {
+  pointer-events: auto;
+}
+.viewer-shell .viewport-tools .select-mode-control {
+  position: static;
+  flex-shrink: 0;
+}
+.viewer-shell .viewport-tools .address-search {
+  position: relative;
+  top: auto;
+  left: auto;
+  min-width: 32px;
+}
+.viewer-shell .viewport-tools .address-search-open {
+  flex: 1;
+  max-width: 280px;
+}
+@container (min-width: 561px) {
+  .viewer-shell .viewport-tools {
+    right: 260px;
+  }
+}
+.viewer-shell .select-mode-control {
+  top: 12px;
+  left: 12px;
+  height: 32px;
+  box-sizing: border-box;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+.viewer-shell .select-mode-segment {
+  padding: 0;
+}
+.viewer-shell .select-mode-segment button {
+  padding: 4px 7px;
+}
+.viewer-shell .address-search {
+  top: 52px;
+  left: 12px;
+  max-width: calc(100% - 24px);
+}
+.viewer-shell .address-search-toggle {
+  width: 32px;
+  height: 32px;
+  font: 500 12px/1.25 var(--font-ui);
+  background: var(--bg-panel);
+  color: var(--fg);
+  border-color: var(--border-strong);
+}
+.viewer-shell .address-search-open {
+  box-sizing: border-box;
+  width: 280px;
+  height: 32px;
+  gap: 6px;
+  padding: 0 4px 0 8px;
+  background: var(--bg-panel);
+  border-color: var(--border-strong);
+  box-shadow: none;
+}
+.viewer-shell .address-search-input {
+  flex: 1;
+  min-width: 0;
+  width: 0;
+  height: 100%;
+  padding: 0;
+}
+.viewer-shell .address-search-input::placeholder {
+  color: var(--fg-muted);
+}
+.viewer-shell .address-search-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.viewer-shell .address-search-close svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+.viewer-shell :is(.address-search-close, .address-search-toggle):hover {
+  background: var(--bg-raised);
+  color: var(--fg);
+}
+.viewer-shell .address-search-open:focus-within {
+  border-color: var(--accent);
+}
+.viewer-shell .address-search-list {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  max-height: min(320px, 45vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.viewer-shell .address-search-option {
+  overflow-wrap: anywhere;
+}
+
+.viewer-shell .address-search-toggle {
+  background: color-mix(in srgb, var(--accent) 13%, var(--bg-panel));
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+/* Header sorting and the Columns list share the table's compact controls. */
+.viewer-shell .data-sort-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.viewer-shell .data-sort-button svg,
+.viewer-shell .column-picker-row svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.viewer-shell .table-panel {
+  position: relative;
+}
+.viewer-shell .columns-popover {
+  position: absolute;
+  top: 36px;
+  right: 8px;
+  z-index: 5;
+  width: min(320px, calc(100% - 32px));
+  box-sizing: border-box;
+  max-height: calc(100% - 48px);
+  max-width: 360px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.viewer-shell .column-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+}
+.viewer-shell .column-picker-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.viewer-shell .column-picker-row button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--fg);
+  cursor: pointer;
+}
+.viewer-shell .column-picker-row button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.viewer-shell .attribute-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.viewer-shell .attribute-section-heading .details-section-title {
+  margin: 0;
+}
+.viewer-shell .attribute-order-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.viewer-shell .attribute-order-row > .attr-row {
+  flex: 1;
+  min-width: 0;
+}
+.viewer-shell .attribute-order-actions {
+  display: flex;
+  gap: 2px;
+}
+.viewer-shell .attribute-order-actions button {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--fg);
+  cursor: pointer;
+}
+.viewer-shell .attribute-order-actions button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.viewer-shell .attribute-order-actions svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Keep record information separate from actions. */
+.viewer-shell .table-panel-header {
+  padding: 8px 12px;
+  gap: 12px;
+  background: var(--bg-panel);
+}
+.viewer-shell .table-panel-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+  font-weight: 600;
+}
+.viewer-shell .table-panel-header .table-sync-label {
+  margin-left: auto;
+}
+.viewer-shell .table-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-toolbar);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.viewer-shell .table-panel-actions .table-action-btn,
+.viewer-shell .columns-popover .table-action-btn {
+  padding: 4px 10px;
+  min-height: 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: 0;
+  background: var(--bg-panel);
+  color: var(--fg);
+  font: 500 12px/1.25 var(--font-ui);
+}
+.viewer-shell .table-panel-actions .table-action-btn[aria-expanded="true"] {
+  background: var(--bg-raised);
+  border-color: var(--fg-muted);
+}
+.viewer-shell .columns-popover {
+  top: 72px;
+  right: 12px;
+  width: min(360px, calc(100% - 24px));
+  max-height: calc(100% - 84px);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-color: var(--border-strong);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 16%);
+}
+.viewer-shell .columns-panel-heading,
+.viewer-shell .columns-panel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  flex-shrink: 0;
+}
+.viewer-shell .columns-panel-heading {
+  border-bottom: 1px solid var(--border);
+}
+.viewer-shell .columns-popover > .details-search {
+  margin: 8px 12px;
+  width: calc(100% - 24px);
+  flex-shrink: 0;
+}
+.viewer-shell .columns-panel-list {
+  overflow: auto;
+  min-height: 0;
+  padding: 0 12px 8px;
+}
+.viewer-shell .columns-panel-list h4 {
+  margin: 12px 0 6px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+.viewer-shell .column-picker-row {
+  min-height: 32px;
+  border-bottom: 1px solid var(--border);
+}
+.viewer-shell .column-move-controls {
+  display: flex;
+  gap: 2px;
+}
+.viewer-shell .columns-panel-footer {
+  border-top: 1px solid var(--border);
+}
+.viewer-shell .columns-panel-footer span {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+/* Native top-layer popup can extend above even the shortest drawer. */
+.viewer-shell .columns-popover.columns-floating {
+  position: fixed;
+  margin: 0;
+  inset: auto;
+  max-height: none;
+  max-width: none;
+  height: 420px;
+}
+.viewer-shell .columns-popover[popover]::backdrop {
+  background: transparent;
+}
+
+.viewer-shell .legend-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.viewer-shell .legend-header .legend-title {
+  margin: 0;
+}
+.viewer-shell .legend-header + div:not([hidden]) {
+  margin-top: 6px;
+}
+.viewer-shell .legend-collapse {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.viewer-shell .legend-collapse:hover {
+  color: var(--fg);
+  background: var(--bg-raised);
+}
+.viewer-shell .legend-collapse:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.viewer-shell .legend-collapse svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

@@ -63,6 +63,7 @@ export function captureColorBy(layer: ColorByLayerFields): {
 }
 
 export interface CaptureInput {
+  readonly basemap?: import("../features/basemap/basemapStore").BasemapState;
   readonly label: string;
   readonly layers: ReadonlyArray<LayerSnapshot>;
   /** The geospatial layers, already stripped of anything unpersistable by
@@ -94,6 +95,7 @@ export interface CaptureInput {
 export function captureSnapshot(input: CaptureInput): ProjectSnapshot {
   const viewState: ViewState = {
     camera: input.camera,
+    ...(input.basemap ? { basemap: input.basemap } : {}),
     datetime: input.datetime.toISOString(),
     ...(input.timeZone !== undefined ? { timeZone: input.timeZone } : {}),
     // Absent for the default mode: an optional field means "the default", so

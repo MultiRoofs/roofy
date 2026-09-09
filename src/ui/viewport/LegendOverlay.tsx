@@ -19,7 +19,7 @@
  * the rows grow to 14px — the legend is then the only chrome left and reads
  * from across a room.
  */
-import { useMemo, useState } from "react";
+import { useMemo, useState, useId } from "react";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
 import { getResidentModel } from "../../features/streaming/residentModel";
@@ -42,6 +42,7 @@ export function LegendOverlay() {
   );
   const streams = useStreamStore((state) => state.streams);
   const [visible, setVisible] = useState(true);
+  const contentId = useId();
   const cyber = useSceneThemeStore((s) => s.theme === "cyber");
   const geoVisibleIds = useGeoFeatureVisibilityStore((s) => s.visible);
   const geoDocuments = useMemo(
@@ -86,9 +87,24 @@ export function LegendOverlay() {
         presentation ? "legend-overlay legend-presentation" : "legend-overlay"
       }
     >
-      {visible && (
-        <div className="legend-card">
+      <div className="legend-card">
+        <div className="legend-header">
           <div className="legend-title">Legend</div>
+          <button
+            type="button"
+            className="legend-collapse"
+            onClick={() => setVisible((value) => !value)}
+            aria-label={visible ? "Collapse legend" : "Expand legend"}
+            title={visible ? "Collapse legend" : "Expand legend"}
+            aria-expanded={visible}
+            aria-controls={contentId}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d={visible ? "m4 6 4 4 4-4" : "m4 10 4-4 4 4"} />
+            </svg>
+          </button>
+        </div>
+        <div id={contentId} hidden={!visible}>
           {cyber && (
             <p className="legend-warning">
               Cyber presentation overrides layer colours.
@@ -136,25 +152,7 @@ export function LegendOverlay() {
             </div>
           ))}
         </div>
-      )}
-      <button
-        className="legend-toggle"
-        onClick={() => setVisible((v) => !v)}
-        title={visible ? "Hide legend" : "Show legend"}
-        aria-label={visible ? "Hide legend" : "Show legend"}
-      >
-        <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden>
-          <path
-            d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-        <span>{visible ? "Hide legend" : "Show legend"}</span>
-      </button>
+      </div>
     </div>
   );
 }

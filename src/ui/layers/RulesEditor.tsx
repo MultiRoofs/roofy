@@ -503,7 +503,8 @@ function RuleRow({
           type="button"
           className="rule-drag-handle"
           aria-label={`Drag rule: ${rule.name}`}
-          title="Drag to change precedence"
+          title="Drag to change precedence, or use the Up and Down arrow keys"
+          aria-keyshortcuts="ArrowUp ArrowDown"
           draggable={!dragDisabled}
           disabled={dragDisabled}
           onDragStart={(event) => {
@@ -513,6 +514,12 @@ function RuleRow({
           onDragEnd={onDragEnd}
           onKeyDown={(event) => {
             if (event.key === "Escape") onDragCancel();
+            if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+              event.preventDefault();
+              if (dragDisabled) return;
+              if (event.key === "ArrowUp" && !isFirst) onMoveUp();
+              if (event.key === "ArrowDown" && !isLast) onMoveDown();
+            }
           }}
         >
           <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
@@ -546,24 +553,6 @@ function RuleRow({
       {/* Every accessible name STARTS with the button's own words, so the
           visible label is a prefix of what a screen reader announces. */}
       <div className="rule-actions">
-        <button
-          type="button"
-          className="rule-action-btn"
-          aria-label={`Move up: ${rule.name}`}
-          disabled={isFirst}
-          onClick={onMoveUp}
-        >
-          Move up
-        </button>
-        <button
-          type="button"
-          className="rule-action-btn"
-          aria-label={`Move down: ${rule.name}`}
-          disabled={isLast}
-          onClick={onMoveDown}
-        >
-          Move down
-        </button>
         <button
           type="button"
           className="rule-action-btn"

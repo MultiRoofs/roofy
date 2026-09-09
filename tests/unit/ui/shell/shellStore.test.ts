@@ -19,6 +19,7 @@ describe("defaultShellState (pure)", () => {
       drawerOpen: false,
       drawerHeight: 280,
       drawerExpanded: false,
+      filterRequest: 0,
       openSections: {},
       requestedSection: null,
     });

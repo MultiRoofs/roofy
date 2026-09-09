@@ -52,6 +52,8 @@ import { useLayerStore } from "../../features/layers/layerStore";
 import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
 
 export interface LeftPanelProps {
+  readonly onRequestAdd?: () => void;
+  readonly addDialogOpen?: boolean;
   /** The file and the format the user confirmed it is — see
    *  {@link AddLayerDialog}; the second argument is the loader's encoding
    *  override, and it is threaded rather than re-derived so what the user saw
@@ -81,6 +83,8 @@ export interface LeftPanelProps {
 const NO_ROWS: ReadonlyArray<never> = [];
 
 export function LeftPanel({
+  onRequestAdd,
+  addDialogOpen,
   onAddFile,
   onAddFiles,
   onAddUrl,
@@ -121,8 +125,8 @@ export function LeftPanel({
           type="button"
           className="left-panel-add"
           aria-haspopup="dialog"
-          aria-expanded={addOpen}
-          onClick={() => setAddOpen(true)}
+          aria-expanded={addDialogOpen ?? addOpen}
+          onClick={() => (onRequestAdd ? onRequestAdd() : setAddOpen(true))}
         >
           + Add layer
         </button>

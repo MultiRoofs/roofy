@@ -1,3 +1,4 @@
+import { normalizeTablePresentation } from "./tablePresentation";
 /**
  * One {@link LayerQuery} per layer, session only.
  *
@@ -21,6 +22,8 @@ export interface QueryStoreState {
 }
 
 export interface QueryStoreActions {
+  restorePresentation: (layerId: string, value: unknown) => void;
+  setDrawerTab: (layerId: string, tab: "records" | "summary") => void;
   setFilter: (layerId: string, filter: FilterGroup) => void;
   /** Draft -> applied, page back to 0. An EMPTY draft applies `null`, so
    *  "Apply" on a cleared bar means "no filter" rather than "a filter that
@@ -67,6 +70,15 @@ function patch(
 
 export const useQueryStore = create<QueryStore>((set) => ({
   queries: {},
+  restorePresentation: (layerId, value) => {
+    const presentation = normalizeTablePresentation(value);
+    if (presentation)
+      set((s) =>
+        patch(s, layerId, () => ({ ...DEFAULT_LAYER_QUERY, ...presentation })),
+      );
+  },
+  setDrawerTab: (layerId, drawerTab) =>
+    set((s) => patch(s, layerId, (q) => ({ ...q, drawerTab }))),
 
   setFilter: (layerId, filter) =>
     set((s) => patch(s, layerId, (q) => ({ ...q, filter }))),

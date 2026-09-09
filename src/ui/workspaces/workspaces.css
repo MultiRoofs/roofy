@@ -1,0 +1,90 @@
+.workspaces-page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 48px 24px;
+  color: var(--fg);
+  font: 14px/1.5 var(--font-ui);
+}
+.workspaces-page header,
+.workspaces-page form,
+.workspaces-list li,
+.workspaces-list nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.workspaces-page header {
+  justify-content: space-between;
+  margin-bottom: 32px;
+}
+.workspaces-page h1 {
+  font-size: 28px;
+  margin: 0;
+}
+.workspaces-page p,
+.workspaces-page time {
+  color: var(--fg-muted);
+}
+.workspaces-page label {
+  display: grid;
+  gap: 6px;
+}
+.workspaces-page input {
+  padding: 8px;
+  background: var(--bg-panel);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+}
+.workspaces-page button {
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.workspaces-page > form {
+  align-items: end;
+  margin-bottom: 32px;
+}
+.workspaces-list {
+  list-style: none;
+  padding: 0;
+}
+.workspaces-list li {
+  padding: 20px 0;
+  border-top: 1px solid var(--border);
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.workspaces-list time {
+  display: block;
+  font-size: 12px;
+}
+.custom-basemap-fields {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+.custom-basemap-fields label {
+  display: grid;
+  gap: 4px;
+}
+.viewer-route-inactive {
+  position: fixed;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.style-copy-fields {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.style-copy-fields label {
+  display: grid;
+  gap: 4px;
+}
+.style-copy-fields select {
+  width: 100%;
+  min-width: 0;
+}
+body:has(.workspaces-page) {
+  background: var(--bg-root);
+}

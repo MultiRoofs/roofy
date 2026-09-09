@@ -1,161 +1,540 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-05T14:49:02.046Z",
+  "generatedAt": "2026-09-09T11:40:14.254806+00:00",
   "title": "Design System: Roofy",
   "extensions": {
     "colorMeta": {
-      "meadow-lime": {
+      "brand-primary": {
         "role": "primary",
         "displayName": "Meadow Lime",
-        "canonical": "#a7e32b",
-        "tonalRamp": ["#4a7a0f", "#7cb518", "#a7e32b", "#cdf176", "#edfbc8"],
-        "lightTheme": "#7cb518"
+        "tonalRamp": [
+          "oklch(15.00% 0.2063 127.13)",
+          "oklch(26.43% 0.2063 127.13)",
+          "oklch(37.86% 0.2063 127.13)",
+          "oklch(49.29% 0.2063 127.13)",
+          "oklch(60.71% 0.2063 127.13)",
+          "oklch(72.14% 0.2063 127.13)",
+          "oklch(83.57% 0.2063 127.13)",
+          "oklch(95.00% 0.2063 127.13)"
+        ]
       },
-      "noon-amber": {
+      "brand-secondary": {
         "role": "secondary",
         "displayName": "Noon Amber",
-        "canonical": "#ffc530",
         "tonalRamp": [
-          "#4d3700",
-          "#805c00",
-          "#b38000",
-          "#e6a500",
-          "#ffbf1a",
-          "#ffcd4d",
-          "#ffe08f",
-          "#fff4d6"
-        ],
-        "lightTheme": "#f0a800"
+          "oklch(15.00% 0.1632 85.23)",
+          "oklch(26.43% 0.1632 85.23)",
+          "oklch(37.86% 0.1632 85.23)",
+          "oklch(49.29% 0.1632 85.23)",
+          "oklch(60.71% 0.1632 85.23)",
+          "oklch(72.14% 0.1632 85.23)",
+          "oklch(83.57% 0.1632 85.23)",
+          "oklch(95.00% 0.1632 85.23)"
+        ]
       },
-      "terracotta": {
+      "brand-accent": {
         "role": "secondary",
         "displayName": "Terracotta",
-        "canonical": "#f2683c",
         "tonalRamp": [
-          "#481505",
-          "#782308",
-          "#a7310b",
-          "#d73f0e",
-          "#f15828",
-          "#f47d58",
-          "#f8ae96",
-          "#fce1d9"
-        ],
-        "lightTheme": "#d9481c"
+          "oklch(15.00% 0.1801 37.86)",
+          "oklch(26.43% 0.1801 37.86)",
+          "oklch(37.86% 0.1801 37.86)",
+          "oklch(49.29% 0.1801 37.86)",
+          "oklch(60.71% 0.1801 37.86)",
+          "oklch(72.14% 0.1801 37.86)",
+          "oklch(83.57% 0.1801 37.86)",
+          "oklch(95.00% 0.1801 37.86)"
+        ]
       },
-      "canal-blue": {
+      "brand-tertiary": {
         "role": "tertiary",
         "displayName": "Canal Blue",
-        "canonical": "#3b82f6",
         "tonalRamp": [
-          "#031e49",
-          "#06327a",
-          "#0846ab",
-          "#0a5adb",
-          "#2473f5",
-          "#5492f7",
-          "#94bbfa",
-          "#d8e6fd"
-        ],
-        "lightTheme": "#1e5fd8"
-      },
-      "unassigned-grey": {
-        "role": "neutral",
-        "displayName": "Unassigned Grey",
-        "canonical": "#8b93a3",
-        "tonalRamp": [
-          "#22252b",
-          "#383d47",
-          "#4f5664",
-          "#666e80",
-          "#7f8899",
-          "#9ba2b0",
-          "#c0c5cd",
-          "#e8eaed"
+          "oklch(15.00% 0.1880 259.81)",
+          "oklch(26.43% 0.1880 259.81)",
+          "oklch(37.86% 0.1880 259.81)",
+          "oklch(49.29% 0.1880 259.81)",
+          "oklch(60.71% 0.1880 259.81)",
+          "oklch(72.14% 0.1880 259.81)",
+          "oklch(83.57% 0.1880 259.81)",
+          "oklch(95.00% 0.1880 259.81)"
         ]
       },
-      "night-root": {
+      "lime-100": {
         "role": "neutral",
-        "displayName": "Night Root",
-        "canonical": "#0b0e13",
+        "displayName": "Lime 100",
         "tonalRamp": [
-          "#080a0e",
-          "#0b0e13",
-          "#10141c",
-          "#12161e",
-          "#161b24",
-          "#1d222c"
+          "oklch(15.00% 0.0678 120.15)",
+          "oklch(26.43% 0.0678 120.15)",
+          "oklch(37.86% 0.0678 120.15)",
+          "oklch(49.29% 0.0678 120.15)",
+          "oklch(60.71% 0.0678 120.15)",
+          "oklch(72.14% 0.0678 120.15)",
+          "oklch(83.57% 0.0678 120.15)",
+          "oklch(95.00% 0.0678 120.15)"
         ]
       },
-      "night-panel": {
+      "lime-300": {
         "role": "neutral",
-        "displayName": "Night Panel",
-        "canonical": "#12161e",
+        "displayName": "Lime 300",
         "tonalRamp": [
-          "#1d2330",
-          "#303a50",
-          "#435270",
-          "#56698f",
-          "#7083a9",
-          "#8f9ebc",
-          "#b9c2d5",
-          "#e6e9f0"
+          "oklch(15.00% 0.1552 123.01)",
+          "oklch(26.43% 0.1552 123.01)",
+          "oklch(37.86% 0.1552 123.01)",
+          "oklch(49.29% 0.1552 123.01)",
+          "oklch(60.71% 0.1552 123.01)",
+          "oklch(72.14% 0.1552 123.01)",
+          "oklch(83.57% 0.1552 123.01)",
+          "oklch(95.00% 0.1552 123.01)"
         ]
       },
-      "paper-ink": {
+      "lime-500": {
         "role": "neutral",
-        "displayName": "Paper Ink",
-        "canonical": "#f2f4ef",
-        "tonalRamp": ["#5a6270", "#8a93a0", "#a3abb7", "#f2f4ef"]
-      },
-      "paper-root": {
-        "role": "neutral",
-        "displayName": "Paper Root",
-        "canonical": "#f6f7f2",
+        "displayName": "Lime 500",
         "tonalRamp": [
-          "#e9ebe4",
-          "#edefe7",
-          "#f3f4ee",
-          "#f6f7f2",
-          "#fbfcf8",
-          "#ffffff"
+          "oklch(15.00% 0.2063 127.13)",
+          "oklch(26.43% 0.2063 127.13)",
+          "oklch(37.86% 0.2063 127.13)",
+          "oklch(49.29% 0.2063 127.13)",
+          "oklch(60.71% 0.2063 127.13)",
+          "oklch(72.14% 0.2063 127.13)",
+          "oklch(83.57% 0.2063 127.13)",
+          "oklch(95.00% 0.2063 127.13)"
         ]
       },
-      "night-ink": {
+      "lime-700": {
         "role": "neutral",
-        "displayName": "Night Ink",
-        "canonical": "#14181e",
-        "tonalRamp": ["#14181e", "#4f5661", "#5c636e", "#8b93a3"]
+        "displayName": "Lime 700",
+        "tonalRamp": [
+          "oklch(15.00% 0.1815 129.18)",
+          "oklch(26.43% 0.1815 129.18)",
+          "oklch(37.86% 0.1815 129.18)",
+          "oklch(49.29% 0.1815 129.18)",
+          "oklch(60.71% 0.1815 129.18)",
+          "oklch(72.14% 0.1815 129.18)",
+          "oklch(83.57% 0.1815 129.18)",
+          "oklch(95.00% 0.1815 129.18)"
+        ]
+      },
+      "lime-900": {
+        "role": "neutral",
+        "displayName": "Lime 900",
+        "tonalRamp": [
+          "oklch(15.00% 0.1397 132.16)",
+          "oklch(26.43% 0.1397 132.16)",
+          "oklch(37.86% 0.1397 132.16)",
+          "oklch(49.29% 0.1397 132.16)",
+          "oklch(60.71% 0.1397 132.16)",
+          "oklch(72.14% 0.1397 132.16)",
+          "oklch(83.57% 0.1397 132.16)",
+          "oklch(95.00% 0.1397 132.16)"
+        ]
+      },
+      "layer-unassigned": {
+        "role": "neutral",
+        "displayName": "Layer Unassigned",
+        "tonalRamp": [
+          "oklch(15.00% 0.0255 264.39)",
+          "oklch(26.43% 0.0255 264.39)",
+          "oklch(37.86% 0.0255 264.39)",
+          "oklch(49.29% 0.0255 264.39)",
+          "oklch(60.71% 0.0255 264.39)",
+          "oklch(72.14% 0.0255 264.39)",
+          "oklch(83.57% 0.0255 264.39)",
+          "oklch(95.00% 0.0255 264.39)"
+        ]
+      },
+      "bg-root": {
+        "role": "neutral",
+        "displayName": "Bg Root",
+        "tonalRamp": [
+          "oklch(15.00% 0.0117 260.61)",
+          "oklch(26.43% 0.0117 260.61)",
+          "oklch(37.86% 0.0117 260.61)",
+          "oklch(49.29% 0.0117 260.61)",
+          "oklch(60.71% 0.0117 260.61)",
+          "oklch(72.14% 0.0117 260.61)",
+          "oklch(83.57% 0.0117 260.61)",
+          "oklch(95.00% 0.0117 260.61)"
+        ]
+      },
+      "bg-panel": {
+        "role": "neutral",
+        "displayName": "Bg Panel",
+        "tonalRamp": [
+          "oklch(15.00% 0.0173 264.07)",
+          "oklch(26.43% 0.0173 264.07)",
+          "oklch(37.86% 0.0173 264.07)",
+          "oklch(49.29% 0.0173 264.07)",
+          "oklch(60.71% 0.0173 264.07)",
+          "oklch(72.14% 0.0173 264.07)",
+          "oklch(83.57% 0.0173 264.07)",
+          "oklch(95.00% 0.0173 264.07)"
+        ]
+      },
+      "bg-raised": {
+        "role": "neutral",
+        "displayName": "Bg Raised",
+        "tonalRamp": [
+          "oklch(15.00% 0.0204 264.11)",
+          "oklch(26.43% 0.0204 264.11)",
+          "oklch(37.86% 0.0204 264.11)",
+          "oklch(49.29% 0.0204 264.11)",
+          "oklch(60.71% 0.0204 264.11)",
+          "oklch(72.14% 0.0204 264.11)",
+          "oklch(83.57% 0.0204 264.11)",
+          "oklch(95.00% 0.0204 264.11)"
+        ]
+      },
+      "fg": {
+        "role": "neutral",
+        "displayName": "Fg",
+        "tonalRamp": [
+          "oklch(15.00% 0.0069 124.45)",
+          "oklch(26.43% 0.0069 124.45)",
+          "oklch(37.86% 0.0069 124.45)",
+          "oklch(49.29% 0.0069 124.45)",
+          "oklch(60.71% 0.0069 124.45)",
+          "oklch(72.14% 0.0069 124.45)",
+          "oklch(83.57% 0.0069 124.45)",
+          "oklch(95.00% 0.0069 124.45)"
+        ]
+      },
+      "fg-muted": {
+        "role": "neutral",
+        "displayName": "Fg Muted",
+        "tonalRamp": [
+          "oklch(15.00% 0.0220 257.49)",
+          "oklch(26.43% 0.0220 257.49)",
+          "oklch(37.86% 0.0220 257.49)",
+          "oklch(49.29% 0.0220 257.49)",
+          "oklch(60.71% 0.0220 257.49)",
+          "oklch(72.14% 0.0220 257.49)",
+          "oklch(83.57% 0.0220 257.49)",
+          "oklch(95.00% 0.0220 257.49)"
+        ]
+      },
+      "fg-dim": {
+        "role": "neutral",
+        "displayName": "Fg Dim",
+        "tonalRamp": [
+          "oklch(15.00% 0.0245 261.69)",
+          "oklch(26.43% 0.0245 261.69)",
+          "oklch(37.86% 0.0245 261.69)",
+          "oklch(49.29% 0.0245 261.69)",
+          "oklch(60.71% 0.0245 261.69)",
+          "oklch(72.14% 0.0245 261.69)",
+          "oklch(83.57% 0.0245 261.69)",
+          "oklch(95.00% 0.0245 261.69)"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Border"
+      },
+      "border-strong": {
+        "role": "neutral",
+        "displayName": "Border Strong"
+      },
+      "light-brand-primary": {
+        "role": "neutral",
+        "displayName": "Light Brand Primary",
+        "tonalRamp": [
+          "oklch(15.00% 0.1815 129.18)",
+          "oklch(26.43% 0.1815 129.18)",
+          "oklch(37.86% 0.1815 129.18)",
+          "oklch(49.29% 0.1815 129.18)",
+          "oklch(60.71% 0.1815 129.18)",
+          "oklch(72.14% 0.1815 129.18)",
+          "oklch(83.57% 0.1815 129.18)",
+          "oklch(95.00% 0.1815 129.18)"
+        ]
+      },
+      "light-brand-secondary": {
+        "role": "neutral",
+        "displayName": "Light Brand Secondary",
+        "tonalRamp": [
+          "oklch(15.00% 0.1629 77.82)",
+          "oklch(26.43% 0.1629 77.82)",
+          "oklch(37.86% 0.1629 77.82)",
+          "oklch(49.29% 0.1629 77.82)",
+          "oklch(60.71% 0.1629 77.82)",
+          "oklch(72.14% 0.1629 77.82)",
+          "oklch(83.57% 0.1629 77.82)",
+          "oklch(95.00% 0.1629 77.82)"
+        ]
+      },
+      "light-brand-tertiary": {
+        "role": "neutral",
+        "displayName": "Light Brand Tertiary",
+        "tonalRamp": [
+          "oklch(15.00% 0.1971 261.49)",
+          "oklch(26.43% 0.1971 261.49)",
+          "oklch(37.86% 0.1971 261.49)",
+          "oklch(49.29% 0.1971 261.49)",
+          "oklch(60.71% 0.1971 261.49)",
+          "oklch(72.14% 0.1971 261.49)",
+          "oklch(83.57% 0.1971 261.49)",
+          "oklch(95.00% 0.1971 261.49)"
+        ]
+      },
+      "light-brand-accent": {
+        "role": "neutral",
+        "displayName": "Light Brand Accent",
+        "tonalRamp": [
+          "oklch(15.00% 0.1889 36.19)",
+          "oklch(26.43% 0.1889 36.19)",
+          "oklch(37.86% 0.1889 36.19)",
+          "oklch(49.29% 0.1889 36.19)",
+          "oklch(60.71% 0.1889 36.19)",
+          "oklch(72.14% 0.1889 36.19)",
+          "oklch(83.57% 0.1889 36.19)",
+          "oklch(95.00% 0.1889 36.19)"
+        ]
+      },
+      "light-layer-unassigned": {
+        "role": "neutral",
+        "displayName": "Light Layer Unassigned",
+        "tonalRamp": [
+          "oklch(15.00% 0.0255 264.39)",
+          "oklch(26.43% 0.0255 264.39)",
+          "oklch(37.86% 0.0255 264.39)",
+          "oklch(49.29% 0.0255 264.39)",
+          "oklch(60.71% 0.0255 264.39)",
+          "oklch(72.14% 0.0255 264.39)",
+          "oklch(83.57% 0.0255 264.39)",
+          "oklch(95.00% 0.0255 264.39)"
+        ]
+      },
+      "light-bg-root": {
+        "role": "neutral",
+        "displayName": "Light Bg Root",
+        "tonalRamp": [
+          "oklch(15.00% 0.0067 115.70)",
+          "oklch(26.43% 0.0067 115.70)",
+          "oklch(37.86% 0.0067 115.70)",
+          "oklch(49.29% 0.0067 115.70)",
+          "oklch(60.71% 0.0067 115.70)",
+          "oklch(72.14% 0.0067 115.70)",
+          "oklch(83.57% 0.0067 115.70)",
+          "oklch(95.00% 0.0067 115.70)"
+        ]
+      },
+      "light-bg-panel": {
+        "role": "neutral",
+        "displayName": "Light Bg Panel",
+        "tonalRamp": [
+          "oklch(15.00% 0.0000 89.88)",
+          "oklch(26.43% 0.0000 89.88)",
+          "oklch(37.86% 0.0000 89.88)",
+          "oklch(49.29% 0.0000 89.88)",
+          "oklch(60.71% 0.0000 89.88)",
+          "oklch(72.14% 0.0000 89.88)",
+          "oklch(83.57% 0.0000 89.88)",
+          "oklch(95.00% 0.0000 89.88)"
+        ]
+      },
+      "light-bg-raised": {
+        "role": "neutral",
+        "displayName": "Light Bg Raised",
+        "tonalRamp": [
+          "oklch(15.00% 0.0108 118.03)",
+          "oklch(26.43% 0.0108 118.03)",
+          "oklch(37.86% 0.0108 118.03)",
+          "oklch(49.29% 0.0108 118.03)",
+          "oklch(60.71% 0.0108 118.03)",
+          "oklch(72.14% 0.0108 118.03)",
+          "oklch(83.57% 0.0108 118.03)",
+          "oklch(95.00% 0.0108 118.03)"
+        ]
+      },
+      "light-fg": {
+        "role": "neutral",
+        "displayName": "Light Fg",
+        "tonalRamp": [
+          "oklch(15.00% 0.0135 258.37)",
+          "oklch(26.43% 0.0135 258.37)",
+          "oklch(37.86% 0.0135 258.37)",
+          "oklch(49.29% 0.0135 258.37)",
+          "oklch(60.71% 0.0135 258.37)",
+          "oklch(72.14% 0.0135 258.37)",
+          "oklch(83.57% 0.0135 258.37)",
+          "oklch(95.00% 0.0135 258.37)"
+        ]
+      },
+      "light-fg-muted": {
+        "role": "neutral",
+        "displayName": "Light Fg Muted",
+        "tonalRamp": [
+          "oklch(15.00% 0.0196 259.42)",
+          "oklch(26.43% 0.0196 259.42)",
+          "oklch(37.86% 0.0196 259.42)",
+          "oklch(49.29% 0.0196 259.42)",
+          "oklch(60.71% 0.0196 259.42)",
+          "oklch(72.14% 0.0196 259.42)",
+          "oklch(83.57% 0.0196 259.42)",
+          "oklch(95.00% 0.0196 259.42)"
+        ]
+      },
+      "light-fg-dim": {
+        "role": "neutral",
+        "displayName": "Light Fg Dim",
+        "tonalRamp": [
+          "oklch(15.00% 0.0255 264.39)",
+          "oklch(26.43% 0.0255 264.39)",
+          "oklch(37.86% 0.0255 264.39)",
+          "oklch(49.29% 0.0255 264.39)",
+          "oklch(60.71% 0.0255 264.39)",
+          "oklch(72.14% 0.0255 264.39)",
+          "oklch(83.57% 0.0255 264.39)",
+          "oklch(95.00% 0.0255 264.39)"
+        ]
+      },
+      "light-border": {
+        "role": "neutral",
+        "displayName": "Light Border"
+      },
+      "light-border-strong": {
+        "role": "neutral",
+        "displayName": "Light Border Strong"
+      },
+      "bg-toolbar": {
+        "role": "neutral",
+        "displayName": "Bg Toolbar",
+        "tonalRamp": [
+          "oklch(15.00% 0.0175 264.03)",
+          "oklch(26.43% 0.0175 264.03)",
+          "oklch(37.86% 0.0175 264.03)",
+          "oklch(49.29% 0.0175 264.03)",
+          "oklch(60.71% 0.0175 264.03)",
+          "oklch(72.14% 0.0175 264.03)",
+          "oklch(83.57% 0.0175 264.03)",
+          "oklch(95.00% 0.0175 264.03)"
+        ]
+      },
+      "bg-viewport": {
+        "role": "neutral",
+        "displayName": "Bg Viewport",
+        "tonalRamp": [
+          "oklch(15.00% 0.0094 262.99)",
+          "oklch(26.43% 0.0094 262.99)",
+          "oklch(37.86% 0.0094 262.99)",
+          "oklch(49.29% 0.0094 262.99)",
+          "oklch(60.71% 0.0094 262.99)",
+          "oklch(72.14% 0.0094 262.99)",
+          "oklch(83.57% 0.0094 262.99)",
+          "oklch(95.00% 0.0094 262.99)"
+        ]
+      },
+      "bg-input": {
+        "role": "neutral",
+        "displayName": "Bg Input",
+        "tonalRamp": [
+          "oklch(15.00% 0.0192 262.09)",
+          "oklch(26.43% 0.0192 262.09)",
+          "oklch(37.86% 0.0192 262.09)",
+          "oklch(49.29% 0.0192 262.09)",
+          "oklch(60.71% 0.0192 262.09)",
+          "oklch(72.14% 0.0192 262.09)",
+          "oklch(83.57% 0.0192 262.09)",
+          "oklch(95.00% 0.0192 262.09)"
+        ]
+      },
+      "fg-label": {
+        "role": "neutral",
+        "displayName": "Fg Label",
+        "tonalRamp": [
+          "oklch(15.00% 0.0195 258.36)",
+          "oklch(26.43% 0.0195 258.36)",
+          "oklch(37.86% 0.0195 258.36)",
+          "oklch(49.29% 0.0195 258.36)",
+          "oklch(60.71% 0.0195 258.36)",
+          "oklch(72.14% 0.0195 258.36)",
+          "oklch(83.57% 0.0195 258.36)",
+          "oklch(95.00% 0.0195 258.36)"
+        ]
+      },
+      "light-bg-toolbar": {
+        "role": "neutral",
+        "displayName": "Light Bg Toolbar",
+        "tonalRamp": [
+          "oklch(15.00% 0.0054 117.92)",
+          "oklch(26.43% 0.0054 117.92)",
+          "oklch(37.86% 0.0054 117.92)",
+          "oklch(49.29% 0.0054 117.92)",
+          "oklch(60.71% 0.0054 117.92)",
+          "oklch(72.14% 0.0054 117.92)",
+          "oklch(83.57% 0.0054 117.92)",
+          "oklch(95.00% 0.0054 117.92)"
+        ]
+      },
+      "light-bg-viewport": {
+        "role": "neutral",
+        "displayName": "Light Bg Viewport",
+        "tonalRamp": [
+          "oklch(15.00% 0.0096 119.58)",
+          "oklch(26.43% 0.0096 119.58)",
+          "oklch(37.86% 0.0096 119.58)",
+          "oklch(49.29% 0.0096 119.58)",
+          "oklch(60.71% 0.0096 119.58)",
+          "oklch(72.14% 0.0096 119.58)",
+          "oklch(83.57% 0.0096 119.58)",
+          "oklch(95.00% 0.0096 119.58)"
+        ]
+      },
+      "light-bg-input": {
+        "role": "neutral",
+        "displayName": "Light Bg Input",
+        "tonalRamp": [
+          "oklch(15.00% 0.0080 114.22)",
+          "oklch(26.43% 0.0080 114.22)",
+          "oklch(37.86% 0.0080 114.22)",
+          "oklch(49.29% 0.0080 114.22)",
+          "oklch(60.71% 0.0080 114.22)",
+          "oklch(72.14% 0.0080 114.22)",
+          "oklch(83.57% 0.0080 114.22)",
+          "oklch(95.00% 0.0080 114.22)"
+        ]
+      },
+      "light-fg-label": {
+        "role": "neutral",
+        "displayName": "Light Fg Label",
+        "tonalRamp": [
+          "oklch(15.00% 0.0201 259.41)",
+          "oklch(26.43% 0.0201 259.41)",
+          "oklch(37.86% 0.0201 259.41)",
+          "oklch(49.29% 0.0201 259.41)",
+          "oklch(60.71% 0.0201 259.41)",
+          "oklch(72.14% 0.0201 259.41)",
+          "oklch(83.57% 0.0201 259.41)",
+          "oklch(95.00% 0.0201 259.41)"
+        ]
       }
     },
     "typographyMeta": {
       "display": {
         "displayName": "Display",
-        "purpose": "Landing headline only; Outfit 600 at -0.03em."
+        "purpose": "Landing headline."
       },
-      "headline": {
-        "displayName": "Headline",
-        "purpose": "Landing section titles and modal titles."
-      },
-      "title": {
-        "displayName": "Title",
-        "purpose": "Panel and dialog headings; compressed to 0.88rem/600 inside the shell."
+      "dialog-title": {
+        "displayName": "Dialog Title",
+        "purpose": "Dialog titles."
       },
       "body": {
         "displayName": "Body",
-        "purpose": "Reading copy; the landing lede."
+        "purpose": "Interface copy."
       },
-      "small": {
-        "displayName": "Small",
-        "purpose": "Descriptions inside panels and cards."
+      "lede": {
+        "displayName": "Lede",
+        "purpose": "Landing introduction."
       },
       "label": {
         "displayName": "Label",
-        "purpose": "Every section title inside a panel: mono, uppercase, 0.16em, muted ink."
+        "purpose": "Uppercase section annotations."
       },
-      "data": {
-        "displayName": "Data",
-        "purpose": "Numbers, coordinates, the status bar, attribute values."
+      "layer-name": {
+        "displayName": "Layer Name",
+        "purpose": "Layer names."
       }
     },
     "shadows": [
@@ -168,53 +547,23 @@
         "name": "modal",
         "value": "0 18px 48px rgb(0 0 0 / 45%)",
         "purpose": "Dialogs, with the strong hairline and 14px radius."
-      },
-      {
-        "name": "sheet",
-        "value": "0 4px 12px rgba(0, 0, 0, 0.25)",
-        "purpose": "Small floating sheets (solar scrubber); 0.1 alpha on the light theme."
-      },
-      {
-        "name": "glow",
-        "value": "0 0 6px var(--accent)",
-        "purpose": "The one coloured shadow: the live status dot."
-      },
-      {
-        "name": "glass",
-        "value": "backdrop-filter: blur(12px); background: rgba(11, 14, 19, 0.9)",
-        "purpose": "Overlays floating over the 3D viewport; 8px blur at 70% on the camera buttons; white at 92% on the light theme."
       }
     ],
     "motion": [
       {
         "name": "state",
         "value": "background 0.15s, color 0.15s, border-color 0.15s",
-        "purpose": "Every hover and active transition."
+        "purpose": "Common hover and active state transitions."
       },
       {
-        "name": "quick",
-        "value": "transform 0.12s linear",
-        "purpose": "Handles and scrubber thumbs."
+        "name": "layer-loading",
+        "value": "spin 0.9s linear infinite",
+        "purpose": "Layer loading indicator; disabled under reduced motion."
       },
       {
-        "name": "toast-in",
-        "value": "0.2s ease-out (translate + fade)",
-        "purpose": "Toast entry."
-      },
-      {
-        "name": "pulse-dot",
-        "value": "opacity 1 → 0.4 → 1, looping",
-        "purpose": "Streaming / busy status dot."
-      },
-      {
-        "name": "spin",
-        "value": "360deg loop",
-        "purpose": "Loading spinner."
-      },
-      {
-        "name": "reduced-motion",
-        "value": "none",
-        "purpose": "No prefers-reduced-motion guard exists yet; the motion vocabulary is small enough that adding one is a single rule."
+        "name": "disclosure",
+        "value": "transform 0.15s",
+        "purpose": "Active-layer caret; disabled under reduced motion."
       }
     ],
     "breakpoints": [
@@ -223,8 +572,16 @@
         "value": "640px"
       },
       {
-        "name": "min-width",
-        "value": "320px"
+        "name": "viewer-min-width",
+        "value": "1024px"
+      },
+      {
+        "name": "panel-defaults",
+        "value": "1360px"
+      },
+      {
+        "name": "drawer-default-height-threshold",
+        "value": "800px"
       }
     ]
   },
@@ -233,7 +590,7 @@
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "The one filled lime button per view; identical in both themes.",
+      "description": "Standard filled primary action, using the same fill in both themes.",
       "html": "<button class=\"ds-btn-primary\">Open catalog</button>",
       "css": ".ds-btn-primary{background:var(--accent-fill,#a7e32b);color:var(--on-accent,#14181e);padding:.5rem 1.25rem;border:none;border-radius:var(--radius,9px);font-family:var(--font-display,\"Outfit Variable\",Outfit,system-ui,sans-serif);font-size:.9rem;font-weight:600;cursor:pointer;transition:background .15s}.ds-btn-primary:hover{background:var(--accent-fill-hover,#cdf176)}.ds-btn-primary:focus-visible{outline:2px solid var(--accent,#a7e32b);outline-offset:2px}"
     },
@@ -243,7 +600,7 @@
       "refersTo": "button-ghost",
       "description": "Cancel and secondary actions: transparent with a hairline.",
       "html": "<button class=\"ds-btn-ghost\">Cancel</button>",
-      "css": ".ds-btn-ghost{padding:.25rem .5rem;border:1px solid var(--border,rgba(255,255,255,.09));border-radius:var(--radius-sm,6px);background:transparent;color:var(--fg-muted,#8a93a0);font-family:var(--font-ui,\"IBM Plex Sans\",system-ui,sans-serif);font-size:.7rem;cursor:pointer;transition:background .15s,color .15s}.ds-btn-ghost:hover{background:var(--bg-raised,#1d222c);color:var(--fg,#f2f4ef)}.ds-btn-ghost:focus-visible{outline:2px solid var(--accent,#a7e32b);outline-offset:2px}"
+      "css": ".ds-btn-ghost{padding:.25rem .5rem;border:1px solid var(--border,rgba(255,255,255,.09));border-radius:var(--radius-sm,6px);background:transparent;color:var(--fg-muted,#8a93a0);font-family:var(--font-ui,\"IBM Plex Sans\",system-ui,sans-serif);font-size:.68rem;cursor:pointer;transition:background .15s,color .15s}.ds-btn-ghost:hover{background:var(--bg-raised,#1d222c);color:var(--fg,#f2f4ef)}.ds-btn-ghost:focus-visible{outline:2px solid var(--accent,#a7e32b);outline-offset:2px}"
     },
     {
       "name": "Toolbar Icon Button",
@@ -262,17 +619,16 @@
       "css": ".ds-input{width:16rem;padding:.3rem .4rem;background:var(--bg-input,#161b24);border:1px solid var(--border,rgba(255,255,255,.09));border-radius:var(--radius-sm,6px);color:var(--fg,#f2f4ef);font-family:var(--font-ui,\"IBM Plex Sans\",system-ui,sans-serif);font-size:.72rem}.ds-input::placeholder{color:var(--fg-dim,#5a6270)}.ds-input:focus{outline:none;border-color:var(--accent,#a7e32b)}"
     },
     {
-      "name": "Inspector Tabs",
+      "name": "Add Layer Tabs",
       "kind": "nav",
-      "refersTo": "tab",
-      "description": "Outfit 500 tabs with a 2px underline that turns lime when active.",
-      "html": "<nav class=\"ds-tabs\"><button class=\"ds-tab ds-tab-active\">Attributes</button><button class=\"ds-tab\">Rules</button><button class=\"ds-tab\">Analysis</button></nav>",
-      "css": ".ds-tabs{display:flex;width:20rem;background:var(--bg-panel,#12161e);border-bottom:1px solid var(--border,rgba(255,255,255,.09))}.ds-tab{flex:1;padding:.5rem .75rem;border:none;border-bottom:2px solid transparent;margin-bottom:-1px;background:transparent;color:var(--fg-muted,#8a93a0);font-family:var(--font-display,\"Outfit Variable\",Outfit,system-ui,sans-serif);font-size:.78rem;font-weight:500;cursor:pointer;transition:color .15s,border-color .15s}.ds-tab:hover{color:var(--fg,#f2f4ef)}.ds-tab-active{color:var(--fg,#f2f4ef);border-bottom-color:var(--accent,#a7e32b)}.ds-tab:focus-visible{outline:2px solid var(--accent,#a7e32b);outline-offset:-2px}"
+      "refersTo": "modal-tab",
+      "description": "File / URL / Catalog tabs with an accent underline.",
+      "html": "<nav class=\"ds-tabs\"><button class=\"ds-tab ds-tab-active\">File</button><button class=\"ds-tab\">URL</button><button class=\"ds-tab\">Catalog</button></nav>",
+      "css": ".ds-tabs{display:flex;width:20rem;background:var(--bg-panel,#12161e);border-bottom:1px solid var(--border,rgba(255,255,255,.09))}.ds-tab{padding:.45rem .6rem;border:none;border-bottom:2px solid transparent;margin-bottom:-1px;background:transparent;color:var(--fg-muted,#8a93a0);font-family:var(--font-display,\"Outfit Variable\",Outfit,system-ui,sans-serif);font-size:.78rem;font-weight:500;cursor:pointer;transition:color .15s,border-color .15s}.ds-tab:hover{color:var(--fg,#f2f4ef)}.ds-tab-active{color:var(--accent,#a7e32b);border-bottom-color:var(--accent,#a7e32b)}.ds-tab:focus-visible{outline:2px solid var(--accent,#a7e32b);outline-offset:-2px}"
     },
     {
       "name": "Section Label",
       "kind": "custom",
-      "refersTo": "label",
       "description": "The plan-annotation heading used inside every panel.",
       "html": "<div class=\"ds-label\">Rule target</div>",
       "css": ".ds-label{font-family:var(--font-mono,\"IBM Plex Mono\",ui-monospace,monospace);font-size:.66rem;font-weight:500;text-transform:uppercase;letter-spacing:var(--tracking-label,.16em);color:var(--fg-muted,#8a93a0)}"
@@ -281,80 +637,63 @@
       "name": "Layer Row",
       "kind": "card",
       "refersTo": "list-row",
-      "description": "A hairline list row; the active one takes a lime hairline and the lime wash, with the streaming chip.",
-      "html": "<div class=\"ds-rows\"><div class=\"ds-row ds-row-active\"><span class=\"ds-row-name\">delft.fcb</span><span class=\"ds-chip\">streaming</span></div><div class=\"ds-row\"><span class=\"ds-row-name\">two-buildings.city.json</span></div></div>",
-      "css": ".ds-rows{width:15rem;padding:.5rem;background:var(--bg-panel,#12161e)}.ds-row{display:flex;align-items:center;gap:.5rem;padding:.35rem .5rem;border:1px solid var(--border,rgba(255,255,255,.09));border-radius:var(--radius-sm,6px);margin-bottom:.3rem;color:var(--fg,#f2f4ef);font-family:var(--font-ui,\"IBM Plex Sans\",system-ui,sans-serif);font-size:.75rem;cursor:pointer;transition:background .15s,border-color .15s}.ds-row:hover{background:var(--bg-raised,#1d222c)}.ds-row-active{border-color:var(--accent,#a7e32b);background:var(--accent-soft,color-mix(in srgb,#a7e32b 13%,transparent))}.ds-row-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ds-chip{padding:.05rem .3rem;font-size:.55rem;font-weight:600;letter-spacing:.03em;color:var(--accent,#a7e32b);border:1px solid var(--accent,#a7e32b);border-radius:999px}"
+      "description": "Two-line layer composition with an accent border and wash for the active row.",
+      "html": "<div class=\"ds-rows\"><div class=\"ds-row ds-row-active\" tabindex=\"0\"><span class=\"ds-row-body\"><span class=\"ds-row-name\">delft.fcb</span><span class=\"ds-row-state\">Streaming · City model</span></span></div></div>",
+      "css": ".ds-rows{width:15rem;padding:.5rem;background:var(--bg-panel,#12161e)}.ds-row{display:flex;align-items:center;gap:.5rem;padding:.125rem .4rem;border:1px solid var(--border,rgba(255,255,255,.09));border-radius:var(--radius-sm,6px);margin-bottom:.3rem;color:var(--fg,#f2f4ef);font-family:var(--font-ui,\"IBM Plex Sans\",system-ui,sans-serif);font-size:.75rem;cursor:pointer;transition:background .15s,border-color .15s}.ds-row:hover{background:var(--bg-raised,#1d222c)}.ds-row-active{border-color:var(--accent,#a7e32b);background:var(--accent-soft,color-mix(in srgb,#a7e32b 13%,transparent))}.ds-row-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ds-chip{padding:.05rem .3rem;font-size:.55rem;font-weight:600;letter-spacing:.03em;color:var(--accent,#a7e32b);border:1px solid var(--accent,#a7e32b);border-radius:999px}.ds-row-body{display:flex;flex-direction:column;min-width:0}.ds-row-state{font-size:.65rem;color:var(--fg-muted,#8a93a0)}.ds-row:focus-visible{outline:2px solid var(--accent,#a7e32b);outline-offset:-2px}"
     },
     {
       "name": "Legend Card",
       "kind": "card",
       "refersTo": "glass-overlay",
-      "description": "Glass card over the viewport listing the active rules with their rooftop colours.",
+      "description": "Translucent map legend; production groups entries by layer and opens Style from each layer heading.",
       "html": "<div class=\"ds-legend\"><div class=\"ds-legend-title\">Legend</div><div class=\"ds-legend-row\"><i class=\"ds-sw\" style=\"background:var(--layer-energy,#ffc530)\"></i>South-facing</div><div class=\"ds-legend-row\"><i class=\"ds-sw\" style=\"background:var(--layer-water,#3b82f6)\"></i>Flat roofs</div><div class=\"ds-legend-row\"><i class=\"ds-sw\" style=\"background:var(--layer-unassigned,#8b93a3)\"></i>Unassigned</div></div>",
-      "css": ".ds-legend{display:inline-block;min-width:9rem;padding:.5rem .6rem;background:rgba(11,14,19,.9);backdrop-filter:blur(12px);border:1px solid var(--border-strong,rgba(255,255,255,.16));border-radius:var(--radius,9px);color:var(--fg,#f2f4ef);font-family:var(--font-ui,\"IBM Plex Sans\",system-ui,sans-serif);font-size:.7rem}.ds-legend-title{font-family:var(--font-mono,\"IBM Plex Mono\",ui-monospace,monospace);font-size:.66rem;font-weight:500;text-transform:uppercase;letter-spacing:.16em;color:var(--fg-muted,#8a93a0);margin-bottom:.35rem}.ds-legend-row{display:flex;align-items:center;gap:.4rem;padding:.1rem 0}.ds-sw{width:.7rem;height:.7rem;border-radius:2px;flex-shrink:0}"
+      "css": ".ds-legend{display:inline-block;min-width:10.5rem;max-width:16.25rem;padding:.4rem .55rem;background:rgba(11,14,19,.9);backdrop-filter:blur(12px);border:1px solid var(--border-strong,rgba(255,255,255,.16));border-radius:var(--radius,9px);color:var(--fg,#f2f4ef);font-family:var(--font-ui,\"IBM Plex Sans\",system-ui,sans-serif);font-size:.7rem}.ds-legend-title{font-family:var(--font-mono,\"IBM Plex Mono\",ui-monospace,monospace);font-size:.66rem;font-weight:500;text-transform:uppercase;letter-spacing:.16em;color:var(--fg-muted,#8a93a0);margin-bottom:.35rem}.ds-legend-row{display:flex;align-items:center;gap:.4rem;padding:.1rem 0}.ds-sw{width:.7rem;height:.7rem;border-radius:2px;flex-shrink:0}"
+    },
+    {
+      "name": "Preset Chip",
+      "kind": "chip",
+      "refersTo": "preset-chip",
+      "description": "Outlined preset action with a color swatch.",
+      "html": "<button class=\"ds-preset\"><span class=\"ds-swatch\"></span>Energy</button>",
+      "css": ".ds-preset{display:inline-flex;align-items:center;gap:.3rem;padding:.25rem .5rem;border:1px solid var(--border);border-radius:var(--radius-pill);background:transparent;color:var(--fg-muted);font-family:var(--font-ui);font-size:.7rem;cursor:pointer;transition:background .15s,color .15s,border-color .15s}.ds-preset:hover{background:var(--bg-panel-hover);color:var(--fg);border-color:var(--accent)}.ds-preset:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}.ds-swatch{width:.6rem;height:.6rem;border-radius:2px;background:var(--layer-energy)}"
     }
   ],
   "narrative": {
     "northStar": "The Planner's Light Table",
-    "overview": "Roofy is a drafting surface for a city. The near-black shell (#0b0e13 root,\n#12161e panels) is the table; the lit, georeferenced 3D model on the globe is\nthe drawing laid on it; the sidebar, inspector and toolbar are instruments set\naround the drawing, never on top of it. Everything the interface does defers to\nthat reading: panels are flat and hairline-bordered, labels are typeset like plan\nannotations in spaced monospace capitals, and colour is reserved for the roofs\nand for the one thing you are touching.\n\nThe tone is friendly, clear and bright. Bright comes from the brand rather than\nfrom the surfaces: Meadow Lime, Noon Amber, Terracotta and Canal Blue are the\nfour rooftop functions (nature, energy, social, water) and they carry warmth\ninto a dark, steady frame. Clear comes from plain copy and from a strict\nhierarchy in which a non-specialist planner can always tell what is data, what\nis a control and what is a state. A full light theme exists for paper and\nprojectors; on it the brand hues darken so borders, icons and text keep their\ncontrast, while the filled lime button stays exactly the same.",
+    "overview": "Roofy frames the city model with compact instruments: a workspace header, layer controls on the left, selection details on the right, and records beneath the map. The interface uses fine borders and tonal steps to keep those regions distinct. Large expressive type belongs to the landing page; the viewer uses a denser reading scale.\n\nThe existing design language is clear, friendly and bright. Meadow Lime carries interaction, while Noon Amber, Terracotta and Canal Blue connect the interface to the rooftop palette. Outfit gives names and headings their character; IBM Plex Sans and Mono distinguish prose, controls and technical annotations. This description preserves the language of the previous sidecar; it is not a newly commissioned visual direction.",
     "keyCharacteristics": [
-      "Dark by default, light theme as a first-class sibling; the OS preference picks the initial theme.",
-      "One accent, Meadow Lime, used only for the active, the selected and the primary.",
-      "Four rooftop hues that mean something; they are legend colours, not decoration.",
-      "Outfit for names and headings, IBM Plex Sans for reading, IBM Plex Mono for labels and numbers.",
-      "Flat shell with hairlines; glass only where something floats over the 3D view.",
-      "Dense, instrument-like controls in the shell; generous scale only on the landing page."
+      "System appearance by default, with explicit Light and Dark preferences.",
+      "Lime interaction states and four established rooftop brand hues.",
+      "Outfit headings, IBM Plex Sans interface copy, IBM Plex Mono annotations and data.",
+      "Flat shell regions, translucent map overlays, elevated menus and dialogs.",
+      "A responsive landing document and a desktop viewer with a 1024px minimum width."
     ],
     "rules": [
       {
-        "name": "The One Accent Rule",
-        "body": "Meadow Lime is the only colour that means \"interactive\". Amber, terracotta and blue mean energy, social and water first; they may double as warn, danger and loading, but they never mark hover, focus or selection.",
+        "name": "The Semantic Color Rule",
+        "body": "Use the existing role variables rather than copying a dark-theme literal into a component. Keep scene selection and hover distinct from base geometry through the existing scene color policy.",
         "section": "colors"
-      },
-      {
-        "name": "The Selection Reserve Rule",
-        "body": "Lime 500 is the 3D selection colour and Lime 300 the 3D hover colour. No rule preset, legend entry, default geo-layer colour or base surface colour may equal either. Presets pick from the other three hues and the deeper lime.",
-        "section": "colors"
-      },
-      {
-        "name": "The Same Button Rule",
-        "body": "The filled primary button is #a7e32b with #14181e ink in both themes. Only the *tint* uses of lime (icons, borders, text) darken on paper.",
-        "section": "colors"
-      },
-      {
-        "name": "The Annotation Rule",
-        "body": "A heading inside a panel is a mono uppercase label, not a bigger sans. Size never carries hierarchy inside the shell; case, tracking and ink do.",
-        "section": "typography"
       },
       {
         "name": "The Wordmark Rule",
-        "body": "\"Roofy\" is set in Outfit 600 at -0.03em and is never re-cased, re-spaced or wrapped in an uppercase parent. The lockup's mark is 1.15em of its type, pinned to 20px beside 15px type in the toolbar.",
+        "body": "Preserve “Roofy” in Outfit 600 with display tracking and no uppercase transformation. The mark normally scales to 1.15em, with the header's existing fixed-size override.",
         "section": "typography"
-      },
-      {
-        "name": "The Three Layers Rule",
-        "body": "Shell is flat and hairlined; anything over the viewport is glass; anything over the window carries a shadow. A component never mixes two of these.",
-        "section": "elevation"
       }
     ],
     "dos": [
-      "Do derive every interactive colour from the brand tokens in `src/app/brand.css`; `app.css` maps them to roles and never restates a hex.",
-      "Do set panel section titles as IBM Plex Mono, 500, uppercase, 0.16em tracking, muted ink.",
-      "Do keep a single filled lime button per view, Outfit 600, dark ink, the same in both themes.",
-      "Do use Lime Wash plus a lime hairline for the active row, tab or tool, and step hover one tone up (panel to raised).",
-      "Do use Night Glass with a 12px blur, edged with the strong hairline, for anything floating over the 3D view.",
-      "Do keep the four rooftop hues in legend order (nature, energy, social, water) wherever they appear together.",
-      "Do use Night Ink Muted (5.8:1) or Night Ink Label for any text that must be read; both themes pass AA on every surface."
+      "Do derive interface roles from brand.css and keep its public/brand/brand.css counterpart aligned when changing brand tokens.",
+      "Do use accent-text for readable lime text; it resolves to the deeper lime on light surfaces.",
+      "Do preserve the visible keyboard focus ring and the dedicated focus border for fields.",
+      "Do keep layer controls, selection details and records in their respective shell regions.",
+      "Do preserve the Roofy wordmark casing and its existing four-plane mark.",
+      "Do distinguish unavailable, loading, empty and error states with explanatory text."
     ],
     "donts": [
-      "Don't use Night Ink Dim or Paper Ink Dim as the only ink of a readable label; at 3:1 it fails AA for text. The incumbent tabs, scope buttons and table captions do this and are on record as a defect, not a pattern.",
-      "Don't set Noon Amber or Meadow Lime Deep as running text on the light theme; both fall below 3:1 on white.",
-      "Don't give a rule preset, legend entry, default geo colour or base surface the selection lime (#a7e32b) or the hover lime (#cdf176).",
-      "Don't add a shadow to anything inside the shell, or a blur to anything outside the viewport.",
-      "Don't recolour individual planes of the mark, rotate it, add effects, or re-case the wordmark.",
-      "Don't write globe colour or wireframe from the UI; the engine freezes. Only the elevation colormap is a clean setter.",
-      "Don't hide or gate the geoid attribution overlay; it is a licence obligation.",
-      "Don't introduce a font, a hue outside the brand set, or a second accent. Variation happens in hierarchy, density and layout, not identity."
+      "Don't treat the historical design/wireframe.html or old Inspector Tabs sidecar example as the current viewer layout.",
+      "Don't interpret the dark CSS root as the default user preference; the preference defaults to System.",
+      "Don't promote the dim text token into essential reading copy or assume every current color pairing passes contrast checks.",
+      "Don't reuse the scene selection and hover colors for base geometry or rule presets; follow the scene's color policy.",
+      "Don't hide attribution when expanding the records drawer."
     ]
   }
 }

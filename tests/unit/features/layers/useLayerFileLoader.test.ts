@@ -164,7 +164,9 @@ describe("useLayerFileLoader — .fcb routing", () => {
     const { result } = renderHook(() => useLayerFileLoader());
 
     await act(async () => {
-      await result.current.addLayerFromUrl("https://x/delft.fcb");
+      await result.current.addLayerFromUrl("https://x/delft.fcb", {
+        attributeOrders: { Building: ["height", "name"] },
+      });
     });
     expect(openStream).toHaveBeenCalledTimes(1);
     expect(
@@ -174,6 +176,9 @@ describe("useLayerFileLoader — .fcb routing", () => {
     const layers = useLayerStore.getState().layers;
     expect(layers).toHaveLength(1);
     expect(layers[0]!.isStreaming).toBe(true);
+    expect(layers[0]!.attributeOrders).toEqual({
+      Building: ["height", "name"],
+    });
     expect(result.current.error).toBeNull();
   });
 

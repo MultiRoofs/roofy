@@ -32,6 +32,7 @@ export interface DataGridProps {
     readonly dir: "asc" | "desc";
   } | null;
   readonly selectedIds: ReadonlySet<string>;
+  readonly onReorder?: (source: string, target: string) => void;
   readonly onSort: (column: string) => void;
   readonly onRowClick: (rowId: string, shiftKey: boolean) => void;
   readonly emptyMessage?: string;
@@ -60,6 +61,7 @@ export const DataGrid = memo(function DataGrid({
   sort,
   selectedIds,
   onSort,
+  onReorder,
   onRowClick,
   emptyMessage = "No rows match this filter.",
   partsById = {},
@@ -68,6 +70,7 @@ export const DataGrid = memo(function DataGrid({
   derivedColumnNames = new Set(),
 }: DataGridProps) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
   const hasParts = Object.keys(partsById).length > 0;
 
   if (rows.length === 0) {
@@ -91,7 +94,21 @@ export const DataGrid = memo(function DataGrid({
                     ? derivedColumnTitle(col.name)
                     : `${col.name} (${col.type})`
                 }
-                onClick={canSort ? () => onSort(col.name) : undefined}
+                draggable={onReorder !== undefined}
+                onDragStart={(event) => {
+                  setDraggedColumn(col.name);
+                  event.dataTransfer.setData("text/plain", col.name);
+                  event.dataTransfer.effectAllowed = "move";
+                }}
+                onDragOver={(event) => {
+                  if (draggedColumn) event.preventDefault();
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  if (draggedColumn) onReorder?.(draggedColumn, col.name);
+                  setDraggedColumn(null);
+                }}
+                onDragEnd={() => setDraggedColumn(null)}
                 aria-sort={
                   sorted
                     ? sort.dir === "asc"
@@ -100,14 +117,35 @@ export const DataGrid = memo(function DataGrid({
                     : "none"
                 }
               >
-                <span>
-                  {derivedColumnNames.has(col.name)
-                    ? columnLabel(col.name)
-                    : col.name}
-                </span>
-                {sorted && (
-                  <span className="sort-indicator">
-                    {sort.dir === "asc" ? "▲" : "▼"}
+                {canSort ? (
+                  <button
+                    type="button"
+                    className="data-sort-button"
+                    aria-label={`Sort ${col.name} ${sorted && sort.dir === "asc" ? "descending" : "ascending"}`}
+                    title={`Sort ${sorted && sort.dir === "asc" ? "descending" : "ascending"}. Drag header to reorder.`}
+                    onClick={() => onSort(col.name)}
+                  >
+                    <span>
+                      {derivedColumnNames.has(col.name)
+                        ? columnLabel(col.name)
+                        : col.name}
+                    </span>
+                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                      <path
+                        d="m4 6 4-4 4 4"
+                        opacity={sorted && sort.dir === "desc" ? 0.25 : 1}
+                      />
+                      <path
+                        d="m4 10 4 4 4-4"
+                        opacity={sorted && sort.dir === "asc" ? 0.25 : 1}
+                      />
+                    </svg>
+                  </button>
+                ) : (
+                  <span title="Sorting is not available for this column. Drag header to reorder.">
+                    {derivedColumnNames.has(col.name)
+                      ? columnLabel(col.name)
+                      : col.name}
                   </span>
                 )}
               </th>
@@ -172,16 +210,17 @@ export const DataGrid = memo(function DataGrid({
                     className="data-row data-row-part"
                     onClick={(event) => onRowClick(part, event.shiftKey)}
                   >
-                    {columns.map((column, index) => {
+                    {hasParts && <td aria-hidden="true" />}
+                    {columns.map((column) => {
                       const value =
-                        index === 0
+                        column.name === "id"
                           ? `↳ ${part}`
                           : partRows[part]?.[column.name];
                       return (
                         <td
                           key={column.name}
                           className="data-td"
-                          aria-label={index === 0 ? "Part" : undefined}
+                          aria-label={column.name === "id" ? "Part" : undefined}
                           title={rawCellTitle(value)}
                         >
                           {formatCell(value)}

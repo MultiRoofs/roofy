@@ -1,3 +1,9 @@
+import { useQueryStore } from "../query/queryStore";
+import { type TablePresentation } from "../query/tablePresentation";
+import {
+  normalizeAttributeOrders,
+  type AttributeOrders,
+} from "../attributes/attributeOrder";
 /**
  * Zustand store for the layer system.
  *
@@ -81,6 +87,8 @@ export interface Layer {
    * identity, same convention as {@link Layer.rules}.
    */
   readonly hiddenTypes: ReadonlyArray<string>;
+  readonly attributeOrders?: AttributeOrders;
+  readonly tablePresentation?: TablePresentation;
   /**
    * Only these objects are DRAWN, or `null` for all of them — the table
    * panel's "Filter map" toggle, pushed to the plugin by `handleSync`.
@@ -155,6 +163,8 @@ export interface LayerStoreActions {
        *  value was seeded into the plugin at add/open time so the layer never
        *  renders one frame of the geometry it was saved without. */
       readonly hiddenTypes?: ReadonlyArray<string>;
+      readonly attributeOrders?: AttributeOrders;
+      readonly tablePresentation?: TablePresentation;
       /** Supplied by a RESTORE. Applied only when the (possibly different)
        *  model actually carries that theme; `undefined` means "choose the
        *  load default", `null` means "plain colours, deliberately". */
@@ -192,6 +202,11 @@ export interface LayerStoreActions {
   setCameraSync: (layerId: string, enabled: boolean) => void;
   /** Replaces {@link Layer.hiddenTypes} — never mutates it, because the sync
    *  layer's "did this change?" test is array identity. */
+  setAttributeOrder: (
+    layerId: string,
+    objectType: string,
+    order: ReadonlyArray<string>,
+  ) => void;
   setHiddenTypes: (layerId: string, types: ReadonlyArray<string>) => void;
   /** Replaces {@link Layer.visibleObjectIds} — never mutates it, because the
    *  sync layer's "did this change?" test is set IDENTITY. */
@@ -200,6 +215,7 @@ export interface LayerStoreActions {
     ids: ReadonlySet<string> | null,
   ) => void;
 
+  copyStyle: (targetId: string, sourceId: string) => void;
   // Per-layer rule actions
   addRule: (layerId: string, rule: Rule) => void;
   updateRule: (
@@ -318,6 +334,7 @@ export const useLayerStore = create<LayerStore>((set) => ({
           cameraSync: true,
           isStreaming: input.isStreaming ?? false,
           hiddenTypes: input.hiddenTypes ?? [],
+          attributeOrders: normalizeAttributeOrders(input.attributeOrders),
           // Session state, and never an add-time input: a fresh layer is
           // unfiltered until a query says otherwise.
           visibleObjectIds: null,
@@ -333,6 +350,7 @@ export const useLayerStore = create<LayerStore>((set) => ({
         },
       ],
     }));
+    useQueryStore.getState().restorePresentation(id, input.tablePresentation);
     return id;
   },
 
@@ -383,6 +401,20 @@ export const useLayerStore = create<LayerStore>((set) => ({
       ),
     })),
 
+  setAttributeOrder: (layerId, objectType, order) =>
+    set((state) => ({
+      layers: state.layers.map((layer) =>
+        layer.id === layerId
+          ? {
+              ...layer,
+              attributeOrders: {
+                ...layer.attributeOrders,
+                [objectType]: [...new Set(order)],
+              },
+            }
+          : layer,
+      ),
+    })),
   setHiddenTypes: (layerId, types) =>
     set((state) => ({
       layers: state.layers.map((l) =>
@@ -408,6 +440,27 @@ export const useLayerStore = create<LayerStore>((set) => ({
       };
     }),
 
+  copyStyle: (targetId, sourceId) =>
+    set((state) => {
+      const source = state.layers.find((l) => l.id === sourceId);
+      if (!source || targetId === sourceId) return state;
+      return {
+        layers: state.layers.map((layer) =>
+          layer.id === targetId
+            ? {
+                ...layer,
+                colorBy: source.colorBy,
+                singleColor: source.singleColor,
+                unmatchedColor: source.unmatchedColor,
+                rules: structuredClone(source.rules).map((rule) => ({
+                  ...rule,
+                  id: crypto.randomUUID(),
+                })),
+              }
+            : layer,
+        ),
+      };
+    }),
   // --- Per-layer rule actions ---
 
   addRule: (layerId, rule) =>

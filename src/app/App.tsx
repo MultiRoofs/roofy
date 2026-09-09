@@ -1,7 +1,22 @@
+import { saveWorkspace } from "../persistence/saveWorkspace";
+import {
+  captureBasemap,
+  restoreBasemap,
+} from "../features/basemap/basemapPersistence";
+import { WorkspacesPage } from "../ui/workspaces/WorkspacesPage";
+import { captureTablePresentation } from "../features/query/tablePresentation";
+import { useQueryStore } from "../features/query/queryStore";
+import { type TablePresentation } from "../features/query/tablePresentation";
+import {
+  normalizeAttributeOrders,
+  type AttributeOrders,
+} from "../features/attributes/attributeOrder";
 import type { AppearanceTheme, CityModelEncoding } from "@cityjson/navara-core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./brand.css";
 import "./app.css";
+import "./workspace.css";
+import "./flatControls.css";
 import { detectEncoding } from "../domain/citymodel/detectEncoding";
 import {
   loadFromUrl,
@@ -95,7 +110,7 @@ import { DetailsPanel } from "../ui/details/DetailsPanel";
 import { WorkspaceHeader } from "../ui/header/WorkspaceHeader";
 import { LeftPanel } from "../ui/sidebar/LeftPanel";
 import { SourcePicker } from "../ui/layers/SourcePicker";
-import { AddLayerDialog, type SourceTab } from "../ui/layers/AddLayerDialog";
+import { AddLayerDialog } from "../ui/layers/AddLayerDialog";
 import { UrlSourceForm } from "../ui/layers/UrlSourceForm";
 import {
   addGeoSourceFromFile,
@@ -226,6 +241,8 @@ interface UnavailableLayer {
   readonly lodMode: "auto" | "manual";
   readonly selectedLod: string | null;
   readonly hiddenTypes: readonly string[];
+  readonly attributeOrders?: AttributeOrders;
+  readonly tablePresentation?: TablePresentation;
   readonly appearance: AppearanceTheme | null | undefined;
 }
 
@@ -238,6 +255,18 @@ export function App({
   persistenceStore = defaultStore,
   platform = browserPlatform,
 }: AppProps) {
+  const [pathname, setPathname] = useState(window.location.pathname);
+  const savedIdRef = useRef<string | null>(null);
+  const partialRestoreRef = useRef(false);
+  const navigate = (path: string) => {
+    window.history.pushState(null, "", path);
+    setPathname(path);
+  };
+  useEffect(() => {
+    const sync = () => setPathname(window.location.pathname);
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
   const [savedSnapshots, setSavedSnapshots] = useState<SnapshotSummary[]>([]);
   const [unavailableLayers, setUnavailableLayers] = useState<
     ReadonlyArray<UnavailableLayer>
@@ -259,7 +288,8 @@ export function App({
    * branch that renders it — it is plain state that outlives its own UI.
    */
   const [catalogOpen, setCatalogOpen] = useState(false);
-  const [emptyAddTab, setEmptyAddTab] = useState<SourceTab | null>(null);
+  const [addLayerOpen, setAddLayerOpen] = useState(false);
+  const [restoringWorkspace, setRestoringWorkspace] = useState(false);
   const [hasEnteredViewer, setHasEnteredViewer] = useState(false);
   /** The minted share link currently on display, or null. Non-null IS the
    *  dialog's open state: the URL is a snapshot of the view at the moment
@@ -655,6 +685,24 @@ export function App({
     failed,
     dismissFailed,
   } = useLayerFileLoader({ resolveStreamPlugin });
+  useEffect(() => {
+    if (
+      !hasWorkspace &&
+      !engineBooting &&
+      !loading &&
+      !restoringWorkspace &&
+      hasEnteredViewer &&
+      pathname !== "/workspaces"
+    )
+      setAddLayerOpen(true);
+  }, [
+    hasWorkspace,
+    engineBooting,
+    loading,
+    restoringWorkspace,
+    hasEnteredViewer,
+    pathname,
+  ]);
 
   /*
    * A failed load has ONE surface, and since 12.2 it is a ROW.
@@ -958,6 +1006,7 @@ export function App({
             };
 
     const snapshot = captureSnapshot({
+      basemap: captureBasemap(),
       label,
       layers: allLayers.map((l) => ({
         name: l.name,
@@ -970,6 +1019,10 @@ export function App({
         selectedLod: l.selectedLod,
         lodMode: l.lodMode,
         hiddenTypes: [...l.hiddenTypes],
+        attributeOrders: l.attributeOrders,
+        tablePresentation: captureTablePresentation(
+          useQueryStore.getState().queries[l.id],
+        ),
         appearance: l.selectedAppearance,
         ...(l.isStreaming ? { stream: streamSourceSnapshot(l.modelRef) } : {}),
       })),
@@ -986,7 +1039,11 @@ export function App({
     });
 
     try {
-      await persistenceStore.save(snapshot);
+      savedIdRef.current = await saveWorkspace(
+        persistenceStore,
+        savedIdRef.current,
+        snapshot,
+      );
       await refreshSnapshots();
       // Success used to be silent, which is indistinguishable from a button
       // that does nothing. The message also has a fact to teach — saved
@@ -994,9 +1051,12 @@ export function App({
       // nobody discovers that by guessing — so it gets the explanatory
       // duration, not the 3 s status one.
       showToast(
-        "Workspace saved — you'll find it here next time you open Roofy.",
+        partialRestoreRef.current
+          ? "Loaded layers saved as a new workspace. The original save still contains the layers that could not be restored."
+          : "Workspace saved — you'll find it here next time you open Roofy.",
         EXPLANATION_TOAST_MS,
       );
+      partialRestoreRef.current = false;
       return true;
     } catch (e) {
       showToast(
@@ -1009,6 +1069,8 @@ export function App({
 
   const handleRestore = useCallback(
     async (id: string) => {
+      setRestoringWorkspace(true);
+      setAddLayerOpen(false);
       clearError();
       // A restore adds layers and then applies the camera it saved. The
       // viewport fits to any newly added layer, so without this the fit and
@@ -1038,6 +1100,8 @@ export function App({
         // The snapshot's label IS the workspace's name — that is what it was
         // saved as — so restoring one restores the name the header shows.
         useWorkspaceStore.getState().setName(snapshot.label);
+        savedIdRef.current = null;
+        partialRestoreRef.current = true;
 
         // Remove all existing layers — the streaming ones first, so their
         // workers and cell meshes die with them rather than outliving the
@@ -1126,6 +1190,10 @@ export function App({
             const selectedLod = (sl.selectedLod as string | null) ?? null;
             // Already defaulted to [] by `normalizeLayers`.
             const hiddenTypes = sl.hiddenTypes;
+            const tablePresentation = sl.tablePresentation;
+            const attributeOrders = normalizeAttributeOrders(
+              sl.attributeOrders,
+            );
             // `undefined` (older snapshot) lets the load default decide.
             const appearance = readAppearanceTheme(sl.appearance);
 
@@ -1144,6 +1212,8 @@ export function App({
                 lodMode,
                 selectedLod,
                 hiddenTypes,
+                attributeOrders,
+                tablePresentation,
                 appearance,
               });
               continue;
@@ -1165,6 +1235,8 @@ export function App({
                   unmatchedColor,
                   visible,
                   hiddenTypes,
+                  attributeOrders,
+                  tablePresentation,
                   selectedAppearance: appearance,
                 }),
               );
@@ -1186,6 +1258,8 @@ export function App({
                 singleColor,
                 unmatchedColor,
                 hiddenTypes,
+                attributeOrders,
+                tablePresentation,
                 selectedAppearance: appearance,
                 duckdb: { kind: "model", model: parsed },
               });
@@ -1202,6 +1276,8 @@ export function App({
                 singleColor,
                 unmatchedColor,
                 hiddenTypes,
+                attributeOrders,
+                tablePresentation,
                 selectedAppearance: appearance,
                 duckdb: modelTableSource({
                   model: parsed.model,
@@ -1222,6 +1298,12 @@ export function App({
             addedCityIds.push(addedId);
           }
         }
+        const complete =
+          addedCityIds.length === snapshotLayers.length &&
+          addedCityIds.every(Boolean) &&
+          addedGeoIds.every(Boolean);
+        savedIdRef.current = complete ? id : null;
+        partialRestoreRef.current = !complete;
         setUnavailableLayers(newUnavailable);
 
         // The layer the workspace comes up looking at, and the reason this is
@@ -1309,6 +1391,7 @@ export function App({
             : STATUS_TOAST_MS,
         );
       } finally {
+        setRestoringWorkspace(false);
         releaseAutoFit();
       }
     },
@@ -1356,6 +1439,7 @@ export function App({
     const { mode: pickMode } = useSelectionStore.getState();
 
     const state: ShareableViewState = {
+      basemap: captureBasemap(),
       v: 3,
       layers: allLayers
         .filter((l) => l.modelRef.type === "url")
@@ -1367,6 +1451,10 @@ export function App({
           // rebuilt on the other side, never sent.
           ...captureColorBy(l),
           visible: l.visible,
+          attributeOrders: l.attributeOrders,
+          tablePresentation: captureTablePresentation(
+            useQueryStore.getState().queries[l.id],
+          ),
         })),
       cam: cameraState,
       dt: datetime.toISOString(),
@@ -1441,6 +1529,8 @@ export function App({
                 singleColor,
                 unmatchedColor,
                 visible,
+                attributeOrders: sl.attributeOrders,
+                tablePresentation: sl.tablePresentation,
               }),
             );
           } else if (isCityParquetUrl(sl.modelUrl)) {
@@ -1454,6 +1544,8 @@ export function App({
               model: parsed,
               modelRef: { type: "url", url: sl.modelUrl },
               visible,
+              attributeOrders: sl.attributeOrders,
+              tablePresentation: sl.tablePresentation,
               rules,
               colorBy,
               singleColor,
@@ -1468,6 +1560,8 @@ export function App({
               model: parsed.model,
               modelRef: { type: "url", url: sl.modelUrl },
               visible,
+              attributeOrders: sl.attributeOrders,
+              tablePresentation: sl.tablePresentation,
               rules,
               colorBy,
               singleColor,
@@ -1490,6 +1584,7 @@ export function App({
         selections: [],
         hovered: null,
       });
+      restoreBasemap(shared.basemap);
       const dt = new Date(shared.dt);
       if (!isNaN(dt.getTime())) {
         useSolarStore.getState().setDatetime(dt);
@@ -1629,6 +1724,10 @@ export function App({
     // "New workspace" in the header is this same exit, and a new workspace
     // does not inherit the old one's name.
     useWorkspaceStore.getState().resetName();
+    setAddLayerOpen(true);
+    savedIdRef.current = null;
+    partialRestoreRef.current = false;
+    restoreBasemap(undefined);
     useSceneSheetStore.getState().setSheet(null);
   }, [clearSelection]);
 
@@ -1657,6 +1756,8 @@ export function App({
                 lodMode: entry.lodMode,
                 selectedLod: entry.selectedLod,
                 hiddenTypes: entry.hiddenTypes,
+                attributeOrders: entry.attributeOrders,
+                tablePresentation: entry.tablePresentation,
                 selectedAppearance: entry.appearance,
               }
             : undefined,
@@ -1889,6 +1990,28 @@ export function App({
   // the first thing opened. Everything below already reads `activeLayer`
   // optional-chained, so an empty workspace renders an empty globe rather than
   // throwing.
+  const workspacePage =
+    pathname === "/workspaces" ? (
+      <WorkspacesPage
+        store={persistenceStore}
+        onRename={(id, name) => {
+          if (savedIdRef.current === id)
+            useWorkspaceStore.getState().setName(name);
+        }}
+        onBack={() => {
+          navigate("/");
+          void refreshSnapshots();
+        }}
+        onOpen={(id) => {
+          navigate("/");
+          setHasEnteredViewer(true);
+          void handleRestore(id);
+        }}
+      />
+    ) : null;
+  if (workspacePage && !(hasWorkspace || engineBooting || hasEnteredViewer))
+    return workspacePage;
+
   if (hasWorkspace || engineBooting || hasEnteredViewer) {
     const hasUrlLayers = layers.some((l) => l.modelRef.type === "url");
 
@@ -1903,206 +2026,189 @@ export function App({
 
     return (
       <>
-        <ViewerShell
-          header={
-            <WorkspaceHeader
-              onSave={handleSave}
-              onShare={handleShare}
-              canShare={hasUrlLayers}
-              /* "New workspace" is what "Close file" was: it empties the
+        {workspacePage}
+        <div
+          className={
+            workspacePage
+              ? "viewer-route viewer-route-inactive"
+              : "viewer-route"
+          }
+          inert={workspacePage ? true : undefined}
+          aria-hidden={workspacePage ? true : undefined}
+        >
+          <ViewerShell
+            header={
+              <WorkspaceHeader
+                onSave={handleSave}
+                onShare={handleShare}
+                canShare={hasUrlLayers}
+                /* "New workspace" is what "Close file" was: it empties the
                  workspace (and resets its name) and hands the user back to
                  the landing page. */
-              onNewWorkspace={handleClose}
-              onOpenWorkspace={(id) => void handleRestore(id)}
-              snapshots={savedSnapshots}
-            />
-          }
-          /* The rail is not a collapsed panel: it is a different component
+                onNewWorkspace={handleClose}
+                onOpenWorkspace={(id) => void handleRestore(id)}
+                snapshots={savedSnapshots}
+              />
+            }
+            /* The rail is not a collapsed panel: it is a different component
              for a 40px column (the shell already narrows the track), which
              is why the choice is made here rather than inside the panel. */
-          left={
-            leftCollapsed ? (
-              /* The same three row sources the panel gets: the rail's badge
+            left={
+              leftCollapsed ? (
+                /* The same three row sources the panel gets: the rail's badge
                  counts what the list WOULD show, not what the stores hold. */
-              <LeftRail
-                extraRows={unavailableRows}
-                pending={pending}
-                failed={failed}
-                failedCount={failed.length}
-              />
-            ) : (
-              <LeftPanel
-                onAddFile={handlePickedFile}
-                onAddFiles={handlePickedFiles}
-                onAddUrl={handleAddUrl}
-                loading={loading}
-                /* The one thing only `App` can answer: a city layer is flown
-                   to through the scene handle, a geospatial one through an
-                   extent this app computes for itself. */
-                onZoomToLayer={handleZoomToLayer}
-                extraRows={unavailableRows}
-                pending={pending}
-                failed={failed}
-                dismissFailed={dismissFailed}
-              />
-            )
-          }
-          map={
-            <div className="viewport" ref={viewportRef}>
-              {!hasWorkspace && !engineBooting && (
-                <div className="empty-workspace-overlay">
-                  <div className="empty-workspace-overlay__card">
-                    <strong>Add a layer to start</strong>
-                    {loadError && (
-                      <p className="error-message" role="alert">
-                        {loadError}
-                      </p>
-                    )}
-                    <div className="empty-workspace-overlay__actions">
-                      <button
-                        className="primary"
-                        type="button"
-                        onClick={() => setEmptyAddTab("file")}
-                      >
-                        Add layer
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEmptyAddTab("file")}
-                      >
-                        File
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEmptyAddTab("url")}
-                      >
-                        URL
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEmptyAddTab("catalog")}
-                      >
-                        Catalog
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {emptyAddTab !== null && (
-                <AddLayerDialog
-                  onClose={() => setEmptyAddTab(null)}
+                <LeftRail
+                  extraRows={unavailableRows}
+                  pending={pending}
+                  failed={failed}
+                  failedCount={failed.length}
+                />
+              ) : (
+                <LeftPanel
+                  onRequestAdd={() => setAddLayerOpen(true)}
+                  addDialogOpen={addLayerOpen}
                   onAddFile={handlePickedFile}
                   onAddFiles={handlePickedFiles}
                   onAddUrl={handleAddUrl}
                   loading={loading}
-                  initialTab={emptyAddTab}
+                  /* The one thing only `App` can answer: a city layer is flown
+                   to through the scene handle, a geospatial one through an
+                   extent this app computes for itself. */
+                  onZoomToLayer={handleZoomToLayer}
+                  extraRows={unavailableRows}
+                  pending={pending}
+                  failed={failed}
+                  dismissFailed={dismissFailed}
                 />
-              )}
-              <NavaraViewport
-                ref={attachScene}
-                onTriangleCount={() => {}}
-                onFps={setFps}
-                onCursorPosition={setCursorPosition}
-                onLayerError={handleLayerError}
-                onAttributionChange={setViewportAttribution}
-              />
-              <AddressSearch onFlyTo={handleFlyToAddress} />
-              <CameraCluster
-                onZoomIn={() => sceneRef.current?.zoomIn()}
-                onZoomOut={() => sceneRef.current?.zoomOut()}
-                onResetNorth={() => sceneRef.current?.resetNorth()}
-                onFit={handleFitActiveLayer}
-                fitDisabled={activeLayer === null}
-                fitTitle={
-                  activeLayer === null
-                    ? "Choose a layer to fit"
-                    : "Fit active layer"
-                }
-                onFitSelection={handleFitSelection}
-                selectionPresent={
-                  selectedObjectIds.length > 0 || geoSelection !== null
-                }
-                selectionDisabled={
-                  selectedObjectIds.length === 0 && selectedGeoBounds === null
-                }
-                selectionTitle={
-                  geoSelection !== null
-                    ? selectedGeoBounds === null
-                      ? "Selected geo feature has no coordinates"
-                      : "Zoom to selected geo feature"
-                    : "Zoom to selection"
-                }
-              />
-              <SelectModeControl
-                mode={mode}
-                toolMode={toolMode}
-                cityActive={activeCityLayer !== null}
-                onSetMode={setMode}
-                onSetToolMode={setToolMode}
-              />
-              <LegendOverlay />
-              <FilterChip />
-              <HoverTooltip />
-              <SceneButtons
-                renderSun={(onClose) => <SunShadeSheet onClose={onClose} />}
-                renderSettings={(onClose) => (
-                  <SceneSettingsSheet onClose={onClose} />
+              )
+            }
+            map={
+              <div className="viewport" ref={viewportRef}>
+                {addLayerOpen && pathname !== "/workspaces" && (
+                  <AddLayerDialog
+                    onClose={() => setAddLayerOpen(false)}
+                    onAddFile={handlePickedFile}
+                    onAddFiles={handlePickedFiles}
+                    onAddUrl={handleAddUrl}
+                    loading={loading}
+                  />
                 )}
+                {loadError && !hasWorkspace && (
+                  <p
+                    className="empty-workspace-error error-message"
+                    role="alert"
+                  >
+                    {loadError}
+                  </p>
+                )}
+                <NavaraViewport
+                  ref={attachScene}
+                  onTriangleCount={() => {}}
+                  onFps={setFps}
+                  onCursorPosition={setCursorPosition}
+                  onLayerError={handleLayerError}
+                  onAttributionChange={setViewportAttribution}
+                />
+                <CameraCluster
+                  onZoomIn={() => sceneRef.current?.zoomIn()}
+                  onZoomOut={() => sceneRef.current?.zoomOut()}
+                  onResetNorth={() => sceneRef.current?.resetNorth()}
+                  onFit={handleFitActiveLayer}
+                  fitDisabled={activeLayer === null}
+                  fitTitle={
+                    activeLayer === null
+                      ? "Choose a layer to fit"
+                      : "Fit active layer"
+                  }
+                  onFitSelection={handleFitSelection}
+                  selectionPresent={
+                    selectedObjectIds.length > 0 || geoSelection !== null
+                  }
+                  selectionDisabled={
+                    selectedObjectIds.length === 0 && selectedGeoBounds === null
+                  }
+                  selectionTitle={
+                    geoSelection !== null
+                      ? selectedGeoBounds === null
+                        ? "Selected geo feature has no coordinates"
+                        : "Zoom to selected geo feature"
+                      : "Zoom to selection"
+                  }
+                />
+                <div className="viewport-tools">
+                  <SelectModeControl
+                    mode={mode}
+                    toolMode={toolMode}
+                    cityActive={activeCityLayer !== null}
+                    onSetMode={setMode}
+                    onSetToolMode={setToolMode}
+                  />
+                  <AddressSearch onFlyTo={handleFlyToAddress} />
+                </div>
+                <LegendOverlay />
+                <FilterChip />
+                <HoverTooltip />
+                <SceneButtons
+                  renderSun={(onClose) => <SunShadeSheet onClose={onClose} />}
+                  renderSettings={(onClose) => (
+                    <SceneSettingsSheet onClose={onClose} />
+                  )}
+                />
+              </div>
+            }
+            drawer={
+              drawerOpen ? (
+                <DataDrawer
+                  duckdbStatus={duckdbStatus}
+                  onRetryDuckDB={handleRetryDuckDB}
+                />
+              ) : null
+            }
+            right={
+              selections.length > 0 || geoSelection !== null ? (
+                <DetailsPanel onClose={clearSelection} />
+              ) : null
+            }
+            rightTitle={selectionTitle(selections, geoSelection !== null)}
+            attributionLines={viewportAttribution}
+            status={
+              <StatusBar
+                objectCount={totalObjects}
+                fps={fps}
+                cursorPosition={cursorPosition}
+                streamStatus={
+                  activeCityLayer?.isStreaming
+                    ? (activeStreamStatus ?? "idle")
+                    : null
+                }
+                streamMessage={
+                  activeCityLayer?.isStreaming
+                    ? (activeStreamMessage ?? null)
+                    : null
+                }
+                residentCellCount={
+                  activeCityLayer?.isStreaming
+                    ? activeStream?.handle.getResidentModel().cellCount
+                    : undefined
+                }
               />
-            </div>
-          }
-          drawer={
-            drawerOpen ? (
-              <DataDrawer
-                duckdbStatus={duckdbStatus}
-                onRetryDuckDB={handleRetryDuckDB}
-              />
-            ) : null
-          }
-          right={
-            selections.length > 0 || geoSelection !== null ? (
-              <DetailsPanel onClose={clearSelection} />
-            ) : null
-          }
-          rightTitle={selectionTitle(selections, geoSelection !== null)}
-          attributionLines={viewportAttribution}
-          status={
-            <StatusBar
-              objectCount={totalObjects}
-              fps={fps}
-              cursorPosition={cursorPosition}
-              streamStatus={
-                activeCityLayer?.isStreaming
-                  ? (activeStreamStatus ?? "idle")
-                  : null
-              }
-              streamMessage={
-                activeCityLayer?.isStreaming
-                  ? (activeStreamMessage ?? null)
-                  : null
-              }
-              residentCellCount={
-                activeCityLayer?.isStreaming
-                  ? activeStream?.handle.getResidentModel().cellCount
-                  : undefined
-              }
-            />
-          }
-        />
+            }
+          />
 
-        {/* Keyed on the URL so a second Share click while the dialog is open
+          {/* Keyed on the URL so a second Share click while the dialog is open
             remounts it — the auto-copy effect must run again for the NEW
             link, not leave the old one on screen reporting an old result. */}
-        {shareUrl !== null && (
-          <ShareDialog
-            key={shareUrl}
-            url={shareUrl}
-            onClose={() => setShareUrl(null)}
-            copyToClipboard={copyShareText}
-          />
-        )}
+          {shareUrl !== null && (
+            <ShareDialog
+              key={shareUrl}
+              url={shareUrl}
+              onClose={() => setShareUrl(null)}
+              copyToClipboard={copyShareText}
+            />
+          )}
 
-        {toast && <div className="toast">{toast}</div>}
+          {toast && <div className="toast">{toast}</div>}
+        </div>
       </>
     );
   }
@@ -2112,6 +2218,16 @@ export function App({
     <main className="app-shell">
       <div className="landing-preferences">
         <PreferencesMenu />
+        <button
+          type="button"
+          className="tb-btn workspaces-trigger"
+          onClick={() => navigate("/workspaces")}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 7V4h7l2 3h9v13H3Z" />
+          </svg>
+          <span>Workspaces</span>
+        </button>
       </div>
 
       <div className="hero">

@@ -1,80 +1,83 @@
-.scene-settings-sheet {
-  width: 340px;
-  max-width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  padding: 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-lg);
-  background: color-mix(in srgb, var(--bg-panel) 86%, transparent);
-  color: var(--fg);
-  font: 11px var(--font-ui);
-  backdrop-filter: blur(14px);
-}
-.scene-settings-sheet header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 0 8px;
-  border-bottom: 1px solid var(--border);
-}
-.scene-settings-sheet h2 {
-  margin: 0;
-  font: 600 14px var(--font-display);
-}
-.scene-settings-sheet h3,
-.scene-settings-sheet summary {
-  margin: 0;
-  font: 600 10px var(--font-mono);
-  letter-spacing: var(--tracking-label);
-  text-transform: uppercase;
-}
-.scene-settings-sheet__body {
-  overflow: auto;
-  padding: 9px 0;
-}
-.scene-settings-sheet section,
-.scene-settings-sheet details {
+.scene-settings-sheet__body > section,
+.scene-settings-sheet__body > details {
   display: grid;
-  gap: 7px;
-  margin-bottom: 11px;
+  gap: 0.625rem;
+  margin: 0;
+  min-width: 0;
 }
+
+.scene-settings-sheet__body > :is(section, details) + :is(section, details) {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.scene-settings-sheet h3,
+.scene-settings-sheet summary,
+.scene-settings-sheet .attr-section-title {
+  margin: 0 0 0.25rem;
+  color: var(--fg);
+  font: 600 0.75rem/1.4 var(--font-ui);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.scene-settings-sheet summary {
+  cursor: pointer;
+}
+
+.scene-settings-sheet details[open] > summary {
+  margin-bottom: 0.75rem;
+}
+
 .scene-settings-sheet label {
   display: grid;
-  gap: 4px;
+  gap: 0.375rem;
+  min-width: 0;
 }
-.scene-settings-sheet__toggle {
-  display: flex !important;
+
+.scene-settings-sheet .scene-settings-sheet__toggle {
+  display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 1.5rem;
 }
-.scene-settings-sheet input,
-.scene-settings-sheet select,
-.scene-settings-sheet button {
-  font: inherit;
-  accent-color: var(--brand-primary);
-}
-.scene-settings-sheet select,
-.scene-settings-sheet button {
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-sm);
-  background: var(--bg-raised);
-  color: var(--fg);
-  padding: 5px;
-}
+
 .scene-settings-sheet__hint {
   margin: 0;
   color: var(--fg-muted);
-  font-size: 10px;
+  font-size: 0.6875rem;
+  line-height: 1.5;
 }
+
+.scene-settings-sheet__readout {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
 .scene-settings-sheet output {
-  float: right;
-  font-family: var(--font-mono);
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
 }
-.scene-settings-sheet details button {
-  margin: 2px;
+
+/* Embedded selectors share the sheet's gutter, rather than adding a second. */
+.scene-settings-sheet .attr-section {
+  padding: 0;
 }
-.scene-settings-sheet footer {
-  display: none;
+
+.scene-settings-sheet .attr-section-title {
+  margin-bottom: 0.625rem;
+}
+
+.scene-settings-sheet .layer-item {
+  margin: 0;
+}
+
+.scene-settings-sheet .layer-vis-btn {
+  padding: 0;
+  min-height: 1.5rem;
+  border: 0;
+  background: transparent;
 }

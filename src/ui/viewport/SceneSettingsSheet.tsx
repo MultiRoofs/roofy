@@ -12,6 +12,7 @@ import {
 } from "../../features/sceneTheme/sceneThemeStore";
 import { BasemapPanel } from "../layers/BasemapPanel";
 import { GoogleTilesPanel } from "../layers/GoogleTilesPanel";
+import "./mapSheet.css";
 import "./sceneSettingsSheet.css";
 
 export function SceneSettingsSheet({
@@ -29,23 +30,25 @@ export function SceneSettingsSheet({
   };
   return (
     <section
-      className="scene-settings-sheet"
+      className="scene-settings-sheet map-sheet"
       role="dialog"
       aria-label="Scene settings"
     >
-      <header>
+      <header className="map-sheet__header">
         <h2>Scene settings</h2>
         <button
           type="button"
           onClick={onClose}
           aria-label="Close scene settings"
+          className="map-sheet__close"
         >
-          ×
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="m4 4 8 8m0-8-8 8" />
+          </svg>
         </button>
       </header>
-      <div className="scene-settings-sheet__body">
+      <div className="map-sheet__body scene-settings-sheet__body">
         <section>
-          <h3>Basemap</h3>
           <BasemapPanel />
         </section>
         <section>
@@ -55,7 +58,9 @@ export function SceneSettingsSheet({
         <section>
           <h3>Rendering</h3>
           <label>
-            Exposure <output>{render.exposure.toFixed(1)}</output>
+            <span className="scene-settings-sheet__readout">
+              Exposure <output>{render.exposure.toFixed(1)}</output>
+            </span>
             <input
               aria-label="Exposure"
               type="range"

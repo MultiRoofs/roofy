@@ -396,3 +396,39 @@ describe("layerStore", () => {
     });
   });
 });
+
+it("copies style independently without changing the destination data", () => {
+  const store = useLayerStore.getState();
+  const source = store.addLayer({
+    name: "Source",
+    model: makeModel(),
+    modelRef: { type: "file", fileName: "a" },
+    rules: [makeRule()],
+    visible: true,
+  });
+  const target = store.addLayer({
+    name: "Target",
+    model: makeModel("other"),
+    modelRef: { type: "file", fileName: "b" },
+    rules: [],
+    visible: false,
+  });
+  store.updateLayer(source, { colorBy: "single", singleColor: "#123456" });
+  store.copyStyle(target, source);
+  const result = useLayerStore.getState().layers.find((l) => l.id === target)!;
+  expect(result.rules[0]!.conditions).toEqual(
+    useLayerStore.getState().layers.find((l) => l.id === source)!.rules[0]!
+      .conditions,
+  );
+  expect(result.rules[0]!.conditions).not.toBe(
+    useLayerStore.getState().layers.find((l) => l.id === source)!.rules[0]!
+      .conditions,
+  );
+  expect(result.singleColor).toBe("#123456");
+  expect(result.colorBy).toBe("single");
+  expect(result.visible).toBe(false);
+  expect(result.name).toBe("Target");
+  expect(result.rules).not.toBe(
+    useLayerStore.getState().layers.find((l) => l.id === source)!.rules,
+  );
+});

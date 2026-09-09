@@ -36,13 +36,14 @@ export function SceneButtons({
           aria-pressed={sheet === "sun"}
           aria-expanded={sheet === "sun"}
           aria-haspopup="dialog"
+          aria-label="Sun & shade"
           onClick={() => setSheet(sheet === "sun" ? null : "sun")}
         >
           <svg viewBox="0 0 16 16" aria-hidden="true">
-            <circle cx="8" cy="8" r="3" />
-            <path d="M8 1v2M8 13v2M1 8h2M13 8h2" />
+            <circle cx="8" cy="8" r="5" />
+            <path d="M8 3a5 5 0 0 1 0 10Z" fill="currentColor" stroke="none" />
           </svg>
-          Sun &amp; shade
+          <span className="scene-buttons__label">Sun &amp; shade</span>
         </button>
         <button
           ref={settings}
@@ -50,13 +51,13 @@ export function SceneButtons({
           aria-pressed={sheet === "settings"}
           aria-expanded={sheet === "settings"}
           aria-haspopup="dialog"
+          aria-label="Scene settings"
           onClick={() => setSheet(sheet === "settings" ? null : "settings")}
         >
           <svg viewBox="0 0 16 16" aria-hidden="true">
-            <circle cx="8" cy="8" r="2" />
-            <path d="M8 1v3M8 12v3M1 8h3M12 8h3" />
+            <path d="M2 5h12M2 11h12M6 3v4M10 9v4" />
           </svg>
-          Scene settings
+          <span className="scene-buttons__label">Scene settings</span>
         </button>
       </div>
       {sheet !== null && (

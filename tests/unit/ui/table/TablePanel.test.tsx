@@ -5,6 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -632,11 +633,11 @@ describe("TablePanel columns and child records", () => {
     panel();
     await screen.findByText("B1");
     fireEvent.click(screen.getByRole("button", { name: "Columns" }));
-    const derived = screen.getByLabelText("___roofy_roof_area");
+    const derived = screen.getByRole("checkbox", { name: "Roof area" });
     expect(derived).toBeChecked();
     fireEvent.click(screen.getByLabelText("custom_source"));
-    expect(screen.getByLabelText("___roofy_roof_area")).toBeChecked();
-    expect(await screen.findByText("Roof area")).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Roof area" })).toBeChecked();
+    expect((await screen.findAllByText("Roof area")).length).toBeGreaterThan(0);
   });
 
   it("keeps a raw source __roofy collision literal and exposes structural columns", async () => {
@@ -768,4 +769,59 @@ describe("TablePanel columns and child records", () => {
       { kind: "object", layerId: "L", objectId: "P1" },
     ]);
   });
+});
+
+it("returns from Summary to Records when filter setup is requested", async () => {
+  useLayerStore.setState({ layers: [layer()] });
+  useWorkspaceStore.setState({ activeLayerId: "L" });
+  useLayerTableStore.setState({
+    tables: { L: { state: "ready", info: TABLE } },
+  });
+  panel();
+  fireEvent.click(screen.getByRole("tab", { name: "Summary" }));
+  expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  act(() => useShellStore.getState().openFilter());
+  await waitFor(() =>
+    expect(screen.getByRole("tab", { name: "Records" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    ),
+  );
+});
+
+it("keeps column picker and table in the same chosen order", async () => {
+  runQuery.mockImplementation(async (sql: string) =>
+    sql.includes("COUNT(*)")
+      ? { ok: true, columns: ["n"], rows: [{ n: 1 }] }
+      : {
+          ok: true,
+          columns: [],
+          rows: [{ id: "B1", object_type: "Building" }],
+        },
+  );
+  useLayerStore.setState({ layers: [layer()] });
+  useWorkspaceStore.setState({ activeLayerId: "L" });
+  useLayerTableStore.setState({
+    tables: { L: { state: "ready", info: TABLE } },
+  });
+  useQueryStore.getState().setColumns("L", ["id", "object_type"]);
+  panel();
+  await screen.findByText("B1");
+  fireEvent.click(screen.getByRole("button", { name: "Columns" }));
+  fireEvent.click(screen.getByRole("button", { name: "Move object_type up" }));
+  expect(useQueryStore.getState().queries.L!.columns).toEqual([
+    "object_type",
+    "id",
+  ]);
+  expect(
+    screen.getAllByRole("columnheader").map((el) => el.textContent),
+  ).toEqual(["object_type", "id"]);
+  const boxes = document.querySelectorAll(
+    ".columns-popover input[type=checkbox]",
+  );
+  expect(boxes[0]?.parentElement?.textContent).toBe("object_type");
+  expect(boxes[1]?.parentElement?.textContent).toBe("id");
 });

@@ -1,3 +1,5 @@
+import { useQueryStore } from "../../features/query/queryStore";
+import { useWorkspaceStore } from "../../features/workspace/workspaceStore";
 /**
  * Session-only UI state for the app shell: the left layer panel, the right
  * details panel, the bottom data drawer, and which sections of the active
@@ -39,6 +41,8 @@ export interface ShellState {
    *  selection persists, only its panel is hidden. */
   readonly rightCollapsed: boolean;
   readonly drawerOpen: boolean;
+  /** Signals an explicit request to show the Records filter builder. */
+  readonly filterRequest: number;
   readonly drawerHeight: number;
   readonly drawerExpanded: boolean;
   /** Per layer: which sections of that layer's panel are open. A layer
@@ -57,6 +61,7 @@ export interface ShellActions {
   setRightCollapsed(v: boolean): void;
   toggleRightCollapsed(): void;
   openDrawer(): void;
+  openFilter(): void;
   closeDrawer(): void;
   toggleDrawer(): void;
   setDrawerHeight(px: number): void;
@@ -107,6 +112,7 @@ export function defaultShellState(
     drawerOpen: false,
     drawerHeight: short ? 220 : 280,
     drawerExpanded: false,
+    filterRequest: 0,
     openSections: {},
     requestedSection: null,
   };
@@ -136,6 +142,15 @@ export const useShellStore = create<ShellStore>((set, get) => ({
     set((state) => ({ rightCollapsed: !state.rightCollapsed })),
 
   openDrawer: () => set({ drawerOpen: true }),
+  openFilter: () => {
+    const layerId = useWorkspaceStore.getState().activeLayerId;
+    if (layerId !== null)
+      useQueryStore.getState().setDrawerTab(layerId, "records");
+    set((state) => ({
+      drawerOpen: true,
+      filterRequest: state.filterRequest + 1,
+    }));
+  },
   closeDrawer: () => set({ drawerOpen: false }),
   toggleDrawer: () => set((state) => ({ drawerOpen: !state.drawerOpen })),
 

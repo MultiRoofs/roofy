@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  /><title>Roofy — Layer control variants</title>
+  <style>
+    @font-face {
+      font-family: Source;
+      src: url("/node_modules/@fontsource/source-sans-3/files/source-sans-3-latin-400-normal.woff2");
+    }
+    @font-face {
+      font-family: Source;
+      src: url("/node_modules/@fontsource/source-sans-3/files/source-sans-3-latin-600-normal.woff2");
+      font-weight: 600;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      background: #fafbf8;
+      color: #202720;
+      font:
+        15px/1.45 Source,
+        system-ui,
+        sans-serif;
+    }
+    header {
+      padding: 38px 40px 26px;
+      border-bottom: 1px solid #d9ddd5;
+      background: #fff;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 600;
+      letter-spacing: -0.025em;
+      margin: 0 0 8px;
+    }
+    p {
+      margin: 0;
+      color: #596054;
+    }
+    header p {
+      max-width: 780px;
+    }
+    .variants {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      max-width: 1450px;
+      margin: auto;
+      padding: 32px 40px;
+      gap: 32px;
+    }
+    article {
+      min-width: 0;
+    }
+    h2 {
+      font-size: 21px;
+      font-weight: 600;
+      margin: 0 0 6px;
+    }
+    .description {
+      min-height: 64px;
+      font-size: 14px;
+    }
+    .preview {
+      background: #fff;
+      border-top: 1px solid #aeb6a7;
+      border-bottom: 1px solid #aeb6a7;
+      min-height: 550px;
+      padding: 20px 0;
+    }
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px 16px;
+      font-weight: 600;
+      font-size: 13px;
+    }
+    .layer {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      margin: 0;
+      min-height: 64px;
+      cursor: pointer;
+      color: #5f665b;
+    }
+    .layer .info {
+      flex: 1;
+      min-width: 0;
+    }
+    .name {
+      display: block;
+      font-size: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .meta {
+      font-size: 12px;
+      display: block;
+      margin-top: 2px;
+    }
+    .layer.selected .name {
+      font-weight: 600;
+    }
+    .layer.selected {
+      color: #202720;
+    }
+    .layer .mark {
+      width: 16px;
+      visibility: hidden;
+    }
+    .layer.selected .mark {
+      visibility: visible;
+    }
+    svg {
+      width: 16px;
+      height: 16px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      flex-shrink: 0;
+    }
+    button {
+      font: inherit;
+      color: inherit;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: 0;
+      background: none;
+      padding: 6px 10px;
+      border-radius: 0;
+      min-height: 30px;
+    }
+    button:focus-visible,
+    .layer:focus-visible {
+      outline: 2px solid #4a7a0f;
+      outline-offset: 3px;
+    }
+    .icon {
+      padding: 4px;
+      min-width: 24px;
+      min-height: 24px;
+    }
+    .content {
+      padding: 24px 16px;
+      border-top: 1px solid #e0e4db;
+      margin-top: 16px;
+    }
+    .content h3 {
+      font-size: 15px;
+      margin: 0 0 4px;
+      font-weight: 600;
+    }
+    .content p {
+      font-size: 12px;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    .group {
+      padding: 0 16px 22px;
+      margin-top: 14px;
+    }
+    .group-title {
+      font-size: 12px;
+      color: #596054;
+      margin: 0 0 10px;
+    }
+    .segments {
+      display: inline-flex;
+      gap: 0;
+    }
+    .toolbar {
+      display: flex;
+      gap: 4px;
+      margin-top: 22px;
+    }
+    .toolbar button {
+      width: 32px;
+      height: 32px;
+      padding: 6px;
+    }
+    .caption {
+      font-size: 13px;
+      margin-top: 14px;
+      color: #596054;
+    }
+    .preview button:hover {
+      background: #e7ebe1;
+      color: #202720;
+    }
+    /* A: ordinary desktop list, opaque neutral selection. */
+    .a .layer.selected {
+      background: #e8ece3;
+    }
+    .a .layer .mark {
+      display: none;
+    }
+    .a .button {
+      background: #edf0e8;
+    }
+    .a .button.active,
+    .a .segments .active {
+      background: #dbe5cf;
+      color: #304d1d;
+    }
+    .a .segments {
+      background: #f1f3ee;
+    }
+    .a .toolbar button {
+      background: #edf0e8;
+    }
+    .a .segments button {
+      padding: 6px 14px;
+    }
+    /* B: one high contrast selected row, squared solid controls. */
+    .b .layer.selected {
+      background: #263126;
+      color: #fff;
+    }
+    .b .layer.selected .meta {
+      color: #d6dfd1;
+    }
+    .b .layer .mark {
+      display: none;
+    }
+    .b .button {
+      border: 1px solid #bbc3b5;
+    }
+    .b .button.active,
+    .b .segments .active {
+      background: #263126;
+      color: #fff;
+      border-color: #263126;
+    }
+    .b .segments {
+      border: 1px solid #bbc3b5;
+    }
+    .b .segments button {
+      padding: 5px 14px;
+    }
+    .b .toolbar button {
+      border: 1px solid #bbc3b5;
+    }
+    .b .button.add {
+      background: #263126;
+      color: #fff;
+      border-color: #263126;
+    }
+    /* C: selection carried by text weight and a check, no enclosing surface. */
+    .c .layer {
+      padding-left: 12px;
+    }
+    .c .layer.selected .name {
+      color: #395e1a;
+    }
+    .c .layer.selected .mark {
+      color: #395e1a;
+    }
+    .c .layer {
+      border-bottom: 1px solid #edf0e8;
+    }
+    .c .button {
+      padding-left: 0;
+      padding-right: 0;
+      border-bottom: 1px solid #b7bfb0;
+    }
+    .c .button.active {
+      color: #395e1a;
+      border-bottom: 2px solid #395e1a;
+    }
+    .c .actions {
+      gap: 20px;
+    }
+    .c .segments {
+      gap: 20px;
+      border-bottom: 1px solid #d7ddcf;
+    }
+    .c .segments button {
+      padding: 6px 0;
+      border-bottom: 2px solid transparent;
+    }
+    .c .segments .active {
+      border-bottom-color: #395e1a;
+      color: #395e1a;
+      font-weight: 600;
+    }
+    .c .toolbar {
+      gap: 12px;
+    }
+    .c .toolbar button {
+      border-bottom: 1px solid #b7bfb0;
+    }
+    .c .button.add {
+      border: 0;
+      color: #395e1a;
+    }
+    footer {
+      padding: 0 40px 36px;
+      max-width: 1450px;
+      margin: auto;
+      color: #596054;
+      font-size: 14px;
+    }
+    @media (max-width: 900px) {
+      .variants {
+        grid-template-columns: 1fr;
+        max-width: 520px;
+      }
+      .description {
+        min-height: 0;
+        margin-bottom: 18px;
+      }
+      header {
+        padding: 24px;
+      }
+      footer {
+        padding: 24px;
+      }
+    }
+  </style>
+  <header>
+    <h1>Layer controls, without the cards</h1>
+    <p>
+      Three treatments using Roofy’s current typeface and palette. Click the
+      sample layers and Feature / Surface buttons to compare their selected
+      states.
+    </p>
+  </header>
+  <main class="variants"></main>
+  <footer>
+    Choose A, B, or C in the conversation—or annotate parts you’d like to
+    combine. These are isolated previews; the app’s styling has not changed.
+  </footer>
+  <script>
+    const icons = {
+      eye: '<path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5Z"/><circle cx="8" cy="8" r="2"/>',
+      check: '<path d="m3 8 3 3 7-7"/>',
+      more: '<circle cx="3" cy="8" r=".5"/><circle cx="8" cy="8" r=".5"/><circle cx="13" cy="8" r=".5"/>',
+      plus: '<path d="M8 3v10M3 8h10"/>',
+      search: '<circle cx="7" cy="7" r="4"/><path d="m10 10 4 4"/>',
+      fit: '<path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/>',
+      north: '<path d="m8 2 5 12-5-3-5 3L8 2Z"/>',
+    };
+    const svg = (name) =>
+      `<svg viewBox="0 0 16 16" aria-hidden="true">${icons[name]}</svg>`;
+    const variants = [
+      [
+        "a",
+        "A · Flat list",
+        "An opaque neutral row, with no outline or rounding. Quiet filled buttons.",
+        "Most familiar for a dense desktop workspace.",
+      ],
+      [
+        "b",
+        "B · Solid selection",
+        "A charcoal selected row and crisp rectangular buttons. Stronger contrast, no translucency.",
+        "The active layer is unmistakable at a glance.",
+      ],
+      [
+        "c",
+        "C · Type & underline",
+        "White surfaces throughout. A check and text weight identify the layer; underlines identify active tools.",
+        "The lightest treatment, with the least visual framing.",
+      ],
+    ];
+    for (const [id, title, desc, caption] of variants) {
+      const article = document.createElement("article");
+      article.className = id;
+      article.innerHTML = `<h2>${title}</h2><p class="description">${desc}</p><div class="preview"><div class="section-head"><span>Layers</span><button class="button add">${svg("plus")} Add layer</button></div><div class="layer-list" role="listbox" aria-label="${title} layers">${[
+        ["delft.city.jsonl", "1,115 buildings · LoD 2.2"],
+        ["vegetation.city.json", "842 objects · LoD 2"],
+        ["planning-areas.geojson", "18 features"],
+      ]
+        .map(
+          ([name, meta], i) =>
+            `<div class="layer ${i === 0 ? "selected" : ""}" role="option" aria-selected="${i === 0}" tabindex="0">${svg("eye")}<div class="info"><span class="name">${name}</span><span class="meta">${meta}</span></div><span class="mark">${svg("check")}</span>${svg("more")}</div>`,
+        )
+        .join(
+          "",
+        )}</div><div class="content"><h3>delft.city.jsonl</h3><p>City model · CityJSONSeq</p><div class="actions"><button class="button">Zoom to layer</button><button class="button active">Open table</button></div></div><div class="group"><p class="group-title">Selection mode</p><div class="segments"><button class="active" aria-pressed="true">Feature</button><button aria-pressed="false">Surface</button></div><div class="toolbar"><button aria-label="Search">${svg("search")}</button><button aria-label="Fit view">${svg("fit")}</button><button aria-label="Face north">${svg("north")}</button></div></div></div><p class="caption">${caption}</p>`;
+      document.querySelector("main").append(article);
+    }
+    document.querySelectorAll(".layer").forEach((row) => {
+      function activate() {
+        row.parentElement.querySelectorAll(".layer").forEach((r) => {
+          r.classList.toggle("selected", r === row);
+          r.setAttribute("aria-selected", r === row);
+        });
+        row.closest(".preview").querySelector("h3").textContent =
+          row.querySelector(".name").textContent;
+      }
+      row.onclick = activate;
+      row.onkeydown = (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          activate();
+        }
+      };
+    });
+    document.querySelectorAll(".segments button").forEach(
+      (button) =>
+        (button.onclick = () =>
+          button.parentElement.querySelectorAll("button").forEach((b) => {
+            b.classList.toggle("active", b === button);
+            b.setAttribute("aria-pressed", b === button);
+          })),
+    );
+  </script>
+</html>

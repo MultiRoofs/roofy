@@ -18,6 +18,7 @@ import {
   render,
   screen,
 } from "@testing-library/react";
+import { useSceneSheetStore } from "../../../../src/features/sceneSheet/sceneSheetStore";
 import { AddressSearch } from "../../../../src/ui/viewport/AddressSearch";
 import { SEARCH_DEBOUNCE_MS } from "../../../../src/features/geocode/useAddressSearch";
 import { PHOTON_ATTRIBUTION } from "../../../../src/features/geocode/photon";
@@ -70,6 +71,7 @@ async function search(text: string) {
 }
 
 beforeEach(() => {
+  useSceneSheetStore.getState().setSheet(null);
   vi.useFakeTimers();
   stubFetch(DELFT_AND_DELFZIJL);
 });
@@ -85,6 +87,31 @@ describe("AddressSearch", () => {
     render(<AddressSearch onFlyTo={vi.fn()} />);
     expect(screen.queryByRole("combobox")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /search/i }));
+    expect(screen.getByRole("combobox")).toBeTruthy();
+  });
+
+  it("collapses with a visible close button and preserves the query", async () => {
+    render(<AddressSearch onFlyTo={vi.fn()} />);
+    await search("Delft");
+    fireEvent.click(screen.getByRole("button", { name: "Close place search" }));
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Search for a place" }),
+    ).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Search for a place" }));
+    expect(screen.getByRole("combobox")).toHaveValue("Delft");
+  });
+
+  it("keeps search and scene sheets mutually exclusive without stealing sheet focus", () => {
+    render(<AddressSearch onFlyTo={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Search for a place" }));
+    act(() => useSceneSheetStore.getState().setSheet("settings"));
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Search for a place" }),
+    ).not.toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Search for a place" }));
+    expect(useSceneSheetStore.getState().sheet).toBeNull();
     expect(screen.getByRole("combobox")).toBeTruthy();
   });
 
