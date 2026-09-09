@@ -140,3 +140,6 @@ vite.config.ts.timestamp-*
 
 .env*
 .wrangler/
+
+# Impeccable generated detector cache (design and live configuration are tracked)
+.impeccable/hook.cache.json
