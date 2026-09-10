@@ -17,8 +17,12 @@ tools, each with a parameter form, a run with progress and cancel, a log and
 a history. Every tool runs entirely in the browser on DuckDB-wasm with the
 `cityjson`, `spatial` and `three_d` extensions. A run produces either
 
-- **new attribute columns on an existing layer** (v1), or
-- **a new vector layer** (v2, see §9).
+- **new attribute columns on an existing layer** (destination "This
+  layer"), or
+- **a new derived layer** holding the scoped features plus the results
+  (destination "New layer"), built app-side from the in-memory model
+  because the CityJSON writer emits nothing in wasm. Tools that create
+  new GEOMETRY (buffers, hulls) are v2, §9.
 
 The user picks a tool, picks the target layer and scope, fills the
 parameters, runs, and gets attributes that behave like any other attribute:
@@ -63,8 +67,10 @@ current code (2026-09-10), except where marked "probe".
   boot today; `ensureExtension` exists and has no caller. Offline, none of
   them can load.
 - `COPY ... TO (FORMAT cityjson | cityjsonseq | flatcitybuf)` writes 0 bytes
-  in wasm; `parquet`, `csv`, `json` and `cityparquet_write` work. A new
-  layer can therefore only come out as GeoJSON (via `ST_AsGeoJSON`) or as a
+  in wasm; `parquet`, `csv`, `json` and `cityparquet_write` work. DuckDB
+  can therefore not WRITE a city model for the app to load; a derived
+  layer is built app-side from the in-memory model instead (§6), and
+  engine-written output is limited to GeoJSON (via `ST_AsGeoJSON`) or a
   CityParquet package through the app's own reader (probe, v2).
 - Vector (GeoJSON) layers have NO DuckDB table today and are held in
   WGS84; city layers are in a metric EPSG CRS. The app already carries
@@ -90,21 +96,38 @@ current code (2026-09-10), except where marked "probe".
 - **Source**: a second layer a cross-layer tool reads from.
 - **Scope**: which target objects a run touches: All, Matching (the
   drawer's applied filter), Selected.
+- **Destination**: where a run writes: **this layer** (columns added to or
+  replaced on the target) or **a new layer** (a derived copy of the scoped
+  features carrying the results; the target is untouched).
 - **Run**: one execution of one tool with fixed parameters; has a status,
-  a log, a result summary and (when it wrote columns) an undo.
+  a log, a result summary and an undo (columns restored, or the new layer
+  removed).
 - **Computed column**: an attribute column written by a run; carries
   provenance (tool, parameters, run time) and a "computed" badge.
 
 ## 4. Where the toolbox lives
 
-### 4.1 Header button
+### 4.1 Scene toolbar button
 
-A ghost button **Tools** (wrench icon + text) in the header's right group,
-between **Share** and **Preferences**. Clicking it opens the Tools tab in the
-right panel; clicking again while Tools is showing closes the tab. While a
-run is queued or running, the button carries a small lime activity dot; a
-failed run the user has not yet seen turns the dot amber until the Tools
-tab is opened.
+Processing is a scene feature, not a workspace feature, so its entry point
+lives in the map header (the scene's own toolbar), not in the app header.
+A ghost button **Tools** (wrench icon + text, the same 30 px compact style
+as the Mode select) sits in the map header's left group, directly after
+the Mode select and before the address search:
+
+```
+│ Mode [Pick feature ▾]  [🔧 Tools]  [🔍]        [Sun & shade] [Scene settings] │
+```
+
+Clicking it reveals the Tools tab: it opens the toolbox when closed,
+switches to Tools when the Details tab is showing, and expands the right
+panel on Tools when the panel is collapsed. Only a click while Tools is
+visibly the active tab closes the toolbox. While a run is queued or
+running, the button carries a small lime activity dot; a failed run the
+user has not yet seen turns the dot amber until the Tools tab is opened.
+Below 1280 px of viewport width the button drops its text and keeps the
+icon with a "Tools" tooltip, as the map header's search button already
+does. The app header (Export, Save, Share, Preferences) is unchanged.
 
 ### 4.2 Right panel tabs
 
@@ -118,8 +141,8 @@ With the toolbox open, the right panel gains a tab strip under its header:
 ```
 
 - **Tools** is present whenever the toolbox is open. Closing it (the tab's
-  × or the header button) restores today's behaviour: the panel follows
-  the selection and is absent without one.
+  × or the map header's Tools button) restores today's behaviour: the
+  panel follows the selection and is absent without one.
 - **Details** is present only while a selection exists, titled as today.
   Picking a feature while Tools is showing does NOT switch the tab; the
   Details tab title updates and gets a subtle emphasis so the user knows
@@ -235,7 +258,10 @@ toolbox closed.
 │ [ ] Ground elevation     [ ] Ridge elevation │
 │                                              │
 │ OUTPUT                                       │
-│ Column prefix  [solid_          ]            │
+│ Write to   (•) This layer (Delft)            │
+│            ( ) New layer                     │
+│            Name [Delft · solids           ]  │
+│ Prefix     [solid_          ]                │
 │ Columns: solid_volume_m3, solid_envelope_m2, │
 │ solid_footprint_m2, solid_height_m,          │
 │ solid_valid                                  │
@@ -280,15 +306,54 @@ Common structure for every tool:
   flagged on the second; a proxy/predicate pair that cannot combine
   ("Largest overlap needs a footprint or rectangle") disables the option
   with that text; a distance limit must be a positive number.
-- **OUTPUT**: column prefix (tool default; letters, digits, underscore,
-  must start with a letter; validation message inline), the resolved
-  column list in mono, always shown before Run, and a replace warning
-  listing which columns already exist. A column written by an earlier run
-  may be replaced (its previous values are kept for Undo, §6.2). A column
-  that came from the file is never replaced: the prefix input errors with
-  "'height' belongs to the source data; choose another prefix". Copied
-  field names that collide after slugifying ("Zone Name" and "zone_name")
-  are flagged on the second with "resolves to the same column".
+- **OUTPUT** starts with the destination, **Write to**, two radios:
+  - **This layer (Delft)**, the default: columns are added to the target
+    or replaced on it, as the rest of this section describes.
+  - **New layer**: the run creates a derived layer and leaves the target
+    untouched. A **Name** field appears under the radio, prefilled
+    "<target> · <tool noun>" ("Delft · solids", "Delft · roof metrics",
+    "Delft · validation", "Delft · extent", "Delft + Zones", "Zones ·
+    buildings", "Delft · nearest Roads"). Names are unique among all
+    layers of the workspace, compared trimmed and case-insensitively; an
+    empty or duplicate name is flagged inline at Run. The name is
+    re-checked at publication (a queued run or a rename in between can
+    take it): a conflict then gets " (2)" appended and the result card
+    says so, rather than failing a finished run. The new layer holds the SCOPED features only (All →
+    every feature; Matching → the matching ones; Selected → the selected
+    ones), with their geometry at every LoD, all their existing attributes
+    (inherited computed columns keep their provenance) and the new
+    computed columns. For Aggregate buildings per area the copy holds ALL
+    target areas (the scope selects the source buildings that are
+    counted, §7.6). For a streaming target the copy is a static snapshot
+    of the frozen features' resident records, captured when Run is
+    pressed, so a later eviction cannot change it; if a frozen feature is
+    no longer resident when the run starts, the run fails with "Some
+    buildings left the loaded area; run again". A prefix colliding with an
+    INHERITED computed column replaces it, with the replace warning
+    scoped to the copy ("2 inherited computed columns will be replaced in
+    the new layer"); a prefix colliding with a source attribute still
+    errors as below. The new layer is session only, like every result
+    (§8): the layer list marks it "Derived · not saved in workspaces".
+  - **What a derived layer is.** An ordinary static layer. A derived city
+    layer whose parent has a CityJSON or CityJSONSeq source keeps a
+    reference to that source plus its feature-id list, so its DuckDB table
+    is reader-backed (the reader re-reads the parent source filtered to
+    those ids) and every tool, proxy and export format the parent
+    supports works on it too. A derived layer of a CityGML, CityParquet
+    or streaming parent has the flat attribute table and the same
+    limitations as its parent (no 3D tools, no footprint proxy, attribute
+    exports only). A derived vector layer is a plain GeoJSON layer. A
+    derived layer is independent of its parent from publication on: a
+    parent table rebuild, filter, edit or removal never marks it stale.
+    Then the column prefix (tool default; letters, digits, underscore,
+    must start with a letter; validation message inline), the resolved
+    column list in mono, always shown before Run, and, for This layer, a
+    replace warning listing which columns already exist. A column written by an earlier run
+    may be replaced (its previous values are kept for Undo, §6.2). A column
+    that came from the file is never replaced: the prefix input errors with
+    "'height' belongs to the source data; choose another prefix". Copied
+    field names that collide after slugifying ("Zone Name" and "zone_name")
+    are flagged on the second with "resolves to the same column".
 - **Extension note** when the tool's extension is not yet loaded, and a
   **workload note** when the target's source is large: "Re-reads a 180 MB
   source; this can take a minute and needs memory" above 100 MB.
@@ -316,24 +381,28 @@ disabled, values visible):
 - **Frozen parameters.** Pressing Run freezes everything the run needs:
   target and source layer identities, the LoD, the resolved set of feature
   ids the scope names (so a later filter or selection change does not
-  move the goalposts), the fields to copy, and the resolved output
-  columns. A queued run re-validates these just before it starts: a
+  move the goalposts), the fields to copy, the destination and new-layer
+  name, and the resolved output columns. A queued run re-validates these just before it starts: a
   missing layer, a missing source field, a rebuilt table or a column that
   now belongs to the file fails the run with that reason instead of
   running on changed ground.
 - **Cancel** asks the engine to cancel, marks the run "cancelling", and
-  resolves in one of two ways. Results are computed into a scratch table
-  and written to the layer in one final transaction; a cancel that lands
-  BEFORE that commit discards the scratch table and the run reads
-  cancelled with no change to the layer. A cancel that lands AFTER the
-  commit cannot unwrite it: the run reads done with the note "finished
-  before the cancel arrived" and offers Undo. The card never claims a
-  cancel it could not deliver.
+  resolves in one of two ways, defined by the run's single PUBLICATION
+  step. For This layer, results are computed into a scratch table and
+  written to the layer in one final transaction. For New layer, the
+  results, the model copy, its table and the layer row are all prepared
+  first and published together as the last step. A cancel (or a failure)
+  that lands BEFORE publication discards every partial resource (scratch
+  tables, the model copy, a half-built table) and the run reads
+  cancelled with nothing changed. A cancel that lands AFTER publication
+  cannot unwrite it: the run reads done with the note "finished before
+  the cancel arrived" and offers Undo. The card never claims a cancel it
+  could not deliver.
 - One run executes at a time; a second Run from any tool queues it and the
   footer says "Queued behind Measure solids". Queued runs can be
   cancelled instantly.
 - The user can leave the tool view, switch tabs, pick, filter and pan
-  while a run executes. The header dot shows activity.
+  while a run executes. The Tools button's dot shows activity.
 - Removing the target or the source layer during a run cancels it
   ("Layer removed"). A table rebuild of a streaming layer that is the
   target OR the source of a running run cancels it with "Layer changed
@@ -346,7 +415,10 @@ disabled, values visible):
   enough memory to read the source". If the DuckDB engine itself dies, the running run and
   every queued run fail with "Analytics engine stopped", the status bar
   shows its Failed state, and Retry there restarts the engine and rebuilds
-  the layer tables; computed columns are lost (their runs read stale).
+  every layer table from the in-memory models. Computed columns live in
+  the model too (§8), so they come back on both ordinary and derived
+  layers; what is lost is the copies kept for Undo, so every earlier run
+  shows Undo disabled with "Unavailable after an engine restart".
 
 ### 6.2 Done
 
@@ -382,6 +454,28 @@ The footer becomes a result card, and a toast repeats its first line:
   Undo asks no confirmation.
 - **Log** opens the log view (§6.4).
 - **Run again** unlocks the form with the same values.
+
+When the destination was **New layer**, the card reads "Created Delft ·
+solids · 312 buildings · 37 invalid solids (no volume) · 2.4 s" and the
+actions are **Zoom to layer**, **Open table** (the drawer on the new
+layer), **Style by result** (the new layer's STYLE section), **Undo**
+(removes the new layer; asks no confirmation) and **Log**. The new layer
+is inserted directly under its target in the layer list, visible, with an
+independent COPY of the target's LoD choice, colour mode, rules and
+palette (later edits on either side do not affect the other), no filter,
+no selection, and its own legend group; it becomes the active layer
+through the ordinary activate rule (which clears a selection belonging to
+another layer). The target stays visible (the user hides it if the two
+overlap). Its state line reads "312 buildings · LoD 2.2 · Derived from
+Delft" and its overflow menu offers the usual actions plus "Show run
+log". Removing the target later does not remove the derived layer.
+
+Undo of a New-layer run is available only while the derived layer is
+untouched as data: it has not been the target or source of any later run
+(queued, running or done) and has no computed columns of its own.
+Renaming or restyling it does not block Undo. Once blocked, Undo is
+disabled with "Used by a later run; remove the layer from the layer list
+instead".
 
 The card distinguishes objects that were evaluated with a caveat
 ("37 invalid solids (no volume)": envelope, footprint and height are still
@@ -666,8 +760,14 @@ The reverse direction: summarises buildings inside each vector feature.
 - **Export**: computed columns are included in every attribute format and
   in CityParquet as attributes.
 - **Persistence**: nothing new is saved in v4 snapshots or share links.
-  A restored workspace opens with no computed columns and an empty Recent
-  runs list; a rule that references an attribute the layer no longer has
+  A derived layer (destination New layer) is not saved either: the
+  snapshot omits it entirely (it is skipped when the active-layer index
+  and the layer order are written, so nothing refers to it), Save shows
+  the existing toast plus "1 derived layer is not saved; export it to
+  keep it", and the layer's Export offers the formats its table supports
+  (§6, "What a derived layer is") so the user can keep it as a file. A
+  restored workspace opens with no computed columns, no derived layers and
+  an empty Recent runs list; a rule that references an attribute the layer no longer has
   shows the existing "attribute not found, matches nothing" behaviour
   with the generic hint "This attribute is not in the layer's data. If a
   tool computed it, run the tool again." (provenance is not persisted, so
@@ -735,6 +835,22 @@ The reverse direction: summarises buildings inside each vector feature.
 9. Escape order: with a sheet open, a tool form open and a selection:
    Escape closes the sheet, then returns to the catalogue, then clears the
    selection.
+10. Destination New layer: Measure solids on scope Matching (312) with the
+    name "Delft · solids" creates a layer of exactly those 312 buildings
+    directly under Delft, active, with the columns in its table and
+    Details; Delft's own table has no new columns; Undo removes the
+    layer; Save warns that the derived layer is not saved; export of the
+    derived layer includes the computed columns; Measure solids can run
+    on the derived layer (its table is reader-backed through Delft's
+    source).
+11. Aggregate buildings per area with destination New layer on scope
+    Selected (2): the new vector layer holds all 6 areas, `buildings_n`
+    counts only the 2 selected buildings, and Zones itself is unchanged.
+12. Add a layer named "Delft · solids" by hand, then run Measure solids
+    with the same default name: the form flags the duplicate; rename it to
+    "Delft · solids 2" and run; while it is queued, rename the manual layer
+    to "Delft · solids 2": the run publishes as "Delft · solids 2 (2)" and
+    the card says so.
 
 ## 11. Mockup
 
@@ -745,5 +861,6 @@ layout) with the toolbox surfaces rendered in the Soft Utility tokens from
 `src/app/brand.css` and `src/app/flatControls.css`. A state strip switches
 between: catalogue, Measure solids form, running, done (with the table
 drawer and Details showing computed columns), Join attributes by location
-form, failed, log, and the collapsed-panel pill. Static HTML, mock data,
+form (destination New layer chosen), failed, log, the collapsed-panel
+pill, and done with a derived layer in the list. Static HTML, mock data,
 no engine.
