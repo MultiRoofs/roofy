@@ -794,6 +794,26 @@ body {
   color: var(--accent);
 }
 
+/* Two pills (Tools + Details) with the toolbox open and the panel collapsed:
+   the container takes over the absolute placement `.details-pill` carries on
+   its own, so the pills stack instead of landing on top of one another. */
+.details-pills {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.details-pills .details-pill {
+  position: static;
+  transform: none;
+}
+
 /* Shared drag handle (`ResizeHandle`): a 4px strip on the edge it resizes. */
 .resize-handle {
   flex-shrink: 0;

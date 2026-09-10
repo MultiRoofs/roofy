@@ -13,10 +13,14 @@
  *  1. A modal (`.modal-backdrop`) — its own trap owns the key outright. This
  *     hook stands down, exactly as `RenderingPanel` does, and for the same
  *     reason: a user closing a dialog is not asking to lose their selection.
- *  2. A text field with the focus — Escape there means "abandon what I am
+ *  2. An open scene sheet (`sceneSheetStore`) — the sheet closes and the
+ *     selection behind it stays.
+ *  3. An open tool form or log in the processing toolbox — back to the
+ *     catalogue, for the same reason as the sheet above.
+ *  4. A text field with the focus — Escape there means "abandon what I am
  *     typing" (the inline rename inputs read it that way), never "throw away
  *     the selection behind the field".
- *  3. Everything else, all at once. The rendering panel and every header
+ *  5. Everything else, all at once. The rendering panel and every header
  *     popover (workspace, scene, scene theme, solar, weather, preferences)
  *     close on the same press that clears the selection. That is the intended
  *     reading, not an oversight:
@@ -28,6 +32,7 @@
 import { useEffect } from "react";
 import { useSelectionStore } from "./selectionStore";
 import { useSceneSheetStore } from "../sceneSheet/sceneSheetStore";
+import { useProcessingStore } from "../processing/processingStore";
 
 const TEXT_ENTRY = new Set(["INPUT", "TEXTAREA", "SELECT"]);
 
@@ -40,6 +45,14 @@ export function useEscapeClearsSelection(): void {
       if (document.querySelector(".modal-backdrop")) return;
       if (useSceneSheetStore.getState().sheet !== null) {
         useSceneSheetStore.getState().setSheet(null);
+        return;
+      }
+      // Spec §4.2: then a tool form or a log, back to the catalogue. A tool's
+      // parameters are work in progress the way a sheet is, and stepping out
+      // of one is not asking to lose the selection it was aimed at.
+      const processing = useProcessingStore.getState();
+      if (processing.open && processing.view.kind !== "catalogue") {
+        processing.back();
         return;
       }
       const target = e.target;

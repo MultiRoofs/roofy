@@ -142,6 +142,8 @@ import { SunShadeSheet } from "../ui/viewport/SunShadeSheet";
 import { SelectModeControl } from "../ui/viewport/SelectModeControl";
 import { AddressSearch } from "../ui/viewport/AddressSearch";
 import { ToolsButton } from "../ui/processing/ToolsButton";
+import { ProcessingPanel } from "../ui/processing/ProcessingPanel";
+import { useProcessingStore } from "../features/processing/processingStore";
 import { CameraCluster } from "../ui/viewport/CameraCluster";
 import { selectedGeoJsonBounds } from "../features/geoLayers/geoLayerBounds";
 import { useGeoFeatureVisibilityStore } from "../features/geoLayers/geoFeatureVisibilityStore";
@@ -736,6 +738,9 @@ export function App({
   const clearSelection = useSelectionStore((s) => s.clear);
   const geoSelection = useSelectionStore((s) => s.geoSelection);
   const selectGeoFeature = useSelectionStore((s) => s.selectGeoFeature);
+  /** Spec §4.2: with the toolbox open the right panel is the toolbox, and the
+   *  details become one of its tabs rather than the whole panel. */
+  const toolboxOpen = useProcessingStore((s) => s.open);
 
   // The shell's layout state (what `inspectorOpen`, `leftSidebarCollapsed`,
   // `leftSidebarWidth`, `tableOpen` and `tableHeight` used to be). `App` reads
@@ -2066,7 +2071,16 @@ export function App({
        selected — the pill on the map's edge brings it back — but the
        panel's OWN close button clears the selection outright, same as
        Escape (`useEscapeClearsSelection`): two different affordances for two
-       different intents, "hide this" versus "I'm done with this". */
+       different intents, "hide this" versus "I'm done with this".
+
+       With the toolbox open the panel is the toolbox and this node becomes its
+       Details TAB (spec §4.2), which is why the title and the "is anything
+       selected" answer are named once here and handed to both. */
+    const hasSelection = selections.length > 0 || geoSelection !== null;
+    const detailsNode = hasSelection ? (
+      <DetailsPanel onClose={clearSelection} />
+    ) : null;
+    const detailsTitle = selectionTitle(selections, geoSelection !== null);
 
     return (
       <>
@@ -2241,11 +2255,18 @@ export function App({
               ) : null
             }
             right={
-              selections.length > 0 || geoSelection !== null ? (
-                <DetailsPanel onClose={clearSelection} />
-              ) : null
+              toolboxOpen ? (
+                <ProcessingPanel
+                  details={detailsNode}
+                  detailsTitle={detailsTitle}
+                />
+              ) : (
+                detailsNode
+              )
             }
-            rightTitle={selectionTitle(selections, geoSelection !== null)}
+            rightTitle={detailsTitle}
+            rightMode={toolboxOpen ? "tools" : "details"}
+            hasSelection={hasSelection}
             attributionLines={viewportAttribution}
             status={
               <StatusBar

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 import { useSelectionStore } from "../../../../src/features/selection/selectionStore";
 import { useEscapeClearsSelection } from "../../../../src/features/selection/useEscapeClearsSelection";
+import { useProcessingStore } from "../../../../src/features/processing/processingStore";
 
 function Host() {
   useEscapeClearsSelection();
@@ -35,6 +36,7 @@ describe("useEscapeClearsSelection", () => {
       hovered: null,
       geoSelection: null,
     });
+    useProcessingStore.getState().resetForTest();
   });
   it("clears the selection on Escape", () => {
     render(<Host />);
@@ -70,6 +72,28 @@ describe("useEscapeClearsSelection", () => {
     selectSomething();
     pressEscape(input);
     expect(useSelectionStore.getState().selections).toHaveLength(1);
+  });
+
+  it("takes the tool form back to the catalogue before the selection", () => {
+    render(<Host />);
+    useProcessingStore.getState().openTool("height-from-extent");
+    selectSomething();
+
+    pressEscape();
+    expect(useProcessingStore.getState().view).toEqual({ kind: "catalogue" });
+    expect(useSelectionStore.getState().selections).toHaveLength(1);
+
+    pressEscape();
+    expect(useSelectionStore.getState().selections).toEqual([]);
+  });
+
+  it("leaves the selection alone for a closed toolbox on a tool view", () => {
+    render(<Host />);
+    useProcessingStore.getState().openTool("height-from-extent");
+    useProcessingStore.setState({ open: false });
+    selectSomething();
+    pressEscape();
+    expect(useSelectionStore.getState().selections).toEqual([]);
   });
 
   it("ignores keys other than Escape", () => {

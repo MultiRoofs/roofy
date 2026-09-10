@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ToolsButton } from "../../../../src/ui/processing/ToolsButton";
 import { useProcessingStore } from "../../../../src/features/processing/processingStore";
+import { useShellStore } from "../../../../src/ui/shell/shellStore";
 
 afterEach(() => {
   cleanup();
   useProcessingStore.getState().resetForTest();
+  useShellStore.getState().setRightCollapsed(false);
 });
 
 describe("ToolsButton", () => {
@@ -19,6 +21,23 @@ describe("ToolsButton", () => {
       "aria-pressed",
       "true",
     );
+  });
+
+  it("expands a collapsed right panel instead of opening behind it", () => {
+    useShellStore.getState().setRightCollapsed(true);
+    render(<ToolsButton />);
+    fireEvent.click(screen.getByRole("button", { name: "Tools" }));
+    expect(useProcessingStore.getState().open).toBe(true);
+    expect(useShellStore.getState().rightCollapsed).toBe(false);
+  });
+
+  it("reveals an open toolbox hidden behind a collapsed panel rather than closing it", () => {
+    useProcessingStore.getState().setOpen(true);
+    useShellStore.getState().setRightCollapsed(true);
+    render(<ToolsButton />);
+    fireEvent.click(screen.getByRole("button", { name: "Tools" }));
+    expect(useProcessingStore.getState().open).toBe(true);
+    expect(useShellStore.getState().rightCollapsed).toBe(false);
   });
 
   it("shows a lime dot while a run is queued or running and amber for an unseen failure", () => {

@@ -14,6 +14,11 @@
  * as when the panel is collapsed, and a collapsed panel WITH something to
  * show leaves a pill on the map's right edge — collapsing the details panel
  * is not clearing the selection.
+ *
+ * `rightMode` says WHAT the panel is holding, because that decides how many
+ * pills a collapse leaves: the details panel leaves one, the processing
+ * toolbox leaves its own Tools pill plus the Details pill when something is
+ * selected behind it (spec §4.2).
  */
 
 import type { CSSProperties, ReactElement, ReactNode } from "react";
@@ -21,6 +26,7 @@ import { SHELL_LIMITS, useShellStore } from "./shellStore";
 import { ActionIcon } from "../ActionIcon";
 import { ResizeHandle } from "./ResizeHandle";
 import { AttributionLines } from "../viewport/AttributionOverlay";
+import { useProcessingStore } from "../../features/processing/processingStore";
 
 /** The width of the collapsed left column, which `LeftRail` fills. */
 const LEFT_RAIL_WIDTH = "40px";
@@ -40,6 +46,14 @@ export interface ViewerShellProps {
   readonly right: ReactNode | null;
   /** What the collapsed-details pill names — "Building …25028". */
   readonly rightTitle: string;
+  /** What `right` currently IS: the details panel (the default), or the
+   *  processing toolbox, which carries the details as one of its tabs. The two
+   *  collapse differently — a toolbox leaves a Tools pill of its own, and a
+   *  Details pill only when there is something selected behind it. */
+  readonly rightMode?: "tools" | "details";
+  /** Whether a selection exists. Only read in `rightMode: "tools"`, where
+   *  `right` is present whether or not anything is selected. */
+  readonly hasSelection?: boolean;
   readonly status: ReactNode;
   /** The viewport's active licence credits, mirrored in the expanded drawer. */
   readonly attributionLines?: readonly string[];
@@ -53,6 +67,8 @@ export function ViewerShell({
   drawer,
   right,
   rightTitle,
+  rightMode = "details",
+  hasSelection = false,
   status,
   attributionLines = [],
   canOpenTable = false,
@@ -63,6 +79,14 @@ export function ViewerShell({
   const rightCollapsed = useShellStore((s) => s.rightCollapsed);
   const drawerHeight = useShellStore((s) => s.drawerHeight);
   const drawerExpanded = useShellStore((s) => s.drawerExpanded);
+  const toolsRunning = useProcessingStore((s) =>
+    s.runs.some(
+      (r) =>
+        r.status === "running" ||
+        r.status === "queued" ||
+        r.status === "cancelling",
+    ),
+  );
 
   const rightOpen = right !== null && !rightCollapsed;
 
@@ -92,7 +116,7 @@ export function ViewerShell({
         {toolbar}
         <div className="map-area">
           {map}
-          {right !== null && rightCollapsed && (
+          {right !== null && rightCollapsed && rightMode === "details" && (
             <button
               type="button"
               className="details-pill"
@@ -100,6 +124,30 @@ export function ViewerShell({
             >
               Details · {rightTitle}
             </button>
+          )}
+          {right !== null && rightCollapsed && rightMode === "tools" && (
+            <div className="details-pills">
+              <button
+                type="button"
+                className="details-pill"
+                onClick={() =>
+                  useShellStore.getState().setRightCollapsed(false)
+                }
+              >
+                Tools{toolsRunning ? " · running" : ""}
+              </button>
+              {hasSelection && (
+                <button
+                  type="button"
+                  className="details-pill"
+                  onClick={() =>
+                    useShellStore.getState().setRightCollapsed(false)
+                  }
+                >
+                  Details · {rightTitle}
+                </button>
+              )}
+            </div>
           )}
         </div>
         {canOpenTable && (

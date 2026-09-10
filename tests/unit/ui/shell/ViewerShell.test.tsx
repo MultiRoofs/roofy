@@ -17,11 +17,43 @@ import {
   SHELL_LIMITS,
   useShellStore,
 } from "../../../../src/ui/shell/shellStore";
+import { useProcessingStore } from "../../../../src/features/processing/processingStore";
+import type { RunRecord } from "../../../../src/features/processing/types";
+
+function runRecord(status: RunRecord["status"]): RunRecord {
+  return {
+    id: "r1",
+    toolId: "height-from-extent",
+    targetLayerId: "L1",
+    targetName: "Delft",
+    sourceLayerId: null,
+    sourceName: null,
+    scope: "all",
+    scopeCount: 1,
+    featureIds: null,
+    lod: null,
+    params: {},
+    prefix: "extent_",
+    columns: [],
+    status,
+    phase: null,
+    startedAt: 0,
+    elapsedMs: 0,
+    summary: null,
+    error: null,
+    log: [],
+    warnings: [],
+    undoable: false,
+    stale: false,
+    note: null,
+  };
+}
 
 /** jsdom is 1024×768, which is below both of `defaultShellState`'s
  *  breakpoints — every test here reads the wide/tall numbers instead. */
 beforeEach(() => {
   useShellStore.setState(defaultShellState(1440, 900));
+  useProcessingStore.getState().resetForTest();
 });
 
 afterEach(cleanup);
@@ -145,6 +177,38 @@ describe("ViewerShell collapsed-details pill", () => {
     useShellStore.setState({ rightCollapsed: true });
     shell();
     expect(screen.queryByRole("button", { name: /Details ·/ })).toBeNull();
+  });
+});
+
+describe("ViewerShell collapsed pills with the toolbox open", () => {
+  it("offers Tools alone when nothing is selected", () => {
+    useShellStore.setState({ rightCollapsed: true });
+    shell({ right: <div data-testid="the-right" />, rightMode: "tools" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Tools" }));
+    expect(useShellStore.getState().rightCollapsed).toBe(false);
+    expect(screen.queryByRole("button", { name: /Details ·/ })).toBeNull();
+  });
+
+  it("names a run on the Tools pill", () => {
+    useShellStore.setState({ rightCollapsed: true });
+    useProcessingStore.setState({ runs: [runRecord("running")] });
+    shell({ right: <div data-testid="the-right" />, rightMode: "tools" });
+    expect(screen.getByRole("button", { name: "Tools · running" }));
+  });
+
+  it("stacks the Details pill beside it while a selection exists", () => {
+    useShellStore.setState({ rightCollapsed: true });
+    shell({
+      right: <div data-testid="the-right" />,
+      rightMode: "tools",
+      hasSelection: true,
+    });
+    expect(screen.getByRole("button", { name: "Tools" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /Details · Building 1/ }),
+    );
+    expect(useShellStore.getState().rightCollapsed).toBe(false);
   });
 });
 
