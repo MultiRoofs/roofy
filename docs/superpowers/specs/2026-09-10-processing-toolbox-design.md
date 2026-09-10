@@ -185,7 +185,8 @@ toolbox closed.
   copy):
   - "Needs a city model layer" (active layer is vector, raster or tiles)
     for Roof and 3D tools; "Needs a vector layer" for Aggregate buildings
-    per area.
+    per area when the active layer is a city model and a vector layer
+    exists.
   - "Needs a CityJSON or CityJSONSeq source; this layer was loaded from
     CityGML" (or CityParquet / a streaming FlatCityBuf) for Measure
     solids, Validate solids and the footprint proxy of cross-layer tools.
@@ -223,7 +224,7 @@ toolbox closed.
 │                                              │
 │ TARGET                                       │
 │ Layer      [Delft                        ▾]  │
-│ LoD        [2.2 (1,116 objects)          ▾]  │
+│ LoD        [2.2 (1,115 buildings with a  ▾]  │
 │ Scope      (•) All 1,204 buildings           │
 │            ( ) Matching 312                  │
 │            ( ) Selected 2                    │
@@ -265,7 +266,8 @@ Common structure for every tool:
   does not change the active layer.
 - **LoD** (tools that read geometry): a select of the LoDs at which the
   target has geometry of the kind the tool needs, each with the count of
-  features that have it: "2.2 (1,116 buildings with a solid)". Eligibility
+  FEATURES that have it, parts folded into their building: "2.2 (1,115
+  buildings with a solid)". Eligibility
   and counts come from the in-memory model (every surface is tagged with
   its LoD and its geometry type), so they are known before any source is
   re-read, on every layer kind. When no LoD qualifies the select shows
@@ -304,7 +306,7 @@ disabled, values visible):
 │ ▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮▮░░░░░░░░░░░░  Computing…   │
 │ Loading extension ✓ · Reading source ✓ ·     │
 │ Computing … · Writing results                │
-│ 4.1 s                          [ Cancel ]    │
+│ 1.7 s                          [ Cancel ]    │
 ```
 
 - DuckDB reports no progress; the bar is indeterminate within a phase and
@@ -351,8 +353,8 @@ disabled, values visible):
 The footer becomes a result card, and a toast repeats its first line:
 
 ```
-│ ✓ 1,204 buildings measured · 37 skipped      │
-│   (invalid solid) · 2.4 s                    │
+│ ✓ 1,204 buildings measured · 37 invalid      │
+│   solids (no volume) · 12 skipped · 2.4 s    │
 │   Wrote 5 columns to Delft.                  │
 │ [Open table] [Style by result] [Undo] [Log]  │
 │                              [ Run again ]   │
@@ -381,8 +383,12 @@ The footer becomes a result card, and a toast repeats its first line:
 - **Log** opens the log view (§6.4).
 - **Run again** unlocks the form with the same values.
 
-Skipped objects are explained in the card in a second muted line by cause
-("37 invalid solid · 12 no geometry at LoD 2.2 · 3 outside every area").
+The card distinguishes objects that were evaluated with a caveat
+("37 invalid solids (no volume)": envelope, footprint and height are still
+written, §7.2) from objects that were SKIPPED, which get NULL everywhere;
+skipped objects are explained in a second muted line by cause, and the
+causes add up to the skipped count ("12 skipped: 9 no geometry at LoD
+2.2 · 3 not a solid").
 The value rule is: NULL means "could not be evaluated" (no geometry at the
 LoD, invalid solid, no proxy geometry, reprojection failed); a count that
 WAS evaluated and found nothing is 0 (a building outside every area has
