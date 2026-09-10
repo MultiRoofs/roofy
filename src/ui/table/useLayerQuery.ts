@@ -1,3 +1,7 @@
+import {
+  createCandidateLoader,
+  type CandidateLoader,
+} from "../../insights/filterCandidates";
 /**
  * One page of one layer's DuckDB table, kept in step with `queryStore`.
  *
@@ -13,6 +17,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createColumnStatsLoader,
+  type ColumnStatsLoader,
+} from "../../insights/columnStats";
 import { runQuery } from "../../insights/duckdb";
 import type { ColumnInfo } from "../../insights/columnKind";
 import {
@@ -64,6 +72,8 @@ export interface LayerQueryView {
   readonly unfilteredRows: number | null;
   readonly loading: boolean;
   readonly reload: () => void;
+  readonly getColumnStats?: ColumnStatsLoader;
+  readonly getCandidates?: CandidateLoader;
 }
 
 const NO_ROWS: ReadonlyArray<Record<string, unknown>> = [];
@@ -137,6 +147,75 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
     [tableColumns],
   );
 
+  const scope = useMemo(() => {
+    if (!table) return { error: null, where: null, unfilteredWhere: null };
+    const compiled =
+      applied === null
+        ? ({ ok: true, where: null } as const)
+        : compileFilter(applied, table.columns);
+    if (!compiled.ok) {
+      // Refused before anything was sent: nothing to cancel, and the grid
+      // keeps the page it is already showing rather than blanking.
+      return { error: compiled.message, where: null, unfilteredWhere: null };
+    }
+
+    const rootBuildings = '"parents" IS NULL AND "object_type" = \'Building\'';
+    const filteredWhere =
+      viewMode === "buildings"
+        ? buildFeatureScopeWhere(table.table, compiled.where)
+        : compiled.where;
+    const terms: string[] = [];
+    if (rawObjectId !== null) {
+      // Details may target a child outside the current filter. This is a
+      // temporary record scope only; it never changes `applied` or map membership.
+      terms.push(`"id" = ${quoteLiteral(rawObjectId)}`);
+    } else if (filteredWhere !== null) terms.push(`(${filteredWhere})`);
+    // Buildings is intentionally semantic roots only.  A table without
+    // Buildings remains useful through Raw objects rather than lying about a
+    // count of every parentless object.
+    if (viewMode === "buildings" && rawObjectId === null)
+      terms.push(rootBuildings);
+    if (showSelectedOnly && rawObjectId === null) {
+      const ids = [...new Set(selectedFeatureIds)];
+      terms.push(
+        ids.length === 0
+          ? "FALSE"
+          : viewMode === "buildings"
+            ? `COALESCE("feature_id", "id") IN (${ids.map(quoteLiteral).join(", ")})`
+            : `"id" IN (${ids.map(quoteLiteral).join(", ")})`,
+      );
+    }
+    const scopedWhere = terms.length === 0 ? null : terms.join(" AND ");
+    const unfilteredWhere = viewMode === "buildings" ? rootBuildings : null;
+    return { error: null, where: scopedWhere, unfilteredWhere };
+  }, [
+    table,
+    applied,
+    viewMode,
+    rawObjectId,
+    showSelectedOnly,
+    selectedFeatureIds.join("\u0000"),
+  ]);
+  const getCandidates = useMemo(
+    () =>
+      table
+        ? createCandidateLoader(table.table, table.columns, runQuery)
+        : undefined,
+    [table, reloadToken],
+  );
+  const getColumnStats = useMemo(
+    () =>
+      table && !scope.error
+        ? createColumnStatsLoader(
+            table.table,
+            table.columns,
+            scope.where,
+            runQuery,
+          )
+        : undefined,
+    [table, scope, reloadToken],
+  );
+
   useEffect(() => {
     // Bumped FIRST, before EITHER early return: a page query from the previous
     // effect run may still be in flight, and a run that bails — on a compile
@@ -175,46 +254,13 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
       return;
     }
 
-    const compiled =
-      applied === null
-        ? ({ ok: true, where: null } as const)
-        : compileFilter(applied, table.columns);
-    if (!compiled.ok) {
-      // Refused before anything was sent: nothing to cancel, and the grid
-      // keeps the page it is already showing rather than blanking.
-      setQueryMessage(compiled.message);
+    if (scope.error) {
+      setQueryMessage(scope.error);
       setLoading(false);
       return;
     }
-
-    const rootBuildings = '"parents" IS NULL AND "object_type" = \'Building\'';
-    const filteredWhere =
-      viewMode === "buildings"
-        ? buildFeatureScopeWhere(table.table, compiled.where)
-        : compiled.where;
-    const terms: string[] = [];
-    if (rawObjectId !== null) {
-      // Details may target a child outside the current filter. This is a
-      // temporary record scope only; it never changes `applied` or map membership.
-      terms.push(`"id" = ${quoteLiteral(rawObjectId)}`);
-    } else if (filteredWhere !== null) terms.push(`(${filteredWhere})`);
-    // Buildings is intentionally semantic roots only.  A table without
-    // Buildings remains useful through Raw objects rather than lying about a
-    // count of every parentless object.
-    if (viewMode === "buildings" && rawObjectId === null)
-      terms.push(rootBuildings);
-    if (showSelectedOnly && rawObjectId === null) {
-      const ids = [...new Set(selectedFeatureIds)];
-      terms.push(
-        ids.length === 0
-          ? "FALSE"
-          : viewMode === "buildings"
-            ? `COALESCE("feature_id", "id") IN (${ids.map(quoteLiteral).join(", ")})`
-            : `"id" IN (${ids.map(quoteLiteral).join(", ")})`,
-      );
-    }
-    const scopedWhere = terms.length === 0 ? null : terms.join(" AND ");
-    const unfilteredWhere = viewMode === "buildings" ? rootBuildings : null;
+    const scopedWhere = scope.where;
+    const unfilteredWhere = scope.unfilteredWhere;
 
     setLoading(true);
     setQueryMessage(null);
@@ -298,6 +344,7 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
     rawObjectId,
     selectedFeatureIds.join("\u0000"),
     reloadToken,
+    scope,
   ]);
 
   if (layerId === null) {
@@ -367,5 +414,7 @@ export function useLayerQuery(layerId: string | null): LayerQueryView {
     unfilteredRows,
     loading,
     reload,
+    getColumnStats,
+    getCandidates,
   };
 }

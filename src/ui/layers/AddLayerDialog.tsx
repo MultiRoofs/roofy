@@ -1,3 +1,4 @@
+import { useDrawStore } from "../../features/drawing/drawStore";
 /**
  * The "Add layer" modal: WHERE the source is, then WHAT it is.
  *
@@ -87,7 +88,7 @@ interface AddLayerDialogProps {
  * act (a model on disk), and because the drop zone doubles as the affordance
  * that TEACHES the gesture. The other two are one click away.
  */
-export type SourceTab = "file" | "url" | "catalog";
+export type SourceTab = "file" | "url" | "catalog" | "draw";
 
 /** A local pick, waiting to be confirmed. `files` is the whole selection; a
  *  group of them is one CityParquet package. */
@@ -236,6 +237,7 @@ export function AddLayerDialog({
     ["file", "File"],
     ["url", "URL"],
     ["catalog", "Catalog"],
+    ["draw", "Draw"],
   ];
 
   return createPortal(
@@ -291,6 +293,33 @@ export function AddLayerDialog({
           ))}
         </div>
         <div className="modal-body">
+          {tab === "draw" && (
+            <div
+              role="tabpanel"
+              id={`${tabIdPrefix}-draw-panel`}
+              aria-labelledby={`${tabIdPrefix}-draw-tab`}
+            >
+              <h3>Create a draw layer</h3>
+              <p>
+                Sketch a polygon on the map, then keep it flat or extrude it
+                into a solid.
+              </p>
+              <p>
+                Choose Mode → Draw model in the map toolbar to begin. Finished
+                shapes become normal model layers.
+              </p>
+              <button
+                type="button"
+                className="fcb-url-btn"
+                onClick={() => {
+                  useDrawStore.getState().create();
+                  onClose();
+                }}
+              >
+                Add draw layer
+              </button>
+            </div>
+          )}
           {/* The catalog is mounted only while it is SHOWING: it pulls in
               MapLibre and fetches a STAC catalog, and doing that behind the
               other two tabs would spend a user's network on a tab they never

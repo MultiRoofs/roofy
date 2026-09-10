@@ -1,3 +1,4 @@
+import { ActiveLayerPanel } from "../../../../src/ui/layers/ActiveLayerPanel";
 /**
  * The panel's STATES. Data itself is `useLayerQuery`'s test; this file is
  * about what the user sees when the engine is down, the table is still
@@ -155,7 +156,7 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-describe("TablePanel — the export dialog", () => {
+describe("Layer panel — the export dialog", () => {
   it("closes it when the active layer changes under it", async () => {
     // The dialog is about ONE layer: its table, its types, its LoD ladder. A
     // layer switch behind an open dialog would leave it pointed at the old
@@ -170,7 +171,9 @@ describe("TablePanel — the export dialog", () => {
         L2: { state: "ready", info: { ...TABLE, table: "layer_2" } },
       },
     });
-    panel();
+    useShellStore.getState().closeDrawer();
+    render(<ActiveLayerPanel onZoomToLayer={() => {}} />);
+    expect(useShellStore.getState().drawerOpen).toBe(false);
 
     fireEvent.click(screen.getByRole("button", { name: "Export" }));
     expect(await screen.findByRole("dialog")).toBeTruthy();
@@ -633,10 +636,10 @@ describe("TablePanel columns and child records", () => {
     panel();
     await screen.findByText("B1");
     fireEvent.click(screen.getByRole("button", { name: "Columns" }));
-    const derived = screen.getByRole("checkbox", { name: "Roof area" });
+    const derived = screen.getByRole("checkbox", { name: /Roof area/ });
     expect(derived).toBeChecked();
     fireEvent.click(screen.getByLabelText("custom_source"));
-    expect(screen.getByRole("checkbox", { name: "Roof area" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /Roof area/ })).toBeChecked();
     expect((await screen.findAllByText("Roof area")).length).toBeGreaterThan(0);
   });
 
@@ -824,4 +827,30 @@ it("keeps column picker and table in the same chosen order", async () => {
   );
   expect(boxes[0]?.parentElement?.textContent).toBe("object_type");
   expect(boxes[1]?.parentElement?.textContent).toBe("id");
+});
+
+it("reveals the map when the expanded table separator is dragged down", () => {
+  useShellStore.setState({ drawerExpanded: true, drawerHeight: 280 });
+  render(<TablePanel duckdbStatus={READY_STATUS} onRetryDuckDB={vi.fn()} />);
+  const handle = screen.getByRole("separator", { name: "Resize table" });
+  fireEvent.pointerDown(handle, { clientY: 44, pointerId: 1 });
+  window.dispatchEvent(new PointerEvent("pointermove", { clientY: 144 }));
+  window.dispatchEvent(new PointerEvent("pointerup"));
+  expect(useShellStore.getState().drawerExpanded).toBe(false);
+  expect(useShellStore.getState().drawerHeight).toBeGreaterThan(280);
+});
+it("can drag back upward after leaving expanded mode in the same gesture", () => {
+  useShellStore.setState({ drawerExpanded: true, drawerHeight: 280 });
+  render(<TablePanel duckdbStatus={READY_STATUS} onRetryDuckDB={vi.fn()} />);
+  const handle = screen.getByRole("separator", { name: "Resize table" });
+  const max = Number(handle.getAttribute("aria-valuemax"));
+  fireEvent.pointerDown(handle, { clientY: 44, pointerId: 1 });
+  act(() =>
+    window.dispatchEvent(new PointerEvent("pointermove", { clientY: 144 })),
+  );
+  act(() =>
+    window.dispatchEvent(new PointerEvent("pointermove", { clientY: 44 })),
+  );
+  window.dispatchEvent(new PointerEvent("pointerup"));
+  expect(useShellStore.getState().drawerHeight).toBe(max);
 });

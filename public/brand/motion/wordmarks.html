@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  /><title>Roofy — Wordmark directions</title
+  ><link rel="stylesheet" href="fonts.css" /><style>
+    @font-face {
+      font-family: Source;
+      src: url("/node_modules/@fontsource/source-sans-3/files/source-sans-3-latin-400-normal.woff2");
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      background: #f6f7f2;
+      color: #14181e;
+      font:
+        16px Source,
+        Arial,
+        sans-serif;
+    }
+    main {
+      max-width: 1320px;
+      margin: auto;
+      padding: 40px 32px;
+    }
+    h1 {
+      font-size: 36px;
+      letter-spacing: -0.025em;
+      margin: 0 0 12px;
+    }
+    p {
+      line-height: 1.5;
+      color: #5c636e;
+      max-width: 780px;
+    }
+    nav {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 24px 0 32px;
+    }
+    button {
+      font: inherit;
+      background: #e5ecdd;
+      color: inherit;
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 16px;
+      cursor: pointer;
+    }
+    button:focus-visible,
+    a:focus-visible {
+      outline: 2px solid #4a7a0f;
+      outline-offset: 4px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 32px;
+    }
+    .stage {
+      background: white;
+      border-radius: 12px;
+      padding: 30px 24px 20px;
+    }
+    .lockup {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      height: 145px;
+    }
+    .lockup img {
+      width: 100px;
+      height: 100px;
+    }
+    .name {
+      font-family: var(--family);
+      font-weight: var(--weight);
+      letter-spacing: var(--tracking);
+      font-size: 58px;
+      line-height: 1.1;
+    }
+    .small {
+      border-top: 1px solid #aab3a533;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 18px;
+      gap: 20px;
+    }
+    .small .lockup {
+      height: 36px;
+      justify-content: start;
+    }
+    .small img {
+      width: 36px;
+      height: 36px;
+    }
+    .small .name {
+      font-size: 24px;
+    }
+    .small > span {
+      font-size: 13px;
+      color: #5c636e;
+    }
+    h2 {
+      font-size: 22px;
+      margin: 18px 0 6px;
+    }
+    .description {
+      font-size: 15px;
+      margin: 6px 0 10px;
+      min-height: 45px;
+    }
+    .meta {
+      font-size: 13px;
+      color: #5c636e;
+    }
+    footer {
+      margin-top: 34px;
+      padding-top: 16px;
+      border-top: 1px solid #aab3a533;
+    }
+    a {
+      color: #486f2c;
+    }
+    .dark {
+      background: #0b0e13;
+      color: #f2f4ef;
+    }
+    .dark .stage {
+      background: #12161e;
+    }
+    .dark p,
+    .dark .meta,
+    .dark .small > span {
+      color: #a4ada4;
+    }
+    .dark button {
+      background: #28332b;
+    }
+    .dark a {
+      color: #cdf176;
+    }
+    @media (max-width: 760px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+      main {
+        padding: 28px 20px;
+      }
+      .name {
+        font-size: 48px;
+      }
+      .lockup img {
+        width: 86px;
+        height: 86px;
+      }
+    }
+  </style>
+  <main>
+    <h1>A friendlier face for Roofy.</h1>
+    <p>
+      Four wordmarks paired with your chosen unfolding animation. A little
+      casual, a little pop, and still professional. These letters label font
+      options; animation C is used throughout.
+    </p>
+    <nav>
+      <button id="replay">Replay animation C</button
+      ><button id="theme">Dark background</button
+      ><button id="case">Try lowercase “roofy”</button>
+    </nav>
+    <div class="grid">
+      <article
+        style="
+          --family: &quot;Nunito Sans&quot;;
+          --weight: 700;
+          --tracking: -0.025em;
+        "
+      >
+        <div class="stage">
+          <div class="lockup">
+            <img class="animated" src="roofy-unfold-light.svg" alt="" /><span
+              class="name"
+              >Roofy</span
+            >
+          </div>
+          <div class="small">
+            <div class="lockup">
+              <img src="../roofy-mark-light.svg" alt="" /><span class="name"
+                >Roofy</span
+              >
+            </div>
+            <span>Small-size check</span>
+          </div>
+        </div>
+        <h2>A · Warm & welcoming</h2>
+        <p class="description">
+          Rounded letterforms make the name feel approachable. The strongest
+          casual direction.
+        </p>
+        <div class="meta">
+          Nunito Sans · 700 ·
+          <a
+            href="https://fonts.google.com/specimen/Nunito+Sans"
+            target="_blank"
+            rel="noreferrer"
+            >Font source</a
+          >
+        </div>
+      </article>
+      <article
+        style="--family: &quot;Outfit&quot;; --weight: 600; --tracking: -0.03em"
+      >
+        <div class="stage">
+          <div class="lockup">
+            <img class="animated" src="roofy-unfold-light.svg" alt="" /><span
+              class="name"
+              >Roofy</span
+            >
+          </div>
+          <div class="small">
+            <div class="lockup">
+              <img src="../roofy-mark-light.svg" alt="" /><span class="name"
+                >Roofy</span
+              >
+            </div>
+            <span>Small-size check</span>
+          </div>
+        </div>
+        <h2>B · Bright & confident</h2>
+        <p class="description">
+          Geometric shapes add a little pop while keeping a crisp, professional
+          silhouette.
+        </p>
+        <div class="meta">
+          Outfit · 600 ·
+          <a
+            href="https://fonts.google.com/specimen/Outfit"
+            target="_blank"
+            rel="noreferrer"
+            >Font source</a
+          >
+        </div>
+      </article>
+      <article
+        style="
+          --family: &quot;Manrope&quot;;
+          --weight: 700;
+          --tracking: -0.035em;
+        "
+      >
+        <div class="stage">
+          <div class="lockup">
+            <img class="animated" src="roofy-unfold-light.svg" alt="" /><span
+              class="name"
+              >Roofy</span
+            >
+          </div>
+          <div class="small">
+            <div class="lockup">
+              <img src="../roofy-mark-light.svg" alt="" /><span class="name"
+                >Roofy</span
+              >
+            </div>
+            <span>Small-size check</span>
+          </div>
+        </div>
+        <h2>C · Distinct & assured</h2>
+        <p class="description">
+          A more individual rhythm, with enough weight to feel confident in
+          reports and presentations.
+        </p>
+        <div class="meta">
+          Manrope · 700 ·
+          <a
+            href="https://fonts.google.com/specimen/Manrope"
+            target="_blank"
+            rel="noreferrer"
+            >Font source</a
+          >
+        </div>
+      </article>
+      <article
+        style="
+          --family: &quot;DM Sans&quot;;
+          --weight: 600;
+          --tracking: -0.035em;
+        "
+      >
+        <div class="stage">
+          <div class="lockup">
+            <img class="animated" src="roofy-unfold-light.svg" alt="" /><span
+              class="name"
+              >Roofy</span
+            >
+          </div>
+          <div class="small">
+            <div class="lockup">
+              <img src="../roofy-mark-light.svg" alt="" /><span class="name"
+                >Roofy</span
+              >
+            </div>
+            <span>Small-size check</span>
+          </div>
+        </div>
+        <h2>D · Easy & composed</h2>
+        <p class="description">
+          A quieter, friendly wordmark. A good choice when the colored symbol
+          should do most of the talking.
+        </p>
+        <div class="meta">
+          DM Sans · 600 ·
+          <a
+            href="https://fonts.google.com/specimen/DM+Sans"
+            target="_blank"
+            rel="noreferrer"
+            >Font source</a
+          >
+        </div>
+      </article>
+    </div>
+    <footer>
+      <p>
+        <strong>My pick: B · Outfit.</strong> Its round shapes bring the playful
+        touch you described without making the logo feel childish. Choose A for
+        more warmth, or D for a quieter identity.
+      </p>
+      <p>
+        Try both “Roofy” and “roofy.” The capital R feels a little more
+        established; lowercase feels more informal. Fonts and licenses are saved
+        with these studies. The app typography is unchanged.
+      </p>
+      <p><a href="index.html">Back to motion studies</a></p>
+    </footer>
+  </main>
+  <script>
+    let dark = false,
+      lower = false;
+    function replay() {
+      document
+        .querySelectorAll(".animated")
+        .forEach(
+          (img) =>
+            (img.src =
+              "roofy-unfold-" +
+              (dark ? "dark" : "light") +
+              ".svg?t=" +
+              Date.now()),
+        );
+    }
+    document.querySelector("#replay").onclick = replay;
+    document.querySelector("#theme").onclick = () => {
+      dark = !dark;
+      document.body.classList.toggle("dark", dark);
+      document.querySelector("#theme").textContent = dark
+        ? "Light background"
+        : "Dark background";
+      document
+        .querySelectorAll(".small img")
+        .forEach(
+          (img) =>
+            (img.src = "../roofy-mark" + (dark ? "" : "-light") + ".svg"),
+        );
+      replay();
+    };
+    document.querySelector("#case").onclick = () => {
+      lower = !lower;
+      document
+        .querySelectorAll(".name")
+        .forEach((el) => (el.textContent = lower ? "roofy" : "Roofy"));
+      document.querySelector("#case").textContent = lower
+        ? "Try capital “Roofy”"
+        : "Try lowercase “roofy”";
+    };
+  </script>
+</html>

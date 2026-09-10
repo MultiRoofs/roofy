@@ -115,6 +115,11 @@ export function ResizeHandle({
   return (
     <div
       className={`resize-handle resize-handle-${axis}`}
+      title={
+        axis === "y"
+          ? "Drag down to show more map; drag up to enlarge the table"
+          : label
+      }
       role="separator"
       aria-orientation={axis === "x" ? "vertical" : "horizontal"}
       aria-label={label}

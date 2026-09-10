@@ -182,7 +182,7 @@ describe("LeftPanel", () => {
     renderPanel();
 
     expect(screen.queryByRole("dialog")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "+ Add layer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
@@ -192,7 +192,7 @@ describe("LeftPanel", () => {
     expect(screen.getByText("No layers yet")).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Layers" })).toBeNull();
     // The empty state is not a dead end.
-    fireEvent.click(screen.getByRole("button", { name: "+ Add layer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 

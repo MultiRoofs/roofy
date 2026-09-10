@@ -115,3 +115,7 @@ Initial external references:
 
 - DuckDB `cityjson` extension
 - Delft CityJSONSeq sample fixture: `https://storage.googleapis.com/cityjson/delft.city.jsonl`
+
+## UI consistency
+
+Follow [the shared UI consistency rules](docs/ui-consistency.md) for every UI change. The approved direction is Soft Utility. Reuse the control tokens in `src/app/flatControls.css`: 8px radius, 38px primary height, and 30px compact field height. Keep button, input, select, slider, spacing, icon, and interaction states consistent across panels; verify new controls against existing peers in the browser before finishing.

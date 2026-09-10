@@ -1,13 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   useGeoLayerStore,
   type GeoLayer,
 } from "../../features/geoLayers/geoLayerStore";
-import {
-  geoExportText,
-  geoScopeCount,
-  type GeoExportScope,
-} from "../../features/geoLayers/geoExport";
 import {
   filterGeoRecords,
   geoRecordColumns,
@@ -19,14 +14,12 @@ import { useSelectionStore } from "../../features/selection/selectionStore";
 import { DataGrid } from "./DataGrid";
 import { FilterBar } from "./FilterBar";
 import { Pagination } from "./Pagination";
-import { downloadBlob } from "../../platform/download";
 
 export function GeoRecordsPanel({
   layer,
 }: {
   readonly layer: Extract<GeoLayer, { kind: "geojson" }>;
 }) {
-  const [scope, setScope] = useState<GeoExportScope>("all");
   const query = useQueryStore((state) => layerQuery(state, layer.id));
   const geoSelection = useSelectionStore((state) => state.geoSelection);
   const source = layer.config.preparedData;
@@ -97,11 +90,6 @@ export function GeoRecordsPanel({
         This vector layer has no attributes to browse.
       </div>
     );
-  const matchingIds = new Set(
-    matching.map((row) => geoRecordId(row as (typeof records)[number])),
-  );
-  const selectedIds = selected;
-  const exportCount = geoScopeCount(records, scope, matchingIds, selectedIds);
   return (
     <>
       <label className="table-sync-label geo-record-selection">
@@ -116,62 +104,6 @@ export function GeoRecordsPanel({
         />{" "}
         Show selected records
       </label>
-      <div className="geo-record-actions">
-        <label>
-          Export{" "}
-          <select
-            className="geo-record-scope"
-            value={scope}
-            onChange={(event) => setScope(event.target.value as GeoExportScope)}
-          >
-            <option value="all">All ({records.length})</option>
-            <option value="matching">Matching ({matching.length})</option>
-            <option value="selected" disabled={selected.size === 0}>
-              Selected ({selected.size})
-            </option>
-          </select>
-        </label>
-        <button
-          type="button"
-          className="tb-btn table-action-btn"
-          disabled={exportCount === 0}
-          onClick={() =>
-            downloadBlob(
-              new Blob(
-                [
-                  geoExportText(
-                    source,
-                    "geojson",
-                    scope,
-                    matchingIds,
-                    selectedIds,
-                  ),
-                ],
-                { type: "application/geo+json" },
-              ),
-              `${layer.name}.geojson`,
-            )
-          }
-        >
-          GeoJSON
-        </button>
-        <button
-          type="button"
-          className="tb-btn table-action-btn"
-          disabled={exportCount === 0}
-          onClick={() =>
-            downloadBlob(
-              new Blob(
-                [geoExportText(source, "csv", scope, matchingIds, selectedIds)],
-                { type: "text/csv" },
-              ),
-              `${layer.name}.csv`,
-            )
-          }
-        >
-          CSV
-        </button>
-      </div>
       <FilterBar
         columns={columns}
         filter={query.filter}

@@ -17,6 +17,7 @@
  */
 
 import { useState } from "react";
+import { CityObjectIcon } from "./CityObjectIcon";
 import { useLayerStore } from "../../features/layers/layerStore";
 import type { Layer } from "../../features/layers/layerStore";
 import { useStreamStore } from "../../features/streaming/streamStore";
@@ -97,6 +98,7 @@ export function LayerTypeToggles({
                   checked={!hidden.has(type)}
                   onChange={() => toggle(type)}
                 />
+                <CityObjectIcon type={type} />
                 {type}
               </label>
             ))

@@ -1,3 +1,4 @@
+import { ComputedAttributeBadge } from "./ComputedAttributeBadge";
 /**
  * The rows themselves: a sticky-header table over ONE page of results.
  *
@@ -6,6 +7,8 @@
  * `IntersectionObserver` sentinel is gone with the in-memory paths it fed.)
  */
 
+import { ColumnStatsHint } from "./ColumnStatsHint";
+import type { ColumnStatsLoader } from "../../insights/columnStats";
 import { Fragment, memo, useState } from "react";
 import type { ColumnInfo } from "../../insights/columnKind";
 import { formatCell, rawCellTitle } from "./tableText";
@@ -25,6 +28,7 @@ function sortable(column: ColumnInfo): boolean {
 }
 
 export interface DataGridProps {
+  readonly getColumnStats?: ColumnStatsLoader;
   readonly columns: ReadonlyArray<ColumnInfo>;
   readonly rows: ReadonlyArray<Record<string, unknown>>;
   readonly sort: {
@@ -57,6 +61,7 @@ export interface DataGridProps {
  */
 export const DataGrid = memo(function DataGrid({
   columns,
+  getColumnStats,
   rows,
   sort,
   selectedIds,
@@ -117,37 +122,47 @@ export const DataGrid = memo(function DataGrid({
                     : "none"
                 }
               >
-                {canSort ? (
-                  <button
-                    type="button"
-                    className="data-sort-button"
-                    aria-label={`Sort ${col.name} ${sorted && sort.dir === "asc" ? "descending" : "ascending"}`}
-                    title={`Sort ${sorted && sort.dir === "asc" ? "descending" : "ascending"}. Drag header to reorder.`}
-                    onClick={() => onSort(col.name)}
-                  >
-                    <span>
+                <div className="data-header-content">
+                  {derivedColumnNames.has(col.name) && (
+                    <ComputedAttributeBadge />
+                  )}
+                  {canSort ? (
+                    <button
+                      type="button"
+                      className="data-sort-button"
+                      aria-label={`Sort ${col.name} ${sorted && sort.dir === "asc" ? "descending" : "ascending"}`}
+                      title={`Sort ${sorted && sort.dir === "asc" ? "descending" : "ascending"}. Drag header to reorder.`}
+                      onClick={() => onSort(col.name)}
+                    >
+                      <span>
+                        {derivedColumnNames.has(col.name)
+                          ? columnLabel(col.name)
+                          : col.name}
+                      </span>
+                      <svg viewBox="0 0 16 16" aria-hidden="true">
+                        <path
+                          d="m4 6 4-4 4 4"
+                          opacity={sorted && sort.dir === "desc" ? 0.25 : 1}
+                        />
+                        <path
+                          d="m4 10 4 4 4-4"
+                          opacity={sorted && sort.dir === "asc" ? 0.25 : 1}
+                        />
+                      </svg>
+                    </button>
+                  ) : (
+                    <span title="Sorting is not available for this column. Drag header to reorder.">
                       {derivedColumnNames.has(col.name)
                         ? columnLabel(col.name)
                         : col.name}
                     </span>
-                    <svg viewBox="0 0 16 16" aria-hidden="true">
-                      <path
-                        d="m4 6 4-4 4 4"
-                        opacity={sorted && sort.dir === "desc" ? 0.25 : 1}
-                      />
-                      <path
-                        d="m4 10 4 4 4-4"
-                        opacity={sorted && sort.dir === "asc" ? 0.25 : 1}
-                      />
-                    </svg>
-                  </button>
-                ) : (
-                  <span title="Sorting is not available for this column. Drag header to reorder.">
-                    {derivedColumnNames.has(col.name)
-                      ? columnLabel(col.name)
-                      : col.name}
-                  </span>
-                )}
+                  )}
+                  {canSort &&
+                    getColumnStats &&
+                    !derivedColumnNames.has(col.name) && (
+                      <ColumnStatsHint name={col.name} load={getColumnStats} />
+                    )}
+                </div>
               </th>
             );
           })}

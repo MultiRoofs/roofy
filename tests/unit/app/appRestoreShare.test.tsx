@@ -412,6 +412,41 @@ describe("App restore against CitySceneHandle.ready", () => {
     expect(setCameraState).not.toHaveBeenCalled();
   });
 
+  it("restores the saved camera after a local workspace file is re-selected", async () => {
+    const snapshot = snapshotWithUrlLayer();
+    const localSnapshot: ProjectSnapshot = {
+      ...snapshot,
+      layers: snapshot.layers!.map((layer) => ({
+        ...layer,
+        modelRef: { type: "file", fileName: "delft.city.json" },
+      })),
+    };
+    render(<App persistenceStore={storeWith(localSnapshot)} />);
+    await clickRestore();
+    const input = await screen.findByLabelText("Choose file");
+    fireEvent.change(input, {
+      target: {
+        files: [
+          new File(
+            [
+              JSON.stringify({
+                type: "CityJSON",
+                version: "2.0",
+                CityObjects: {},
+                vertices: [],
+                metadata: { referenceSystem: "EPSG:7415" },
+              }),
+            ],
+            "delft.city.json",
+          ),
+        ],
+      },
+    });
+    await screen.findByTestId("navara-viewport");
+    readyGate.resolve();
+    await waitFor(() => expect(setCameraState).toHaveBeenCalledWith(CAM));
+  });
+
   it("gives a file-backed layer a ROW in the viewer, not a banner over it", async () => {
     // 12.2: inside the shell a layer waiting for its file is still one of the
     // workspace's layers, so it takes a row in the list beside the ones that

@@ -1,3 +1,4 @@
+import { ActionIcon } from "../ActionIcon";
 /**
  * "What is being left out?" — a SUMMARY of the layer's applied filter, and
  * deliberately not a second filter builder.
@@ -51,6 +52,7 @@ export function FilterSection({ item }: { readonly item: ActiveLayer }) {
             className="active-layer-action"
             onClick={() => useShellStore.getState().openFilter()}
           >
+            <ActionIcon name="filter" />
             Add filter
           </button>
         </div>

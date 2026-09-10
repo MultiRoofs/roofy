@@ -324,7 +324,7 @@ describe("App viewer shell", () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog", { name: "Add layer" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "+ Add layer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
     expect(
       screen.getByRole("dialog", { name: "Add layer" }),
     ).toBeInTheDocument();

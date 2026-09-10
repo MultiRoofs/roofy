@@ -225,3 +225,24 @@ describe("DataGrid actual child rows", () => {
     expect(onRowClick).toHaveBeenCalledWith("child", false);
   });
 });
+
+it("marks only app-generated columns as computed, even with source name collisions", () => {
+  render(
+    <DataGrid
+      columns={[
+        { name: "roofArea", type: "DOUBLE", kind: "scalar" },
+        { name: "sourceRoofArea", type: "DOUBLE", kind: "scalar" },
+      ]}
+      rows={[{ id: "a", roofArea: 12, sourceRoofArea: 15 }]}
+      sort={null}
+      selectedIds={new Set()}
+      onSort={vi.fn()}
+      onRowClick={vi.fn()}
+      derivedColumnNames={new Set(["roofArea"])}
+    />,
+  );
+  expect(screen.getAllByLabelText("Computed by Roofy")).toHaveLength(1);
+  expect(screen.getByLabelText("Computed by Roofy").getAttribute("title")).toBe(
+    "Computed by Roofy — this value is calculated by the app.",
+  );
+});

@@ -1,3 +1,7 @@
+import { useDrawStore } from "../features/drawing/drawStore";
+import { forwardCloudShadowShader } from "./cloudShadowShader";
+import { captureFrame } from "../features/export/captureFrame";
+import { copySceneImage } from "../features/export/sceneImage";
 import { customBasemapOption } from "../features/basemap/customBasemap";
 /**
  * Navara viewport: owns the `ThreeView` lifecycle and exposes the imperative
@@ -189,6 +193,16 @@ import { StreamQueryBoxOverlay } from "../ui/viewport/StreamQueryBoxOverlay";
 const makeEngineColor = (hex: number): unknown => new Color().setHex(hex);
 
 export interface CitySceneHandle {
+  projectDrawingPoint?: (
+    point: readonly [number, number, number],
+  ) => { x: number; y: number } | null;
+  pickDrawingPoint?: (
+    x: number,
+    y: number,
+  ) => readonly [number, number, number] | null;
+  captureImage: (
+    credits: readonly string[],
+  ) => Promise<import("../features/export/sceneImage").SceneImage>;
   fitAll: () => void;
   fitLayer: (layerId: string) => void;
   /** Frame exactly the selected source objects and their child parts. */
@@ -1358,6 +1372,9 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
     /** The last `fitToken` the fit effect below acted on (or deliberately
      *  dropped), so one token can never be served twice. */
     const handledFitTokenRef = useRef(0);
+    // A restored viewpoint outranks first-layer framing even when React syncs
+    // the model after App has released its temporary restore suppression.
+    const restoredCameraRef = useRef(false);
     /**
      * How many layers the workspace held at the end of the last sync — city
      * rows (static AND streaming) plus geo overlays.
@@ -1669,6 +1686,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         // default globe camera. Those re-added layers are the first content of
         // the new scene and must earn their one fit (Task 6).
         previousLayerCountRef.current = 0;
+        restoredCameraRef.current = false;
         // Same reasoning for the geospatial pairs, but they are DELETED rather
         // than merely forgotten: they are ordinary engine layers and sources,
         // and this runs before `session.dispose()` (which only happens once
@@ -1816,6 +1834,36 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         makeEngineColor,
       );
     }, [engineReady, geoLayers]);
+
+    // The engine's default forward-lighting shader samples cloud shadows but
+    // discards their transmittance. Bridge that branch without re-lighting albedo.
+    useEffect(() => {
+      if (!engineReady || !cloudsWanted || !postProcessingEnabled) return;
+      const ap = photorealRef.current?.aerialPerspective as unknown as
+        | {
+            ref?: {
+              raw?: {
+                rawEffect?: {
+                  getFragmentShader: () => string;
+                  setFragmentShader: (shader: string) => void;
+                };
+              };
+            };
+          }
+        | undefined;
+      const effect = ap?.ref?.raw?.rawEffect;
+      if (!effect) return;
+      const original = effect.getFragmentShader();
+      try {
+        effect.setFragmentShader(forwardCloudShadowShader(original));
+      } catch (error) {
+        console.error("Cloud shadows could not be restored", error);
+        return;
+      }
+      return () => {
+        effect.setFragmentShader(original);
+      };
+    }, [engineReady, cloudsWanted, postProcessingEnabled]);
 
     // --- Volumetric clouds ---
     //
@@ -2469,6 +2517,14 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       // against. Streaming layers are rows of `layerStore` like any other
       // (`openStreamingLayer` mints one), so `layers.length` already counts
       // them — `streamsRef` would double-count.
+      if (
+        previousLayerCountRef.current > 0 &&
+        layers.length + geoLayerCount === 0
+      ) {
+        // Removing every layer starts a fresh scene, even when App retains
+        // the mounted viewport. Its next first layer should frame normally.
+        restoredCameraRef.current = false;
+      }
       previousLayerCountRef.current = layers.length + geoLayerCount;
       // Only the FIRST layer of an empty workspace earns a camera move. A
       // visibility toggle, a LoD change or a rule edit adds no handle; a second
@@ -2507,7 +2563,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       // A restore adds layers to get where it is going and then sets the
       // camera it saved. Fitting to those layers would overwrite exactly that
       // camera — see `autoFitSuppression.ts` (Task C26).
-      if (isAutoFitSuppressed()) return;
+      if (isAutoFitSuppressed() || restoredCameraRef.current) return;
       fitAll();
     }, [fitToken, fitAll]);
 
@@ -3245,6 +3301,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       };
 
       const onPointerMove = (e: PointerEvent) => {
+        if (useDrawStore.getState().active) return;
         lastEngineMove = e;
         const point = canvasPointOf(e);
         clickGate.move(point);
@@ -3269,6 +3326,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       };
 
       const onClick = (e: PointerEvent) => {
+        if (useDrawStore.getState().active) return;
         const store = useSelectionStore.getState();
         if (!acceptsPointer(store.toolMode, "click")) return;
         // Since 0.1.1 the engine's `click` is a GESTURE (a primary-pointer
@@ -3424,6 +3482,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       (state: GeographicCameraState) => {
         const view = viewRef.current;
         if (!view) return;
+        restoredCameraRef.current = true;
         // A restore is the sharpest case of a move that is not a gesture:
         // without the bracket, reopening a share link would re-fetch tiles for
         // a camera the user never touched.
@@ -3605,9 +3664,48 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         );
       }, []);
 
+    const captureImage = useCallback((credits: readonly string[]) => {
+      const view = viewRef.current;
+      const canvas = containerRef.current?.querySelector("canvas");
+      if (!view || !canvas)
+        return Promise.reject(new Error("The scene is not ready to capture."));
+      return captureFrame({
+        subscribe: (callback) => {
+          view.on("postRender", callback);
+          return () => view.off("postRender", callback);
+        },
+        requestRender: () => view.forceUpdate(),
+        copy: () => copySceneImage(canvas, credits),
+      });
+    }, []);
+
     useImperativeHandle(
       ref,
       () => ({
+        projectDrawingPoint: (point: readonly [number, number, number]) => {
+          const view = viewRef.current;
+          if (!view) return null;
+          const vector = geodeticToVector3({
+            lng: point[0],
+            lat: point[1],
+            height: point[2],
+          }).project(view.camera.raw);
+          const rect = containerRef.current?.getBoundingClientRect();
+          if (!rect) return null;
+          return {
+            x: ((vector.x + 1) * rect.width) / 2,
+            y: ((1 - vector.y) * rect.height) / 2,
+          };
+        },
+        pickDrawingPoint: (x: number, y: number) => {
+          // Installed TerrainPicker samples canvas-local CSS pixels directly,
+          // despite the public method comment describing client coordinates.
+          const point = viewRef.current?.pickDepthPosition(x, y);
+          if (!point) return null;
+          const geo = vector3ToGeodetic(point);
+          return [geo.lng, geo.lat, geo.height] as const;
+        },
+        captureImage,
         fitAll,
         fitLayer,
         fitObjects,
@@ -3635,6 +3733,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
         },
       }),
       [
+        captureImage,
         fitAll,
         fitLayer,
         fitObjects,

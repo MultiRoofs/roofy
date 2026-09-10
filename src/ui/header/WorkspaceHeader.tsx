@@ -35,6 +35,8 @@ import { useSelectionStore } from "../../features/selection/selectionStore";
 import type { SnapshotSummary } from "../../persistence/types";
 import { WorkspaceMenu } from "./WorkspaceMenu";
 import { PreferencesMenu } from "./PreferencesMenu";
+import { SceneExportMenu } from "./SceneExportMenu";
+import type { SceneExportFormat } from "../../features/export/browserSceneExport";
 
 /** How long "Saved · just now" stays up. Long enough to be read by someone
  *  who was looking at the map when they clicked, short enough not to become
@@ -42,6 +44,7 @@ import { PreferencesMenu } from "./PreferencesMenu";
 const SAVED_NOTE_MS = 5000;
 
 export interface WorkspaceHeaderProps {
+  readonly onExportScene?: (format: SceneExportFormat) => Promise<void>;
   /** Resolves `true` only when a snapshot was really written. */
   readonly onSave: () => Promise<boolean>;
   readonly onShare: () => void;
@@ -52,6 +55,7 @@ export interface WorkspaceHeaderProps {
 }
 
 export function WorkspaceHeader({
+  onExportScene,
   onSave,
   onShare,
   canShare,
@@ -124,6 +128,7 @@ export function WorkspaceHeader({
       </button>
 
       <div className="header-spacer" />
+      {onExportScene && <SceneExportMenu onExport={onExportScene} />}
 
       {/* The note is positioned against this wrapper, in the flexible gap to
           the button's left, rather than sitting beside it in flow: a

@@ -1,3 +1,5 @@
+import { LayerExport } from "./LayerExport";
+import { ActionIcon } from "../ActionIcon";
 /**
  * The active layer's own panel: everything the layer row stopped carrying
  * when it became a two-line block (Task 17), laid out as a form under the
@@ -111,6 +113,7 @@ export function ActiveLayerPanel({ onZoomToLayer }: ActiveLayerPanelProps) {
             className="active-layer-action"
             onClick={() => onZoomToLayer(item)}
           >
+            <ActionIcon name="camera" />
             Zoom to layer
           </button>
           {/* City kinds only: a geospatial layer has no attribute table
@@ -128,9 +131,11 @@ export function ActiveLayerPanel({ onZoomToLayer }: ActiveLayerPanelProps) {
                 drawerOpen ? shell().closeDrawer() : shell().openDrawer()
               }
             >
+              <ActionIcon name="table" />
               {drawerOpen ? "Close table" : "Open table"}
             </button>
           )}
+          <LayerExport key={layerId} item={item} />
         </div>
       </header>
 

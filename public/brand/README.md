@@ -22,16 +22,15 @@ rooftop functions, in legend order: nature, energy, social, water.
 | `brand.css`                | The kit's tokens + `.roofy-lockup`, for use OUTSIDE the app |
 | `brand.tokens.json`        | The same data for design tooling                            |
 
-Lockup SVGs carry live `<text>` in Outfit 600. Convert to outlines for anything
-that ships outside the app, or build the lockup in HTML with `.roofy-lockup` so the
-webfont applies. In the app the lockup is `src/ui/RoofyLockup.tsx`: the mark's four
-fills are the `--layer-*` tokens, so it follows the theme toggle with no JS.
+Lockup SVGs use Outfit 600 with an embedded font, so they render independently of installed fonts. The app uses the same locally hosted Outfit font for its wordmark; UI text remains Source Sans 3. Fonts and their licenses live in `fonts/`.
+
+Approved motion is C (Open possibilities): `roofy-lockup-animated-light.svg` and `roofy-lockup-animated-dark.svg` include the Outfit wordmark. They play once, respect reduced motion, and have transparent backgrounds. Static marks, favicons and app icons retain their approved geometry and palette; font changes only affect wordmarks. Historical comparison pages remain in `motion/`.
 
 ## Rules
 
 - Clear space on all sides = slab height, 10 grid units (20.8% of mark height).
 - Minimum size 16px; below 20px use `roofy-mark-small.svg` (the app's toolbar does).
-- Never recolour individual planes, rotate the mark, or add effects — it is flat by design.
+- Keep static marks flat. The approved unfolding animation is the motion exception; do not recolor or rotate the mark.
 - On a lime field, swap the lime plane and slab to `#14181E` and keep amber + orange.
 
 ## Tokens

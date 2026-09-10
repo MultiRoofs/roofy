@@ -1,3 +1,5 @@
+import { useDrawStore } from "../features/drawing/drawStore";
+import { DrawOverlay } from "../ui/viewport/DrawOverlay";
 import { saveWorkspace } from "../persistence/saveWorkspace";
 import {
   captureBasemap,
@@ -108,6 +110,7 @@ import { useSolarStore } from "../features/solar/solarStore";
 import { useSceneSheetStore } from "../features/sceneSheet/sceneSheetStore";
 import { DetailsPanel } from "../ui/details/DetailsPanel";
 import { WorkspaceHeader } from "../ui/header/WorkspaceHeader";
+import { exportScene } from "../features/export/browserSceneExport";
 import { LeftPanel } from "../ui/sidebar/LeftPanel";
 import { SourcePicker } from "../ui/layers/SourcePicker";
 import { AddLayerDialog } from "../ui/layers/AddLayerDialog";
@@ -255,6 +258,8 @@ export function App({
   persistenceStore = defaultStore,
   platform = browserPlatform,
 }: AppProps) {
+  const drawActive = useDrawStore((state) => state.active);
+  const drawLayerId = useDrawStore((state) => state.layerId);
   const [pathname, setPathname] = useState(window.location.pathname);
   const savedIdRef = useRef<string | null>(null);
   const partialRestoreRef = useRef(false);
@@ -301,6 +306,8 @@ export function App({
     readonly [number, number, number] | null
   >(null);
   const sceneRef = useRef<CitySceneHandle | null>(null);
+  // Retain the viewpoint while a local-only workspace waits for its files.
+  const pendingRestoredCameraRef = useRef<GeographicCamera | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   /**
    * A `.fcb` open is in flight and needs the 3D engine, so the viewer shell
@@ -1069,6 +1076,8 @@ export function App({
 
   const handleRestore = useCallback(
     async (id: string) => {
+      useDrawStore.getState().finish();
+      pendingRestoredCameraRef.current = null;
       setRestoringWorkspace(true);
       setAddLayerOpen(false);
       clearError();
@@ -1086,6 +1095,7 @@ export function App({
 
         const { viewState, activeLayer: savedActiveLayer } =
           restoreSnapshot(snapshot);
+        pendingRestoredCameraRef.current = viewState.camera;
         // BEFORE the layers and the camera. Entering a mode flies the camera,
         // and the viewport suppresses that flight for a mode that is already
         // set when it mounts — which is exactly this case. Setting it after
@@ -1372,6 +1382,7 @@ export function App({
         ) {
           try {
             await applyCameraWhenReady(viewState.camera);
+            pendingRestoredCameraRef.current = null;
           } catch (e) {
             showToast(
               `Workspace restored, but the 3D view could not start: ${
@@ -1701,6 +1712,8 @@ export function App({
   );
 
   const handleClose = useCallback(() => {
+    useDrawStore.getState().finish();
+    pendingRestoredCameraRef.current = null;
     closeAllStreamingLayers(getStreamPlugin());
     useLayerStore.getState().removeAllLayers();
     // No `setCatalogOpen(false)` here: the effect above already guarantees the
@@ -1743,28 +1756,58 @@ export function App({
       const entry = unavailableLayers.find((u) => u.id === entryId);
       setUnavailableLayers((prev) => prev.filter((u) => u.id !== entryId));
       clearError();
-      void withEngineBooting(file.name, () =>
-        addLayerFromFile(
-          file,
-          entry
-            ? {
-                rules: entry.rules,
-                colorBy: entry.colorBy,
-                singleColor: entry.singleColor,
-                unmatchedColor: entry.unmatchedColor,
-                visible: entry.visible,
-                lodMode: entry.lodMode,
-                selectedLod: entry.selectedLod,
-                hiddenTypes: entry.hiddenTypes,
-                attributeOrders: entry.attributeOrders,
-                tablePresentation: entry.tablePresentation,
-                selectedAppearance: entry.appearance,
-              }
-            : undefined,
-        ),
-      );
+      const pendingCamera = pendingRestoredCameraRef.current;
+      const releaseAutoFit = pendingCamera ? suppressAutoFit() : () => {};
+      void (async () => {
+        try {
+          const layerId = await withEngineBooting(file.name, () =>
+            addLayerFromFile(
+              file,
+              entry
+                ? {
+                    rules: entry.rules,
+                    colorBy: entry.colorBy,
+                    singleColor: entry.singleColor,
+                    unmatchedColor: entry.unmatchedColor,
+                    visible: entry.visible,
+                    lodMode: entry.lodMode,
+                    selectedLod: entry.selectedLod,
+                    hiddenTypes: entry.hiddenTypes,
+                    attributeOrders: entry.attributeOrders,
+                    tablePresentation: entry.tablePresentation,
+                    selectedAppearance: entry.appearance,
+                  }
+                : undefined,
+            ),
+          );
+          if (
+            layerId &&
+            pendingCamera &&
+            pendingRestoredCameraRef.current === pendingCamera
+          ) {
+            await applyCameraWhenReady(pendingCamera);
+            pendingRestoredCameraRef.current = null;
+          }
+        } catch (error) {
+          showToast(
+            error instanceof Error
+              ? error.message
+              : "Could not restore the saved view.",
+            EXPLANATION_TOAST_MS,
+          );
+        } finally {
+          releaseAutoFit();
+        }
+      })();
     },
-    [unavailableLayers, addLayerFromFile, clearError, withEngineBooting],
+    [
+      unavailableLayers,
+      addLayerFromFile,
+      clearError,
+      withEngineBooting,
+      applyCameraWhenReady,
+      showToast,
+    ],
   );
 
   const handleDismissUnavailableLayer = useCallback((entryId: string) => {
@@ -2039,6 +2082,16 @@ export function App({
           <ViewerShell
             header={
               <WorkspaceHeader
+                onExportScene={(format) =>
+                  exportScene(format, () => {
+                    const scene = sceneRef.current;
+                    if (!scene)
+                      return Promise.reject(
+                        new Error("The scene is not ready to capture."),
+                      );
+                    return scene.captureImage(viewportAttribution);
+                  })
+                }
                 onSave={handleSave}
                 onShare={handleShare}
                 canShare={hasUrlLayers}
@@ -2135,19 +2188,35 @@ export function App({
                       : "Zoom to selection"
                   }
                 />
-                <div className="viewport-tools">
+                {drawActive && <DrawOverlay scene={sceneRef} />}
+                <LegendOverlay />
+                <FilterChip />
+                <HoverTooltip />
+              </div>
+            }
+            toolbar={
+              <div
+                className="map-tool-header"
+                role="toolbar"
+                aria-label="Map tools"
+              >
+                <div className="map-tool-header__editing">
                   <SelectModeControl
                     mode={mode}
                     toolMode={toolMode}
                     cityActive={activeCityLayer !== null}
                     onSetMode={setMode}
                     onSetToolMode={setToolMode}
+                    drawActive={drawActive}
+                    canDraw={
+                      activeLayer?.layer.id === drawLayerId &&
+                      activeLayer?.kind === "geo"
+                    }
+                    onDraw={() => useDrawStore.getState().start()}
+                    onPick={() => useDrawStore.getState().stop()}
                   />
                   <AddressSearch onFlyTo={handleFlyToAddress} />
                 </div>
-                <LegendOverlay />
-                <FilterChip />
-                <HoverTooltip />
                 <SceneButtons
                   renderSun={(onClose) => <SunShadeSheet onClose={onClose} />}
                   renderSettings={(onClose) => (
@@ -2155,6 +2224,11 @@ export function App({
                   )}
                 />
               </div>
+            }
+            canOpenTable={
+              activeLayer?.kind === "city" ||
+              (activeLayer?.kind === "geo" &&
+                activeLayer.layer.kind === "geojson")
             }
             drawer={
               drawerOpen ? (

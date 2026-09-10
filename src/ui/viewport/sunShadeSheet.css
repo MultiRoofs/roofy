@@ -81,47 +81,6 @@
   gap: 0.75rem;
   color: var(--fg);
 }
-.sun-shade-sheet input[type="range"] {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-  height: 20px;
-  min-height: 20px;
-  padding: 0;
-  cursor: pointer;
-}
-.sun-shade-sheet input[type="range"]::-webkit-slider-runnable-track {
-  height: 3px;
-  background: var(--fg-dim);
-  border: 0;
-  border-radius: 0;
-}
-.sun-shade-sheet input[type="range"]::-webkit-slider-thumb {
-  appearance: none;
-  width: 12px;
-  height: 12px;
-  margin-top: -4.5px;
-  border: 0;
-  border-radius: 50%;
-  background: var(--accent);
-}
-.sun-shade-sheet input[type="range"]::-moz-range-track {
-  height: 3px;
-  background: var(--fg-dim);
-  border: 0;
-}
-.sun-shade-sheet input[type="range"]::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
-  border: 0;
-  border-radius: 50%;
-  background: var(--accent);
-}
-.sun-shade-sheet input[type="range"]:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
 .sun-speed-custom {
   display: grid;
   grid-template-columns: 1fr auto;

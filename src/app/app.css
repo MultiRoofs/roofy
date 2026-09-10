@@ -391,6 +391,45 @@ body {
   color: var(--fg-muted);
 }
 
+.drop-cue {
+  flex: none;
+  margin-bottom: 0.5rem;
+  color: var(--accent-text);
+  pointer-events: none;
+}
+
+/* Two short demonstrations, then a still affordance. No perpetual motion. */
+.drop-cue-file {
+  animation: drop-file-into-tray 2.4s cubic-bezier(0.16, 1, 0.3, 1) 2;
+}
+
+@keyframes drop-file-into-tray {
+  0%,
+  15% {
+    transform: translateY(-4px);
+    opacity: 0.65;
+  }
+  45%,
+  70% {
+    transform: translateY(4px);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.drop-cue.is-still .drop-cue-file {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drop-cue-file {
+    animation: none;
+  }
+}
+
 .drop-or {
   font-size: 0.85rem;
   color: var(--fg-muted);

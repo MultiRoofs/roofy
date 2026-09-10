@@ -158,23 +158,29 @@ export function SceneSettingsSheet({
           <p className="scene-settings-sheet__hint">
             A look can override your basemap and background choices.
           </p>
-          {SCENE_THEMES.map((candidate) => (
-            <button
-              key={candidate}
-              type="button"
-              aria-pressed={theme === candidate}
-              onClick={() => setTheme(candidate)}
-            >
-              {
+          <div
+            className="button-group"
+            role="group"
+            aria-label="Presentation looks"
+          >
+            {SCENE_THEMES.map((candidate) => (
+              <button
+                key={candidate}
+                type="button"
+                aria-pressed={theme === candidate}
+                onClick={() => setTheme(candidate)}
+              >
                 {
-                  photoreal: "Photorealistic",
-                  cartoon: "Cartoon",
-                  cyber: "Cyber",
-                  wireframe: "Wireframe",
-                }[candidate]
-              }
-            </button>
-          ))}
+                  {
+                    photoreal: "Photorealistic",
+                    cartoon: "Cartoon",
+                    cyber: "Cyber",
+                    wireframe: "Wireframe",
+                  }[candidate]
+                }
+              </button>
+            ))}
+          </div>
           <p className="scene-settings-sheet__hint">
             Cyber overrides layer colours.
           </p>

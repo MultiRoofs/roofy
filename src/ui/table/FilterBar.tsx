@@ -18,6 +18,13 @@
  * Apply and not as the user types.
  */
 
+import { ColumnTypeIcon } from "./ColumnTypeIcon";
+import { FilterValueInput } from "./FilterValueInput";
+import {
+  columnTypeLabel,
+  type CandidateLoader,
+} from "../../insights/filterCandidates";
+import { isTextColumn } from "../../insights/columnKind";
 import { useCallback } from "react";
 import type { ColumnInfo } from "../../insights/columnKind";
 import {
@@ -34,6 +41,7 @@ import {
 } from "./tableText";
 
 export interface FilterBarProps {
+  readonly getCandidates?: CandidateLoader;
   readonly columns: ReadonlyArray<ColumnInfo>;
   readonly filter: FilterGroup;
   readonly onChange: (filter: FilterGroup) => void;
@@ -56,6 +64,7 @@ export interface FilterBarProps {
 
 export function FilterBar({
   columns,
+  getCandidates,
   filter,
   onChange,
   onApply,
@@ -117,6 +126,7 @@ export function FilterBar({
                 {index === 0 ? "Where" : filter.logic}
               </span>
 
+              <ColumnTypeIcon column={column} />
               <select
                 className="filter-select"
                 aria-label="Filter column"
@@ -140,7 +150,7 @@ export function FilterBar({
               >
                 {columns.map((c) => (
                   <option key={c.name} value={c.name}>
-                    {c.name}
+                    {c.name} · {columnTypeLabel(c)}
                   </option>
                 ))}
               </select>
@@ -169,7 +179,13 @@ export function FilterBar({
               </select>
 
               {!isNullaryOp(condition.op) && (
-                <input
+                <FilterValueInput
+                  column={condition.column}
+                  load={
+                    column && isTextColumn(column) && condition.op !== "in"
+                      ? getCandidates
+                      : undefined
+                  }
                   className="filter-value"
                   aria-label="Filter value"
                   value={valueText(condition.value)}

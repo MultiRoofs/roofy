@@ -119,3 +119,7 @@ Each of these has a story in `docs/architecture-notes.md`; the rule here is the 
 ## Project Philosophy
 
 Experimental project: breaking changes are fine, no migration shims. Prefer well-organised code and good UX over backward compatibility.
+
+## UI consistency
+
+Follow [the shared UI consistency rules](docs/ui-consistency.md) for every UI change. The approved direction is Soft Utility. Reuse the control tokens in `src/app/flatControls.css`: 8px radius, 38px primary height, and 30px compact field height. Keep button, input, select, slider, spacing, icon, and interaction states consistent across panels; verify new controls against existing peers in the browser before finishing.

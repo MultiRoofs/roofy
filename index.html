@@ -4,10 +4,60 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="/brand/favicon.svg" type="image/svg+xml" />
+    <link
+      rel="preload"
+      as="image"
+      href="/brand/roofy-lockup-animated-light.svg"
+    />
+    <style>
+      #launch-screen {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: grid;
+        place-items: center;
+        background: #fff;
+        opacity: 1;
+        transition: opacity 180ms ease-out;
+      }
+      #launch-screen img {
+        width: 360px;
+        max-width: 65vw;
+        height: auto;
+      }
+      #launch-screen.launch-screen--leaving {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #root[aria-hidden="true"] {
+        visibility: hidden;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #launch-screen {
+          transition: none;
+        }
+      }
+    </style>
     <title>Roofy — 3D city viewer & rooftop analyser</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="launch-screen" role="status" aria-label="Loading Roofy">
+      <img
+        src="/brand/roofy-lockup-animated-light.svg"
+        width="432"
+        height="128"
+        alt="Roofy"
+      />
+    </div>
+    <div id="root" inert aria-hidden="true"></div>
+    <noscript
+      ><style>
+        #launch-screen {
+          display: none;
+        }</style
+      >Roofy needs JavaScript to open city models. Please enable it and
+      reload.</noscript
+    >
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

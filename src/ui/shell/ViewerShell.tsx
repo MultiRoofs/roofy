@@ -18,6 +18,7 @@
 
 import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { SHELL_LIMITS, useShellStore } from "./shellStore";
+import { ActionIcon } from "../ActionIcon";
 import { ResizeHandle } from "./ResizeHandle";
 import { AttributionLines } from "../viewport/AttributionOverlay";
 
@@ -31,8 +32,10 @@ export interface ViewerShellProps {
   readonly left: ReactNode;
   /** The viewport and its overlays. */
   readonly map: ReactNode;
+  readonly toolbar?: ReactNode;
   /** `null` = closed; rendered under the map only. */
   readonly drawer: ReactNode | null;
+  readonly canOpenTable?: boolean;
   /** `null` = no selection → column width 0. */
   readonly right: ReactNode | null;
   /** What the collapsed-details pill names — "Building …25028". */
@@ -46,11 +49,13 @@ export function ViewerShell({
   header,
   left,
   map,
+  toolbar,
   drawer,
   right,
   rightTitle,
   status,
   attributionLines = [],
+  canOpenTable = false,
 }: ViewerShellProps): ReactElement {
   const leftCollapsed = useShellStore((s) => s.leftCollapsed);
   const leftWidth = useShellStore((s) => s.leftWidth);
@@ -74,7 +79,7 @@ export function ViewerShell({
   const sizes = {
     "--left-w": leftCollapsed ? LEFT_RAIL_WIDTH : `${leftWidth}px`,
     "--right-w": rightOpen ? `${rightWidth}px` : "0",
-    "--drawer-h": drawer === null ? "0" : `${drawerHeight}px`,
+    "--drawer-h": drawer === null ? "0px" : `${drawerHeight}px`,
   } as CSSProperties;
 
   return (
@@ -84,6 +89,7 @@ export function ViewerShell({
       <div className="shell-left">{left}</div>
 
       <div className="map-column">
+        {toolbar}
         <div className="map-area">
           {map}
           {right !== null && rightCollapsed && (
@@ -96,6 +102,31 @@ export function ViewerShell({
             </button>
           )}
         </div>
+        {canOpenTable && (
+          <div className="collapsed-table-handle" hidden={drawer !== null}>
+            <ResizeHandle
+              axis="y"
+              current={0}
+              min={0}
+              max={SHELL_LIMITS.drawerMax}
+              direction={-1}
+              label="Open or resize table"
+              onResize={(height) => {
+                if (height <= 8) return;
+                useShellStore.getState().setDrawerExpanded(false);
+                useShellStore.getState().openDrawer();
+                useShellStore.getState().setDrawerHeight(height);
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => useShellStore.getState().openDrawer()}
+            >
+              <ActionIcon name="table" /> Open table
+            </button>
+            <span>Drag up to expand</span>
+          </div>
+        )}
         {drawer !== null && (
           <div className="drawer-area">
             {drawer}

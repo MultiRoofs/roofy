@@ -208,6 +208,27 @@ export function SourcePicker({
         onDrop={handleDrop}
         data-testid="source-picker-drop-zone"
       >
+        {variant === "hero" && (
+          <svg
+            className={`drop-cue${dragging || loading ? " is-still" : ""}`}
+            width="64"
+            height="56"
+            viewBox="0 0 64 56"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <g className="drop-cue-file">
+              <path d="M23 6h12l7 7v23H23z" />
+              <path d="M35 6v8h7M28 21h9M28 26h6" />
+            </g>
+            <path d="M14 39v10h36V39M26 42l6 5 6-5M32 36v10" />
+          </svg>
+        )}
         <p>
           {dragging
             ? "Release to load this file"

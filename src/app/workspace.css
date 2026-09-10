@@ -620,3 +620,157 @@ body:has(.viewer-shell) :is(.modal, .toast, .unavailable-layers) {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+.city-object-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.city-object-icon {
+  flex: none;
+  color: var(--fg-muted);
+  vertical-align: middle;
+}
+.city-object-icon--building {
+  color: light-dark(#b44b27, #f39470);
+}
+.city-object-icon--vegetation {
+  color: light-dark(#477a28, #a5cd78);
+}
+.city-object-icon--water {
+  color: light-dark(#276caa, #7eb9e8);
+}
+.city-object-icon--transport {
+  color: light-dark(#75569e, #b8a0df);
+}
+.city-object-icon--bridge {
+  color: light-dark(#89631c, #dbb771);
+}
+.city-object-icon--terrain {
+  color: light-dark(#68723b, #b4bc82);
+}
+
+.scene-export-popover {
+  width: 280px;
+  max-width: calc(100vw - 32px);
+}
+.scene-export-popover p {
+  margin: 8px 0 12px;
+  color: var(--fg-muted);
+  line-height: 1.5;
+}
+.scene-export-actions {
+  display: flex;
+  gap: 8px;
+}
+.scene-export-popover .scene-export-note {
+  font-size: 11px;
+  margin-bottom: 0;
+}
+.scene-export-popover [role="alert"] {
+  color: var(--fg);
+}
+
+.data-header-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.viewer-shell .column-stats-trigger {
+  display: inline-flex;
+  padding: 3px;
+  min-width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.column-stats-trigger svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.viewer-shell .column-stats-trigger:hover,
+.viewer-shell .column-stats-trigger:focus-visible {
+  background: var(--bg-raised);
+  color: var(--fg);
+}
+.column-stats-popover {
+  position: fixed;
+  z-index: 1000;
+  box-sizing: border-box;
+  width: 280px;
+  max-width: calc(100vw - 16px);
+  padding: 14px;
+  background: var(--bg-panel, Canvas);
+  color: var(--fg, CanvasText);
+  border: 1px solid var(--border, GrayText);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.column-stats-popover strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.column-stats-popover dl {
+  margin: 12px 0;
+}
+.column-stats-popover dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 5px 0;
+}
+.column-stats-popover dd {
+  margin: 0;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.column-stats-popover p {
+  margin: 8px 0 0;
+  color: var(--fg-muted);
+}
+
+.filter-type-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  flex: 0 0 20px;
+  color: var(--fg-muted);
+}
+.filter-type-icon svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Keep the table's top edge discoverable even at full height. */
+.table-panel > .resize-handle-y {
+  height: 12px;
+  position: relative;
+  touch-action: none;
+}
+.table-panel > .resize-handle-y::after {
+  content: "";
+  position: absolute;
+  width: 36px;
+  height: 3px;
+  left: calc(50% - 18px);
+  top: 4px;
+  background: var(--fg-muted);
+  border-radius: 2px;
+}

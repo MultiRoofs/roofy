@@ -346,6 +346,42 @@ describe("NavaraViewport camera controls", () => {
     useViewModeStore.setState({ mode: DEFAULT_VIEW_MODE });
   });
 
+  it("keeps a restored camera when the first model registers after restore completes", async () => {
+    const { ref } = await mount();
+    cameraThrows = false;
+    const saved = {
+      lng: 4.36,
+      lat: 52.01,
+      height: 160,
+      heading: 123,
+      pitch: -23,
+      roll: 2,
+    };
+    act(() => ref.current!.setCameraState(saved));
+    expect(lastCamera()).toEqual(saved);
+    flyTo.mockClear();
+    suppressSettleThenCommit.mockClear();
+    cityPluginInstance.addCityModel.mockImplementation(() =>
+      makeHandle("restored"),
+    );
+    await act(async () => {
+      useLayerStore.setState({ layers: [makeLayer("restored")] });
+      useWorkspaceStore.setState({ activeLayerId: "restored" });
+    });
+    expect(cityPluginInstance.addCityModel).toHaveBeenCalled();
+    // No queued fit may replace the saved camera once the geometry catches up.
+    expect(suppressSettleThenCommit).not.toHaveBeenCalled();
+    expect(flyTo).not.toHaveBeenCalled();
+    expect(lastCamera()).toEqual(saved);
+    await act(async () => {
+      useLayerStore.setState({ layers: [] });
+    });
+    await act(async () => {
+      useLayerStore.setState({ layers: [makeLayer("new")] });
+    });
+    expect(flyTo).toHaveBeenCalledOnce();
+  });
+
   it("subscribes to the CAMERA's move events, not the view's", async () => {
     await mount();
     const names = cameraOn.mock.calls.map((c) => c[0]);

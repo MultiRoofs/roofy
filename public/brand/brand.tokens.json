@@ -65,8 +65,8 @@
   },
   "type": {
     "display": "Outfit, system-ui, sans-serif",
-    "ui": "'IBM Plex Sans', system-ui, sans-serif",
-    "mono": "'IBM Plex Mono', ui-monospace, monospace",
+    "ui": "'Source Sans 3', system-ui, sans-serif",
+    "mono": "'Source Sans 3', ui-monospace, monospace",
     "scale": {
       "display": "48/1.0/600/-0.03em",
       "h1": "32/1.15/600/-0.02em",

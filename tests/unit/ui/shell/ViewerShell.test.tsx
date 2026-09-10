@@ -86,7 +86,7 @@ describe("ViewerShell regions", () => {
   it("gives the drawer no row and no area when it is closed", () => {
     const el = shell();
     expect(el.querySelector(".drawer-area")).toBeNull();
-    expect(widthOf(el, "--drawer-h")).toBe("0");
+    expect(widthOf(el, "--drawer-h")).toBe("0px");
   });
 
   it("sizes an open drawer from the store", () => {
@@ -265,4 +265,32 @@ describe("ViewerShell map identity", () => {
     expect(container.querySelector(".map-area")).toBe(mapArea);
     expect(screen.getByTestId("the-map")).toBe(mapNode);
   });
+});
+
+it("keeps a table opener when closed and lets the grip open by keyboard resizing", () => {
+  shell({ canOpenTable: true });
+  fireEvent.click(screen.getByRole("button", { name: "Open table" }));
+  expect(useShellStore.getState().drawerOpen).toBe(true);
+  useShellStore.getState().closeDrawer();
+  fireEvent.keyDown(
+    screen.getByRole("separator", { name: "Open or resize table" }),
+    { key: "ArrowUp" },
+  );
+  expect(useShellStore.getState().drawerOpen).toBe(true);
+  expect(useShellStore.getState().drawerHeight).toBe(SHELL_LIMITS.drawerMin);
+});
+it("drag-resizing a closed expanded table returns to a map/table split", () => {
+  useShellStore.setState({ drawerExpanded: true });
+  shell({ canOpenTable: true });
+  fireEvent.keyDown(
+    screen.getByRole("separator", { name: "Open or resize table" }),
+    { key: "ArrowUp" },
+  );
+  expect(useShellStore.getState().drawerExpanded).toBe(false);
+});
+it("places the toolbar before the map as a separate row", () => {
+  const el = shell({ toolbar: <div data-testid="map-toolbar" /> });
+  const toolbar = screen.getByTestId("map-toolbar");
+  expect(toolbar.parentElement).toBe(el.querySelector(".map-column"));
+  expect(toolbar.nextElementSibling).toBe(el.querySelector(".map-area"));
 });

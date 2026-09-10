@@ -38,6 +38,7 @@ import { LodSelector } from "../sidebar/LodSelector";
 import { formatCount } from "../table/tableText";
 import { KIND_LABEL, sourceOf } from "./geoLayerMeta";
 import { LayerTypeToggles } from "./LayerTypeToggles";
+import { CityObjectIcon } from "./CityObjectIcon";
 import { StreamingLodControl } from "./StreamingLodControl";
 
 /** Long enough to keep a host and a file name either side of the ellipsis in
@@ -249,7 +250,10 @@ function ObjectTypeCounts({ model }: { readonly model: CityModel }) {
     <dl className="active-layer-rows">
       {counts.map(({ type, count }) => (
         <div className="active-layer-row" key={type}>
-          <dt className="active-layer-key">{type}</dt>
+          <dt className="active-layer-key city-object-label">
+            <CityObjectIcon type={type} />
+            {type}
+          </dt>
           <dd className="active-layer-value">{formatCount(count)}</dd>
         </div>
       ))}

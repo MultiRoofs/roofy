@@ -1,3 +1,4 @@
+import { ActionIcon } from "../ActionIcon";
 /**
  * The shell's left column: the workspace's layers, and the configuration of
  * the ONE that is active, in a single full-height panel.
@@ -128,7 +129,8 @@ export function LeftPanel({
           aria-expanded={addDialogOpen ?? addOpen}
           onClick={() => (onRequestAdd ? onRequestAdd() : setAddOpen(true))}
         >
-          + Add layer
+          <ActionIcon name="addLayer" />
+          Add layer
         </button>
       </div>
 

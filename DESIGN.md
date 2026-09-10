@@ -24,9 +24,9 @@ typography:
     fontSize: "0.8125rem"
     fontWeight: 600
 rounded:
-  workspace-small: "0px"
-  workspace-medium: "0px"
-  workspace-large: "0px"
+  workspace-small: "8px"
+  workspace-medium: "8px"
+  workspace-large: "8px"
 ---
 
 # Design System: Roofy
@@ -59,11 +59,11 @@ At map widths below 560px, scene triggers and the selection camera action use co
 
 ## Elevation & Depth
 
-Shell regions are opaque and separated by fine borders. Floating map controls and scene sheets use opaque, square surfaces. Preserve the landing page's existing ambient background.
+Shell regions are opaque and separated by fine borders. Floating map controls and scene sheets use opaque surfaces with 8px corners. Preserve the landing page's existing ambient background.
 
 ## Shapes
 
-Use square corners and no button shadows or visible button borders, following approved variant A (Flat list). Quiet solid fills distinguish actions; muted green fills mark selection. Keep the brand mark unchanged.
+Use 8px corners and quiet solid button fills, following approved variant B (Soft utility). Pale green fills mark selection; floating menus use soft elevation. Keep the brand mark unchanged.
 
 ## Components
 
@@ -79,3 +79,16 @@ Active layer rows use a full-width opaque neutral selection fill without a borde
 - Don't reintroduce decorative display typography into workspace controls.
 - Don't use one uniform gap for section boundaries and detailed controls.
 - Don't let nested scrolling containers clip sheet headers or cover camera controls.
+
+## Approved direction: B · Soft utility
+
+The user selected B from design/ui-system-variants.html. Use 8px control corners,
+38px primary controls, pale green selected states, and raised menus with a soft
+5px/18px shadow. Keep records and filter rows compact (30px filter fields).
+Native selects use customizable pickers where supported, with padded options,
+rounded selection states and the browser's keyboard navigation; older engines
+retain styled native controls. This supersedes earlier square/flat direction A.
+
+## Approved wordmark
+
+Outfit 600, capitalized Roofy, with -0.03em tracking. UI text stays Source Sans 3. Brand motion C (unfolding planes) is saved in public/brand as animated lockups; app logos remain static.

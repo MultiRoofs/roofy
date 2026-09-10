@@ -1,3 +1,10 @@
+@font-face {
+  font-family: "Outfit";
+  src: url("/brand/fonts/outfit.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
 /* Roofy brand tokens — v1.0. Loaded BEFORE app.css, which derives every
    interactive colour (--accent, --danger, --tertiary, …) from these and never
    restates them. The kit's own copy for docs and slides is
@@ -111,4 +118,10 @@
    uppercase would ship it as "ROOFY". */
 .roofy-wordmark {
   text-transform: none;
+}
+
+.roofy-lockup .roofy-wordmark {
+  font-family: "Outfit", sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.03em;
 }

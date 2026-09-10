@@ -1,3 +1,4 @@
+import { ActionIcon } from "../ActionIcon";
 import { ColumnsPanel } from "./ColumnsPanel";
 import { columnLabel } from "../drawer/columnPolicy";
 import { orderedColumns, moveColumn } from "./columnOrder";
@@ -21,13 +22,11 @@ import {
   useActiveCityLayer,
   useActiveLayer,
 } from "../../features/workspace/activeLayer";
-import { epsgOf } from "../../features/layers/layerPresentation";
 import type { Selection } from "../../domain/selection/types";
 import { ResizeHandle } from "../shell/ResizeHandle";
 import { SHELL_LIMITS, useShellStore } from "../shell/shellStore";
 import { SummaryView } from "../drawer/SummaryView";
 import { DataGrid } from "./DataGrid";
-import { ExportDialog } from "./ExportDialog";
 import { FilterBar } from "./FilterBar";
 import { Pagination } from "./Pagination";
 import { GeoRecordsPanel } from "./GeoRecordsPanel";
@@ -95,13 +94,11 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
   };
   const [columnsOpen, setColumnsOpen] = useState(false);
   const columnsButtonRef = useRef<HTMLButtonElement>(null);
-  const [exportOpen, setExportOpen] = useState(false);
 
   // The dialog is about ONE layer — its table, its types, its LoD ladder — and
   // the layer under it can change while it is open (the sidebar is live). It
   // closes rather than silently re-pointing at a different layer's data.
   useEffect(() => {
-    setExportOpen(false);
     setColumnsOpen(false);
   }, [active?.layer.id]);
 
@@ -267,11 +264,16 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
       <ResizeHandle
         axis="y"
         label="Resize table"
-        current={drawerHeight}
+        current={drawerExpanded ? drawerMax : drawerHeight}
         min={SHELL_LIMITS.drawerMin}
         max={drawerMax}
         direction={-1}
-        onResize={(height) => useShellStore.getState().setDrawerHeight(height)}
+        onResize={(height) => {
+          const shell = useShellStore.getState();
+          if (shell.drawerExpanded && height >= drawerMax) return;
+          shell.setDrawerHeight(height);
+          shell.setDrawerExpanded(false);
+        }}
       />
 
       {query?.rawObjectId !== null && query?.rawObjectId !== undefined && (
@@ -330,6 +332,37 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
             ? "Table only · currently loaded"
             : "Map + table"}
         </span>
+        <div
+          className="table-layout-actions"
+          role="group"
+          aria-label="Table layout"
+        >
+          <button
+            type="button"
+            className="tb-btn table-action-btn"
+            onClick={() =>
+              useShellStore.getState().setDrawerExpanded(!drawerExpanded)
+            }
+          >
+            <ActionIcon name={drawerExpanded ? "restore" : "expand"} />
+            {drawerExpanded ? "Show map" : "Expand"}
+          </button>
+
+          <button
+            className="tb-btn table-action-btn"
+            title="Collapse table"
+            onClick={() => useShellStore.getState().closeDrawer()}
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14">
+              <path
+                d="M4 6l4 4 4-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              />
+            </svg>
+          </button>
+        </div>
       </div>
       <div
         className="table-panel-actions"
@@ -346,10 +379,14 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
               onClick={() => setColumnsOpen((open) => !open)}
               disabled={view.status !== "ready"}
             >
+              <ActionIcon name="columns" />
               Columns
             </button>
             {columnsOpen && layerId !== null && (
               <ColumnsPanel
+                computedNames={
+                  new Set(derivedKeys.map((column) => column.name))
+                }
                 anchorRef={columnsButtonRef}
                 columns={selectableColumns}
                 visible={visibleColumns}
@@ -368,104 +405,94 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
                 }}
               />
             )}
-
-            <button
-              type="button"
-              className="tb-btn table-action-btn"
-              disabled={view.status !== "ready"}
-              onClick={() => setExportOpen(true)}
-            >
-              Export
-            </button>
           </>
         )}
-        <button
-          type="button"
-          className="tb-btn table-action-btn"
-          onClick={() =>
-            useShellStore.getState().setDrawerExpanded(!drawerExpanded)
-          }
-        >
-          {drawerExpanded ? "Show map" : "Expand"}
-        </button>
-
-        <button
-          className="tb-btn table-action-btn"
-          title="Unselect all"
-          onClick={handleUnselectAll}
-        >
-          Clear selection
-        </button>
-
-        <div className="toolbar-spacer" />
-
-        <button
-          className="tb-btn table-action-btn"
-          title="Collapse table"
-          onClick={() => useShellStore.getState().closeDrawer()}
-        >
-          <svg viewBox="0 0 16 16" width="14" height="14">
-            <path
-              d="M4 6l4 4 4-4"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            />
-          </svg>
-        </button>
+        {activeLayer === null && (
+          <>
+            {" "}
+            <button
+              className="tb-btn table-action-btn"
+              title="Unselect all"
+              onClick={handleUnselectAll}
+            >
+              <ActionIcon name="clear" />
+              Clear selection
+            </button>
+          </>
+        )}{" "}
       </div>
 
       {activeLayer !== null && (
-        <div
-          className="data-drawer-tabs"
-          role="tablist"
-          aria-label="Drawer view"
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={!summaryOpen}
-            className="data-drawer-tab"
-            onClick={() => setSummaryOpen(false)}
+        <div className="table-view-controls">
+          <div
+            className="data-drawer-tabs"
+            role="tablist"
+            aria-label="Drawer view"
           >
-            Records
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={summaryOpen}
-            className="data-drawer-tab"
-            onClick={() => setSummaryOpen(true)}
-          >
-            Summary
-          </button>
-          {layerId !== null && (
             <button
               type="button"
-              className="tb-btn table-action-btn"
-              onClick={() =>
-                useQueryStore
-                  .getState()
-                  .setView(layerId, query?.view === "raw" ? "buildings" : "raw")
-              }
+              role="tab"
+              aria-selected={!summaryOpen}
+              className="data-drawer-tab"
+              onClick={() => setSummaryOpen(false)}
             >
-              {query?.view === "raw" ? "Buildings" : "Raw objects"}
+              Records
             </button>
-          )}
-          {layerId !== null && (
-            <label className="table-sync-label">
-              <input
-                type="checkbox"
-                checked={query?.showSelectedOnly ?? false}
-                onChange={(e) =>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={summaryOpen}
+              className="data-drawer-tab"
+              onClick={() => setSummaryOpen(true)}
+            >
+              Summary
+            </button>
+          </div>
+          <div
+            className="table-record-controls"
+            role="group"
+            aria-label="Record controls"
+          >
+            {layerId !== null && (
+              <button
+                type="button"
+                className="tb-btn table-action-btn"
+                onClick={() =>
                   useQueryStore
                     .getState()
-                    .setShowSelectedOnly(layerId, e.target.checked)
+                    .setView(
+                      layerId,
+                      query?.view === "raw" ? "buildings" : "raw",
+                    )
                 }
-              />{" "}
-              Show selected records
-            </label>
-          )}
+              >
+                <ActionIcon name="feature" />
+                {query?.view === "raw" ? "Buildings" : "Raw objects"}
+              </button>
+            )}
+            {layerId !== null && (
+              <label className="table-sync-label">
+                <input
+                  type="checkbox"
+                  checked={query?.showSelectedOnly ?? false}
+                  onChange={(e) =>
+                    useQueryStore
+                      .getState()
+                      .setShowSelectedOnly(layerId, e.target.checked)
+                  }
+                />{" "}
+                Show selected records
+              </label>
+            )}
+            <button
+              className="tb-btn table-action-btn"
+              title="Unselect all"
+              onClick={handleUnselectAll}
+            >
+              <ActionIcon name="clear" />
+              Clear selection
+            </button>
+          </div>
         </div>
       )}
 
@@ -475,6 +502,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
         <>
           {view.status === "ready" && query !== null && layerId !== null && (
             <FilterBar
+              getCandidates={view.getCandidates}
               columns={view.columns}
               filter={query.filter}
               // The body renders it instead when it is the reason the grid is
@@ -554,6 +582,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
                 )}
                 {!pageError && (
                   <DataGrid
+                    getColumnStats={view.getColumnStats}
                     columns={visibleColumns}
                     rows={derivedRows}
                     sort={query?.sort ?? null}
@@ -591,18 +620,6 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
             />
           )}
         </>
-      )}
-
-      {exportOpen && view.table !== null && activeLayer !== null && (
-        <ExportDialog
-          layerId={activeLayer.id}
-          layerName={activeLayer.name}
-          table={view.table}
-          epsg={epsgOf(activeLayer.model.metadata.referenceSystem)}
-          selectedLod={activeLayer.selectedLod}
-          isStreaming={activeLayer.isStreaming}
-          onClose={() => setExportOpen(false)}
-        />
       )}
     </div>
   );

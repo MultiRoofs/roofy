@@ -156,6 +156,7 @@ describe("AddLayerDialog — the three places a source comes from", () => {
       "File",
       "URL",
       "Catalog",
+      "Draw",
     ]);
     expect(screen.getByRole("tab", { name: "File" })).toHaveAttribute(
       "aria-selected",
@@ -628,4 +629,12 @@ describe("AddLayerDialog — modal chrome", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     expect(document.body.style.overflow).not.toBe("hidden");
   });
+});
+
+it("creates an empty draw layer and closes the dialog", () => {
+  openDialog();
+  fireEvent.click(screen.getByRole("tab", { name: "Draw" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add draw layer" }));
+  expect(useGeoLayerStore.getState().layers.at(-1)?.name).toBe("Draw layer");
+  expect(screen.queryByRole("dialog")).toBeNull();
 });

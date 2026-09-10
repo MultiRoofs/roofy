@@ -442,7 +442,7 @@ describe("App — a failed group add is reported", () => {
       rules: [],
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: "+ Add layer" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add layer" }));
     // The dialog opens on the File tab, which is where a group of files is
     // dropped; a multi-file selection is a CityParquet package by
     // construction, so the confirming click is all it needs.

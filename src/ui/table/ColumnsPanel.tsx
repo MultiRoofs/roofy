@@ -1,7 +1,9 @@
+import { ComputedAttributeBadge } from "./ComputedAttributeBadge";
 import { useState, useRef, useLayoutEffect, type RefObject } from "react";
 import type { ColumnInfo } from "../../insights/columnKind";
 export function ColumnsPanel({
   columns,
+  computedNames,
   visible,
   label,
   onChange,
@@ -9,6 +11,7 @@ export function ColumnsPanel({
   onClose,
   anchorRef,
 }: {
+  readonly computedNames?: ReadonlySet<string>;
   readonly anchorRef?: RefObject<HTMLButtonElement | null>;
   readonly columns: ReadonlyArray<ColumnInfo>;
   readonly visible: ReadonlyArray<ColumnInfo>;
@@ -17,6 +20,12 @@ export function ColumnsPanel({
   readonly onMove: (source: string, target: string) => void;
   readonly onClose: () => void;
 }) {
+  const [dragged, setDragged] = useState<string | null>(null);
+  const [target, setTarget] = useState<string | null>(null);
+  const clearDrag = () => {
+    setDragged(null);
+    setTarget(null);
+  };
   const [search, setSearch] = useState("");
   const panelRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -59,7 +68,10 @@ export function ColumnsPanel({
       role="group"
       aria-label="Columns"
       onKeyDown={(event) => {
-        if (event.key === "Escape") onClose();
+        if (event.key === "Escape") {
+          clearDrag();
+          onClose();
+        }
       }}
     >
       <div className="columns-panel-heading">
@@ -86,7 +98,52 @@ export function ColumnsPanel({
         {shown.map((column) => {
           const index = names.indexOf(column.name);
           return (
-            <div className="column-picker-row" key={column.name}>
+            <div
+              className={`column-picker-row ${dragged === column.name ? "column-dragging" : ""} ${target === column.name && dragged !== column.name ? "column-drop-target" : ""}`}
+              key={column.name}
+              onDragOver={(event) => {
+                if (!dragged) return;
+                event.preventDefault();
+                setTarget(column.name);
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                if (
+                  dragged &&
+                  names.includes(dragged) &&
+                  dragged !== column.name
+                )
+                  onMove(dragged, column.name);
+                clearDrag();
+              }}
+            >
+              <button
+                type="button"
+                className="column-drag-grip"
+                draggable
+                aria-label={`Drag ${column.name} to reorder`}
+                title="Drag to reorder, or use the arrow buttons"
+                onDragStart={(event) => {
+                  setDragged(column.name);
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", column.name);
+                }}
+                onDragEnd={clearDrag}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowUp" && index > 0) {
+                    event.preventDefault();
+                    onMove(column.name, names[index - 1]!);
+                  }
+                  if (event.key === "ArrowDown" && index < names.length - 1) {
+                    event.preventDefault();
+                    onMove(column.name, names[index + 1]!);
+                  }
+                }}
+              >
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M5 3h.01M11 3h.01M5 8h.01M11 8h.01M5 13h.01M11 13h.01" />
+                </svg>
+              </button>
               <label>
                 <input
                   type="checkbox"
@@ -96,6 +153,7 @@ export function ColumnsPanel({
                   }
                 />
                 <span>{label(column.name)}</span>
+                {computedNames?.has(column.name) && <ComputedAttributeBadge />}
               </label>
               <div className="column-move-controls">
                 <button
@@ -134,6 +192,7 @@ export function ColumnsPanel({
                 onChange={() => onChange([...names, column.name])}
               />
               <span>{label(column.name)}</span>
+              {computedNames?.has(column.name) && <ComputedAttributeBadge />}
             </label>
           </div>
         ))}

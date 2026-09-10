@@ -30,3 +30,31 @@ it("separates shown and available columns and searches both", () => {
   fireEvent.click(screen.getByRole("button", { name: "Reset columns" }));
   expect(onChange).toHaveBeenCalledWith(null);
 });
+it("reorders shown columns by dragging a grip onto another row", () => {
+  const columns = ["id", "height"].map((name) => ({
+    name,
+    type: "VARCHAR",
+    kind: "scalar" as const,
+  }));
+  const onMove = vi.fn();
+  render(
+    <ColumnsPanel
+      columns={columns}
+      visible={columns}
+      label={(n) => n}
+      onChange={vi.fn()}
+      onMove={onMove}
+      onClose={vi.fn()}
+    />,
+  );
+  const grip = screen.getByRole("button", { name: "Drag id to reorder" });
+  fireEvent.dragStart(grip, {
+    dataTransfer: { setData: vi.fn(), effectAllowed: "" },
+  });
+  const target = screen
+    .getByRole("checkbox", { name: "height" })
+    .closest(".column-picker-row")!;
+  fireEvent.dragOver(target);
+  fireEvent.drop(target);
+  expect(onMove).toHaveBeenCalledWith("id", "height");
+});
