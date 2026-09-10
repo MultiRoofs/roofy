@@ -20,7 +20,7 @@
      schematic map, placeholder text. Traced from 1440x900 screenshots of the
      dev server with the Delft fixture loaded.
    · The NEW toolbox surfaces (right-panel Tools tab, tool forms, run states,
-     log, recent runs, header Tools button, computed-column badges) are drawn
+     log, recent runs, map-header Tools button, computed-column badges) are drawn
      with the app's real Soft Utility tokens, copied from src/app/brand.css
      (light theme) and src/app/flatControls.css.
    Static: no engine, no data, no build step.
@@ -247,7 +247,7 @@
         background: var(--gb-fill);
       }
 
-      /* NEW: header Tools button (production fidelity) */
+      /* NEW: map-header Tools button (production fidelity, §4.1) */
       .tools-btn {
         position: relative;
         height: 30px;
@@ -337,6 +337,28 @@
       .layer-row-active {
         background: var(--gb-fill-2);
       }
+      /* NEW: a derived layer (destination New layer) is inserted directly under
+         its target, active, in the app's own selected-row wash (§6.2) */
+      .layer-row-derived {
+        background: var(--control-selected);
+      }
+      .layer-row-derived .layer-row-name {
+        color: var(--fg);
+      }
+      .layer-row-derived .layer-row-sub {
+        color: var(--fg-muted);
+      }
+      .layer-row-derived .eye,
+      .layer-row-derived .kind {
+        background: #c2d4a8;
+      }
+      .layer-row-derived .dots {
+        color: var(--fg-dim);
+      }
+      /* with the derived layer active, the target row loses its wash */
+      .frame[data-state="10"] .layer-row-target {
+        background: transparent;
+      }
       .layer-row .eye,
       .layer-row .kind {
         width: 14px;
@@ -378,6 +400,15 @@
       }
       .al-sub {
         font-size: 11px;
+      }
+      /* NEW: the derived layer's own heading (§6.2, §8) */
+      .al-title-derived {
+        font-size: 13px;
+        color: var(--fg);
+      }
+      .al-sub-derived {
+        font-size: 11px;
+        color: var(--fg-muted);
       }
       .al-actions {
         display: flex;
@@ -1050,6 +1081,24 @@
         display: block;
         font-size: 11px;
         color: var(--fg-dim);
+      }
+      /* the Name field that appears under the "New layer" radio (§6): it sits
+         in the radio column, indented past the radio itself, not as a
+         label-plus-control .field row */
+      .dest-name {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: 22px;
+      }
+      .dest-name > label {
+        flex: 0 0 auto;
+        font-size: 12px;
+        color: var(--fg-muted);
+      }
+      .dest-name > .inp {
+        flex: 1;
+        min-width: 0;
       }
       .muted {
         color: var(--fg-muted);
@@ -1738,7 +1787,9 @@
 
       <div class="frame" id="frame" data-state="1" data-dot="">
         <div class="app">
-          <!-- ============ HEADER (greybox, except the Tools button) ======== -->
+          <!-- ============ HEADER (greybox: Export, Save, Share,
+               Preferences and the collapse chevrons — §4.1 leaves it
+               unchanged) ==================================================== -->
           <header class="hdr gb">
             <div class="hdr-left">
               <span class="hdr-mark"></span>
@@ -1750,13 +1801,6 @@
               <span class="gb-hbtn"><i></i>Export</span>
               <span class="gb-hbtn"><i></i>Save</span>
               <span class="gb-hbtn"><i></i>Share</span>
-
-              <button class="tools-btn" type="button">
-                <svg><use href="#i-wrench" /></svg>Tools<span
-                  class="tools-dot"
-                ></span>
-              </button>
-
               <span class="gb-hbtn"><i></i>Preferences</span>
               <span class="gb-sq"></span>
             </div>
@@ -1771,11 +1815,22 @@
               </div>
 
               <div class="layer-list">
-                <div class="layer-row layer-row-active">
+                <div class="layer-row layer-row-target layer-row-active">
                   <span class="eye"></span><span class="kind"></span>
                   <span class="layer-row-txt">
                     <span class="layer-row-name">delft.city.jsonl</span><br />
                     <span class="layer-row-sub">1,115 buildings · LoD 2.2</span>
+                  </span>
+                  <span class="dots">···</span>
+                </div>
+                <!-- NEW: the derived layer of state 10 -->
+                <div class="layer-row layer-row-derived" data-when="10">
+                  <span class="eye"></span><span class="kind"></span>
+                  <span class="layer-row-txt">
+                    <span class="layer-row-name">Delft · solids</span><br />
+                    <span class="layer-row-sub"
+                      >312 buildings · LoD 2.2 · Derived from Delft</span
+                    >
                   </span>
                   <span class="dots">···</span>
                 </div>
@@ -1792,11 +1847,21 @@
               <div class="left-sep"></div>
 
               <div class="active-layer">
-                <div class="al-title">delft.city.jsonl</div>
-                <div class="al-sub">City model · CityJSONSeq</div>
+                <div class="al-title" data-when="1 2 3 4 5 6 7 8 9">
+                  delft.city.jsonl
+                </div>
+                <div class="al-sub" data-when="1 2 3 4 5 6 7 8 9">
+                  City model · CityJSONSeq
+                </div>
+                <div class="al-title-derived" data-when="10">
+                  Delft · solids
+                </div>
+                <div class="al-sub-derived" data-when="10">
+                  Derived · not saved in workspaces
+                </div>
                 <div class="al-actions">
                   <span class="gb-btn">Zoom to layer</span>
-                  <span class="gb-btn" data-when="1 2 3 6 7 8 9"
+                  <span class="gb-btn" data-when="1 2 3 6 7 8 9 10"
                     >Open table</span
                   >
                   <span class="gb-btn" data-when="4 5">Close table</span>
@@ -1850,12 +1915,22 @@
               </div>
             </aside>
 
-            <!-- ============ MAP COLUMN (greybox) ========================== -->
+            <!-- ============ MAP COLUMN (greybox, except the Tools button) = -->
             <section class="mapcol">
               <div class="maphdr gb">
                 <span style="font-size: 12px">Mode</span>
                 <span class="gb-sq" style="width: 22px; height: 22px"></span>
                 <span class="gb-field" style="width: 148px">Pick feature</span>
+
+                <!-- NEW: the toolbox entry point lives in the scene's own
+                     toolbar, directly after the Mode select and before the
+                     address search (§4.1) -->
+                <button class="tools-btn" type="button">
+                  <svg><use href="#i-wrench" /></svg>Tools<span
+                    class="tools-dot"
+                  ></span>
+                </button>
+
                 <span class="gb-sq" style="width: 30px; height: 30px"></span>
                 <span class="maphdr-right">
                   <span class="gb-hbtn"><i></i>Sun &amp; shade</span>
@@ -1953,6 +2028,15 @@
                 <div class="camera gb"><i></i><i></i><i></i><i></i><i></i></div>
                 <div class="scalebar gb">20 m</div>
 
+                <!-- toast (state 10) -->
+                <div class="toast" data-when="10">
+                  <span class="ok"
+                    ><svg width="16" height="16"><use href="#i-check" /></svg
+                  ></span>
+                  Created Delft · solids · 312 buildings · 37 invalid solids (no
+                  volume) · 2.4 s
+                </div>
+
                 <!-- toast (state 4) -->
                 <div class="toast" data-when="4">
                   <span class="ok"
@@ -1977,7 +2061,7 @@
               </div>
 
               <!-- collapsed drawer handle -->
-              <div class="handle gb" data-when="1 2 3 6 7 8 9">
+              <div class="handle gb" data-when="1 2 3 6 7 8 9 10">
                 <span class="gb-btn" style="height: 24px">Open table</span>
                 <span>Drag up to expand</span>
               </div>
@@ -2148,7 +2232,7 @@
             </section>
 
             <!-- ============ RIGHT PANEL (new surfaces) ==================== -->
-            <aside class="right" data-when="1 2 3 4 5 6 7 8">
+            <aside class="right" data-when="1 2 3 4 5 6 7 8 10">
               <div class="rp-tabs">
                 <button class="tab" id="tabTools" type="button">Tools</button>
                 <button
@@ -2178,7 +2262,7 @@
 
               <div class="rp-body">
                 <!-- ---------- TOOLS TAB BODY ---------- -->
-                <div class="tab-body" data-when="1 2 3 4 6 7 8">
+                <div class="tab-body" data-when="1 2 3 4 6 7 8 10">
                   <!-- ===== catalogue (state 1) ===== -->
                   <div class="tab-body" data-when="1">
                     <div class="body-head">
@@ -2303,7 +2387,7 @@
                   </div>
 
                   <!-- ===== Measure solids form (states 2, 3, 4) ===== -->
-                  <div class="tab-body" data-when="2 3 4">
+                  <div class="tab-body" data-when="2 3 4 10">
                     <div class="tool-head">
                       <button
                         class="back"
@@ -2414,6 +2498,67 @@
                       </div>
 
                       <div class="sec">Output</div>
+
+                      <!-- destination, This layer (states 2, 3, 4) -->
+                      <div
+                        class="field"
+                        style="align-items: flex-start"
+                        data-when="2 3 4"
+                      >
+                        <label style="padding-top: 2px">Write to</label>
+                        <span class="radios" style="flex: 1">
+                          <label class="rad"
+                            ><input
+                              class="lockable"
+                              type="radio"
+                              name="ms-dest-a"
+                              checked
+                            />This layer (Delft)</label
+                          >
+                          <label class="rad"
+                            ><input
+                              class="lockable"
+                              type="radio"
+                              name="ms-dest-a"
+                            />New layer</label
+                          >
+                        </span>
+                      </div>
+
+                      <!-- destination, New layer (state 10) -->
+                      <div
+                        class="field"
+                        style="align-items: flex-start"
+                        data-when="10"
+                      >
+                        <label style="padding-top: 2px">Write to</label>
+                        <span class="radios" style="flex: 1">
+                          <label class="rad"
+                            ><input
+                              class="lockable"
+                              type="radio"
+                              name="ms-dest-b"
+                            />This layer (Delft)</label
+                          >
+                          <label class="rad"
+                            ><input
+                              class="lockable"
+                              type="radio"
+                              name="ms-dest-b"
+                              checked
+                            />New layer</label
+                          >
+                          <span class="dest-name">
+                            <label for="ms-newname">Name</label>
+                            <input
+                              class="inp lockable"
+                              id="ms-newname"
+                              value="Delft · solids"
+                            />
+                          </span>
+                        </span>
+                      </div>
+
                       <div class="field">
                         <label for="ms-prefix">Prefix</label>
                         <input
@@ -2428,7 +2573,7 @@
                         solid_volume_m3, solid_envelope_m2, solid_footprint_m2,
                         solid_height_m, solid_valid
                       </div>
-                      <div class="warnline">
+                      <div class="warnline" data-when="2 3 4">
                         <svg><use href="#i-warn" /></svg>
                         <span
                           >3 of these columns exist; they will be
@@ -2498,6 +2643,26 @@
                         <button class="btn btn-primary" type="button">
                           Run again
                         </button>
+                      </div>
+                    </div>
+
+                    <!-- footer: done, destination New layer (state 10) -->
+                    <div class="card card-done" data-when="10">
+                      <div class="card-1">
+                        <svg><use href="#i-check" /></svg>
+                        <span
+                          >Created Delft · solids · 312 buildings · 37 invalid
+                          solids (no volume) · 2.4 s</span
+                        >
+                      </div>
+                      <div class="card-actions">
+                        <button class="btn" type="button">Zoom to layer</button>
+                        <button class="btn" type="button">Open table</button>
+                        <button class="btn" type="button">
+                          Style by result
+                        </button>
+                        <button class="btn" type="button">Undo</button>
+                        <button class="btn" type="button">Log</button>
                       </div>
                     </div>
                   </div>
@@ -2707,6 +2872,68 @@
                       >
 
                       <div class="sec">Output</div>
+
+                      <!-- destination, New layer (state 6): a derived layer has
+                           no earlier columns, so no replace warning applies -->
+                      <div
+                        class="field"
+                        style="align-items: flex-start"
+                        data-when="6"
+                      >
+                        <label style="padding-top: 2px">Write to</label>
+                        <span class="radios" style="flex: 1">
+                          <label class="rad"
+                            ><input
+                              class="lockable-j"
+                              type="radio"
+                              name="jn-dest-a"
+                            />This layer (Delft)</label
+                          >
+                          <label class="rad"
+                            ><input
+                              class="lockable-j"
+                              type="radio"
+                              name="jn-dest-a"
+                              checked
+                            />New layer</label
+                          >
+                          <span class="dest-name">
+                            <label for="jn-newname">Name</label>
+                            <input
+                              class="inp lockable-j"
+                              id="jn-newname"
+                              value="Delft + Zones"
+                            />
+                          </span>
+                        </span>
+                      </div>
+
+                      <!-- destination, This layer (state 7) -->
+                      <div
+                        class="field"
+                        style="align-items: flex-start"
+                        data-when="7"
+                      >
+                        <label style="padding-top: 2px">Write to</label>
+                        <span class="radios" style="flex: 1">
+                          <label class="rad"
+                            ><input
+                              class="lockable-j"
+                              type="radio"
+                              name="jn-dest-b"
+                              checked
+                            />This layer (Delft)</label
+                          >
+                          <label class="rad"
+                            ><input
+                              class="lockable-j"
+                              type="radio"
+                              name="jn-dest-b"
+                            />New layer</label
+                          >
+                        </span>
+                      </div>
+
                       <div class="field">
                         <label for="jn-prefix">Prefix</label>
                         <input
@@ -3069,7 +3296,7 @@ UPDATE layer_1 AS t
 
     <nav class="strip" id="strip" aria-label="Mockup states">
       <span class="lbl">State</span>
-      <span class="hint">1–9 or ← → to switch</span>
+      <span class="hint">1–9, 0 or ← → to switch</span>
     </nav>
 
     <script>
@@ -3080,7 +3307,7 @@ UPDATE layer_1 AS t
             label: "1 · Catalogue",
             dot: "",
             lines: [
-              "<b>Catalogue (§5).</b> Tools tab open with no selection, so no Details tab and no activity dot on the header Tools button. Search, three groups, capability chips on the rows that need them, the three cross-layer tools disabled with their reason, and Recent runs in its empty state.",
+              "<b>Catalogue (§5).</b> Tools tab open with no selection, so no Details tab and no activity dot on the map header's Tools button. Search, three groups, capability chips on the rows that need them, the three cross-layer tools disabled with their reason, and Recent runs in its empty state.",
               "Simulated: the search field carries a drawn focus ring (a static page has no :focus-visible); the workspace holds only the Delft city layer, which is what disables the cross-layer rows.",
             ],
           },
@@ -3089,7 +3316,7 @@ UPDATE layer_1 AS t
             label: "2 · Measure solids",
             dot: "",
             lines: [
-              "<b>Tool view (§6, §7.2).</b> Back chevron to the catalogue, description, TARGET (layer, LoD with its qualifying count, scope radios with live counts), PARAMETERS, OUTPUT with the prefix, the resolved column list in mono and the replace warning, then the extension note and the Cancel / Run footer.",
+              "<b>Tool view (§6, §7.2).</b> Back chevron to the catalogue, description, TARGET (layer, LoD with its qualifying count, scope radios with live counts), PARAMETERS, then OUTPUT: the <b>Write to</b> destination pair (This layer, the default, with New layer collapsed below it), the prefix, the resolved column list in mono and the replace warning — which belongs to This layer only. Then the extension note and the Cancel / Run footer.",
               "Simulated: the focus ring sits on the column-prefix input. Scope counts (312 matching, 2 selected) match the drawer header in states 4–5.",
             ],
           },
@@ -3099,7 +3326,7 @@ UPDATE layer_1 AS t
             dot: "lime",
             lines: [
               "<b>Running (§6.1).</b> The footer is replaced by the progress block and every form field is really disabled — values stay readable. The bar is indeterminate within a phase; phases are discrete and ticked as they pass; elapsed time ticks; Cancel is best-effort.",
-              'Simulated: the header Tools button carries the lime activity dot. Queueing ("Queued behind Measure solids") is not drawn — one run only.',
+              'Simulated: the map header\'s Tools button carries the lime activity dot. Queueing ("Queued behind Measure solids") is not drawn — one run only.',
             ],
           },
           {
@@ -3125,7 +3352,7 @@ UPDATE layer_1 AS t
             label: "6 · Join form",
             dot: "",
             lines: [
-              "<b>Join attributes by location (§7.5).</b> A second layer, zones.geojson, is in the left panel. TARGET Delft, SOURCE Zones, the building-geometry radios with the explanatory muted line, predicate, the six fields to copy with their types, the tie rule, the match-count checkbox, prefix zones_ and the 24 MB spatial note.",
+              "<b>Join attributes by location (§7.5).</b> A second layer, zones.geojson, is in the left panel. TARGET Delft, SOURCE Zones, the building-geometry radios with the explanatory muted line, predicate, the six fields to copy with their types, the tie rule, the match-count checkbox, and OUTPUT with destination <b>New layer</b> chosen: the Name field is prefilled “Delft + Zones”, and no replace warning is shown because a new layer has no earlier columns. Then prefix zones_ and the 24 MB spatial note.",
               "Simulated: this layer has no LoD 0, so Footprint (LoD 0) is disabled and the centre proxy is the default — which in turn disables Largest overlap with its own reason. The focus ring sits on the first Fields-to-copy checkbox.",
             ],
           },
@@ -3135,7 +3362,7 @@ UPDATE layer_1 AS t
             dot: "amber",
             lines: [
               "<b>Failed (§6.3).</b> The same join form with the failure block: elapsed time, the first DuckDB error line as the export dialog shows it, Retry and Log. Nothing was written.",
-              "Simulated: the header dot is amber, as the brief asks. §4.1 says the amber dot clears once the Tools tab is opened, and here it is open — see the report.",
+              "Simulated: the map header's dot is amber, as the brief asks. §4.1 says the amber dot clears once the Tools tab is opened, and here it is open — see the report. Destination is back on This layer, so the state-6 Name field is gone.",
             ],
           },
           {
@@ -3152,8 +3379,17 @@ UPDATE layer_1 AS t
             label: "9 · Collapsed panel",
             dot: "lime",
             lines: [
-              '<b>Collapsed right panel (§4.2).</b> The panel is collapsed to nothing and its two pills sit on the map\'s right edge: "Tools · running" with the running dot, beside the existing Details pill. The header Tools button keeps the lime activity dot.',
+              "<b>Collapsed right panel (§4.2).</b> The panel is collapsed to nothing and its two pills sit on the map's right edge: \"Tools · running\" with the running dot, beside the existing Details pill. The map header's Tools button keeps the lime activity dot.",
               "Simulated: a run is in flight while the panel is collapsed; the camera cluster keeps its place lower on the same edge.",
+            ],
+          },
+          {
+            n: 10,
+            label: "10 · Derived layer",
+            dot: "",
+            lines: [
+              '<b>Done · new layer (§6.2, §8).</b> Measure solids finished with destination <b>New layer</b> on scope Matching 312. "Delft · solids" is inserted directly under its target, active, reading "312 buildings · LoD 2.2 · Derived from Delft", and the config block below the list is titled after it with the muted "Derived · not saved in workspaces". The result card reads "Created …" with Zoom to layer / Open table / Style by result / Undo / Log, the toast repeats its first line, the drawer is closed and the Tools button carries no dot (the run is over).',
+              "Simulated: the card carries the five actions §6.2 lists for a New-layer run and no Run again. Delft’s own table is untouched, so the drawer stays closed rather than showing columns that do not exist there. The greybox Style block below is not re-labelled for the derived layer — it is existing-shell filler.",
             ],
           },
         ];
@@ -3200,8 +3436,11 @@ UPDATE layer_1 AS t
 
           // the form locks while a run is executing and stays locked on the card
           document.querySelectorAll(".lockable").forEach(function (f) {
-            f.disabled = n === 3 || n === 4;
+            f.disabled = n === 3 || n === 4 || n === 10;
           });
+          // state 10 ran on scope Matching 312; every other state on All
+          var msScope = document.querySelectorAll('input[name="ms-scope"]');
+          if (msScope.length) msScope[n === 10 ? 1 : 0].checked = true;
           document.querySelectorAll(".lockable-j").forEach(function (f) {
             f.disabled = false;
           });
@@ -3243,12 +3482,16 @@ UPDATE layer_1 AS t
             show(Number(e.key));
             return;
           }
+          if (e.key === "0") {
+            show(10);
+            return;
+          }
           if (e.key === "ArrowRight") {
-            show(current === 9 ? 1 : current + 1);
+            show(current === 10 ? 1 : current + 1);
             e.preventDefault();
           }
           if (e.key === "ArrowLeft") {
-            show(current === 1 ? 9 : current - 1);
+            show(current === 1 ? 10 : current - 1);
             e.preventDefault();
           }
         });
