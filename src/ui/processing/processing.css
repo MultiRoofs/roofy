@@ -1,0 +1,28 @@
+/* Processing toolbox (spec §4–§6). Soft Utility tokens from flatControls.css. */
+.tools-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control-height-compact);
+  padding: 0 10px;
+  font-size: 12px;
+}
+.tools-button__dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--lime-500);
+  box-shadow: 0 0 0 2px var(--bg-panel);
+}
+.tools-button__dot[data-tone="failed"] {
+  background: var(--brand-secondary);
+}
+@media (max-width: 1279px) {
+  .tools-button__label {
+    display: none;
+  }
+}

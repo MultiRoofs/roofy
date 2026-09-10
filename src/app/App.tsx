@@ -141,6 +141,7 @@ import { SceneSettingsSheet } from "../ui/viewport/SceneSettingsSheet";
 import { SunShadeSheet } from "../ui/viewport/SunShadeSheet";
 import { SelectModeControl } from "../ui/viewport/SelectModeControl";
 import { AddressSearch } from "../ui/viewport/AddressSearch";
+import { ToolsButton } from "../ui/processing/ToolsButton";
 import { CameraCluster } from "../ui/viewport/CameraCluster";
 import { selectedGeoJsonBounds } from "../features/geoLayers/geoLayerBounds";
 import { useGeoFeatureVisibilityStore } from "../features/geoLayers/geoFeatureVisibilityStore";
@@ -2215,6 +2216,7 @@ export function App({
                     onDraw={() => useDrawStore.getState().start()}
                     onPick={() => useDrawStore.getState().stop()}
                   />
+                  <ToolsButton />
                   <AddressSearch onFlyTo={handleFlyToAddress} />
                 </div>
                 <SceneButtons

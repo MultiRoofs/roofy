@@ -14,7 +14,8 @@ export function ActionIcon({
     | "export"
     | "expand"
     | "restore"
-    | "clear";
+    | "clear"
+    | "tools";
 }) {
   const paths = {
     draw: "m4 16 11-11 4 4L8 20H4v-4ZM13 7l4 4M3 3h5M3 3v5",
@@ -30,6 +31,8 @@ export function ActionIcon({
     feature: "m12 3 9 5v9l-9 5-9-5V8l9-5ZM3 8l9 5 9-5M12 13v9",
     surface: "m3 15 8-10 10 4-8 10-10-4ZM11 5l2 14",
     filter: "M3 4h18l-7 8v7l-4 2v-9L3 4Z",
+    tools:
+      "M14.7 6.3a4 4 0 0 0 5 5l-8.4 8.4a2.1 2.1 0 0 1-3-3l8.4-8.4ZM14.7 6.3 17.5 3.5m2.2 7.8 2.8-2.8",
   };
   return (
     <svg
