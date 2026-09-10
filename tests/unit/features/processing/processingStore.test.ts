@@ -84,6 +84,24 @@ describe("processingStore", () => {
     expect(useProcessingStore.getState().unseenFailure).toBe(false);
   });
 
+  it("clears an unseen failure whenever a view opens the panel", () => {
+    const s = useProcessingStore.getState();
+    s.upsertRun(run("r1", { status: "failed", error: "boom" }));
+    expect(useProcessingStore.getState().unseenFailure).toBe(true);
+    s.openTool("height-from-extent");
+    expect(useProcessingStore.getState().unseenFailure).toBe(false);
+
+    useProcessingStore.setState({ open: false, unseenFailure: true });
+    s.openLog("r1");
+    expect(useProcessingStore.getState().unseenFailure).toBe(false);
+  });
+
+  it("ignores a patch for a run it does not hold", () => {
+    const s = useProcessingStore.getState();
+    s.patchRun("nope", { status: "failed", error: "boom" });
+    expect(useProcessingStore.getState().unseenFailure).toBe(false);
+  });
+
   it("publishes a notice with a sequence number", () => {
     const s = useProcessingStore.getState();
     s.pushNotice("done");

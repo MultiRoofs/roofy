@@ -70,9 +70,20 @@ export const useProcessingStore = create<ProcessingState & ProcessingActions>(
         unseenFailure: open ? false : s.unseenFailure,
       })),
     toggle: () => get().setOpen(!get().open),
-    openTool: (toolId) => set({ open: true, view: { kind: "tool", toolId } }),
+    // Opening the panel through a view is opening the panel: the amber dot
+    // means "a failure you have not looked at", and the Tools tab is now up.
+    openTool: (toolId) =>
+      set({
+        open: true,
+        view: { kind: "tool", toolId },
+        unseenFailure: false,
+      }),
     openLog: (runId) =>
-      set((s) => ({ open: true, view: { kind: "log", runId, from: s.view } })),
+      set((s) => ({
+        open: true,
+        view: { kind: "log", runId, from: s.view },
+        unseenFailure: false,
+      })),
     back: () =>
       set((s) =>
         s.view.kind === "log"
@@ -92,11 +103,19 @@ export const useProcessingStore = create<ProcessingState & ProcessingActions>(
         };
       }),
     patchRun: (id, patch) =>
-      set((s) => ({
-        runs: s.runs.map((r) => (r.id === id ? { ...r, ...patch } : r)),
-        unseenFailure:
-          s.unseenFailure || (patch.status === "failed" && !s.open),
-      })),
+      set((s) => {
+        // A patch for an id the history no longer holds (evicted past
+        // MAX_RUNS, or reset under a late worker message) changes nothing —
+        // least of all the dot, which would otherwise light for a run the
+        // user can no longer open.
+        const held = s.runs.some((r) => r.id === id);
+        if (!held) return {};
+        return {
+          runs: s.runs.map((r) => (r.id === id ? { ...r, ...patch } : r)),
+          unseenFailure:
+            s.unseenFailure || (patch.status === "failed" && !s.open),
+        };
+      }),
     pushNotice: (text) =>
       set((s) => ({ notice: text, noticeSeq: s.noticeSeq + 1 })),
     resetForTest: () => set({ ...initial }),
