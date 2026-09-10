@@ -623,9 +623,13 @@ including streaming (resident set) and CityGML.
 
 ### 7.4 Height from extent (group 3D measurements, no extension)
 
-- Uses the bbox column already in every table; works on every layer kind
-  including streaming and CityGML. Parameters: none beyond target and
-  scope.
+- Uses the table's `bbox` column: the reader writes it (a STRUCT `xmin,
+ymin, zmin, xmax, ymax, zmax`, unioned across LoDs and descendants), and
+  the flat fallback rows (CityGML, CityParquet, streaming) gain the same
+  column computed from each object's own extent in the in-memory model,
+  so the tool works on every layer kind. Parameters: none beyond target
+  and scope. Feature roll-up per §7: max `zmax` minus min `zmin` over the
+  root and its parts.
 - Output: `extent_height_m`, `extent_zmin_m`, `extent_zmax_m`.
 - The description says exactly what it is: "The vertical extent of each
   building's geometry (highest minus lowest coordinate), across all LoDs
