@@ -571,6 +571,39 @@ no compatibility shims; saved workspaces migrate to schema v4.
 - 12.5 Scene controls (IMPLEMENTED, 2026-09-08): Select Feature / Surface, compact camera controls and explicit layer/selection fit; exclusive nonmodal Sun & shade and Scene settings sheets; timezone-aware civil-time editing, seasonal presets and playback; persisted Shadow quality; interface appearance under Preferences. Weather and presentation looks retain their explanatory labels. Sheets scroll within the available map height, preserving camera and attribution access.
 - 12.6 Verification (LOCAL GATE, 2026-09-08): full suite 2,531 passed / 17 skipped before final wording and CSS polish; subsequent focused regression checks recorded in the reconciliation ledger. Browser checks cover city/vector records, filtering, selection, sheet interactions, resizing, expanded attribution and light/dark desktop/laptop layouts. See `scripts/smoke/ui-redesign.md` for reproducible scenarios and the reconciliation ledger for exact evidence and limitations. External Codex CLI review was rejected by automatic approval review because it would send source to an external service; local review completed. No commit or push performed.
 
+## Milestone 13: Processing Toolbox — Spatial Operations Across Layers (Specified)
+
+Goal: a QGIS-style processing toolbox (issue #10) that runs spatial operations
+in the browser on DuckDB-wasm with the `cityjson`, `spatial` and `three_d`
+extensions, writing results back as attribute columns of an existing layer.
+
+Feature specification (reviewed by Codex `gpt-6-astra`, two rounds):
+`docs/superpowers/specs/2026-09-10-processing-toolbox-design.md`. Mockup:
+`design/processing-toolbox-wireframe.html`.
+
+Deliverables (v1):
+
+- A **Tools** header button opening a Tools tab in the right panel: searchable
+  catalogue, per-tool parameter form (target layer, scope All / Matching /
+  Selected, LoD, parameters, output prefix), one run at a time with phases,
+  best-effort cancel with a defined commit boundary, result card, log and a
+  session history with Undo that restores previous values.
+- Tools: Roof metrics to attributes (no extension); Measure solids, Validate
+  solids (`three_d`, CityJSON/CityJSONSeq sources only), Height from extent
+  (bbox, every layer kind); Join attributes by location, Aggregate buildings
+  per area, Distance to nearest (`spatial`, vector layer reprojected app-side
+  with proj4 into the city layer's CRS).
+- Computed columns carry provenance and a badge in Details, the table, the
+  rule editor and exports. Features (Building plus parts) are the unit of
+  every count and roll-up; parts never count as buildings.
+- Results are session only; snapshots are unchanged (v4).
+
+Deferred (named slots in spec §9): footprint operations to a new vector
+layer, field calculator (next milestone), city-to-city joins, replay of runs
+on restore, geometry for layers without a reader.
+
+Status: specified 2026-09-10. Next: implementation plan from the spec.
+
 ## Cross-Cutting Workstreams
 
 - Data quality and semantic assumptions
