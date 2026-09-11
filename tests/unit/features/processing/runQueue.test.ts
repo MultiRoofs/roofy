@@ -46,11 +46,34 @@ function freshTable() {
   };
 }
 
+/** The layer's FEATURE count, as the mocked COUNT(DISTINCT …) answers it. */
+let featureTotal = 1;
+/** Rows the feature-expansion query returns for an id scope. */
+let scopeRows: Array<{ id: string; f: string }> = [];
+/** Holds the first statement containing `needle` until `promise` resolves. */
+let gate: { needle: string; promise: Promise<void> } | null = null;
+/** The columns the fake database holds, tracked from the ALTERs it is sent. */
+let liveColumns: string[] = ["id", "feature_id"];
+
 vi.mock("../../../../src/insights/duckdb", () => {
   const run = async (statement: string) => {
     sql.push(statement);
+    if (gate && statement.includes(gate.needle)) await gate.promise;
+    // The registry's column list is what decides CREATE vs REPLACE on the next
+    // run, so the fake database has to actually change shape.
+    const added =
+      /^ALTER TABLE "[^"]+" ADD COLUMN IF NOT EXISTS "([^"]+)"/.exec(statement);
+    if (added?.[1] && !liveColumns.includes(added[1]))
+      liveColumns.push(added[1]);
+    const dropped = /^ALTER TABLE "[^"]+" DROP COLUMN IF EXISTS "([^"]+)"/.exec(
+      statement,
+    );
+    if (dropped?.[1]) liveColumns = liveColumns.filter((c) => c !== dropped[1]);
     if (statement.includes("COUNT(DISTINCT")) {
-      return { ok: true as const, columns: ["n"], rows: [{ n: 1 }] };
+      return { ok: true as const, columns: ["n"], rows: [{ n: featureTotal }] };
+    }
+    if (statement.includes("AS f FROM")) {
+      return { ok: true as const, columns: ["id", "f"], rows: scopeRows };
     }
     return { ok: true as const, columns: [], rows: [] };
   };
@@ -100,7 +123,20 @@ vi.mock("../../../../src/insights/layerTables", async () => {
       );
       return next;
     }),
-    refreshLayerTableColumns: vi.fn(async () => {}),
+    refreshLayerTableColumns: vi.fn(async () => {
+      // The real one round-trips a DESCRIBE through WASM. The delay is what makes
+      // "inside the queued task" observable: a refresh left outside it lands
+      // after the next run has already read the columns.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      tableInfo = {
+        ...tableInfo,
+        columns: liveColumns.map((name) => ({
+          name,
+          type: "VARCHAR",
+          kind: "scalar" as const,
+        })),
+      };
+    }),
     __resetQueue: () => {
       chain = Promise.resolve();
       store.setState({ tables: {} });
@@ -117,8 +153,10 @@ const { runById, useProcessingStore } =
   await import("../../../../src/features/processing/processingStore");
 const { useLayerStore } =
   await import("../../../../src/features/layers/layerStore");
-const { computedColumnsOf, useComputedColumnStore } =
+const { computedColumnsOf, provenanceOf, useComputedColumnStore } =
   await import("../../../../src/insights/computedColumns");
+const { useSelectionStore } =
+  await import("../../../../src/features/selection/selectionStore");
 
 type Resettable = { __resetQueue: () => void };
 
@@ -200,7 +238,12 @@ function request(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   sql.length = 0;
   registered.length = 0;
+  featureTotal = 1;
+  scopeRows = [];
+  gate = null;
+  liveColumns = ["id", "feature_id"];
   tableInfo = freshTable();
+  useSelectionStore.getState().clear();
   useLayerStore.setState({ layers: [layer()] });
   useProcessingStore.getState().resetForTest();
   useComputedColumnStore.setState({ byLayer: {} });
@@ -360,6 +403,139 @@ describe("submitRun", () => {
     expect(calls).toBe(0);
   });
 
+  it("freezes the scope at Run, not at the head of the queue", async () => {
+    // The user selects one building, presses Run behind a long run, then clicks
+    // a different building. The queued run must measure the FIRST one.
+    featureTotal = 3;
+    scopeRows = [{ id: "a", f: "a" }];
+    const seen: Array<ReadonlyArray<string> | null> = [];
+    const hold = deferred<void>();
+    let calls = 0;
+    registerExecutor("height-from-extent", async (_run, ctx) => {
+      calls += 1;
+      seen.push(ctx.featureIds);
+      if (calls === 1) await hold.promise;
+      return {
+        columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+        rows: new Map([["a", { extent_height_m: 4 }]]),
+        measured: 1,
+        skipped: [],
+      };
+    });
+    useSelectionStore
+      .getState()
+      .selectMany([{ kind: "object", layerId: "L1", objectId: "a" }]);
+    const first = submitRun(request());
+    const second = submitRun(request({ scope: "selected" }));
+    await vi.waitFor(() => expect(runById(first)?.status).toBe("running"));
+    // Changing the selection now must not reach the queued run.
+    useSelectionStore
+      .getState()
+      .selectMany([{ kind: "object", layerId: "L1", objectId: "other" }]);
+    hold.resolve();
+    await vi.waitFor(() => expect(runById(second)?.status).toBe("done"));
+    expect(sql.some((s) => s.includes(`"id" IN ('a')`))).toBe(true);
+    expect(sql.some((s) => s.includes("'other'"))).toBe(false);
+    expect(seen[1]).toEqual(["a"]);
+  });
+
+  it("refuses a run whose table was rebuilt while it queued", async () => {
+    const hold = deferred<void>();
+    let calls = 0;
+    registerExecutor("height-from-extent", async () => {
+      calls += 1;
+      if (calls === 1) await hold.promise;
+      return {
+        columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+        rows: new Map([["a", { extent_height_m: 4 }]]),
+        measured: 1,
+        skipped: [],
+      };
+    });
+    const first = submitRun(request());
+    const second = submitRun(request());
+    await vi.waitFor(() => expect(runById(first)?.status).toBe("running"));
+    // A streaming settle rebuilt the table under the queued run (spec §6.1
+    // re-validation): its frozen ids describe rows that no longer exist.
+    tableInfo = { ...freshTable(), table: "layer_2" };
+    hold.resolve();
+    await vi.waitFor(() => expect(runById(second)?.status).toBe("failed"));
+    expect(runById(second)?.error).toBe(
+      "Layer changed while running; run again",
+    );
+    expect(calls).toBe(1);
+  });
+
+  it("cancels a run aborted while its scope was still resolving", async () => {
+    const held = deferred<void>();
+    gate = { needle: "COUNT(DISTINCT", promise: held.promise };
+    let calls = 0;
+    registerExecutor("height-from-extent", async () => {
+      calls += 1;
+      return {
+        columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+        rows: new Map([["a", { extent_height_m: 4 }]]),
+        measured: 1,
+        skipped: [],
+      };
+    });
+    const id = submitRun(request());
+    await vi.waitFor(() =>
+      expect(sql.some((s) => s.includes("COUNT(DISTINCT"))).toBe(true),
+    );
+    cancelRun(id);
+    held.resolve();
+    // `cancelRun` patched the card the moment it was pressed, so waiting for the
+    // status would prove nothing: this waits for the whole run to unwind.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(runById(id)?.status).toBe("cancelled");
+    // The scope query had already gone out, but nothing after it may run.
+    expect(calls).toBe(0);
+    expect(sql).not.toContain("BEGIN TRANSACTION");
+  });
+
+  it("times a failure that happened before the scope resolved", async () => {
+    const now = vi.spyOn(performance, "now");
+    let t = 0;
+    now.mockImplementation(() => (t += 100));
+    try {
+      const id = submitRun(request({ toolId: "roof-metrics" }));
+      await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
+      // A card that says "0.0 s" for a run that never started is a card that
+      // looks like it is still going.
+      expect(runById(id)?.elapsedMs).toBeGreaterThan(0);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("counts the provenance partial in FEATURES, not rows", async () => {
+    // 1 building in scope, modelled as 2 rows (a Building and its part), on a
+    // layer of 3 buildings: the tooltip says "1 of 3", never "2 of 3".
+    featureTotal = 3;
+    scopeRows = [
+      { id: "a", f: "a" },
+      { id: "a-part", f: "a" },
+    ];
+    registerExecutor("height-from-extent", async () => ({
+      columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+      rows: new Map([
+        ["a", { extent_height_m: 4 }],
+        ["a-part", { extent_height_m: 4 }],
+      ]),
+      measured: 1,
+      skipped: [],
+    }));
+    useSelectionStore
+      .getState()
+      .selectMany([{ kind: "object", layerId: "L1", objectId: "a" }]);
+    const id = submitRun(request({ scope: "selected" }));
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    const provenance = provenanceOf("L1", "extent_height_m");
+    expect(provenance?.partial).toEqual({ count: 1, total: 3 });
+    expect(provenance?.summary).toBe("Selected 1 building");
+  });
+
   it("fails a tool with no executor rather than hanging", async () => {
     // A tool NOTHING registers in this milestone, deliberately: asking for
     // "height-from-extent" here would pass only because the previous test's
@@ -367,6 +543,97 @@ describe("submitRun", () => {
     const id = submitRun(request({ toolId: "roof-metrics" }));
     await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
     expect(runById(id)?.error).toBe("Not available yet");
+  });
+});
+
+describe("a run over a column an earlier run wrote", () => {
+  /** An executor that writes `extent_height_m` on object "a". */
+  function writeHeight() {
+    registerExecutor("height-from-extent", async () => ({
+      columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+  }
+
+  it("sees a column an Undo dropped as gone, not as one to replace", async () => {
+    writeHeight();
+    const first = submitRun(request());
+    await vi.waitFor(() => expect(runById(first)?.status).toBe("done"));
+    expect(tableInfo.columns.map((c) => c.name)).toContain("extent_height_m");
+
+    sql.length = 0;
+    // Undo and Run again, back to back — the second run is queued while the undo
+    // is still on the queue, which is exactly when the registry may lie.
+    const undoing = undoRun(first);
+    const second = submitRun(request());
+    await undoing;
+    await vi.waitFor(() => expect(runById(second)?.status).toBe("done"));
+    // Nothing to back up: the column the Undo dropped is not an existing column.
+    expect(sql.filter((s) => s.startsWith('CREATE TABLE "__undo_'))).toEqual(
+      [],
+    );
+
+    sql.length = 0;
+    await undoRun(second);
+    // And its own Undo DROPS the column rather than restoring values that were
+    // never there.
+    expect(sql).toContain(
+      'ALTER TABLE "layer_1" DROP COLUMN IF EXISTS "extent_height_m"',
+    );
+  });
+
+  it("takes the earlier run's Undo away and drops its backup", async () => {
+    // The column is already on the table, so BOTH runs replace it.
+    liveColumns = ["id", "feature_id", "extent_height_m"];
+    tableInfo = {
+      ...freshTable(),
+      columns: liveColumns.map((name) => ({
+        name,
+        type: "VARCHAR",
+        kind: "scalar" as const,
+      })),
+    };
+    writeHeight();
+    const first = submitRun(request());
+    await vi.waitFor(() => expect(runById(first)?.status).toBe("done"));
+    expect(sql).toContain(
+      `CREATE TABLE "__undo_${first}" AS SELECT "id", "extent_height_m" FROM "layer_1" WHERE "id" IN ('a')`,
+    );
+
+    const second = submitRun(request());
+    await vi.waitFor(() => expect(runById(second)?.status).toBe("done"));
+    // Spec §6.2: the later run owns the column's Undo now.
+    expect(runById(first)?.undoable).toBe(false);
+    expect(runById(second)?.undoable).toBe(true);
+    // And the copy the first run kept is a table nothing will ever read.
+    await vi.waitFor(() =>
+      expect(sql).toContain(`DROP TABLE IF EXISTS "__undo_${first}"`),
+    );
+  });
+});
+
+describe("a cancel that lost the race", () => {
+  it("publishes the run with the note instead of claiming the cancel", async () => {
+    const held = deferred<void>();
+    gate = { needle: "COMMIT", promise: held.promise };
+    registerExecutor("height-from-extent", async () => ({
+      columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+    const id = submitRun(request());
+    await vi.waitFor(() => expect(sql).toContain("COMMIT"));
+    // The write is mid-transaction: there is nothing to un-commit.
+    cancelRun(id);
+    expect(runById(id)?.status).toBe("cancelling");
+    held.resolve();
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    expect(runById(id)?.note).toBe("finished before the cancel arrived");
+    expect(runById(id)?.undoable).toBe(true);
+    expect(attributesOf("a").extent_height_m).toBe(4);
   });
 });
 

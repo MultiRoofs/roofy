@@ -8,11 +8,15 @@
  * `runOnTableQueue` is the seam `layerTables` exposes for exactly this, so a run
  * and a build can never interleave.
  *
- * WHAT IS FROZEN AND WHEN. A run resolves its scope when it reaches the head of
- * the queue, then holds those ids for the rest of its life: the tool computes
- * against them, the write targets them, and Undo restores them. The filter bar
- * and the selection stay live while a run is in flight, and nothing about them
- * reaches an already-running run.
+ * WHAT IS FROZEN AND WHEN. `submitRun` snapshots everything a run reads from the
+ * live stores — the selection, the applied filter, the layer's table name — and
+ * `resolveScope` resolves THAT at the head of the queue (spec §6.1, "Frozen
+ * parameters"). A run queued behind a long build therefore measures the ground
+ * the user saw when they pressed Run. The resolved ids are then held for the rest
+ * of its life: the tool computes against them, the write targets them, and Undo
+ * restores them. The one thing re-checked at the head is the table itself: a
+ * rebuild between Run and the head means the frozen ids name rows that are gone,
+ * and the run fails rather than writing to a table the user did not target.
  *
  * PUBLICATION IS THE LAST STEP. The DuckDB write is a transaction inside
  * `writeComputedColumns`; only once it has committed does the run touch the
@@ -25,6 +29,7 @@
  */
 
 import { runQuery, type QueryOutcome } from "../../insights/duckdb";
+import { quoteIdent } from "../../insights/sql";
 import {
   undoComputedColumns,
   useComputedColumnStore,
@@ -40,7 +45,7 @@ import {
 } from "../../insights/layerTables";
 import { useLayerStore, type Layer } from "../layers/layerStore";
 import { runById, useProcessingStore } from "./processingStore";
-import { resolveScope } from "./scope";
+import { resolveScope, snapshotScopeInputs, type ScopeSnapshot } from "./scope";
 import { toolById } from "./toolRegistry";
 import { EXECUTORS } from "./tools";
 import "./tools/register";
@@ -62,6 +67,13 @@ export interface RunRequest {
   readonly params: Readonly<Record<string, unknown>>;
   readonly prefix: string;
   readonly columns: ReadonlyArray<OutputColumn>;
+}
+
+/** A {@link RunRequest} plus everything `submitRun` froze for it. */
+interface FrozenRequest extends RunRequest {
+  readonly snapshot: ScopeSnapshot;
+  /** The target's table name at Run; a different one at the head is a rebuild. */
+  readonly tableName: string | null;
 }
 
 /**
@@ -192,20 +204,51 @@ export function submitRun(request: RunRequest): string {
     stale: false,
     note: null,
   };
+  const before = useProcessingStore.getState().runs.map((r) => r.id);
   useProcessingStore.getState().upsertRun(record);
+  // A run pushed past MAX_RUNS has no card left to press Undo on, so its backup
+  // table is dead weight in the database.
+  const held = new Set(useProcessingStore.getState().runs.map((r) => r.id));
+  for (const gone of before) if (!held.has(gone)) discardUndo(gone);
   const controller = new AbortController();
   controllers.set(id, controller);
+  const frozen: FrozenRequest = {
+    ...request,
+    snapshot: snapshotScopeInputs(request.targetLayerId),
+    tableName: getLayerTable(request.targetLayerId)?.table ?? null,
+  };
   // The queue's rejection is not this caller's business: every failure mode a
   // run has is already a patched card.
-  void runOnTableQueue(() => execute(id, request, controller.signal)).catch(
+  void runOnTableQueue(() => execute(id, frozen, controller.signal)).catch(
     () => {},
   );
   return id;
 }
 
+/**
+ * Give up a run's Undo and the database resources behind it.
+ *
+ * Three ways a run loses its Undo without using it: a later run overwrote one of
+ * its columns (spec §6.2), a table rebuild retired it, or the history evicted it.
+ * The backup table is a real table in the database in every one of them, and
+ * nothing will ever read it again.
+ */
+function discardUndo(id: string): void {
+  const state = undoState.get(id);
+  if (!state) return;
+  undoState.delete(id);
+  const backup = state.backupTable;
+  if (!backup) return;
+  // On the queue, like every other statement about a layer table, and NOT
+  // awaited: dropping a backup is housekeeping, never something a card waits on.
+  void runOnTableQueue(() =>
+    runQuery(`DROP TABLE IF EXISTS ${quoteIdent(backup)}`),
+  ).catch(() => {});
+}
+
 async function execute(
   id: string,
-  request: RunRequest,
+  request: FrozenRequest,
   signal: AbortSignal,
 ): Promise<void> {
   const started = performance.now();
@@ -221,7 +264,11 @@ async function execute(
       .getState()
       .layers.find((l) => l.id === request.targetLayerId);
     if (!layer) {
-      patch(id, { status: "failed", error: "Layer removed" });
+      patch(id, {
+        status: "failed",
+        error: "Layer removed",
+        elapsedMs: elapsed(),
+      });
       return;
     }
     const table = getLayerTable(request.targetLayerId);
@@ -229,19 +276,35 @@ async function execute(
       patch(id, {
         status: "failed",
         error: "This layer's table could not be built",
+        elapsedMs: elapsed(),
+      });
+      return;
+    }
+    // Spec §6.1: a queued run re-validates its frozen ground. A rebuilt table is
+    // a different table — the frozen ids point at rows that no longer exist, and
+    // the columns the form checked may not be there either.
+    if (request.tableName !== null && request.tableName !== table.table) {
+      patch(id, {
+        status: "failed",
+        error: "Layer changed while running; run again",
+        elapsedMs: elapsed(),
       });
       return;
     }
     const executor = EXECUTORS[request.toolId];
     if (!executor) {
-      patch(id, { status: "failed", error: "Not available yet" });
+      patch(id, {
+        status: "failed",
+        error: "Not available yet",
+        elapsedMs: elapsed(),
+      });
       return;
     }
 
     const scope = await resolveScope({
-      layerId: layer.id,
       table,
       scope: request.scope,
+      snapshot: request.snapshot,
     });
     if (!scope.ok) {
       patch(id, {
@@ -249,6 +312,12 @@ async function execute(
         error: scope.message,
         elapsedMs: elapsed(),
       });
+      return;
+    }
+    // Cancelled while the scope query was in flight. `cancelRun` has patched the
+    // card already, but a run that is about to start must not.
+    if (signal.aborted) {
+      patch(id, { status: "cancelled", phase: null, elapsedMs: elapsed() });
       return;
     }
     patch(id, {
@@ -346,7 +415,6 @@ async function execute(
     useLayerStore.getState().mergeAttributes(layer.id, merge);
 
     const tool = toolById(request.toolId);
-    const total = table.rowCount ?? result.rows.size;
     for (const col of result.columns) {
       const registry = useComputedColumnStore.getState();
       const previous = registry.byLayer[layer.id]?.[col.name] ?? null;
@@ -358,8 +426,12 @@ async function execute(
           scope.count,
         )}`,
         at: Date.now(),
+        // FEATURES on both sides of "312 of 1,115": `rows` are ROWS (a Building
+        // and its parts), and the tooltip would read as more than the layer has.
         partial:
-          scope.featureIds === null ? null : { count: result.rows.size, total },
+          scope.featureIds === null
+            ? null
+            : { count: scope.count, total: scope.total },
         previous,
       });
     }
@@ -377,6 +449,7 @@ async function execute(
         )
       ) {
         patch(other.id, { undoable: false });
+        discardUndo(other.id);
       }
     }
 
@@ -392,6 +465,10 @@ async function execute(
       ids: scope.featureIds === null ? null : [...result.rows.keys()],
       previousModelValues,
     });
+    // Evicted while it ran: there is no card to press Undo on, so the backup the
+    // write just made would never be read. (The eviction diff in `submitRun`
+    // cannot see this one — the run was already gone when it was pushed out.)
+    if (!runById(id)) discardUndo(id);
 
     // The registry's `columns` came from a DESCRIBE at build time; the grid and
     // the NEXT run both read it, and the next run's "did this column exist?"
@@ -461,20 +538,28 @@ export function cancelRun(id: string): void {
  *
  * On the table queue for the same reason the write was: an Undo is `UPDATE` +
  * `DROP COLUMN` over a table a streaming layer may be rebuilding.
+ *
+ * The re-DESCRIBE is part of the SAME queued task, not a step after it: the very
+ * next thing the user does is "Run again", and a run that reaches the head while
+ * the registry still lists the column this Undo dropped classifies it as a column
+ * to REPLACE — it backs up a column that is gone and its own Undo then restores
+ * nothing.
  */
 export async function undoRun(id: string): Promise<void> {
   const run = runById(id);
   const state = undoState.get(id);
   if (!run || !run.undoable || !state) return;
-  const out = await runOnTableQueue(() =>
-    undoComputedColumns({
+  const out = await runOnTableQueue(async () => {
+    const undone = await undoComputedColumns({
       table: state.table,
       backupTable: state.backupTable,
       created: state.created,
       replaced: state.replaced,
       ids: state.ids,
-    }),
-  );
+    });
+    if (undone.ok) await refreshLayerTableColumns(run.targetLayerId);
+    return undone;
+  });
   if (!out.ok) {
     // The card keeps its Undo: the table is unchanged (the undo is a
     // transaction too), so trying again is meaningful.
@@ -497,7 +582,6 @@ export async function undoRun(id: string): Promise<void> {
     }
   }
   undoState.delete(id);
-  await refreshLayerTableColumns(run.targetLayerId);
   patch(id, { undoable: false, note: "Undone" });
 }
 
@@ -524,8 +608,10 @@ export function installStaleWatcher(): () => void {
           run.targetLayerId === layerId &&
           run.status === "done" &&
           !run.stale
-        )
+        ) {
           patch(run.id, { stale: true, undoable: false });
+          discardUndo(run.id);
+        }
       }
       useComputedColumnStore.getState().clearLayer(layerId);
     }
