@@ -19,6 +19,7 @@ vi.mock("../../../../src/insights/duckdb", () => ({
   // file assumes; the one test that cares overrides it per call.
   subscribeDuckDBStatus: vi.fn(() => () => {}),
   getDuckDBStatusVersion: vi.fn(() => 0),
+  getEngineGeneration: vi.fn(() => 1),
   getDuckDBStatus: vi.fn(() => ({
     state: "ready",
     extensions: {

@@ -16,7 +16,23 @@ let initGate: Promise<void> | null = null;
 /** The worker has died: `duckdb.ts` publishes `failed` and every subscriber
  *  hears it. Separate from `engineReady`, which is "not up YET". */
 let engineDead = false;
+/** `duckdb.ts`'s engine generation: a new number for every boot AND every
+ *  death, which is what tells a build the tables it knew are gone. */
+let engineGeneration = 1;
 const statusListeners = new Set<() => void>();
+/** Holds every statement containing `needle` until `promise` settles, so a
+ *  death can be timed INSIDE one the module is awaiting. */
+let holdStatement: { needle: string; promise: Promise<void> } | null = null;
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => {
+    resolve = () => {
+      r();
+    };
+  });
+  return { promise, resolve };
+}
 /**
  * Whether `registerBuffer` accepts a buffer.
  *
@@ -35,6 +51,8 @@ let onStatement: ((statement: string) => Promise<void>) | null = null;
 vi.mock("../../../src/insights/duckdb", () => {
   const run = async (statement: string) => {
     sql.push(statement);
+    const held = holdStatement;
+    if (held && statement.includes(held.needle)) await held.promise;
     if (onStatement) {
       const hook = onStatement;
       onStatement = null;
@@ -56,6 +74,7 @@ vi.mock("../../../src/insights/duckdb", () => {
       if (initGate) await initGate;
     }),
     getDuckDBStatusVersion: vi.fn(() => 0),
+    getEngineGeneration: vi.fn(() => engineGeneration),
     subscribeDuckDBStatus: vi.fn((listener: () => void) => {
       statusListeners.add(listener);
       return () => statusListeners.delete(listener);
@@ -213,6 +232,8 @@ beforeEach(() => {
   failures = {};
   engineReady = true;
   engineDead = false;
+  engineGeneration = 1;
+  holdStatement = null;
   initGate = null;
   registerAccepts = true;
   onStatement = null;
@@ -979,11 +1000,18 @@ describe("flat-fallback layer table", () => {
   });
 });
 
-/** The worker died: the value first, then every subscriber, as `duckdb.ts`
- *  publishes it. */
+/** The worker died: `markEngineDead` bumps the generation and publishes. */
 function killEngine(): void {
   engineDead = true;
-  for (const listener of statusListeners) listener();
+  engineGeneration += 1;
+  for (const listener of Array.from(statusListeners)) listener();
+}
+
+/** Publish a status without a death, the way a boot does. */
+function publishStatus(state: "initializing" | "failed"): void {
+  engineDead = state === "failed";
+  if (state === "initializing") engineReady = false;
+  for (const listener of Array.from(statusListeners)) listener();
 }
 
 describe("the engine's death (spec §6.1)", () => {
@@ -1063,6 +1091,96 @@ describe("a build the engine's death overtook", () => {
     failures = {};
     await retryEngine();
     expect(useLayerTableStore.getState().tables["L1"]).toEqual({
+      state: "failed",
+      message: "Analytics engine stopped",
+    });
+  });
+});
+
+describe("a build whose engine went while it ran", () => {
+  it("abandons a build whose engine died during its CLEANUP", async () => {
+    // The catch checks the engine once, before `discardHalfBuilt` — and that
+    // cleanup is itself an await. A death inside it slips past the only guard,
+    // and what follows parks the source for a Retry that must not rebuild it,
+    // or puts the captured `ready` back over a table that no longer exists.
+    await enqueueLayerTable("L1", readerSource());
+    failures = { "CREATE OR REPLACE TABLE": "boom" };
+    const held = deferred();
+    holdStatement = { needle: "DROP TABLE", promise: held.promise };
+    const building = enqueueLayerTable("L1", readerSource());
+    await vi.waitFor(() =>
+      expect(sql.some((q) => q.startsWith("DROP TABLE"))).toBe(true),
+    );
+
+    killEngine();
+    held.resolve();
+    await building;
+
+    expect(stateOf("L1")).toEqual({
+      state: "failed",
+      message: "Analytics engine stopped",
+    });
+    expect(getLayerTable("L1")).toBeNull();
+
+    // Not parked: a Retry reboots the engine and must find nothing to revive.
+    engineDead = false;
+    failures = {};
+    holdStatement = null;
+    await retryEngine();
+    expect(stateOf("L1")).toEqual({
+      state: "failed",
+      message: "Analytics engine stopped",
+    });
+  });
+
+  it("abandons a build whose engine was REPLACED under it", async () => {
+    // A worker that dies while the status is `initializing` publishes `failed`
+    // from there, which is not the `ready` → `failed` transition the
+    // invalidation watches — so nothing invalidates, and a build that measures
+    // only that transition happily publishes a table into a database that has
+    // been replaced since. The ENGINE GENERATION is the fact that does not
+    // depend on catching a particular transition, and the abandoning build
+    // writes the failed entry itself rather than assuming someone else did.
+    await enqueueLayerTable("L1", readerSource());
+    const held = deferred();
+    holdStatement = { needle: "DESCRIBE", promise: held.promise };
+    const building = enqueueLayerTable("L2", readerSource());
+    await vi.waitFor(() =>
+      expect(sql.some((q) => q.includes("DESCRIBE"))).toBe(true),
+    );
+
+    publishStatus("initializing");
+    engineGeneration += 1;
+    engineReady = true;
+    publishStatus("failed");
+    engineDead = false;
+
+    held.resolve();
+    await building;
+
+    expect(stateOf("L2")).toEqual({
+      state: "failed",
+      message: "Analytics engine stopped",
+    });
+    expect(getLayerTable("L2")).toBeNull();
+  });
+
+  it("leaves a failed entry, never `building`, when the engine is not ready at the publish", async () => {
+    // The readiness-only branch returned without writing anything, on the
+    // assumption that the invalidation had already spoken. It has not when the
+    // status left `ready` by any other route, and the entry then sits on
+    // `building` for ever under a spinner nothing will ever stop.
+    const held = deferred();
+    holdStatement = { needle: "COUNT(*)", promise: held.promise };
+    const building = enqueueLayerTable("L1", readerSource());
+    await vi.waitFor(() =>
+      expect(sql.some((q) => q.includes("COUNT(*)"))).toBe(true),
+    );
+    engineReady = false;
+    held.resolve();
+    await building;
+
+    expect(stateOf("L1")).toEqual({
       state: "failed",
       message: "Analytics engine stopped",
     });

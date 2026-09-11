@@ -117,6 +117,7 @@ vi.mock("../../../../src/insights/duckdb", () => {
       return () => deathListeners.delete(listener);
     }),
     getDuckDBStatusVersion: vi.fn(() => 0),
+    getEngineGeneration: vi.fn(() => 1),
     getDuckDBStatus: vi.fn(() => ({
       state: "ready",
       extensions: {},

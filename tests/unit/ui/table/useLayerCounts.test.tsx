@@ -10,6 +10,7 @@ vi.mock("../../../../src/insights/duckdb", () => ({
   // vitest's `No "subscribeDuckDBStatus" export is defined on the … mock`.
   subscribeDuckDBStatus: () => () => {},
   getDuckDBStatusVersion: () => 0,
+  getEngineGeneration: () => 1,
   // `layerTables` reads the status at MODULE LOAD now (spec §6.1 invalidates
   // every table when the engine's worker dies), so this import chain needs it
   // even though nothing here asks about the engine.

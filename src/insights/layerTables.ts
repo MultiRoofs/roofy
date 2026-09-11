@@ -35,6 +35,7 @@ import {
   ddl,
   dropBuffer,
   getDuckDBStatus,
+  getEngineGeneration,
   initDuckDB,
   registerBuffer,
   runQuery,
@@ -424,19 +425,6 @@ function invalidateTablesOnEngineDeath(): void {
   }
 }
 
-/**
- * How many engines have died this session.
- *
- * Every build captures this when it is ENQUEUED and abandons if it has moved:
- * a build that was waiting on the queue when the worker died was invalidated
- * along with everything else, and running it would write `building` and then
- * `ready` over that invalidation for a table the live database has never seen.
- * A death COUNT rather than the engine generation, because that also counts
- * boots — and the ordinary first build of a session is enqueued before the
- * engine has booted at all.
- */
-let engineDeaths = 0;
-
 let disposeEngineDeathWatch: (() => void) | null = null;
 
 /**
@@ -455,7 +443,6 @@ export function installEngineDeathWatch(): () => void {
     const died = previousEngineState === "ready" && state === "failed";
     previousEngineState = state;
     if (!died) return;
-    engineDeaths += 1;
     invalidateTablesOnEngineDeath();
   });
   const dispose = () => {
@@ -466,10 +453,18 @@ export function installEngineDeathWatch(): () => void {
   return dispose;
 }
 
-installEngineDeathWatch();
+const stopEngineDeathWatch = installEngineDeathWatch();
+// A module RE-EVALUATION gets a fresh `disposeEngineDeathWatch` (null), so the
+// installer above cannot see — let alone dispose — the subscription the
+// previous copy of this module left on `duckdb.ts`'s listener set. Only the
+// old copy can, and this is where it is told to. Optional-chained because
+// `import.meta.hot` exists in Vite's dev server and nowhere else (vitest, the
+// production bundle).
+import.meta.hot?.dispose(() => {
+  stopEngineDeathWatch();
+});
 
 export function resetLayerTablesForTest(): void {
-  engineDeaths = 0;
   // Re-installed, not merely reset: the previous-state tracker is a closure
   // variable, and a test that left it on `failed` would make the next test's
   // death unrecognisable.
@@ -877,26 +872,55 @@ export function enqueueLayerTable(
    *  once after it finishes — because a drop can arrive at any point in
    *  between. (`?? 0` is safe: `seqCounter` starts at 1.) */
   const superseded = () => seq <= (cancelBefore.get(layerId) ?? 0);
-  const deathsAtEnqueue = engineDeaths;
   /**
-   * Has an engine died since this build was enqueued?
+   * The engine this build belongs to, by {@link getEngineGeneration}.
    *
-   * Asked wherever the build would write an entry, because the invalidation
-   * has already written the true one: `{ failed, "Analytics engine stopped" }`.
-   * The build must leave it alone, and must not touch the engine to do so — a
-   * dead worker answers nothing.
+   * Taken at ENQUEUE when one is live, because a build enqueued against a
+   * running engine is building a table in THAT database — and any replacement
+   * in between, a crash or the Retry after one, means its table is gone.
+   * `null` while no engine is up: a build enqueued before the boot (the
+   * ordinary first layer of a session) has no database to be loyal to yet and
+   * adopts whichever one `initDuckDB` brings up below.
    */
-  const engineDied = () => engineDeaths !== deathsAtEnqueue;
+  let engine: number | null =
+    getDuckDBStatus().state === "ready" ? getEngineGeneration() : null;
+  /**
+   * Is the engine this build adopted no longer the live one?
+   *
+   * Asked before EVERY state write, because what the build would write is a
+   * claim about a database that is gone. The generation and not the invalidation
+   * subscriber's own bookkeeping: that subscriber recognises `ready` → `failed`,
+   * and a worker that dies while the status is `initializing` publishes
+   * `failed` from there — a death it would miss, and the generation would not.
+   */
+  const engineGone = () => engine !== null && getEngineGeneration() !== engine;
+  /**
+   * Give the entry up with §6.1's sentence, and touch no engine doing it: a
+   * dead worker answers no DROP, and the table is gone either way.
+   *
+   * WRITTEN HERE rather than left to the invalidation subscriber, which only
+   * sees one of the ways an engine can go. Idempotent by VALUE, so the common
+   * case — the subscriber wrote exactly this a moment ago — does not re-render
+   * every reader of the store for no news.
+   */
+  const abandon = (): LayerTableOutcome => {
+    registry.delete(layerId);
+    const current = useLayerTableStore.getState().tables[layerId];
+    if (current?.state !== "failed" || current.message !== ENGINE_STOPPED) {
+      setState(layerId, { state: "failed", message: ENGINE_STOPPED });
+    }
+    return ENGINE_DEAD;
+  };
 
   return enqueue(async () => {
     // Checked SYNCHRONOUSLY, before the first await: a build still WAITING
     // when the drop arrived is skipped outright and never touches DuckDB.
     if (superseded()) return SUPERSEDED;
-    // …and the same for a build still waiting when the ENGINE died. Before the
+    // …and the same for a build still waiting when its ENGINE went. Before the
     // `setState` below, which would otherwise put `building` over the
     // invalidation, and before `initDuckDB`, which it has no business asking
     // for on a table that is gone whatever the answer.
-    if (engineDied()) return ENGINE_DEAD;
+    if (engineGone()) return abandon();
     // Re-read at RUN time, not at enqueue time: a drop or an earlier rebuild
     // may have landed in between, so a build that was queued over nothing can
     // turn out to be a rebuild by the time it runs (and vice versa).
@@ -922,7 +946,7 @@ export function enqueueLayerTable(
     // source to `retryEngine`, which is the rebuild this milestone deliberately
     // does not do, and `ENGINE_NOT_RUNNING` would overwrite §6.1's sentence
     // with the one that means "not up YET".
-    if (engineDied()) return ENGINE_DEAD;
+    if (engineGone()) return abandon();
     if (getDuckDBStatus().state !== "ready") {
       // PARK the source: nothing has been handed to DuckDB, so a `bytes`
       // array is still intact — but a provider is preferred over it anyway,
@@ -942,7 +966,9 @@ export function enqueueLayerTable(
       return { ok: false, message: ENGINE_NOT_RUNNING };
     }
     // Past this point the engine is up, so this attempt is not a candidate for
-    // the retry queue any more.
+    // the retry queue any more — and a build that was enqueued before any
+    // engine existed now has one to be loyal to.
+    engine = getEngineGeneration();
     pendingSources.delete(layerId);
     // The name is minted INSIDE the queued task, so table numbering follows
     // build order rather than enqueue order and a cancelled build burns no
@@ -975,12 +1001,13 @@ export function enqueueLayerTable(
         await retire(info);
         return SUPERSEDED;
       }
-      // The engine this table was built in has gone. `info` describes a table
-      // in a database nobody can reach, and publishing it would put a `ready`
-      // entry over the invalidation — the exact state the catalogue would then
-      // offer tools against. Nothing is retired: that is SQL for a corpse.
-      if (engineDied() || getDuckDBStatus().state !== "ready") {
-        return ENGINE_DEAD;
+      // The engine this table was built in has gone, or the status has left
+      // `ready` under it. `info` describes a table in a database nobody can
+      // reach, and publishing it would put a `ready` entry over the
+      // invalidation — the exact state the catalogue would then offer tools
+      // against. Nothing is retired: that is SQL for a corpse.
+      if (engineGone() || getDuckDBStatus().state !== "ready") {
+        return abandon();
       }
       registry.set(layerId, info);
       setState(layerId, { state: "ready", info });
@@ -1000,11 +1027,14 @@ export function enqueueLayerTable(
       // would undo the invalidation — one by restoring a captured `ready` over
       // a table that no longer exists, the other by parking the source for a
       // Retry that must not rebuild it.
-      if (engineDied()) return ENGINE_DEAD;
+      if (engineGone()) return abandon();
       // BEFORE any publishing, and on every branch below: a `CREATE` that
       // succeeded before a later statement failed has left a table nothing
       // will ever name again.
       await discardHalfBuilt(table, scratch);
+      // AGAIN, because that cleanup is itself an await: a death inside it would
+      // otherwise slip past the check above and reach the two branches below.
+      if (engineGone()) return abandon();
       if (superseded()) {
         // Same reason as the success path: the drop owns the store entry now,
         // and a failed build of a removed layer has nothing to report to a
@@ -1018,6 +1048,7 @@ export function enqueueLayerTable(
         // dead `failed` a retry would never touch. Only when the source cannot
         // be replayed at all (bytes already consumed, no provider) does it
         // fall through to a real failure.
+        if (engineGone()) return abandon();
         const parked = parkConsumed(source);
         if (parked) {
           pendingSources.set(layerId, parked);
@@ -1030,6 +1061,7 @@ export function enqueueLayerTable(
           return { ok: false, message: ENGINE_NOT_RUNNING };
         }
       }
+      if (engineGone()) return abandon();
       if (previous) {
         // A failed REBUILD is not a failed layer: the old table was never
         // touched and still answers every query. The console carries the

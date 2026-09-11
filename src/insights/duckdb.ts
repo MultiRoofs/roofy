@@ -216,6 +216,22 @@ export function subscribeDuckDBStatus(listener: () => void): () => void {
 export function getDuckDBStatusVersion(): number {
   return statusVersion;
 }
+
+/**
+ * Which engine is live, as a number that changes for every boot AND every
+ * death (see {@link generation}).
+ *
+ * Exported for work that outlives the engine it was started for — a table
+ * build, above all: comparing this is how it learns that the database it was
+ * writing into is not the one the app is on any more, WITHOUT having to catch a
+ * particular status transition. A worker that dies while the status is
+ * `initializing` publishes `failed` from there, which is not `ready` → `failed`
+ * and would be missed by anything watching only for that; the counter moves
+ * either way.
+ */
+export function getEngineGeneration(): number {
+  return generation;
+}
 let initPromise: Promise<void> | null = null;
 /** One in-flight load per extension, so N concurrent `ensureExtension` calls
  *  cost one INSTALL. */

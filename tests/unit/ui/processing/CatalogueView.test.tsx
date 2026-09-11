@@ -11,6 +11,7 @@ import type { LayerStoreActions } from "../../../../src/features/layers/layerSto
 vi.mock("../../../../src/insights/duckdb", () => ({
   subscribeDuckDBStatus: vi.fn(() => () => {}),
   getDuckDBStatusVersion: vi.fn(() => 0),
+  getEngineGeneration: vi.fn(() => 1),
   getDuckDBStatus: vi.fn(() => ({
     state: "ready",
     extensions: {

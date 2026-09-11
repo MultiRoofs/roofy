@@ -29,6 +29,7 @@ vi.mock("../../../../src/insights/duckdb", async () => ({
   ).formatDuckDBError,
   subscribeDuckDBStatus: vi.fn(() => () => {}),
   getDuckDBStatusVersion: vi.fn(() => 0),
+  getEngineGeneration: vi.fn(() => 1),
   getDuckDBStatus: vi.fn(() => ({
     state: "ready",
     extensions: {

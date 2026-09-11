@@ -13,6 +13,7 @@ import type { LayerTableState } from "../../../../src/insights/layerTables";
 vi.mock("../../../../src/insights/duckdb", () => ({
   subscribeDuckDBStatus: vi.fn(() => () => {}),
   getDuckDBStatusVersion: vi.fn(() => 0),
+  getEngineGeneration: vi.fn(() => 1),
   getDuckDBStatus: vi.fn(() => ({
     state: "ready",
     extensions: {
