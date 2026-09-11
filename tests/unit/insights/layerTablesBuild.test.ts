@@ -81,6 +81,7 @@ const {
   dropLayerTable,
   enqueueLayerTable,
   getLayerTable,
+  refreshLayerTableColumns,
   resetLayerTablesForTest,
   retryEngine,
   useLayerTableStore,
@@ -465,6 +466,48 @@ describe("rebuilding a layer that already has a table", () => {
     await first;
     await second;
     expect(getLayerTable("L1")).toMatchObject({ table: "layer_2" });
+  });
+});
+
+describe("re-describing a table a run has written to", () => {
+  it("publishes the new columns under the SAME table name", async () => {
+    await enqueueLayerTable("L1", readerSource());
+    const before = getLayerTable("L1")!;
+
+    describeRows = [
+      ...READER_DESCRIBE,
+      { column_name: "extent_height_m", column_type: "DOUBLE" },
+    ];
+    await refreshLayerTableColumns("L1");
+
+    const after = getLayerTable("L1")!;
+    expect(after.columns.map((c) => c.name)).toContain("extent_height_m");
+    expect(after.columns.find((c) => c.name === "extent_height_m")?.kind).toBe(
+      "scalar",
+    );
+    // The NAME is what the stale watcher compares: a re-describe is not a
+    // rebuild, and must not retire the layer's result cards.
+    expect(after.table).toBe(before.table);
+    // Both the registry and the store, because the next run reads the registry
+    // (its `existing` set decides whether Undo restores or drops) and the grid
+    // reads the store.
+    expect(stateOf("L1")).toEqual({ state: "ready", info: after });
+  });
+
+  it("leaves the entry alone when the DESCRIBE fails", async () => {
+    await enqueueLayerTable("L1", readerSource());
+    const before = getLayerTable("L1")!;
+
+    failures = { DESCRIBE: "Binder Error: gone" };
+    await refreshLayerTableColumns("L1");
+
+    // The write is already committed; a failed re-read says nothing about it.
+    expect(getLayerTable("L1")).toBe(before);
+  });
+
+  it("does nothing for a layer with no table", async () => {
+    await refreshLayerTableColumns("nope");
+    expect(stateOf("nope")).toBeUndefined();
   });
 });
 

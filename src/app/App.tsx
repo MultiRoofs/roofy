@@ -70,6 +70,7 @@ import {
 import { installGeoJsonPreparation } from "../features/geoLayers/geoJsonPreparation";
 import { resolveGeoLayerBounds } from "../features/geoLayers/geoLayerBounds";
 import { installLayerTableLifecycle } from "../features/layers/layerTableLifecycle";
+import { installStaleWatcher } from "../features/processing/runQueue";
 import { installMapFilterSync } from "../features/query/mapFilterSync";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
 import { ensureModelCrsLoadable } from "../features/layers/ensureCrs";
@@ -886,7 +887,15 @@ export function App({
     void retryEngine().then(() => {
       setDuckdbStatus(getDuckDBStatus());
     });
-    return installLayerTableLifecycle();
+    const stopLifecycle = installLayerTableLifecycle();
+    // A rebuilt table has none of a run's computed columns, so the processing
+    // panel's result cards have to hear about it (spec §7). Installed next to
+    // the lifecycle because it watches the same store.
+    const stopStaleWatcher = installStaleWatcher();
+    return () => {
+      stopLifecycle();
+      stopStaleWatcher();
+    };
   }, []);
 
   /**

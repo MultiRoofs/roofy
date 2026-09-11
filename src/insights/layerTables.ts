@@ -323,6 +323,41 @@ export function getLayerTable(layerId: string): LayerTable | null {
   return registry.get(layerId) ?? null;
 }
 
+/**
+ * Re-read one table's COLUMN LIST, in place.
+ *
+ * A processing run adds columns with `ALTER TABLE`, and after that the entry's
+ * `columns` — a DESCRIBE from BUILD time — is a stale description of a table
+ * that has more in it than it says. Two readers care: the grid, which renders
+ * what the entry lists, and the NEXT run, whose "did this column already exist?"
+ * test decides whether its Undo restores a value or drops the column outright.
+ *
+ * Deliberately NOT on the queue: this is called from INSIDE a queued run, and
+ * enqueueing here would wait on the task that is waiting on it.
+ *
+ * Deliberately the SAME table name and a new `info` object: the processing
+ * panel's stale watcher retires a layer's result cards when the table is
+ * REBUILT, and it tells a rebuild from a re-describe by the name. `rebuilding`
+ * is carried through untouched — a rebuild in flight is still in flight.
+ */
+export async function refreshLayerTableColumns(layerId: string): Promise<void> {
+  const entry = useLayerTableStore.getState().tables[layerId];
+  const current = registry.get(layerId);
+  if (!entry || entry.state !== "ready" || !current) return;
+  const described = await runQuery(
+    `DESCRIBE SELECT * FROM ${quoteIdent(current.table)}`,
+  );
+  // The write that prompted this has already committed. A DESCRIBE that failed
+  // says nothing about it, so the entry keeps the description it had.
+  if (!described.ok) return;
+  const info: LayerTable = {
+    ...current,
+    columns: columnsFromDescribe(described.rows),
+  };
+  registry.set(layerId, info);
+  setState(layerId, { ...entry, info });
+}
+
 /** Append `task` to the single queue. One queue, not one per layer, so a drop
  *  enqueued behind a create can never race the `CREATE` it must follow.
  *  GENERIC in the task's result, so a build can report its outcome to the
