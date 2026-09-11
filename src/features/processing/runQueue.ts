@@ -534,7 +534,7 @@ export function cancelRun(id: string): void {
 }
 
 /**
- * Put the layer back the way the run found it.
+ * Put the layer back the way the run found it, if it still can.
  *
  * On the table queue for the same reason the write was: an Undo is `UPDATE` +
  * `DROP COLUMN` over a table a streaming layer may be rebuilding.
@@ -550,6 +550,13 @@ export async function undoRun(id: string): Promise<void> {
   const state = undoState.get(id);
   if (!run || !run.undoable || !state) return;
   const out = await runOnTableQueue(async () => {
+    // Re-validated at the head, exactly like a run's scope: while this Undo
+    // waited, a later run over the same column may have published (§6.2) or a
+    // rebuild may have retired the card. Its backup then describes the state two
+    // writes ago, and restoring it would delete what the later run wrote — so the
+    // card, which already reads `undoable: false`, is left as it is.
+    const current = runById(id);
+    if (!current?.undoable || !undoState.has(id)) return null;
     const undone = await undoComputedColumns({
       table: state.table,
       backupTable: state.backupTable,
@@ -560,6 +567,7 @@ export async function undoRun(id: string): Promise<void> {
     if (undone.ok) await refreshLayerTableColumns(run.targetLayerId);
     return undone;
   });
+  if (out === null) return;
   if (!out.ok) {
     // The card keeps its Undo: the table is unchanged (the undo is a
     // transaction too), so trying again is meaningful.

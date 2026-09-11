@@ -612,6 +612,48 @@ describe("a run over a column an earlier run wrote", () => {
       expect(sql).toContain(`DROP TABLE IF EXISTS "__undo_${first}"`),
     );
   });
+
+  it("does not undo a run whose Undo was taken away while the undo queued", async () => {
+    // Undo pressed on run 1 while run 2 is mid-write. The undo waits behind it,
+    // and by the time it reaches the head its backup describes the state TWO
+    // writes ago — restoring it would delete what run 2 just wrote.
+    liveColumns = ["id", "feature_id", "extent_height_m"];
+    tableInfo = {
+      ...freshTable(),
+      columns: liveColumns.map((name) => ({
+        name,
+        type: "VARCHAR",
+        kind: "scalar" as const,
+      })),
+    };
+    let calls = 0;
+    registerExecutor("height-from-extent", async () => {
+      calls += 1;
+      return {
+        columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+        rows: new Map([["a", { extent_height_m: calls === 1 ? 4 : 9 }]]),
+        measured: 1,
+        skipped: [],
+      };
+    });
+    const first = submitRun(request());
+    await vi.waitFor(() => expect(runById(first)?.status).toBe("done"));
+
+    const held = deferred<void>();
+    gate = { needle: "COMMIT", promise: held.promise };
+    const second = submitRun(request());
+    await vi.waitFor(() => expect(sql).toContain("COMMIT"));
+    sql.length = 0;
+    // Pressed while run 1 still says it can be undone.
+    const undoing = undoRun(first);
+    held.resolve();
+    await undoing;
+    await vi.waitFor(() => expect(runById(second)?.status).toBe("done"));
+
+    expect(sql.some((s) => s.includes(`FROM "__undo_${first}"`))).toBe(false);
+    expect(sql.some((s) => s.includes("DROP COLUMN"))).toBe(false);
+    expect(attributesOf("a").extent_height_m).toBe(9);
+  });
 });
 
 describe("a cancel that lost the race", () => {
@@ -677,6 +719,17 @@ describe("undoRun", () => {
 
 describe("installStaleWatcher", () => {
   it("marks the layer's runs stale when its table is rebuilt", async () => {
+    // The column is pre-existing, so the run keeps a backup table — a rebuilt
+    // table makes that copy unreadable as well as useless.
+    liveColumns = ["id", "feature_id", "extent_height_m"];
+    tableInfo = {
+      ...freshTable(),
+      columns: liveColumns.map((name) => ({
+        name,
+        type: "VARCHAR",
+        kind: "scalar" as const,
+      })),
+    };
     registerExecutor("height-from-extent", async () => ({
       columns: [{ name: "extent_height_m", type: "DOUBLE" }],
       rows: new Map([["a", { extent_height_m: 4 }]]),
@@ -699,6 +752,9 @@ describe("installStaleWatcher", () => {
       expect(runById(id)?.stale).toBe(true);
       expect(runById(id)?.undoable).toBe(false);
       expect(computedColumnsOf("L1").size).toBe(0);
+      await vi.waitFor(() =>
+        expect(sql).toContain(`DROP TABLE IF EXISTS "__undo_${id}"`),
+      );
     } finally {
       stop();
     }
