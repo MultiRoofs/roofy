@@ -62,6 +62,8 @@ vi.mock("../../../src/insights/duckdb", () => {
   };
   return {
     initDuckDB: vi.fn(async () => {}),
+    subscribeDuckDBStatus: vi.fn(() => () => {}),
+    getDuckDBStatusVersion: vi.fn(() => 0),
     getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
     isExtensionLoaded: vi.fn(() => true),
     ensureExtension: vi.fn(async () => false),

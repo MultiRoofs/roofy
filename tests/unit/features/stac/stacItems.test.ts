@@ -17,6 +17,8 @@ vi.mock("../../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   // Defaults to READY, because that is the state every other test in this
   // file assumes; the one test that cares overrides it per call.
+  subscribeDuckDBStatus: vi.fn(() => () => {}),
+  getDuckDBStatusVersion: vi.fn(() => 0),
   getDuckDBStatus: vi.fn(() => ({
     state: "ready",
     extensions: {

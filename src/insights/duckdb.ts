@@ -83,6 +83,39 @@ let extensions: Record<ExtensionName, ExtensionStatus> = {
 let loadedExtensions: ReadonlyArray<LoadedExtension> = [];
 let platform: string | null = null;
 let status: DuckDBStatus = { state: "uninitialized" };
+/**
+ * The status is a VALUE React subscribes to, so every transition has to be
+ * announced. `statusVersion` — not the status object — is what
+ * `useSyncExternalStore` snapshots. In PRODUCTION either would do:
+ * `getDuckDBStatus()` returns this module's STORED object, the same reference
+ * between transitions. The counter is for the TESTS, where 24 of the 26 mock
+ * factories spell the status as `vi.fn(() => ({ … }))` — a fresh literal per
+ * call, which React rejects as an uncached snapshot. A number cannot be spelled
+ * that way by accident.
+ */
+let statusVersion = 0;
+const statusListeners = new Set<() => void>();
+
+/** The ONE writer. Every `status = …` in this module goes through it. */
+function setStatus(next: DuckDBStatus): void {
+  status = next;
+  statusVersion += 1;
+  // Over a COPY: a listener is allowed to unsubscribe from inside its own
+  // notification, and mutating the set mid-iteration would silently skip the
+  // listener that happens to follow it.
+  for (const listener of Array.from(statusListeners)) listener();
+}
+
+export function subscribeDuckDBStatus(listener: () => void): () => void {
+  statusListeners.add(listener);
+  return () => {
+    statusListeners.delete(listener);
+  };
+}
+
+export function getDuckDBStatusVersion(): number {
+  return statusVersion;
+}
 let initPromise: Promise<void> | null = null;
 /** One in-flight load per extension, so N concurrent `ensureExtension` calls
  *  cost one INSTALL. */
@@ -100,12 +133,12 @@ export function isExtensionLoaded(name: ExtensionName): boolean {
  *  status is a VALUE React subscribes to, so a lazy load has to mint a new
  *  one rather than mutate the old. */
 function publishReady(): void {
-  status = {
+  setStatus({
     state: "ready",
     extensions: { ...extensions },
     loadedExtensions,
     platform,
-  };
+  });
 }
 
 /** DuckDB's own first error line. Its messages are one useful line plus a
@@ -196,7 +229,7 @@ async function readLoadedExtensions(): Promise<ReadonlyArray<LoadedExtension>> {
 // ---------------------------------------------------------------------------
 
 async function doInit(): Promise<void> {
-  status = { state: "initializing" };
+  setStatus({ state: "initializing" });
 
   // Held OUTSIDE the try so the catch can terminate it. A failed init used to
   // leave its Worker running — and `initDuckDB` clears its memo on failure, so
@@ -239,7 +272,7 @@ async function doInit(): Promise<void> {
     publishReady();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    status = { state: "failed", error: message };
+    setStatus({ state: "failed", error: message });
     // Kill the Worker BEFORE clearing the memo: the reset below is what makes
     // a Retry re-run this function, and a retry must not stack a second
     // 36 MB wasm heap beside one nobody can reach any more.
@@ -277,6 +310,12 @@ export async function ensureExtension(name: ExtensionName): Promise<boolean> {
   const existing = extensionPromises.get(name);
   if (existing) return await existing;
   const promise = (async () => {
+    // The "loading" state has to reach the catalogue's chip (spec §5), and
+    // `loadExtension` cannot announce it itself — `doInit` calls that function
+    // for `cityjson` before the status is `ready` at all, so a publish inside
+    // it would announce a half-built engine.
+    extensions = { ...extensions, [name]: { state: "loading" } };
+    if (status.state === "ready") publishReady();
     const ok = await loadExtension(name);
     // A successful lazy load changes what `duckdb_extensions()` reports, and
     // THAT list is the status tooltip — without this re-read the tooltip goes

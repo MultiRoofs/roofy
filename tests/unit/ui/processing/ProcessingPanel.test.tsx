@@ -13,6 +13,8 @@ import {
 } from "@testing-library/react";
 
 vi.mock("../../../../src/insights/duckdb", () => ({
+  subscribeDuckDBStatus: vi.fn(() => () => {}),
+  getDuckDBStatusVersion: vi.fn(() => 0),
   getDuckDBStatus: vi.fn(() => ({
     state: "ready",
     extensions: {

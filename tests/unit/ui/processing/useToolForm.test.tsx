@@ -11,6 +11,8 @@ import type { LayerStoreActions } from "../../../../src/features/layers/layerSto
 import type { LayerTableState } from "../../../../src/insights/layerTables";
 
 vi.mock("../../../../src/insights/duckdb", () => ({
+  subscribeDuckDBStatus: vi.fn(() => () => {}),
+  getDuckDBStatusVersion: vi.fn(() => 0),
   getDuckDBStatus: vi.fn(() => ({
     state: "ready",
     extensions: {

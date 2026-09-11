@@ -11,6 +11,8 @@ import {
 const runQuery = vi.fn();
 vi.mock("../../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
+  subscribeDuckDBStatus: vi.fn(() => () => {}),
+  getDuckDBStatusVersion: vi.fn(() => 0),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
   isExtensionLoaded: vi.fn(() => false),
   ensureExtension: vi.fn(async () => false),

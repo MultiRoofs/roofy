@@ -2,11 +2,10 @@
  * The stores behind the spec §5 disabled-row reasons, gathered for ONE
  * candidate target.
  *
- * `getDuckDBStatus()` is a plain read, not a subscription: the engine's state
- * only moves on boot and on Retry, and both of those also move a layer's table
- * — which IS subscribed here — so the catalogue re-renders anyway. The lazy
- * extension loads that would need their own subscription arrive with the
- * executor (M2), and the status read moves with them.
+ * The status is SUBSCRIBED (`useDuckDBStatus`), not polled. A lazy extension
+ * load moves it without touching a layer's table, so the catalogue's chips and
+ * the extension-failure reason would otherwise go on showing the state the
+ * panel happened to open with.
  *
  * The PURE `eligibilityContextFor` sits beside the hook because a hook answers
  * for one target and §6's layer select has to ask the same question of every
@@ -14,7 +13,7 @@
  */
 import { useLayerTableStore } from "../../insights/layerTables";
 import type { LayerTableState } from "../../insights/layerTables";
-import { getDuckDBStatus } from "../../insights/duckdb";
+import { useDuckDBStatus } from "../../insights/useDuckDBStatus";
 import type { DuckDBStatus } from "../../insights/duckdb";
 import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
 import { layerKindOf } from "../../features/layers/layerPresentation";
@@ -33,7 +32,7 @@ export function useEligibilityInputs(): EligibilityInputs {
   const hasVectorLayer = useGeoLayerStore((s) =>
     s.layers.some((l) => l.kind === "geojson"),
   );
-  return { tables, hasVectorLayer, status: getDuckDBStatus() };
+  return { tables, hasVectorLayer, status: useDuckDBStatus() };
 }
 
 export function eligibilityContextFor(

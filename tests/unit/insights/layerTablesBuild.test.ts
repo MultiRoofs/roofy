@@ -51,6 +51,8 @@ vi.mock("../../../src/insights/duckdb", () => {
     initDuckDB: vi.fn(async () => {
       if (initGate) await initGate;
     }),
+    subscribeDuckDBStatus: vi.fn(() => () => {}),
+    getDuckDBStatusVersion: vi.fn(() => 0),
     getDuckDBStatus: vi.fn(() =>
       engineReady
         ? {

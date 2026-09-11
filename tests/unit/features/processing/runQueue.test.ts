@@ -102,6 +102,8 @@ vi.mock("../../../../src/insights/duckdb", () => {
       return true;
     }),
     dropBuffer: vi.fn(async () => {}),
+    subscribeDuckDBStatus: vi.fn(() => () => {}),
+    getDuckDBStatusVersion: vi.fn(() => 0),
     getDuckDBStatus: vi.fn(() => ({
       state: "ready",
       extensions: {},

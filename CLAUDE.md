@@ -113,7 +113,7 @@ Each of these has a story in `docs/architecture-notes.md`; the rule here is the 
 - No source directory may be named `analytics/`, `ads/` or `tracking/`: content blockers match those path segments and refuse the dev server's module request with `ERR_BLOCKED_BY_CLIENT`, which blanks the app for anyone running a blocker. The DuckDB directory is `src/insights/` for this reason.
 - `src/insights/duckdb.ts` is the ONLY module under `src/` that may import `@duckdb/duckdb-wasm`. Everything else — `layerTables`, `export`, `sql`, every UI module — takes the engine through its exported functions, which is what makes them mockable.
 - `@duckdb/duckdb-wasm` is pinned EXACTLY, never a range and never `latest`: npm `latest` (dev57 / DuckDB 1.5.4) serves a stale 4-function `cityjson` and a `three_d` that breaks `LOAD spatial`, both silently.
-- ONE writer of the DuckDB status: `App` owns the `duckdbStatus` state, and `duckdb.ts` owns the value. Nothing else calls `setDuckdbStatus`, and nothing reads `getDuckDBStatus()` into a second copy.
+- ONE writer of the DuckDB status: `duckdb.ts` owns the value and publishes every transition (`setStatus`). React reads it through `useDuckDBStatus()` (`src/insights/useDuckDBStatus.ts`, a `useSyncExternalStore` over `subscribeDuckDBStatus` + `getDuckDBStatusVersion`) — never into component state, and nothing else publishes.
 - `retryEngine()` is the door to the engine on boot and on Retry — not `initDuckDB()`. It awaits the same memoised boot AND rebuilds the tables that were refused while the engine was still coming up; calling `initDuckDB` directly leaves those layers permanently table-less.
 
 ## Project Philosophy

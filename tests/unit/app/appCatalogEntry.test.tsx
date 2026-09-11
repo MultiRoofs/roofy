@@ -60,6 +60,8 @@ vi.mock("../../../src/scene/NavaraViewport", () => ({
 // import into a runtime TypeError.
 vi.mock("../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
+  subscribeDuckDBStatus: vi.fn(() => () => {}),
+  getDuckDBStatusVersion: vi.fn(() => 0),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
   isExtensionLoaded: vi.fn(() => false),
   ensureExtension: vi.fn(async () => false),

@@ -9,6 +9,8 @@ import type { CityModel } from "../../../../src/domain/citymodel/types";
 import type { LayerStoreActions } from "../../../../src/features/layers/layerStore";
 
 vi.mock("../../../../src/insights/duckdb", () => ({
+  subscribeDuckDBStatus: vi.fn(() => () => {}),
+  getDuckDBStatusVersion: vi.fn(() => 0),
   getDuckDBStatus: vi.fn(() => ({
     state: "ready",
     extensions: {

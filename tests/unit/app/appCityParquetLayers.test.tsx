@@ -115,6 +115,8 @@ let extensionReady = false;
 
 vi.mock("../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
+  subscribeDuckDBStatus: vi.fn(() => () => {}),
+  getDuckDBStatusVersion: vi.fn(() => 0),
   getDuckDBStatus: vi.fn(() =>
     extensionReady
       ? {

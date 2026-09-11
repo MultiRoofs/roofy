@@ -197,4 +197,19 @@ face here would be the single element outside the brand's family, and CLAUDE.md
 makes the brand tokens the only source. If this is ever revisited it is one
 token change in `brand.css`, not a per-component override.
 
+**The engine status is published, not polled (M13.2).** `duckdb.ts` keeps a
+listener set and a version counter; `setStatus` is the one writer and every
+transition — `initializing`, `ready`, `failed`, and each lazy extension's
+`loading`/`loaded`/`failed` — goes through it. React reads the value through
+`useDuckDBStatus()`, a `useSyncExternalStore` whose SNAPSHOT is the version
+counter rather than the status object. The status object itself would be a
+valid snapshot — `getDuckDBStatus()` returns the module's stored reference —
+but the app's test mock factories return a fresh literal per call, which React
+rejects as uncached; a counter cannot be written that way by accident.
+`App` no longer mirrors the status in
+`useState`. That mirror was also subtly wrong: `retryEngine()` on an engine
+that is already `ready` does not re-run `doInit`, so App's optimistic
+`setDuckdbStatus({ state: "initializing" })` made a healthy engine read
+"Loading" whenever the user retried a failed TABLE.
+
 Browser acceptance procedure: `scripts/smoke/processing-m1.md`.

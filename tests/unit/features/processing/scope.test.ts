@@ -21,6 +21,8 @@ vi.mock("../../../../src/insights/duckdb", () => ({
   ddl: vi.fn(async () => ({ ok: true, columns: [], rows: [] })),
   registerBuffer: vi.fn(async () => true),
   dropBuffer: vi.fn(async () => {}),
+  subscribeDuckDBStatus: vi.fn(() => () => {}),
+  getDuckDBStatusVersion: vi.fn(() => 0),
   getDuckDBStatus: vi.fn(() => ({
     state: "ready",
     extensions: {},

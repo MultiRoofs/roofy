@@ -47,8 +47,7 @@ import { restoreSnapshot } from "../persistence/restoreSnapshot";
 import { readShareHash, buildShareUrl } from "../persistence/urlShare";
 import type { ColorBy } from "../features/rules/colorBy";
 import type { ShareableViewState } from "../persistence/urlShare";
-import { getDuckDBStatus } from "../insights/duckdb";
-import type { DuckDBStatus } from "../insights/duckdb";
+import { useDuckDBStatus } from "../insights/useDuckDBStatus";
 import { retryEngine } from "../insights/layerTables";
 import { browserPlatform } from "../platform/browser";
 import type { PlatformServices } from "../platform/types";
@@ -283,9 +282,7 @@ export function App({
   const [unavailableLayers, setUnavailableLayers] = useState<
     ReadonlyArray<UnavailableLayer>
   >([]);
-  const [duckdbStatus, setDuckdbStatus] = useState<DuckDBStatus>({
-    state: "uninitialized",
-  });
+  const duckdbStatus = useDuckDBStatus();
   const [toast, setToast] = useState<string | null>(null);
   const [viewportAttribution, setViewportAttribution] = useState<
     readonly string[]
@@ -903,19 +900,18 @@ export function App({
   // the stores. One install, torn down with the app: the subscriptions are
   // module-level machinery, not per-render state.
   useEffect(() => {
-    // BEFORE the await, not after: the cold boot takes ~3.5 s (a 36 MB wasm
-    // module plus the community extension), and the status starts as
-    // `uninitialized`, which the table panel renders as "the analytics engine is
-    // not running" with a Retry button. Announcing the ATTEMPT first turns that
-    // into "Loading" for the duration.
-    setDuckdbStatus({ state: "initializing" });
     // `retryEngine`, not `initDuckDB`: it awaits the same (memoised) boot and
-    // then rebuilds any table that was refused while the engine was still coming
-    // up. A layer added during the boot — a restored snapshot, a share link, a
-    // quick drop — must not need the user to notice and re-add it.
-    void retryEngine().then(() => {
-      setDuckdbStatus(getDuckDBStatus());
-    });
+    // then rebuilds any table that was refused while the engine was still
+    // coming up. A layer added during the boot — a restored snapshot, a share
+    // link, a quick drop — must not need the user to notice and re-add it.
+    //
+    // Nothing sets the status here any more: `doInit` publishes `initializing`
+    // synchronously on the first call and `ready`/`failed` when it lands, and
+    // `useDuckDBStatus` renders each of them. The old optimistic
+    // `setDuckdbStatus({ state: "initializing" })` was also WRONG on the Retry
+    // path — `initDuckDB` does not re-run a boot that already succeeded, so a
+    // Retry aimed at a failed TABLE made a healthy engine read "Loading".
+    void retryEngine();
     const stopLifecycle = installLayerTableLifecycle();
     // A rebuilt table has none of a run's computed columns, so the processing
     // panel's result cards have to hear about it (spec §7). Installed next to
@@ -937,8 +933,7 @@ export function App({
    * "The analytics engine is not running" would look like it had done nothing.
    */
   const handleRetryDuckDB = useCallback(() => {
-    setDuckdbStatus({ state: "initializing" });
-    void retryEngine().then(() => setDuckdbStatus(getDuckDBStatus()));
+    void retryEngine();
   }, []);
 
   const handleFile = useCallback(
