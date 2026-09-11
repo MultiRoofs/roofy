@@ -453,6 +453,11 @@ const FLAT_COLUMN_TYPES: Readonly<Record<string, string>> = {
   object_type: "VARCHAR",
   parents: "VARCHAR[]",
   children: "VARCHAR[]",
+  // The reader's own extent struct, field for field (spec §7.4). DOUBLE, not
+  // whatever the rows infer to: integer coordinates read back as
+  // STRUCT(xmin BIGINT, ...) and an all-NULL bbox as JSON — and the tools that
+  // read `"bbox"."zmin"` must see ONE type on every layer kind.
+  bbox: "STRUCT(xmin DOUBLE, ymin DOUBLE, zmin DOUBLE, xmax DOUBLE, ymax DOUBLE, zmax DOUBLE)",
 };
 
 /** The columns an empty fallback table is declared with — the vocabulary every

@@ -4,7 +4,7 @@
  * resident cells) contributes instead.
  *
  * The column names are ALIGNED to the reader's — `id, feature_id, object_type,
- * parents, children`, then one column per attribute — because the filter
+ * parents, children, bbox`, then one column per attribute — because the filter
  * builder, the export scope and the map-filter id set are written once and
  * must mean the same thing on every layer. `parents`/`children` are NULL when
  * empty, exactly as the reader writes them, so `parents IS NULL` really is the
@@ -16,9 +16,36 @@
  * Pure — no engine import, no store.
  */
 
-import type { CityModel } from "../domain/citymodel/types";
+import type { BBox3, CityModel } from "../domain/citymodel/types";
 import type { ResidentObjectRecord } from "@cityjson/navara-flatcitybuf";
 import { parentsIndexOf, rootFeatureId } from "../domain/citymodel/featureId";
+
+/**
+ * An object's extent, NAMED AND ORDERED as the reader's `bbox` STRUCT is
+ * (spec §7.4), because `read_json_auto` infers a STRUCT from the KEYS of the
+ * first object it sees: these six names in this order ARE the column's schema.
+ *
+ * A 6-element ARRAY would infer a LIST instead, and `"bbox"."zmin"` — how the
+ * Height-from-extent tool reads the extent on EVERY layer kind — binds to no
+ * field on a list.
+ */
+export interface BboxStruct {
+  readonly xmin: number;
+  readonly ymin: number;
+  readonly zmin: number;
+  readonly xmax: number;
+  readonly ymax: number;
+  readonly zmax: number;
+}
+
+/** The domain's `[minX, minY, minZ, maxX, maxY, maxZ]` tuple as the reader's
+ *  struct. NULL for an object with no geometry — the column is nullable on the
+ *  reader's tables too. */
+export function bboxStruct(bbox: BBox3 | null | undefined): BboxStruct | null {
+  if (!bbox) return null;
+  const [xmin, ymin, zmin, xmax, ymax, zmax] = bbox;
+  return { xmin, ymin, zmin, xmax, ymax, zmax };
+}
 
 export interface FlatRow {
   readonly id: string;
@@ -26,6 +53,7 @@ export interface FlatRow {
   readonly object_type: string;
   readonly parents: ReadonlyArray<string> | null;
   readonly children: ReadonlyArray<string> | null;
+  readonly bbox: BboxStruct | null;
   readonly [attribute: string]: unknown;
 }
 
@@ -35,6 +63,7 @@ export const FLAT_PREFIX_COLUMNS: ReadonlyArray<string> = [
   "object_type",
   "parents",
   "children",
+  "bbox",
 ];
 
 /**
@@ -134,6 +163,7 @@ export function flatRowsFromModel(model: CityModel): FlatRow[] {
       object_type: obj.objectType,
       parents: emptyToNull(obj.parents),
       children: emptyToNull(obj.children),
+      bbox: bboxStruct(obj.bbox),
     });
   }
   warnDroppedAttributes(dropped);
@@ -154,6 +184,7 @@ export function flatRowsFromRecords(
     object_type: r.objectType,
     parents: emptyToNull(r.parents),
     children: emptyToNull(r.children),
+    bbox: bboxStruct(r.bbox),
   }));
   warnDroppedAttributes(dropped);
   return rows;

@@ -82,6 +82,11 @@ const enabled = process.env.DUCKDB_INTEGRATION === "1";
 
 const TABLE = "layer_t33";
 
+/** The `bbox` type `layerTables.FLAT_COLUMN_TYPES` forces on a flat table —
+ *  spelled here because the ALTER is built inside `buildFromRows`. */
+const BBOX_TYPE =
+  "STRUCT(xmin DOUBLE, ymin DOUBLE, zmin DOUBLE, xmax DOUBLE, ymax DOUBLE, zmax DOUBLE)";
+
 /**
  * The two export routes' output names, spelled as the app spells them:
  * `export_N.<format>` for an attribute file, `exp_N` for a CityParquet
@@ -393,6 +398,73 @@ describe.skipIf(!enabled)("layer tables over real fixtures", () => {
     db.query('DROP TABLE "flat_t33"');
   });
 
+  it("declares the reader's bbox EXACTLY as the flat fallback forces it", () => {
+    // The point of the flat table's `bbox` column: a tool that reads
+    // `"bbox"."zmin"` must see the SAME struct on a reader-backed table and on
+    // a flat one. If the community extension ever renames a field, reorders
+    // them or changes the numeric type, this is the ONLY test in the repo that
+    // would notice — every unit test mocks the DESCRIBE.
+    expect(allColumns.find((c) => c.name === "bbox")?.type).toBe(BBOX_TYPE);
+  });
+
+  it("types an ALL-NULL bbox column as the reader's STRUCT on the flat-fallback path", () => {
+    // Same mechanism as `parents`, different consequence: every object in this
+    // model has no geometry, `read_json_auto` types the all-NULL `bbox` as
+    // JSON, and `"bbox"."zmin"` — how the extent is read on EVERY layer kind —
+    // binds to no field on a JSON column. The ALTER in `buildFromRows` is the
+    // fix, and BOTH casts it depends on are exercised here: JSON -> STRUCT
+    // (this test) and STRUCT(... BIGINT) -> STRUCT(... DOUBLE) (below).
+    db.registerBytes(
+      "flatbbox.json",
+      encodeRowsAsJson(flatRowsFromModel(allRootModel(["A", "B"]))),
+    );
+    db.query(
+      `CREATE OR REPLACE TABLE "flat_bb" AS SELECT * FROM read_json_auto('flatbbox.json', ${READ_JSON_OPTIONS})`,
+    );
+    expect(
+      db.query('DESCRIBE "flat_bb"').find((r) => r.column_name === "bbox")
+        ?.column_type,
+    ).toBe("JSON");
+    db.query(`ALTER TABLE "flat_bb" ALTER COLUMN "bbox" TYPE ${BBOX_TYPE}`);
+    expect(
+      db.query('DESCRIBE "flat_bb"').find((r) => r.column_name === "bbox")
+        ?.column_type,
+    ).toBe(BBOX_TYPE);
+    expect(
+      db
+        .query('SELECT "bbox"."zmin" AS zmin FROM "flat_bb"')
+        .map((r) => r.zmin),
+    ).toEqual([null, null]);
+    db.query('DROP TABLE "flat_bb"');
+  });
+
+  it("carries an INTEGER-coordinate bbox through the ALTER as DOUBLE", () => {
+    // A model whose extents are whole numbers infers STRUCT(xmin BIGINT, ...),
+    // which is not the reader's STRUCT(xmin DOUBLE, ...). The ALTER has to cast
+    // struct-to-struct WITHOUT losing the values, or the tool reads a table
+    // whose column type depends on whether the file happened to use integers.
+    const model = allRootModel(["A"]);
+    (model.objects.A as { bbox: unknown }).bbox = [1, 2, 3, 4, 5, 9];
+    db.registerBytes(
+      "flatbbox2.json",
+      encodeRowsAsJson(flatRowsFromModel(model)),
+    );
+    db.query(
+      `CREATE OR REPLACE TABLE "flat_bb2" AS SELECT * FROM read_json_auto('flatbbox2.json', ${READ_JSON_OPTIONS})`,
+    );
+    db.query(`ALTER TABLE "flat_bb2" ALTER COLUMN "bbox" TYPE ${BBOX_TYPE}`);
+    expect(
+      db.query('DESCRIBE "flat_bb2"').find((r) => r.column_name === "bbox")
+        ?.column_type,
+    ).toBe(BBOX_TYPE);
+    expect(
+      db.query(
+        'SELECT "bbox"."zmin" AS zmin, "bbox"."zmax" AS zmax FROM "flat_bb2"',
+      )[0],
+    ).toMatchObject({ zmin: 3, zmax: 9 });
+    db.query('DROP TABLE "flat_bb2"');
+  });
+
   it("keeps a DATE-SHAPED or numeric id readable AS THE MODEL SPELLS IT", () => {
     // The bug: `read_json_auto` infers `"2024-01-01"` as DATE, and the map sync
     // then reads back epoch-millisecond strings that match no key in the model
@@ -486,8 +558,8 @@ describe.skipIf(!enabled)("layer tables over real fixtures", () => {
       `CREATE OR REPLACE TABLE "wide_opts" AS SELECT * FROM read_json_auto('wide_opts.json', ${READ_JSON_OPTIONS})`,
     );
     const kept = db.query('DESCRIBE "wide_opts"').map((r) => r.column_name);
-    // Five fixed columns plus one per attribute, none lost or merged.
-    expect(kept).toHaveLength(305);
+    // Six fixed columns plus one per attribute, none lost or merged.
+    expect(kept).toHaveLength(306);
     for (const fixed of ["id", "feature_id", "object_type"]) {
       expect(kept).toContain(fixed);
     }

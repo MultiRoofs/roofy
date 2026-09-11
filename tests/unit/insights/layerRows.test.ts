@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   encodeRowsAsJson,
+  FLAT_PREFIX_COLUMNS,
   flatRowsFromModel,
   flatRowsFromRecords,
 } from "../../../src/insights/layerRows";
@@ -86,6 +87,38 @@ describe("flatRowsFromModel", () => {
     expect(rows[0]!.tags).toBe('{"a":1}');
   });
 
+  it("carries each object's extent as the reader's own bbox struct", () => {
+    // `read_json_auto` infers the STRUCT from the KEYS, in order, so the field
+    // names ARE the schema: the Height-from-extent tool reads `"bbox"."zmin"`
+    // and `"bbox"."zmax"` off every layer kind, reader-backed or flat, and a
+    // 6-element ARRAY here would give it a LIST no field reference can bind to.
+    expect(FLAT_PREFIX_COLUMNS).toContain("bbox");
+    const bbox = rows[0]!.bbox!;
+    expect(Object.keys(bbox)).toEqual([
+      "xmin",
+      "ymin",
+      "zmin",
+      "xmax",
+      "ymax",
+      "zmax",
+    ]);
+    expect(bbox).toEqual({
+      xmin: 0,
+      ymin: 0,
+      zmin: 0,
+      xmax: 1,
+      ymax: 1,
+      zmax: 1,
+    });
+    expect(bbox.zmax).toBeGreaterThan(bbox.zmin);
+  });
+
+  it("writes NULL for an object with no extent", () => {
+    const m = model();
+    (m.objects.B1 as { bbox: unknown }).bbox = null;
+    expect(flatRowsFromModel(m)[0]!.bbox).toBeNull();
+  });
+
   it("drops the old app-side derivations", () => {
     expect(rows[0]!.lod).toBeUndefined();
     expect(rows[0]!.surface_count).toBeUndefined();
@@ -151,6 +184,29 @@ describe("a dropped reserved attribute name", () => {
     );
   });
 
+  it("drops a source attribute named bbox, like every other fixed column", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const m = model();
+    (m.objects.B1 as { attributes: Record<string, unknown> }).attributes = {
+      bbox: "SPOOF",
+      ok: 1,
+    };
+    const [row] = flatRowsFromModel(m);
+    expect(row!.bbox).toEqual({
+      xmin: 0,
+      ymin: 0,
+      zmin: 0,
+      xmax: 1,
+      ymax: 1,
+      zmax: 1,
+    });
+    expect(row!.ok).toBe(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      "Flat table: source attributes named bbox were dropped because they collide with the fixed columns.",
+    );
+  });
+
   it("says nothing when no attribute collides", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     flatRowsFromModel(model());
@@ -181,6 +237,7 @@ describe("flatRowsFromRecords", () => {
         object_type: "Building",
         parents: null,
         children: ["R1-0"],
+        bbox: { xmin: 0, ymin: 0, zmin: 0, xmax: 1, ymax: 1, zmax: 1 },
       },
       {
         id: "R1-0",
@@ -188,6 +245,7 @@ describe("flatRowsFromRecords", () => {
         object_type: "BuildingPart",
         parents: ["R1"],
         children: null,
+        bbox: { xmin: 0, ymin: 0, zmin: 0, xmax: 1, ymax: 1, zmax: 1 },
       },
     ]);
   });
@@ -208,6 +266,7 @@ describe("encodeRowsAsJson", () => {
         object_type: "Building",
         parents: null,
         children: null,
+        bbox: { xmin: 0, ymin: 0, zmin: 0, xmax: 1, ymax: 1, zmax: 1 },
       },
     ]);
   });

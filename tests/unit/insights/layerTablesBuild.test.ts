@@ -89,6 +89,11 @@ import type { SourceProvider } from "../../../src/insights/layerTables";
 import { FLAT_PREFIX_COLUMNS } from "../../../src/insights/layerRows";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 
+/** The flat table's `bbox` column type, spelled once: `layerTables` declares it
+ *  on the empty table AND forces it with an ALTER on a populated one. */
+const BBOX_TYPE =
+  "STRUCT(xmin DOUBLE, ymin DOUBLE, zmin DOUBLE, xmax DOUBLE, ymax DOUBLE, zmax DOUBLE)";
+
 const READER_DESCRIBE = [
   { column_name: "id", column_type: "VARCHAR" },
   { column_name: "feature_id", column_type: "VARCHAR" },
@@ -118,6 +123,7 @@ const FALLBACK_DESCRIBE = [
   { column_name: "object_type", column_type: "VARCHAR" },
   { column_name: "parents", column_type: "VARCHAR[]" },
   { column_name: "children", column_type: "VARCHAR[]" },
+  { column_name: "bbox", column_type: BBOX_TYPE },
 ];
 
 /** ONE provider instance, so `LayerTable.source` can be asserted by identity
@@ -287,7 +293,7 @@ describe("reader-backed layer table", () => {
 
 describe("a failed build leaves nothing behind", () => {
   it("DROPs the table when a step AFTER the CREATE fails", async () => {
-    // The fallback route runs five ALTERs and a DESCRIBE after its CREATE, so
+    // The fallback route runs six ALTERs and a DESCRIBE after its CREATE, so
     // a failure there strands a fully materialised table under a name nothing
     // will ever use again — memory held for the life of the page.
     describeRows = FALLBACK_DESCRIBE;
@@ -828,14 +834,15 @@ describe("flat-fallback layer table", () => {
     // VARCHAR[], and a DATE-SHAPED id as DATE — either one silently diverges
     // the fallback schema from the reader's. Each ALTER is a no-op when the
     // inference was already right.
-    expect(sql.slice(1, 6)).toEqual([
+    expect(sql.slice(1, 7)).toEqual([
       'ALTER TABLE "layer_1" ALTER COLUMN "id" TYPE VARCHAR',
       'ALTER TABLE "layer_1" ALTER COLUMN "feature_id" TYPE VARCHAR',
       'ALTER TABLE "layer_1" ALTER COLUMN "object_type" TYPE VARCHAR',
       'ALTER TABLE "layer_1" ALTER COLUMN "parents" TYPE VARCHAR[]',
       'ALTER TABLE "layer_1" ALTER COLUMN "children" TYPE VARCHAR[]',
+      `ALTER TABLE "layer_1" ALTER COLUMN "bbox" TYPE ${BBOX_TYPE}`,
     ]);
-    expect(sql[6]).toBe('DESCRIBE SELECT * FROM "layer_1"');
+    expect(sql[7]).toBe('DESCRIBE SELECT * FROM "layer_1"');
     expect(dropped).toEqual(["layer_1.json"]);
 
     const info = getLayerTable("L1");
@@ -854,7 +861,7 @@ describe("flat-fallback layer table", () => {
 
     expect(registered).toEqual([]);
     expect(sql[0]).toBe(
-      'CREATE OR REPLACE TABLE "layer_1" ("id" VARCHAR, "feature_id" VARCHAR, "object_type" VARCHAR, "parents" VARCHAR[], "children" VARCHAR[])',
+      `CREATE OR REPLACE TABLE "layer_1" ("id" VARCHAR, "feature_id" VARCHAR, "object_type" VARCHAR, "parents" VARCHAR[], "children" VARCHAR[], "bbox" ${BBOX_TYPE})`,
     );
     expect(getLayerTable("L9")).toMatchObject({ rowCount: 0 });
   });
