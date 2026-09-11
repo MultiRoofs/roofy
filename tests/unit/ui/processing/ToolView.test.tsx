@@ -17,7 +17,16 @@ import type { LayerStoreActions } from "../../../../src/features/layers/layerSto
 import type { RunRecord } from "../../../../src/features/processing/types";
 import type { ColumnInfo } from "../../../../src/insights/columnKind";
 
-vi.mock("../../../../src/insights/duckdb", () => ({
+vi.mock("../../../../src/insights/duckdb", async () => ({
+  // The ONE export taken from the real module: `formatDuckDBError` is pure,
+  // and §6.3's notice is DEFINED as the message `runQuery` already built with
+  // it. A copy of that formatter in this file would go on passing while the
+  // real one changed under it. Everything else stays faked, engine included.
+  formatDuckDBError: (
+    await vi.importActual<typeof import("../../../../src/insights/duckdb")>(
+      "../../../../src/insights/duckdb",
+    )
+  ).formatDuckDBError,
   getDuckDBStatus: vi.fn(() => ({
     state: "ready",
     extensions: {
@@ -30,7 +39,6 @@ vi.mock("../../../../src/insights/duckdb", () => ({
   })),
   isExtensionLoaded: vi.fn(() => false),
   ensureExtension: vi.fn(async () => false),
-  formatDuckDBError: (e: unknown) => String(e),
   runQuery: vi.fn(async () => ({ ok: false, message: "no engine" })),
   ddl: vi.fn(async () => ({ ok: false, message: "no engine" })),
   registerBuffer: vi.fn(async () => false),
@@ -78,7 +86,8 @@ const { useQueryStore, layerQuery } =
   await import("../../../../src/features/query/queryStore");
 const { useRuleDraftStore } =
   await import("../../../../src/features/rules/ruleDraftStore");
-const { runQuery } = await import("../../../../src/insights/duckdb");
+const { runQuery, formatDuckDBError } =
+  await import("../../../../src/insights/duckdb");
 const { NEW_RULE_COLOR_HEX } = await import("../../../../src/scene/cityColors");
 
 type LayerInput = Parameters<LayerStoreActions["addLayer"]>[0];
@@ -171,23 +180,6 @@ function doneRun(layerId: string, patch: Partial<RunRecord> = {}): RunRecord {
     },
     ...patch,
   });
-}
-
-/**
- * What `formatDuckDBError` (duckdb.ts:114-124) makes of a raw DuckDB error —
- * replicated rather than imported, because the module it lives in is mocked
- * here and importing the real one would drag `@duckdb/duckdb-wasm` into a
- * jsdom run. Documented behaviour: drop the `LINE n:` echo and everything
- * after it, keep every other non-empty line, join with a space.
- */
-function formattedDuckDBError(raw: string): string {
-  const kept: string[] = [];
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (/^LINE \d+:/.test(trimmed)) break;
-    if (trimmed !== "") kept.push(trimmed);
-  }
-  return kept.join(" ");
 }
 
 type Outcome = Awaited<ReturnType<typeof runQuery>>;
@@ -605,7 +597,7 @@ describe("ToolView", () => {
     // — candidate bindings included — is kept, joined into one line. So the
     // outcome is built here the way `runQuery` builds it, and the notice must
     // be that message VERBATIM; a second split here would eat the bindings.
-    const message = formattedDuckDBError(
+    const message = formatDuckDBError(
       [
         'Binder Error: Referenced column "zone_id" not found in FROM clause',
         'Candidate bindings: "zone_code"',
