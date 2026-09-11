@@ -52,7 +52,10 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
     latestRun?.status === "queued" && f.queuedBehind !== null
       ? `Queued behind ${f.queuedBehind}`
       : null;
-  const footerNote = queueNote ?? footerReason;
+  // A ternary, not `??`: a run can be queued with nothing running yet (the
+  // hand-off between one run finishing and the next starting), and that footer
+  // must still say "Queued" rather than fall through to the draft's reason.
+  const footerNote = latestRun?.status === "queued" ? queueNote : footerReason;
   // §5: "A disabled row still opens the tool view", so a target the user has
   // already chosen stays in the select even when the tool cannot run on it —
   // a blank select would hide which layer the reason under Run is about.

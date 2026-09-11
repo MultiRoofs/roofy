@@ -475,6 +475,29 @@ describe("ToolView", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("keeps a stale reason out of the queued footer even before anything runs", () => {
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() => {
+      useProcessingStore.getState().setDraft("height-from-extent", {
+        targetLayerId: layerId,
+        scope: "selected",
+        lod: null,
+        prefix: "extent_",
+        params: {},
+      });
+      // Queued with nothing running yet: the hand-off window between one run's
+      // done patch and the next run's running patch.
+      useProcessingStore
+        .getState()
+        .upsertRun(runFixture({ status: "queued", targetLayerId: layerId }));
+    });
+    expect(screen.getByText("Queued")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Nothing selected on this layer"),
+    ).not.toBeInTheDocument();
+  });
+
   it("names the running tool a queued run waits behind", () => {
     const layerId = addCityLayer();
     render(<ToolView toolId="height-from-extent" />);
