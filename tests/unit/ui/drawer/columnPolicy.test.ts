@@ -44,6 +44,23 @@ describe("computed columns in the default set", () => {
     );
   });
 
+  it("lists a computed column that collides with a base name once, and last", () => {
+    // The buildings view's own six names are the collision risk: a tool whose
+    // OUTPUT is `measuredHeight` must not be both a base column and a computed
+    // one, and the run's result is the copy that survives.
+    const names = defaultColumns(
+      [
+        { name: "id", type: "VARCHAR", kind: "scalar" as const },
+        { name: "measuredHeight", type: "DOUBLE", kind: "scalar" as const },
+        { name: "function", type: "VARCHAR", kind: "scalar" as const },
+      ],
+      "buildings",
+      new Set(["measuredHeight"]),
+    ).map((column) => column.name);
+    expect(names.filter((name) => name === "measuredHeight")).toHaveLength(1);
+    expect(names.at(-1)).toBe("measuredHeight");
+  });
+
   it("never lists a computed column twice", () => {
     const names = defaultColumns(
       withComputed,
