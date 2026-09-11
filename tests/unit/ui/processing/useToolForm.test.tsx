@@ -1,13 +1,8 @@
 /**
- * `useToolForm`'s two answers that the rendered form cannot pin on its own:
- *
- * - `OUTPUT_COLUMNS` promises the names the run WILL write, before any run
- *   exists. The executor writes them for real. The two used to be two literal
- *   lists; this file is what keeps them one.
- * - `eligibleTargets` is spec §6's "a layer select listing only layers the tool
- *   can target", which is more than "the table is ready". The only implemented
- *   M1 tool can never fail per layer (no reader, no extension, city target), so
- *   the registry is mocked here to make one that can.
+ * `eligibleTargets`: spec §6's "a layer select listing only layers the tool can
+ * target", which is more than "the table is ready". The only implemented M1
+ * tool can never fail per layer (no reader, no extension, city target), so the
+ * registry is mocked here to make one that can.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -75,10 +70,6 @@ vi.mock("../../../../src/features/processing/toolRegistry", async () => {
   };
 });
 
-const { OUTPUT_COLUMNS } =
-  await import("../../../../src/ui/processing/useToolForm");
-const { outputColumnNames } =
-  await import("../../../../src/features/processing/tools/heightFromExtent");
 const { ToolView } = await import("../../../../src/ui/processing/ToolView");
 const { useLayerStore } =
   await import("../../../../src/features/layers/layerStore");
@@ -141,17 +132,6 @@ afterEach(() => {
   useLayerStore.getState().removeAllLayers();
   useWorkspaceStore.getState().setActiveLayerId(null);
   useLayerTableStore.setState({ tables: {} });
-});
-
-describe("OUTPUT_COLUMNS", () => {
-  it("promises exactly the names the Height from extent executor writes", () => {
-    expect(OUTPUT_COLUMNS["height-from-extent"]!("extent_", {})).toEqual(
-      outputColumnNames("extent_"),
-    );
-    expect(OUTPUT_COLUMNS["height-from-extent"]!("", {})).toEqual(
-      outputColumnNames(""),
-    );
-  });
 });
 
 describe("the Layer select (spec §6 TARGET)", () => {

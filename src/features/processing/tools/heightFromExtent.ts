@@ -24,6 +24,7 @@ import { quoteIdent, quoteLiteral } from "../../../insights/sql";
 import type { OutputColumn } from "../../../insights/computedColumns";
 import type { ToolExecutor } from "../runQueue";
 import type { SkipCount } from "../types";
+import { toolById } from "../toolRegistry";
 import { registerExecutor } from "./index";
 
 /** One row of the extent read: a row id, its feature, and the z extent. */
@@ -43,14 +44,15 @@ export interface RollUp {
 }
 
 /**
- * The three columns this tool writes, in the order §7.4 lists them.
+ * The names this run writes, read from the tool's own DEFINITION.
  *
  * The ONE answer: the roll-up keys its rows with it, the executor declares it,
- * and the form's `OUTPUT_COLUMNS` promises it before any run exists. Three
- * literal lists is how the form comes to promise a name the run never writes.
+ * and the form promises it before any run exists. Three literal lists is how
+ * the form comes to promise a name the run never writes. The registry is pure
+ * data, so reading it here adds no edge back to the queue or to the UI.
  */
-export function outputColumnNames(prefix: string): [string, string, string] {
-  return [`${prefix}height_m`, `${prefix}zmin_m`, `${prefix}zmax_m`];
+function columnNames(prefix: string): ReadonlyArray<string> {
+  return toolById("height-from-extent").outputColumns?.(prefix, {}) ?? [];
 }
 
 /**
@@ -107,7 +109,9 @@ export function rollUpExtents(
     );
   }
 
-  const [heightCol, zminCol, zmaxCol] = outputColumnNames(prefix);
+  // Three names, fixed by §7.4 and by this tool's registry entry; the `!`s
+  // below are `noUncheckedIndexedAccess`, not a doubt about the shape.
+  const [heightCol, zminCol, zmaxCol] = columnNames(prefix);
   const out = new Map<string, Record<string, number | null>>();
   let measured = 0;
   let skipped = 0;
@@ -116,9 +120,9 @@ export function rollUpExtents(
     else skipped += 1;
     for (const id of members.get(feature) ?? []) {
       out.set(id, {
-        [heightCol]: extent ? extent.zmax - extent.zmin : null,
-        [zminCol]: extent ? extent.zmin : null,
-        [zmaxCol]: extent ? extent.zmax : null,
+        [heightCol!]: extent ? extent.zmax - extent.zmin : null,
+        [zminCol!]: extent ? extent.zmin : null,
+        [zmaxCol!]: extent ? extent.zmax : null,
       });
     }
   }
@@ -154,7 +158,7 @@ export const heightFromExtent: ToolExecutor = async (run, ctx) => {
     })),
     run.prefix,
   );
-  const columns: OutputColumn[] = outputColumnNames(run.prefix).map((name) => ({
+  const columns: OutputColumn[] = columnNames(run.prefix).map((name) => ({
     name,
     type: "DOUBLE",
   }));

@@ -10,9 +10,9 @@ import { describe, expect, it } from "vitest";
 import {
   buildExtentSql,
   heightFromExtent,
-  outputColumnNames,
   rollUpExtents,
 } from "../../../../src/features/processing/tools/heightFromExtent";
+import { toolById } from "../../../../src/features/processing/toolRegistry";
 import type {
   ToolContext,
   ToolResult,
@@ -197,15 +197,20 @@ describe("heightFromExtent executor", () => {
     expect(result.skipped).toEqual([{ cause: "no geometry", count: 1 }]);
   });
 
-  it("writes the columns the form promised, from the ONE builder", async () => {
+  it("writes exactly the names the tool DEFINITION promises the form", async () => {
+    const promised = toolById("height-from-extent").outputColumns!(
+      run.prefix,
+      run.params,
+    );
+    expect(promised).toEqual([
+      "extent_height_m",
+      "extent_zmin_m",
+      "extent_zmax_m",
+    ]);
     const fake = fakeContext([{ id: "B", f: "B", zmin: 0, zmax: 2 }], null);
     const result = await heightFromExtent(run, fake.ctx);
-    expect(result.columns.map((c) => c.name)).toEqual(
-      outputColumnNames(run.prefix),
-    );
-    expect(Object.keys(result.rows.get("B")!)).toEqual(
-      outputColumnNames(run.prefix),
-    );
+    expect(result.columns.map((c) => c.name)).toEqual(promised);
+    expect(Object.keys(result.rows.get("B")!)).toEqual(promised);
   });
 
   it("reads every row when the scope is 'all'", async () => {

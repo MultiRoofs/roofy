@@ -32,6 +32,18 @@ export interface ToolDefinition {
   /** Needs a second, vector layer as the source. */
   readonly needsVectorSource: boolean;
   readonly defaultPrefix: string;
+  /**
+   * The names this tool's run will write, for a prefix and a parameter set.
+   *
+   * It lives on the DEFINITION, which is pure data, because two places need the
+   * same answer at different times: the form prints it before any run exists,
+   * and the executor writes it. Absent for a tool whose executor has not
+   * shipped — the form then promises nothing.
+   */
+  readonly outputColumns?: (
+    prefix: string,
+    params: Readonly<Record<string, unknown>>,
+  ) => string[];
   /** False until a later milestone ships the executor. */
   readonly implemented: boolean;
 }

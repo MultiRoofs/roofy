@@ -29,25 +29,10 @@ import {
   eligibilityContextFor,
   useEligibilityInputs,
 } from "./useEligibilityContext";
-import { outputColumnNames } from "../../features/processing/tools/heightFromExtent";
 import { useActiveLayer } from "../../features/workspace/activeLayer";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 import type { RunRecord } from "../../features/processing/types";
 import type { RunRequest } from "../../features/processing/runQueue";
-
-/** Output column names per tool; M1 knows one tool, later milestones extend this map. */
-export const OUTPUT_COLUMNS: Readonly<
-  Partial<
-    Record<
-      ToolId,
-      (prefix: string, params: Readonly<Record<string, unknown>>) => string[]
-    >
-  >
-> = {
-  // The tool's own builder, not a copy of it: the promise the form prints
-  // before a run exists has to be the names the executor actually writes.
-  "height-from-extent": (p) => outputColumnNames(p),
-};
 
 /** An EMPTY prefix is a legal prefix — it is how the bare column names are
  *  asked for, and the collision check below is what refuses it when they are
@@ -69,7 +54,7 @@ function asColumns(names: ReadonlyArray<string>): RunRequest["columns"] {
  */
 export function requestFromRun(run: RunRecord): RunRequest {
   const names =
-    OUTPUT_COLUMNS[run.toolId]?.(run.prefix, run.params) ?? run.columns;
+    toolById(run.toolId).outputColumns?.(run.prefix, run.params) ?? run.columns;
   return {
     toolId: run.toolId,
     targetLayerId: run.targetLayerId,
@@ -149,10 +134,9 @@ export function useToolForm(toolId: ToolId) {
     status,
   );
   const eligibility = toolEligibility(tool, targetCtx);
-  const columns = (OUTPUT_COLUMNS[toolId] ?? (() => []))(
-    draft.prefix,
-    draft.params,
-  );
+  // The registry's own builder (spec §6 prints the resolved column list before
+  // Run); a tool whose executor has not shipped promises nothing.
+  const columns = tool.outputColumns?.(draft.prefix, draft.params) ?? [];
   const tableInfo =
     target && tables[target.id]?.state === "ready" ? tables[target.id] : null;
   const tableColumns =

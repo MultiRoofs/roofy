@@ -56,6 +56,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     target: "city",
     needsVectorSource: false,
     defaultPrefix: "extent_",
+    outputColumns: (p) => [`${p}height_m`, `${p}zmin_m`, `${p}zmax_m`],
     implemented: true,
   },
   {
