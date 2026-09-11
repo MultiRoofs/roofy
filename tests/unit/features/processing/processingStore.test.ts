@@ -96,6 +96,39 @@ describe("processingStore", () => {
     expect(useProcessingStore.getState().unseenFailure).toBe(false);
   });
 
+  it("marks a failure unseen while the Details tab is up", () => {
+    // §4.1's amber dot means "a failure you have not looked at". An open
+    // toolbox showing DETAILS is not showing the failure.
+    const s = useProcessingStore.getState();
+    s.setOpen(true);
+    s.setTab("details");
+    s.upsertRun(run("r1"));
+    useProcessingStore.getState().patchRun("r1", {
+      status: "failed",
+      error: "Binder Error: x",
+    });
+    expect(useProcessingStore.getState().unseenFailure).toBe(true);
+    useProcessingStore.getState().setTab("tools");
+    expect(useProcessingStore.getState().unseenFailure).toBe(false);
+  });
+
+  it("marks a failure unseen while the right panel is collapsed", () => {
+    const s = useProcessingStore.getState();
+    s.setOpen(true);
+    s.setPanelCollapsed(true);
+    s.upsertRun(run("r1", { status: "failed", error: "Binder Error: x" }));
+    expect(useProcessingStore.getState().unseenFailure).toBe(true);
+    useProcessingStore.getState().setPanelCollapsed(false);
+    expect(useProcessingStore.getState().unseenFailure).toBe(false);
+  });
+
+  it("leaves a failure seen when the Tools tab is actually showing", () => {
+    const s = useProcessingStore.getState();
+    s.setOpen(true);
+    s.upsertRun(run("r1", { status: "failed", error: "Binder Error: x" }));
+    expect(useProcessingStore.getState().unseenFailure).toBe(false);
+  });
+
   it("ignores a patch for a run it does not hold", () => {
     const s = useProcessingStore.getState();
     s.patchRun("nope", { status: "failed", error: "boom" });

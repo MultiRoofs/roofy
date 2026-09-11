@@ -8,6 +8,7 @@ import {
 } from "../../../../src/ui/shell/shellStore";
 import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 import { useSelectionStore } from "../../../../src/features/selection/selectionStore";
+import { useProcessingStore } from "../../../../src/features/processing/processingStore";
 
 describe("defaultShellState (pure)", () => {
   it("uses the wide/tall defaults at a normal viewport", () => {
@@ -134,6 +135,16 @@ describe("useShellStore", () => {
     expect(useSelectionStore.getState().selections).toHaveLength(1);
     useShellStore.getState().toggleRightCollapsed();
     expect(useShellStore.getState().rightCollapsed).toBe(false);
+  });
+
+  it("mirrors the collapse into the processing store, both ways", () => {
+    // §4.1's amber dot must not light for a failure the user can already see,
+    // and a collapsed panel shows neither tab. `features/` may not import
+    // `ui/`, so the shell — the state's owner — pushes it the other way.
+    useShellStore.getState().setRightCollapsed(true);
+    expect(useProcessingStore.getState().panelCollapsed).toBe(true);
+    useShellStore.getState().toggleRightCollapsed();
+    expect(useProcessingStore.getState().panelCollapsed).toBe(false);
   });
 
   it("clamps leftWidth to 240..420", () => {

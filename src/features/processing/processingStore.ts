@@ -45,6 +45,16 @@ interface ProcessingState {
    * history it shadows.
    */
   readonly dismissedRunIds: ReadonlyArray<string>;
+  /**
+   * Whether the right panel is collapsed, mirrored from the shell.
+   *
+   * A copy rather than a read because nothing under `features/` may import
+   * from `ui/`, and the collapse is the shell's state — so the shell's own
+   * setters push it here (`shellStore.ts`). It exists for ONE reason: "the
+   * Tools tab is visible" is `open` AND `activeTab === "tools"` AND this, and
+   * §4.1's amber dot is about exactly that.
+   */
+  readonly panelCollapsed: boolean;
   /** A failed run the user has not looked at yet (spec §4.1 amber dot). */
   readonly unseenFailure: boolean;
   /** One-line toast text; `noticeSeq` increments so App can subscribe. */
@@ -56,6 +66,8 @@ interface ProcessingActions {
   setOpen(open: boolean): void;
   toggle(): void;
   setTab(tab: "tools" | "details"): void;
+  /** The shell's `rightCollapsed`, mirrored. Called by `shellStore` only. */
+  setPanelCollapsed(collapsed: boolean): void;
   openTool(toolId: ToolId): void;
   openLog(runId: string): void;
   back(): void;
@@ -91,10 +103,21 @@ const initial: ProcessingState = {
   drafts: {},
   runs: [],
   dismissedRunIds: [],
+  panelCollapsed: false,
   unseenFailure: false,
   notice: null,
   noticeSeq: 0,
 };
+
+/**
+ * Spec §4.1: the amber dot turns off when "the Tools tab is opened" — which is
+ * not the same as the toolbox being open. A failure that lands while DETAILS is
+ * selected, or while the right panel is collapsed over both tabs, is one the
+ * user has not seen, and the dot is the only thing that would say so.
+ */
+function toolsVisible(s: ProcessingState): boolean {
+  return s.open && s.activeTab === "tools" && !s.panelCollapsed;
+}
 
 export const useProcessingStore = create<ProcessingState & ProcessingActions>(
   (set, get) => ({
@@ -104,25 +127,40 @@ export const useProcessingStore = create<ProcessingState & ProcessingActions>(
         open,
         activeTab: open ? "tools" : s.activeTab,
         view: open ? s.view : { kind: "catalogue" },
-        unseenFailure: open ? false : s.unseenFailure,
+        unseenFailure: open && !s.panelCollapsed ? false : s.unseenFailure,
       })),
     toggle: () => get().setOpen(!get().open),
-    setTab: (activeTab) => set({ activeTab }),
+    setTab: (activeTab) =>
+      set((s) => ({
+        activeTab,
+        unseenFailure: toolsVisible({ ...s, activeTab })
+          ? false
+          : s.unseenFailure,
+      })),
+    setPanelCollapsed: (panelCollapsed) =>
+      set((s) => ({
+        panelCollapsed,
+        unseenFailure: toolsVisible({ ...s, panelCollapsed })
+          ? false
+          : s.unseenFailure,
+      })),
     // Opening the panel through a view is opening the panel: the amber dot
     // means "a failure you have not looked at", and the Tools tab is now up.
+    // A collapsed panel still hides it — every caller here pairs the view with
+    // `revealTools`, whose `setRightCollapsed(false)` mirrors in and clears it.
     openTool: (toolId) =>
-      set({
+      set((s) => ({
         open: true,
         activeTab: "tools",
         view: { kind: "tool", toolId },
-        unseenFailure: false,
-      }),
+        unseenFailure: s.panelCollapsed ? s.unseenFailure : false,
+      })),
     openLog: (runId) =>
       set((s) => ({
         open: true,
         activeTab: "tools",
         view: { kind: "log", runId, from: s.view },
-        unseenFailure: false,
+        unseenFailure: s.panelCollapsed ? s.unseenFailure : false,
       })),
     back: () =>
       set((s) =>
@@ -149,7 +187,7 @@ export const useProcessingStore = create<ProcessingState & ProcessingActions>(
         return {
           runs: [run, ...rest].slice(0, MAX_RUNS),
           unseenFailure:
-            s.unseenFailure || (run.status === "failed" && !s.open),
+            s.unseenFailure || (run.status === "failed" && !toolsVisible(s)),
         };
       }),
     dismissRun: (id) =>
@@ -178,7 +216,7 @@ export const useProcessingStore = create<ProcessingState & ProcessingActions>(
         return {
           runs: s.runs.map((r) => (r.id === id ? { ...r, ...patch } : r)),
           unseenFailure:
-            s.unseenFailure || (patch.status === "failed" && !s.open),
+            s.unseenFailure || (patch.status === "failed" && !toolsVisible(s)),
         };
       }),
     pushNotice: (text) =>

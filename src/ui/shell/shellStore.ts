@@ -1,3 +1,4 @@
+import { useProcessingStore } from "../../features/processing/processingStore";
 import { useQueryStore } from "../../features/query/queryStore";
 import { useWorkspaceStore } from "../../features/workspace/workspaceStore";
 /**
@@ -137,9 +138,19 @@ export const useShellStore = create<ShellStore>((set, get) => ({
       rightWidth: clamp(px, SHELL_LIMITS.rightMin, SHELL_LIMITS.rightMax),
     }),
 
-  setRightCollapsed: (v) => set({ rightCollapsed: v }),
-  toggleRightCollapsed: () =>
-    set((state) => ({ rightCollapsed: !state.rightCollapsed })),
+  // Spec §4.1: the toolbox's amber dot is about whether the user can SEE the
+  // Tools tab, and a collapsed panel hides it. `processingStore` cannot read
+  // this itself — nothing under `features/` may import from `ui/` — so the
+  // state's owner pushes it, from the only two places it changes.
+  setRightCollapsed: (v) => {
+    set({ rightCollapsed: v });
+    useProcessingStore.getState().setPanelCollapsed(v);
+  },
+  toggleRightCollapsed: () => {
+    const next = !get().rightCollapsed;
+    set({ rightCollapsed: next });
+    useProcessingStore.getState().setPanelCollapsed(next);
+  },
 
   openDrawer: () => set({ drawerOpen: true }),
   openFilter: () => {
