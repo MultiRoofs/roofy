@@ -127,7 +127,8 @@ export function DrawOverlay({
         if (e.key === "Escape") useDrawStore.getState().stop();
         if (e.key === "Enter" && e.target === e.currentTarget) {
           e.preventDefault();
-          extruding ? void finish(height) : finishFootprint();
+          if (extruding) void finish(height);
+          else finishFootprint();
         }
       }}
     >

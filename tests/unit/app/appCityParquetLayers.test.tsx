@@ -22,6 +22,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { forwardRef, useImperativeHandle } from "react";
 import type { CitySceneHandle } from "../../../src/scene/NavaraViewport";
@@ -442,12 +443,24 @@ describe("App — a failed group add is reported", () => {
       rules: [],
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Add layer" }));
+    // Scoped to the layers panel on purpose: "Add layer" is also the label of
+    // the landing page's URL submit button and of the dialog's own confirm
+    // button, and an unscoped query resolves against whichever of them is on
+    // screen first — which is how this click used to land on the landing
+    // page's button and never open the dialog at all.
+    const panel = await screen.findByRole("complementary", {
+      name: "Layers panel",
+    });
+    fireEvent.click(within(panel).getByRole("button", { name: "Add layer" }));
     // The dialog opens on the File tab, which is where a group of files is
     // dropped; a multi-file selection is a CityParquet package by
     // construction, so the confirming click is all it needs.
     dropTwoFiles();
-    fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Add layer",
+      }),
+    );
 
     await waitFor(() =>
       expect(loadCityParquetFromFiles).toHaveBeenCalledTimes(1),
