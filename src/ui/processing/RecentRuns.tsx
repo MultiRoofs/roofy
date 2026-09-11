@@ -105,13 +105,13 @@ function RunRow({ run }: { readonly run: RunRecord }) {
               params: run.params,
             });
             // §5: the form opens "so parameters can be changed" — clear the
-            // card that would otherwise lock it (§6.2). That card belongs to
-            // the LATEST run of this tool and target, which may be a newer run
-            // than the row clicked; a latest run still in flight keeps its
-            // footer and its lock.
+            // card that would otherwise lock it (§6.2) or leave it with no Run
+            // button at all (§6.3). That card belongs to the LATEST run of this
+            // tool and target, which may be a newer run than the row clicked; a
+            // latest run still in flight keeps its footer and its lock.
             useProcessingStore
               .getState()
-              .dismissDoneRun(run.toolId, run.targetLayerId);
+              .dismissFinishedRun(run.toolId, run.targetLayerId);
             openToolView(run.toolId);
           }}
         >

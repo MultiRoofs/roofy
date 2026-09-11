@@ -113,20 +113,63 @@ describe("processingStore", () => {
     expect(useProcessingStore.getState().dismissedRunIds).toEqual([]);
   });
 
-  it("dismisses the latest DONE run of a pair, and never one in flight", () => {
+  it("dismisses the latest FINISHED run of a pair, and never one in flight", () => {
     const store = useProcessingStore.getState();
     store.upsertRun(
       run("other-target", { targetLayerId: "L2", status: "done" }),
     );
     store.upsertRun(run("older", { status: "done" }));
     store.upsertRun(run("newer", { status: "done" }));
-    store.dismissDoneRun("height-from-extent", "L1");
+    store.dismissFinishedRun("height-from-extent", "L1");
     // The newest of the pair, not the oldest — and nothing on the other target.
     expect(useProcessingStore.getState().dismissedRunIds).toEqual(["newer"]);
 
     useProcessingStore.getState().upsertRun(run("live", { status: "running" }));
-    useProcessingStore.getState().dismissDoneRun("height-from-extent", "L1");
+    useProcessingStore
+      .getState()
+      .dismissFinishedRun("height-from-extent", "L1");
     expect(useProcessingStore.getState().dismissedRunIds).toEqual(["newer"]);
+
+    // §6.3's failed card is dismissible too: it offers Retry and Log only, so
+    // while it stands there is no way to submit an edited request at all.
+    useProcessingStore
+      .getState()
+      .upsertRun(run("boom", { status: "failed", error: "Binder Error: x" }));
+    useProcessingStore
+      .getState()
+      .dismissFinishedRun("height-from-extent", "L1");
+    expect(useProcessingStore.getState().dismissedRunIds).toEqual([
+      "boom",
+      "newer",
+    ]);
+  });
+
+  it("dismisses a failed card on the first edit of the tool's draft", () => {
+    // §6.3 offers Retry and Log; the Run button comes back the moment the user
+    // changes something, so an edited request has somewhere to go.
+    const s = useProcessingStore.getState();
+    s.upsertRun(run("r1", { status: "failed", error: "Binder Error: x" }));
+    s.setDraft("height-from-extent", {
+      targetLayerId: "L1",
+      scope: "all",
+      lod: null,
+      prefix: "h_",
+      params: {},
+    });
+    expect(useProcessingStore.getState().dismissedRunIds).toEqual(["r1"]);
+  });
+
+  it("leaves a run in flight alone when the draft is edited", () => {
+    const s = useProcessingStore.getState();
+    s.upsertRun(run("r1", { status: "running", phase: "compute" }));
+    s.setDraft("height-from-extent", {
+      targetLayerId: "L1",
+      scope: "all",
+      lod: null,
+      prefix: "h_",
+      params: {},
+    });
+    expect(useProcessingStore.getState().dismissedRunIds).toEqual([]);
   });
 
   it("publishes a notice with a sequence number", () => {

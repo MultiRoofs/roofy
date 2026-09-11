@@ -450,6 +450,13 @@ describe("ToolView", () => {
   it("retries a failed run with its FROZEN parameters, not the draft", () => {
     const layerId = addCityLayer();
     render(<ToolView toolId="height-from-extent" />);
+    // §6.3 leaves the form editable after a failure, so the draft can drift —
+    // and drift into a state that would refuse a fresh Run. Seeded BEFORE the
+    // card arrives: an edit made UNDER a failed card dismisses it, which is
+    // how the Run button comes back.
+    fireEvent.change(screen.getByRole("textbox", { name: "Prefix" }), {
+      target: { value: "1 bad" },
+    });
     act(() =>
       useProcessingStore.getState().upsertRun(
         runFixture({
@@ -460,11 +467,6 @@ describe("ToolView", () => {
         }),
       ),
     );
-    // §6.3 leaves the form editable after a failure, so the draft can drift —
-    // and drift into a state that would refuse a fresh Run.
-    fireEvent.change(screen.getByRole("textbox", { name: "Prefix" }), {
-      target: { value: "1 bad" },
-    });
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     // The frozen request lives in the QUEUE (its scope's resolved ids with
     // it), so Retry repeats the run by id and never rebuilds a request from
@@ -1039,6 +1041,54 @@ describe("ToolView", () => {
         }),
       ),
     );
+    expect(screen.getByRole("textbox", { name: "Prefix" })).not.toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Layer" })).not.toBeDisabled();
+  });
+
+  it("hands Run back on the first edit under a FAILED card", () => {
+    // §6.3's footer offers Retry and Log only, and Retry repeats the FROZEN
+    // request — so while the card stands, an edited request has no way out of
+    // the form at all.
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() =>
+      useProcessingStore.getState().upsertRun(
+        runFixture({
+          status: "failed",
+          targetLayerId: layerId,
+          error: "Binder Error: x",
+        }),
+      ),
+    );
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Prefix" }), {
+      target: { value: "h_" },
+    });
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(submitRun).toHaveBeenCalledWith(
+      expect.objectContaining({ prefix: "h_" }),
+    );
+  });
+
+  it("shows the idle footer for a failed run Edit & run dismissed", () => {
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() => {
+      useProcessingStore.getState().upsertRun(
+        runFixture({
+          status: "failed",
+          targetLayerId: layerId,
+          error: "Binder Error: x",
+        }),
+      );
+      useProcessingStore
+        .getState()
+        .dismissFinishedRun("height-from-extent", layerId);
+    });
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Run" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Prefix" })).not.toBeDisabled();
     expect(screen.getByRole("combobox", { name: "Layer" })).not.toBeDisabled();
   });

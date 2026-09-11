@@ -192,6 +192,17 @@ describe("RecentRuns", () => {
     expect(useProcessingStore.getState().dismissedRunIds).toEqual([]);
   });
 
+  it("clears a FAILED card too, so the form it opens can be submitted", () => {
+    // §6.3's card offers Retry and Log; Edit & run promises a form whose
+    // parameters can be changed, which means one with a Run button.
+    useProcessingStore
+      .getState()
+      .upsertRun(runFixture({ status: "failed", error: "Binder Error: x" }));
+    render(<RecentRuns />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit & run" }));
+    expect(useProcessingStore.getState().dismissedRunIds).toEqual(["r1"]);
+  });
+
   it("lists the newest run first", () => {
     useProcessingStore.getState().upsertRun(runFixture({ id: "old" }));
     useProcessingStore

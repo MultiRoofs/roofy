@@ -71,8 +71,13 @@ interface ProcessingActions {
    * Recent runs is not necessarily the card in its way. A latest run that is
    * still in flight is left alone: §6.1 locks the form while it runs, and no
    * dismissal may take its progress block or its Cancel away.
+   *
+   * FINISHED is done OR failed. §6.3's failed footer offers Retry and Log
+   * only, and Retry repeats the run's FROZEN request — so while that card
+   * stands there is no way to submit an edited one, and "Edit & run" would
+   * open a form whose Run button is not there.
    */
-  dismissDoneRun(toolId: ToolId, targetLayerId: string): void;
+  dismissFinishedRun(toolId: ToolId, targetLayerId: string): void;
   patchRun(id: string, patch: Partial<RunRecord>): void;
   pushNotice(text: string): void;
   resetForTest(): void;
@@ -126,8 +131,18 @@ export const useProcessingStore = create<ProcessingState & ProcessingActions>(
           : { view: { kind: "catalogue" } },
       ),
     setSearch: (search) => set({ search }),
-    setDraft: (toolId, draft) =>
-      set((s) => ({ drafts: { ...s.drafts, [toolId]: draft } })),
+    setDraft: (toolId, draft) => {
+      set((s) => ({ drafts: { ...s.drafts, [toolId]: draft } }));
+      // §6.3's card has no Run button under it, so the first edit is what
+      // gives the user one: a failed card the user has started editing away
+      // from is gone, and its Retry stays reachable from Recent runs. Only a
+      // FAILED one — a done card locks the form, and nothing in flight may
+      // lose its progress block.
+      const latest = get().runs.find(
+        (r) => r.toolId === toolId && r.targetLayerId === draft.targetLayerId,
+      );
+      if (latest?.status === "failed") get().dismissRun(latest.id);
+    },
     upsertRun: (run) =>
       set((s) => {
         const rest = s.runs.filter((r) => r.id !== run.id);
@@ -143,12 +158,14 @@ export const useProcessingStore = create<ProcessingState & ProcessingActions>(
           ? {}
           : { dismissedRunIds: [id, ...s.dismissedRunIds].slice(0, MAX_RUNS) },
       ),
-    dismissDoneRun: (toolId, targetLayerId) => {
+    dismissFinishedRun: (toolId, targetLayerId) => {
       // `runs` is newest first, so the first match IS the latest of the pair.
       const latest = get().runs.find(
         (r) => r.toolId === toolId && r.targetLayerId === targetLayerId,
       );
-      if (latest?.status === "done") get().dismissRun(latest.id);
+      if (latest?.status === "done" || latest?.status === "failed") {
+        get().dismissRun(latest.id);
+      }
     },
     patchRun: (id, patch) =>
       set((s) => {

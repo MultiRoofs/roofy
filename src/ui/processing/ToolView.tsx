@@ -24,14 +24,15 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
   // the store, so it survives leaving the tool view and Recent runs' "Edit &
   // run" can clear the card of the run it opens the form on.
   //
-  // A dismissal only ever hides a DONE card. A queued, running or cancelling
-  // run keeps its footer and its lock whatever is in the dismissed list: §6.1's
-  // progress block and Cancel are the only way to reach a run in flight, and
-  // Run must not come back while one is still going.
+  // A dismissal only ever hides a FINISHED card — done or failed (§6.3's
+  // footer offers Retry and Log, so dismissing it is the only way back to Run).
+  // A queued, running or cancelling run keeps its footer and its lock whatever
+  // is in the dismissed list: §6.1's progress block and Cancel are the only way
+  // to reach a run in flight, and Run must not come back while one is going.
   const dismissed = useProcessingStore((s) => s.dismissedRunIds);
   const latestRun =
     f.latestRun !== null &&
-    f.latestRun.status === "done" &&
+    (f.latestRun.status === "done" || f.latestRun.status === "failed") &&
     dismissed.includes(f.latestRun.id)
       ? null
       : f.latestRun;
