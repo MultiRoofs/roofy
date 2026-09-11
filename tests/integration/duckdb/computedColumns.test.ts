@@ -324,9 +324,10 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
       const { inferred: types, write } = assignInto("allnull", rows);
       expect(write.ok).toBe(true);
       expect(heightOf("allnull", "b1")).toBeNull();
-      // Recorded, not asserted to a guessed spelling: this is the fact the
-      // architecture notes carry.
-      expect(typeof types.extent_height_m).toBe("string");
+      // PINNED, now that the probe has answered: `JSON`, not `SQLNULL`. The
+      // architecture note carries this, and a duckdb-wasm bump that changed it
+      // has to say so here first.
+      expect(types.extent_height_m).toBe("JSON");
     });
 
     it("(a-big) an all-NULL column past the sample size still assigns into DOUBLE", () => {
@@ -349,11 +350,12 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
       console.log(
         `[cc] probe 2/latedouble: ${JSON.stringify(types)}, ok=${write.ok}, msg=${write.message}`,
       );
-      // Recorded either way — a refusal here is a real M2 hazard for a tool
-      // whose first 20,480 features have no value.
-      if (write.ok) {
-        expect(heightOf("latedouble", `b${SAMPLE_SIZE}`)).toBe(12.5);
-      }
+      // There is no sample-size cliff for the all-NULL case: `JSON` absorbs the
+      // late value rather than the sample fixing the column to NULL. A tool
+      // whose first 20,480 features have no value depends on this.
+      expect(types.extent_height_m).toBe("JSON");
+      expect(write.ok).toBe(true);
+      expect(heightOf("latedouble", `b${SAMPLE_SIZE}`)).toBe(12.5);
     });
 
     it("(b) a BigInt stringified by the replacer, assigned into DOUBLE", () => {
@@ -365,13 +367,14 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
       console.log(
         `[cc] probe 2/bigint: inferred ${JSON.stringify(types)}, ok=${write.ok}, msg=${write.message}`,
       );
-      if (write.ok) {
-        console.log(
-          `[cc] probe 2/bigint value: ${String(heightOf("bigint", "b1"))}`,
-        );
-      }
-      // Recorded, not pre-judged: the ruling only asks what DuckDB does.
-      expect(typeof types.extent_height_m).toBe("string");
+      // The replacer's string is inferred VARCHAR and casts implicitly — the
+      // write never fails. What it costs is precision: the value comes back as
+      // the DOUBLE nearest to it, which no DOUBLE column could have held
+      // anyway. Pinned so a bump that started REFUSING the cast is caught here.
+      expect(types.extent_height_m).toBe("VARCHAR");
+      expect(write.ok).toBe(true);
+      expect(heightOf("bigint", "b1")).toBe(12345678901234567000);
+      expect(heightOf("bigint", "b2")).toBe(42);
     });
 
     it("(b-big) the same BigInt-as-string past the sample size", () => {
@@ -387,17 +390,15 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
       console.log(
         `[cc] probe 2/bigintbig: inferred ${JSON.stringify(types)}, ok=${write.ok}, msg=${write.message}`,
       );
-      if (write.ok) {
-        // What happened to the ONE value outside the sample matters more than
-        // the verdict: a silent NULL there would be a data loss nothing warns
-        // about.
-        console.log(
-          `[cc] probe 2/bigintbig out-of-sample value: ${String(
-            heightOf("bigintbig", `b${SAMPLE_SIZE}`),
-          )}, in-sample: ${String(heightOf("bigintbig", "b0"))}`,
-        );
-      }
-      expect(typeof types.extent_height_m).toBe("string");
+      // Past the sample the inference flips to DOUBLE, and the one string
+      // outside it still casts rather than landing as NULL — which is what
+      // matters: a silent NULL there would be data loss nothing warns about.
+      expect(types.extent_height_m).toBe("DOUBLE");
+      expect(write.ok).toBe(true);
+      expect(heightOf("bigintbig", `b${SAMPLE_SIZE}`)).toBe(
+        12345678901234567000,
+      );
+      expect(heightOf("bigintbig", "b0")).toBe(1.5);
     });
 
     it("(c) whole-number heights infer an integer type and still assign into DOUBLE", () => {
@@ -408,7 +409,10 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
       const { inferred: types, write } = assignInto("wholenumbers", rows);
       expect(write.ok).toBe(true);
       expect(heightOf("wholenumbers", "b1")).toBe(12);
-      expect(typeof types.extent_height_m).toBe("string");
+      // Heights are often whole numbers, and JSON gives DuckDB no reason to
+      // read 12 as a double. BIGINT into a DOUBLE column is fine; pinned so a
+      // bump that inferred something narrower (and overflowed) is caught.
+      expect(types.extent_height_m).toBe("BIGINT");
     });
   });
 
