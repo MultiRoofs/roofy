@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship **Roof metrics to attributes** as the toolbox's second working tool (spec §7.1: LoD select, six measure checkboxes, flat-threshold slider, feature roll-ups, skip accounting, Style by result on `roof_area_m2`), plus the two seams the rest of the catalogue waits on — a **"Loading extension" run phase** backed by `ensureExtension`, and a **DuckDB status subscription** so the capability chips and their **Retry** link re-render when an extension's state moves.
+**Goal:** Ship **Roof metrics to attributes** as the toolbox's second working tool (spec §7.1: LoD select, six measure checkboxes, flat-threshold slider, feature roll-ups, skip accounting, Style by result on `roof_area_m2`), plus the three seams the rest of the catalogue waits on — a **"Loading extension" run phase** backed by `ensureExtension`, a **DuckDB status subscription** so the capability chips and their **Retry** link re-render when an extension's state moves, and **containment of a dead engine** (§6.1's "Analytics engine stopped", minus its recovery).
 
-**Architecture:** Three independent strands, in this order. (1) `src/insights/duckdb.ts` gains a listener list and publishes every status transition; a new `src/insights/useDuckDBStatus.ts` hook (`useSyncExternalStore` over a version counter) becomes the ONE React door to the value, and `App`'s `useState` mirror is deleted. (2) `runQueue.execute` gains an extension step before the scope is resolved: a tool with `extension !== null` that is not already loaded runs `ensureExtension` under `phase: "extension"`, and a failed load fails the run; the catalogue's chips read the published state and offer Retry. (3) Roof metrics is computed **app-side** from the layer's surfaces (static: `CityObject.surfaces`; streaming: the resident records, which this milestone LoD-tags in the plugin submodule), rolled up per FEATURE by a pure domain module, and written through M1's existing rows path — no SQL compute, so the "Reading source" phase stays skipped.
+**Architecture:** Four strands, in this order. (1) `src/insights/duckdb.ts` gains a listener list and publishes every status transition; a new `src/insights/useDuckDBStatus.ts` hook (`useSyncExternalStore` over a version counter) becomes the ONE React door to the value, and `App`'s `useState` mirror is deleted. (2) `runQueue.execute` gains an extension step before the scope is resolved: a tool with `extension !== null` that is not already loaded runs `ensureExtension` under `phase: "extension"`, and a failed load fails the run; the catalogue's chips read the published state and offer Retry. (3) A dead worker is detected by `duckdb.ts` itself, published as `failed` through the same writer, and acted on by a new `runQueue` watcher that fails every queued and running run and disables every Undo. (4) Roof metrics is computed **app-side** from the layer's surfaces (static: `CityObject.surfaces`; streaming: the resident records, which this milestone LoD-tags in the plugin submodule), rolled up per FEATURE by a pure domain module, and written through M1's existing rows path — no SQL compute, so the "Reading source" phase stays skipped.
 
 **Tech Stack:** React 19 (`useSyncExternalStore`), Zustand, DuckDB-wasm reached only through `src/insights/duckdb.ts`, Vitest + @testing-library/react (jsdom), plugin submodule `@cityjson/navara-flatcitybuf` (pnpm).
 
@@ -19,14 +19,14 @@ Carried from M1 (unchanged, and every one still applies):
 - Never run bare `vite`/`vp dev`; use `npm run dev`, `npm run build`, `npx vp check`, `npx vitest run`, `npx tsc -b --noEmit`.
 - `src/insights/duckdb.ts` is the ONLY importer of `@duckdb/duckdb-wasm`. Every NEW export from `duckdb.ts` must be added to every `vi.mock(".../insights/duckdb", …)` factory. **This milestone adds two** (`subscribeDuckDBStatus`, `getDuckDBStatusVersion`) — Task 1 lists all 26 files and does it.
 - Test files import from `"vitest"`, never `"vite-plus/test"`.
-- Submodule-first: commit inside `packages/cityjson-navara-plugins` first, push it (`git -C packages/cityjson-navara-plugins push origin main`), then commit the pointer bump plus the parent-side fixture fixes in the parent. Always `cd` into the submodule for pnpm; never `pnpm -C`. Task 5 is the only submodule task, and the milestone review (Task 14) reads the submodule diff too.
+- Submodule-first: commit inside `packages/cityjson-navara-plugins` first, push it (`git -C packages/cityjson-navara-plugins push origin main`), then commit the pointer bump plus the parent-side fixture fixes in the parent. Always `cd` into the submodule for pnpm; never `pnpm -C`. Task 6 is the only submodule task, and the milestone review (Task 15) reads the submodule diff too.
 - Commits: small, prefixed `feat:` / `fix:` / `test:` / `docs:` / `refactor:` / `chore:`; commit directly on `develop`. **No attribution trailers** (the M1 sessions' standing ruling; the harness's `Claude-Session:` line included).
 - UI: Soft Utility tokens from `src/app/flatControls.css` (`--control-radius` 8px, `--control-height` 38px, `--control-height-compact` 30px). Verify new controls against peers in the browser.
-- Copy: every user-visible string comes from the spec verbatim. Where the spec has no string for a roof-specific case, this plan proposes one and marks it **[adapted]**; the collected list is in "Open questions for the human" at the end.
+- Copy: every user-visible string comes from the spec verbatim. Where the spec has no string for a case this milestone reaches, the repo owner has DECIDED one; it is written to the spec's own pattern and tagged **[adapted copy]** so a reviewer knows not to look for it in §5-§8. The collected list is "Decisions recorded (2026-09-11)" at the end.
 - Features, not rows (spec §7): a BuildingPart never counts as a building; roll-ups are per feature (`COALESCE("feature_id","id")`).
 - Nothing new is persisted (snapshot schema v4 untouched).
 - Pre-commit hook runs `vp staged`; pre-push runs `vp check`, `tsc -b --noEmit`, `vp test run`. Do not bypass hooks.
-- `!implemented` outranks every eligibility reason (M1 ruling, `eligibility.ts:44`). Roof metrics flips to `implemented: true` in **Task 12**, after its executor, LoD select and parameters exist; only then can its row show a per-layer reason.
+- `!implemented` outranks every eligibility reason (M1 ruling, `eligibility.ts:44`). Roof metrics flips to `implemented: true` in **Task 13**, after its executor, LoD select and parameters exist; only then can its row show a per-layer reason.
 
 New in M2:
 
@@ -35,7 +35,7 @@ New in M2:
 - The extension load runs INSIDE `runOnTableQueue` (it is part of `execute`), so a first `spatial` load blocks table builds for its ~24 MB download, once per session. Accepted deliberately: the alternative — loading before the queue — loses the phase's place in §6.1's sequence and lets a run start against a table that is being rebuilt. Say so in the architecture note.
 - `ensureExtension` is NOT abortable. Every call site checks `signal.aborted` after it resolves.
 - Roof metrics computes app-side. It issues exactly ONE SQL statement (the id/feature read) and never re-reads geometry, so `needsReader` stays `false` and the "Reading source" phase stays skipped.
-- Out of scope, and no task may add them: destination **New layer**, **Measure solids**, **Validate solids**, the cross-layer tools, LoD for non-roof tools, rule-colour palette rotation, the field calculator. Two further exclusions are DEFERRALS with a written design and an open question each, not silent gaps: the FCB **attribute write-back** (Design decision (b), open question 10) and **engine-death recovery** (§6.1's "Analytics engine stopped", the "Deferred with design notes" section, open question 11).
+- Out of scope, and no task may add them: destination **New layer**, **Measure solids**, **Validate solids**, the cross-layer tools, LoD for non-roof tools, rule-colour palette rotation, the field calculator. One further exclusion is the repo owner's ruling, not a silent gap: the FCB **attribute write-back** is a FUTURE CONSIDERATION (Design decision (b), and the section of that name). Engine death is NOT excluded — Task 4 detects it, fails every run and disables every Undo; what Task 4 does not do is RECOVER, and the status bar's Retry is left exactly as it is.
 - **No unimplemented tool may claim a fact about the user's data.** A tool with `implemented === false` renders no LoD control, no column list and no geometry verdict — only its name, description, chip and "Not available yet". Inventing "No solid geometry in this layer" for a tool that never inspected the geometry is a lie the UI must not tell.
 - **Nothing walks a whole layer's geometry synchronously.** LoD eligibility and counts read surface TAGS only (`type`, `lod`) and call no metric function; a run measures only the scoped features' contributors at the chosen LoD, in batches of **500 features** that yield to the event loop and check `signal.aborted` between them.
 
@@ -94,15 +94,15 @@ Every line below was read on this checkout. File:line citations are exact.
 - **Streaming layers have an empty model.** `src/features/streaming/openStreamingLayer.ts:109-115` builds `const model: CityModel = { sourceEncoding: "flatcitybuf", …, objects: {}, vertexCount: 0 }`. `ctx.layer.model.objects` is `{}` for every FCB layer.
 - The resident set is reachable from anywhere on the main thread: `src/features/streaming/residentModel.ts:46-53` — `getResidentModel(layerId, version): ResidentModel` reads `useStreamStore.getState().streams[layerId]?.handle`. `ResidentModel.objects` is `Record<string, ResidentObjectRecord>`; `version` is a **subscription marker** for React callers (`residentModel.ts:40-44`), bumped on every commit (`src/features/streaming/streamStore.ts:86,153`).
 - `packages/…/navara-flatcitybuf/src/workerProtocol.ts:39-51` — `ResidentObjectRecord = { id; objectType; attributes; bbox; lod: string | null; surfaceCount; roofMetrics: ReadonlyArray<RoofMetrics>; footprintAreaSqM; volumeCuM; parents; children }`.
-- **`roofMetrics` is NOT LoD-tagged and NOT LoD-filtered.** `packages/…/navara-flatcitybuf/src/objectRecords.ts:33-35` computes it as `obj.surfaces.filter((s) => s.type === "RoofSurface").map(computeRoofMetrics)`, and `fcb.worker.ts:408` calls `toObjectRecords(cellModel)` on the **unfiltered** cell model — `msg.lod` only filters the mesh arrays built at `fcb.worker.ts:356-364`. `record.lod` is the CityObject's lod, not the surfaces'. Task 5 fixes this.
+- **`roofMetrics` is NOT LoD-tagged and NOT LoD-filtered.** `packages/…/navara-flatcitybuf/src/objectRecords.ts:33-35` computes it as `obj.surfaces.filter((s) => s.type === "RoofSurface").map(computeRoofMetrics)`, and `fcb.worker.ts:408` calls `toObjectRecords(cellModel)` on the **unfiltered** cell model — `msg.lod` only filters the mesh arrays built at `fcb.worker.ts:356-364`. `record.lod` is the CityObject's lod, not the surfaces'. Task 6 fixes this.
 - Readers of `record.roofMetrics` that a widened element type must not break: `src/ui/viewport/legendCounts.ts:94-103`, `src/ui/details/useResolvedSubject.ts:125`, `src/ui/details/DetailsPanel.tsx:263-268`, `src/insights/computeStats.ts:142,231`, `src/ui/drawer/derivedBuildingColumns.ts:19-20`. All of them read `areaSqM`/`inclinationDeg`/`azimuthDeg` or pass the array where `ReadonlyArray<RoofMetrics>` is expected — a widening (`RoofMetrics & { lod }`) is assignable to all of them.
 - **`src/domain/roofMetrics/aggregate.ts` agrees with §7 on two measures and not on the rest.** `aggregateRoofMetrics` (`:39-58`) DOES compute an area-weighted mean inclination (`:50-54`) and DOES count surfaces as `metrics.length` — the same answers §7 wants for `roof_slope_deg` and `roof_surfaces_n`. What it cannot give M2: (a) `computeAverageAzimuth` (`:12-35`) is an area-weighted **circular mean**, not §7's "azimuth of the largest non-flat surface"; (b) its flat cut-off is a hard-coded `FLAT_THRESHOLD_DEG = 1` (`:8`), not the user's slider; (c) it returns `0` where §7 needs `null` ("NULL means could not be evaluated"), and it has no notion of flat area or flat share. Those three are why `roofRollUp.ts` exists rather than a wrapper. Leave `aggregate.ts` untouched — `src/ui/details/subject.ts:228` depends on its current behaviour.
 - The table's three synthetic columns are `__roofy_roof_area`, `__roofy_mean_slope`, `__roofy_parts` (`src/ui/drawer/columnPolicy.ts:4-6`, values at `:91-95`, computed by `src/ui/drawer/derivedBuildingColumns.ts:30-66`). §7.1: they **stay as they are**; the computed columns sit beside them. No task touches them.
 
 ### Tests that M2 must move
 
-- `tests/unit/features/processing/register.test.ts:18` — `expect(Object.keys(EXECUTORS)).toEqual(["height-from-extent"])`. Task 8 updates it.
-- `tests/unit/ui/processing/useToolForm.test.tsx:54-71` — a registry mock that flips `measure-solids` to `implemented: true`, because "the only implemented M1 tool can never fail per layer". **This mock must STAY.** Roof metrics has `needsReader: false` and `extension: null` and (per Design decision (b)) is eligible on streaming too, so among the ready-table `candidates` it can no more discriminate than Height from extent can. Task 10 adds a comment saying why it survived.
+- `tests/unit/features/processing/register.test.ts:18` — `expect(Object.keys(EXECUTORS)).toEqual(["height-from-extent"])`. Task 9 updates it.
+- `tests/unit/ui/processing/useToolForm.test.tsx:54-71` — a registry mock that flips `measure-solids` to `implemented: true`, because "the only implemented M1 tool can never fail per layer". **This mock must STAY.** Roof metrics has `needsReader: false` and `extension: null` and (per Design decision (b)) is eligible on streaming too, so among the ready-table `candidates` it can no more discriminate than Height from extent can. Task 11 adds a comment saying why it survived.
 - 26 test files carry a `vi.mock(".../insights/duckdb", …)` factory with a `getDuckDBStatus` key; Task 1 lists them.
 - `tests/unit/ui/processing/CatalogueView.test.tsx:11-33` is the factory shape to copy: a flat object of `vi.fn`s.
 - `tests/unit/app/appEngineBoot.test.tsx:99-113` mocks duckdb and asserts **nothing** about the status (`:226-343` are all about the streaming boot gate), so deleting App's mirror does not break it — it only needs the two new keys.
@@ -116,7 +116,7 @@ Every line below was read on this checkout. File:line citations are exact.
 ### Docs state
 
 - `docs/architecture-notes.md:107-147` — "Processing toolbox seam (M13.1, 2026-09-11)". Its last paragraph (`:136-138`) states the FCB merge boundary; M2 extends the section rather than starting a new one.
-- `docs/roadmap.md:605-640` — the Milestone 13 entry and its "Carried to 13.2 / M2" list. **The list is stale**: it claims "§6.1 re-validation of an output column that has come to belong to the file itself is not implemented", which `runQueue.ts:419-442` contradicts. Task 13 refreshes it.
+- `docs/roadmap.md:605-640` — the Milestone 13 entry and its "Carried to 13.2 / M2" list. **The list is stale**: it claims "§6.1 re-validation of an output column that has come to belong to the file itself is not implemented", which `runQueue.ts:419-442` contradicts. Task 14 refreshes it.
 - `scripts/smoke/processing-m1.md` is the smoke recipe + record format to copy (last run 2026-09-11 @ `8ef02cd`, `agent-browser connect 9333` against a hand-launched Chromium).
 
 ---
@@ -125,43 +125,46 @@ Every line below was read on this checkout. File:line citations are exact.
 
 **Create:**
 
-| Path                                            | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/insights/useDuckDBStatus.ts`               | The ONE React door to the engine status: `useSyncExternalStore` over `subscribeDuckDBStatus` + `getDuckDBStatusVersion`. No copy in state.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `src/domain/roofMetrics/roofRollUp.ts`          | Pure: `RoofSurfaceMetric`, `RoofRollUp`, `rollUpRoofSurfaces(surfaces, flatThresholdDeg)`. §7's six measures for ONE set of surfaces.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `src/features/processing/roofMetricsParams.ts`  | Pure: `RoofMeasure`, `ROOF_MEASURES` (key, label, suffix, in §7.1 order), `RoofMetricsParams`, `roofParams(raw)`, `roofColumnNames(prefix, params)`, `DEFAULT_ROOF_PARAMS`, the threshold bounds. The ONE answer for the registry, the executor, the frozen request and the form.                                                                                                                                                                                                                                                                                                                                                                                               |
-| `src/features/processing/roofGeometrySource.ts` | `roofGeometrySource(layer)` (`has`/`hasGeometryAt`/`roofSurfacesAt`, memoised, measuring on demand), `featureIdsByObject(layer)`, `roofLodOptions(layer)` (tags only). The static/streaming split lives here and nowhere else.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `src/features/processing/tools/roofMetrics.ts`  | The executor: one SQL read, §7's geometry-keyed contributor rule, §8's root/part split, batches of `ROOF_BATCH_FEATURES`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `src/ui/processing/useLodOptions.ts`            | Hook: the LoD options for a tool + target, subscribed to the stream's commit version; empty for an unimplemented tool.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `src/ui/processing/RoofMetricsParams.tsx`       | The PARAMETERS section for `roof-metrics`: six checkboxes + the flat-threshold slider.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `scripts/smoke/processing-m2.md`                | The browser smoke recipe and its record.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| Tests                                           | `tests/unit/insights/useDuckDBStatus.test.tsx`, `tests/unit/domain/roofRollUp.test.ts`, `tests/unit/features/processing/roofMetricsParams.test.ts`, `tests/unit/features/processing/roofGeometrySource.test.ts`, `tests/unit/features/processing/roofMetricsTool.test.ts`, `tests/unit/features/processing/roofMetricsRun.test.ts`, `tests/unit/ui/processing/extensionChip.test.tsx`, `tests/unit/ui/processing/roofLayerFixture.tsx`, `tests/unit/ui/processing/lodSelect.test.tsx`, `tests/unit/ui/processing/RoofMetricsParams.test.tsx`, `tests/unit/ui/processing/roofMetricsEnabled.test.tsx`; plugin-side `packages/.../navara-flatcitybuf/tests/objectRecords.test.ts` |
+| Path                                              | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/insights/useDuckDBStatus.ts`                 | The ONE React door to the engine status: `useSyncExternalStore` over `subscribeDuckDBStatus` + `getDuckDBStatusVersion`. No copy in state.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `src/domain/roofMetrics/roofRollUp.ts`            | Pure: `RoofSurfaceMetric`, `RoofRollUp`, `rollUpRoofSurfaces(surfaces, flatThresholdDeg)`. §7's six measures for ONE set of surfaces.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `src/features/processing/roofMetricsParams.ts`    | Pure: `RoofMeasure`, `ROOF_MEASURES` (key, label, suffix, in §7.1 order), `RoofMetricsParams`, `roofParams(raw)`, `roofColumnNames(prefix, params)`, `DEFAULT_ROOF_PARAMS`, the threshold bounds. The ONE answer for the registry, the executor, the frozen request and the form.                                                                                                                                                                                                                                                                                                                                                                                               |
+| `tests/unit/ui/processing/engineStopped.test.tsx` | The dead-engine UI: disabled tool rows, disabled Undo on the card and in Recent runs (Task 4).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `src/features/processing/roofGeometrySource.ts`   | `roofGeometrySource(layer)` (`has`/`hasGeometryAt`/`roofSurfacesAt`, memoised, measuring on demand), `featureIdsByObject(layer)`, `roofLodOptions(layer)` (tags only). The static/streaming split lives here and nowhere else.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `src/features/processing/tools/roofMetrics.ts`    | The executor: one SQL read, §7's geometry-keyed contributor rule, §8's root/part split, batches of `ROOF_BATCH_FEATURES`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `src/ui/processing/useLodOptions.ts`              | Hook: the LoD options for a tool + target, subscribed to the stream's commit version; empty for an unimplemented tool.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `src/ui/processing/RoofMetricsParams.tsx`         | The PARAMETERS section for `roof-metrics`: six checkboxes + the flat-threshold slider.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `scripts/smoke/processing-m2.md`                  | The browser smoke recipe and its record.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Tests                                             | `tests/unit/insights/useDuckDBStatus.test.tsx`, `tests/unit/domain/roofRollUp.test.ts`, `tests/unit/features/processing/roofMetricsParams.test.ts`, `tests/unit/features/processing/roofGeometrySource.test.ts`, `tests/unit/features/processing/roofMetricsTool.test.ts`, `tests/unit/features/processing/roofMetricsRun.test.ts`, `tests/unit/ui/processing/extensionChip.test.tsx`, `tests/unit/ui/processing/roofLayerFixture.tsx`, `tests/unit/ui/processing/lodSelect.test.tsx`, `tests/unit/ui/processing/RoofMetricsParams.test.tsx`, `tests/unit/ui/processing/roofMetricsEnabled.test.tsx`; plugin-side `packages/.../navara-flatcitybuf/tests/objectRecords.test.ts` |
 
 **Modify:**
 
-| Path                                                                                    | Change                                                                                                                                                |
-| --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/insights/duckdb.ts`                                                                | `setStatus` notifier, `subscribeDuckDBStatus`, `getDuckDBStatusVersion`, publish the `"loading"` transition from `ensureExtension`.                   |
-| `src/app/App.tsx`                                                                       | Delete the `duckdbStatus` `useState`; use `useDuckDBStatus()`; simplify `handleRetryDuckDB`.                                                          |
-| `src/ui/processing/useEligibilityContext.ts`                                            | `useDuckDBStatus()` instead of the plain read; rewrite the stale comment.                                                                             |
-| `src/features/processing/runQueue.ts`                                                   | The `"extension"` phase step and `extensionFailure`; `ToolContext.throwIfCancelled`; `summarise` gains `firstColumnNonNull` and the streaming clause. |
-| `src/ui/processing/CatalogueView.tsx`                                                   | Per-state chip tooltip, muted chip, the Retry link (row restructured so the link is not nested in a button).                                          |
-| `src/ui/processing/RunFooter.tsx`                                                       | Style by result gates on `firstColumnNonNull`, not on `measured`.                                                                                     |
-| `src/ui/processing/processing.css`                                                      | `.processing-tool-row-wrap`, `.processing-chip[data-state]`, `.processing-retry`, `.processing-checks`, `.processing-slider`.                         |
-| `src/features/processing/types.ts`                                                      | `ToolDefinition.needsLod`, `validateParams?`, `normaliseParams?`; `RunSummary.firstColumnNonNull`.                                                    |
-| `src/features/processing/toolRegistry.ts`                                               | `needsLod` on all seven; `outputColumns` + `validateParams` + `normaliseParams` on `roof-metrics` (Task 7), then `implemented: true` (Task 12).       |
-| `src/features/processing/tools/register.ts`                                             | `import "./roofMetrics";`                                                                                                                             |
-| `src/ui/processing/useToolForm.ts`                                                      | `lodOptions`/`lodNoun`/`lodReason`, the effective `draft.lod`, `paramsError`, `extensionNote`, `runReason` precedence.                                |
-| `src/ui/processing/ToolView.tsx`                                                        | The LoD field in TARGET; the PARAMETERS fieldset; the extension note; `run()` freezes the normalised params.                                          |
-| `packages/…/navara-flatcitybuf/src/workerProtocol.ts`, `objectRecords.ts`               | `ResidentRoofMetrics` (LoD-tagged) and `ResidentObjectRecord.geometryLods`.                                                                           |
-| `tests/unit/ui/drawer/layerSummary.test.ts`, `tests/unit/insights/computeStats.test.ts` | The hand-built resident-record literals the two new fields break (Task 5).                                                                            |
-| `CLAUDE.md:116`                                                                         | The amended status rule.                                                                                                                              |
-| `docs/architecture-notes.md`                                                            | Five new paragraphs in the M13.1 section.                                                                                                             |
-| `docs/roadmap.md:605-640`                                                               | Add 13.2; refresh the stale carried list.                                                                                                             |
-| 26 test files                                                                           | The two new duckdb mock keys (listed in Task 1).                                                                                                      |
-| `tests/unit/features/processing/register.test.ts`                                       | The `EXECUTORS` pin.                                                                                                                                  |
-| `tests/unit/ui/processing/ToolView.test.tsx`                                            | The "All values are empty" setup moves to `firstColumnNonNull`.                                                                                       |
-| `tests/unit/features/processing/eligibility.test.ts`                                    | Roof metrics' eligibility on streaming and vector targets.                                                                                            |
+| Path                                                                                    | Change                                                                                                                                                                                                        |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/insights/duckdb.ts`                                                                | `setStatus` notifier, `subscribeDuckDBStatus`, `getDuckDBStatusVersion`, publish the `"loading"` transition from `ensureExtension`, and `markEngineDead` on the worker's own `error`/`messageerror` (Task 4). |
+| `src/app/App.tsx`                                                                       | Delete the `duckdbStatus` `useState`; use `useDuckDBStatus()`; simplify `handleRetryDuckDB`; install `installEngineWatcher` (Task 4).                                                                         |
+| `src/ui/processing/useEligibilityContext.ts`                                            | `useDuckDBStatus()` instead of the plain read; rewrite the stale comment.                                                                                                                                     |
+| `src/features/processing/processingStore.ts`                                            | `engineStopped` + `markEngineStopped` (Task 4).                                                                                                                                                               |
+| `src/ui/processing/RecentRuns.tsx`                                                      | Undo disabled with its reason once the engine has stopped (Task 4).                                                                                                                                           |
+| `src/features/processing/runQueue.ts`                                                   | `installEngineWatcher` (Task 4); the `"extension"` phase step and `extensionFailure`; `ToolContext.throwIfCancelled`; `summarise` gains `firstColumnNonNull` and the streaming clause.                        |
+| `src/ui/processing/CatalogueView.tsx`                                                   | Per-state chip tooltip, muted chip, the Retry link (row restructured so the link is not nested in a button).                                                                                                  |
+| `src/ui/processing/RunFooter.tsx`                                                       | Style by result gates on `firstColumnNonNull`, not on `measured`; Undo disabled once the engine has stopped (Task 4).                                                                                         |
+| `src/ui/processing/processing.css`                                                      | `.processing-tool-row-wrap`, `.processing-chip[data-state]`, `.processing-retry`, `.processing-checks`, `.processing-slider`.                                                                                 |
+| `src/features/processing/types.ts`                                                      | `ToolDefinition.needsLod`, `validateParams?`, `normaliseParams?`; `RunSummary.firstColumnNonNull`.                                                                                                            |
+| `src/features/processing/toolRegistry.ts`                                               | `needsLod` on all seven; `outputColumns` + `validateParams` + `normaliseParams` on `roof-metrics` (Task 8), then `implemented: true` (Task 13).                                                               |
+| `src/features/processing/tools/register.ts`                                             | `import "./roofMetrics";`                                                                                                                                                                                     |
+| `src/ui/processing/useToolForm.ts`                                                      | `lodOptions`/`lodNoun`/`lodReason`, the effective `draft.lod`, `paramsError`, `extensionNote`, `runReason` precedence.                                                                                        |
+| `src/ui/processing/ToolView.tsx`                                                        | The LoD field in TARGET; the PARAMETERS fieldset; the extension note; `run()` freezes the normalised params.                                                                                                  |
+| `packages/…/navara-flatcitybuf/src/workerProtocol.ts`, `objectRecords.ts`               | `ResidentRoofMetrics` (LoD-tagged) and `ResidentObjectRecord.geometryLods`.                                                                                                                                   |
+| `tests/unit/ui/drawer/layerSummary.test.ts`, `tests/unit/insights/computeStats.test.ts` | The hand-built resident-record literals the two new fields break (Task 6).                                                                                                                                    |
+| `CLAUDE.md:116`                                                                         | The amended status rule.                                                                                                                                                                                      |
+| `docs/architecture-notes.md`                                                            | Five new paragraphs in the M13.1 section.                                                                                                                                                                     |
+| `docs/roadmap.md:605-640`                                                               | Add 13.2; refresh the stale carried list.                                                                                                                                                                     |
+| 26 test files                                                                           | The two new duckdb mock keys (listed in Task 1).                                                                                                                                                              |
+| `tests/unit/features/processing/register.test.ts`                                       | The `EXECUTORS` pin.                                                                                                                                                                                          |
+| `tests/unit/ui/processing/ToolView.test.tsx`                                            | The "All values are empty" setup moves to `firstColumnNonNull`.                                                                                                                                               |
+| `tests/unit/features/processing/eligibility.test.ts`                                    | Roof metrics' eligibility on streaming and vector targets.                                                                                                                                                    |
 
 ---
 
@@ -203,23 +206,23 @@ It holds no copy: the store's value is read fresh on every render, and the versi
 
 **Bonus correctness, worth stating in the note:** `retryEngine()` on a _ready_ engine does not re-run `doInit` (`duckdb.ts:261-266`), so App's current optimistic `setDuckdbStatus({state:"initializing"})` at `App.tsx:940` shows "Loading" for an engine that never left `ready`. The hook cannot do that.
 
-**Approved.** The M2 plan review (`.superpowers/sdd/2026-09-10-processing-toolbox-m1/m2-plan-review.md`) accepts the single-owner subscription rule change, on condition that `retryEngine()` stays the door for boot and the engine Retry and that the sole-importer rule is untouched — both hold. It is therefore no longer an open question; Task 1 commits the `CLAUDE.md` edit with the code.
+**APPROVED BY THE REPO OWNER (2026-09-11).** The rule rewrite is settled, not proposed: `duckdb.ts` owns and publishes the value, `useDuckDBStatus()` is React's one door, and `App`'s mirror goes. The two conditions the plan review attached both hold — `retryEngine()` stays the door for boot and for the engine Retry (CLAUDE.md:117, untouched), and `duckdb.ts` stays the sole importer of `@duckdb/duckdb-wasm`. Task 1 commits the `CLAUDE.md` edit in the same commit as the code.
 
 **Cost if wrong:** two extra exports and one hard-rule edit to revert; the status still has exactly one owner either way.
 
 ### (b) Roof metrics on streaming (FCB) layers
 
-**Decision: streaming targets are IN for computing and writing. The FCB attribute WRITE-BACK into the model (which is what puts a run's values in Details, the rule editor and a colour rule) is DEFERRED past M2 by an explicit, renewed scope ruling — not by calling it "an unchanged seam".**
+**Decision: streaming targets are IN for computing and writing. The FCB attribute WRITE-BACK into the model (which is what puts a run's values in Details, the rule editor and a colour rule) is a FUTURE CONSIDERATION — the repo owner's words, and their ruling on 2026-09-11. It is not in M2, and it is not scheduled to a milestone.**
 
 Spec §7.1 says the tool "works on every city layer kind including streaming (resident set)", and §10 scenario 4 is an acceptance scenario about it. `getResidentModel(layerId, 0).objects` (`residentModel.ts:46-53`) hands any caller the resident `ResidentObjectRecord`s, each with roof metrics the worker already computed — so the compute half is one adapter.
 
-**Two blockers in the record, and why both are worth one submodule commit.** `record.roofMetrics` is built from **all** of `obj.surfaces` regardless of LoD (`objectRecords.ts:33-35`, on the unfiltered `cellModel` at `fcb.worker.ts:408`), and `record.lod` labels the _object_, not the surfaces — so a LoD select fed by it would sum areas across every LoD in the file. And the record carries no way to answer §7's contributor question, "does this object have GEOMETRY (of any kind) at this LoD", because non-roof surfaces are dropped entirely; `surfaceCount` is a total with no LoD breakdown. Task 5 fixes both, additively: `roofMetrics` becomes `ReadonlyArray<ResidentRoofMetrics>` (`RoofMetrics` widened with the surface's `lod`), and the record gains `geometryLods: ReadonlyArray<string>`, the distinct non-null `Surface.lod` values over ALL of the object's surfaces. Every existing READER (`legendCounts.ts:94-103`, `useResolvedSubject.ts:125`, `DetailsPanel.tsx:263-268`, `computeStats.ts:142,231`, `derivedBuildingColumns.ts:19-20`) is unaffected by a widening; existing hand-built record LITERALS in tests are not, and Task 5 updates the two files that have them.
+**Two blockers in the record, and why both are worth one submodule commit.** `record.roofMetrics` is built from **all** of `obj.surfaces` regardless of LoD (`objectRecords.ts:33-35`, on the unfiltered `cellModel` at `fcb.worker.ts:408`), and `record.lod` labels the _object_, not the surfaces — so a LoD select fed by it would sum areas across every LoD in the file. And the record carries no way to answer §7's contributor question, "does this object have GEOMETRY (of any kind) at this LoD", because non-roof surfaces are dropped entirely; `surfaceCount` is a total with no LoD breakdown. Task 6 fixes both, additively: `roofMetrics` becomes `ReadonlyArray<ResidentRoofMetrics>` (`RoofMetrics` widened with the surface's `lod`), and the record gains `geometryLods: ReadonlyArray<string>`, the distinct non-null `Surface.lod` values over ALL of the object's surfaces. Every existing READER (`legendCounts.ts:94-103`, `useResolvedSubject.ts:125`, `DetailsPanel.tsx:263-268`, `computeStats.ts:142,231`, `derivedBuildingColumns.ts:19-20`) is unaffected by a widening; existing hand-built record LITERALS in tests are not, and Task 6 updates the two files that have them.
 
-**The deferral, stated plainly.** The M1 ledger parked the FCB Details/rules write-back **to M2**, and §7.1 and §8 do ask for it. This plan does **not** deliver it, because the milestone's scope as set by the user is "Roof metrics + lazy extension loading + the status subscription". The mechanism: `runQueue.ts:575-589` merges a run's values into `layer.model.objects` and skips any id the model lacks, and an FCB layer's `model.objects` is `{}` (`openStreamingLayer.ts:113`). Closing it means giving the FCB plugin an attribute-overlay seam — resident records (and the worker's cache, so a re-fetched cell keeps the values) carrying app-written attributes, plus an `Undo` path that removes them — and then teaching `mergeAttributes`/`DetailsPanel`/the rule evaluator to read it. That is its own change, in the submodule, with its own worker-protocol version. **Open question 10 asks the human whether to pull it into M2 or schedule it as M3.** Until then, a streaming run's values live in the table (grid, filter, sort, export) and nowhere else, exactly as Height from extent's already do — and the gate records it as an unmet part of §7.1/§8 rather than as a closed seam. A camera settle rebuilds the table and the run reads "stale: layer reloaded", which is what §7's last bullet and scenario 4 ask for.
+**The ruling, stated plainly.** The M1 ledger parked the FCB Details/rules write-back **to M2**, and §7.1 and §8 do ask for it. The repo owner has since ruled it a **future consideration**: M2's scope is Roof metrics, lazy extension loading, the status subscription and the engine-death containment of Task 4. The mechanism: `runQueue.ts:575-589` merges a run's values into `layer.model.objects` and skips any id the model lacks, and an FCB layer's `model.objects` is `{}` (`openStreamingLayer.ts:113`). Closing it means giving the FCB plugin an attribute-overlay seam — resident records (and the worker's cache, so a re-fetched cell keeps the values) carrying app-written attributes, plus an `Undo` path that removes them — and then teaching `mergeAttributes`/`DetailsPanel`/the rule evaluator to read it. That is its own change, in the submodule, with its own worker-protocol version, sketched under "Future consideration: the FCB attribute write-back" below. Until someone picks it up, a streaming run's values live in the table (grid, filter, sort, export) and nowhere else, exactly as Height from extent's already do — and Task 15's gate records it as an unmet part of §7.1/§8 rather than as a closed seam. A camera settle rebuilds the table and the run reads "stale: layer reloaded", which is what §7's last bullet and scenario 4 ask for.
 
 **Evicted residents.** A frozen row whose object is no longer resident when the run executes is in neither map. It is counted under `no roof surfaces at LoD X` — honest (there is, now, no geometry to measure) and it keeps the skip causes adding up to the skipped count as §6.2 requires. No second cause is invented.
 
-**Cost if wrong:** one submodule commit to revert plus the `isStreaming` branches in `roofGeometrySource.ts`. If the human would rather keep M2 out of the submodule, Task 5 is dropped and Roof metrics needs an eligibility reason for streaming targets (proposed, **[adapted]**: "Roof surfaces are not tagged by LoD for a streaming layer"), with §7.1 and scenario 4 on the deviation list. That is strictly worse; it is recorded only so the choice is visible.
+**Cost if wrong:** one submodule commit to revert plus the `isStreaming` branches in `roofGeometrySource.ts`. The repo owner kept streaming compute, so Task 6 stands. (Had it been dropped, Roof metrics would have needed an eligibility reason for streaming targets and §7.1 plus scenario 4 would have gone on the deviation list — recorded only so the road not taken is visible.)
 
 ### (c) Where the metrics are computed, and from which fields
 
@@ -237,7 +240,7 @@ The table is the authority on the rows to write; the model/resident map is the a
 
 **Contributors and roll-ups (§7), spelled out.** §7's sentence is: "At the chosen LoD, if any part of the feature has **geometry**, the PARTS are the contributors and the root's own geometry at that LoD is ignored (3D BAG stores the same building on both); otherwise the root is the sole contributor." **Geometry, not roof surfaces.** The distinction is load-bearing and is the plan's first correction: a Building with a roof at LoD 2.2 whose BuildingPart has only WALLS at 2.2 selects the PART as its contributor, and the feature is then skipped for having no roof — the root's roof is not silently used instead. Getting this wrong measures the 3D BAG double-storage this rule exists to avoid. So, for each feature `f` and the chosen `lod`:
 
-1. `geometryLods(id)` — the distinct non-null `Surface.lod` values over ALL of the object's surfaces, whatever their semantic type. For a resident record this is the new `geometryLods` field (Task 5).
+1. `geometryLods(id)` — the distinct non-null `Surface.lod` values over ALL of the object's surfaces, whatever their semantic type. For a resident record this is the new `geometryLods` field (Task 6).
 2. If any **non-root** member has `lod ∈ geometryLods(id)`, the contributors are exactly those non-root members that do; otherwise the root is the sole contributor (and only if IT has geometry at the LoD — a feature with geometry nowhere at this LoD has no contributor at all).
 3. `roofSurfacesAt(id, lod)` — measured on demand, only for the contributors chosen above.
 4. The **root row** is written the roll-up over the contributors' roof surfaces; **every other row** is written the roll-up over its OWN roof surfaces at that LoD (§8: "a Building shows the aggregated value, a part its own"). This is `heightFromExtent.ts:130-138`'s shape exactly.
@@ -721,7 +724,7 @@ Expected: PASS. A `The result of getSnapshot should be cached` error anywhere me
 
 - [ ] **Step 10: Amend the hard rule and write the story**
 
-`CLAUDE.md:116` — replace the line with:
+The rewrite is **approved by the repo owner (2026-09-11)**, so this is an edit to make, not a proposal to raise. `CLAUDE.md:116` — replace the line with:
 
 ```markdown
 - ONE writer of the DuckDB status: `duckdb.ts` owns the value and publishes every transition (`setStatus`). React reads it through `useDuckDBStatus()` (`src/insights/useDuckDBStatus.ts`, a `useSyncExternalStore` over `subscribeDuckDBStatus` + `getDuckDBStatusVersion`) — never into component state, and nothing else publishes.
@@ -874,7 +877,7 @@ describe("the Loading extension phase (spec §6.1)", () => {
 });
 ```
 
-`request(overrides)` is the file's own request builder (`runQueue.test.ts:268-279`; its defaults already target `"L1"` with scope `"all"`), and `vi.waitFor` is how every test in the file settles a run — there is no `settle()` helper, do not invent one. Add `ensureExtension`, `isExtensionLoaded` and `getDuckDBStatus` to the file's imports from `src/insights/duckdb`; `registerExecutor` and `EXECUTORS` are already imported (`:173-174`). The file's existing duckdb mock factory already stubs all three (`runQueue.test.ts:100`); if `isExtensionLoaded`/`ensureExtension` are plain `vi.fn`s there, they are already `vi.mocked`-able. Reset them in the suite's `beforeEach` (`runQueue.test.ts:281-296`) alongside the existing resets, and add `delete EXECUTORS["measure-solids"]` to the existing `afterEach` (`:297-300`) beside the `height-from-extent` line, so the `register.test.ts` pin (Task 8) is not polluted — Vitest isolates modules per file, so this is belt-and-braces.
+`request(overrides)` is the file's own request builder (`runQueue.test.ts:268-279`; its defaults already target `"L1"` with scope `"all"`), and `vi.waitFor` is how every test in the file settles a run — there is no `settle()` helper, do not invent one. Add `ensureExtension`, `isExtensionLoaded` and `getDuckDBStatus` to the file's imports from `src/insights/duckdb`; `registerExecutor` and `EXECUTORS` are already imported (`:173-174`). The file's existing duckdb mock factory already stubs all three (`runQueue.test.ts:100`); if `isExtensionLoaded`/`ensureExtension` are plain `vi.fn`s there, they are already `vi.mocked`-able. Reset them in the suite's `beforeEach` (`runQueue.test.ts:281-296`) alongside the existing resets, and add `delete EXECUTORS["measure-solids"]` to the existing `afterEach` (`:297-300`) beside the `height-from-extent` line, so the `register.test.ts` pin (Task 9) is not polluted — Vitest isolates modules per file, so this is belt-and-braces.
 
 - [ ] **Step 2: Run them and watch them fail**
 
@@ -938,7 +941,7 @@ if (tool.extension !== null && !isExtensionLoaded(tool.extension)) {
 
 Note: `const tool = toolById(request.toolId)` is declared here; the publication block further down declares its own `const tool` (`runQueue.ts:591`) — rename that later one's reference or reuse this binding. **Reuse it**: delete the second declaration and let the publication block use this one. (It is the same tool, and two bindings with one name in one function body is a `tsc` error.)
 
-**One consequence to leave in place and record.** `execute` patches `startedAt: Date.now()` again when it flips to `phase: "compute"` (`runQueue.ts:463-470`), so a run that spent seconds downloading an extension sees its live ticker jump back to zero at the hand-off. The roadmap already carries "the run's live elapsed timer starts at submit but is measured from execute, so it can jump back"; extend that bullet in Task 11 rather than changing the patch here — the elapsed number the CARD finally reports is computed from `started` (`runQueue.ts`'s `elapsed()`), which does include the download.
+**One consequence to leave in place and record.** `execute` patches `startedAt: Date.now()` again when it flips to `phase: "compute"` (`runQueue.ts:463-470`), so a run that spent seconds downloading an extension sees its live ticker jump back to zero at the hand-off. The roadmap already carries "the run's live elapsed timer starts at submit but is measured from execute, so it can jump back"; extend that bullet in Task 12 rather than changing the patch here — the elapsed number the CARD finally reports is computed from `started` (`runQueue.ts`'s `elapsed()`), which does include the download.
 
 Add the message builder beside `failedAlready` (`runQueue.ts`, near `:400`):
 
@@ -975,7 +978,7 @@ function extensionFailure(name: "spatial" | "three_d"): string {
 }
 ```
 
-**[adapted]** — §6.3 specifies the shape of these sentences, not their words. See "Open questions for the human".
+**[adapted copy]**, decided — §6.3 specifies what these sentences must convey, not their words. Decision 4.
 
 - [ ] **Step 4: Run the tests**
 
@@ -1309,7 +1312,7 @@ function chipTitle(
 }
 ```
 
-**[adapted]** — the loaded and loading sentences. See "Open questions for the human".
+**[adapted copy]**, decided — the loaded and loading sentences. The failed one is §5's own reason, verbatim. Decision 3.
 
 - [ ] **Step 4: Restructure the row and add Retry**
 
@@ -1444,7 +1447,493 @@ git commit -m "feat(processing): the capability chips follow the extension and o
 
 ---
 
-### Task 4: The pure roof roll-up
+### Task 4: The engine's death is detected, announced, and stops every run
+
+**Files:**
+
+- Modify: `src/insights/duckdb.ts:201-248` (the worker the boot creates), `src/features/processing/runQueue.ts` (a third installer watcher, beside `installTargetRemovalWatcher` at `:811-847`), `src/features/processing/processingStore.ts` (the `engineStopped` flag), `src/ui/processing/RunFooter.tsx:310-314`, `src/ui/processing/RecentRuns.tsx:75-79`, `src/app/App.tsx:850` (install the watcher)
+- Test: `tests/unit/insights/useDuckDBStatus.test.tsx` (the publish), `tests/unit/features/processing/runQueue.test.ts` (the watcher), `tests/unit/ui/processing/ToolView.test.tsx` and a new `tests/unit/ui/processing/engineStopped.test.tsx` (the disabled Undo and the disabled rows)
+
+**Interfaces:**
+
+- Consumes: `setStatus` and the listener set (Task 1); `installTargetRemovalWatcher`'s shape (`runQueue.ts:811-847`); `toolEligibility`'s existing `engineState === "failed"` branch (`eligibility.ts:45-47`).
+- Produces:
+  - `duckdb.ts`: `markEngineDead(reason: string): void` (exported for the watcher's test, and called from the worker's own event handlers).
+  - `processingStore.ts`: `engineStopped: boolean` and `markEngineStopped(): void`.
+  - `runQueue.ts`: `installEngineWatcher(): () => void`.
+- Nothing later in the plan depends on this task; it is placed here because it belongs to the same seam as Tasks 1-3 (the published status) and because the roof tool's tasks should not have to reason about a dead engine.
+
+**Scope, decided by the repo owner: detection and containment, NO recovery.** Spec §6.1 asks for the failure path AND a Retry that "restarts the engine and rebuilds every layer table from the in-memory models". The second half is not built. The status bar's existing Retry (`TablePanel.tsx:565-578` → `App.tsx`'s `handleRetryDuckDB` → `retryEngine`) is **left exactly as it is**: it reboots the engine, and because `retryEngine` only rebuilds tables it parked in `pendingSources` (`layerTables.ts:624-660`), tables that were `ready` when the worker died are not rebuilt. Their layers therefore stay table-less and every tool stays disabled until the page is reloaded. That is the deliberate shape; the task and the docs step both say so, and the gate records it as a deviation from §6.1.
+
+**What can actually be detected, verified on the checkout.** This is the fact the whole task turns on, and it is worse than it looks:
+
+- `doInit` creates the Worker itself (`duckdb.ts:224`, `worker = new Worker(workerUrl)`) and hands it to `new duckdb.AsyncDuckDB(logger, worker)` (`:227`). duckdb-wasm's `attach(worker)` registers its own `message`, `error` and `close` listeners with `addEventListener` (`node_modules/@duckdb/duckdb-wasm/dist/duckdb-browser.mjs`, `attach(e){this._worker=e,this._worker.addEventListener("message",…),addEventListener("error",…),addEventListener("close",…)}`). `addEventListener` is additive, so **our own `error`/`messageerror` listeners on the same worker object coexist with duckdb-wasm's** — no monkey-patching, no library fork.
+- **A query will NOT tell us.** duckdb-wasm's `onError` handler does `console.error(...); this._pendingRequests.clear()` — it CLEARS the pending map without rejecting the promises, so an in-flight `conn.query()` after a worker error **never settles**. And once the worker is gone, `postTask` logs `"cannot send a message since the worker is not set!"` and `return`s `undefined` rather than rejecting. So "a query rejection whose message identifies a terminated worker" is not a signal this library offers. The worker's own `error` event is the only reliable one, and it is why the watcher must ABORT a running run's controller rather than wait for its query.
+- **Containment is already half built.** `runQuery` returns `{ ok: false, message: NOT_RUNNING }` whenever `status.state !== "ready"` (`duckdb.ts:389-391`), so the moment `markEngineDead` publishes `failed`, every subsequent statement fails fast instead of hanging.
+- **The catalogue needs no new copy.** `toolEligibility` already returns `{ ok: false, reason: "Not available while DuckDB is unavailable" }` for `engineState === "failed"` (`eligibility.ts:45-47`), and `eligibilityContextFor` reads `engineState` straight off the published status (`useEligibilityContext.ts:58`). Task 1's subscription is what makes that re-render. Nothing to write, only to test.
+
+- [ ] **Step 1: Write the failing test for the publish**
+
+Append to `tests/unit/insights/useDuckDBStatus.test.tsx`, inside the existing `describe("duckdb.ts publishes every transition", …)`. The `FakeWorker` there is a bare class; give it the `addEventListener`/`dispatchEvent` surface so the test can kill it:
+
+```ts
+class FakeWorker {
+  readonly listeners = new Map<string, Set<(event: unknown) => void>>();
+  addEventListener(type: string, listener: (event: unknown) => void) {
+    const set = this.listeners.get(type) ?? new Set();
+    set.add(listener);
+    this.listeners.set(type, set);
+  }
+  removeEventListener(type: string, listener: (event: unknown) => void) {
+    this.listeners.get(type)?.delete(listener);
+  }
+  postMessage() {}
+  terminate() {}
+  /** What the browser does when the worker script dies. */
+  die(message: string) {
+    for (const listener of this.listeners.get("error") ?? []) {
+      listener({ type: "error", message });
+    }
+  }
+}
+
+/** The last worker `doInit` constructed, so a test can kill it. */
+let lastWorker: FakeWorker | null = null;
+```
+
+with `vi.stubGlobal("Worker", class extends FakeWorker { constructor() { super(); lastWorker = this; } })` in the `beforeEach` (and `lastWorker = null` beside it). Then:
+
+```ts
+it("publishes failed when the worker dies, and keeps the reason", async () => {
+  const { seen, stop } = record();
+  await duckdb.initDuckDB();
+  expect(duckdb.getDuckDBStatus().state).toBe("ready");
+  lastWorker!.die("Uncaught RuntimeError: memory access out of bounds");
+  stop();
+  expect(seen).toEqual(["initializing", "ready:unloaded", "failed"]);
+  const status = duckdb.getDuckDBStatus();
+  expect(status.state).toBe("failed");
+  if (status.state !== "failed") throw new Error("unreachable");
+  // The status bar prints this after "The analytics engine is not running"
+  // (`TablePanel.tsx:568-572`), so it has to be the engine's own words.
+  expect(status.error).toContain("memory access out of bounds");
+});
+
+it("fails every statement fast once the engine is dead", async () => {
+  await duckdb.initDuckDB();
+  lastWorker!.die("worker gone");
+  const outcome = await duckdb.runQuery("SELECT 1");
+  // `runQuery` guards on the status, so nothing is posted to a worker that
+  // is not there — which matters, because `postTask` would neither reject
+  // nor resolve.
+  expect(outcome).toEqual({
+    ok: false,
+    message: "The analytics engine is not running.",
+  });
+});
+
+it("announces the death ONCE, however many events arrive", async () => {
+  await duckdb.initDuckDB();
+  const { seen, stop } = record();
+  lastWorker!.die("first");
+  lastWorker!.die("second");
+  stop();
+  expect(seen).toEqual(["failed"]);
+  const status = duckdb.getDuckDBStatus();
+  if (status.state !== "failed") throw new Error("unreachable");
+  expect(status.error).toContain("first");
+});
+```
+
+- [ ] **Step 2: Run it and watch it fail**
+
+```bash
+npx vitest run tests/unit/insights/useDuckDBStatus.test.tsx -t "worker dies"
+```
+
+Expected: FAIL — the status stays `ready` after `die()`; nothing is published.
+
+- [ ] **Step 3: Detect and announce the death**
+
+In `src/insights/duckdb.ts`, beside `setStatus` (Task 1's block):
+
+```ts
+/**
+ * The engine's worker has died. Publish it, and make sure nothing tries to
+ * talk to the corpse.
+ *
+ * WHY AN EVENT AND NOT A FAILED QUERY. duckdb-wasm's own worker error handler
+ * does `this._pendingRequests.clear()` — it drops the pending promises without
+ * rejecting them, so a query in flight when the worker dies NEVER SETTLES; and
+ * once the worker is gone `postTask` logs and returns `undefined` rather than
+ * rejecting. There is no rejection to listen for. The worker's `error` event,
+ * on the worker THIS module constructed, is the only honest signal.
+ *
+ * Idempotent: a dying worker can fire more than once, and a second `failed`
+ * status would re-render every subscriber for no news.
+ */
+export function markEngineDead(reason: string): void {
+  if (status.state === "failed") return;
+  // Cleared BEFORE the publish, so a listener that reacts synchronously cannot
+  // find a connection that is about to be dropped. `runQuery` then refuses on
+  // `status.state !== "ready"` (see below) rather than posting into the void.
+  db = null;
+  conn = null;
+  // A retry must genuinely re-run `doInit` rather than be handed the memo of
+  // the boot that succeeded before the worker died.
+  initPromise = null;
+  extensions = {
+    cityjson: { state: "unloaded" },
+    spatial: { state: "unloaded" },
+    three_d: { state: "unloaded" },
+  };
+  loadedExtensions = [];
+  setStatus({ state: "failed", error: reason });
+  console.error("DuckDB-wasm worker stopped:", reason);
+}
+```
+
+and in `doInit`, immediately after `worker = new Worker(workerUrl);` (`:224`) — **before** `new duckdb.AsyncDuckDB(logger, worker)`, so our listener is registered whatever the library does next:
+
+```ts
+// ADDITIVE: `AsyncDuckDB.attach` registers its own "message"/"error"/
+// "close" listeners with addEventListener, so these two sit beside them
+// rather than replacing them.
+worker.addEventListener("error", (event) => {
+  markEngineDead(event.message || "The analytics engine's worker stopped.");
+});
+worker.addEventListener("messageerror", () => {
+  markEngineDead("The analytics engine sent a message that could not be read.");
+});
+```
+
+`runQuery` already refuses on a non-`ready` status (`duckdb.ts:389-391`); no change there.
+
+- [ ] **Step 4: Write the failing test for the runs**
+
+Append to `tests/unit/features/processing/runQueue.test.ts`. Its duckdb mock has no status publisher, so the watcher is driven by making `getDuckDBStatus` return `failed` and calling the module's notify — simplest and honest: give the file a mutable status plus a listener set in its factory.
+
+```ts
+// In the duckdb mock factory, beside the other keys:
+//   getDuckDBStatus: vi.fn(() => engineStatus),
+//   subscribeDuckDBStatus: vi.fn((l: () => void) => {
+//     statusListeners.add(l);
+//     return () => statusListeners.delete(l);
+//   }),
+//   getDuckDBStatusVersion: vi.fn(() => statusVersion),
+// with, above it:
+//   let engineStatus: unknown = { state: "ready", extensions: {}, loadedExtensions: [], platform: null };
+//   let statusVersion = 0;
+//   const statusListeners = new Set<() => void>();
+// and a helper the tests call:
+function killEngine(reason = "worker gone"): void {
+  engineStatus = { state: "failed", error: reason };
+  statusVersion += 1;
+  for (const listener of [...statusListeners]) listener();
+}
+
+describe("the engine watcher (spec §6.1)", () => {
+  it("fails the queued AND the running run when the engine stops", async () => {
+    const stop = installEngineWatcher();
+    const held = deferred<void>();
+    gate = { needle: "COUNT(DISTINCT", promise: held.promise };
+    registerExecutor("height-from-extent", async () => {
+      throw new Error("the executor must never be reached");
+    });
+    const running = submitRun(request());
+    const queued = submitRun(request({ prefix: "other_" }));
+    await vi.waitFor(() =>
+      expect(sql.some((q) => q.includes("COUNT(DISTINCT"))).toBe(true),
+    );
+    expect(runById(queued)?.status).toBe("queued");
+
+    killEngine();
+
+    // §6.1's exact sentence, on BOTH runs.
+    expect(runById(running)?.status).toBe("failed");
+    expect(runById(running)?.error).toBe("Analytics engine stopped");
+    expect(runById(queued)?.status).toBe("failed");
+    expect(runById(queued)?.error).toBe("Analytics engine stopped");
+    expect(useProcessingStore.getState().engineStopped).toBe(true);
+
+    held.resolve();
+    stop();
+  });
+
+  it("leaves a run that already finished alone, but takes its Undo away", async () => {
+    const stop = installEngineWatcher();
+    registerExecutor("height-from-extent", async (run) => ({
+      columns: [{ name: `${run.prefix}height_m`, type: "DOUBLE" as const }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+    const id = submitRun(request());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    expect(runById(id)?.undoable).toBe(true);
+
+    killEngine();
+
+    // The RUN is untouched — it succeeded, and its columns are still in the
+    // table and the model. Only the flag changes, and the UI reads that.
+    expect(runById(id)?.status).toBe("done");
+    expect(runById(id)?.undoable).toBe(true);
+    expect(useProcessingStore.getState().engineStopped).toBe(true);
+    stop();
+  });
+
+  it("does not issue a DROP for a backup table that died with the engine", async () => {
+    const stop = installEngineWatcher();
+    registerExecutor("height-from-extent", async (run) => ({
+      columns: [{ name: `${run.prefix}height_m`, type: "DOUBLE" as const }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+    const id = submitRun(request());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    sql.length = 0;
+
+    killEngine();
+    await Promise.resolve();
+
+    expect(sql.filter((q) => q.startsWith("DROP TABLE"))).toEqual([]);
+    expect(runById(id)).not.toBeNull();
+    stop();
+  });
+});
+```
+
+- [ ] **Step 5: Run it and watch it fail**
+
+```bash
+npx vitest run tests/unit/features/processing/runQueue.test.ts -t "engine watcher"
+```
+
+Expected: FAIL — `installEngineWatcher` is not exported and `engineStopped` is not on the store.
+
+- [ ] **Step 6: Carry the flag on the store**
+
+In `src/features/processing/processingStore.ts`, add to `ProcessingState` (beside `unseenFailure`):
+
+```ts
+  /**
+   * The analytics engine has stopped and is not coming back this session
+   * (spec §6.1, minus its restart).
+   *
+   * It is ONE flag rather than a field per run because it is one fact about
+   * the session: every backup table lived in the database that died, so no
+   * run's Undo can restore anything, whatever its own `undoable` says. The
+   * cards read this beside `undoable`; nothing clears it, because the status
+   * bar's Retry reboots the engine without rebuilding the tables the backups
+   * described.
+   */
+  readonly engineStopped: boolean;
+```
+
+`engineStopped: false` in `initial`, an action
+
+```ts
+  markEngineStopped(): void;
+```
+
+implemented as `markEngineStopped: () => set({ engineStopped: true })`, and `resetForTest` already spreads `initial`, so it clears.
+
+- [ ] **Step 7: Install the watcher**
+
+In `src/features/processing/runQueue.ts`, beside `installTargetRemovalWatcher` (`:811-847`) and following its shape exactly — a module-level `disposeEngineWatcher`, a `dispose` that nulls it, and one immediate call so an engine that is ALREADY dead at install time is acted on:
+
+```ts
+let disposeEngineWatcher: (() => void) | null = null;
+
+/**
+ * Spec §6.1: "If the DuckDB engine itself dies, the running run and every
+ * queued run fail with 'Analytics engine stopped'."
+ *
+ * The running run is ABORTED rather than awaited, because there may be nothing
+ * to await: duckdb-wasm drops the promises of requests that were in flight when
+ * its worker died (its own `onError` clears the pending map without rejecting),
+ * so a run waiting on a query would otherwise hang for the life of the page.
+ *
+ * Undo is taken from every earlier run through the store's `engineStopped`
+ * flag, not by patching each card: the backup tables lived in the database that
+ * just died. `discardUndo` is deliberately NOT called — its `DROP TABLE` would
+ * be posted at an engine that cannot answer, and there is nothing left to drop.
+ */
+export function installEngineWatcher(): () => void {
+  disposeEngineWatcher?.();
+
+  let stopped = false;
+  const reactToStatus = () => {
+    if (stopped) return;
+    if (getDuckDBStatus().state !== "failed") return;
+    stopped = true;
+    for (const run of useProcessingStore.getState().runs) {
+      if (
+        run.status !== "queued" &&
+        run.status !== "running" &&
+        run.status !== "cancelling"
+      ) {
+        continue;
+      }
+      patch(run.id, {
+        status: "failed",
+        phase: null,
+        error: "Analytics engine stopped",
+        elapsedMs: Math.max(0, Date.now() - run.startedAt),
+      });
+      controllers.get(run.id)?.abort();
+    }
+    useProcessingStore.getState().markEngineStopped();
+  };
+
+  const unsubscribe = subscribeDuckDBStatus(reactToStatus);
+  reactToStatus();
+
+  const dispose = () => {
+    unsubscribe();
+    if (disposeEngineWatcher === dispose) disposeEngineWatcher = null;
+  };
+  disposeEngineWatcher = dispose;
+  return dispose;
+}
+```
+
+Add `subscribeDuckDBStatus` to the module's imports from `../../insights/duckdb`. In `src/app/App.tsx`, install it beside the removal watcher (`:850`): `useEffect(() => installEngineWatcher(), []);`, importing it from the same module the other two come from.
+
+- [ ] **Step 8: Write the failing test for the UI**
+
+Create `tests/unit/ui/processing/engineStopped.test.tsx`, on `lodSelect.test.tsx`'s scaffolding (its three `vi.mock` blocks, imports and reset pair) with the duckdb mock's status switched to `failed`:
+
+```tsx
+/**
+ * Spec §6.1 after the engine dies: the tools go dark with the reason the
+ * catalogue already has, and no card offers an Undo it cannot perform.
+ */
+describe("after the analytics engine stops", () => {
+  it("disables every tool row with the existing reason", () => {
+    // `eligibility.ts:45-47` already answers this for `engineState: "failed"`;
+    // what is new is that the panel HEARS about it (Task 1's subscription).
+    addRoofLayer();
+    render(<CatalogueView />);
+    const row = screen
+      .getByText("Roof metrics to attributes")
+      .closest("button")!;
+    expect(row).toHaveAttribute("aria-disabled", "true");
+    expect(row.textContent).toContain(
+      "Not available while DuckDB is unavailable",
+    );
+  });
+
+  it("disables the result card's Undo and says why", () => {
+    const layerId = addRoofLayer();
+    useProcessingStore.getState().markEngineStopped();
+    render(<ToolView toolId="roof-metrics" />);
+    act(() =>
+      useProcessingStore
+        .getState()
+        .upsertRun(doneRoofRun(layerId, { undoable: true })),
+    );
+    const undo = screen.getByRole("button", { name: "Undo" });
+    expect(undo).toBeDisabled();
+    expect(undo).toHaveAttribute(
+      "title",
+      "Unavailable: the analytics engine stopped",
+    );
+  });
+
+  it("disables Recent runs' Undo for the same reason", () => {
+    const layerId = addRoofLayer();
+    useProcessingStore.getState().markEngineStopped();
+    act(() =>
+      useProcessingStore
+        .getState()
+        .upsertRun(doneRoofRun(layerId, { undoable: true })),
+    );
+    render(<CatalogueView />);
+    const undo = screen.getByRole("button", { name: "Undo" });
+    expect(undo).toBeDisabled();
+    expect(undo).toHaveAttribute(
+      "title",
+      "Unavailable: the analytics engine stopped",
+    );
+  });
+
+  it("leaves Undo alone while the engine is alive", () => {
+    const layerId = addRoofLayer();
+    render(<ToolView toolId="roof-metrics" />);
+    act(() =>
+      useProcessingStore
+        .getState()
+        .upsertRun(doneRoofRun(layerId, { undoable: true })),
+    );
+    expect(screen.getByRole("button", { name: "Undo" })).toBeEnabled();
+  });
+});
+```
+
+`doneRoofRun(layerId, patch)` is this file's local `doneRun` equivalent: copy `ToolView.test.tsx:140-182`'s `runFixture`/`doneRun` pair and point `toolId` at `"roof-metrics"` with `columns: ["roof_area_m2"]`. The first case needs the duckdb mock's `getDuckDBStatus` to return `{ state: "failed", error: "worker gone" }`; the last three need it `ready` — make it a mutable module `let` the tests set, as `runQueue.test.ts` does with its own fixtures.
+
+- [ ] **Step 9: Disable the two Undo buttons**
+
+**[adapted copy]** — `"Unavailable: the analytics engine stopped"`. §6.1's own sentence is "Unavailable after an engine restart", which assumes the restart this milestone does not perform; saying "after a restart" when nothing restarted would describe an event the user never saw.
+
+In `src/ui/processing/RunFooter.tsx`, replace the Undo block (`:310-314`):
+
+```tsx
+{
+  run.undoable && (
+    <button
+      type="button"
+      disabled={engineStopped}
+      title={engineStopped ? UNDO_ENGINE_STOPPED : undefined}
+      onClick={() => void undoRun(run.id)}
+    >
+      Undo
+    </button>
+  );
+}
+```
+
+with, at the top of the module,
+
+```tsx
+/**
+ * §6.1's reason, adapted. The spec says "Unavailable after an engine restart",
+ * which assumes a restart; this milestone detects the death and does not
+ * restart, so the sentence names what actually happened.
+ */
+const UNDO_ENGINE_STOPPED = "Unavailable: the analytics engine stopped";
+```
+
+and, in the component, `const engineStopped = useProcessingStore((s) => s.engineStopped);`.
+
+The same two lines in `src/ui/processing/RecentRuns.tsx:75-79` (its condition already gates on `run.status === "done" && run.undoable && !run.stale`; keep it and add `disabled`/`title`), importing the constant from `RunFooter` or, better, moving it to `src/ui/processing/runFormat.ts` beside the other shared copy so neither component owns the other's string.
+
+- [ ] **Step 10: Run everything**
+
+```bash
+npx vitest run tests/unit/insights tests/unit/features/processing tests/unit/ui/processing
+npx tsc -b --noEmit
+```
+
+Expected: PASS.
+
+- [ ] **Step 11: Commit**
+
+```bash
+git add src/insights/duckdb.ts src/features/processing/runQueue.ts \
+  src/features/processing/processingStore.ts src/ui/processing/RunFooter.tsx \
+  src/ui/processing/RecentRuns.tsx src/ui/processing/runFormat.ts src/app/App.tsx \
+  tests/unit/insights/useDuckDBStatus.test.tsx \
+  tests/unit/features/processing/runQueue.test.ts \
+  tests/unit/ui/processing/engineStopped.test.tsx
+git commit -m "feat(insights): a dead DuckDB worker stops every run and every Undo"
+```
+
+---
+
+### Task 5: The pure roof roll-up
 
 **Files:**
 
@@ -1458,7 +1947,7 @@ git commit -m "feat(processing): the capability chips follow the extension and o
   - `export interface RoofSurfaceMetric { readonly lod: string | null; readonly areaSqM: number; readonly inclinationDeg: number; readonly azimuthDeg: number }`
   - `export interface RoofRollUp { readonly areaM2: number; readonly flatM2: number; readonly flatShare: number | null; readonly slopeDeg: number | null; readonly azimuthDeg: number | null; readonly surfaces: number }`
   - `export function rollUpRoofSurfaces(surfaces: ReadonlyArray<RoofSurfaceMetric>, flatThresholdDeg: number): RoofRollUp | null`
-- Task 6 produces `RoofSurfaceMetric[]`; Task 8 consumes `rollUpRoofSurfaces`.
+- Task 7 produces `RoofSurfaceMetric[]`; Task 9 consumes `rollUpRoofSurfaces`.
 
 **Do not touch `src/domain/roofMetrics/aggregate.ts`.** Its `computeAverageAzimuth` is a circular area-weighted mean over a hard-coded 1° threshold (`aggregate.ts:8,12-35`) and `aggregateRoofMetrics` returns `0` for an empty set — neither is §7's rule, and `src/ui/details/subject.ts:228` still depends on the old behaviour.
 
@@ -1661,7 +2150,7 @@ git commit -m "feat(domain): the spec's roof roll-ups as one pure function"
 
 ---
 
-### Task 5: LoD-tag the resident roof metrics, and expose the resident geometry LoDs (plugin submodule)
+### Task 6: LoD-tag the resident roof metrics, and expose the resident geometry LoDs (plugin submodule)
 
 **Files:**
 
@@ -1677,7 +2166,7 @@ git commit -m "feat(domain): the spec's roof roll-ups as one pure function"
   - `export interface ResidentRoofMetrics extends RoofMetrics { readonly lod: string | null }`
   - `ResidentObjectRecord.roofMetrics: ReadonlyArray<ResidentRoofMetrics>`
   - `ResidentObjectRecord.geometryLods: ReadonlyArray<string>` — the distinct non-null `Surface.lod` values over **all** of the object's surfaces, in the order first seen.
-- Task 6 consumes both.
+- Task 7 consumes both.
 
 **Why two fields and not one.** §7's contributor rule asks "does this object have GEOMETRY at this LoD" — of any semantic type. `roofMetrics` answers only for roofs; a wall-only BuildingPart at LoD 2.2 has no roof metric and would look like an object with nothing there, which is precisely the case finding 1 is about. `surfaceCount` is a total with no LoD breakdown. `geometryLods` is the smallest honest answer: a handful of short strings per record, computed in the same loop that already visits every surface for `attrKeys` (`objectRecords.ts:36-38`).
 
@@ -1876,7 +2365,7 @@ A `tsc` error at one of the five READER sites (`legendCounts.ts:94-103`, `useRes
 
 ---
 
-### Task 6: One geometry source for both layer kinds, and LoD counts that measure nothing
+### Task 7: One geometry source for both layer kinds, and LoD counts that measure nothing
 
 **Files:**
 
@@ -1885,14 +2374,14 @@ A `tsc` error at one of the five READER sites (`legendCounts.ts:94-103`, `useRes
 
 **Interfaces:**
 
-- Consumes: `RoofSurfaceMetric` (Task 4); `ResidentObjectRecord`/`ResidentRoofMetrics` (Task 5); `computeRoofMetrics` from `@cityjson/navara-core`; `getResidentModel` (`residentModel.ts:46`); `parentsIndexOf`/`rootFeatureId` (`featureId.ts:19,46`).
+- Consumes: `RoofSurfaceMetric` (Task 5); `ResidentObjectRecord`/`ResidentRoofMetrics` (Task 6); `computeRoofMetrics` from `@cityjson/navara-core`; `getResidentModel` (`residentModel.ts:46`); `parentsIndexOf`/`rootFeatureId` (`featureId.ts:19,46`).
 - Produces:
   - `export interface RoofGeometrySource { has(objectId: string): boolean; hasGeometryAt(objectId: string, lod: string): boolean; roofSurfacesAt(objectId: string, lod: string): ReadonlyArray<RoofSurfaceMetric> }`
   - `export function roofGeometrySource(layer: Layer): RoofGeometrySource`
   - `export function featureIdsByObject(layer: Layer): ReadonlyMap<string, string>`
   - `export interface LodOption { readonly lod: string; readonly features: number }`
   - `export function roofLodOptions(layer: Layer): ReadonlyArray<LodOption>`
-- Task 8 consumes the source; Task 10 consumes `roofLodOptions`.
+- Task 9 consumes the source; Task 11 consumes `roofLodOptions`.
 
 **The CPU contract, which is the reason this module has the shape it has.**
 
@@ -2465,7 +2954,7 @@ git commit -m "feat(processing): one geometry source for static and streaming ro
 
 ---
 
-### Task 7: The roof parameters, and the registry entry that promises their columns
+### Task 8: The roof parameters, and the registry entry that promises their columns
 
 **Files:**
 
@@ -2479,11 +2968,11 @@ git commit -m "feat(processing): one geometry source for static and streaming ro
 - Produces:
   - `roofMetricsParams.ts`: `export type RoofMeasure = "area" | "flatArea" | "flatShare" | "slope" | "azimuth" | "surfaces"`; `export interface RoofMeasureSpec { readonly key: RoofMeasure; readonly label: string; readonly hint: string | null; readonly suffix: string }`; `export const ROOF_MEASURES: ReadonlyArray<RoofMeasureSpec>`; `export interface RoofMetricsParams { readonly measures: ReadonlyArray<RoofMeasure>; readonly flatThresholdDeg: number }`; `export const DEFAULT_ROOF_PARAMS: RoofMetricsParams`; `export const FLAT_THRESHOLD_MIN = 0`; `export const FLAT_THRESHOLD_MAX = 15`; `export function roofParams(raw: Readonly<Record<string, unknown>>): RoofMetricsParams`; `export function roofColumnNames(prefix: string, params: RoofMetricsParams): string[]`.
   - `types.ts`: `ToolDefinition.needsLod: boolean` (required, on all seven entries); `ToolDefinition.validateParams?`; `ToolDefinition.normaliseParams?`.
-- Tasks 8, 10, 11 and 12 all consume these.
+- Tasks 9, 11, 12 and 13 all consume these.
 
-**`implemented` stays `false` here.** The registry entry gains its columns and its validation, but the tool is NOT switched on until its executor (Task 8), its LoD select (Task 10) and its parameters (Task 11) exist — Task 12 is the single step that flips it and proves the form works. Enabling it earlier would put a runnable Run button in front of a form with no parameters and no LoD.
+**`implemented` stays `false` here.** The registry entry gains its columns and its validation, but the tool is NOT switched on until its executor (Task 9), its LoD select (Task 11) and its parameters (Task 12) exist — Task 13 is the single step that flips it and proves the form works. Enabling it earlier would put a runnable Run button in front of a form with no parameters and no LoD.
 
-**The default is all six measures ON.** The spec does not say, and the mockup has no Roof metrics form state (`design/processing-toolbox-wireframe.html` shows only the catalogue row). Three reasons for ON: §7.1 calls the tool one that "materialises the roof metrics the app already computes", and a half-materialised default contradicts that; §7.1's own Style-by-result rule is "`roof_area_m2 >` median", which only holds if area is written by default; and Measure solids' mockup ticks its four primary measures and leaves only its two _elevation_ extras off — roof metrics has no such secondary tier. Confirmed by the reviewer; recorded in "Open questions for the human".
+**The default is all six measures ON.** The spec does not say, and the mockup has no Roof metrics form state (`design/processing-toolbox-wireframe.html` shows only the catalogue row). Three reasons for ON: §7.1 calls the tool one that "materialises the roof metrics the app already computes", and a half-materialised default contradicts that; §7.1's own Style-by-result rule is "`roof_area_m2 >` median", which only holds if area is written by default; and Measure solids' mockup ticks its four primary measures and leaves only its two _elevation_ extras off — roof metrics has no such secondary tier. Decided by the repo owner (decision 6).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2811,7 +3300,7 @@ In `src/features/processing/toolRegistry.ts`, add `needsLod` to every entry: `tr
         ? "Pick at least one measure"
         : null,
     normaliseParams: (params) => ({ ...roofParams(params) }),
-    // Task 12 flips this, once the executor, the LoD select and the parameters
+    // Task 13 flips this, once the executor, the LoD select and the parameters
     // all exist. Until then the row reads "Not available yet" and a run of it
     // fails with the same words rather than hanging.
     implemented: false,
@@ -2822,10 +3311,10 @@ with `import { roofColumnNames, roofParams } from "./roofMetricsParams";` at the
 
 - [ ] **Step 6: Extend the eligibility test**
 
-Append to `tests/unit/features/processing/eligibility.test.ts`. Roof metrics is still `implemented: false`, and `eligibility.ts:44` outranks everything — so these two assert the rules that will apply the moment Task 12 flips it, over an enabled COPY of the definition:
+Append to `tests/unit/features/processing/eligibility.test.ts`. Roof metrics is still `implemented: false`, and `eligibility.ts:44` outranks everything — so these two assert the rules that will apply the moment Task 13 flips it, over an enabled COPY of the definition:
 
 ```ts
-/** The M2 registry entry, as Task 12 will switch it on. */
+/** The M2 registry entry, as Task 13 will switch it on. */
 const enabledRoof = { ...toolById("roof-metrics"), implemented: true };
 
 it("lets Roof metrics run on a streaming layer with no reader", () => {
@@ -2860,7 +3349,7 @@ it("refuses Roof metrics on a vector layer", () => {
   ).toEqual({ ok: false, reason: "Needs a city model layer" });
 });
 
-it("still reads 'Not available yet' until Task 12 switches it on", () => {
+it("still reads 'Not available yet' until Task 13 switches it on", () => {
   expect(
     toolEligibility(toolById("roof-metrics"), {
       targetKind: "city",
@@ -2899,7 +3388,7 @@ git commit -m "feat(processing): Roof metrics' parameters and the columns they p
 
 ---
 
-### Task 8: The Roof metrics executor, in bounded batches
+### Task 9: The Roof metrics executor, in bounded batches
 
 **Files:**
 
@@ -2909,11 +3398,11 @@ git commit -m "feat(processing): Roof metrics' parameters and the columns they p
 
 **Interfaces:**
 
-- Consumes: `ToolExecutor`/`ToolContext`/`ToolResult` (`runQueue.ts:85-108`); `rollUpRoofSurfaces` (Task 4); `roofGeometrySource`, `RoofGeometrySource` (Task 6); `roofParams`, `ROOF_MEASURES` (Task 7); `quoteIdent`, `quoteLiteral` from `src/insights/sql.ts`.
+- Consumes: `ToolExecutor`/`ToolContext`/`ToolResult` (`runQueue.ts:85-108`); `rollUpRoofSurfaces` (Task 5); `roofGeometrySource`, `RoofGeometrySource` (Task 7); `roofParams`, `ROOF_MEASURES` (Task 8); `quoteIdent`, `quoteLiteral` from `src/insights/sql.ts`.
 - Produces:
   - `runQueue.ts`: `ToolContext.throwIfCancelled(): void`.
   - `roofMetrics.ts`: `buildFeatureRowsReadSql(table, ids)`, `groupRowsByFeature(rows)`, `computeRoofRows(input): Promise<RoofComputeOutput>`, `ROOF_BATCH_FEATURES`, `roofMetrics: ToolExecutor`, and the registration.
-- Task 9 consumes the executor's all-NULL case; Task 12 consumes the registration.
+- Task 10 consumes the executor's all-NULL case; Task 13 consumes the registration.
 
 **The batch bound, stated.** `ROOF_BATCH_FEATURES = 500`. Between batches the executor yields with `await new Promise((r) => setTimeout(r, 0))` — a MACROTASK, so the event loop actually turns and the browser can paint and deliver the Cancel click. A microtask (`await Promise.resolve()`) would not: it runs before the loop turns. The abort is checked **after** the yield, not before it, because the click the yield exists to let through lands DURING the yield; checking first would run one more batch than necessary every time. 500 features is a few milliseconds of `computeRoofMetrics` on 3D BAG-shaped data and keeps the yield overhead under a percent on a 100k-feature layer; it is a constant in one place, so it is one edit if a real profile disagrees.
 
@@ -2931,7 +3420,7 @@ Create `tests/unit/features/processing/roofMetricsTool.test.ts`:
  *
  * The pure halves are tested directly: `buildFeatureRowsReadSql` (the run's one
  * statement) and `computeRoofRows` (everything else). The executor itself is
- * glue over them, and Task 8's second file drives it through a real run.
+ * glue over them, and Task 9's second file drives it through a real run.
  */
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -3846,7 +4335,7 @@ git commit -m "feat(processing): Roof metrics computes the six columns in bounde
 
 ---
 
-### Task 9: Style by result gates on a column that has values, and the card names the resident set
+### Task 10: Style by result gates on a column that has values, and the card names the resident set
 
 **Files:**
 
@@ -3858,13 +4347,13 @@ git commit -m "feat(processing): Roof metrics computes the six columns in bounde
 - Produces:
   - `RunSummary.firstColumnNonNull: number` — how many WRITTEN ROWS have a non-null value in the run's first output column.
   - `summarise(result: ToolResult, elapsedMs: number, options: { readonly streaming: boolean }): RunSummary`.
-- Task 11 and Task 14 rely on the gate; nothing else consumes the new field.
+- Task 12 and Task 15 rely on the gate; nothing else consumes the new field.
 
 **Why `measured === 0` is the wrong gate.** M1 ruled it as the synchronous stand-in for §6.2's "disabled with 'All values are empty' when the chosen column is NULL for every object in the run", and for Height from extent the two coincide: every measured feature gets a height. Roof metrics breaks the equivalence. A run with **only** Dominant azimuth ticked over a layer of perfectly flat roofs measures every building (`measured > 0`) and writes `roof_azimuth_deg = NULL` everywhere — `§7`'s "no remaining contributor for a measure gets NULL for it". Style by result would then open a rule editor on a column with no median, and `readMedian` would toast DuckDB's NULL instead of the sentence the spec names. Same for `roof_slope_deg` and `roof_flat_share` over zero-area surfaces (`computeRoofMetrics` returns all-zeros for a degenerate ring).
 
 The count is computed centrally in `summarise`, from `result.columns[0]` and `result.rows`, so it is right for every tool present and future without asking executors to remember it.
 
-**The resident-set qualifier (§10 scenario 4: "the card says so").** Today the "Runs over the N currently loaded buildings" sentence appears only in the FORM (`ToolView.tsx:174-179`). Scenario 4 asks for it on the result too, and the card is where a run is read afterwards. `summarise` takes `{ streaming }` and puts an extra clause at the head of the DETAIL line. **[adapted]** copy: `"Over the resident set: the buildings loaded when the run started."`
+**The resident-set qualifier (§10 scenario 4: "the card says so").** Today the "Runs over the N currently loaded buildings" sentence appears only in the FORM (`ToolView.tsx:174-179`). Scenario 4 asks for it on the result too, and the card is where a run is read afterwards. `summarise` takes `{ streaming }` and puts an extra clause at the head of the DETAIL line. **[adapted copy]**, decided (decision 9): `"Over the resident set: the buildings loaded when the run started."`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -4137,7 +4626,7 @@ git commit -m "fix(processing): Style by result needs a column with values, not 
 
 ---
 
-### Task 10: The LoD select
+### Task 11: The LoD select
 
 **Files:**
 
@@ -4147,16 +4636,16 @@ git commit -m "fix(processing): Style by result needs a column with values, not 
 
 **Interfaces:**
 
-- Consumes: `roofLodOptions`, `LodOption` (Task 6); `ToolDefinition.needsLod` (Task 7).
+- Consumes: `roofLodOptions`, `LodOption` (Task 7); `ToolDefinition.needsLod` (Task 8).
 - Produces:
   - `useLodOptions.ts`: `export interface LodChoices { readonly options: ReadonlyArray<LodOption>; readonly noun: string; readonly emptyReason: string | null }`; `export function useLodOptions(tool: ToolDefinition, target: Layer | null): LodChoices`.
-  - `roofLayerFixture.tsx`: `export function roofModel(options?: { roofs?: boolean }): CityModel`; `export function addRoofLayer(options?: { selectedLod?: string | null; roofs?: boolean }): string` — adds the layer, activates it and registers a `ready` table entry. Task 11 imports both.
+  - `roofLayerFixture.tsx`: `export function roofModel(options?: { roofs?: boolean }): CityModel`; `export function addRoofLayer(options?: { selectedLod?: string | null; roofs?: boolean }): string` — adds the layer, activates it and registers a `ready` table entry. Task 12 imports both.
   - `useToolForm` gains `lodOptions`, `lodNoun`, `lodReason`, and its returned `draft.lod` is the EFFECTIVE LoD.
-- Task 11 consumes the fixture and `f.paramsError`'s place in `runReason`; Task 12 consumes the rendered select.
+- Task 12 consumes the fixture and `f.paramsError`'s place in `runReason`; Task 13 consumes the rendered select.
 
 **An unimplemented tool renders NO LoD control and claims nothing.** `useLodOptions` returns the empty `LodChoices` for any tool with `implemented === false`, and `ToolView` renders the field only when `tool.needsLod && tool.implemented`. Measure solids and Validate solids have no source of truthful counts in M2, and a select reading "No solid geometry in this layer" over a layer full of solids is a fabricated fact. Their rows already say the true thing — "Not available yet".
 
-**Copy.** §6's option pattern is "2.2 (1,115 buildings with a solid)" and its empty state is "No solid geometry in this layer". Roof metrics needs the roof-shaped versions: **[adapted]** `"2.2 (1,115 buildings with roof surfaces)"` and `"No roof surfaces in this layer"`. Both accepted by the reviewer; both listed in "Open questions for the human".
+**Copy.** §6's option pattern is "2.2 (1,115 buildings with a solid)" and its empty state is "No solid geometry in this layer". Roof metrics needs the roof-shaped versions, and both are decided (decisions 1 and 2): **[adapted copy]** `"2.2 (1,115 buildings with roof surfaces)"` and `"No roof surfaces in this layer"`.
 
 **Why the default is computed and not written.** `useToolForm` must not `setDraft` from a render. It already normalises a stale `targetLayerId` by returning a corrected draft rather than writing one (`useToolForm.ts:90-92`); the LoD takes the same road.
 
@@ -4356,10 +4845,10 @@ vi.mock("../../../../src/ui/table/useLayerCounts", () => ({
 }));
 
 /**
- * Roof metrics is `implemented: false` until Task 12. `TOOLS` is an array of
+ * Roof metrics is `implemented: false` until Task 13. `TOOLS` is an array of
  * plain readonly object literals, so a getter spy has nothing to attach to —
  * the registry is MOCKED instead, the same way `useToolForm.test.tsx:54-71`
- * already enables `measure-solids`. Task 12 deletes this block and reruns
+ * already enables `measure-solids`. Task 13 deletes this block and reruns
  * these assertions against the real registry.
  */
 vi.mock("../../../../src/features/processing/toolRegistry", async () => {
@@ -4588,7 +5077,7 @@ Every line below `:93` already refers to `draft` by that name. Then extend `runR
 ```ts
 // Precedence, top to bottom: what the TOOL cannot do here (eligibility),
 // what the TARGET cannot offer (no qualifying LoD), then the things the user
-// can fix in the form — the prefix, the parameters (Task 11), the scope.
+// can fix in the form — the prefix, the parameters (Task 12), the scope.
 const runReason = !eligibility.ok
   ? eligibility.reason
   : (lods.emptyReason ?? prefixError ?? scopeReason);
@@ -4663,7 +5152,7 @@ git commit -m "feat(processing): the tool form offers the LoDs the target actual
 
 ---
 
-### Task 11: The PARAMETERS section — six checkboxes, a threshold slider, one validation
+### Task 12: The PARAMETERS section — six checkboxes, a threshold slider, one validation
 
 **Files:**
 
@@ -4674,10 +5163,10 @@ git commit -m "feat(processing): the tool form offers the LoDs the target actual
 
 **Interfaces:**
 
-- Consumes: `ROOF_MEASURES`, `roofParams`, `FLAT_THRESHOLD_MIN`, `FLAT_THRESHOLD_MAX` (Task 7); `ToolDefinition.validateParams`/`normaliseParams` (Task 7); `addRoofLayer` (Task 10).
+- Consumes: `ROOF_MEASURES`, `roofParams`, `FLAT_THRESHOLD_MIN`, `FLAT_THRESHOLD_MAX` (Task 8); `ToolDefinition.validateParams`/`normaliseParams` (Task 8); `addRoofLayer` (Task 11).
 - Produces: `useToolForm` gains `paramsError: string | null` and `extensionNote: string | null`; `RoofMetricsParams` is a `{ params, onChange }` component, so a second parameterised tool in M3 is a sibling file and one more line in `ToolView`.
 
-**The slider's peer.** `src/app/flatControls.css:237-284` styles **every** `input[type="range"]` in the app, so the control is already on the tokens — no thumb or track CSS may be added here. The layout peer is the Sun & shade sheet's "Time of day" slider (`src/ui/viewport/SunShadeSheet.tsx:142-165`): a `<label>` wrapping the caption, the input with an `aria-label`, and a small muted row under it. Verify the two side by side in the browser at Task 14.
+**The slider's peer.** `src/app/flatControls.css:237-284` styles **every** `input[type="range"]` in the app, so the control is already on the tokens — no thumb or track CSS may be added here. The layout peer is the Sun & shade sheet's "Time of day" slider (`src/ui/viewport/SunShadeSheet.tsx:142-165`): a `<label>` wrapping the caption, the input with an `aria-label`, and a small muted row under it. Verify the two side by side in the browser at Task 15.
 
 **The `measure-solids` registry mock in `useToolForm.test.tsx` STAYS.** M1 deferred "delete it once a second real tool exists", but Roof metrics is not that tool: it has `needsReader: false` and `extension: null` and is eligible on streaming targets too, so among the ready-table `candidates` (`useToolForm.ts:53-56`) it can no more discriminate one layer from another than Height from extent can. Only a reader-needing or extension-needing tool can, and the first of those is M3's.
 
@@ -4929,7 +5418,7 @@ const extensionNote =
     : null;
 ```
 
-Put `paramsError` into the precedence chain from Task 10:
+Put `paramsError` into the precedence chain from Task 11:
 
 ```ts
 const runReason = !eligibility.ok
@@ -5065,7 +5554,7 @@ git commit -m "feat(processing): Roof metrics' measures and flat threshold in th
 
 ---
 
-### Task 12: Switch the tool on
+### Task 13: Switch the tool on
 
 **Files:**
 
@@ -5073,7 +5562,7 @@ git commit -m "feat(processing): Roof metrics' measures and flat threshold in th
 - Modify: `tests/unit/ui/processing/lodSelect.test.tsx`, `tests/unit/ui/processing/RoofMetricsParams.test.tsx` (drop the registry shim), `tests/unit/features/processing/eligibility.test.ts` (the "still reads Not available yet" test), `tests/unit/ui/processing/CatalogueView.test.tsx` if it used Roof metrics as its disabled-row example
 - Test: `tests/unit/ui/processing/roofMetricsEnabled.test.tsx`
 
-This task exists on its own because it is the moment the tool becomes reachable, and it is the one a reviewer should be able to reject without rejecting any of the machinery. Everything it needs — executor, registration, LoD select, parameters, validation — landed in Tasks 8, 10 and 11.
+This task exists on its own because it is the moment the tool becomes reachable, and it is the one a reviewer should be able to reject without rejecting any of the machinery. Everything it needs — executor, registration, LoD select, parameters, validation — landed in Tasks 9, 11 and 12.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -5187,16 +5676,16 @@ describe("Roof metrics to attributes, switched on", () => {
 npx vitest run tests/unit/ui/processing/roofMetricsEnabled.test.tsx
 ```
 
-Expected: FAIL — the row is `aria-disabled="true"` with "Not available yet", there is no LoD combobox, and Run is disabled with the same reason. (`EXECUTORS["roof-metrics"]` already passes: Task 8 wired the executor; `implemented` is a registry flag, not a registration.)
+Expected: FAIL — the row is `aria-disabled="true"` with "Not available yet", there is no LoD combobox, and Run is disabled with the same reason. (`EXECUTORS["roof-metrics"]` already passes: Task 9 wired the executor; `implemented` is a registry flag, not a registration.)
 
 - [ ] **Step 3: Flip it**
 
-In `src/features/processing/toolRegistry.ts`, on the `roof-metrics` entry: `implemented: true`, and delete the comment Task 7 left there.
+In `src/features/processing/toolRegistry.ts`, on the `roof-metrics` entry: `implemented: true`, and delete the comment Task 8 left there.
 
 - [ ] **Step 4: Remove the scaffolding the shim was standing in for**
 
 - `tests/unit/ui/processing/lodSelect.test.tsx` and `RoofMetricsParams.test.tsx`: delete the `vi.mock(".../toolRegistry", …)` block that enabled `roof-metrics`, and nothing else — their imports, `counts` object and reset pair stay. Both suites must pass unchanged against the real registry; if either needs another edit, the flip did not deliver what the mock was standing in for.
-- `tests/unit/features/processing/eligibility.test.ts`: delete the "still reads 'Not available yet' until Task 12 switches it on" test, and replace `enabledRoof` with `toolById("roof-metrics")` in the two that used it.
+- `tests/unit/features/processing/eligibility.test.ts`: delete the "still reads 'Not available yet' until Task 13 switches it on" test, and replace `enabledRoof` with `toolById("roof-metrics")` in the two that used it.
 - `tests/unit/ui/processing/CatalogueView.test.tsx`: if its "a disabled row still opens the tool view" case used Roof metrics, repoint it at `measure-solids`, which is still unimplemented.
 
 - [ ] **Step 5: Run the whole suite**
@@ -5218,7 +5707,7 @@ git commit -m "feat(processing): switch Roof metrics to attributes on"
 
 ---
 
-### Task 13: Documentation
+### Task 14: Documentation
 
 **Files:**
 
@@ -5273,6 +5762,27 @@ surface), the user's own threshold, or NULL where a measure could not be
 evaluated — so `domain/roofMetrics/roofRollUp.ts` exists beside it rather than
 replacing it.
 
+**A dead worker is detected, announced and contained — and not recovered
+from (M13.2).** `doInit` creates the Worker itself, so `duckdb.ts` attaches its
+own `error`/`messageerror` listeners beside the ones `AsyncDuckDB.attach`
+registers (both use `addEventListener`), and `markEngineDead` drops the
+connection, clears the boot memo and publishes `failed` through the same
+`setStatus` writer. A failed QUERY is not the signal: duckdb-wasm's own worker
+error handler clears its pending-request map without rejecting the promises, so
+a query in flight when the worker dies never settles, and `postTask` on a
+detached worker logs and returns `undefined` rather than rejecting. That is
+also why `runQueue`'s engine watcher ABORTS a running run's controller instead
+of awaiting it. Containment then falls out of code that already exists:
+`runQuery` refuses on a non-`ready` status, and `toolEligibility` already
+disables every row with "Not available while DuckDB is unavailable". What is
+deliberately NOT built is §6.1's recovery — the status bar's Retry reboots the
+engine but does not rebuild the tables that were `ready` when the worker died
+(`retryEngine` only revives what it parked in `pendingSources`), so those
+layers stay table-less and every tool stays disabled until the page is
+reloaded. Undo is taken away session-wide through one `engineStopped` flag on
+the processing store rather than per run, because every backup table died with
+the database.
+
 **Style by result gates on values, not on a count.** `RunSummary` carries
 `firstColumnNonNull`, computed centrally in `summarise` from the run's first
 output column. §6.2 disables the button "when the chosen column is NULL for
@@ -5293,8 +5803,14 @@ roll-ups, skip accounting by LoD, Style by result on `roof_area_m2`), computed
 app-side on every city layer kind including streaming; the "Loading extension"
 run phase with `ensureExtension` and the spec's failure copy; and a published
 DuckDB status, so the catalogue's capability chips track an extension's state
-and offer Retry. Acceptance scenarios 4 and 6, as far as this milestone
-reaches, are smoked in `scripts/smoke/processing-m2.md`.
+and offer Retry. A dead DuckDB worker is now DETECTED (its own `error` event,
+published as `failed`): every queued and running run fails with §6.1's
+"Analytics engine stopped", every Undo is disabled, and the tool rows go dark
+with the existing "Not available while DuckDB is unavailable". §6.1's RECOVERY
+is deliberately not built — the status bar's Retry reboots the engine without
+rebuilding the tables that were ready when the worker died, so tools stay
+disabled until the page is reloaded. Acceptance scenarios 4 and 6, as far as
+this milestone reaches, are smoked in `scripts/smoke/processing-m2.md`.
 ```
 
 Then **fix the stale carried list** (`:615-640`). Remove the item claiming "§6.1 re-validation of an output column that has come to belong to the file itself is not implemented" (`runQueue.ts:419-442` does it), and remove any other item fix wave 1 closed — check each against the code before deleting it, and leave anything you cannot verify. Extend the existing elapsed-timer bullet so it names the new case: "…so it can jump back once — and again at the hand-off from Loading extension to Computing, which re-stamps `startedAt`; the elapsed the finished card reports is measured from the run's real start and does include the download." Then add:
@@ -5306,12 +5822,18 @@ Then **fix the stale carried list** (`:615-640`). Remove the item claiming "§6.
   Details, the rule editor or a colour rule — which §7.1 and §8 do ask for.
   Closing it means an attribute-overlay seam in the FCB plugin and worker (so a
   re-fetched cell keeps the values) plus an Undo path; see the M2 plan's Design
-  decision (b) and its open question 10.
-- **Engine-death recovery (§6.1) is specified but not implemented.** If the
-  DuckDB worker dies, the running and queued runs do not fail with "Analytics
-  engine stopped", the status bar does not turn Failed, and earlier runs' Undo
-  is not disabled with "Unavailable after an engine restart". The mechanism is
-  sketched in the M2 plan's "Deferred with design notes"; open question 11.
+  decision (b) and the plan's "Future consideration" section. The repo owner
+  has ruled it a future consideration rather than scheduling it.
+- **A dead DuckDB worker is DETECTED and contained, but not recovered from.**
+  13.2 publishes `failed` from the worker's own `error`/`messageerror` event,
+  fails every queued and running run with §6.1's "Analytics engine stopped",
+  disables every Undo with "Unavailable: the analytics engine stopped"
+  (adapted: §6.1's own sentence assumes a restart) and lets the catalogue's
+  existing "Not available while DuckDB is unavailable" reason disable the rows.
+  What §6.1 also asks for and 13.2 does NOT do is the recovery: the status
+  bar's Retry reboots the engine but does not rebuild the tables that were
+  `ready` when the worker died, so those layers stay table-less and every tool
+  stays disabled until the page is reloaded.
 - **No tool needs an extension yet**, so the muted chip, its Retry link and the
   extension-failure run copy are covered by unit tests and cannot be reached
   through the UI until a three_d or spatial tool ships (13.3). While those
@@ -5321,7 +5843,8 @@ Then **fix the stale carried list** (`:615-640`). Remove the item claiming "§6.
   ("with roof surfaces"), the empty-LoD text, the extension-failure sentences,
   the measure labels, the Roof metrics long description and the card's
   resident-set clause are ADAPTED from the spec's patterns, not verbatim spec
-  copy — see the M2 plan's "Open questions for the human".
+  copy, written to the spec's patterns and decided by the repo owner — see
+  the M2 plan's "Decisions recorded (2026-09-11)".
 - Roof metrics' six measures are all ticked by default (the spec states no
   default), and its flat threshold is STRICT, so at 0° a horizontal roof counts
   as not flat.
@@ -5337,7 +5860,7 @@ git commit -m "docs: record M13.2's seams, and refresh the carried-forward list"
 
 ---
 
-### Task 14: Milestone gate — verification, browser smoke, review
+### Task 15: Milestone gate — verification, browser smoke, review
 
 **Files:**
 
@@ -5369,10 +5892,10 @@ Record what was observed against each check:
 2. **Measure solids** reads `"Not available yet"`, **not** the FlatCityBuf reason — `!implemented` outranks eligibility (`eligibility.ts:44`). A **DEVIATION**, not a failure; it resolves in 13.3.
 3. **Roof metrics to attributes** is enabled. Open it: the LoD select offers the stream's rungs with feature counts, the streaming note reads "Runs over the N currently loaded buildings, not the whole dataset.", and the columns line reads the six names.
 4. Run it. The card reports N buildings measured, the detail line opens with "Over the resident set: the buildings loaded when the run started." and, if any, continues with "M skipped: M no roof surfaces at LoD X".
-5. Open table: the six columns carry the computed badge, sort and filter. **Details shows none of them** — the deferred FCB write-back; record it as an unmet part of §7.1/§8 and point at open question 10.
+5. Open table: the six columns carry the computed badge, sort and filter. **Details shows none of them** — the FCB write-back the repo owner ruled a future consideration; record it as an unmet part of §7.1/§8.
 6. Pan far enough to rebuild the table; the run's card reads "stale: layer reloaded" and Style by result is disabled with it.
 7. Also load `fixtures/two-buildings.city.json` and run Roof metrics at LoD 2.2. The fixture's `NL.IMBAG.Pand.0001` has a BuildingPart with one RoofSurface at 2.2 and the root has two, so §7's contributor rule means the building's `roof_area_m2` is the PART's area alone. Check it against the part's own row — they must be equal, and neither may equal the root's two-surface sum. `NL.IMBAG.Pand.0002` has no part and gets its own. Style by result opens a draft rule on `roof_area_m2 >` the median, and the map does not change until Save.
-8. Task 9's gate needs a run whose first column is NULL for every object, and a threshold slider cannot guarantee that (15° does not make an arbitrary roof flat). Use a KNOWN FLAT-ROOF layer instead. Look for one in `fixtures/` first — load each candidate and read the table's `__roofy_mean_slope` column, which is 0 for a flat roof; if none is flat, author a two-building CityJSON with horizontal RoofSurfaces in the run's scratch directory and load it from disk, recording in the recipe how it was made (a smoke fixture, not a repo one). On that layer, untick everything except **Dominant azimuth** and run: every surface is flat, `roof_azimuth_deg` is NULL everywhere, and **Style by result must be disabled with "All values are empty"** rather than opening an editor on a column with no median. Then tick **Total roof area** too and re-run: the first written column is `roof_area_m2`, which has values, and the button is enabled again.
+8. Task 10's gate needs a run whose first column is NULL for every object, and a threshold slider cannot guarantee that (15° does not make an arbitrary roof flat). Use a KNOWN FLAT-ROOF layer instead. Look for one in `fixtures/` first — load each candidate and read the table's `__roofy_mean_slope` column, which is 0 for a flat roof; if none is flat, author a two-building CityJSON with horizontal RoofSurfaces in the run's scratch directory and load it from disk, recording in the recipe how it was made (a smoke fixture, not a repo one). On that layer, untick everything except **Dominant azimuth** and run: every surface is flat, `roof_azimuth_deg` is NULL everywhere, and **Style by result must be disabled with "All values are empty"** rather than opening an editor on a column with no median. Then tick **Total roof area** too and re-run: the first written column is `roof_area_m2`, which has values, and the button is enabled again.
 
 - [ ] **Step 4: Scenario 6, split into what is reachable and what is not**
 
@@ -5388,19 +5911,26 @@ Spec §10 scenario 6: "Disconnect the network, reload: the tools with a Spatial 
 
 **Verified by unit test only**, and named as such in the record: the muted chip, the download reason as a tooltip, the Retry link calling `ensureExtension`, the re-render on a state change (`tests/unit/ui/processing/extensionChip.test.tsx`), the real publish sequence (`tests/unit/insights/useDuckDBStatus.test.tsx`) and the run-level failure copy (`tests/unit/features/processing/runQueue.test.ts`).
 
-- [ ] **Step 5: The UI consistency check**
+- [ ] **Step 5: The two deviations, recorded as such**
+
+Neither is a bug; both are the repo owner's rulings, and the smoke file names them so the next reader does not rediscover them as defects.
+
+1. **§7.1/§8 on a streaming layer: results in the table only.** The FCB attribute write-back is a **future consideration** (decision 11). Observed at Step 3 case 5.
+2. **§6.1 engine death: contained, not recovered.** Task 4 fails the runs and disables the Undos; the status bar's Retry reboots the engine but does not rebuild the tables that were `ready` when the worker died, so tools stay disabled until the page is reloaded (decision 12). Verified by unit test only — killing a real worker in the smoke is out of reach without devtools surgery, so the smoke records the DESIGN and points at `tests/unit/features/processing/runQueue.test.ts`'s engine-watcher cases and `tests/unit/ui/processing/engineStopped.test.tsx`.
+
+- [ ] **Step 6: The UI consistency check**
 
 With the tool form open on Roof metrics, open the Sun & shade sheet beside it and compare the two sliders: track, thumb, focus ring and disabled opacity must be identical (both come from `flatControls.css:237-284`). Check the checkbox grid against the Scope radios above it (12 px labels, 6 px gaps) and at the panel's narrowest drag — it must fall to one column, not clip. Screenshot both.
 
-- [ ] **Step 6: A performance sanity check on the real fixture**
+- [ ] **Step 7: A performance sanity check on the real fixture**
 
 Open Roof metrics on the largest layer to hand (delft.fcb with a wide camera, or `delft.city.jsonl` if it is loaded) and confirm: opening the LoD select is instant (it reads tags), and a run over All keeps the page responsive — the elapsed ticker keeps ticking and Cancel lands within a second. If either stalls, `ROOF_BATCH_FEATURES` is the one constant to lower; record the number you settled on.
 
-- [ ] **Step 7: Write the record**
+- [ ] **Step 8: Write the record**
 
 Create `scripts/smoke/processing-m2.md` on `processing-m1.md`'s shape: a one-paragraph intro naming the scenarios, a "Last run" table (Date, Branch @ SHA, Browser, Driver, Dev server, DuckDB, Result), the "Running it" recipe including the offline prerequisites from Step 4, then a numbered section per scenario with **what was observed** beside each check and an explicit DEVIATION / NOT REACHABLE label where this milestone cannot deliver the sentence as worded.
 
-- [ ] **Step 8: Codex review**
+- [ ] **Step 9: Codex review**
 
 The diff must include the submodule's own change, which `git diff main...develop` does not show as content — run both:
 
@@ -5414,7 +5944,7 @@ git -C packages/cityjson-navara-plugins diff <previous-pin>..HEAD | \
 
 **Every MAJOR finding must be resolved before the merge**, as M1's gate required; MINORs are ruled on and recorded. If Codex is unavailable, `claude -p --model opus` is the fallback (see the memory note on codex-cli hangs on this host). Record each finding's ruling in the milestone ledger.
 
-- [ ] **Step 9: Commit and push**
+- [ ] **Step 10: Commit and push**
 
 ```bash
 git add scripts/smoke/processing-m2.md
@@ -5426,31 +5956,13 @@ The pre-push hook runs `vp check`, `tsc -b --noEmit` and `vp test run` (about 40
 
 ---
 
-## Deferred with design notes
+## Future consideration: the FCB attribute write-back
 
-Two things the spec asks for that M13.2 does not build. Neither is a silent gap: each has a mechanism written down here, a roadmap entry (Task 13) and an open question for the human. If either is pulled into M2, it becomes a task between Tasks 12 and 13.
+One thing the spec asks for that M13.2 does not build, and that the repo owner has ruled a **future consideration** rather than M2 work: §7.1 and §8's promise that a STREAMING run's values reach Details, the rule editor and colour rules. Streaming COMPUTE is in (Task 6 LoD-tags the resident roof metrics; Task 7 reads them), and the results land in the layer's table; what does not follow is the model merge.
 
-### Engine-death recovery (spec §6.1)
+The mechanism, for whoever picks it up: `runQueue.ts:575-589` merges a run's values into `layer.model.objects` and skips any id the model lacks, and an FCB layer's `model.objects` is `{}` (`openStreamingLayer.ts:113`). Closing it means an app-written attribute overlay on `ResidentObjectRecord`, kept in the worker's cell cache so a re-fetched cell does not drop the values, plus `mergeAttributes`/`removeAttributes` on `FcbStreamLayerHandle`; `runQueue`'s publication branch then calls that instead of skipping, and `DetailsPanel`, the rule evaluator and `derivedBuildingColumns` read the overlay. It is a worker-protocol change: one submodule commit plus one app commit, with tests on both sides.
 
-> "If the DuckDB engine itself dies, the running run and every queued run fail with 'Analytics engine stopped', the status bar shows its Failed state, and Retry there restarts the engine and rebuilds every layer table from the in-memory models. Computed columns live in the model too (§8), so they come back on both ordinary and derived layers; what is lost is the copies kept for Undo, so every earlier run shows Undo disabled with 'Unavailable after an engine restart'."
-
-Today nothing detects a dead worker. `duckdb.ts` catches failures inside `doInit` only; a worker that dies AFTER a successful boot leaves `status` reading `ready` and every subsequent query rejecting with whatever the wasm layer says. M13.2's status publication is a prerequisite for the fix but is not the fix.
-
-The mechanism, in the order it would be built:
-
-1. **Detect it in `duckdb.ts`**, the only module that may touch the worker. Subscribe to the `Worker`'s `error` and `messageerror` events when it is created (`duckdb.ts:214-227`), and add a `markEngineDead(reason)` that calls `setStatus({ state: "failed", error: reason })`, clears `db`/`conn`/`initPromise` and resets the `extensions` map to `unloaded`. A query that rejects with the wasm layer's "worker terminated" shape calls it too, because a worker can die without firing `error`.
-2. **Fail the runs.** `runQueue` already has the installer pattern for this (`installTargetRemovalWatcher`, `installStaleWatcher`): a third watcher subscribes to the status and, on a transition INTO `failed`, patches every `queued`/`running`/`cancelling` run to `failed` with `"Analytics engine stopped"`, aborts their controllers, and calls `discardUndo` on every run in the history.
-3. **Disable the Undos.** A run whose backup table lived in the dead database can never restore anything. Add `RunRecord.undoUnavailableReason: string | null`, set it to `"Unavailable after an engine restart"` for every done run at the same moment, and render it in `RunFooter` and `RecentRuns` exactly as `stale` is rendered.
-4. **Retry.** `retryEngine()` already awaits a fresh `initDuckDB` (the memo is cleared) and rebuilds parked tables. What it does NOT do is rebuild tables that were `ready` before the death — they are in the registry, not in `pendingSources`. It would need to re-enqueue every registered layer from its `LayerTableSource`, which for a model-backed layer is `flatRowsFromModel(layer.model)` and therefore carries the computed columns back (§8), and for a reader-backed one is the provider.
-5. **Tests.** A `markEngineDead` unit test in `useDuckDBStatus.test.tsx`'s fake-engine style; a runQueue watcher test for the two patched runs; a `retryEngine` test that a `ready` table is rebuilt.
-
-Sized at roughly one Task-1-shaped task plus one runQueue task. **Open question 11** asks whether to pull it into M2.
-
-### The FCB attribute write-back (spec §7.1, §8)
-
-Design decision (b) has the full argument. The mechanism, in outline: `ResidentObjectRecord` gains an app-written attribute overlay; the worker's cell cache keeps it so a re-fetched cell does not drop the values; `FcbStreamLayerHandle` gains `mergeAttributes(map)` and `removeAttributes(names)`; `runQueue`'s publication branch calls that instead of skipping ids the model lacks; `DetailsPanel`, the rule evaluator and `derivedBuildingColumns` read the overlay. It is a worker-protocol change, so it is one submodule commit plus one app commit, with its own tests on both sides. **Open question 10.**
-
----
+Until then a streaming run's values live in the table (grid, filter, sort, export) and nowhere else — the same shape Height from extent already has — and Task 14's roadmap step and Task 15's gate both record it as an unmet part of §7.1/§8.
 
 ## Self-review
 
@@ -5460,56 +5972,56 @@ Design decision (b) has the full argument. The mechanism, in outline: `ResidentO
 | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | §5 chip tooltip by state                                       | Task 3                                                                                                                                                                                 |
 | §5 muted chip, download reason, Retry link                     | Task 3 (reason already shipped in M1, `eligibility.ts:73-81`; reachable on the chip's tooltip only until 13.3)                                                                         |
-| §6 LoD select, counts, default, empty state                    | Task 10 (options from Task 6)                                                                                                                                                          |
-| §6 PARAMETERS, "Pick at least one measure"                     | Task 11 (rule from Task 7)                                                                                                                                                             |
-| §6 extension note                                              | Task 11, Steps 4-5                                                                                                                                                                     |
+| §6 LoD select, counts, default, empty state                    | Task 11 (options from Task 7)                                                                                                                                                          |
+| §6 PARAMETERS, "Pick at least one measure"                     | Task 12 (rule from Task 8)                                                                                                                                                             |
+| §6 extension note                                              | Task 12, Steps 4-5                                                                                                                                                                     |
 | §6 workload note ("Re-reads a 180 MB source…")                 | **Not implemented, deliberately.** It fires "when the target's source is large", and no M2 tool re-reads a source. It belongs with the first reader-backed tool (M3). Listed as a gap. |
 | §6.1 "Loading extension (skipped once loaded)"                 | Task 2                                                                                                                                                                                 |
-| §6.1 frozen parameters                                         | Task 7 (`normaliseParams`) + Task 11, Step 5                                                                                                                                           |
-| §6.1 engine death, "Analytics engine stopped"                  | **Deferred with a written mechanism** — "Deferred with design notes", open question 11                                                                                                 |
-| §6.2 Style by result on `roof_area_m2`, "All values are empty" | Task 9 (the gate) + Task 7's column order                                                                                                                                              |
+| §6.1 frozen parameters                                         | Task 8 (`normaliseParams`) + Task 12, Step 5                                                                                                                                           |
+| §6.1 engine death, "Analytics engine stopped"                  | Task 4 — detection, the failed runs and the disabled Undos. Its RECOVERY half (Retry rebuilding every table) is deliberately not built; the gate records the deviation.                |
+| §6.2 Style by result on `roof_area_m2`, "All values are empty" | Task 10 (the gate) + Task 8's column order                                                                                                                                             |
 | §6.3 extension-failure copy, offline case                      | Task 2, `extensionFailure`                                                                                                                                                             |
-| §6.4 the log as a reproducible record                          | Task 7's `normaliseParams` is what puts the real measures and threshold in it                                                                                                          |
-| §7 features-not-rows, contributors (GEOMETRY), roll-ups        | Tasks 4, 6 and 8                                                                                                                                                                       |
-| §7.1 parameters, outputs, skip reason, Style by result         | Tasks 7, 8, 11                                                                                                                                                                         |
+| §6.4 the log as a reproducible record                          | Task 8's `normaliseParams` is what puts the real measures and threshold in it                                                                                                          |
+| §7 features-not-rows, contributors (GEOMETRY), roll-ups        | Tasks 5, 7 and 9                                                                                                                                                                       |
+| §7.1 parameters, outputs, skip reason, Style by result         | Tasks 8, 9, 12                                                                                                                                                                         |
 | §7.1 "the drawer's three synthetic columns stay as they are"   | Nothing touches `columnPolicy.ts:4-6` — verified, no task                                                                                                                              |
-| §7.1/§8 streaming results in Details and rules                 | **Deferred with a written mechanism** — Design decision (b), open question 10                                                                                                          |
-| §8 "a Building shows the aggregated value, a part its own"     | Task 8's root/part split                                                                                                                                                               |
-| §10 scenario 4                                                 | Task 14, Step 3 (two recorded deviations: the Measure solids reason, and Details on a streaming layer)                                                                                 |
-| §10 scenario 6                                                 | Task 14, Step 4, split into the warm-engine offline case (verifiable) and the cold reload (UNMET, with its prerequisites)                                                              |
+| §7.1/§8 streaming results in Details and rules                 | **Future consideration** (repo owner, 2026-09-11) — Design decision (b) and the section of that name                                                                                   |
+| §8 "a Building shows the aggregated value, a part its own"     | Task 9's root/part split                                                                                                                                                               |
+| §10 scenario 4                                                 | Task 15, Step 3 (two recorded deviations: the Measure solids reason, and Details on a streaming layer)                                                                                 |
+| §10 scenario 6                                                 | Task 15, Step 4, split into the warm-engine offline case (verifiable) and the cold reload (UNMET, with its prerequisites)                                                              |
 
-**Known gaps, all deliberate and all named:** §6's workload note; §6's New-layer destination and everything downstream of it; §7.2–§7.7's tools; the FCB attribute write-back; engine-death recovery. The last two carry design notes and open questions 10 and 11 — and they DO block in the sense that a "yes" to either adds tasks to this plan before it can be called a faithful implementation of §7.1 and §6.1. Nothing in Tasks 1–14 depends on either answer, so execution can begin either way; what changes is where the milestone ends.
+**Known gaps, all deliberate, all decided and all named:** §6's workload note (no M2 tool re-reads a source); §6's New-layer destination and everything downstream of it; §7.2-§7.7's tools; the FCB attribute write-back (a future consideration, decision 11); and §6.1's engine-death RECOVERY — Task 4 builds the detection and containment the repo owner asked for, and deliberately not the Retry-rebuilds-every-table half (decision 12). Nothing is left open: each has an owner's ruling behind it, and Task 15's gate records the two that are visible deviations from the spec.
 
 **2. Placeholder scan.** No "TBD", no "add appropriate error handling", no "similar to Task N", no "write tests for the above". Every implementation step carries real code. **The test steps are not uniformly complete, and here is exactly where they are not:**
 
-- Written out in full, runnable as given: Task 1 (the engine fake and every case), Task 3 (same fake, full scaffolding), Task 4, Task 6, Task 7, Task 8's pure suite, Task 10's fixture and suite.
-- Written as a DIFF against an existing file, which the executor must open: Task 5 (two assertions in `objectRecords.test.ts` and one helper in `streamLayer.test.ts`), Task 9 (`ToolView.test.tsx`'s `doneRun` and the two Style-by-result cases), Task 11's `measure-solids` comment, Task 12's shim removal. Each names the file and the line range.
-- Written as "copy this header, then these cases": Task 8's lifecycle suite (from `runQueue.test.ts:1-235`), Task 11 (from `lodSelect.test.tsx`) and Task 12 (the same, minus one block). The alternative — pasting a 90-line mock header three more times — is duplication a reviewer would reject next, but it does mean **those three files are not literally paste-ready**; the executor assembles them.
-- Left to the executor's judgement, deliberately: the smoke's flat-roof fixture (Task 14 Step 3 case 8) says how to find or make one but cannot name a file that exists; Task 8's lifecycle suite says to drop the rebuilt-table case if the existing suite already covers it identically.
+- Written out in full, runnable as given: Task 1 (the engine fake and every case), Task 3 (same fake, full scaffolding), Task 5, Task 7, Task 8, Task 9's pure suite, Task 11's fixture and suite.
+- Written as a DIFF against an existing file, which the executor must open: Task 6 (two assertions in `objectRecords.test.ts` and one helper in `streamLayer.test.ts`), Task 10 (`ToolView.test.tsx`'s `doneRun` and the two Style-by-result cases), Task 12's `measure-solids` comment, Task 13's shim removal. Each names the file and the line range.
+- Written as "copy this header, then these cases": Task 9's lifecycle suite (from `runQueue.test.ts:1-235`), Task 12 (from `lodSelect.test.tsx`) and Task 13 (the same, minus one block). The alternative — pasting a 90-line mock header three more times — is duplication a reviewer would reject next, but it does mean **those three files are not literally paste-ready**; the executor assembles them.
+- Left to the executor's judgement, deliberately: the smoke's flat-roof fixture (Task 15 Step 3 case 8) says how to find or make one but cannot name a file that exists; Task 9's lifecycle suite says to drop the rebuilt-table case if the existing suite already covers it identically.
 
 **3. Type consistency.** Checked end to end:
 
-- `RoofSurfaceMetric` — declared Task 4, produced Task 6, consumed Tasks 8 and 10. Four fields, one file, throughout.
-- `rollUpRoofSurfaces(surfaces, flatThresholdDeg) → RoofRollUp | null` — Task 4 declares; Task 8 is its only caller; Task 8's `valueOf` switch covers all six `RoofMeasure` keys with no default, so a seventh measure is a `tsc` error.
-- `RoofGeometrySource` — Task 6 declares `has`/`hasGeometryAt`/`roofSurfacesAt`; Task 8's pure suite builds one from two plain maps and the executor gets one from `roofGeometrySource(ctx.layer)`. `roofLodOptions(layer)` takes the layer, not the source, and both apply the same contributor rule.
-- `roofParams` / `roofColumnNames` / `ROOF_MEASURES` (now with `hint`) — Task 7 declares; the registry, the executor, the form component and `normaliseParams` all go through them, so the printed column list, the frozen params, the written columns and Style by result's first column cannot disagree. `roofParams` is asserted idempotent, which is what makes freezing a normalised bag safe.
-- `LodOption { lod, features }` — Task 6 declares; Task 10's `LodChoices` and `ToolView` consume.
-- `ToolDefinition.needsLod` (required), `validateParams?`, `normaliseParams?` — Task 7 adds all three and fills `needsLod` on **all seven** entries in the same step.
-- `RunSummary.firstColumnNonNull` and `summarise(result, elapsedMs, { streaming })` — Task 9 adds both; `runQueue`'s two call sites and `RunFooter` are the only consumers, and `tsc` names every test literal that needs the field.
-- `ToolContext.throwIfCancelled()` — Task 8 adds it to the interface and to the one `ctx` literal; only `roofMetrics.ts` calls it.
+- `RoofSurfaceMetric` — declared Task 5, produced Task 7, consumed Tasks 9 and 11. Four fields, one file, throughout.
+- `rollUpRoofSurfaces(surfaces, flatThresholdDeg) → RoofRollUp | null` — Task 5 declares; Task 9 is its only caller; Task 9's `valueOf` switch covers all six `RoofMeasure` keys with no default, so a seventh measure is a `tsc` error.
+- `RoofGeometrySource` — Task 7 declares `has`/`hasGeometryAt`/`roofSurfacesAt`; Task 9's pure suite builds one from two plain maps and the executor gets one from `roofGeometrySource(ctx.layer)`. `roofLodOptions(layer)` takes the layer, not the source, and both apply the same contributor rule.
+- `roofParams` / `roofColumnNames` / `ROOF_MEASURES` (now with `hint`) — Task 8 declares; the registry, the executor, the form component and `normaliseParams` all go through them, so the printed column list, the frozen params, the written columns and Style by result's first column cannot disagree. `roofParams` is asserted idempotent, which is what makes freezing a normalised bag safe.
+- `LodOption { lod, features }` — Task 7 declares; Task 11's `LodChoices` and `ToolView` consume.
+- `ToolDefinition.needsLod` (required), `validateParams?`, `normaliseParams?` — Task 8 adds all three and fills `needsLod` on **all seven** entries in the same step.
+- `RunSummary.firstColumnNonNull` and `summarise(result, elapsedMs, { streaming })` — Task 10 adds both; `runQueue`'s two call sites and `RunFooter` are the only consumers, and `tsc` names every test literal that needs the field.
+- `ToolContext.throwIfCancelled()` — Task 9 adds it to the interface and to the one `ctx` literal; only `roofMetrics.ts` calls it.
 - `subscribeDuckDBStatus` / `getDuckDBStatusVersion` — Task 1 declares in `duckdb.ts`; `useDuckDBStatus.ts` is the only consumer; 26 mock factories gain both keys.
-- `ResidentRoofMetrics` and `ResidentObjectRecord.geometryLods` — Task 5 declares; Task 6 consumes; Task 5's Steps 1 and 5 fix the four known producers (`objectRecords.test.ts`'s two assertions, `streamLayer.test.ts`'s helper, and whatever `pnpm typecheck` adds), and Step 6 the two parent-side ones.
+- `ResidentRoofMetrics` and `ResidentObjectRecord.geometryLods` — Task 6 declares; Task 7 consumes; Task 6's Steps 1 and 5 fix the four known producers (`objectRecords.test.ts`'s two assertions, `streamLayer.test.ts`'s helper, and whatever `pnpm typecheck` adds), and Step 6 the two parent-side ones.
 - `extensionReason` / `extensionFailure` / `RESIDENT_SET_NOTE` are local to `runQueue.ts` and referenced from no other task.
 - Task 2 folds the second `const tool` in `runQueue.ts`'s publication block into the one it declares — flagged in its step, because two bindings of one name in one function body is a compile error.
 
 **What I could not verify, and an executor should check first.** These are the plan's remaining unknowns, each named where it occurs rather than asserted away:
 
-- **`ColumnInfo`'s exact shape.** Task 10's fixture writes `{ name, type, kind: "scalar" }` from `src/insights/columnKind.ts`, copied from `ToolView.test.tsx:18,93-95`. I read that call site, not the interface. Step 1 says to `grep` it first.
+- **`ColumnInfo`'s exact shape.** Task 11's fixture writes `{ name, type, kind: "scalar" }` from `src/insights/columnKind.ts`, copied from `ToolView.test.tsx:18,93-95`. I read that call site, not the interface. Step 1 says to `grep` it first.
 - **`useLayerStore.removeAllLayers()` and `useProcessingStore.resetForTest()`** are used in the new suites' `afterEach` because `ToolView.test.tsx:207-222` uses them; I did not re-read their signatures.
 - **The "loading" chip assertion may be racy.** `ensureExtension` publishes `loading` before its first await, but whether a render lands between that and the fake's resolution depends on microtask ordering. Task 3 says what to do if it does not (a deferred inside the fake connection) and forbids weakening the assertion to a store read.
-- **`ROOF_BATCH_FEATURES = 500`** is a reasoned guess, not a measurement. Task 14 Step 6 is where it gets one.
+- **`ROOF_BATCH_FEATURES = 500`** is a reasoned guess, not a measurement. Task 15 Step 6 is where it gets one.
 - **Line numbers move.** Every `file:line` here was read on `develop` @ `3e42958`; two fix waves landed while this plan was being written, and the executor should treat a citation that does not match as a cue to re-read, not as a licence to improvise.
-- **The existing plugin suite's other cases** (footprint, volume, bbox-skip, surface-attribute keys) were read once and assumed unaffected by an additive field. `pnpm vitest run packages/navara-flatcitybuf` at Task 5 Step 5 is the check.
+- **The existing plugin suite's other cases** (footprint, volume, bbox-skip, surface-attribute keys) were read once and assumed unaffected by an additive field. `pnpm vitest run packages/navara-flatcitybuf` at Task 6 Step 5 is the check.
 
 ## Review residuals (resolve at M2 pre-flight, before Task 1)
 
@@ -5525,20 +6037,21 @@ The plan review loop was capped at two rounds; these are the findings the second
 
 - **The empty-LoD assertion has multiple matches** (plan `4442-4448`, `4592-4594`, `4623-4624`). `screen.getByText("No roof surfaces in this layer")` matches both the disabled combobox's only `<option>` and the footer's Run reason, so it throws on multiplicity rather than asserting either. Fix: scope the queries — assert the disabled combobox's option (`within(select).getByRole("option")`) and the footer's reason (`{ selector: "p" }`, as `ToolView.test.tsx` already does for "All values are empty") separately.
 
-- **Surviving false cancellation and Retry explanations, and overclaimed review conclusions** (plan `1368-1371`, `5256-5258`, `3541-3557`, `5483-5503`). Three corrections. The prescribed App comment at `1368-1371` still implies `retryEngine()` on a healthy engine did something the hook now prevents — it says the old optimistic write "was WRONG on the Retry path", which reads as a behaviour change rather than a display fix; state only that the status is no longer written from the component. The prescribed architecture note at `5256-5258` and the Task 8 preamble at `3541-3557` still carry the rationale that `throwIfCancelled` is what makes cancellation correct — `execute` already refuses to publish an aborted run (`runQueue.ts:515`), so the method buys an early exit and responsiveness, nothing more; make both passages say that and only that. And the self-review's "runnable as given" list at `5483-5503` names suites (Task 1's, Task 3's, Task 8's pure suite) whose scaffolding the residuals above show is not in fact complete, and asserts type consistency for symbols verified only at a call site — rewrite both claims to match what was actually checked.
+- **Surviving false cancellation and Retry explanations, and overclaimed review conclusions** (plan `1368-1371`, `5256-5258`, `3541-3557`, `5483-5503`). Three corrections. The prescribed App comment at `1368-1371` still implies `retryEngine()` on a healthy engine did something the hook now prevents — it says the old optimistic write "was WRONG on the Retry path", which reads as a behaviour change rather than a display fix; state only that the status is no longer written from the component. The prescribed architecture note at `5256-5258` and the Task 9 preamble at `3541-3557` still carry the rationale that `throwIfCancelled` is what makes cancellation correct — `execute` already refuses to publish an aborted run (`runQueue.ts:515`), so the method buys an early exit and responsiveness, nothing more; make both passages say that and only that. And the self-review's "runnable as given" list at `5483-5503` names suites (Task 1's, Task 3's, Task 9's pure suite) whose scaffolding the residuals above show is not in fact complete, and asserts type consistency for symbols verified only at a call site — rewrite both claims to match what was actually checked.
 
-## Open questions for the human
+## Decisions recorded (2026-09-11)
 
-Items 1-9 are strings or defaults this plan PROPOSES because the spec does not state them; the reviewer accepted each, and every one is a one-line change if the answer differs — none of them stops an executor from starting. Items 10 and 11 are SCOPE questions, and they DO need an answer: each names work the spec asks for that this plan defers, and a "yes" to either adds tasks before the milestone can be called complete. Tasks 1-14 do not depend on either answer, so the two can be settled while execution runs.
+Every question this plan raised has been answered by the repo owner. Nothing below is open; each line is the decision, and the task that carries it. A string marked **[adapted copy]** is NOT verbatim spec — it is a decided sentence written to the spec's pattern, tagged so a reviewer knows not to look for it in §5-§8.
 
-1. **LoD option noun.** §6's pattern is "2.2 (1,115 buildings with a solid)". Proposed: **"2.2 (1,115 buildings with roof surfaces)"**. _(Reviewer: accept.)_
-2. **Empty LoD text.** §6's is "No solid geometry in this layer". Proposed: **"No roof surfaces in this layer"**. _(Reviewer: accept.)_
-3. **Chip tooltips for the states §5 does not spell out.** Loaded → **"The spatial extension is loaded"**; loading → **"Loading the spatial extension…"**. The failed tooltip reuses the spec's disabled-row reason verbatim. _(Reviewer: accept.)_
-4. **Extension-failure run copy.** Online → **"The three_d extension could not be loaded: HTTP 404"** (DuckDB's own first line appended); offline → **"The three_d extension could not be loaded; it needs a network connection."**, detected with `navigator.onLine === false`, which is advisory (a captive portal reports online). _(Reviewer: keep the advisory sentence and retain the engine error in the log.)_
-5. **Measure checkbox labels, and where §7.1's explanations go.** §7.1 lists the measures in running prose. Labels: **"Total roof area (m²)", "Flat roof area (m²)", "Flat share", "Mean slope (deg)", "Dominant azimuth (deg)", "Roof surface count"**. The explanations the labels trim are now PLACED, per the reviewer: each checkbox's `<label>` carries them as its `title` (`RoofMeasureSpec.hint`, Task 7) — **"Surfaces with a slope under the flat threshold"**, **"0-1: the flat area over the total roof area"**, **"Area-weighted over every roof surface"**, **"Of the largest non-flat surface"**; area and count need none. A tooltip rather than a second muted line under every row, because six explanatory lines would be longer than the section they explain. Say if you want them visible instead.
-6. **All six measures ticked by default.** _(Reviewer: all six on.)_
-7. **The flat threshold is strict** (`inclinationDeg < threshold`), so at 0° a horizontal roof is NOT flat and `roof_flat_m2` is 0. _(Reviewer: strict `<`, matching "under".)_
-8. **The Roof metrics long description** — "Writes the roof metrics Roofy already computes as attributes of each building." — is M1's invention, not spec copy (§5 gives only the one-line description). Keep, or replace?
-9. **The card's resident-set clause** (§10 scenario 4's "the card says so"): **"Over the resident set: the buildings loaded when the run started."**
-10. **The FCB attribute write-back: pull into M2, or defer to M3?** §7.1 and §8 ask for a streaming run's values in Details, the rule editor and colour rules; the M1 ledger parked it _to M2_; this plan defers it again and writes down the mechanism ("Deferred with design notes"). Deferring ships Roof metrics on streaming layers with table-only results — the same shape Height from extent already has. Pulling it in adds a submodule task (worker-protocol change: an attribute overlay on the resident records and the cell cache, plus `mergeAttributes`/`removeAttributes` on the handle) and one app task.
-11. **Engine-death recovery (§6.1): pull into M2, or schedule?** The M1 ledger assigned the design to M2 and this plan supplies the design without building it. Roughly one `duckdb.ts`-shaped task (worker `error`/`messageerror` detection, `markEngineDead`) plus one `runQueue` task (a third installer watcher, `undoUnavailableReason`, and `retryEngine` rebuilding already-`ready` tables).
+1. **LoD option noun** — **[adapted copy]** "2.2 (1,115 buildings with roof surfaces)", to §6's "…with a solid" pattern. Task 11.
+2. **Empty LoD text** — **[adapted copy]** "No roof surfaces in this layer", to §6's "No solid geometry in this layer". Task 11.
+3. **Chip tooltips for the states §5 leaves unstated** — **[adapted copy]** loaded: "The spatial extension is loaded"; loading: "Loading the spatial extension…". The failed tooltip is §5's own disabled-row reason, verbatim. Task 3.
+4. **Extension-failure run copy** — **[adapted copy]** online: "The three_d extension could not be loaded: &lt;DuckDB's first error line&gt;"; offline: "The three_d extension could not be loaded; it needs a network connection.", detected with `navigator.onLine === false`. The advisory sentence stands AND the engine's own reason is kept in the run's log as a warning, so a bug report has both. Task 2.
+5. **Measure labels, and where §7.1's explanations go** — labels "Total roof area (m²)", "Flat roof area (m²)", "Flat share", "Mean slope (deg)", "Dominant azimuth (deg)", "Roof surface count"; the explanations the labels trim are **[adapted copy]** hover text on each checkbox's `<label>` ("Surfaces with a slope under the flat threshold", "0-1: the flat area over the total roof area", "Area-weighted over every roof surface", "Of the largest non-flat surface"), carried as `RoofMeasureSpec.hint`. Tasks 8 and 12.
+6. **All six measures ticked by default.** Tasks 8 and 12.
+7. **The flat threshold is strict** (`inclinationDeg < flatThresholdDeg`), matching §7.1's "under": at 0° a horizontal roof is NOT flat and `roof_flat_m2` is 0. Tasks 5 and 9.
+8. **The Roof metrics long description stays** — "Writes the roof metrics Roofy already computes as attributes of each building." **[adapted copy]**: M1 wrote it; §5 gives only the one-line catalogue description. Task 8's registry entry keeps it unchanged.
+9. **The card's resident-set clause** — **[adapted copy]** "Over the resident set: the buildings loaded when the run started.", the head of a streaming run's detail line (§10 scenario 4's "the card says so"). Task 10.
+10. **The CLAUDE.md "ONE writer" rule rewrite** — APPROVED. `duckdb.ts` publishes; `useDuckDBStatus()` is React's one door; `App`'s mirror goes; `retryEngine()` and the sole-importer rule are untouched. Design decision (a); Task 1 commits the rule edit with the code.
+11. **The FCB attribute write-back** — NOT in M2; a **future consideration**. Streaming COMPUTE stays (Task 6's LoD tagging, Task 7's source). Design decision (b), the "Future consideration" section, Task 14's roadmap step and Task 15's deviation list.
+12. **Engine death** — detection and containment, **NO recovery**. Task 4. The Undo reason is **[adapted copy]** "Unavailable: the analytics engine stopped", because §6.1's own "Unavailable after an engine restart" describes a restart this milestone does not perform. The status bar's Retry is left exactly as it is: it reboots the engine without rebuilding the tables that were `ready` when the worker died, so tools stay disabled until the page is reloaded.
