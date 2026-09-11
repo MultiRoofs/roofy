@@ -15,7 +15,10 @@
         inset: 0;
         z-index: 2147483647;
         display: grid;
+        align-content: center;
         place-items: center;
+        gap: 24px;
+        padding: 24px;
         background: #fff;
         opacity: 1;
         transition: opacity 180ms ease-out;
@@ -24,6 +27,34 @@
         width: 360px;
         max-width: 65vw;
         height: auto;
+      }
+      #launch-screen .launch-tagline {
+        margin: 0;
+        max-width: 100%;
+        color: #5c636e;
+        font-family: "Source Sans 3", system-ui, sans-serif;
+        font-size: clamp(0.75rem, 3.5vw, 1.5rem);
+        font-weight: 500;
+        line-height: 1.35;
+        text-align: center;
+        white-space: nowrap;
+      }
+      #launch-screen .launch-tagline-mask {
+        display: block;
+        overflow: hidden;
+      }
+      #launch-screen .launch-tagline-line {
+        display: block;
+        animation: launch-tagline-reveal 750ms cubic-bezier(0.16, 1, 0.3, 1) 2s
+          both;
+      }
+      @keyframes launch-tagline-reveal {
+        from {
+          transform: translateY(105%);
+        }
+        to {
+          transform: translateY(0);
+        }
       }
       #launch-screen.launch-screen--leaving {
         opacity: 0;
@@ -35,6 +66,9 @@
       @media (prefers-reduced-motion: reduce) {
         #launch-screen {
           transition: none;
+        }
+        #launch-screen .launch-tagline-line {
+          animation: none;
         }
       }
     </style>
@@ -48,6 +82,13 @@
         height="128"
         alt="Roofy"
       />
+      <p class="launch-tagline">
+        <span class="launch-tagline-mask">
+          <span class="launch-tagline-line"
+            >Discover your city’s rooftop potential</span
+          >
+        </span>
+      </p>
     </div>
     <div id="root" inert aria-hidden="true"></div>
     <noscript
