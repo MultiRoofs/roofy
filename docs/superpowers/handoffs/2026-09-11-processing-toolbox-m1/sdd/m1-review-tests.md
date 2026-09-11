@@ -1,0 +1,7 @@
+1. MAJOR — `tests/unit/features/processing/runQueue.test.ts:645`: the wait matches the first run’s retained `COMMIT`, so Undo can be requested before run 2 starts and the race test passes hollow; clear SQL before submission and await an explicit second-run gate before Undo.
+2. MAJOR — `tests/unit/features/processing/heightFromExtent.test.ts:75`: every measured part’s extent equals its feature’s extent, so the ledger’s M6 defect remains undetectable; add two parts with different extents plus a bbox-less part, asserting aggregate root values and individual/NULL part values (§7.4, §8).
+3. MAJOR — `tests/unit/ui/processing/RecentRuns.test.tsx:110`: “frozen request” coverage mocks submission and uses All scope, never testing frozen IDs; follow the M4 ruling with `retryRun` assertions and a queue test that changes selection/filter before Retry and verifies the original scope.
+4. MAJOR — `tests/unit/features/processing/runQueue.test.ts:662`: cancellation coverage gates at `COMMIT`, leaving the ruled M1 mid-write cancellation untested; gate UPDATE, cancel before COMMIT, and assert ROLLBACK, no COMMIT, and unchanged table/model/provenance.
+5. MINOR — `tests/unit/ui/processing/ToolView.test.tsx:182`: the error test duplicates the formatter although the ledger claims coverage through the real formatter; use the production formatter so implementation drift fails the test.
+
+Not yet — this tests-pass diff leaves critical regression paths unverified; findings concern coverage, not a re-review of the pending source fixes.
