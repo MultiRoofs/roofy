@@ -107,6 +107,8 @@ const statusListeners = new Set<() => void>();
  * so the corpse's news cannot be mistaken for the live engine's.
  */
 let generation = 0;
+/** Who is waiting on an engine that is about to stop being there. */
+const deathListeners = new Set<() => void>();
 
 /** The ONE writer. Every `status = …` in this module goes through it. */
 function setStatus(next: DuckDBStatus): void {
@@ -154,6 +156,18 @@ export function markEngineDead(reason: string): void {
   // without rejecting it — would be handed to every `ensureExtension` after a
   // Retry, leaving the chip on "Loading…" for the rest of the session.
   extensionPromises.clear();
+  // BEFORE the status publish, and over a copy so a listener that unsubscribes
+  // from inside its own notification cannot change this dispatch. Per listener,
+  // for the reason `setStatus` gives: this is engine work, and a waiter that
+  // throws must not strand the rest of the death.
+  for (const listener of Array.from(deathListeners)) {
+    deathListeners.delete(listener);
+    try {
+      listener();
+    } catch (error) {
+      console.error("A DuckDB death listener threw:", error);
+    }
+  }
   // Cleared BEFORE the publish, so a listener that reacts synchronously cannot
   // find a connection that is about to be dropped. `runQuery` then refuses on
   // `status.state !== "ready"` rather than posting into the void.
@@ -170,6 +184,26 @@ export function markEngineDead(reason: string): void {
   loadedExtensions = [];
   setStatus({ state: "failed", error: reason });
   console.error("DuckDB-wasm worker stopped:", reason);
+}
+
+/**
+ * Hear about the LIVE engine dying, as an event of its own.
+ *
+ * Separate from {@link subscribeDuckDBStatus} because a death is not the same
+ * as the `failed` a boot that never came up publishes, and separate from any
+ * run's `AbortSignal` because a signal fires once: a run cancelled while the
+ * engine was alive has already spent its abort, and the death that catches its
+ * write a moment later still has to release the await that will never settle.
+ *
+ * Fires only from {@link markEngineDead}, so every listener is per-engine by
+ * construction: the next engine's death is a new notification, and a boot that
+ * fails is none.
+ */
+export function onEngineDeath(listener: () => void): () => void {
+  deathListeners.add(listener);
+  return () => {
+    deathListeners.delete(listener);
+  };
 }
 
 export function subscribeDuckDBStatus(listener: () => void): () => void {

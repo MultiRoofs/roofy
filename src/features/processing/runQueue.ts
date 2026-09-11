@@ -31,6 +31,7 @@
 import {
   ensureExtension,
   getDuckDBStatus,
+  onEngineDeath,
   subscribeDuckDBStatus,
   isExtensionLoaded,
   runQuery,
@@ -114,6 +115,9 @@ export type ToolExecutor = (
   ctx: ToolContext,
 ) => Promise<ToolResult>;
 
+/** Spec §6.1's sentence for a run the engine's death took. */
+const ENGINE_STOPPED = "Analytics engine stopped";
+
 /** Thrown by the context when the user cancelled; never surfaced as an error. */
 class CancelledError extends Error {}
 
@@ -131,52 +135,48 @@ class CancelledError extends Error {}
  * The listener is removed on settle; a run that is never cancelled would
  * otherwise leave one on its controller for as long as the signal lives.
  */
-/**
- * {@link abortable} for the awaits AFTER the point of no return, where an abort
- * is not by itself a reason to stop waiting.
- *
- * A user's Cancel during the write is decided INSIDE the write — its
- * pre-COMMIT check, and §6.1's "finished before the cancel arrived" when the
- * COMMIT won the race — and the same is true of the DESCRIBE that follows it:
- * past the COMMIT the columns are on the table whatever the signal says.
- * Racing the signal unconditionally would report a cancel over a transaction
- * that had already committed. So the race may only WIN when the engine is
- * gone, which is the one case those awaits cannot settle by themselves. The
- * status is current by then: the watcher publishes `failed` in the same
- * listener call as its abort, before this microtask runs.
- */
-function releasedOnDeath<T>(
-  promise: Promise<T>,
-  signal: AbortSignal,
-): Promise<T> {
-  return abortable(promise, signal).catch(async (error: unknown) => {
-    if (
-      error instanceof CancelledError &&
-      getDuckDBStatus().state === "ready"
-    ) {
-      return await promise;
-    }
-    throw error;
-  });
-}
+/** Thrown when the engine died under an await that can never settle. */
+class EngineDeadError extends Error {}
 
-function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(new CancelledError());
+/**
+ * Race an ENGINE await against the engine's DEATH, and optionally against the
+ * run's own abort.
+ *
+ * The death is an independent signal (`onEngineDeath`) and not a reading of
+ * the abort, because an `AbortSignal` fires ONCE: a run cancelled while the
+ * engine was alive has already spent its abort, and the crash that catches its
+ * write a moment later would have nothing left to fire. Racing the death
+ * separately covers every cancel state, which is the whole point.
+ *
+ * `signal` is null for the awaits at and past the point of no return. A user's
+ * Cancel during the write is decided INSIDE the write — its pre-COMMIT check,
+ * and §6.1's "finished before the cancel arrived" when the COMMIT won the race
+ * — and the DESCRIBE that follows it is past the COMMIT, where the columns are
+ * on the table whatever the signal says. Only the death may take those two.
+ */
+function raced<T>(promise: Promise<T>, signal: AbortSignal | null): Promise<T> {
+  if (signal?.aborted) return Promise.reject(new CancelledError());
   return new Promise<T>((resolve, reject) => {
+    const stopListening = () => {
+      signal?.removeEventListener("abort", onAbort);
+      stopDeath();
+    };
     const onAbort = () => {
+      stopListening();
       reject(new CancelledError());
     };
-    signal.addEventListener("abort", onAbort, { once: true });
-    const settle = () => {
-      signal.removeEventListener("abort", onAbort);
-    };
+    const stopDeath = onEngineDeath(() => {
+      stopListening();
+      reject(new EngineDeadError());
+    });
+    signal?.addEventListener("abort", onAbort, { once: true });
     promise.then(
       (value) => {
-        settle();
+        stopListening();
         resolve(value);
       },
       (error: unknown) => {
-        settle();
+        stopListening();
         reject(error instanceof Error ? error : new Error(String(error)));
       },
     );
@@ -579,7 +579,7 @@ async function execute(
     const tool = toolById(request.toolId);
     if (tool.extension !== null && !isExtensionLoaded(tool.extension)) {
       patch(id, { status: "running", phase: "extension" });
-      const loaded = await abortable(ensureExtension(tool.extension), signal);
+      const loaded = await raced(ensureExtension(tool.extension), signal);
       // `ensureExtension` cannot be aborted (it is one memoised INSTALL/LOAD
       // per extension), so a Cancel pressed during the download is honoured
       // here, on the far side of it.
@@ -608,7 +608,7 @@ async function execute(
       }
     }
 
-    const scope = await abortable(
+    const scope = await raced(
       resolveScope({
         table,
         scope: request.scope,
@@ -647,7 +647,7 @@ async function execute(
       async query(label, sql) {
         if (signal.aborted) throw new CancelledError();
         const t0 = performance.now();
-        const out = await abortable(runQuery(sql), signal);
+        const out = await raced(runQuery(sql), signal);
         log.push({
           label,
           sql,
@@ -715,7 +715,7 @@ async function execute(
       // can still mean "nothing changed" is inside it, before its COMMIT.
       signal,
     });
-    const written = await releasedOnDeath(writing, signal);
+    const written = await raced(writing, null);
     log.push({
       label: "Writing results",
       sql: null,
@@ -813,12 +813,12 @@ async function execute(
     // the NEXT run both read it, and the next run's "did this column exist?"
     // decides whether Undo restores a value or drops the column.
     try {
-      await releasedOnDeath(refreshLayerTableColumns(layer.id), signal);
+      await raced(refreshLayerTableColumns(layer.id), null);
     } catch (error) {
       // Past the COMMIT nothing may fail the run, and this is the one await
       // left that a dead engine can strand. A DESCRIBE that will never answer
       // is abandoned; the run's own card is already the watcher's to write.
-      if (!(error instanceof CancelledError)) throw error;
+      if (!(error instanceof EngineDeadError)) throw error;
     }
 
     const summary = summarise(result, elapsed());
@@ -851,6 +851,19 @@ async function execute(
     // removed"). Its abort is what lands here, so the reason it wrote outranks
     // the plain cancel this would otherwise report.
     if (failedAlready(id)) return;
+    if (error instanceof EngineDeadError) {
+      // Normally the watcher has already written this — it fails every live run
+      // on the same death, and `patch` refuses a second status. Spelled here
+      // too, so a run ends with §6.1's sentence even when it is the await that
+      // noticed first.
+      patch(id, {
+        status: "failed",
+        phase: null,
+        error: ENGINE_STOPPED,
+        elapsedMs: elapsed(),
+      });
+      return;
+    }
     if (error instanceof CancelledError || signal.aborted) {
       patch(id, {
         status: "cancelled",
@@ -1066,7 +1079,7 @@ export function installEngineWatcher(): () => void {
       patch(run.id, {
         status: "failed",
         phase: null,
-        error: "Analytics engine stopped",
+        error: ENGINE_STOPPED,
         elapsedMs: Math.max(0, Date.now() - run.startedAt),
       });
       controllers.get(run.id)?.abort();

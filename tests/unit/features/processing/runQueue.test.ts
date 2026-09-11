@@ -61,6 +61,9 @@ let columnsAtBegin: string[] | null = null;
 /** Whoever `subscribeDuckDBStatus` handed a listener to, so a test can publish
  *  a transition the way `duckdb.ts` does. */
 const statusListeners = new Set<() => void>();
+/** Whoever asked to hear about the engine DYING — a signal of its own, because
+ *  a run's abort cannot fire twice and a death can follow a cancel. */
+const deathListeners = new Set<() => void>();
 
 vi.mock("../../../../src/insights/duckdb", () => {
   const run = async (statement: string) => {
@@ -108,6 +111,10 @@ vi.mock("../../../../src/insights/duckdb", () => {
     subscribeDuckDBStatus: vi.fn((listener: () => void) => {
       statusListeners.add(listener);
       return () => statusListeners.delete(listener);
+    }),
+    onEngineDeath: vi.fn((listener: () => void) => {
+      deathListeners.add(listener);
+      return () => deathListeners.delete(listener);
     }),
     getDuckDBStatusVersion: vi.fn(() => 0),
     getDuckDBStatus: vi.fn(() => ({
@@ -299,6 +306,7 @@ beforeEach(() => {
   liveColumns = ["id", "feature_id"];
   columnsAtBegin = null;
   statusListeners.clear();
+  deathListeners.clear();
   tableInfo = freshTable();
   useSelectionStore.getState().clear();
   useLayerStore.setState({ layers: [layer()] });
@@ -1488,8 +1496,10 @@ function publishStatus(next: ReturnType<typeof getDuckDBStatus>): void {
   for (const listener of statusListeners) listener();
 }
 
-/** The worker died. */
+/** The worker died: `markEngineDead` tells the death subscribers and publishes
+ *  the status, in that order. */
 function killEngine(reason = "worker gone"): void {
+  for (const listener of [...deathListeners]) listener();
   publishStatus({ state: "failed", error: reason });
 }
 
@@ -1726,6 +1736,42 @@ describe("the engine watcher (spec §6.1)", () => {
 
     expect(runById(id)?.status).toBe("queued");
     expect(runById(id)?.error).toBeNull();
+    stop();
+  });
+
+  it("releases a run CANCELLED before the engine died, and frees the queue", async () => {
+    // The abort already fired, for the user's Cancel, while the engine was
+    // alive — and the write is entitled to decide that one for itself (§6.1's
+    // "finished before the cancel arrived"). A signal cannot fire twice, so
+    // the death that follows has to be a SIGNAL OF ITS OWN; without it the
+    // card fails and `execute` goes on holding the queue for ever.
+    const stop = installEngineWatcher();
+    const never = deferred<void>();
+    gate = { needle: "BEGIN TRANSACTION", promise: never.promise };
+    registerExecutor("height-from-extent", async (run) => ({
+      columns: [{ name: `${run.prefix}height_m`, type: "DOUBLE" as const }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+    const id = submitRun(request());
+    await vi.waitFor(() => expect(sql).toContain("BEGIN TRANSACTION"));
+
+    cancelRun(id);
+    expect(runById(id)?.status).toBe("cancelling");
+    sql.length = 0;
+
+    killEngine();
+
+    expect(runById(id)?.status).toBe("failed");
+    expect(runById(id)?.error).toBe("Analytics engine stopped");
+    // Nothing posted at the corpse — no ROLLBACK, no DROP.
+    expect(sql).toEqual([]);
+
+    gate = null;
+    reviveEngine();
+    const next = submitRun(request({ prefix: "other_" }));
+    await vi.waitFor(() => expect(runById(next)?.status).toBe("done"));
     stop();
   });
 
