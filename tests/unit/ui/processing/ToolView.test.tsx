@@ -72,6 +72,8 @@ const { useLayerTableStore } =
 const { useComputedColumnStore } =
   await import("../../../../src/insights/computedColumns");
 const { useShellStore } = await import("../../../../src/ui/shell/shellStore");
+const { useQueryStore } =
+  await import("../../../../src/features/query/queryStore");
 
 type LayerInput = Parameters<LayerStoreActions["addLayer"]>[0];
 
@@ -164,6 +166,7 @@ afterEach(() => {
   useWorkspaceStore.getState().setActiveLayerId(null);
   useLayerTableStore.setState({ tables: {} });
   useComputedColumnStore.setState({ byLayer: {} });
+  useQueryStore.setState({ queries: {} });
 });
 
 describe("ToolView", () => {
@@ -207,6 +210,30 @@ describe("ToolView", () => {
     expect(
       screen.getByRole("radio", { name: "All … buildings" }),
     ).toBeChecked();
+  });
+
+  it("offers Matching with its count once a filter is applied, and runs on it", () => {
+    counts.matching = 312;
+    const layerId = addCityLayer();
+    act(() => {
+      useQueryStore.getState().setFilter(layerId, {
+        logic: "AND",
+        conditions: [{ id: "c1", column: "status", op: "=", value: "ok" }],
+      });
+      useQueryStore.getState().applyFilter(layerId);
+    });
+    render(<ToolView toolId="height-from-extent" />);
+    const matching = screen.getByRole("radio", { name: "Matching 312" });
+    expect(matching).not.toBeDisabled();
+    fireEvent.click(matching);
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(submitRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolId: "height-from-extent",
+        targetLayerId: layerId,
+        scope: "matching",
+      }),
+    );
   });
 
   it("names the reason Run is blocked under the button", () => {
