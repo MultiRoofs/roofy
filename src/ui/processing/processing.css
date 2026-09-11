@@ -173,3 +173,187 @@
   background: var(--lime-100);
   color: var(--lime-900);
 }
+
+/* ── Tool view (spec §6) ───────────────────────────────────────────── */
+.processing-tool {
+  display: flex;
+  flex-direction: column;
+}
+.processing-tool__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.processing-tool__title {
+  margin: 0;
+  font: 500 16px/1.3 var(--font-display);
+  color: var(--fg);
+}
+.processing-tool__desc {
+  margin: 6px 0 14px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+/* A back chevron is an icon button, not a field: the shared fill and 38px
+   height would make the form's first row look like a control. */
+.processing-back {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  min-height: 30px !important;
+  padding: 0;
+  font-size: 16px;
+  background: transparent !important;
+}
+.processing-section {
+  margin: 0 0 14px;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.processing-field {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.processing-field > span {
+  color: var(--fg-muted);
+}
+.processing-field select,
+.processing-field input[type="text"] {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-height-compact);
+}
+.processing-radios {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.processing-radios label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.processing-note,
+.processing-columns,
+.processing-phases,
+.processing-elapsed {
+  margin: 0 0 4px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.processing-columns {
+  font-family: var(--font-mono);
+  word-break: break-word;
+  color: var(--fg);
+}
+.processing-error {
+  margin: 0 0 6px;
+  font-size: 11px;
+  color: var(--brand-accent);
+}
+.processing-warning {
+  margin: 0 0 6px;
+  font-size: 11px;
+  color: var(--brand-secondary);
+}
+
+/* ── Run footer (spec §6.1–§6.3) ───────────────────────────────────── */
+.processing-footer {
+  position: sticky;
+  bottom: 0;
+  padding: 10px 0 2px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.processing-footer__row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+.processing-footer__row .processing-elapsed {
+  margin: 0 auto 0 0;
+}
+.processing-footer .processing-note {
+  margin: 6px 0 0;
+  text-align: right;
+}
+.processing-run {
+  min-height: var(--control-height);
+  padding: 0 16px;
+  font-weight: 600;
+  /* The one filled button of the panel. `!important` because flatControls sets
+     every button's fill with it; the tokens are app.css's shared pair. */
+  background: var(--accent-fill) !important;
+  color: var(--on-accent) !important;
+}
+.processing-run:hover:not(:disabled) {
+  background: var(--accent-fill-hover) !important;
+}
+.processing-progress {
+  position: relative;
+  height: 3px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--border);
+}
+.processing-progress::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 30%;
+  border-radius: 2px;
+  background: var(--lime-500);
+  animation: processing-indeterminate 1.1s ease-in-out infinite;
+}
+@keyframes processing-indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(333%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .processing-progress::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
+}
+.processing-card {
+  margin-bottom: 8px;
+  padding: 10px;
+  border: 1px solid var(--lime-700);
+  border-radius: var(--control-radius);
+}
+.processing-card--failed {
+  border-color: var(--brand-accent);
+}
+.processing-card__line {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--fg);
+}
+.processing-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.processing-card__actions button {
+  min-height: var(--control-height-compact);
+  padding: 0 10px;
+  font-size: 11px;
+}
