@@ -23,6 +23,13 @@ const MAX_RUNS = 20;
 
 interface ProcessingState {
   readonly open: boolean;
+  /**
+   * Spec §4.1/§4.2: which of the right panel's two tabs is up. It lives here,
+   * not in `ProcessingPanel`, because the Tools button has to be able to SWITCH
+   * to Tools — a click while Details is showing reveals the toolbox instead of
+   * closing something the user cannot see.
+   */
+  readonly activeTab: "tools" | "details";
   readonly view: ProcessingView;
   readonly search: string;
   readonly drafts: Readonly<Partial<Record<ToolId, ToolDraft>>>;
@@ -38,6 +45,7 @@ interface ProcessingState {
 interface ProcessingActions {
   setOpen(open: boolean): void;
   toggle(): void;
+  setTab(tab: "tools" | "details"): void;
   openTool(toolId: ToolId): void;
   openLog(runId: string): void;
   back(): void;
@@ -51,6 +59,7 @@ interface ProcessingActions {
 
 const initial: ProcessingState = {
   open: false,
+  activeTab: "tools",
   view: { kind: "catalogue" },
   search: "",
   drafts: {},
@@ -66,21 +75,25 @@ export const useProcessingStore = create<ProcessingState & ProcessingActions>(
     setOpen: (open) =>
       set((s) => ({
         open,
+        activeTab: open ? "tools" : s.activeTab,
         view: open ? s.view : { kind: "catalogue" },
         unseenFailure: open ? false : s.unseenFailure,
       })),
     toggle: () => get().setOpen(!get().open),
+    setTab: (activeTab) => set({ activeTab }),
     // Opening the panel through a view is opening the panel: the amber dot
     // means "a failure you have not looked at", and the Tools tab is now up.
     openTool: (toolId) =>
       set({
         open: true,
+        activeTab: "tools",
         view: { kind: "tool", toolId },
         unseenFailure: false,
       }),
     openLog: (runId) =>
       set((s) => ({
         open: true,
+        activeTab: "tools",
         view: { kind: "log", runId, from: s.view },
         unseenFailure: false,
       })),

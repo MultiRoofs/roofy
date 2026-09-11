@@ -11,16 +11,33 @@ afterEach(() => {
 });
 
 describe("ToolsButton", () => {
-  it("toggles the toolbox and reflects it as pressed", () => {
+  it("opens the toolbox on the Tools tab and reflects it as pressed", () => {
     render(<ToolsButton />);
     const button = screen.getByRole("button", { name: "Tools" });
     expect(button).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(button);
     expect(useProcessingStore.getState().open).toBe(true);
+    expect(useProcessingStore.getState().activeTab).toBe("tools");
     expect(screen.getByRole("button", { name: "Tools" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
+  });
+
+  it("closes the toolbox only while Tools is visibly the active tab", () => {
+    useProcessingStore.getState().setOpen(true);
+    render(<ToolsButton />);
+    fireEvent.click(screen.getByRole("button", { name: "Tools" }));
+    expect(useProcessingStore.getState().open).toBe(false);
+  });
+
+  it("switches to Tools instead of closing while Details is showing", () => {
+    useProcessingStore.getState().setOpen(true);
+    useProcessingStore.getState().setTab("details");
+    render(<ToolsButton />);
+    fireEvent.click(screen.getByRole("button", { name: "Tools" }));
+    expect(useProcessingStore.getState().open).toBe(true);
+    expect(useProcessingStore.getState().activeTab).toBe("tools");
   });
 
   it("expands a collapsed right panel instead of opening behind it", () => {
@@ -33,10 +50,12 @@ describe("ToolsButton", () => {
 
   it("reveals an open toolbox hidden behind a collapsed panel rather than closing it", () => {
     useProcessingStore.getState().setOpen(true);
+    useProcessingStore.getState().setTab("details");
     useShellStore.getState().setRightCollapsed(true);
     render(<ToolsButton />);
     fireEvent.click(screen.getByRole("button", { name: "Tools" }));
     expect(useProcessingStore.getState().open).toBe(true);
+    expect(useProcessingStore.getState().activeTab).toBe("tools");
     expect(useShellStore.getState().rightCollapsed).toBe(false);
   });
 

@@ -1,17 +1,18 @@
 import { ActionIcon } from "../ActionIcon";
 import { useProcessingStore } from "../../features/processing/processingStore";
 import { useShellStore } from "../shell/shellStore";
+import { revealTools } from "./revealTools";
 import "./processing.css";
 
 /**
  * Spec §4.1: the scene toolbar's entry point. The button REVEALS the Tools
  * tab — only a click while Tools is visibly showing closes the toolbox — so a
- * collapsed right panel is expanded rather than opened behind, and a click on
- * an open-but-hidden toolbox brings it back instead of closing something the
- * user cannot see.
+ * collapsed right panel is expanded rather than opened behind, a click while
+ * the Details tab is up switches to Tools, and a click on an open-but-hidden
+ * toolbox brings it back instead of closing something the user cannot see.
  *
- * The coupling lives here, not in `processingStore`: nothing under `features/`
- * may import from `ui/`, and the shell's collapse is the shell's state.
+ * The shell coupling lives in `revealTools`, not in `processingStore`: nothing
+ * under `features/` may import from `ui/`, and the collapse is the shell's.
  */
 export function ToolsButton() {
   const open = useProcessingStore((s) => s.open);
@@ -33,13 +34,22 @@ export function ToolsButton() {
       aria-label="Tools"
       title="Tools"
       onClick={() => {
-        const shell = useShellStore.getState();
-        if (open && shell.rightCollapsed) {
-          shell.setRightCollapsed(false);
+        const processing = useProcessingStore.getState();
+        if (!processing.open) {
+          processing.setOpen(true);
+          revealTools();
           return;
         }
-        useProcessingStore.getState().toggle();
-        if (!open) shell.setRightCollapsed(false);
+        // Open already: reveal whatever is hiding the Tools tab, and only close
+        // when nothing is — the collapse first, because a collapsed panel hides
+        // both tabs and the user asked for this one.
+        const collapsed = useShellStore.getState().rightCollapsed;
+        if (collapsed || processing.activeTab !== "tools") {
+          processing.setTab("tools");
+          revealTools();
+          return;
+        }
+        processing.setOpen(false);
       }}
     >
       <ActionIcon name="tools" />

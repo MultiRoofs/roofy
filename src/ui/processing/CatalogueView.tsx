@@ -20,6 +20,7 @@ import type {
 import { useActiveLayer } from "../../features/workspace/activeLayer";
 import { useEligibilityContext } from "./useEligibilityContext";
 import { RecentRuns } from "./RecentRuns";
+import { openToolView } from "./revealTools";
 
 const GROUP_ORDER: ReadonlyArray<ToolGroup> = ["roof", "3d", "cross-layer"];
 
@@ -42,7 +43,7 @@ export function CatalogueView() {
   const visible = useMemo(() => filterTools(TOOLS, search), [search]);
 
   return (
-    <div className="processing-catalogue">
+    <>
       <input
         type="search"
         className="processing-search"
@@ -77,7 +78,7 @@ export function CatalogueView() {
         })
       )}
       <RecentRuns />
-    </div>
+    </>
   );
 }
 
@@ -95,16 +96,12 @@ function ToolRow({
       className="processing-tool-row"
       aria-disabled={reason !== null}
       title={reason ?? undefined}
-      onClick={() => useProcessingStore.getState().openTool(tool.id)}
+      onClick={() => openToolView(tool.id)}
     >
       <span className="processing-tool-row__head">
         <span className="processing-tool-row__name">{tool.name}</span>
         {tool.extension !== null && (
-          <span
-            className="processing-chip"
-            data-extension={tool.extension}
-            title={CHIP_TITLE[tool.extension]}
-          >
+          <span className="processing-chip" title={CHIP_TITLE[tool.extension]}>
             {CHIP_LABEL[tool.extension]}
           </span>
         )}

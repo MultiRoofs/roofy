@@ -102,6 +102,28 @@ describe("ProcessingPanel", () => {
     ).toBeNull();
   });
 
+  it("follows the tab the store names, so the Tools button can switch it", () => {
+    render(
+      <ProcessingPanel details={<div>details body</div>} detailsTitle="B" />,
+    );
+    act(() => useProcessingStore.getState().setTab("details"));
+    expect(screen.getByText("details body")).toBeInTheDocument();
+    act(() => useProcessingStore.getState().setTab("tools"));
+    expect(screen.queryByText("details body")).toBeNull();
+  });
+
+  it("brings the Tools tab up when a view opens behind the Details tab", () => {
+    render(
+      <ProcessingPanel details={<div>details body</div>} detailsTitle="B" />,
+    );
+    act(() => useProcessingStore.getState().setTab("details"));
+    act(() => useProcessingStore.getState().openTool("height-from-extent"));
+    expect(screen.queryByText("details body")).toBeNull();
+    expect(
+      screen.getByRole("heading", { name: "Height from extent" }),
+    ).toBeInTheDocument();
+  });
+
   it("closes through the × and returns the panel to the selection", () => {
     useProcessingStore.getState().setOpen(true);
     render(<ProcessingPanel details={null} detailsTitle="Selection" />);

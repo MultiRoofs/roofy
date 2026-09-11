@@ -3,6 +3,7 @@ import { cleanup, render } from "@testing-library/react";
 import { useSelectionStore } from "../../../../src/features/selection/selectionStore";
 import { useEscapeClearsSelection } from "../../../../src/features/selection/useEscapeClearsSelection";
 import { useProcessingStore } from "../../../../src/features/processing/processingStore";
+import { useSceneSheetStore } from "../../../../src/features/sceneSheet/sceneSheetStore";
 
 function Host() {
   useEscapeClearsSelection();
@@ -37,6 +38,7 @@ describe("useEscapeClearsSelection", () => {
       geoSelection: null,
     });
     useProcessingStore.getState().resetForTest();
+    useSceneSheetStore.getState().setSheet(null);
   });
   it("clears the selection on Escape", () => {
     render(<Host />);
@@ -87,13 +89,32 @@ describe("useEscapeClearsSelection", () => {
     expect(useSelectionStore.getState().selections).toEqual([]);
   });
 
-  it("leaves the selection alone for a closed toolbox on a tool view", () => {
+  it("clears the selection for a CLOSED toolbox left on a tool view", () => {
     render(<Host />);
     useProcessingStore.getState().openTool("height-from-extent");
     useProcessingStore.setState({ open: false });
     selectSomething();
     pressEscape();
     expect(useSelectionStore.getState().selections).toEqual([]);
+    expect(useProcessingStore.getState().view).toEqual({
+      kind: "tool",
+      toolId: "height-from-extent",
+    });
+  });
+
+  it("closes an open scene sheet before it touches the tool form", () => {
+    render(<Host />);
+    useProcessingStore.getState().openTool("height-from-extent");
+    useSceneSheetStore.getState().setSheet("sun");
+    selectSomething();
+
+    pressEscape();
+    expect(useSceneSheetStore.getState().sheet).toBeNull();
+    expect(useProcessingStore.getState().view).toEqual({
+      kind: "tool",
+      toolId: "height-from-extent",
+    });
+    expect(useSelectionStore.getState().selections).toHaveLength(1);
   });
 
   it("ignores keys other than Escape", () => {

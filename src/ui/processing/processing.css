@@ -111,7 +111,7 @@
 }
 .processing-group__label {
   margin: 0 0 6px;
-  font: 500 11px/1.4 var(--font-label, var(--font-ui));
+  font: 500 11px/1.4 var(--font-mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--fg-muted);

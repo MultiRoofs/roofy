@@ -42,6 +42,7 @@ const { useWorkspaceStore } =
   await import("../../../../src/features/workspace/workspaceStore");
 const { useLayerTableStore } =
   await import("../../../../src/insights/layerTables");
+const { useShellStore } = await import("../../../../src/ui/shell/shellStore");
 
 type LayerInput = Parameters<LayerStoreActions["addLayer"]>[0];
 
@@ -88,6 +89,7 @@ afterEach(() => {
   useLayerStore.getState().removeAllLayers();
   useWorkspaceStore.getState().setActiveLayerId(null);
   useLayerTableStore.setState({ tables: {} });
+  useShellStore.getState().setRightCollapsed(false);
 });
 
 describe("CatalogueView", () => {
@@ -166,6 +168,14 @@ describe("CatalogueView", () => {
       kind: "tool",
       toolId: "join-by-location",
     });
+  });
+
+  it("expands a collapsed right panel when it opens a tool view", () => {
+    addCityLayer();
+    useShellStore.getState().setRightCollapsed(true);
+    render(<CatalogueView />);
+    fireEvent.click(screen.getByRole("button", { name: /Height from extent/ }));
+    expect(useShellStore.getState().rightCollapsed).toBe(false);
   });
 
   it("shows the empty history text", () => {

@@ -8,6 +8,10 @@
  * "the title the user has looked at" rather than set by a pick — which is why
  * `seenTitle` starts at the title present on mount: opening the toolbox over an
  * existing selection is not a change the user needs pointed out.
+ *
+ * Which tab is up lives in `processingStore`, not here: spec §4.1's Tools button
+ * has to be able to switch to Tools, and a store field is the only thing both
+ * the map header and this panel can see.
  */
 import { useEffect, useState, type ReactNode } from "react";
 import { useProcessingStore } from "../../features/processing/processingStore";
@@ -24,7 +28,8 @@ interface Props {
 
 export function ProcessingPanel({ details, detailsTitle }: Props) {
   const view = useProcessingStore((s) => s.view);
-  const [tab, setTab] = useState<"tools" | "details">("tools");
+  const tab = useProcessingStore((s) => s.activeTab);
+  const setTab = useProcessingStore((s) => s.setTab);
   const [seenTitle, setSeenTitle] = useState<string>(() => detailsTitle);
   const hasDetails = details !== null;
   const showDetails = hasDetails && tab === "details";
@@ -32,7 +37,7 @@ export function ProcessingPanel({ details, detailsTitle }: Props) {
   // Clearing the selection removes the Details tab, so the strip falls back.
   useEffect(() => {
     if (!hasDetails) setTab("tools");
-  }, [hasDetails]);
+  }, [hasDetails, setTab]);
 
   // While Details is the visible tab its title has, by definition, been seen.
   useEffect(() => {
@@ -77,7 +82,6 @@ export function ProcessingPanel({ details, detailsTitle }: Props) {
           type="button"
           className="processing-tab processing-tab--close"
           aria-label="Close tools"
-          title="Close tools"
           onClick={() => useProcessingStore.getState().setOpen(false)}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
