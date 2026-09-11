@@ -57,6 +57,18 @@ interface ProcessingState {
   readonly panelCollapsed: boolean;
   /** A failed run the user has not looked at yet (spec §4.1 amber dot). */
   readonly unseenFailure: boolean;
+  /**
+   * The analytics engine has stopped and is not coming back this session
+   * (spec §6.1, minus its restart).
+   *
+   * It is ONE flag rather than a field per run because it is one fact about
+   * the session: every backup table lived in the database that died, so no
+   * run's Undo can restore anything, whatever its own `undoable` says. The
+   * cards read this beside `undoable`; nothing clears it, because the status
+   * bar's Retry reboots the engine without rebuilding the tables the backups
+   * described.
+   */
+  readonly engineStopped: boolean;
   /** One-line toast text; `noticeSeq` increments so App can subscribe. */
   readonly notice: string | null;
   readonly noticeSeq: number;
@@ -91,6 +103,8 @@ interface ProcessingActions {
    */
   dismissFinishedRun(toolId: ToolId, targetLayerId: string): void;
   patchRun(id: string, patch: Partial<RunRecord>): void;
+  /** Spec §6.1: the engine died. Called by the run queue's engine watcher. */
+  markEngineStopped(): void;
   pushNotice(text: string): void;
   resetForTest(): void;
 }
@@ -105,6 +119,7 @@ const initial: ProcessingState = {
   dismissedRunIds: [],
   panelCollapsed: false,
   unseenFailure: false,
+  engineStopped: false,
   notice: null,
   noticeSeq: 0,
 };
@@ -219,6 +234,7 @@ export const useProcessingStore = create<ProcessingState & ProcessingActions>(
             s.unseenFailure || (patch.status === "failed" && !toolsVisible(s)),
         };
       }),
+    markEngineStopped: () => set({ engineStopped: true }),
     pushNotice: (text) =>
       set((s) => ({ notice: text, noticeSeq: s.noticeSeq + 1 })),
     resetForTest: () => set({ ...initial }),

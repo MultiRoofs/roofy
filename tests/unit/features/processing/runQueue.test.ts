@@ -58,6 +58,9 @@ let failing: string | null = null;
 let liveColumns: string[] = ["id", "feature_id"];
 /** What they were when the open transaction began, for its ROLLBACK. */
 let columnsAtBegin: string[] | null = null;
+/** Whoever `subscribeDuckDBStatus` handed a listener to, so a test can publish
+ *  a transition the way `duckdb.ts` does. */
+const statusListeners = new Set<() => void>();
 
 vi.mock("../../../../src/insights/duckdb", () => {
   const run = async (statement: string) => {
@@ -102,7 +105,10 @@ vi.mock("../../../../src/insights/duckdb", () => {
       return true;
     }),
     dropBuffer: vi.fn(async () => {}),
-    subscribeDuckDBStatus: vi.fn(() => () => {}),
+    subscribeDuckDBStatus: vi.fn((listener: () => void) => {
+      statusListeners.add(listener);
+      return () => statusListeners.delete(listener);
+    }),
     getDuckDBStatusVersion: vi.fn(() => 0),
     getDuckDBStatus: vi.fn(() => ({
       state: "ready",
@@ -173,6 +179,7 @@ const {
   undoRun,
   installStaleWatcher,
   installTargetRemovalWatcher,
+  installEngineWatcher,
 } = await import("../../../../src/features/processing/runQueue");
 const { registerExecutor, EXECUTORS } =
   await import("../../../../src/features/processing/tools");
@@ -291,6 +298,7 @@ beforeEach(() => {
   failing = null;
   liveColumns = ["id", "feature_id"];
   columnsAtBegin = null;
+  statusListeners.clear();
   tableInfo = freshTable();
   useSelectionStore.getState().clear();
   useLayerStore.setState({ layers: [layer()] });
@@ -1470,5 +1478,144 @@ describe("the Loading extension phase (spec §6.1)", () => {
     // "Failed to fetch" is true and useless to the user, and indispensable in a
     // bug report — so it is kept as the run's warning, not as its message.
     expect(run?.warnings).toContain("three_d: Failed to fetch");
+  });
+});
+
+/** Publish a `failed` status the way `duckdb.ts` does when the worker dies:
+ *  the value first, then every listener. */
+function killEngine(reason = "worker gone"): void {
+  vi.mocked(getDuckDBStatus).mockReturnValue({
+    state: "failed",
+    error: reason,
+  });
+  for (const listener of statusListeners) listener();
+}
+
+/** A `failed` status that was never preceded by a `ready` one — a boot that
+ *  did not come up, which the status bar's Retry can still fix. */
+function failBoot(reason = "no bundle for this platform"): void {
+  vi.mocked(getDuckDBStatus).mockReturnValue({
+    state: "failed",
+    error: reason,
+  });
+}
+
+describe("the engine watcher (spec §6.1)", () => {
+  it("fails the queued AND the running run when the engine stops", async () => {
+    const stop = installEngineWatcher();
+    const held = deferred<void>();
+    gate = { needle: "COUNT(DISTINCT", promise: held.promise };
+    registerExecutor("height-from-extent", async () => {
+      throw new Error("the executor must never be reached");
+    });
+    const running = submitRun(request());
+    const queued = submitRun(request({ prefix: "other_" }));
+    await vi.waitFor(() =>
+      expect(sql.some((q) => q.includes("COUNT(DISTINCT"))).toBe(true),
+    );
+    expect(runById(queued)?.status).toBe("queued");
+
+    killEngine();
+
+    // §6.1's exact sentence, on BOTH runs.
+    expect(runById(running)?.status).toBe("failed");
+    expect(runById(running)?.error).toBe("Analytics engine stopped");
+    expect(runById(queued)?.status).toBe("failed");
+    expect(runById(queued)?.error).toBe("Analytics engine stopped");
+    expect(useProcessingStore.getState().engineStopped).toBe(true);
+
+    held.resolve();
+    stop();
+  });
+
+  it("leaves a run that already finished alone, but takes its Undo away", async () => {
+    const stop = installEngineWatcher();
+    registerExecutor("height-from-extent", async (run) => ({
+      columns: [{ name: `${run.prefix}height_m`, type: "DOUBLE" as const }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+    const id = submitRun(request());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    expect(runById(id)?.undoable).toBe(true);
+
+    killEngine();
+
+    // The RUN is untouched — it succeeded, and its columns are still in the
+    // table and the model. Only the flag changes, and the UI reads that.
+    expect(runById(id)?.status).toBe("done");
+    expect(runById(id)?.undoable).toBe(true);
+    expect(useProcessingStore.getState().engineStopped).toBe(true);
+    stop();
+  });
+
+  it("does not issue a DROP for a backup table that died with the engine", async () => {
+    const stop = installEngineWatcher();
+    registerExecutor("height-from-extent", async (run) => ({
+      columns: [{ name: `${run.prefix}height_m`, type: "DOUBLE" as const }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+    const id = submitRun(request());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    sql.length = 0;
+
+    killEngine();
+    await Promise.resolve();
+
+    expect(sql.filter((q) => q.startsWith("DROP TABLE"))).toEqual([]);
+    expect(runById(id)).not.toBeNull();
+    stop();
+  });
+
+  it("says nothing about a BOOT that never came up", async () => {
+    // §6.1 is about an engine that DIES. A boot that failed — offline, no
+    // bundle for the platform — is the state the status bar's Retry exists
+    // for, and it publishes the same `failed`. Treating it as a death would
+    // strike every Undo for the rest of a session in which the engine then
+    // came up perfectly well on the second attempt.
+    failBoot();
+    const stop = installEngineWatcher();
+    expect(useProcessingStore.getState().engineStopped).toBe(false);
+
+    // …and a death AFTER that retry is still heard.
+    vi.mocked(getDuckDBStatus).mockReturnValue({
+      state: "ready",
+      extensions: {
+        cityjson: { state: "loaded" },
+        spatial: { state: "unloaded" },
+        three_d: { state: "unloaded" },
+      },
+      loadedExtensions: [],
+      platform: "wasm_eh",
+    });
+    for (const listener of statusListeners) listener();
+    killEngine();
+    expect(useProcessingStore.getState().engineStopped).toBe(true);
+    stop();
+  });
+
+  it("reads the status on install, so a LATE install still hears the death", () => {
+    // The app shell installs this in an effect, which can run after the engine
+    // is already up. Without the read on install the watcher would have no
+    // `ready` to measure the next transition against, and would dismiss a real
+    // death as a boot that never came up.
+    const stop = installEngineWatcher();
+    killEngine();
+    expect(useProcessingStore.getState().engineStopped).toBe(true);
+    stop();
+  });
+
+  it("disposes the previous watcher rather than stacking a second", () => {
+    const first = installEngineWatcher();
+    const second = installEngineWatcher();
+    // One live installer, the same shape as the removal watcher: a hot reload
+    // must not leave two of them failing the same runs twice.
+    expect(statusListeners.size).toBe(1);
+    first();
+    second();
+    expect(statusListeners.size).toBe(0);
   });
 });

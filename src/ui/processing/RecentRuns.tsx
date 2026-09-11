@@ -14,7 +14,7 @@ import {
 import { toolById } from "../../features/processing/toolRegistry";
 import type { RunRecord } from "../../features/processing/types";
 import { openRunLog, openToolView } from "./revealTools";
-import { STATUS_WORD, seconds } from "./runFormat";
+import { STATUS_WORD, UNDO_ENGINE_STOPPED, seconds } from "./runFormat";
 
 export function RecentRuns() {
   const runs = useProcessingStore((s) => s.runs);
@@ -44,6 +44,9 @@ function secondLine(run: RunRecord): string | null {
 
 function RunRow({ run }: { readonly run: RunRecord }) {
   const inFlight = run.status === "queued" || run.status === "running";
+  // §6.1: the backup table this Undo would restore from lived in the database
+  // that died. The row keeps the button and explains itself, as the card does.
+  const engineStopped = useProcessingStore((s) => s.engineStopped);
   const target =
     run.sourceName === null
       ? run.targetName
@@ -73,7 +76,12 @@ function RunRow({ run }: { readonly run: RunRecord }) {
           Log
         </button>
         {run.status === "done" && run.undoable && !run.stale && (
-          <button type="button" onClick={() => void undoRun(run.id)}>
+          <button
+            type="button"
+            disabled={engineStopped}
+            title={engineStopped ? UNDO_ENGINE_STOPPED : undefined}
+            onClick={() => void undoRun(run.id)}
+          >
             Undo
           </button>
         )}

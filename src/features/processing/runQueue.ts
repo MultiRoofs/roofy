@@ -31,6 +31,7 @@
 import {
   ensureExtension,
   getDuckDBStatus,
+  subscribeDuckDBStatus,
   isExtensionLoaded,
   runQuery,
   type QueryOutcome,
@@ -934,6 +935,80 @@ export function installTargetRemovalWatcher(): () => void {
     if (disposeTargetWatcher === dispose) disposeTargetWatcher = null;
   };
   disposeTargetWatcher = dispose;
+  return dispose;
+}
+
+let disposeEngineWatcher: (() => void) | null = null;
+
+/**
+ * Spec §6.1: "If the DuckDB engine itself dies, the running run and every
+ * queued run fail with 'Analytics engine stopped'."
+ *
+ * The running run is ABORTED rather than awaited, because there may be nothing
+ * to await: duckdb-wasm drops the promises of requests that were in flight when
+ * its worker died (its own `onError` clears the pending map without rejecting),
+ * so a run waiting on a query would otherwise hang for the life of the page.
+ * The card is patched BEFORE the abort, as the removal watcher does it, so
+ * `failedAlready` keeps this reason rather than `execute`'s cancel.
+ *
+ * A DEATH, not a failed boot. `duckdb.ts` publishes the same `failed` for both
+ * — an offline boot with no bundle, and a worker that crashed after serving —
+ * and they are not the same event: the boot failure is what the status bar's
+ * Retry exists for, and treating it as a death would take every Undo away for
+ * the rest of a session whose engine then came up on the second attempt. The
+ * transition this watches is therefore `ready` → `failed`, which in that module
+ * only `markEngineDead` produces.
+ *
+ * Undo is taken from every earlier run through the store's `engineStopped`
+ * flag, not by patching each card: the backup tables lived in the database that
+ * just died. `discardUndo` is deliberately NOT called — its `DROP TABLE` would
+ * be posted at an engine that cannot answer, and there is nothing left to drop.
+ */
+export function installEngineWatcher(): () => void {
+  disposeEngineWatcher?.();
+
+  let sawReady = false;
+  const reactToStatus = () => {
+    const state = getDuckDBStatus().state;
+    if (state === "ready") {
+      sawReady = true;
+      return;
+    }
+    if (state !== "failed" || !sawReady) return;
+    for (const run of useProcessingStore.getState().runs) {
+      if (
+        run.status !== "queued" &&
+        run.status !== "running" &&
+        run.status !== "cancelling"
+      ) {
+        continue;
+      }
+      patch(run.id, {
+        status: "failed",
+        phase: null,
+        error: "Analytics engine stopped",
+        elapsedMs: Math.max(0, Date.now() - run.startedAt),
+      });
+      controllers.get(run.id)?.abort();
+    }
+    useProcessingStore.getState().markEngineStopped();
+  };
+
+  const unsubscribe = subscribeDuckDBStatus(reactToStatus);
+  // Read once on install, so a shell that mounts AFTER the engine came up still
+  // has its `sawReady`. A status that is already `failed` at this point is left
+  // alone: with no transition to read, a boot that never came up and a worker
+  // that died are the same value, and the first of those must not strike a
+  // session's Undo. The app installs this before DuckDB is even asked to boot,
+  // so the case is a re-install — where the watcher this one replaced has
+  // already failed the runs and set the flag.
+  reactToStatus();
+
+  const dispose = () => {
+    unsubscribe();
+    if (disposeEngineWatcher === dispose) disposeEngineWatcher = null;
+  };
+  disposeEngineWatcher = dispose;
   return dispose;
 }
 

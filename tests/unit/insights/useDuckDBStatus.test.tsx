@@ -53,11 +53,44 @@ vi.mock("@duckdb/duckdb-wasm", () => {
   };
 });
 
+/** Every worker `doInit` constructed, so a test can kill the live one and can
+ *  tell a Retry's fresh worker from the one that died. */
+const workers: FakeWorker[] = [];
+
 // jsdom has neither of these, and `doInit` uses both to wrap the CDN worker.
+// The listener surface is real because `doInit` registers its own `error` and
+// `messageerror` handlers on the worker it builds, and the only way to assert
+// what happens when the engine dies is to fire one.
 class FakeWorker {
+  readonly listeners = new Map<string, Set<(event: unknown) => void>>();
+  constructor() {
+    workers.push(this);
+  }
+  addEventListener(type: string, listener: (event: unknown) => void) {
+    const set = this.listeners.get(type) ?? new Set();
+    set.add(listener);
+    this.listeners.set(type, set);
+  }
+  removeEventListener(type: string, listener: (event: unknown) => void) {
+    this.listeners.get(type)?.delete(listener);
+  }
+  postMessage() {}
   terminate() {
     terminations.count += 1;
   }
+  /** What the browser does when the worker script dies. */
+  die(message: string) {
+    for (const listener of this.listeners.get("error") ?? []) {
+      listener({ type: "error", message });
+    }
+  }
+}
+
+/** The worker the current engine is talking to. */
+function liveWorker(): FakeWorker {
+  const worker = workers.at(-1);
+  if (!worker) throw new Error("no Worker was constructed");
+  return worker;
 }
 
 type DuckdbModule = typeof import("../../../src/insights/duckdb");
@@ -71,6 +104,7 @@ beforeEach(async () => {
   failBundle = false;
   failInstantiate = false;
   terminations.count = 0;
+  workers.length = 0;
   vi.stubGlobal("Worker", FakeWorker);
   // `duckdb.ts` is a module singleton: a fresh copy per test is the only way
   // to observe a BOOT, which happens exactly once per module instance.
@@ -259,6 +293,70 @@ describe("duckdb.ts publishes every transition", () => {
     await duckdb.ensureExtension("three_d");
     after.stop();
     expect(after.seen.length).toBeGreaterThan(0);
+  });
+
+  it("publishes failed when the worker dies, and keeps the reason", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { seen, stop } = record();
+    await duckdb.initDuckDB();
+    expect(duckdb.getDuckDBStatus().state).toBe("ready");
+    liveWorker().die("Uncaught RuntimeError: memory access out of bounds");
+    stop();
+    expect(seen).toEqual(["initializing", "ready:unloaded", "failed"]);
+    const status = duckdb.getDuckDBStatus();
+    expect(status.state).toBe("failed");
+    if (status.state !== "failed") throw new Error("unreachable");
+    // The status bar prints this after "The analytics engine is not running"
+    // (`TablePanel.tsx`), so it has to be the engine's own words.
+    expect(status.error).toContain("memory access out of bounds");
+    // The corpse holds a 36 MB wasm heap and nothing else can reach it any
+    // more: `markEngineDead` drops the module's `db`, so this listener is the
+    // last hand on the Worker. Same reason `doInit`'s catch terminates.
+    expect(terminations.count).toBe(1);
+    errors.mockRestore();
+  });
+
+  it("fails every statement fast once the engine is dead", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    await duckdb.initDuckDB();
+    liveWorker().die("worker gone");
+    const outcome = await duckdb.runQuery("SELECT 1");
+    // `runQuery` guards on the status, so nothing is posted to a worker that
+    // is not there — which matters, because `postTask` would neither reject
+    // nor resolve.
+    expect(outcome).toEqual({
+      ok: false,
+      message: "The analytics engine is not running.",
+    });
+    errors.mockRestore();
+  });
+
+  it("announces the death ONCE, however many events arrive", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    await duckdb.initDuckDB();
+    const { seen, stop } = record();
+    liveWorker().die("first");
+    liveWorker().die("second");
+    stop();
+    expect(seen).toEqual(["failed"]);
+    const status = duckdb.getDuckDBStatus();
+    if (status.state !== "failed") throw new Error("unreachable");
+    expect(status.error).toContain("first");
+    errors.mockRestore();
+  });
+
+  it("lets a Retry re-run the boot after a death — the memo is cleared", async () => {
+    // `initDuckDB` hands back its memo forever unless something clears it, so
+    // without the reset in `markEngineDead` the status bar's Retry would
+    // resolve instantly against the boot that succeeded before the crash.
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    await duckdb.initDuckDB();
+    liveWorker().die("worker gone");
+    await duckdb.initDuckDB();
+    expect(duckdb.getDuckDBStatus().state).toBe("ready");
+    // A SECOND worker, not the corpse a memo would have handed back.
+    expect(workers).toHaveLength(2);
+    errors.mockRestore();
   });
 });
 

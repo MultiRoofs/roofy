@@ -18,7 +18,7 @@ import { useShellStore } from "../shell/shellStore";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 import { appendColumns } from "../drawer/columnPolicy";
 import { openRunLog } from "./revealTools";
-import { phaseLine, plural, seconds } from "./runFormat";
+import { UNDO_ENGINE_STOPPED, phaseLine, plural, seconds } from "./runFormat";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useRuleDraftStore } from "../../features/rules/ruleDraftStore";
 import { useLayerTableStore } from "../../insights/layerTables";
@@ -179,6 +179,10 @@ function useElapsed(run: RunRecord | null): number {
 
 export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
   const elapsed = useElapsed(run);
+  // §6.1: the engine died, so every backup table died with it. The button stays
+  // where it was, disabled and explaining itself, rather than vanishing — a
+  // card that quietly loses its Undo reads as a card that was never undoable.
+  const engineStopped = useProcessingStore((s) => s.engineStopped);
   const style = useStyleByResult(run?.id ?? null);
   const status = run?.status ?? null;
 
@@ -308,7 +312,12 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
               </button>
             )}
             {run.undoable && (
-              <button type="button" onClick={() => void undoRun(run.id)}>
+              <button
+                type="button"
+                disabled={engineStopped}
+                title={engineStopped ? UNDO_ENGINE_STOPPED : undefined}
+                onClick={() => void undoRun(run.id)}
+              >
                 Undo
               </button>
             )}

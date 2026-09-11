@@ -119,6 +119,40 @@ function setStatus(next: DuckDBStatus): void {
   }
 }
 
+/**
+ * The engine's worker has died. Publish it, and make sure nothing tries to
+ * talk to the corpse.
+ *
+ * WHY AN EVENT AND NOT A FAILED QUERY. duckdb-wasm's own worker error handler
+ * does `this._pendingRequests.clear()` — it drops the pending promises without
+ * rejecting them, so a query in flight when the worker dies NEVER SETTLES; and
+ * once the worker is gone `postTask` logs and returns `undefined` rather than
+ * rejecting. There is no rejection to listen for. The worker's `error` event,
+ * on the worker THIS module constructed, is the only honest signal.
+ *
+ * Idempotent: a dying worker can fire more than once, and a second `failed`
+ * status would re-render every subscriber for no news.
+ */
+export function markEngineDead(reason: string): void {
+  if (status.state === "failed") return;
+  // Cleared BEFORE the publish, so a listener that reacts synchronously cannot
+  // find a connection that is about to be dropped. `runQuery` then refuses on
+  // `status.state !== "ready"` rather than posting into the void.
+  db = null;
+  conn = null;
+  // A retry must genuinely re-run `doInit` rather than be handed the memo of
+  // the boot that succeeded before the worker died.
+  initPromise = null;
+  extensions = {
+    cityjson: { state: "unloaded" },
+    spatial: { state: "unloaded" },
+    three_d: { state: "unloaded" },
+  };
+  loadedExtensions = [];
+  setStatus({ state: "failed", error: reason });
+  console.error("DuckDB-wasm worker stopped:", reason);
+}
+
 export function subscribeDuckDBStatus(listener: () => void): () => void {
   statusListeners.add(listener);
   return () => {
@@ -269,6 +303,26 @@ async function doInit(): Promise<void> {
     );
     worker = new Worker(workerUrl);
     URL.revokeObjectURL(workerUrl);
+    // ADDITIVE, and registered BEFORE `AsyncDuckDB` gets the worker: that
+    // constructor's `attach` adds its own "message"/"error"/"close" listeners
+    // with `addEventListener`, so these two sit beside them rather than
+    // replacing them.
+    //
+    // The terminate is for the same reason the catch below has one: once
+    // `markEngineDead` has dropped `db`, this closure is the last hand on a
+    // Worker holding a 36 MB wasm heap, and `markEngineDead` clears the boot
+    // memo precisely so a Retry builds a SECOND one.
+    const created = worker;
+    const stopEngine = (reason: string) => {
+      markEngineDead(reason);
+      created.terminate();
+    };
+    created.addEventListener("error", (event) => {
+      stopEngine(event.message || "The analytics engine's worker stopped.");
+    });
+    created.addEventListener("messageerror", () => {
+      stopEngine("The analytics engine sent a message that could not be read.");
+    });
     const logger = new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING);
     const instance = new duckdb.AsyncDuckDB(logger, worker);
     await instance.instantiate(bundle.mainModule);

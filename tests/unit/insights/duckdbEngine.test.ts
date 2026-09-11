@@ -68,6 +68,9 @@ describe("init failure", () => {
       },
     }));
     class FakeWorker {
+      addEventListener() {}
+      removeEventListener() {}
+      postMessage() {}
       terminate = terminate;
     }
     vi.stubGlobal("Worker", FakeWorker);
@@ -174,6 +177,9 @@ async function bootEngine(): Promise<EngineHarness> {
   vi.stubGlobal(
     "Worker",
     class {
+      addEventListener = vi.fn();
+      removeEventListener = vi.fn();
+      postMessage = vi.fn();
       terminate = vi.fn();
     },
   );

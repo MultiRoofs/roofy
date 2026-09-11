@@ -15,6 +15,17 @@ export const PHASES: ReadonlyArray<{
   { key: "write", label: "Writing results" },
 ];
 
+/**
+ * Why an Undo is offered but cannot be taken, once the analytics engine has
+ * stopped (spec §6.1): every backup table lived in the database that died.
+ *
+ * §6.1's own sentence is "Unavailable after an engine restart", which assumes
+ * the restart this milestone does not perform — saying "after a restart" when
+ * nothing restarted would describe an event the user never saw. Here rather
+ * than in either component, so the card and the history cannot drift apart.
+ */
+export const UNDO_ENGINE_STOPPED = "Unavailable: the analytics engine stopped";
+
 /** "1.7 s" — the card's and the history's one duration format. */
 export function seconds(ms: number): string {
   return `${(ms / 1000).toFixed(1)} s`;

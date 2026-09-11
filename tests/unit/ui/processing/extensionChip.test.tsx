@@ -77,7 +77,12 @@ vi.mock("@duckdb/duckdb-wasm", () => {
 });
 
 // jsdom has neither of these, and `doInit` uses both to wrap the CDN worker.
+// The listener methods are real because `doInit` registers its own `error` and
+// `messageerror` handlers on the worker it builds (spec §6.1's detection).
 class FakeWorker {
+  addEventListener() {}
+  removeEventListener() {}
+  postMessage() {}
   terminate() {}
 }
 

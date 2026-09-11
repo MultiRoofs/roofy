@@ -70,6 +70,7 @@ import { installGeoJsonPreparation } from "../features/geoLayers/geoJsonPreparat
 import { resolveGeoLayerBounds } from "../features/geoLayers/geoLayerBounds";
 import { installLayerTableLifecycle } from "../features/layers/layerTableLifecycle";
 import {
+  installEngineWatcher,
   installStaleWatcher,
   installTargetRemovalWatcher,
 } from "../features/processing/runQueue";
@@ -845,6 +846,9 @@ export function App({
    * shape as the invariants above.
    */
   useEffect(() => installTargetRemovalWatcher(), []);
+  /** Spec §6.1: a DuckDB worker that dies fails every run that was counting on
+   *  it, and takes every Undo with it. Same single-live-installer shape. */
+  useEffect(() => installEngineWatcher(), []);
   useEffect(() => installGeoJsonPreparation(), []);
 
   useEffect(
