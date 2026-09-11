@@ -1499,7 +1499,9 @@ function publishStatus(next: ReturnType<typeof getDuckDBStatus>): void {
 /** The worker died: `markEngineDead` tells the death subscribers and publishes
  *  the status, in that order. */
 function killEngine(reason = "worker gone"): void {
-  for (const listener of [...deathListeners]) listener();
+  // Over a COPY, as `markEngineDead` dispatches it: a waiter unsubscribes from
+  // inside its own notification.
+  for (const listener of Array.from(deathListeners)) listener();
   publishStatus({ state: "failed", error: reason });
 }
 
