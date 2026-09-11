@@ -7,4 +7,4 @@
  * here is `implemented: false` in `toolRegistry.ts`, and a run for it fails with
  * "Not available yet" instead of hanging.
  */
-export {};
+import "./heightFromExtent";
