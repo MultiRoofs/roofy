@@ -37,6 +37,7 @@ function fakeHandle(id: string) {
     setVisibleObjectIds: vi.fn(),
     setThemeStyle: vi.fn(),
     setAppearance: vi.fn(),
+    setModel: vi.fn(),
     batchIdMap: () => [],
     delete: vi.fn(),
   };

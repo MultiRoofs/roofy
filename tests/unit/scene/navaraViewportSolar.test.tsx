@@ -256,6 +256,7 @@ function makeHandle(id: string) {
     // viewport pushes the active theme's style on the same beat as LoD.
     setThemeStyle: vi.fn(),
     setAppearance: vi.fn(),
+    setModel: vi.fn(),
     setHighlight: vi.fn(),
     resolvePick: vi.fn(),
     resolveRaycast: vi.fn(() => null as unknown),

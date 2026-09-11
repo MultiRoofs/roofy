@@ -279,6 +279,7 @@ function makeStaticHandle(id: string, triangles = 10) {
     // viewport pushes the active theme's style on the same beat as LoD.
     setThemeStyle: vi.fn(),
     setAppearance: vi.fn(),
+    setModel: vi.fn(),
     setHighlight: vi.fn(),
     resolvePick: vi.fn(() => null as unknown),
     resolveRaycast: vi.fn(() => null as unknown),

@@ -14,6 +14,7 @@ function fakeHandle(id: string) {
     setStyle: vi.fn(),
     setThemeStyle: vi.fn(),
     setAppearance: vi.fn(),
+    setModel: vi.fn(),
     setHighlight: vi.fn(),
     resolvePick: vi.fn(),
     resolveRaycast: vi.fn(),

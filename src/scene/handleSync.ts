@@ -20,6 +20,7 @@ import {
   appearanceThemesEqual,
   compileRuleEvaluator,
   type AppearanceTheme,
+  type CityModel,
 } from "@cityjson/navara-core";
 import type {
   CityModelHandle,
@@ -75,6 +76,12 @@ export interface LiveLayer {
    *  VALUE — the store may hand out a fresh but equal object on restore.
    *  Unset reads as `null` (plain colours), the mesh's own default. */
   appearance?: AppearanceTheme | null;
+  /** The `model` last pushed, by IDENTITY. Seeded (not pushed) on the add
+   *  path: `registry.add` builds the mesh from exactly this model.
+   *  `layerStore.mergeAttributes` produces a NEW model whenever a processing
+   *  tool writes computed attributes back, and that identity change is the
+   *  only thing `setModel` is pushed on — it repaints the whole layer. */
+  model?: CityModel;
 }
 
 /**
@@ -112,6 +119,9 @@ export interface CityModelRegistry {
  * - the active scene theme's mesh style is pushed on the same beat, so a layer
  *   added while a theme is on comes up themed rather than photoreal for a
  *   frame. See {@link LiveLayer.themeStyle} for why it is compared by identity.
+ * - a changed `model` IDENTITY is pushed to `handle.setModel` — the write-back
+ *   seam for computed attributes (`layerStore.mergeAttributes`). Seeded at add
+ *   time, so the first pass pushes nothing.
  *
  * `themeStyle` is optional and `undefined` means "this caller has no theme to
  * push" — which is what photoreal amounts to for a handle that has never been
@@ -147,8 +157,9 @@ export function syncLayers(
           visible: layer.visible,
           hiddenTypes: layer.hiddenTypes,
           // Seeded, not pushed: `registry.add` builds the handle already
-          // drawing this theme.
+          // drawing this theme, from exactly this model.
           appearance: layer.selectedAppearance,
+          model: layer.model,
         };
         live.set(layer.id, entry);
         handle.setVisible(layer.visible);
@@ -165,6 +176,14 @@ export function syncLayers(
     if (entry.visible !== layer.visible) {
       entry.visible = layer.visible;
       entry.handle.setVisible(layer.visible);
+    }
+    // ATTRIBUTES only (`layerStore.mergeAttributes`): the mesh repaints its
+    // rule colours against the new model and keeps its geometry, so this is
+    // safe to push on a mere identity change but must never carry a model
+    // whose GEOMETRY differs — that is a layer replacement, not a merge.
+    if (entry.model !== layer.model) {
+      entry.model = layer.model;
+      entry.handle.setModel(layer.model);
     }
     if (entry.hiddenTypes !== layer.hiddenTypes) {
       entry.hiddenTypes = layer.hiddenTypes;

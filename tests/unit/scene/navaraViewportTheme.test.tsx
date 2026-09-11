@@ -294,6 +294,7 @@ function makeHandle(id: string, bounds: unknown = null) {
     setStyle: vi.fn(),
     setThemeStyle: vi.fn(),
     setAppearance: vi.fn(),
+    setModel: vi.fn(),
     setHiddenTypes: vi.fn(),
     setVisibleObjectIds: vi.fn(),
     setHighlight: vi.fn(),

@@ -522,6 +522,7 @@ function makeHandle(id: string, triangles = 10) {
     // viewport pushes the active theme's style on the same beat as LoD.
     setThemeStyle: vi.fn(),
     setAppearance: vi.fn(),
+    setModel: vi.fn(),
     setHighlight: vi.fn(),
     resolvePick: vi.fn((pick: { properties?: { surfaceIndex?: number } }) => ({
       kind: "surface",

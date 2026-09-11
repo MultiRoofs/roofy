@@ -16,7 +16,11 @@ import {
   appearanceThemesEqual,
   toplevelCityObjectType,
 } from "@cityjson/navara-core";
-import type { AppearanceTheme, CityModel } from "../../domain/citymodel/types";
+import type {
+  AppearanceTheme,
+  CityModel,
+  CityObject,
+} from "../../domain/citymodel/types";
 import type { CityModelReference } from "../../persistence/types";
 import type { Rule } from "../rules/types";
 import { normalizeColorBy, type ColorBy } from "../rules/colorBy";
@@ -190,6 +194,26 @@ export interface LayerStoreActions {
         "name" | "visible" | "colorBy" | "singleColor" | "unmatchedColor"
       >
     >,
+  ) => void;
+  /**
+   * Merge computed attributes into one layer's model.
+   *
+   * A processing tool's output lands here: `byObjectId` maps a city object id
+   * to the keys to write on it, and an `undefined` VALUE deletes a key — which
+   * is what Undo of a computed column is, and why the value type is not simply
+   * "the new value".
+   *
+   * Produces a NEW model with a NEW object for each touched id, and leaves
+   * every untouched object at its old identity. Both halves matter: the new
+   * model identity is what `syncLayers` pushes to `handle.setModel`, and the
+   * preserved object identities are what keeps that push a repaint rather than
+   * an invalidation of everything memoised per object. A merge that would
+   * change nothing (empty map, unknown layer, no id present on the layer)
+   * leaves the store's identity alone.
+   */
+  mergeAttributes: (
+    layerId: string,
+    byObjectId: ReadonlyMap<string, Readonly<Record<string, unknown>>>,
   ) => void;
   removeAllLayers: () => void;
   setLayerLod: (layerId: string, lod: string | null) => void;
@@ -370,6 +394,38 @@ export const useLayerStore = create<LayerStore>((set) => ({
           : l,
       ),
     })),
+
+  mergeAttributes: (layerId, byObjectId) =>
+    set((state) => {
+      if (byObjectId.size === 0) return state;
+      const layer = state.layers.find((l) => l.id === layerId);
+      if (!layer) return state;
+      const objects: Record<string, CityObject> = { ...layer.model.objects };
+      let touched = false;
+      for (const [id, patch] of byObjectId) {
+        const object = objects[id];
+        // An id the tool computed for but this model does not have (a stale
+        // result, a BuildingPart rolled up under its parent) is skipped, not
+        // invented — `objects` must stay a faithful index of the model.
+        if (!object) continue;
+        const attributes: Record<string, unknown> = { ...object.attributes };
+        for (const [key, value] of Object.entries(patch)) {
+          if (value === undefined) delete attributes[key];
+          else attributes[key] = value;
+        }
+        objects[id] = { ...object, attributes };
+        touched = true;
+      }
+      // No id matched: return the SAME state, so nothing re-renders and
+      // `syncLayers` does not push a new-but-identical model into a repaint.
+      if (!touched) return state;
+      const model: CityModel = { ...layer.model, objects };
+      return {
+        layers: state.layers.map((l) =>
+          l.id === layerId ? { ...l, model } : l,
+        ),
+      };
+    }),
 
   removeAllLayers: () => set({ layers: [] }),
 

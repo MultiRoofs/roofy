@@ -37,6 +37,7 @@ function fakeHandle(id: string, triangles = 100) {
     setHiddenTypes: vi.fn(),
     setVisibleObjectIds: vi.fn(),
     setAppearance: vi.fn(),
+    setModel: vi.fn(),
     delete: vi.fn(),
   };
 }
@@ -280,6 +281,35 @@ describe("syncLayers", () => {
     );
     expect(handle.delete).toHaveBeenCalledTimes(1);
     expect(live.size).toBe(0);
+  });
+
+  // The model write-back seam: a processing tool's computed attributes reach
+  // the mesh as a NEW model (`layerStore.mergeAttributes`), and `setModel` is
+  // a full repaint of the layer — so it is pushed on model IDENTITY and on
+  // nothing else.
+  it("pushes a new model identity to setModel, and pushes it once", () => {
+    const handle = fakeHandle("L1");
+    const registry = { get: () => handle, add: vi.fn(() => handle) };
+    const live = new Map<string, LiveLayer>();
+    const before = layer({ id: "L1" });
+    syncLayers(registry as never, [before], live, () => {});
+    // Seeded by the add, not pushed: `registry.add` builds the mesh from
+    // exactly this model.
+    expect(handle.setModel).not.toHaveBeenCalled();
+
+    const merged = {
+      ...before.model,
+      objects: { ...before.model.objects },
+    };
+    const after = layer({ id: "L1", model: merged });
+    syncLayers(registry as never, [after], live, () => {});
+    expect(handle.setModel).toHaveBeenCalledTimes(1);
+    expect(handle.setModel).toHaveBeenCalledWith(merged);
+    expect(live.get("L1")!.model).toBe(merged);
+
+    // An unrelated store change must not repaint the layer again.
+    syncLayers(registry as never, [after], live, () => {});
+    expect(handle.setModel).toHaveBeenCalledTimes(1);
   });
 });
 
