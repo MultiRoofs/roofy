@@ -74,6 +74,10 @@ const { useComputedColumnStore } =
 const { useShellStore } = await import("../../../../src/ui/shell/shellStore");
 const { useQueryStore, layerQuery } =
   await import("../../../../src/features/query/queryStore");
+const { useRuleDraftStore } =
+  await import("../../../../src/features/rules/ruleDraftStore");
+const { runQuery } = await import("../../../../src/insights/duckdb");
+const { NEW_RULE_COLOR_HEX } = await import("../../../../src/scene/cityColors");
 
 type LayerInput = Parameters<LayerStoreActions["addLayer"]>[0];
 
@@ -167,6 +171,7 @@ afterEach(() => {
   useLayerTableStore.setState({ tables: {} });
   useComputedColumnStore.setState({ byLayer: {} });
   useQueryStore.setState({ queries: {} });
+  useRuleDraftStore.setState({ drafts: {} });
 });
 
 describe("ToolView", () => {
@@ -396,7 +401,7 @@ describe("ToolView", () => {
     );
   });
 
-  it("opens the drawer and the STYLE section from the result card", () => {
+  it("opens the drawer and the STYLE section from the result card", async () => {
     const layerId = addCityLayer();
     render(<ToolView toolId="height-from-extent" />);
     act(() =>
@@ -416,7 +421,114 @@ describe("ToolView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open table" }));
     expect(useShellStore.getState().drawerOpen).toBe(true);
     expect(useWorkspaceStore.getState().activeLayerId).toBe(layerId);
-    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    // The median is read before the navigation, so the click is async now.
+    vi.mocked(runQuery).mockResolvedValueOnce({
+      ok: true,
+      columns: ["m"],
+      rows: [{ m: 4.2 }],
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    });
+    expect(useShellStore.getState().requestedSection).toEqual({
+      layerId,
+      section: "style",
+    });
+  });
+
+  it("opens STYLE on a rule DRAFT over the run's first column", async () => {
+    // §6.2/§7.4: Color by = Rules, the editor open on a DRAFT whose attribute
+    // is the first column the run wrote, operator ">", value the median. The
+    // map does not change until the user saves the rule, so nothing here
+    // writes a rule — only the draft.
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() =>
+      useProcessingStore.getState().upsertRun(
+        runFixture({
+          status: "done",
+          targetLayerId: layerId,
+          summary: {
+            line: "2 buildings measured · 0.3 s",
+            detail: null,
+            measured: 2,
+            skipped: [],
+          },
+        }),
+      ),
+    );
+    vi.mocked(runQuery).mockResolvedValueOnce({
+      ok: true,
+      columns: ["m"],
+      rows: [{ m: 4.2 }],
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    });
+    expect(runQuery).toHaveBeenCalledWith(
+      'SELECT median("extent_height_m") AS m FROM "layer_1"',
+    );
+    expect(
+      useLayerStore.getState().layers.find((l) => l.id === layerId)?.colorBy,
+    ).toBe("rules");
+    expect(useRuleDraftStore.getState().drafts[layerId]).toEqual({
+      editingId: null,
+      open: true,
+      form: {
+        name: "",
+        color: NEW_RULE_COLOR_HEX,
+        logic: "AND",
+        conditions: [{ field: "extent_height_m", operator: ">", value: 4.2 }],
+      },
+    });
+  });
+
+  it("disables Style by result when the run measured nothing", async () => {
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() =>
+      useProcessingStore.getState().upsertRun(
+        runFixture({
+          status: "done",
+          targetLayerId: layerId,
+          summary: {
+            line: "0 buildings measured · 0.1 s",
+            detail: null,
+            measured: 0,
+            skipped: [],
+          },
+        }),
+      ),
+    );
+    const button = screen.getByRole("button", { name: "Style by result" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "All values are empty");
+  });
+
+  it("falls back to 0 when the median cannot be read", async () => {
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() =>
+      useProcessingStore.getState().upsertRun(
+        runFixture({
+          status: "done",
+          targetLayerId: layerId,
+          summary: {
+            line: "2 buildings measured · 0.3 s",
+            detail: null,
+            measured: 2,
+            skipped: [],
+          },
+        }),
+      ),
+    );
+    // The engine mock's default outcome is a failure.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    });
+    expect(
+      useRuleDraftStore.getState().drafts[layerId]?.form.conditions[0],
+    ).toEqual({ field: "extent_height_m", operator: ">", value: 0 });
     expect(useShellStore.getState().requestedSection).toEqual({
       layerId,
       section: "style",

@@ -20,6 +20,57 @@ import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 import { appendColumns } from "../drawer/columnPolicy";
 import { openRunLog } from "./revealTools";
 import { phaseLine, plural, seconds } from "./runFormat";
+import { useLayerStore } from "../../features/layers/layerStore";
+import { useRuleDraftStore } from "../../features/rules/ruleDraftStore";
+import { useLayerTableStore } from "../../insights/layerTables";
+import { runQuery } from "../../insights/duckdb";
+import { quoteIdent } from "../../insights/sql";
+import { NEW_RULE_COLOR_HEX } from "../../scene/cityColors";
+
+/** §6.2's reason for a Style-by-result button with nothing to style. */
+const ALL_VALUES_EMPTY = "All values are empty";
+
+/**
+ * §6.2's "Style by result": open the target's STYLE section with Color by =
+ * Rules and the rule editor on a DRAFT — never a saved rule, because "the map
+ * does NOT change until the user presses Save in the editor".
+ *
+ * The value is read from the data at click time (§7.4: "rule on
+ * `extent_height_m` > median"), which is why this is async: the median is one
+ * DuckDB round trip, and the navigation waits for it so the editor never
+ * opens on a value that is about to be replaced.
+ */
+async function styleByResult(run: RunRecord, column: string): Promise<void> {
+  // The run's own target is the frozen truth (§6.1), as for Open table.
+  const layerId = run.targetLayerId;
+  const entry = useLayerTableStore.getState().tables[layerId];
+  const table = entry?.state === "ready" ? entry.info.table : null;
+  let median = 0;
+  if (table !== null) {
+    const outcome = await runQuery(
+      `SELECT median(${quoteIdent(column)}) AS m FROM ${quoteIdent(table)}`,
+    );
+    const value = outcome.ok ? outcome.rows[0]?.["m"] : undefined;
+    // A failed query, an empty table or an all-NULL column all read as 0: the
+    // draft is a starting point the user edits, so a number they can see beats
+    // an editor that refuses to open.
+    if (typeof value === "number" && Number.isFinite(value)) median = value;
+  }
+  useRuleDraftStore.getState().setDraft(layerId, {
+    editingId: null,
+    open: true,
+    form: {
+      // Unnamed, exactly as "+ Add rule" starts: the user names their rule.
+      name: "",
+      color: NEW_RULE_COLOR_HEX,
+      logic: "AND",
+      conditions: [{ field: column, operator: ">", value: median }],
+    },
+  });
+  useLayerStore.getState().updateLayer(layerId, { colorBy: "rules" });
+  // Last, so the panel opens on a draft that is already written.
+  useShellStore.getState().requestSection(layerId, "style");
+}
 
 interface Props {
   /** The latest run of this tool on this target, or null. */
@@ -92,6 +143,9 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
   }
 
   if (run !== null && status === "done") {
+    // §6.2/§7: the draft styles the FIRST column the run wrote, in the tool's
+    // own order (`extent_height_m` for Height from extent, §7.4).
+    const styleColumn = run.columns[0];
     return (
       <div className="processing-footer processing-footer--card">
         <div className="processing-card">
@@ -133,16 +187,22 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
             >
               Open table
             </button>
-            <button
-              type="button"
-              onClick={() =>
-                useShellStore
-                  .getState()
-                  .requestSection(run.targetLayerId, "style")
-              }
-            >
-              Style by result
-            </button>
+            {/* §6.2: "absent when the run wrote no styleable column". Every
+                M1 tool writes one, so this is the empty-columns guard
+                `noUncheckedIndexedAccess` asks for, spelled as the spec's
+                behaviour rather than as a non-null assertion. */}
+            {styleColumn !== undefined && (
+              <button
+                type="button"
+                disabled={run.summary?.measured === 0}
+                title={
+                  run.summary?.measured === 0 ? ALL_VALUES_EMPTY : undefined
+                }
+                onClick={() => void styleByResult(run, styleColumn)}
+              >
+                Style by result
+              </button>
+            )}
             {run.undoable && (
               <button type="button" onClick={() => void undoRun(run.id)}>
                 Undo

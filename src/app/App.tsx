@@ -851,6 +851,24 @@ export function App({
   );
 
   /**
+   * Spec §6.2: a finished run's first line is repeated as a toast, so the
+   * acknowledgement reaches a user who has already moved on from the tool
+   * form (or closed the toolbox).
+   *
+   * It keys off `noticeSeq`, not `notice`: two identical runs push the same
+   * text, and a plain equality check would silently swallow the second.
+   * `subscribe` returns its own unsubscribe, which is the cleanup.
+   */
+  useEffect(
+    () =>
+      useProcessingStore.subscribe((s, prev) => {
+        if (s.noticeSeq !== prev.noticeSeq && s.notice !== null)
+          showToast(s.notice, STATUS_TOAST_MS);
+      }),
+    [showToast],
+  );
+
+  /**
    * The interface appearance, installed ONCE — the same shape as the
    * invariants above, and for the same reason: it is a subscription to
    * something outside React (the OS's colour-scheme query), not per-render
