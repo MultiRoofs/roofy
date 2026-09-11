@@ -602,7 +602,42 @@ Deferred (named slots in spec §9): footprint operations to a new vector
 layer, field calculator (next milestone), city-to-city joins, replay of runs
 on restore, geometry for layers without a reader.
 
-Status: specified 2026-09-10. Next: implementation plan from the spec.
+Status: specified 2026-09-10. **Milestone 13.1 implemented 2026-09-11** — the
+first vertical slice: the Tools button and panel, the catalogue, the tool form
+with frozen scope, the run queue with phases and cancel, the result card, the
+run log and session history with Undo, one tool (**Height from extent**), and
+the results surfacing in the table (badge + provenance), in Details (COMPUTED
+group) and in the rule editor (COMPUTED optgroup) with Style by result.
+Acceptance scenario 1 was smoked in a real browser: `scripts/smoke/processing-m1.md`.
+The seam and the DuckDB probe results are in `docs/architecture-notes.md`
+("Processing toolbox seam (M13.1, 2026-09-11)").
+
+Carried to 13.2 / M2 — things a user can notice today:
+
+- **Streaming (FCB) layers get the table badge but no Details or rules
+  entries.** A run merges its results into `layer.model.objects`, which is
+  empty for a streaming layer, so the values exist only in its table. The
+  streaming attribute path lives in the FCB plugin and worker and is its own
+  change.
+- The six remaining tools are registered but `implemented: false`, and that
+  reason outranks every other one — so a cross-layer row reads "Not available
+  yet" rather than "Add a vector layer to join with" until it is implemented.
+- **Style by result sets `Color by = Rules` eagerly**, so a layer that was on
+  Surface type or Single colour repaints to the unmatched colour before the
+  draft rule is saved. The draft rule's own colour still waits for Save — and
+  the draft cannot be saved until the user types a rule name.
+- **No rule-colour palette rotation**: every Style by result draft takes the
+  editor's one default new-rule colour, so successive drafts share it.
+- "Run again" dismisses the done card for that run (store-level
+  `dismissedRunIds`, capped with the 20-run history) rather than re-submitting;
+  Retry re-runs the frozen request.
+- The run's live elapsed timer starts at submit but is measured from execute,
+  so it can jump back once; a queued run's log header shows `scopeCount 0`.
+- §6.1 re-validation of an output column that has come to belong to the file
+  itself is not implemented; a corrupt bbox with `zmin > zmax` writes a
+  negative height and reports it honestly rather than guarding.
+- The right panel's collapse chevron is disabled without a selection, so a
+  toolbox-only session cannot reach the "Tools" pill.
 
 ## Cross-Cutting Workstreams
 

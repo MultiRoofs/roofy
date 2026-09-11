@@ -103,3 +103,98 @@ path is visible to a blocker.
 - Programmatic camera actions remain inside `withSettleSuppressed`. Selected-building fits combine descendant bounds and resident height offsets. Status coordinates are WGS84 longitude/latitude with ellipsoidal height; they are not source-CRS or orthometric coordinates. Terrain and unconditional geoid attribution remain part of the viewport.
 
 Browser acceptance procedure: `scripts/smoke/ui-redesign.md`. The reconciliation ledger records test results and final visual checks. User-owned design/product files are preserved separately from these implementation notes.
+
+## Processing toolbox seam (M13.1, 2026-09-11)
+
+The toolbox (spec `docs/superpowers/specs/2026-09-10-processing-toolbox-design.md`)
+writes a tool's results back as attribute columns of a layer that already
+exists. Five seams carry that, and each one is a decision rather than an
+implementation detail.
+
+**One FIFO per shared table.** A run does not talk to DuckDB directly; it goes
+through `runOnTableQueue` (`src/insights/layerTables.ts`), the same queue that
+serialises a table's build and rebuild. A run therefore cannot interleave with
+the rebuild of the table it is writing, and two runs on one layer execute in
+submission order. The queue is also why a run's scope is FROZEN at Run (the
+selection's object ids, the applied `FilterGroup`) and resolved at the head:
+the ids the user saw when they pressed Run are the ids the run uses.
+
+**The write is one transaction with a per-run backup table.**
+`writeComputedColumns` (`src/insights/computedColumns.ts`) issues
+`BEGIN TRANSACTION` → `CREATE TABLE __undo_<runId> AS SELECT "id", <replaced…>`
+(only when the run replaces columns that already exist, and only for the ids it
+touches) → `ALTER TABLE … ADD COLUMN IF NOT EXISTS` per output column →
+`UPDATE … FROM read_json_auto(<registered buffer>) AS v WHERE t."id" = v."id"`
+→ `COMMIT`. A failure anywhere rolls the whole thing back, so a half-written
+column cannot exist, and Undo is `buildRestoreSql` from the backup plus a
+`DROP COLUMN IF EXISTS` for the columns the run created.
+
+**Computed attributes are merged into the model and pushed to the engine.**
+The columns are not only a table fact: `runQueue` calls
+`useLayerStore.getState().mergeAttributes(layerId, merge)` and the new model
+reaches the plugin through its `setModel`, which is what lets the Details panel
+and the rule evaluator see `extent_height_m` at all. This is also the boundary
+of M13.1: nothing merges into a streaming (FCB) layer's model, because an FCB
+layer has no resident `model.objects` — see the roadmap's 13.1 entry.
+
+**Provenance lives outside `Layer`.** `useComputedColumnStore`
+(`src/insights/computedColumns.ts`) maps layer id → column → `Provenance`, and
+`formatProvenance` renders the one sentence the badge's tooltip shows
+("Height from extent · All 2 buildings · 2026-09-11 16:58"). Keeping it out of
+`Layer` is what keeps results out of snapshots — they are session state by
+spec — and what lets the badge tell a tool's column from the app's own derived
+ones (`Roof area`, `Mean slope`, `Parts`), which carry the generic
+"Computed by Roofy" text instead.
+
+### What real DuckDB 1.5.5 actually does (probes, 2026-09-11)
+
+`tests/integration/duckdb/computedColumns.test.ts`
+(`DUCKDB_INTEGRATION=1 npx vitest run tests/integration/duckdb`) answers the
+three questions the design left open. All three came back green, so the
+sequence above stands as written.
+
+- **DDL inside the transaction is accepted.** `BEGIN` → `ALTER TABLE … ADD
+COLUMN IF NOT EXISTS` → `UPDATE … FROM read_json_auto(…)` → `COMMIT` all
+  succeed and the values land; so does the `CREATE TABLE … AS SELECT` backup in
+  the same transaction on a second run over the same columns, and so does the
+  restore + `DROP COLUMN` undo. No statement had to move outside the
+  transaction.
+- **`read_json_auto` infers, and every inference casts into `DOUBLE`.** A
+  column that is NULL in EVERY row is inferred **`JSON`** (not `SQLNULL`), and
+  assigning it into a `DOUBLE` column is accepted with NULLs landing — at 2
+  rows and at 20,481. A column that is NULL through the whole default sample
+  (20,480 rows) with one `12.5` just past it is still inferred `JSON`, is
+  accepted, and the late value lands as `12.5`: there is no sample-size cliff
+  for the all-NULL case. A whole-number height (`12`) is inferred **`BIGINT`**
+  and assigns into `DOUBLE` unchanged.
+- **A BigInt stringified by the replacer casts implicitly, and loses
+  precision.** Two rows of `"12345678901234567890"` are inferred **`VARCHAR`**,
+  the implicit cast into `DOUBLE` succeeds with no error, and the stored value
+  is `12345678901234567000` — the double's precision, not the integer's. Past
+  the sample size the inference flips (20,480 numeric rows plus one such string
+  at row 20,481 infers **`DOUBLE`**) and the out-of-sample string still casts
+  to the same `12345678901234567000`. So the replacer never fails a write; what
+  it can do, silently, is round a value no `DOUBLE` could hold anyway.
+- **Reads inside the open write transaction are not blocked.** The table
+  panel's own `buildCountSql` and `buildPageSql` both answer between the
+  `UPDATE` and the `COMMIT`, see the transaction's own writes, and the `COMMIT`
+  still succeeds with the values intact. The node bindings are blocking, so
+  this probe is _interleaved statements inside the open transaction on one
+  connection_, not isolation between two connections — which is exactly the
+  app's shape: ONE DuckDB connection, no other `BEGIN` user anywhere in `src/`,
+  and runs serialised on the table FIFO. The concurrency argument is
+  "no interference", and it is the accepted one for M1.
+
+### `--font-mono` is the brand's label style, not a monospace family
+
+The spec asks for the Details COMPUTED sub-heading and the catalogue's group
+labels to be "mono labels". `src/app/brand.css` deliberately defines
+`--font-mono: var(--font-ui)` — one family across headings, controls and data —
+so a "mono label" in this app is the STYLE (uppercase, tracked,
+`var(--font-mono)`), which is exactly what the catalogue's `ROOF` /
+`3D MEASUREMENTS` / `CROSS-LAYER` headings already render. A literal monospace
+face here would be the single element outside the brand's family, and CLAUDE.md
+makes the brand tokens the only source. If this is ever revisited it is one
+token change in `brand.css`, not a per-component override.
+
+Browser acceptance procedure: `scripts/smoke/processing-m1.md`.
