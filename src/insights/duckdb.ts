@@ -96,6 +96,18 @@ let status: DuckDBStatus = { state: "uninitialized" };
 let statusVersion = 0;
 const statusListeners = new Set<() => void>();
 
+/**
+ * Which ENGINE the module is on. Bumped by every boot and by every death.
+ *
+ * Async work started against one engine can only land after the next one is
+ * up: a worker that dies mid-load leaves an `INSTALL` that never settles until
+ * something releases it, and a boot interrupted by a death still rejects on
+ * its own schedule. Every continuation in this module therefore captures this
+ * number and compares it before it writes module state or publishes a status,
+ * so the corpse's news cannot be mistaken for the live engine's.
+ */
+let generation = 0;
+
 /** The ONE writer. Every `status = …` in this module goes through it. */
 function setStatus(next: DuckDBStatus): void {
   status = next;
@@ -135,6 +147,13 @@ function setStatus(next: DuckDBStatus): void {
  */
 export function markEngineDead(reason: string): void {
   if (status.state === "failed") return;
+  // FIRST: every in-flight continuation is now the dead engine's, including
+  // the boot that may still be running and the loads below.
+  generation += 1;
+  // The memo of a load that can never settle — duckdb-wasm dropped its request
+  // without rejecting it — would be handed to every `ensureExtension` after a
+  // Retry, leaving the chip on "Loading…" for the rest of the session.
+  extensionPromises.clear();
   // Cleared BEFORE the publish, so a listener that reacts synchronously cannot
   // find a connection that is about to be dropped. `runQuery` then refuses on
   // `status.state !== "ready"` rather than posting into the void.
@@ -216,17 +235,27 @@ function installStatement(name: ExtensionName): string {
     : `INSTALL ${name} FROM community`;
 }
 
-async function loadExtension(name: ExtensionName): Promise<boolean> {
-  const connection = conn;
+/** The boot passes its OWN connection, rather than letting this read `conn`
+ *  half-way through a boot that may be abandoned under it. */
+async function loadExtension(
+  name: ExtensionName,
+  connection: duckdb.AsyncDuckDBConnection | null = conn,
+): Promise<boolean> {
   if (!connection) return false;
+  const gen = generation;
   extensions = { ...extensions, [name]: { state: "loading" } };
   try {
     await connection.query(installStatement(name));
     await connection.query(`LOAD ${name}`);
+    // The engine this load belonged to is gone. Its result describes a
+    // database nobody can reach, and writing it here would claim an extension
+    // for the engine that replaced it.
+    if (gen !== generation) return false;
     extensions = { ...extensions, [name]: { state: "loaded" } };
     return true;
   } catch (error) {
     const message = formatDuckDBError(error);
+    if (gen !== generation) return false;
     extensions = { ...extensions, [name]: { state: "failed", error: message } };
     console.warn(`DuckDB extension "${name}" did not load:`, message);
     return false;
@@ -276,6 +305,11 @@ async function readLoadedExtensions(): Promise<ReadonlyArray<LoadedExtension>> {
 // ---------------------------------------------------------------------------
 
 async function doInit(): Promise<void> {
+  // A boot is an ENGINE. Everything below compares this before it writes
+  // module state or publishes, so a boot the user's worker crash abandoned
+  // cannot land on the engine that replaced it.
+  const gen = ++generation;
+  const stale = () => gen !== generation;
   setStatus({ state: "initializing" });
 
   // Held OUTSIDE the try so the catch can terminate it. A failed init used to
@@ -314,6 +348,10 @@ async function doInit(): Promise<void> {
     // memo precisely so a Retry builds a SECOND one.
     const created = worker;
     const stopEngine = (reason: string) => {
+      // A straggler event from a worker this boot has already abandoned (the
+      // stale checks below terminate it) must not bump the generation again
+      // and strand the boot that replaced it at `failed`.
+      if (stale()) return;
       markEngineDead(reason);
       created.terminate();
     };
@@ -326,18 +364,41 @@ async function doInit(): Promise<void> {
     const logger = new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING);
     const instance = new duckdb.AsyncDuckDB(logger, worker);
     await instance.instantiate(bundle.mainModule);
-
+    // The worker died while the wasm was coming up. This instance is attached
+    // to a corpse; the engine the app is on is whatever came after it.
+    if (stale()) {
+      created.terminate();
+      return;
+    }
+    const connection = await instance.connect();
+    if (stale()) {
+      created.terminate();
+      return;
+    }
+    // COMMITTED only here, past the last await that could be abandoned: a
+    // `conn` written earlier would point at a dead database for anything that
+    // read it in between.
     db = instance;
-    conn = await db.connect();
+    conn = connection;
 
     // `cityjson` at init, because every layer table wants it. `spatial` and
     // `three_d` are lazy (`ensureExtension`): nothing in this feature needs
     // them, and `spatial` alone is a 23 MB download.
-    await loadExtension("cityjson");
+    await loadExtension("cityjson", connection);
+    if (stale()) return;
     platform = await readPlatform();
     loadedExtensions = await readLoadedExtensions();
+    if (stale()) return;
     publishReady();
   } catch (err) {
+    // The death that interrupted this boot has already published the reason
+    // the user needs. What arrives here is its consequence — "wasm refused",
+    // a rejected connect — and publishing it would overwrite the crash with
+    // its own symptom, and would clear a memo a newer boot owns.
+    if (stale()) {
+      worker?.terminate();
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
     setStatus({ state: "failed", error: message });
     // Kill the Worker BEFORE clearing the memo: the reset below is what makes
@@ -376,7 +437,8 @@ export async function ensureExtension(name: ExtensionName): Promise<boolean> {
   if (extensions[name].state === "loaded") return true;
   const existing = extensionPromises.get(name);
   if (existing) return await existing;
-  const promise = (async () => {
+  const gen = generation;
+  const promise: Promise<boolean> = (async () => {
     // The "loading" state has to reach the catalogue's chip (spec §5), and
     // `loadExtension` cannot announce it itself — `doInit` calls that function
     // for `cityjson` before the status is `ready` at all, so a publish inside
@@ -392,13 +454,21 @@ export async function ensureExtension(name: ExtensionName): Promise<boolean> {
       if (status.state === "ready") publishReady();
     }
     const ok = await loadExtension(name);
+    // This load belonged to an engine that has since died. `loadExtension` has
+    // already refused to write its result; publishing here would announce it.
+    if (gen !== generation) return ok;
     // A successful lazy load changes what `duckdb_extensions()` reports, and
     // THAT list is the status tooltip — without this re-read the tooltip goes
     // on claiming the extension the user just triggered is absent.
     if (ok) loadedExtensions = await readLoadedExtensions();
+    if (gen !== generation) return ok;
     if (status.state === "ready") publishReady();
     return ok;
-  })().finally(() => extensionPromises.delete(name));
+  })().finally(() => {
+    // BY IDENTITY: `markEngineDead` clears this map, so a settling load from a
+    // dead engine must not delete the live engine's entry for the same name.
+    if (extensionPromises.get(name) === promise) extensionPromises.delete(name);
+  });
   extensionPromises.set(name, promise);
   return await promise;
 }

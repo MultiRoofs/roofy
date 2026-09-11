@@ -13,6 +13,22 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 const queries: string[] = [];
 const refuse = new Set<string>();
 let failBundle = false;
+/** Holds every statement containing `needle` until `promise` settles, so a
+ *  load can be caught in flight by the worker's death. */
+let holdQuery: { needle: string; promise: Promise<void> } | null = null;
+/** Holds `instantiate` the same way, so a BOOT can be caught in flight. */
+let holdInstantiate: Promise<void> | null = null;
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => {
+    resolve = () => {
+      r();
+    };
+  });
+  return { promise, resolve };
+}
+
 /** Fails the boot AFTER the Worker exists, which is the only way to watch
  *  `doInit`'s catch terminate it. */
 let failInstantiate = false;
@@ -22,6 +38,8 @@ vi.mock("@duckdb/duckdb-wasm", () => {
   class FakeConnection {
     async query(sql: string) {
       queries.push(sql);
+      const held = holdQuery;
+      if (held && sql.includes(held.needle)) await held.promise;
       const named = /^(?:INSTALL|LOAD)\s+(\w+)/.exec(sql);
       if (named && refuse.has(named[1]!)) {
         throw new Error(`Extension "${named[1]!}" not found\nLINE 1: ${sql}`);
@@ -34,6 +52,7 @@ vi.mock("@duckdb/duckdb-wasm", () => {
   return {
     AsyncDuckDB: class {
       async instantiate() {
+        if (holdInstantiate) await holdInstantiate;
         if (failInstantiate) throw new Error("wasm refused");
       }
       async connect() {
@@ -103,6 +122,8 @@ beforeEach(async () => {
   refuse.clear();
   failBundle = false;
   failInstantiate = false;
+  holdQuery = null;
+  holdInstantiate = null;
   terminations.count = 0;
   workers.length = 0;
   vi.stubGlobal("Worker", FakeWorker);
@@ -342,6 +363,65 @@ describe("duckdb.ts publishes every transition", () => {
     const status = duckdb.getDuckDBStatus();
     if (status.state !== "failed") throw new Error("unreachable");
     expect(status.error).toContain("first");
+    errors.mockRestore();
+  });
+
+  it("does not hand a REVIVED engine the dead one's extension load", async () => {
+    // `ensureExtension` memoises one promise per extension. The load that was
+    // in flight when the worker died can never settle on its own, so a Retry
+    // that inherited that memo would leave the chip on "Loading…" for the rest
+    // of the session and never issue a second INSTALL.
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    await duckdb.initDuckDB();
+    const first = deferred();
+    holdQuery = { needle: "INSTALL spatial", promise: first.promise };
+    const stranded = duckdb.ensureExtension("spatial");
+    await vi.waitFor(() => expect(queries).toContain("INSTALL spatial"));
+
+    liveWorker().die("worker gone");
+    await duckdb.initDuckDB();
+    expect(duckdb.getDuckDBStatus().state).toBe("ready");
+
+    holdQuery = null;
+    queries.length = 0;
+    expect(await duckdb.ensureExtension("spatial")).toBe(true);
+    expect(queries).toContain("INSTALL spatial");
+
+    // The stranded load now settles — as a FAILURE, which is the observable
+    // case: its continuation belongs to an engine that no longer exists and
+    // must not write over the live one's state or publish anything.
+    refuse.add("spatial");
+    const { seen, stop } = record();
+    first.resolve();
+    await stranded;
+    stop();
+    expect(seen).toEqual([]);
+    expect(duckdb.isExtensionLoaded("spatial")).toBe(true);
+    errors.mockRestore();
+  });
+
+  it("keeps the DEATH's reason when the boot it interrupted fails later", async () => {
+    // The boot is in flight when the worker dies. Its `instantiate` then
+    // rejects, and `doInit`'s catch would publish "wasm refused" over the
+    // death — a second `failed`, with a reason that is an effect of the crash
+    // rather than the crash.
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const gate = deferred();
+    holdInstantiate = gate.promise;
+    failInstantiate = true;
+    const booting = duckdb.initDuckDB();
+    await vi.waitFor(() => expect(workers).toHaveLength(1));
+
+    const { seen, stop } = record();
+    liveWorker().die("Uncaught RuntimeError: memory access out of bounds");
+    gate.resolve();
+    await booting;
+    stop();
+
+    expect(seen).toEqual(["failed"]);
+    const status = duckdb.getDuckDBStatus();
+    if (status.state !== "failed") throw new Error("unreachable");
+    expect(status.error).toContain("memory access out of bounds");
     errors.mockRestore();
   });
 
