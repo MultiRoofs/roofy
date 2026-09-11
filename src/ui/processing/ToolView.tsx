@@ -6,7 +6,6 @@
  * `disabled` on every control. The footer is a separate component because its
  * four states replace each other in the same place (§6.1–§6.3).
  */
-import { useState } from "react";
 import { useProcessingStore } from "../../features/processing/processingStore";
 import { submitRun } from "../../features/processing/runQueue";
 import type { ToolId } from "../../features/processing/types";
@@ -21,12 +20,12 @@ const fmt = (n: number | null) =>
 export function ToolView({ toolId }: { readonly toolId: ToolId }) {
   const f = useToolForm(toolId);
   // §6.2's "Run again unlocks the form with the same values": it DISMISSES the
-  // card for that run rather than submitting anything. The dismissal is local
-  // to the view, so leaving the tool and coming back shows the card again —
-  // the run is still the latest thing that happened to this layer.
-  const [dismissedRunId, setDismissedRunId] = useState<string | null>(null);
+  // card for that run rather than submitting anything. The dismissal lives in
+  // the store, so it survives leaving the tool view and Recent runs' "Edit &
+  // run" can clear the card of the run it opens the form on.
+  const dismissed = useProcessingStore((s) => s.dismissedRunIds);
   const latestRun =
-    f.latestRun !== null && f.latestRun.id === dismissedRunId
+    f.latestRun !== null && dismissed.includes(f.latestRun.id)
       ? null
       : f.latestRun;
   // The form locks while the run is in flight (§6.1) AND while its result card
@@ -204,7 +203,11 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
         run={latestRun}
         canRun={f.canRun}
         reason={footerNote}
-        onRunAgain={() => setDismissedRunId(latestRun?.id ?? null)}
+        onRunAgain={() => {
+          if (latestRun !== null) {
+            useProcessingStore.getState().dismissRun(latestRun.id);
+          }
+        }}
       />
     </form>
   );

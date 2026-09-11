@@ -35,6 +35,16 @@ interface ProcessingState {
   readonly drafts: Readonly<Partial<Record<ToolId, ToolDraft>>>;
   /** Newest first. */
   readonly runs: ReadonlyArray<RunRecord>;
+  /**
+   * Runs whose §6.2 result card the user has dismissed, newest first.
+   *
+   * It is store state, not view state, because two views act on it: "Run again"
+   * puts the form back over the same draft, and Recent runs' "Edit & run" has to
+   * clear the card of the run it is opening — §5 promises a form "so parameters
+   * can be changed", not one locked under its own result. Capped with the
+   * history it shadows.
+   */
+  readonly dismissedRunIds: ReadonlyArray<string>;
   /** A failed run the user has not looked at yet (spec §4.1 amber dot). */
   readonly unseenFailure: boolean;
   /** One-line toast text; `noticeSeq` increments so App can subscribe. */
@@ -52,6 +62,8 @@ interface ProcessingActions {
   setSearch(search: string): void;
   setDraft(toolId: ToolId, draft: ToolDraft): void;
   upsertRun(run: RunRecord): void;
+  /** §6.2 "Run again unlocks the form": hide this run's card, run nothing. */
+  dismissRun(id: string): void;
   patchRun(id: string, patch: Partial<RunRecord>): void;
   pushNotice(text: string): void;
   resetForTest(): void;
@@ -64,6 +76,7 @@ const initial: ProcessingState = {
   search: "",
   drafts: {},
   runs: [],
+  dismissedRunIds: [],
   unseenFailure: false,
   notice: null,
   noticeSeq: 0,
@@ -115,6 +128,12 @@ export const useProcessingStore = create<ProcessingState & ProcessingActions>(
             s.unseenFailure || (run.status === "failed" && !s.open),
         };
       }),
+    dismissRun: (id) =>
+      set((s) =>
+        s.dismissedRunIds.includes(id)
+          ? {}
+          : { dismissedRunIds: [id, ...s.dismissedRunIds].slice(0, MAX_RUNS) },
+      ),
     patchRun: (id, patch) =>
       set((s) => {
         // A patch for an id the history no longer holds (evicted past

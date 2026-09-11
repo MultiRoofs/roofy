@@ -171,6 +171,9 @@ describe("RecentRuns", () => {
       params: {},
     });
     expect(useShellStore.getState().rightCollapsed).toBe(false);
+    // §5: it opens the form "so parameters can be changed" — so the run's own
+    // result card must not be sitting over it, locked.
+    expect(useProcessingStore.getState().dismissedRunIds).toContain("r1");
   });
 
   it("lists the newest run first", () => {

@@ -554,6 +554,9 @@ describe("ToolView", () => {
     // "Run again unlocks the form with the same values" — it does NOT run.
     fireEvent.click(screen.getByRole("button", { name: "Run again" }));
     expect(submitRun).not.toHaveBeenCalled();
+    // The dismissal lives in the store, so it survives leaving the view and
+    // Recent runs' "Edit & run" can reach it.
+    expect(useProcessingStore.getState().dismissedRunIds).toContain("r1");
     expect(screen.getByRole("textbox", { name: "Prefix" })).not.toBeDisabled();
     expect(screen.getByRole("textbox", { name: "Prefix" })).toHaveValue(
       "extent_",

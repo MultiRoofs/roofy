@@ -102,6 +102,17 @@ describe("processingStore", () => {
     expect(useProcessingStore.getState().unseenFailure).toBe(false);
   });
 
+  it("remembers a dismissed result card, once, and forgets it on reset", () => {
+    const store = useProcessingStore.getState();
+    expect(store.dismissedRunIds).toEqual([]);
+    store.dismissRun("r1");
+    store.dismissRun("r1");
+    store.dismissRun("r2");
+    expect(useProcessingStore.getState().dismissedRunIds).toEqual(["r2", "r1"]);
+    useProcessingStore.getState().resetForTest();
+    expect(useProcessingStore.getState().dismissedRunIds).toEqual([]);
+  });
+
   it("publishes a notice with a sequence number", () => {
     const s = useProcessingStore.getState();
     s.pushNotice("done");

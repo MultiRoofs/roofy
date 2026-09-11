@@ -101,6 +101,9 @@ function RunRow({ run }: { readonly run: RunRecord }) {
               prefix: run.prefix,
               params: run.params,
             });
+            // §5: the form opens "so parameters can be changed" — clear this
+            // run's own result card, which would otherwise lock it (§6.2).
+            useProcessingStore.getState().dismissRun(run.id);
             openToolView(run.toolId);
           }}
         >
