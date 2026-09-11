@@ -13,6 +13,10 @@ import { Fragment, memo, useState } from "react";
 import type { ColumnInfo } from "../../insights/columnKind";
 import { formatCell, rawCellTitle } from "./tableText";
 import { columnLabel, derivedColumnTitle } from "../drawer/columnPolicy";
+import {
+  formatProvenance,
+  useComputedColumnStore,
+} from "../../insights/computedColumns";
 
 /** The id a row is selected by. Every layer table has an `id` column, but a
  *  hand-built one may not, so the index is the fallback. */
@@ -48,6 +52,10 @@ export interface DataGridProps {
   >;
   /** Generated derived keys only; source attributes keep their literal labels. */
   readonly derivedColumnNames?: ReadonlySet<string>;
+  /** The layer whose provenance registry names this table's computed columns
+   *  (spec §8). Subscribed here rather than passed as a set, so a run's badge
+   *  appears without the panel above having to re-render. */
+  readonly layerId?: string | null;
 }
 
 /**
@@ -73,7 +81,13 @@ export const DataGrid = memo(function DataGrid({
   getRowId,
   partRows = {},
   derivedColumnNames = new Set(),
+  layerId = null,
 }: DataGridProps) {
+  // The store's own object, not a derived Set: `computedColumnsOf` builds a
+  // fresh Set per call, which as a selector snapshot would re-render forever.
+  const computed = useComputedColumnStore((s) =>
+    layerId === null ? undefined : s.byLayer[layerId],
+  );
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
   const hasParts = Object.keys(partsById).length > 0;
@@ -123,8 +137,14 @@ export const DataGrid = memo(function DataGrid({
                 }
               >
                 <div className="data-header-content">
-                  {derivedColumnNames.has(col.name) && (
+                  {derivedColumnNames.has(col.name) ? (
                     <ComputedAttributeBadge />
+                  ) : (
+                    computed?.[col.name] !== undefined && (
+                      <ComputedAttributeBadge
+                        title={formatProvenance(computed[col.name]!)}
+                      />
+                    )
                   )}
                   {canSort ? (
                     <button

@@ -40,6 +40,7 @@ import { buildResidentModel } from "@cityjson/navara-flatcitybuf";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 import { useRuleDraftStore } from "../../../../src/features/rules/ruleDraftStore";
+import { useComputedColumnStore } from "../../../../src/insights/computedColumns";
 import {
   NEW_RULE_COLOR_HEX,
   SINGLE_COLOR_HEX,
@@ -72,6 +73,7 @@ afterEach(() => {
   useWorkspaceStore.setState({ activeLayerId: null });
   useStreamStore.setState({ streams: {} });
   useRuleDraftStore.setState({ drafts: {} });
+  useComputedColumnStore.setState({ byLayer: {} });
 });
 
 function emptyModel(): CityModel {
@@ -817,5 +819,76 @@ describe("RulesEditor — an open EDIT form survives switching layers", () => {
     // appending a second one.
     fireEvent.click(screen.getByText("Update"));
     expect(readLayer("A").rules.map((r) => r.name)).toEqual(["Mine, renamed"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Computed columns in the attribute select (spec §8)
+// ---------------------------------------------------------------------------
+
+describe("RulesEditor — computed attributes", () => {
+  function modelWith(attributes: Record<string, unknown>): CityModel {
+    return {
+      ...emptyModel(),
+      objects: {
+        a: {
+          id: "a",
+          objectType: "Building",
+          attributes,
+          surfaces: [],
+          children: [],
+          parents: [],
+          lod: "2.2",
+          bbox: null,
+        },
+      },
+    };
+  }
+
+  it("groups the layer's computed columns under a Computed optgroup", () => {
+    // `mergeAttributes` has already put the run's values on the objects, so
+    // `collectAttributeFields` lists the column; only the GROUPING is new.
+    const model = modelWith({ function: "residential", extent_height_m: 8.2 });
+    useLayerStore.setState({ layers: [baseLayer({ model })] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
+    useComputedColumnStore.getState().setProvenance("L", "extent_height_m", {
+      runId: "r1",
+      toolName: "Height from extent",
+      summary: "All · 1 building",
+      at: Date.now(),
+      partial: null,
+      previous: null,
+    });
+
+    render(<RulesEditor model={model} layerId="L" />);
+    fireEvent.click(screen.getByText("+ Add rule"));
+
+    const select = screen.getByLabelText("Attribute") as HTMLSelectElement;
+    const group = select.querySelector('optgroup[label="Computed"]');
+    expect(group).not.toBeNull();
+    expect([...group!.querySelectorAll("option")].map((o) => o.value)).toEqual([
+      "extent_height_m",
+    ]);
+    // …and it is listed ONCE: the plain options keep the file's fields only.
+    expect(
+      [...select.options].filter((o) => o.value === "extent_height_m"),
+    ).toHaveLength(1);
+    expect(
+      [...select.options]
+        .filter((o) => o.parentElement === select)
+        .map((o) => o.value),
+    ).toContain("function");
+  });
+
+  it("offers no Computed group when nothing was computed for this layer", () => {
+    const model = modelWith({ function: "residential" });
+    useLayerStore.setState({ layers: [baseLayer({ model })] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
+
+    render(<RulesEditor model={model} layerId="L" />);
+    fireEvent.click(screen.getByText("+ Add rule"));
+
+    const select = screen.getByLabelText("Attribute") as HTMLSelectElement;
+    expect(select.querySelector('optgroup[label="Computed"]')).toBeNull();
   });
 });

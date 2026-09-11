@@ -259,6 +259,60 @@ export function computedColumnsOf(layerId: string): ReadonlySet<string> {
   return cols ? new Set(Object.keys(cols)) : EMPTY;
 }
 
+/** `en-US` thousands separators, pinned for the same reason `tableText`'s
+ *  formatter is: a tooltip that reads "1.204" in one locale and "1,204" in
+ *  another is a tooltip nobody can quote in a bug report. Not imported from
+ *  `ui/table` — `insights` does not depend on the UI. */
+const COUNT = new Intl.NumberFormat("en-US");
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : `${n}`;
+}
+
+/** LOCAL time, not `toISOString`: the run happened on the user's clock, and a
+ *  tooltip reading 12:02 for a run they watched at 14:02 is simply wrong. */
+function stamp(at: number): string {
+  const d = new Date(at);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function sameDay(a: number, b: number): boolean {
+  const x = new Date(a);
+  const y = new Date(b);
+  return (
+    x.getFullYear() === y.getFullYear() &&
+    x.getMonth() === y.getMonth() &&
+    x.getDate() === y.getDate()
+  );
+}
+
+/**
+ * The one provenance sentence (spec §7): "Measure solids · LoD 2.2 ·
+ * 2026-09-10 14:02", plus, when the run covered PART of the layer, "312 of
+ * 1,204 buildings in this run; the rest from Measure solids · 13:40" — so a
+ * column holding two runs' values is never silently mixed.
+ *
+ * A partial run with no `previous` (a layer's FIRST partial run) says only
+ * what it knows: there is no earlier tool to name, and the rest of the column
+ * is unset rather than another tool's answer.
+ */
+export function formatProvenance(p: Provenance): string {
+  const head = [p.toolName, p.summary, stamp(p.at)].filter(
+    (part) => part !== "",
+  );
+  if (p.partial === null) return head.join(" · ");
+  const run = `${COUNT.format(p.partial.count)} of ${COUNT.format(p.partial.total)} buildings in this run`;
+  const rest =
+    p.previous === null
+      ? ""
+      : `; the rest from ${p.previous.toolName} · ${
+          sameDay(p.previous.at, p.at)
+            ? stamp(p.previous.at).slice(-5)
+            : stamp(p.previous.at)
+        }`;
+  return [...head, `${run}${rest}`].join(" · ");
+}
+
 export function provenanceOf(
   layerId: string,
   column: string,

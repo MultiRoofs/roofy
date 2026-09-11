@@ -1,6 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { DataGrid } from "../../../../src/ui/table/DataGrid";
+import {
+  formatProvenance,
+  useComputedColumnStore,
+  type Provenance,
+} from "../../../../src/insights/computedColumns";
 import { formatCell } from "../../../../src/ui/table/tableText";
 import type { ColumnInfo } from "../../../../src/insights/columnKind";
 
@@ -15,7 +26,19 @@ const ROWS = [
   { id: "B2", object_type: "BuildingPart", b3_h_dak_max: null },
 ];
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  useComputedColumnStore.setState({ byLayer: {} });
+});
+
+const PROVENANCE: Provenance = {
+  runId: "r1",
+  toolName: "Height from extent",
+  summary: "All · 2 buildings",
+  at: new Date(2026, 8, 10, 14, 2).getTime(),
+  partial: null,
+  previous: null,
+};
 
 describe("formatCell", () => {
   it("renders an em dash for null and undefined", () => {
@@ -245,4 +268,49 @@ it("marks only app-generated columns as computed, even with source name collisio
   expect(screen.getByLabelText("Computed by Roofy").getAttribute("title")).toBe(
     "Computed by Roofy — this value is calculated by the app.",
   );
+});
+
+it("badges a column a tool computed for this layer, with its provenance on hover", () => {
+  useComputedColumnStore
+    .getState()
+    .setProvenance("L1", "extent_height_m", PROVENANCE);
+  render(
+    <DataGrid
+      layerId="L1"
+      columns={[
+        { name: "id", type: "VARCHAR", kind: "scalar" },
+        { name: "extent_height_m", type: "DOUBLE", kind: "scalar" },
+      ]}
+      rows={[{ id: "a", extent_height_m: 8.2 }]}
+      sort={null}
+      selectedIds={new Set()}
+      onSort={vi.fn()}
+      onRowClick={vi.fn()}
+    />,
+  );
+  const header = screen
+    .getAllByRole("columnheader")
+    .find((h) => h.textContent?.includes("extent_height_m"))!;
+  const badge = within(header).getByRole("img", { name: "Computed by Roofy" });
+  expect(badge.getAttribute("title")).toBe(formatProvenance(PROVENANCE));
+  // The registry is per layer: another layer's column keeps its plain header.
+  expect(screen.getAllByLabelText("Computed by Roofy")).toHaveLength(1);
+});
+
+it("leaves a computed column of ANOTHER layer unbadged", () => {
+  useComputedColumnStore
+    .getState()
+    .setProvenance("L2", "extent_height_m", PROVENANCE);
+  render(
+    <DataGrid
+      layerId="L1"
+      columns={[{ name: "extent_height_m", type: "DOUBLE", kind: "scalar" }]}
+      rows={[{ id: "a", extent_height_m: 8.2 }]}
+      sort={null}
+      selectedIds={new Set()}
+      onSort={vi.fn()}
+      onRowClick={vi.fn()}
+    />,
+  );
+  expect(screen.queryByLabelText("Computed by Roofy")).toBeNull();
 });

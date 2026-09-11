@@ -8,10 +8,25 @@
  * "only-export-components" rule clean.
  */
 
-export function AttrRow({ label, value }: { label: string; value: string }) {
+import type { ReactNode } from "react";
+
+export function AttrRow({
+  label,
+  value,
+  badge,
+}: {
+  label: string;
+  value: string;
+  /** Rendered beside the KEY — the computed badge (spec §8), never a second
+   *  copy of the `.attr-row` markup. */
+  badge?: ReactNode;
+}) {
   return (
     <div className="attr-row">
-      <span className="attr-key">{label}</span>
+      <span className={`attr-key${badge ? " attr-key-badged" : ""}`}>
+        {label}
+        {badge}
+      </span>
       <span className="attr-value" title={value}>
         {value}
       </span>

@@ -213,3 +213,83 @@ describe("computed column registry", () => {
     expect([...cc.computedColumnsOf("L2")]).toEqual(["roof_area_m2"]);
   });
 });
+
+describe("formatProvenance", () => {
+  // Built from local parts on purpose: a UTC literal would make these
+  // assertions pass only in the timezone they were written in.
+  const at = new Date(2026, 8, 10, 14, 2).getTime();
+
+  it("reads tool, summary and a local YYYY-MM-DD HH:mm stamp", () => {
+    expect(
+      cc.formatProvenance({
+        runId: "r1",
+        toolName: "Measure solids",
+        summary: "LoD 2.2",
+        at,
+        partial: null,
+        previous: null,
+      }),
+    ).toBe("Measure solids · LoD 2.2 · 2026-09-10 14:02");
+  });
+
+  it("names the earlier run for the rest of the layer when the run was partial", () => {
+    expect(
+      cc.formatProvenance({
+        runId: "r2",
+        toolName: "Measure solids",
+        summary: "LoD 2.2",
+        at,
+        partial: { count: 312, total: 1204 },
+        previous: {
+          runId: "r1",
+          toolName: "Measure solids",
+          summary: "LoD 1.2",
+          at: new Date(2026, 8, 10, 13, 40).getTime(),
+          partial: null,
+          previous: null,
+        },
+      }),
+    ).toBe(
+      "Measure solids · LoD 2.2 · 2026-09-10 14:02 · 312 of 1,204 buildings in this run; the rest from Measure solids · 13:40",
+    );
+  });
+
+  it("dates the earlier run in full when it was not on the same day", () => {
+    expect(
+      cc.formatProvenance({
+        runId: "r2",
+        toolName: "Height from extent",
+        summary: "",
+        at,
+        partial: { count: 2, total: 4 },
+        previous: {
+          runId: "r1",
+          toolName: "Height from extent",
+          summary: "",
+          at: new Date(2026, 8, 9, 13, 40).getTime(),
+          partial: null,
+          previous: null,
+        },
+      }),
+    ).toBe(
+      "Height from extent · 2026-09-10 14:02 · 2 of 4 buildings in this run; the rest from Height from extent · 2026-09-09 13:40",
+    );
+  });
+
+  it("says only what it knows when a partial run replaced nothing", () => {
+    // `runQueue` writes `previous: null` for a layer's first partial run:
+    // there is no earlier tool to name, and the rest of the layer is unset.
+    expect(
+      cc.formatProvenance({
+        runId: "r1",
+        toolName: "Height from extent",
+        summary: "Matching · 312 buildings",
+        at,
+        partial: { count: 312, total: 1204 },
+        previous: null,
+      }),
+    ).toBe(
+      "Height from extent · Matching · 312 buildings · 2026-09-10 14:02 · 312 of 1,204 buildings in this run",
+    );
+  });
+});

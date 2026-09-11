@@ -46,6 +46,7 @@ import {
   UNMATCHED_COLOR_HEX,
 } from "../../scene/cityColors";
 import { downloadText } from "../../platform/download";
+import { useComputedColumnStore } from "../../insights/computedColumns";
 
 export interface RulesEditorProps {
   readonly model: CityModel;
@@ -130,7 +131,19 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
         getResidentModel(layerId, streamVersion ?? 0),
       )
     : collectAttributeFields(model);
-  const allFields = orderFields(attributeFields);
+  // Spec §8: a tool's results are listed in their own COMPUTED optgroup. They
+  // are already IN `attributeFields` — `runQueue` merges the values onto the
+  // objects, so `collectAttributeFields` finds them — so all that happens here
+  // is the grouping. The store's own object, never `computedColumnsOf` (a
+  // fresh Set per call cannot be a selector snapshot).
+  const computedColumns = useComputedColumnStore((s) => s.byLayer[layerId]);
+  const ordered = orderFields(attributeFields);
+  const computedFields = ordered.filter(
+    (field) => computedColumns?.[field] !== undefined,
+  );
+  const allFields = ordered.filter(
+    (field) => computedColumns?.[field] === undefined,
+  );
 
   /**
    * A rule the user just created has to be able to PAINT, or the control that
@@ -358,6 +371,7 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
                 <RuleForm
                   values={draft.form}
                   fields={allFields}
+                  computedFields={computedFields}
                   saveLabel="Update"
                   onChange={handleFormChange}
                   onSave={handleFormSave}
@@ -412,6 +426,7 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
         <RuleForm
           values={draft.form}
           fields={allFields}
+          computedFields={computedFields}
           saveLabel="Add"
           onChange={handleFormChange}
           onSave={handleFormSave}
@@ -601,6 +616,9 @@ function colorName(hex: string): string {
 interface RuleFormProps {
   values: RuleFormValues;
   fields: string[];
+  /** The layer's computed columns, listed in their own optgroup below the
+   *  file's fields (spec §8). */
+  computedFields?: ReadonlyArray<string>;
   /** "Add" for a new rule, "Update" for an existing one — the caller already
    *  knows which (it is the one that knows the draft's `editingId`), so the
    *  form does not have to infer it from `values`. */
@@ -619,6 +637,7 @@ interface RuleFormProps {
 function RuleForm({
   values,
   fields,
+  computedFields = [],
   saveLabel,
   onChange,
   onSave,
@@ -707,6 +726,15 @@ function RuleForm({
                 {f}
               </option>
             ))}
+            {computedFields.length > 0 && (
+              <optgroup label="Computed">
+                {computedFields.map((f) => (
+                  <option key={f} value={f}>
+                    {f}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
           <select
             className="rule-select rule-select-sm"

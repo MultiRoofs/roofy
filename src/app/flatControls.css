@@ -411,7 +411,12 @@ body .table-panel .table-action-btn {
   border: 1px solid var(--border-strong);
   border-radius: 6px;
   color: var(--fg);
-  white-space: nowrap;
+  /* A provenance line ("Height from extent · LoD 2.2 · All 1,115 buildings ·
+     2026-09-10 14:02") is far longer than the generic sentence this bubble
+     used to hold, so it WRAPS inside a bounded width instead of running off
+     the panel. */
+  max-width: 280px;
+  white-space: normal;
   font: 12px/1.4 var(--font-ui);
 }
 .computed-attribute-badge:is(:hover, :focus-visible)

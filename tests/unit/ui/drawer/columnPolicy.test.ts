@@ -24,3 +24,31 @@ describe("record column policy", () => {
     expect(derivedColumnTitle("__roofy_parts")).toBe("Parts (count)");
   });
 });
+
+describe("computed columns in the default set", () => {
+  const withComputed = [
+    ...columns,
+    { name: "extent_height_m", type: "DOUBLE", kind: "scalar" as const },
+  ];
+
+  it("shows a registered computed column by default, after the file's columns", () => {
+    const names = defaultColumns(
+      withComputed,
+      "buildings",
+      new Set(["extent_height_m"]),
+    ).map((column) => column.name);
+    expect(names).toContain("extent_height_m");
+    expect(names.indexOf("extent_height_m")).toBeGreaterThan(
+      names.indexOf("id"),
+    );
+  });
+
+  it("never lists a computed column twice", () => {
+    const names = defaultColumns(
+      withComputed,
+      "raw",
+      new Set(["extent_height_m"]),
+    ).map((column) => column.name);
+    expect(names.filter((name) => name === "extent_height_m")).toHaveLength(1);
+  });
+});

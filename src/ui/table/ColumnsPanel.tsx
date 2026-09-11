@@ -1,9 +1,14 @@
 import { ComputedAttributeBadge } from "./ComputedAttributeBadge";
 import { useState, useRef, useLayoutEffect, type RefObject } from "react";
 import type { ColumnInfo } from "../../insights/columnKind";
+import {
+  formatProvenance,
+  useComputedColumnStore,
+} from "../../insights/computedColumns";
 export function ColumnsPanel({
   columns,
   computedNames,
+  layerId = null,
   visible,
   label,
   onChange,
@@ -12,6 +17,9 @@ export function ColumnsPanel({
   anchorRef,
 }: {
   readonly computedNames?: ReadonlySet<string>;
+  /** The layer whose provenance registry names the computed columns (spec §8:
+   *  they are badged here too, and on by default). */
+  readonly layerId?: string | null;
   readonly anchorRef?: RefObject<HTMLButtonElement | null>;
   readonly columns: ReadonlyArray<ColumnInfo>;
   readonly visible: ReadonlyArray<ColumnInfo>;
@@ -20,6 +28,18 @@ export function ColumnsPanel({
   readonly onMove: (source: string, target: string) => void;
   readonly onClose: () => void;
 }) {
+  // The store's own object: `computedColumnsOf` builds a fresh Set per call,
+  // which as a selector snapshot would re-render forever.
+  const computed = useComputedColumnStore((s) =>
+    layerId === null ? undefined : s.byLayer[layerId],
+  );
+  const badgeFor = (name: string) => {
+    if (computedNames?.has(name)) return <ComputedAttributeBadge />;
+    const provenance = computed?.[name];
+    return provenance === undefined ? null : (
+      <ComputedAttributeBadge title={formatProvenance(provenance)} />
+    );
+  };
   const [dragged, setDragged] = useState<string | null>(null);
   const [target, setTarget] = useState<string | null>(null);
   const clearDrag = () => {
@@ -153,7 +173,7 @@ export function ColumnsPanel({
                   }
                 />
                 <span>{label(column.name)}</span>
-                {computedNames?.has(column.name) && <ComputedAttributeBadge />}
+                {badgeFor(column.name)}
               </label>
               <div className="column-move-controls">
                 <button
@@ -192,7 +212,7 @@ export function ColumnsPanel({
                 onChange={() => onChange([...names, column.name])}
               />
               <span>{label(column.name)}</span>
-              {computedNames?.has(column.name) && <ComputedAttributeBadge />}
+              {badgeFor(column.name)}
             </label>
           </div>
         ))}

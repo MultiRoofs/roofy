@@ -19,23 +19,37 @@ export function derivedColumns(
 }
 
 /** Buildings add internal derived fields without ever replacing a source
- * attribute of the same user-facing name. Raw keeps structural source fields. */
+ * attribute of the same user-facing name. Raw keeps structural source fields.
+ *
+ * `computed` is the provenance registry's column set for the layer: spec §8
+ * puts a tool's results ON by default, after the file's columns — a run whose
+ * three new columns land in "Available" and nowhere else looks like a run that
+ * did nothing. Raw already lists every column of the table, so they are only
+ * appended for the buildings view. */
 export function defaultColumns(
   columns: ReadonlyArray<ColumnInfo>,
   view: "buildings" | "raw",
+  computed: ReadonlySet<string> = new Set(),
 ): ReadonlyArray<ColumnInfo> {
   if (view === "raw") return columns.filter((column) => column.kind !== "blob");
-  const base = columns.filter((column) =>
-    [
-      "id",
-      "function",
-      "roofType",
-      "measuredHeight",
-      "yearOfConstruction",
-      "status",
-    ].includes(column.name),
+  const base = columns.filter(
+    (column) =>
+      [
+        "id",
+        "function",
+        "roofType",
+        "measuredHeight",
+        "yearOfConstruction",
+        "status",
+      ].includes(column.name) && !computed.has(column.name),
   );
-  return [...base, ...derivedColumns(columns)];
+  return [
+    ...base,
+    ...derivedColumns(columns),
+    ...columns.filter(
+      (column) => computed.has(column.name) && column.kind !== "blob",
+    ),
+  ];
 }
 
 export function columnLabel(name: string): string {

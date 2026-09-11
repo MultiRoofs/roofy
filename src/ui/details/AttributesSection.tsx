@@ -7,7 +7,7 @@ import {
   attributeKeys,
   reorderAttribute,
 } from "../../features/attributes/attributeOrder";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { AttrRow } from "../inspector/attrDisplay";
 import { formatValue } from "../inspector/formatAttrValue";
 
@@ -15,10 +15,15 @@ export function AttributesSection({
   attributes,
   order = [],
   onOrderChange,
+  trailing = null,
 }: {
   readonly order?: ReadonlyArray<string>;
   readonly onOrderChange?: (order: ReadonlyArray<string>) => void;
   readonly attributes: Readonly<Record<string, unknown>>;
+  /** Appended inside the section: the COMPUTED group (spec §8), which is not
+   *  part of `attributes` here because a tool's results are not reorderable
+   *  with the file's own keys. */
+  readonly trailing?: ReactNode;
 }) {
   const keys = attributeKeys(attributes, order);
   const entries = keys.map((key) => [key, attributes[key]] as const);
@@ -36,7 +41,13 @@ export function AttributesSection({
     return (
       <section className="details-section">
         <h3 className="details-section-title">Attributes</h3>
-        <div className="details-placeholder">No attributes</div>
+        {/* "No attributes" is about the FILE's attributes. With a computed
+            group to show, saying it would deny values that are right there. */}
+        {trailing === null ? (
+          <div className="details-placeholder">No attributes</div>
+        ) : (
+          trailing
+        )}
       </section>
     );
   }
@@ -111,6 +122,7 @@ export function AttributesSection({
           )}
         </div>
       ))}
+      {trailing}
     </section>
   );
 }

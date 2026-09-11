@@ -40,6 +40,7 @@ import { defaultColumns, derivedColumns } from "../drawer/columnPolicy";
 import { getResidentModel } from "../../features/streaming/residentModel";
 import { useStreamStore } from "../../features/streaming/streamStore";
 import { useLayerCounts } from "./useLayerCounts";
+import { useComputedColumnStore } from "../../insights/computedColumns";
 
 const STREAMING_FILTER_REASON =
   "Map filtering is not available for streaming layers yet";
@@ -64,6 +65,17 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
       ? geoRecords(activeGeoLayer.config.preparedData).length
       : null;
   const layerId = activeLayer?.id ?? null;
+
+  // The provenance registry's own object for this layer (never
+  // `computedColumnsOf`, which builds a fresh Set per call and so cannot be a
+  // selector snapshot); the Set below is derived from it under `useMemo`.
+  const computedProvenance = useComputedColumnStore((s) =>
+    layerId === null ? undefined : s.byLayer[layerId],
+  );
+  const computedColumnNames = useMemo(
+    () => new Set(Object.keys(computedProvenance ?? {})),
+    [computedProvenance],
+  );
 
   const view = useLayerQuery(layerId);
   const layerCounts = useLayerCounts(layerId);
@@ -223,9 +235,19 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
 
   const visibleColumns = useMemo(() => {
     if (!query?.columns)
-      return defaultColumns(view.columns, query?.view ?? "buildings");
+      return defaultColumns(
+        view.columns,
+        query?.view ?? "buildings",
+        computedColumnNames,
+      );
     return orderedColumns(selectableColumns, query.columns);
-  }, [query?.columns, query?.view, selectableColumns, view.columns]);
+  }, [
+    computedColumnNames,
+    query?.columns,
+    query?.view,
+    selectableColumns,
+    view.columns,
+  ]);
 
   const reorderColumn = useCallback(
     (source: string, target: string) => {
@@ -387,6 +409,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
                 computedNames={
                   new Set(derivedKeys.map((column) => column.name))
                 }
+                layerId={layerId}
                 anchorRef={columnsButtonRef}
                 columns={selectableColumns}
                 visible={visibleColumns}
@@ -592,6 +615,7 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
                     derivedColumnNames={
                       new Set(derivedKeys.map((column) => column.name))
                     }
+                    layerId={layerId}
                     emptyMessage={emptyGridMessage(
                       (query?.applied ?? null) !== null,
                       activeLayer?.isStreaming !== true,

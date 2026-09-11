@@ -1,7 +1,15 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ColumnsPanel } from "../../../../src/ui/table/ColumnsPanel";
-afterEach(cleanup);
+import {
+  formatProvenance,
+  useComputedColumnStore,
+  type Provenance,
+} from "../../../../src/insights/computedColumns";
+afterEach(() => {
+  cleanup();
+  useComputedColumnStore.setState({ byLayer: {} });
+});
 it("separates shown and available columns and searches both", () => {
   const columns = ["id", "height", "status"].map((name) => ({
     name,
@@ -57,4 +65,35 @@ it("reorders shown columns by dragging a grip onto another row", () => {
   fireEvent.dragOver(target);
   fireEvent.drop(target);
   expect(onMove).toHaveBeenCalledWith("id", "height");
+});
+
+it("badges a tool-computed column in the chooser with its provenance", () => {
+  const provenance: Provenance = {
+    runId: "r1",
+    toolName: "Height from extent",
+    summary: "All · 2 buildings",
+    at: new Date(2026, 8, 10, 14, 2).getTime(),
+    partial: null,
+    previous: null,
+  };
+  useComputedColumnStore
+    .getState()
+    .setProvenance("L1", "extent_height_m", provenance);
+  const columns = [
+    { name: "id", type: "VARCHAR", kind: "scalar" as const },
+    { name: "extent_height_m", type: "DOUBLE", kind: "scalar" as const },
+  ];
+  render(
+    <ColumnsPanel
+      layerId="L1"
+      columns={columns}
+      visible={[columns[0]!]}
+      label={(name) => name}
+      onChange={vi.fn()}
+      onMove={vi.fn()}
+      onClose={vi.fn()}
+    />,
+  );
+  const badge = screen.getByRole("img", { name: "Computed by Roofy" });
+  expect(badge.getAttribute("title")).toBe(formatProvenance(provenance));
 });

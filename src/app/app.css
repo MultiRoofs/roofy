@@ -1934,6 +1934,13 @@ body {
   flex-shrink: 0;
 }
 
+/* Only when a badge is present: the bare key stays plain inline text. */
+.attr-key-badged {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .attr-value {
   font-size: 0.75rem;
   font-family: var(--font-mono);
@@ -6251,6 +6258,18 @@ button.file-label:disabled {
   letter-spacing: var(--tracking-label);
   color: var(--fg-muted);
   margin-bottom: 0.45rem;
+}
+
+/* The Computed sub-heading inside the attributes section (spec §8): the same
+   label as a section title, set apart from the file's rows above it. The
+   second selector beats `workspace.css`'s `.viewer-shell
+   .details-section-title { margin: 0 … }`, which would otherwise close the gap
+   this divider needs. */
+.details-computed-title,
+.viewer-shell .details-section-title.details-computed-title {
+  margin-top: 0.9rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
 }
 
 .details-placeholder {
