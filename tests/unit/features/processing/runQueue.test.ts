@@ -1481,14 +1481,16 @@ describe("the Loading extension phase (spec §6.1)", () => {
   });
 });
 
-/** Publish a `failed` status the way `duckdb.ts` does when the worker dies:
- *  the value first, then every listener. */
-function killEngine(reason = "worker gone"): void {
-  vi.mocked(getDuckDBStatus).mockReturnValue({
-    state: "failed",
-    error: reason,
-  });
+/** Publish a status the way `duckdb.ts` does: the value first, then every
+ *  listener. */
+function publishStatus(next: ReturnType<typeof getDuckDBStatus>): void {
+  vi.mocked(getDuckDBStatus).mockReturnValue(next);
   for (const listener of statusListeners) listener();
+}
+
+/** The worker died. */
+function killEngine(reason = "worker gone"): void {
+  publishStatus({ state: "failed", error: reason });
 }
 
 /** Bring the engine back, the way the status bar's Retry does. */
@@ -1691,6 +1693,39 @@ describe("the engine watcher (spec §6.1)", () => {
     reviveEngine();
     const next = submitRun(request({ prefix: "other_" }));
     await vi.waitFor(() => expect(runById(next)?.status).toBe("done"));
+    stop();
+  });
+
+  it("does not read a FAILED retry boot as a second death", async () => {
+    // ready → failed → initializing → failed. The last one is the status bar's
+    // Retry failing to bring the engine back, not a second crash: nothing was
+    // running to lose. Watching for "the status is failed" rather than for the
+    // TRANSITION into it fails the runs a user started while the engine was
+    // coming up — which is exactly when they would start one.
+    const stop = installEngineWatcher();
+    killEngine();
+    publishStatus({ state: "initializing" });
+
+    const never = deferred<void>();
+    gate = { needle: "COUNT(DISTINCT", promise: never.promise };
+    registerExecutor("height-from-extent", async (run) => ({
+      columns: [{ name: `${run.prefix}height_m`, type: "DOUBLE" as const }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+    const id = submitRun(request());
+    await vi.waitFor(() =>
+      expect(sql.some((q) => q.includes("COUNT(DISTINCT"))).toBe(true),
+    );
+    // Still "queued": the card turns "running" when the scope resolves, and
+    // this run's scope query is the one held open.
+    expect(runById(id)?.status).toBe("queued");
+
+    publishStatus({ state: "failed", error: "no bundle for this platform" });
+
+    expect(runById(id)?.status).toBe("queued");
+    expect(runById(id)?.error).toBeNull();
     stop();
   });
 

@@ -1044,14 +1044,17 @@ let disposeEngineWatcher: (() => void) | null = null;
 export function installEngineWatcher(): () => void {
   disposeEngineWatcher?.();
 
-  let sawReady = false;
+  // The state of the PREVIOUS publication, because the event this watches is a
+  // transition and not a value. `ready` → `failed` is a death; every other way
+  // into `failed` is a boot that did not come up — including the status bar's
+  // Retry failing (`failed` → `initializing` → `failed`), which must not fail
+  // the runs a user started while the engine was coming back.
+  let previous = getDuckDBStatus().state;
   const reactToStatus = () => {
     const state = getDuckDBStatus().state;
-    if (state === "ready") {
-      sawReady = true;
-      return;
-    }
-    if (state !== "failed" || !sawReady) return;
+    const died = previous === "ready" && state === "failed";
+    previous = state;
+    if (!died) return;
     for (const run of useProcessingStore.getState().runs) {
       if (
         run.status !== "queued" &&
@@ -1071,15 +1074,15 @@ export function installEngineWatcher(): () => void {
     useProcessingStore.getState().markEngineStopped();
   };
 
+  // `previous` is SEEDED from the current status above rather than by running
+  // the body once: a shell that mounts after the engine came up needs the
+  // `ready` to measure the next transition against, and a status that is
+  // already `failed` at install time is a value with no transition behind it —
+  // a boot that never came up and a worker that died read the same, and the
+  // first of those must not strike a session's Undo. The app installs this
+  // before DuckDB is asked to boot, so that case is a re-install, where the
+  // watcher this one replaced has already failed the runs and set the flag.
   const unsubscribe = subscribeDuckDBStatus(reactToStatus);
-  // Read once on install, so a shell that mounts AFTER the engine came up still
-  // has its `sawReady`. A status that is already `failed` at this point is left
-  // alone: with no transition to read, a boot that never came up and a worker
-  // that died are the same value, and the first of those must not strike a
-  // session's Undo. The app installs this before DuckDB is even asked to boot,
-  // so the case is a re-install — where the watcher this one replaced has
-  // already failed the runs and set the flag.
-  reactToStatus();
 
   const dispose = () => {
     unsubscribe();
