@@ -164,6 +164,8 @@ vi.mock("../../../../src/insights/layerTables", async () => {
 });
 
 const tables = await import("../../../../src/insights/layerTables");
+const { ensureExtension, isExtensionLoaded, getDuckDBStatus } =
+  await import("../../../../src/insights/duckdb");
 const {
   submitRun,
   retryRun,
@@ -295,11 +297,28 @@ beforeEach(() => {
   useProcessingStore.getState().resetForTest();
   useComputedColumnStore.setState({ byLayer: {} });
   vi.mocked(tables.refreshLayerTableColumns).mockClear();
+  // The extension phase reads all three. `mockClear` before the value, so a
+  // test that asserts "never called" cannot inherit the previous test's call.
+  vi.mocked(isExtensionLoaded).mockClear().mockReturnValue(false);
+  vi.mocked(ensureExtension).mockClear().mockResolvedValue(false);
+  vi.mocked(getDuckDBStatus)
+    .mockClear()
+    .mockReturnValue({
+      state: "ready",
+      extensions: {
+        cityjson: { state: "loaded" },
+        spatial: { state: "unloaded" },
+        three_d: { state: "unloaded" },
+      },
+      loadedExtensions: [],
+      platform: "wasm_eh",
+    });
 });
 
 afterEach(() => {
   (tables as unknown as Resettable).__resetQueue();
   delete EXECUTORS["height-from-extent"];
+  delete EXECUTORS["measure-solids"];
 });
 
 describe("submitRun", () => {
@@ -1228,5 +1247,103 @@ describe("installStaleWatcher", () => {
     } finally {
       stop();
     }
+  });
+});
+
+describe("the Loading extension phase (spec §6.1)", () => {
+  it("loads the tool's extension under its own phase before computing", async () => {
+    const phases: Array<string | null> = [];
+    const unsub = useProcessingStore.subscribe((s) => {
+      const run = s.runs[0];
+      if (run && phases[phases.length - 1] !== run.phase)
+        phases.push(run.phase);
+    });
+    vi.mocked(isExtensionLoaded).mockReturnValue(false);
+    vi.mocked(ensureExtension).mockResolvedValue(true);
+    registerExecutor("measure-solids", async () => ({
+      columns: [{ name: "solid_volume_m3", type: "DOUBLE" as const }],
+      rows: new Map([["b1", { solid_volume_m3: 1 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+
+    const id = submitRun(
+      request({
+        toolId: "measure-solids",
+        lod: "2.2",
+        prefix: "solid_",
+        columns: [{ name: "solid_volume_m3", type: "DOUBLE" as const }],
+      }),
+    );
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    unsub();
+
+    expect(ensureExtension).toHaveBeenCalledWith("three_d");
+    expect(phases).toContain("extension");
+    expect(phases.indexOf("extension")).toBeLessThan(phases.indexOf("compute"));
+    expect(runById(id)?.status).toBe("done");
+  });
+
+  it("skips the phase when the extension is already loaded", async () => {
+    vi.mocked(isExtensionLoaded).mockReturnValue(true);
+    registerExecutor("measure-solids", async () => ({
+      columns: [{ name: "solid_volume_m3", type: "DOUBLE" as const }],
+      rows: new Map([["b1", { solid_volume_m3: 1 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+
+    const id = submitRun(
+      request({
+        toolId: "measure-solids",
+        lod: "2.2",
+        prefix: "solid_",
+        columns: [{ name: "solid_volume_m3", type: "DOUBLE" as const }],
+      }),
+    );
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+
+    expect(ensureExtension).not.toHaveBeenCalled();
+  });
+
+  it("fails the run when the extension cannot be loaded, and writes nothing", async () => {
+    vi.mocked(isExtensionLoaded).mockReturnValue(false);
+    vi.mocked(ensureExtension).mockResolvedValue(false);
+    vi.mocked(getDuckDBStatus).mockReturnValue({
+      state: "ready",
+      extensions: {
+        cityjson: { state: "loaded" },
+        spatial: { state: "unloaded" },
+        three_d: { state: "failed", error: "HTTP 404" },
+      },
+      loadedExtensions: [],
+      platform: "wasm_eh",
+    });
+    let ran = false;
+    registerExecutor("measure-solids", async () => {
+      ran = true;
+      throw new Error("unreachable");
+    });
+
+    const id = submitRun(
+      request({
+        toolId: "measure-solids",
+        lod: "2.2",
+        prefix: "solid_",
+        columns: [{ name: "solid_volume_m3", type: "DOUBLE" as const }],
+      }),
+    );
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
+
+    expect(ran).toBe(false);
+    const run = runById(id);
+    expect(run?.status).toBe("failed");
+    expect(run?.error).toBe(
+      "The three_d extension could not be loaded: HTTP 404",
+    );
+    // §6.4: the engine's own reason survives in the log whichever sentence
+    // the card shows — including the offline one, which replaces it.
+    expect(run?.warnings).toContain("three_d: HTTP 404");
+    expect(run?.undoable).toBe(false);
   });
 });

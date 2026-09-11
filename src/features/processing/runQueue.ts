@@ -28,7 +28,13 @@
  * `insights/duckdb.ts` and `insights/computedColumns.ts`.
  */
 
-import { runQuery, type QueryOutcome } from "../../insights/duckdb";
+import {
+  ensureExtension,
+  getDuckDBStatus,
+  isExtensionLoaded,
+  runQuery,
+  type QueryOutcome,
+} from "../../insights/duckdb";
 import { quoteIdent } from "../../insights/sql";
 import {
   computedColumnsOf,
@@ -371,6 +377,37 @@ function failedAlready(id: string): boolean {
   return runById(id)?.status === "failed";
 }
 
+/**
+ * Spec §6.3: "Extension load failures say what failed to load and, for the
+ * offline case, that it needs a network connection."
+ *
+ * The engine's own recorded reason is appended when there is one — it is the
+ * same first-line treatment every other DuckDB error in this app gets — and an
+ * offline browser is told the one thing it can act on instead, because
+ * "HTTP request failed" is not a sentence a user can do anything with.
+ */
+/** DuckDB's own recorded reason for the failed load, or null. */
+function extensionReason(name: "spatial" | "three_d"): string | null {
+  const status = getDuckDBStatus();
+  const entry = status.state === "ready" ? status.extensions[name] : null;
+  return entry && entry.state === "failed" ? entry.error : null;
+}
+
+function extensionFailure(name: "spatial" | "three_d"): string {
+  const offline =
+    typeof navigator !== "undefined" && navigator.onLine === false;
+  if (offline) {
+    // Offline, the engine's own message is "fetch failed" or worse — true and
+    // useless. The offline sentence is the one the user can act on; the
+    // engine's is still RECORDED, as the warning the caller pushes.
+    return `The ${name} extension could not be loaded; it needs a network connection.`;
+  }
+  const reason = extensionReason(name);
+  return reason === null
+    ? `The ${name} extension could not be loaded.`
+    : `The ${name} extension could not be loaded: ${reason}`;
+}
+
 async function execute(
   id: string,
   request: FrozenRequest,
@@ -448,6 +485,52 @@ async function execute(
         elapsedMs: elapsed(),
       });
       return;
+    }
+
+    // Spec §6.1's first phase, "Loading extension (skipped once loaded)".
+    //
+    // It sits AFTER the cheap pre-flight refusals — a missing layer, a rebuilt
+    // table, a column that now belongs to the file, an unimplemented tool — so
+    // a run that cannot succeed never triggers a 24 MB download.
+    //
+    // It also sits INSIDE `runOnTableQueue`: the load blocks table builds for
+    // its duration, once per session. That is the deliberate trade. Loading
+    // outside the queue would take the phase out of §6.1's sequence and would
+    // let the run start against a table that is being rebuilt underneath it.
+    const tool = toolById(request.toolId);
+    if (tool.extension !== null && !isExtensionLoaded(tool.extension)) {
+      patch(id, {
+        status: "running",
+        phase: "extension",
+        startedAt: Date.now(),
+      });
+      const loaded = await ensureExtension(tool.extension);
+      // `ensureExtension` cannot be aborted (it is one memoised INSTALL/LOAD
+      // per extension), so a Cancel pressed during the download is honoured
+      // here, on the far side of it.
+      if (signal.aborted) {
+        if (!failedAlready(id)) {
+          patch(id, { status: "cancelled", phase: null, elapsedMs: elapsed() });
+        }
+        return;
+      }
+      if (!loaded) {
+        // §6.4 makes the log the reproducible record of the run, so DuckDB's own
+        // reason is kept there even when the card shows the offline sentence
+        // instead — a bug report needs the engine's words, not only ours.
+        const reason = extensionReason(tool.extension);
+        if (reason !== null) {
+          warnings.push(`${tool.extension}: ${reason}`);
+          patch(id, { warnings: [...warnings] });
+        }
+        patch(id, {
+          status: "failed",
+          phase: null,
+          error: extensionFailure(tool.extension),
+          elapsedMs: elapsed(),
+        });
+        return;
+      }
     }
 
     const scope = await resolveScope({
@@ -588,7 +671,6 @@ async function execute(
     }
     useLayerStore.getState().mergeAttributes(layer.id, merge);
 
-    const tool = toolById(request.toolId);
     for (const col of result.columns) {
       const registry = useComputedColumnStore.getState();
       const previous = registry.byLayer[layer.id]?.[col.name] ?? null;
