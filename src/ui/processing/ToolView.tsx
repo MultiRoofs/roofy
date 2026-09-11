@@ -53,6 +53,14 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
       ? `Queued behind ${f.queuedBehind}`
       : null;
   const footerNote = queueNote ?? footerReason;
+  // §5: "A disabled row still opens the tool view", so a target the user has
+  // already chosen stays in the select even when the tool cannot run on it —
+  // a blank select would hide which layer the reason under Run is about.
+  const chosen = f.target;
+  const targetOptions =
+    chosen !== null && !f.eligibleTargets.some((l) => l.id === chosen.id)
+      ? [...f.eligibleTargets, chosen]
+      : f.eligibleTargets;
   const run = () => {
     if (!f.target || !f.canRun) return;
     submitRun({
@@ -99,7 +107,7 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
             value={f.target?.id ?? ""}
             onChange={(e) => f.setDraft({ targetLayerId: e.target.value })}
           >
-            {f.eligibleTargets.map((l) => (
+            {targetOptions.map((l) => (
               <option key={l.id} value={l.id}>
                 {l.name}
               </option>

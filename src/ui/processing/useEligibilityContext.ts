@@ -7,22 +7,41 @@
  * — which IS subscribed here — so the catalogue re-renders anyway. The lazy
  * extension loads that would need their own subscription arrive with the
  * executor (M2), and the status read moves with them.
+ *
+ * The PURE `eligibilityContextFor` sits beside the hook because a hook answers
+ * for one target and §6's layer select has to ask the same question of every
+ * candidate layer: hooks cannot be called in a loop, a pure function can.
  */
 import { useLayerTableStore } from "../../insights/layerTables";
+import type { LayerTableState } from "../../insights/layerTables";
 import { getDuckDBStatus } from "../../insights/duckdb";
+import type { DuckDBStatus } from "../../insights/duckdb";
 import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
 import { layerKindOf } from "../../features/layers/layerPresentation";
 import type { ActiveLayer } from "../../features/workspace/activeLayer";
 import type { EligibilityContext } from "../../features/processing/eligibility";
 
-export function useEligibilityContext(
-  target: ActiveLayer | null,
-): EligibilityContext {
+/** Everything {@link eligibilityContextFor} reads, subscribed once. */
+export interface EligibilityInputs {
+  readonly tables: Readonly<Record<string, LayerTableState>>;
+  readonly hasVectorLayer: boolean;
+  readonly status: DuckDBStatus;
+}
+
+export function useEligibilityInputs(): EligibilityInputs {
   const tables = useLayerTableStore((s) => s.tables);
   const hasVectorLayer = useGeoLayerStore((s) =>
     s.layers.some((l) => l.kind === "geojson"),
   );
-  const status = getDuckDBStatus();
+  return { tables, hasVectorLayer, status: getDuckDBStatus() };
+}
+
+export function eligibilityContextFor(
+  target: ActiveLayer | null,
+  tables: Readonly<Record<string, LayerTableState>>,
+  hasVectorLayer: boolean,
+  status: DuckDBStatus,
+): EligibilityContext {
   const entry = target?.kind === "city" ? tables[target.layer.id] : undefined;
   const ready =
     entry !== undefined && entry.state === "ready" ? entry.info : null;
@@ -43,4 +62,11 @@ export function useEligibilityContext(
       three_d: extState("three_d"),
     },
   };
+}
+
+export function useEligibilityContext(
+  target: ActiveLayer | null,
+): EligibilityContext {
+  const { tables, hasVectorLayer, status } = useEligibilityInputs();
+  return eligibilityContextFor(target, tables, hasVectorLayer, status);
 }

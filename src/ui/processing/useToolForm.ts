@@ -13,7 +13,6 @@
  */
 import { useMemo } from "react";
 import { useLayerStore } from "../../features/layers/layerStore";
-import { useLayerTableStore } from "../../insights/layerTables";
 import { useLayerCounts } from "../table/useLayerCounts";
 import {
   computedColumnsOf,
@@ -26,7 +25,10 @@ import {
 import { toolById } from "../../features/processing/toolRegistry";
 import { toolEligibility } from "../../features/processing/eligibility";
 import type { ToolId } from "../../features/processing/types";
-import { useEligibilityContext } from "./useEligibilityContext";
+import {
+  eligibilityContextFor,
+  useEligibilityInputs,
+} from "./useEligibilityContext";
 import { outputColumnNames } from "../../features/processing/tools/heightFromExtent";
 import { useActiveLayer } from "../../features/workspace/activeLayer";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
@@ -83,20 +85,41 @@ export function useToolForm(toolId: ToolId) {
   const tool = toolById(toolId);
   const active = useActiveLayer();
   const layers = useLayerStore((s) => s.layers);
-  const tables = useLayerTableStore((s) => s.tables);
+  const { tables, hasVectorLayer, status } = useEligibilityInputs();
   const drafts = useProcessingStore((s) => s.drafts);
   const runs = useProcessingStore((s) => s.runs);
   useComputedColumnStore((s) => s.byLayer); // subscribe: the replace warning depends on it
-  const eligibleTargets = useMemo(
+  // Spec §6: the select lists "only layers the tool can target", which is the
+  // tool's whole eligibility, not just "the table is ready". `candidates` keeps
+  // the wider list so an UNIMPLEMENTED tool (every eligibility fails) still
+  // opens on a layer rather than on a blank select — §5's "a disabled row still
+  // opens the tool view".
+  const candidates = useMemo(
     () => layers.filter((l) => tables[l.id]?.state === "ready"),
     [layers, tables],
   );
+  const eligibleTargets = useMemo(
+    () =>
+      candidates.filter(
+        (l) =>
+          toolEligibility(
+            tool,
+            eligibilityContextFor(
+              { kind: "city", layer: l },
+              tables,
+              hasVectorLayer,
+              status,
+            ),
+          ).ok,
+      ),
+    [candidates, tables, hasVectorLayer, status, tool],
+  );
   const stored = drafts[toolId];
+  const preferred = eligibleTargets.length > 0 ? eligibleTargets : candidates;
   const defaultTarget =
-    active?.kind === "city" &&
-    eligibleTargets.some((l) => l.id === active.layer.id)
+    active?.kind === "city" && preferred.some((l) => l.id === active.layer.id)
       ? active.layer.id
-      : (eligibleTargets[0]?.id ?? null);
+      : (preferred[0]?.id ?? null);
   const storedTargetExists =
     stored !== undefined && layers.some((l) => l.id === stored.targetLayerId);
   const draft: ToolDraft =
@@ -119,8 +142,11 @@ export function useToolForm(toolId: ToolId) {
   const noFilter = useQueryStore((s) =>
     target === null ? true : layerQuery(s, target.id).applied === null,
   );
-  const targetCtx = useEligibilityContext(
+  const targetCtx = eligibilityContextFor(
     target ? { kind: "city", layer: target } : null,
+    tables,
+    hasVectorLayer,
+    status,
   );
   const eligibility = toolEligibility(tool, targetCtx);
   const columns = (OUTPUT_COLUMNS[toolId] ?? (() => []))(
