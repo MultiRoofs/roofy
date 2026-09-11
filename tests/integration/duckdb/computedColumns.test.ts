@@ -279,6 +279,52 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
     });
   });
 
+  describe("probe 1c: identifiers differing only in case", () => {
+    const TABLE = "layer_cc1c";
+
+    it("adds nothing for a differently-cased name and updates the column there", () => {
+      // The premise `runQueue.canonicalise` rests on. DuckDB matches
+      // identifiers WITHOUT regard to case, so a second run whose prefix is
+      // typed "EXTENT_" neither creates a column nor writes a second one: the
+      // ALTER is a no-op and the UPDATE lands on `extent_height_m`. The app's
+      // own keys are exact strings, which is why the run resolves its output
+      // names to the table's spelling before any of this.
+      makeTable(TABLE, ["b1", "b2"]);
+      const file = "__vals_cc1c.json";
+      db.registerBytes(
+        file,
+        encodeValues([
+          { id: "b1", EXTENT_height_m: 7.5 },
+          { id: "b2", EXTENT_height_m: 9.5 },
+        ]),
+      );
+      expect(
+        attemptAll([
+          buildAddColumnSql(TABLE, {
+            name: "extent_height_m",
+            type: "DOUBLE",
+          }),
+          buildAddColumnSql(TABLE, {
+            name: "EXTENT_height_m",
+            type: "DOUBLE",
+          }),
+          buildUpdateFromValuesSql(TABLE, file, ["EXTENT_height_m"]),
+        ]).ok,
+      ).toBe(true);
+
+      // ONE column, under the spelling the first ALTER gave it.
+      expect(
+        db.query(`DESCRIBE ${quoteIdent(TABLE)}`).map((r) => r.column_name),
+      ).toEqual(["id", "extent_height_m"]);
+      expect(
+        db.query(
+          `SELECT "extent_height_m" FROM ${quoteIdent(TABLE)} ORDER BY "id"`,
+        ),
+      ).toEqual([{ extent_height_m: 7.5 }, { extent_height_m: 9.5 }]);
+      db.dropFile(file);
+    });
+  });
+
   describe("probe 2: read_json_auto inference", () => {
     /** Builds a values file, reports what was inferred, and tries to assign it
      *  into a DOUBLE column through the app's UPDATE. */
