@@ -131,8 +131,12 @@ function useStyleByResult(runId: string | null): {
           editingId: null,
           open: true,
           form: {
-            // Unnamed, exactly as "+ Add rule" starts: the user names it.
-            name: "",
+            // Named after the column, not left empty as "+ Add rule" starts:
+            // the editor will not save an unnamed rule, and a user who came
+            // here by pressing one button should not have to invent a name
+            // before they can see the result on the map. It is a draft — they
+            // rename it in the field it lands in.
+            name: column,
             color: NEW_RULE_COLOR_HEX,
             logic: "AND",
             conditions: [{ field: column, operator: ">", value }],

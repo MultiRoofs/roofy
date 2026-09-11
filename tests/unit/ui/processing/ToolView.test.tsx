@@ -544,7 +544,10 @@ describe("ToolView", () => {
       editingId: null,
       open: true,
       form: {
-        name: "",
+        // The editor refuses to save an unnamed rule, so the draft arrives
+        // named after the column it is about; the user renames it if they
+        // want to.
+        name: "extent_height_m",
         color: NEW_RULE_COLOR_HEX,
         logic: "AND",
         conditions: [{ field: "extent_height_m", operator: ">", value: 4.2 }],
