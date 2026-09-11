@@ -117,6 +117,72 @@ export type ToolExecutor = (
 /** Thrown by the context when the user cancelled; never surfaced as an error. */
 class CancelledError extends Error {}
 
+/**
+ * Race an ENGINE await against the run's abort signal.
+ *
+ * Aborting a controller does not release an await. duckdb-wasm drops the
+ * promises of requests that were in flight when its worker died — its own
+ * `onError` clears the pending map WITHOUT rejecting them — so a query, an
+ * extension load or a write caught by the death never settles, and an
+ * `execute` sitting on one would hold the shared table FIFO for the life of
+ * the page: the card would read "failed" while every later run and every table
+ * build queued behind a task that can never finish.
+ *
+ * The listener is removed on settle; a run that is never cancelled would
+ * otherwise leave one on its controller for as long as the signal lives.
+ */
+/**
+ * {@link abortable} for the awaits AFTER the point of no return, where an abort
+ * is not by itself a reason to stop waiting.
+ *
+ * A user's Cancel during the write is decided INSIDE the write — its
+ * pre-COMMIT check, and §6.1's "finished before the cancel arrived" when the
+ * COMMIT won the race — and the same is true of the DESCRIBE that follows it:
+ * past the COMMIT the columns are on the table whatever the signal says.
+ * Racing the signal unconditionally would report a cancel over a transaction
+ * that had already committed. So the race may only WIN when the engine is
+ * gone, which is the one case those awaits cannot settle by themselves. The
+ * status is current by then: the watcher publishes `failed` in the same
+ * listener call as its abort, before this microtask runs.
+ */
+function releasedOnDeath<T>(
+  promise: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  return abortable(promise, signal).catch(async (error: unknown) => {
+    if (
+      error instanceof CancelledError &&
+      getDuckDBStatus().state === "ready"
+    ) {
+      return await promise;
+    }
+    throw error;
+  });
+}
+
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new CancelledError());
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      reject(new CancelledError());
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    const settle = () => {
+      signal.removeEventListener("abort", onAbort);
+    };
+    promise.then(
+      (value) => {
+        settle();
+        resolve(value);
+      },
+      (error: unknown) => {
+        settle();
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+}
+
 const controllers = new Map<string, AbortController>();
 
 interface UndoState {
@@ -513,7 +579,7 @@ async function execute(
     const tool = toolById(request.toolId);
     if (tool.extension !== null && !isExtensionLoaded(tool.extension)) {
       patch(id, { status: "running", phase: "extension" });
-      const loaded = await ensureExtension(tool.extension);
+      const loaded = await abortable(ensureExtension(tool.extension), signal);
       // `ensureExtension` cannot be aborted (it is one memoised INSTALL/LOAD
       // per extension), so a Cancel pressed during the download is honoured
       // here, on the far side of it.
@@ -542,11 +608,14 @@ async function execute(
       }
     }
 
-    const scope = await resolveScope({
-      table,
-      scope: request.scope,
-      snapshot: request.snapshot,
-    });
+    const scope = await abortable(
+      resolveScope({
+        table,
+        scope: request.scope,
+        snapshot: request.snapshot,
+      }),
+      signal,
+    );
     if (!scope.ok) {
       patch(id, {
         status: "failed",
@@ -578,7 +647,7 @@ async function execute(
       async query(label, sql) {
         if (signal.aborted) throw new CancelledError();
         const t0 = performance.now();
-        const out = await runQuery(sql);
+        const out = await abortable(runQuery(sql), signal);
         log.push({
           label,
           sql,
@@ -636,7 +705,7 @@ async function execute(
         .filter((name) => onTable.has(name.toLowerCase())),
     );
     const t0 = performance.now();
-    const written = await writeComputedColumns({
+    const writing = writeComputedColumns({
       runId: id,
       table: table.table,
       columns: result.columns,
@@ -646,6 +715,7 @@ async function execute(
       // can still mean "nothing changed" is inside it, before its COMMIT.
       signal,
     });
+    const written = await releasedOnDeath(writing, signal);
     log.push({
       label: "Writing results",
       sql: null,
@@ -742,7 +812,14 @@ async function execute(
     // The registry's `columns` came from a DESCRIBE at build time; the grid and
     // the NEXT run both read it, and the next run's "did this column exist?"
     // decides whether Undo restores a value or drops the column.
-    await refreshLayerTableColumns(layer.id);
+    try {
+      await releasedOnDeath(refreshLayerTableColumns(layer.id), signal);
+    } catch (error) {
+      // Past the COMMIT nothing may fail the run, and this is the one await
+      // left that a dead engine can strand. A DESCRIBE that will never answer
+      // is abandoned; the run's own card is already the watcher's to write.
+      if (!(error instanceof CancelledError)) throw error;
+    }
 
     const summary = summarise(result, elapsed());
     patch(id, {

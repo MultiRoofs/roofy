@@ -20,6 +20,7 @@ import { create } from "zustand";
 import {
   ddl,
   dropBuffer,
+  getDuckDBStatus,
   registerBuffer,
   runQuery,
   type QueryOutcome,
@@ -126,6 +127,19 @@ async function step(
   return use === "ddl" ? ddl(sql) : runQuery(sql);
 }
 
+/**
+ * A ROLLBACK for a transaction whose database is gone.
+ *
+ * Cleanup runs on the failure path, and one of the ways a statement fails is
+ * that the engine's worker died under it. There is nothing to roll back then —
+ * the transaction, the backup table and the database all went together — and a
+ * dead worker never answers, so the statement is skipped rather than sent.
+ */
+async function cleanup(sql: string): Promise<void> {
+  if (getDuckDBStatus().state !== "ready") return;
+  await step(sql);
+}
+
 /** Spec §6.1: results land in ONE transaction; a failure leaves the layer as it was. */
 export async function writeComputedColumns(
   input: WriteInput,
@@ -174,7 +188,7 @@ export async function writeComputedColumns(
     for (const [sql, use] of statements) {
       const out = await step(sql, use);
       if (!out.ok) {
-        await step("ROLLBACK");
+        await cleanup("ROLLBACK");
         return { ok: false, message: out.message };
       }
     }
@@ -183,12 +197,12 @@ export async function writeComputedColumns(
     // table included, DuckDB's DDL being transactional — and after the COMMIT
     // nothing can be.
     if (input.signal?.aborted) {
-      await step("ROLLBACK");
+      await cleanup("ROLLBACK");
       return { ok: false, cancelled: true, message: "Cancelled" };
     }
     const committed = await step("COMMIT");
     if (!committed.ok) {
-      await step("ROLLBACK");
+      await cleanup("ROLLBACK");
       return { ok: false, message: committed.message };
     }
     return { ok: true, backupTable };
@@ -229,7 +243,7 @@ export async function undoComputedColumns(
   for (const sql of statements) {
     const out = await runQuery(sql);
     if (!out.ok) {
-      await runQuery("ROLLBACK");
+      await cleanup("ROLLBACK");
       return out;
     }
   }

@@ -1491,6 +1491,21 @@ function killEngine(reason = "worker gone"): void {
   for (const listener of statusListeners) listener();
 }
 
+/** Bring the engine back, the way the status bar's Retry does. */
+function reviveEngine(): void {
+  vi.mocked(getDuckDBStatus).mockReturnValue({
+    state: "ready",
+    extensions: {
+      cityjson: { state: "loaded" },
+      spatial: { state: "unloaded" },
+      three_d: { state: "unloaded" },
+    },
+    loadedExtensions: [],
+    platform: "wasm_eh",
+  });
+  for (const listener of statusListeners) listener();
+}
+
 /** A `failed` status that was never preceded by a `ready` one — a boot that
  *  did not come up, which the status bar's Retry can still fix. */
 function failBoot(reason = "no bundle for this platform"): void {
@@ -1605,6 +1620,77 @@ describe("the engine watcher (spec §6.1)", () => {
     const stop = installEngineWatcher();
     killEngine();
     expect(useProcessingStore.getState().engineStopped).toBe(true);
+    stop();
+  });
+
+  it("releases a run whose QUERY died with the engine, and frees the queue", async () => {
+    // duckdb-wasm drops the promises of requests that were in flight when its
+    // worker died — its `onError` clears the pending map without rejecting —
+    // so this query never settles. Aborting the controller is only half the
+    // answer: the await has to be raced against the abort, or `execute` sits
+    // on it forever and the run's task never leaves the shared table FIFO.
+    const stop = installEngineWatcher();
+    const never = deferred<void>();
+    gate = { needle: "COUNT(DISTINCT", promise: never.promise };
+    registerExecutor("height-from-extent", async () => {
+      throw new Error("the executor must never be reached");
+    });
+    const id = submitRun(request());
+    await vi.waitFor(() =>
+      expect(sql.some((q) => q.includes("COUNT(DISTINCT"))).toBe(true),
+    );
+    sql.length = 0;
+
+    killEngine();
+
+    expect(runById(id)?.status).toBe("failed");
+    expect(runById(id)?.error).toBe("Analytics engine stopped");
+
+    // The queue is free: a run submitted after the status bar's Retry reaches
+    // the engine instead of queueing behind a task that will never finish.
+    gate = null;
+    reviveEngine();
+    registerExecutor("height-from-extent", async (run) => ({
+      columns: [{ name: `${run.prefix}height_m`, type: "DOUBLE" as const }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+    const next = submitRun(request({ prefix: "other_" }));
+    await vi.waitFor(() => expect(runById(next)?.status).toBe("done"));
+    stop();
+  });
+
+  it("releases a run whose WRITE died with the engine, and posts no ROLLBACK", async () => {
+    // The write is the one await that holds a transaction open. Its own
+    // pre-COMMIT cancel check is never reached when the statement in flight
+    // cannot settle, and the ROLLBACK it would issue has no engine to answer
+    // it — so the run is released here and nothing is sent to the corpse.
+    const stop = installEngineWatcher();
+    const never = deferred<void>();
+    gate = { needle: "BEGIN TRANSACTION", promise: never.promise };
+    registerExecutor("height-from-extent", async (run) => ({
+      columns: [{ name: `${run.prefix}height_m`, type: "DOUBLE" as const }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+    const id = submitRun(request());
+    await vi.waitFor(() => expect(sql).toContain("BEGIN TRANSACTION"));
+    sql.length = 0;
+
+    killEngine();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(runById(id)?.status).toBe("failed");
+    expect(runById(id)?.error).toBe("Analytics engine stopped");
+    expect(sql).toEqual([]);
+
+    gate = null;
+    reviveEngine();
+    const next = submitRun(request({ prefix: "other_" }));
+    await vi.waitFor(() => expect(runById(next)?.status).toBe("done"));
     stop();
   });
 

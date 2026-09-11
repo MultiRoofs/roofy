@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../src/insights/duckdb", () => ({
   runQuery: vi.fn(async () => ({ ok: true, columns: [], rows: [] })),
@@ -24,6 +24,20 @@ vi.mock("../../../src/insights/duckdb", () => ({
 
 const cc = await import("../../../src/insights/computedColumns");
 const duck = await import("../../../src/insights/duckdb");
+
+const ENGINE_READY = {
+  state: "ready",
+  extensions: {},
+  loadedExtensions: [],
+  platform: null,
+} as unknown as ReturnType<typeof duck.getDuckDBStatus>;
+
+afterEach(() => {
+  // `mockReturnValue` outlives the test that set it, and the cleanup guard
+  // reads this on every failure path — a leaked `failed` would silence the
+  // ROLLBACK of every case after it.
+  vi.mocked(duck.getDuckDBStatus).mockReturnValue(ENGINE_READY);
+});
 
 describe("computed column SQL", () => {
   it("adds a column idempotently", () => {
@@ -126,6 +140,39 @@ describe("writeComputedColumns", () => {
     });
     expect(result).toEqual({ ok: false, message: "Binder Error: x" });
     expect(calls).toContain("ROLLBACK");
+  });
+
+  it("sends NO rollback when the statement failed because the engine died", async () => {
+    // Spec §6.1: the worker took the transaction, the backup table and the
+    // whole database with it. There is nothing to roll back, and nothing left
+    // to answer the statement — so the cleanup is skipped rather than posted.
+    const calls: string[] = [];
+    vi.mocked(duck.getDuckDBStatus).mockReturnValue({
+      state: "failed",
+      error: "worker gone",
+    });
+    vi.mocked(duck.runQuery).mockImplementation(async (sql) => {
+      calls.push(sql);
+      return sql.startsWith("UPDATE")
+        ? { ok: false, message: "The analytics engine is not running." }
+        : { ok: true, columns: [], rows: [] };
+    });
+    vi.mocked(duck.ddl).mockImplementation(async (sql) => {
+      calls.push(sql);
+      return { ok: true, columns: [], rows: [] };
+    });
+    const result = await cc.writeComputedColumns({
+      runId: "r9",
+      table: "layer_1",
+      columns: [{ name: "a", type: "DOUBLE" }],
+      rows: new Map([["x", { a: 1 }]]),
+      existing: new Set(),
+    });
+    expect(result).toEqual({
+      ok: false,
+      message: "The analytics engine is not running.",
+    });
+    expect(calls).not.toContain("ROLLBACK");
   });
 
   it("rolls back instead of committing when the run was cancelled", async () => {
