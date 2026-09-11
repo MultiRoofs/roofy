@@ -223,8 +223,30 @@ function scopeLabel(scope: Scope, count: number): string {
       : `Selected ${n}`;
 }
 
-const patch = (id: string, p: Partial<RunRecord>) =>
+/**
+ * Every status a run writes goes through here, and ENDED means ended.
+ *
+ * A run has more than one thing that can finish it, and they do not take turns:
+ * the target-removal watcher fails a run where it stands (§6.1's "Layer
+ * removed") while `execute` is mid-await, and `execute`'s continuation then
+ * arrives with a status of its own — done, or a second failure with the reason
+ * the removal caused. Without this guard the removal's reason was overwritten
+ * by whatever landed last, and a card could claim a result on a layer the user
+ * had thrown away.
+ *
+ * Only a patch that CARRIES a status is refused: the log lines and warnings a
+ * late statement still produces belong on the record either way.
+ */
+const patch = (id: string, p: Partial<RunRecord>) => {
+  const current = runById(id);
+  if (
+    p.status !== undefined &&
+    (current?.status === "failed" || current?.status === "cancelled")
+  ) {
+    return;
+  }
   useProcessingStore.getState().patchRun(id, p);
+};
 
 /**
  * Queue a run and return its id immediately.
@@ -505,7 +527,9 @@ async function execute(
         log: [...log],
         undoable: false,
       });
-      useProcessingStore.getState().pushNotice(summary.line);
+      if (runById(id)?.status === "done") {
+        useProcessingStore.getState().pushNotice(summary.line);
+      }
       return;
     }
 
@@ -645,6 +669,15 @@ async function execute(
       // pressed Cancel and the results appeared anyway.
       note: signal.aborted ? "finished before the cancel arrived" : null,
     });
+    // Read BACK, never assumed: the patch above is refused for a run something
+    // else has already ended (the target was removed while this was finishing,
+    // §6.1). Such a run keeps no Undo — its card offers none, so the copy the
+    // write made is unreachable — and says nothing in the toast, which would
+    // announce a result on a layer that is gone.
+    if (runById(id)?.status !== "done") {
+      discardUndo(id);
+      return;
+    }
     useProcessingStore.getState().pushNotice(summary.line);
   } catch (error) {
     // The target-removal watcher aborts the run AND says why (§6.1's "Layer

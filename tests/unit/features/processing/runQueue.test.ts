@@ -52,6 +52,8 @@ let featureTotal = 1;
 let scopeRows: Array<{ id: string; f: string }> = [];
 /** Holds the first statement containing `needle` until `promise` resolves. */
 let gate: { needle: string; promise: Promise<void> } | null = null;
+/** Any statement containing this substring comes back as a database error. */
+let failing: string | null = null;
 /** The columns the fake database holds, tracked from the ALTERs it is sent. */
 let liveColumns: string[] = ["id", "feature_id"];
 /** What they were when the open transaction began, for its ROLLBACK. */
@@ -61,6 +63,9 @@ vi.mock("../../../../src/insights/duckdb", () => {
   const run = async (statement: string) => {
     sql.push(statement);
     if (gate && statement.includes(gate.needle)) await gate.promise;
+    if (failing !== null && statement.includes(failing)) {
+      return { ok: false as const, message: "Database was closed" };
+    }
     // DuckDB's DDL is transactional, and a cancelled write leans on exactly
     // that: the ROLLBACK is what takes the added columns (and the backup
     // table) away again. A fake that kept them would let a broken write look
@@ -279,6 +284,7 @@ beforeEach(() => {
   featureTotal = 1;
   scopeRows = [];
   gate = null;
+  failing = null;
   liveColumns = ["id", "feature_id"];
   columnsAtBegin = null;
   tableInfo = freshTable();
@@ -1013,6 +1019,115 @@ describe("installTargetRemovalWatcher", () => {
     expect(runById(id)?.status).toBe("failed");
     expect(runById(id)?.error).toBe("Layer removed");
     expect(sql).not.toContain("BEGIN TRANSACTION");
+    stop();
+  });
+
+  it("keeps 'Layer removed' when the run finishes after the removal", async () => {
+    // The removal lands while the run is finishing its schema refresh. The
+    // continuation used to publish DONE over it: the card claimed a result on
+    // a layer that is gone, restored its Undo and toasted the summary.
+    const stop = installTargetRemovalWatcher();
+    liveColumns = ["id", "feature_id", "extent_height_m"];
+    computedAlready("extent_height_m");
+    tableInfo = {
+      ...freshTable(),
+      columns: liveColumns.map((name) => ({
+        name,
+        type: "VARCHAR",
+        kind: "scalar" as const,
+      })),
+    };
+    const held = deferred<void>();
+    vi.mocked(tables.refreshLayerTableColumns).mockImplementationOnce(
+      async () => {
+        await held.promise;
+      },
+    );
+    registerExecutor("height-from-extent", async () => ({
+      columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+    const id = submitRun(request());
+    await vi.waitFor(() => expect(sql).toContain("COMMIT"));
+
+    useLayerStore.setState({ layers: [] });
+    expect(runById(id)?.status).toBe("failed");
+    held.resolve();
+    await tables.runOnTableQueue(async () => {});
+
+    expect(runById(id)?.status).toBe("failed");
+    expect(runById(id)?.error).toBe("Layer removed");
+    expect(runById(id)?.undoable).toBe(false);
+    expect(useProcessingStore.getState().notice).toBeNull();
+    // The copy the write made is unreachable from a card that offers no Undo.
+    await vi.waitFor(() =>
+      expect(sql).toContain(`DROP TABLE IF EXISTS "__undo_${id}"`),
+    );
+    stop();
+  });
+
+  it("keeps 'Layer removed' when the scope query then fails", async () => {
+    const stop = installTargetRemovalWatcher();
+    const held = deferred<void>();
+    gate = { needle: "COUNT(DISTINCT", promise: held.promise };
+    failing = "COUNT(DISTINCT";
+    let calls = 0;
+    registerExecutor("height-from-extent", async () => {
+      calls += 1;
+      return {
+        columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+        rows: new Map([["a", { extent_height_m: 4 }]]),
+        measured: 1,
+        skipped: [],
+      };
+    });
+    const id = submitRun(request());
+    await vi.waitFor(() =>
+      expect(sql.some((s) => s.includes("COUNT(DISTINCT"))).toBe(true),
+    );
+
+    useLayerStore.setState({ layers: [] });
+    expect(runById(id)?.error).toBe("Layer removed");
+    held.resolve();
+    await tables.runOnTableQueue(async () => {});
+
+    // The scope's own refusal is a SECOND reason for a run that already has
+    // one; the removal is the reason the user can act on.
+    expect(runById(id)?.status).toBe("failed");
+    expect(runById(id)?.error).toBe("Layer removed");
+    expect(calls).toBe(0);
+    stop();
+  });
+
+  it("still lets a run reach done, and a cancelled one stay cancelled", async () => {
+    // The terminal guard refuses to move a run OUT of failed or cancelled; it
+    // must not touch the ordinary transitions either side of that.
+    const stop = installTargetRemovalWatcher();
+    registerExecutor("height-from-extent", async () => ({
+      columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+    const done = submitRun(request());
+    await vi.waitFor(() => expect(runById(done)?.status).toBe("done"));
+    expect(runById(done)?.undoable).toBe(true);
+
+    const held = deferred<void>();
+    gate = { needle: "BEGIN TRANSACTION", promise: held.promise };
+    // The first run's own BEGIN is still in the log; a wait for it would return
+    // before the second run had started.
+    sql.length = 0;
+    const cancelled = submitRun(request());
+    await vi.waitFor(() => expect(sql).toContain("BEGIN TRANSACTION"));
+    cancelRun(cancelled);
+    expect(runById(cancelled)?.status).toBe("cancelling");
+    held.resolve();
+    await vi.waitFor(() =>
+      expect(runById(cancelled)?.status).toBe("cancelled"),
+    );
     stop();
   });
 
