@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildExtentSql,
   heightFromExtent,
+  outputColumnNames,
   rollUpExtents,
 } from "../../../../src/features/processing/tools/heightFromExtent";
 import type {
@@ -194,6 +195,17 @@ describe("heightFromExtent executor", () => {
     });
     expect(result.measured).toBe(1);
     expect(result.skipped).toEqual([{ cause: "no geometry", count: 1 }]);
+  });
+
+  it("writes the columns the form promised, from the ONE builder", async () => {
+    const fake = fakeContext([{ id: "B", f: "B", zmin: 0, zmax: 2 }], null);
+    const result = await heightFromExtent(run, fake.ctx);
+    expect(result.columns.map((c) => c.name)).toEqual(
+      outputColumnNames(run.prefix),
+    );
+    expect(Object.keys(result.rows.get("B")!)).toEqual(
+      outputColumnNames(run.prefix),
+    );
   });
 
   it("reads every row when the scope is 'all'", async () => {

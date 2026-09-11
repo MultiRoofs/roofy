@@ -43,6 +43,17 @@ export interface RollUp {
 }
 
 /**
+ * The three columns this tool writes, in the order §7.4 lists them.
+ *
+ * The ONE answer: the roll-up keys its rows with it, the executor declares it,
+ * and the form's `OUTPUT_COLUMNS` promises it before any run exists. Three
+ * literal lists is how the form comes to promise a name the run never writes.
+ */
+export function outputColumnNames(prefix: string): [string, string, string] {
+  return [`${prefix}height_m`, `${prefix}zmin_m`, `${prefix}zmax_m`];
+}
+
+/**
  * The scope's z extents, one row per table row.
  *
  * `ids` are ROW ids (`resolveScope` has already expanded them to whole
@@ -96,6 +107,7 @@ export function rollUpExtents(
     );
   }
 
+  const [heightCol, zminCol, zmaxCol] = outputColumnNames(prefix);
   const out = new Map<string, Record<string, number | null>>();
   let measured = 0;
   let skipped = 0;
@@ -104,9 +116,9 @@ export function rollUpExtents(
     else skipped += 1;
     for (const id of members.get(feature) ?? []) {
       out.set(id, {
-        [`${prefix}height_m`]: extent ? extent.zmax - extent.zmin : null,
-        [`${prefix}zmin_m`]: extent ? extent.zmin : null,
-        [`${prefix}zmax_m`]: extent ? extent.zmax : null,
+        [heightCol]: extent ? extent.zmax - extent.zmin : null,
+        [zminCol]: extent ? extent.zmin : null,
+        [zmaxCol]: extent ? extent.zmax : null,
       });
     }
   }
@@ -142,11 +154,10 @@ export const heightFromExtent: ToolExecutor = async (run, ctx) => {
     })),
     run.prefix,
   );
-  const columns: OutputColumn[] = [
-    { name: `${run.prefix}height_m`, type: "DOUBLE" },
-    { name: `${run.prefix}zmin_m`, type: "DOUBLE" },
-    { name: `${run.prefix}zmax_m`, type: "DOUBLE" },
-  ];
+  const columns: OutputColumn[] = outputColumnNames(run.prefix).map((name) => ({
+    name,
+    type: "DOUBLE",
+  }));
   return {
     columns,
     rows: rolled.rows,

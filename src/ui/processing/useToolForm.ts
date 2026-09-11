@@ -27,6 +27,7 @@ import { toolById } from "../../features/processing/toolRegistry";
 import { toolEligibility } from "../../features/processing/eligibility";
 import type { ToolId } from "../../features/processing/types";
 import { useEligibilityContext } from "./useEligibilityContext";
+import { outputColumnNames } from "../../features/processing/tools/heightFromExtent";
 import { useActiveLayer } from "../../features/workspace/activeLayer";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 import type { RunRecord } from "../../features/processing/types";
@@ -41,7 +42,9 @@ export const OUTPUT_COLUMNS: Readonly<
     >
   >
 > = {
-  "height-from-extent": (p) => [`${p}height_m`, `${p}zmin_m`, `${p}zmax_m`],
+  // The tool's own builder, not a copy of it: the promise the form prints
+  // before a run exists has to be the names the executor actually writes.
+  "height-from-extent": (p) => outputColumnNames(p),
 };
 
 /** An EMPTY prefix is a legal prefix — it is how the bare column names are
