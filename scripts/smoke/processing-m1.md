@@ -10,15 +10,15 @@ file is both the recipe and the record of its last run.
 
 ## Last run
 
-|            |                                                                                                                       |
-| ---------- | --------------------------------------------------------------------------------------------------------------------- |
-| Date       | 2026-09-11                                                                                                            |
-| Branch     | `develop` @ `8ef02cd`                                                                                                 |
-| Browser    | Chrome/151.0.7922.34 (`HeadlessChrome/151.0.0.0`), SwiftShader, 1–2 fps                                               |
-| Driver     | `agent-browser connect 9333` against a Chromium launched by hand                                                      |
-| Dev server | `npm run dev -- --port 5199 --host 127.0.0.1` → it printed `http://127.0.0.1:5200/`; use the port it prints           |
-| DuckDB     | `duckdb-eh.wasm` + the `cityjson` community extension, as the status bar reports                                      |
-| Result     | **every assertion of scenario 1 passed**; five deviations recorded below, none of them a regression of this milestone |
+|            |                                                                                                                                                 |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Date       | 2026-09-11                                                                                                                                      |
+| Branch     | `develop` @ `8ef02cd`                                                                                                                           |
+| Browser    | Chrome/151.0.7922.34 (`HeadlessChrome/151.0.0.0`), SwiftShader, 1–2 fps                                                                         |
+| Driver     | `agent-browser connect 9333` against a Chromium launched by hand                                                                                |
+| Dev server | `npm run dev -- --port 5199 --host 127.0.0.1` → it printed `http://127.0.0.1:5200/`; use the port it prints                                     |
+| DuckDB     | `duckdb-eh.wasm` + the `cityjson` community extension, as the status bar reports                                                                |
+| Result     | **7 of scenario 1's 9 checks pass as worded; 2 are DEVIATIONS that cannot hold in 13.1**, plus 3 observations. No regression of this milestone. |
 
 Screenshots went to the run's scratch directory
 (`…/scratchpad/smoke/`), not into the repo — re-running the recipe
@@ -83,7 +83,7 @@ button.tools-button      ("Tools")
 div.address-search
 ```
 
-## Step 2 — The catalogue — PASS, with a deviation
+## Step 2 — The catalogue — DEVIATION (expected for 13.1)
 
 Seven rows in three groups with the mono group labels `ROOF`,
 `3D MEASUREMENTS`, `CROSS-LAYER`, plus `RECENT RUNS` ("Runs you start appear
@@ -99,7 +99,7 @@ here"). Exactly one row is enabled:
 | Aggregate buildings per area | true            | "Not available yet" |
 | Distance to nearest          | true            | "Not available yet" |
 
-**Deviation from the scenario's wording.** Scenario 1 expects every row enabled
+**This check does NOT pass as the scenario words it.** Scenario 1 expects every row enabled
 except the cross-layer ones, which should read "Add a vector layer to join
 with". In M13.1 only `height-from-extent` is registered, and
 `toolEligibility` (`src/features/processing/eligibility.ts:44`) puts
@@ -176,20 +176,20 @@ Attributes                     COMPUTED
 The file's own attributes stay under Attributes; only the registry's columns
 move into COMPUTED.
 
-## Step 6 — Style by result — PASS, with two deviations
+## Step 6 — Style by result — PASS, with two observations
 
 Clicking **Style by result** opens the target layer's STYLE section with
 `Color by = Rules` (the select's value is `rules`) and a draft rule row:
 attribute `extent_height_m`, operator `>`, value `8.4`, an empty Rule name, the
 editor's default new-rule colour, `+ Condition`, `Add` / `Cancel`.
 
-- **The map repaints BEFORE Save.** The legend goes from
+- **Observation: the map repaints BEFORE Save.** The legend goes from
   `Roof 4 | Wall 12 | Ground 3 | Other 0` to `Unmatched 4` and 17.5 % of the
   pixels over the two buildings change the moment Style by result is clicked.
   This is the ledger's accepted ruling (`colorBy: "rules"` is set eagerly, spec
   §6.2's letter); what stays true is that the DRAFT rule's own colour is not
   painted until the rule is added.
-- **The draft cannot be added without a name.** Clicking `Add` with the Rule
+- **Observation: the draft cannot be added without a name.** Clicking `Add` with the Rule
   name empty does nothing at all — the draft stays open and the rule list is
   unchanged. That is the rule editor's existing validation, and it means
   §6.2's "recolours after Save" costs the user one more step: type a name.
@@ -199,11 +199,14 @@ With the name `Tall` typed and `Add` clicked: the rule appears in the list as
 12.1 m building matches, the 8.4 m one does not), and 22.5 % of the pixels over
 the buildings change again. The map recoloured after Save.
 
-**Why the threshold reads 8.4 and not 10.25.** `RunFooter` asks DuckDB for
-`median(extent_height_m)` over the layer's TABLE, which holds three rows — the
-two Buildings and the one BuildingPart — so the column's median is 8.4, not the
-median of the two buildings. Consistent with the spec's "median"; worth knowing
-before reading it as an off-by-one.
+**Observation: why the threshold reads 8.4 and not 10.25.** `RunFooter` asks
+DuckDB for `median(extent_height_m)` over the layer's TABLE, which holds three
+rows — the two Buildings and the one BuildingPart. The executor gives every
+member row its FEATURE's values (`src/features/processing/tools/heightFromExtent.ts:12`,
+"Every member row then receives the feature's values"), so the column holds
+`[8.4, 12.1, 8.4]` and its median is 8.4 — not the median of the two buildings.
+Consistent with the spec's "median"; worth knowing before reading it as an
+off-by-one.
 
 ## Step 7 — Undo — PASS
 
@@ -230,12 +233,12 @@ building selected.
 Exactly the order in `useEscapeClearsSelection`: modal, sheet, tool form, text
 field, then the selection.
 
-## Step 9 — The collapsed pill — PASS, with a deviation
+## Step 9 — The collapsed pill — PASS for the pill, DEVIATION for reaching it
 
 Collapsed with the toolbox open and a building selected, the map's right edge
 shows two pills: **`Tools`** and `Details · …AG.Pand.0001`, in that order.
 
-**Deviation.** The header's collapse chevron is
+**This half does NOT hold.** The header's collapse chevron is
 `disabled={!hasSelection}` (`src/ui/header/WorkspaceHeader.tsx:193`), so with
 the toolbox open and NOTHING selected the right panel cannot be collapsed at
 all and the `Tools` pill is unreachable. Spec §4.2 describes the Tools pill
