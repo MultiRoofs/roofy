@@ -265,3 +265,61 @@ the header, not a toolbox change.
   these resets sees a rebuilt `layer_N` with no `extent_*` columns and can
   easily mistake it for a write-back bug. Every assertion above was re-taken
   after a reset and came back identical.
+
+---
+
+## Post fix-wave re-check — 2026-09-11
+
+Fix wave 1 (M13.1) changed visible UI, so the parts of scenario 1 it touches
+were re-driven in the browser. Scope: the five checks below, NOT the whole
+scenario — everything else above still stands as the last full run recorded it.
+
+|            |                                                                              |
+| ---------- | ---------------------------------------------------------------------------- |
+| Branch     | `develop` @ `c92e751`                                                        |
+| Browser    | Chrome/151.0.7922.34 headless, SwiftShader, 2 fps                            |
+| Driver     | `agent-browser connect 9333` against a hand-launched Chromium (recipe above) |
+| Dev server | the one already running on `http://127.0.0.1:5200`                           |
+| Fixture    | `fixtures/two-buildings.city.json` through the file input                    |
+| Result     | **5 of 5 pass.** Both deviations this wave was asked to fix are gone.        |
+
+1. **OUTPUT starts with "Write to" — PASS.** The tool form renders
+   `Write to · This layer (two-buildings.city.json)`; the input reports
+   `{checked: true, disabled: true}` and the accessibility tree lists it as
+   `radio "This layer (two-buildings.city.json)" [checked=true, disabled]`.
+   No `New layer` radio, as intended for this milestone.
+2. **The progress block's button reads "Cancel" — PASS.** Sampled through the
+   run: `… Computing ✓ · Writing results … | 1.2 s | Cancel`, then `2.5 s`,
+   `5.5 s`, `7.3 s`, and the card at `✓ 2 buildings measured · 10.9 s ·
+Wrote 3 columns to two-buildings.city.json.` The accessible name is still
+   `Cancel run`.
+3. **Style by result — PASS, and the draft now saves.** The draft opens with
+   Rule name `extent_height_m` (prefilled, was empty), colour `#7cb518`,
+   condition `extent_height_m > 8.4`. Pressing the editor's Save (`Add`)
+   commits it: the rule list gains `extent_height_m — extent_height_m > 8.4`
+   and the legend goes from `Unmatched 4` to `extent_height_m 1 | Unmatched 3`
+   — the 12.1 m building matches, the 8.4 m one does not. The previous run's
+   "the draft cannot be added without a name" deviation is closed.
+4. **Undo — PASS.** `Undo` on the card removes `EXTENT_HEIGHT_M`,
+   `EXTENT_ZMIN_M` and `EXTENT_ZMAX_M` from the drawer's header (back to
+   `… ROOF AREA · MEAN SLOPE · PARTS`), the card reads `Undone` and keeps only
+   `Open table`, `Style by result` and `Log`.
+5. **The collapsed pills with NOTHING selected — PASS.** The header's collapse
+   chevron reports `disabled: false` with no selection, collapsing leaves one
+   pill reading `Tools`, and clicking it brings the panel back with the Tools
+   tab `aria-selected="true"`. The previous run's "a toolbox-only session
+   cannot reach the Tools pill" deviation is closed. With a building selected
+   (through a table cell) both pills show — `Tools` and
+   `Details · …AG.Pand.0002` — and the Details pill now expands onto the
+   DETAILS tab (`aria-selected="true"`), which is the other half of the fix.
+
+Two notes for the next run of the recipe, neither an app problem:
+
+- `agent-browser find role button click --name "Add"` matched **`Add layer`**
+  in the left panel, not the rule editor's `Add`. Accessible-name matching here
+  is a prefix/substring match; disambiguate with a `@ref` from `snapshot -i` or
+  click through `eval` when a shorter name is a prefix of a longer one.
+- Uploading the fixture a second time in the same session fails with
+  `The requested file could not be read, typically due to permission problems
+…` (the first upload's `File` handle is stale) and adds a failed layer entry
+  beside the loaded one. Dismiss it and carry on; upload once per session.
