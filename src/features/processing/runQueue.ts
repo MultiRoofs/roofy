@@ -168,6 +168,52 @@ export function summarise(result: ToolResult, elapsedMs: number): RunSummary {
   };
 }
 
+/**
+ * The run's output under the TABLE's OWN spelling of every column it touches.
+ *
+ * DuckDB matches identifiers without regard to case, so a run whose prefix
+ * differs only in case from an earlier one ("EXTENT_" after "extent_") writes
+ * the column that is already there. Everything the app keeps beside the table
+ * — the model attributes, the provenance registry, the run record's `columns`
+ * and the Undo-ownership check — is keyed on EXACT strings, so the typed
+ * spelling would give that one column a second name: two registry entries, two
+ * model attributes, and an earlier run still holding an Undo that would drop
+ * the column the newer run owns.
+ *
+ * The canonical spelling is the table's when the table has the column, and the
+ * name as typed when it does not (a column nothing has yet is named by the run
+ * that creates it). Renaming here, once, is what makes every step downstream
+ * agree without each of them having to lower-case anything.
+ */
+function canonicalise(
+  result: ToolResult,
+  columns: ReadonlyArray<{ readonly name: string }>,
+): ToolResult {
+  const onTable = new Map(columns.map((c) => [c.name.toLowerCase(), c.name]));
+  const renamed = new Map<string, string>();
+  for (const col of result.columns) {
+    const own = onTable.get(col.name.toLowerCase());
+    if (own !== undefined && own !== col.name) renamed.set(col.name, own);
+  }
+  if (renamed.size === 0) return result;
+  const rows = new Map<string, Record<string, unknown>>();
+  for (const [objectId, values] of result.rows) {
+    const next: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(values)) {
+      next[renamed.get(key) ?? key] = value;
+    }
+    rows.set(objectId, next);
+  }
+  return {
+    ...result,
+    columns: result.columns.map((col) => {
+      const own = renamed.get(col.name);
+      return own === undefined ? col : { ...col, name: own };
+    }),
+    rows,
+  };
+}
+
 function scopeLabel(scope: Scope, count: number): string {
   const n = plural(count, "building", "buildings");
   return scope === "all"
@@ -441,7 +487,9 @@ async function execute(
 
     const record = runById(id);
     if (!record) return;
-    const result = await executor(record, ctx);
+    // The table's spelling wins from here on, so the SQL, the rows' keys, the
+    // model, the registry, the card and Undo all name the same column.
+    const result = canonicalise(await executor(record, ctx), table.columns);
     if (signal.aborted) throw new CancelledError();
 
     if (result.rows.size === 0) {
@@ -546,8 +594,13 @@ async function execute(
         other.id !== id &&
         other.targetLayerId === layer.id &&
         other.undoable &&
+        // Case-insensitively, like every other comparison between column
+        // names: an earlier run recorded under a different spelling still owns
+        // the column this run has just overwritten.
         other.columns.some((name) =>
-          result.columns.some((c) => c.name === name),
+          result.columns.some(
+            (c) => c.name.toLowerCase() === name.toLowerCase(),
+          ),
         )
       ) {
         patch(other.id, { undoable: false });
@@ -584,6 +637,9 @@ async function execute(
       elapsedMs: elapsed(),
       summary,
       log: [...log],
+      // The columns as the TABLE spells them, not as the prefix was typed: the
+      // card, Style by result and the next run's ownership check all read this.
+      columns: result.columns.map((c) => c.name),
       undoable: true,
       // Spec §6.1: a cancel that lost the race is told, not hidden — the user
       // pressed Cancel and the results appeared anyway.

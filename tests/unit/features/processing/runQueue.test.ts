@@ -766,6 +766,50 @@ describe("a run over a column an earlier run wrote", () => {
     );
   });
 
+  it("writes a differently-cased run under the column's own spelling", async () => {
+    // DuckDB matched `EXTENT_height_m` to the column run 1 created and wrote
+    // the same values; everything app-side keyed on the TYPED spelling instead
+    // — two registry entries, two sets of model attributes, and run 1 still
+    // holding an Undo that would drop the column run 2 owns. The run's output
+    // names are resolved to the table's own spelling before anything is
+    // written, so there is only ever one column.
+    let calls = 0;
+    registerExecutor("height-from-extent", async () => {
+      calls += 1;
+      const name = calls === 1 ? "extent_height_m" : "EXTENT_height_m";
+      return {
+        columns: [{ name, type: "DOUBLE" as const }],
+        rows: new Map([["a", { [name]: calls === 1 ? 4 : 9 }]]),
+        measured: 1,
+        skipped: [],
+      };
+    });
+    const first = submitRun(request());
+    await vi.waitFor(() => expect(runById(first)?.status).toBe("done"));
+
+    sql.length = 0;
+    const second = submitRun(
+      request({
+        prefix: "EXTENT_",
+        columns: [{ name: "EXTENT_height_m", type: "DOUBLE" as const }],
+      }),
+    );
+    await vi.waitFor(() => expect(runById(second)?.status).toBe("done"));
+
+    // ONE column, spelled as the table spells it, on the table and everywhere
+    // the app mirrors it.
+    expect(sql.some((s) => s.includes('"EXTENT_height_m"'))).toBe(false);
+    expect([...computedColumnsOf("L1")]).toEqual(["extent_height_m"]);
+    expect(provenanceOf("L1", "extent_height_m")?.runId).toBe(second);
+    expect(Object.keys(attributesOf("a"))).toEqual(["extent_height_m"]);
+    expect(attributesOf("a").extent_height_m).toBe(9);
+    expect(runById(second)?.columns).toEqual(["extent_height_m"]);
+    // Spec §6.2: the later run took the Undo, so run 1 can no longer drop the
+    // column run 2 owns.
+    expect(runById(first)?.undoable).toBe(false);
+    expect(runById(second)?.undoable).toBe(true);
+  });
+
   it("does not undo a run whose Undo was taken away while the undo queued", async () => {
     // Undo pressed on run 1 while run 2 is mid-write. The undo waits behind it,
     // and by the time it reaches the head its backup describes the state TWO
