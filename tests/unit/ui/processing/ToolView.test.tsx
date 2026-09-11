@@ -30,7 +30,7 @@ vi.mock("../../../../src/insights/duckdb", () => ({
   })),
   isExtensionLoaded: vi.fn(() => false),
   ensureExtension: vi.fn(async () => false),
-  formatDuckDBError: vi.fn((e: unknown) => String(e)),
+  formatDuckDBError: (e: unknown) => String(e),
   runQuery: vi.fn(async () => ({ ok: false, message: "no engine" })),
   ddl: vi.fn(async () => ({ ok: false, message: "no engine" })),
   registerBuffer: vi.fn(async () => false),
@@ -77,8 +77,7 @@ const { useQueryStore, layerQuery } =
   await import("../../../../src/features/query/queryStore");
 const { useRuleDraftStore } =
   await import("../../../../src/features/rules/ruleDraftStore");
-const { runQuery, formatDuckDBError } =
-  await import("../../../../src/insights/duckdb");
+const { runQuery } = await import("../../../../src/insights/duckdb");
 const { NEW_RULE_COLOR_HEX } = await import("../../../../src/scene/cityColors");
 
 type LayerInput = Parameters<LayerStoreActions["addLayer"]>[0];
@@ -171,6 +170,23 @@ function doneRun(layerId: string, patch: Partial<RunRecord> = {}): RunRecord {
     },
     ...patch,
   });
+}
+
+/**
+ * What `formatDuckDBError` (duckdb.ts:114-124) makes of a raw DuckDB error —
+ * replicated rather than imported, because the module it lives in is mocked
+ * here and importing the real one would drag `@duckdb/duckdb-wasm` into a
+ * jsdom run. Documented behaviour: drop the `LINE n:` echo and everything
+ * after it, keep every other non-empty line, join with a space.
+ */
+function formattedDuckDBError(raw: string): string {
+  const kept: string[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (/^LINE \d+:/.test(trimmed)) break;
+    if (trimmed !== "") kept.push(trimmed);
+  }
+  return kept.join(" ");
 }
 
 type Outcome = Awaited<ReturnType<typeof runQuery>>;
@@ -552,27 +568,64 @@ describe("ToolView", () => {
     const layerId = addCityLayer();
     render(<ToolView toolId="height-from-extent" />);
     act(() => useProcessingStore.getState().upsertRun(doneRun(layerId)));
-    // §6.3: "The first error line" — a DuckDB error is several lines, and the
-    // toast is one line of chrome. `formatDuckDBError` JOINS the lines it
-    // keeps (duckdb.ts:122), so the split has to happen BEFORE it.
-    vi.mocked(runQuery).mockResolvedValueOnce({
-      ok: false,
-      message:
-        'Binder Error: Referenced column "zone_id" not found in FROM clause\nCandidate bindings: "zone_code"\nLINE 1: SELECT median("zone_id")',
-    });
+    // `runQuery` has ALREADY run the raw DuckDB error through
+    // `formatDuckDBError` (duckdb.ts:396), and that IS §6.3's "first error
+    // line, as the export dialog shows DuckDB errors": the `LINE n:` echo of
+    // our own SQL and its caret are dropped, everything DuckDB actually said
+    // — candidate bindings included — is kept, joined into one line. So the
+    // outcome is built here the way `runQuery` builds it, and the notice must
+    // be that message VERBATIM; a second split here would eat the bindings.
+    const message = formattedDuckDBError(
+      [
+        'Binder Error: Referenced column "zone_id" not found in FROM clause',
+        'Candidate bindings: "zone_code"',
+        'LINE 1: SELECT median("zone_id") AS m FROM "layer_1"',
+        "                      ^",
+      ].join("\n"),
+    );
+    vi.mocked(runQuery).mockResolvedValueOnce({ ok: false, message });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
     });
     // The engine already told us what went wrong; discarding that for a
     // plausible-looking "> 0" rule is the bug this pins.
-    expect(formatDuckDBError).toHaveBeenCalledWith(
+    const notice = useProcessingStore.getState().notice;
+    expect(notice).toBe(message);
+    expect(notice).toContain(
       'Binder Error: Referenced column "zone_id" not found in FROM clause',
     );
-    expect(useProcessingStore.getState().notice).toBe(
-      'Binder Error: Referenced column "zone_id" not found in FROM clause',
-    );
+    expect(notice).toContain('Candidate bindings: "zone_code"');
+    expect(notice).not.toContain("LINE 1:");
+    expect(notice).not.toContain("^");
     expect(useRuleDraftStore.getState().drafts[layerId]).toBeUndefined();
     expect(useShellStore.getState().requestedSection).toBeNull();
+  });
+
+  it("keeps the stale reason on a run that is BOTH stale and empty", async () => {
+    // A rebuilt table is why a median cannot be trusted at all; "All values
+    // are empty" would be a claim about data this run no longer describes.
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() =>
+      useProcessingStore.getState().upsertRun(
+        doneRun(layerId, {
+          stale: true,
+          summary: {
+            line: "0 buildings measured · 0.1 s",
+            detail: null,
+            measured: 0,
+            skipped: [],
+          },
+        }),
+      ),
+    );
+    const button = screen.getByRole("button", { name: "Style by result" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "stale: layer reloaded");
+    expect(
+      screen.getByText("stale: layer reloaded", { selector: "p" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("All values are empty")).toBeNull();
   });
 
   it("says All values are empty when the median is NULL, and opens no draft", async () => {

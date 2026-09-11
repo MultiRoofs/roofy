@@ -23,11 +23,7 @@ import { phaseLine, plural, seconds } from "./runFormat";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useRuleDraftStore } from "../../features/rules/ruleDraftStore";
 import { useLayerTableStore } from "../../insights/layerTables";
-import {
-  formatDuckDBError,
-  runQuery,
-  type QueryOutcome,
-} from "../../insights/duckdb";
+import { runQuery, type QueryOutcome } from "../../insights/duckdb";
 import { quoteIdent } from "../../insights/sql";
 import { NEW_RULE_COLOR_HEX } from "../../scene/cityColors";
 
@@ -37,22 +33,6 @@ const ALL_VALUES_EMPTY = "All values are empty";
  *  longer describes what a median would be read from. Same string the card
  *  already prints for a stale run. */
 const STALE_LAYER_RELOADED = "stale: layer reloaded";
-
-/**
- * §6.3's "The first error line", for the toast.
- *
- * The split happens BEFORE `formatDuckDBError`, not after: the formatter
- * JOINS every line it keeps into one string (duckdb.ts:122), so by the time
- * it has run there are no lines left to take the first of.
- */
-function firstErrorLine(message: string): string {
-  const first =
-    message
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find((line) => line !== "") ?? "";
-  return formatDuckDBError(first);
-}
 
 /**
  * The median read behind Style by result, or `null` when there is no table to
@@ -135,9 +115,10 @@ function useStyleByResult(runId: string | null): {
           .layers.some((l) => l.id === layerId);
         if (!alive) return;
         if (!outcome.ok) {
-          useProcessingStore
-            .getState()
-            .pushNotice(firstErrorLine(outcome.message));
+          // Verbatim: `runQuery` has already put the error through
+          // `formatDuckDBError` (duckdb.ts:396), which IS §6.3's "first error
+          // line, as the export dialog shows DuckDB errors".
+          useProcessingStore.getState().pushNotice(outcome.message);
           return;
         }
         const value = outcome.rows[0]?.["m"];
@@ -244,18 +225,21 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
     // §6.2/§7: the draft styles the FIRST column the run wrote, in the tool's
     // own order (`extent_height_m` for Height from extent, §7.4).
     const styleColumn = run.columns[0];
+    // Why the button is off, as a reason the user can READ — not only a
+    // tooltip on a disabled control, which no keyboard or screen-reader user
+    // reaches — in the same muted note Run's own reason gets.
+    //
     // §6.2: "disabled with 'All values are empty' when the chosen column is
-    // NULL for every object in the run". A reason the user can READ, not only
-    // a tooltip on a disabled control — the same muted note Run's reason gets.
-    // A STALE run is disabled too: its table has been rebuilt under it, so a
-    // median would describe data the run never saw. The card already prints
-    // that reason above the actions, so it is not repeated below them.
-    const styleReason =
-      run.summary?.measured === 0
+    // NULL for every object in the run". A STALE run is disabled too, and
+    // OUTRANKS empty: its table was rebuilt under it, which is why no median
+    // can be trusted at all, so "All values are empty" would be a claim about
+    // data this run no longer describes. The card already prints the stale
+    // reason above the actions, so that one is not repeated below them.
+    const styleReason = run.stale
+      ? STALE_LAYER_RELOADED
+      : run.summary?.measured === 0
         ? ALL_VALUES_EMPTY
-        : run.stale
-          ? STALE_LAYER_RELOADED
-          : null;
+        : null;
     return (
       <div className="processing-footer processing-footer--card">
         <div className="processing-card">
