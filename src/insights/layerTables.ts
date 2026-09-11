@@ -350,12 +350,20 @@ export async function refreshLayerTableColumns(layerId: string): Promise<void> {
   // The write that prompted this has already committed. A DESCRIBE that failed
   // says nothing about it, so the entry keeps the description it had.
   if (!described.ok) return;
+  // The registry is re-read AFTER the round trip: a rebuild that published a new
+  // table while the DESCRIBE was in flight has already replaced this entry, and
+  // writing `{ ...current, columns }` would put the old table's name back — the
+  // grid would then query a table the rebuild dropped.
+  const latest = useLayerTableStore.getState().tables[layerId];
+  const held = registry.get(layerId);
+  if (!latest || latest.state !== "ready" || held?.table !== current.table)
+    return;
   const info: LayerTable = {
-    ...current,
+    ...held,
     columns: columnsFromDescribe(described.rows),
   };
   registry.set(layerId, info);
-  setState(layerId, { ...entry, info });
+  setState(layerId, { ...latest, info });
 }
 
 /** Append `task` to the single queue. One queue, not one per layer, so a drop

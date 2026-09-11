@@ -21,10 +21,21 @@ let initGate: Promise<void> | null = null;
  * refusal rather than inventing a failure mode the real one does not have.
  */
 let registerAccepts = true;
+/**
+ * Fires ONCE, on the first statement it is armed for, while that statement is
+ * still in flight. The only way to model something happening to a layer's table
+ * DURING a query the module is awaiting.
+ */
+let onStatement: ((statement: string) => Promise<void>) | null = null;
 
 vi.mock("../../../src/insights/duckdb", () => {
   const run = async (statement: string) => {
     sql.push(statement);
+    if (onStatement) {
+      const hook = onStatement;
+      onStatement = null;
+      await hook(statement);
+    }
     for (const [needle, message] of Object.entries(failures)) {
       if (statement.includes(needle)) return { ok: false as const, message };
     }
@@ -192,6 +203,7 @@ beforeEach(() => {
   engineReady = true;
   initGate = null;
   registerAccepts = true;
+  onStatement = null;
   resetLayerTablesForTest();
   useLayerTableStore.setState({ tables: {} });
 });
@@ -491,6 +503,28 @@ describe("re-describing a table a run has written to", () => {
     // Both the registry and the store, because the next run reads the registry
     // (its `existing` set decides whether Undo restores or drops) and the grid
     // reads the store.
+    expect(stateOf("L1")).toEqual({ state: "ready", info: after });
+  });
+
+  it("bails out when the table was REBUILT while it described", async () => {
+    await enqueueLayerTable("L1", readerSource());
+    const before = getLayerTable("L1")!;
+    expect(before.table).toBe("layer_1");
+
+    // A streaming settle lands between the DESCRIBE going out and its rows
+    // coming back. The refresh describes a table that is no longer the layer's,
+    // and publishing what it read would put the OLD table name back.
+    onStatement = async () => {
+      await enqueueLayerTable("L1", readerSource());
+    };
+    describeRows = [
+      ...READER_DESCRIBE,
+      { column_name: "extent_height_m", column_type: "DOUBLE" },
+    ];
+    await refreshLayerTableColumns("L1");
+
+    const after = getLayerTable("L1")!;
+    expect(after.table).toBe("layer_2");
     expect(stateOf("L1")).toEqual({ state: "ready", info: after });
   });
 
