@@ -154,7 +154,7 @@ afterEach(() => {
 describe("after the analytics engine stops", () => {
   it("disables every tool row with the existing reason", () => {
     // `eligibility.ts` already answers this for `engineState: "failed"`; what
-    // is new is that the panel HEARS about it (the published status).
+    // this pins is that the reason is REACHABLE once the status says so.
     engineStatus = { state: "failed", error: "worker gone" };
     addCityLayer();
     render(<CatalogueView />);
