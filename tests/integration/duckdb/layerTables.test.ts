@@ -99,7 +99,7 @@ const EXPORT_BASE = "exp_t33";
 
 /** Files this suite writes to DISK (see the harness's note on NODE_RUNTIME).
  *  Dropped through DuckDB where it can, removed here as the safety net. */
-const WRITTEN_DIRS = [EXPORT_BASE];
+const WRITTEN_DIRS = [EXPORT_BASE, `${EXPORT_BASE}_joined`];
 const WRITTEN_FILES = [
   `${ATTRIBUTE_BASE}.parquet`,
   `${ATTRIBUTE_BASE}.csv`,
@@ -835,8 +835,40 @@ describe.skipIf(!enabled)("layer tables over real fixtures", () => {
       expect(row.extent_height_m).toBe(12.5 * String(row.id).length);
     }
 
+    // And the WRITER takes it: §8 promises the column "in CityParquet as
+    // attributes", which is the written package, not the scratch table. The
+    // whole sequence runs over the joined source and the column survives into
+    // `building.parquet`.
+    const schema = `${EXPORT_BASE}_joined`;
+    const outDir = schema;
+    db.query(`CREATE SCHEMA ${quoteIdent(schema)}`);
+    db.query(
+      buildCityParquetModuleSql({
+        schema,
+        module: "building",
+        scratchSchema,
+        table: layerTable,
+        moduleTypes: ["Building"],
+      }),
+    );
+    db.query(`PRAGMA cityparquet_init(${quoteLiteral(schema)})`);
+    const written = db.query(
+      `SELECT * FROM cityparquet_write(${quoteLiteral(schema)}, ${quoteLiteral(outDir)}, crs => ${quoteLiteral("EPSG:7415")})`,
+    );
+    expect(written.length).toBeGreaterThan(0);
+    const parquet = `${outDir}/building.parquet`;
+    expect(
+      db.query(
+        `SELECT "extent_height_m" FROM read_parquet(${quoteLiteral(parquet)}) ORDER BY "id"`,
+      ),
+    ).toEqual(rows.map((r) => ({ extent_height_m: r.extent_height_m })));
+
+    db.query("DROP TABLE IF EXISTS cityparquet_validation");
+    db.query(`DROP SCHEMA IF EXISTS ${quoteIdent(schema)} CASCADE`);
     db.query(`DROP SCHEMA IF EXISTS ${quoteIdent(scratchSchema)} CASCADE`);
     db.query(`DROP TABLE IF EXISTS ${quoteIdent(layerTable)}`);
+    db.dropFile(parquet);
+    db.dropFile(`${outDir}/metadata.json`);
     db.dropFile(sourceName);
   });
 });
