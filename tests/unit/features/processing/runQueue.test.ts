@@ -361,7 +361,10 @@ describe("submitRun", () => {
   });
 
   it("fails a tool with no executor rather than hanging", async () => {
-    const id = submitRun(request());
+    // A tool NOTHING registers in this milestone, deliberately: asking for
+    // "height-from-extent" here would pass only because the previous test's
+    // `afterEach` deleted the executor Task 10 registers at module load.
+    const id = submitRun(request({ toolId: "roof-metrics" }));
     await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
     expect(runById(id)?.error).toBe("Not available yet");
   });
