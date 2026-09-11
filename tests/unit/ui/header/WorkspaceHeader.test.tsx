@@ -33,6 +33,7 @@ import {
 } from "../../../../src/features/workspace/workspaceStore";
 import { useShellStore } from "../../../../src/ui/shell/shellStore";
 import { useSelectionStore } from "../../../../src/features/selection/selectionStore";
+import { useProcessingStore } from "../../../../src/features/processing/processingStore";
 import type { SnapshotSummary } from "../../../../src/persistence/types";
 import {
   SINGLE_COLOR_HEX,
@@ -72,6 +73,9 @@ beforeEach(() => {
   useWorkspaceStore.setState({ name: DEFAULT_WORKSPACE_NAME });
   useShellStore.setState({ leftCollapsed: false, rightCollapsed: false });
   useSelectionStore.setState({ selections: [], geoSelection: null });
+  // The details chevron reads it too (a toolbox-only session has a right
+  // column with no selection), so it is part of this header's ground state.
+  useProcessingStore.getState().resetForTest();
 });
 
 afterEach(() => {
@@ -197,6 +201,18 @@ describe("WorkspaceHeader — the panel collapse buttons", () => {
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(true);
+  });
+
+  it("stays live with the toolbox open and nothing selected", () => {
+    // Spec §4.2's collapsed "Tools" pill is reachable only through this
+    // button, and a toolbox-only session has no selection to enable it — so
+    // the right column exists and the chevron must be able to collapse it.
+    useProcessingStore.setState({ open: true });
+    render(<WorkspaceHeader {...baseProps} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Collapse details panel" }),
+    );
+    expect(useShellStore.getState().rightCollapsed).toBe(true);
   });
 
   it("collapses and expands the details panel once there is a selection", () => {

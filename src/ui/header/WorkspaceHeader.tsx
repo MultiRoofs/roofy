@@ -14,13 +14,16 @@
  * one at the very end, above its panel. A collapse button that is not over the
  * thing it collapses is a button you have to learn.
  *
- * The details button is disabled with no selection, and that is not a
- * defensive check: the right column is not rendered at all without one
- * (`ViewerShell` gives it width 0), so the button would collapse nothing.
- * It reads the selection store directly rather than taking a prop — the
- * formula ("a city selection or a geo selection") already exists in App and
- * in `ViewerShell`, and a third copy passed down as a boolean would be a
- * third thing to keep in step.
+ * The details button is disabled when there is nothing on the right at all,
+ * and that is not a defensive check: without a right column (`ViewerShell`
+ * gives it width 0) the button would collapse nothing. Two things put
+ * something there — a selection, or the processing toolbox, which occupies
+ * the same column with or without one (spec §4.2). Miss the second and a
+ * toolbox-only session can never collapse the panel, which is the only way to
+ * reach §4.2's "Tools" pill. Both are read from their stores directly rather
+ * than taken as props — the formulas already exist in App and in
+ * `ViewerShell`, and a third copy passed down as a boolean would be a third
+ * thing to keep in step.
  *
  * "Saved · just now" replaces nothing — the save toast still explains where
  * the workspace went. This is the acknowledgement AT the button, muted, for
@@ -32,6 +35,7 @@ import { useEffect, useRef, useState } from "react";
 import { RoofyLockup } from "../RoofyLockup";
 import { useShellStore } from "../shell/shellStore";
 import { useSelectionStore } from "../../features/selection/selectionStore";
+import { useProcessingStore } from "../../features/processing/processingStore";
 import type { SnapshotSummary } from "../../persistence/types";
 import { WorkspaceMenu } from "./WorkspaceMenu";
 import { PreferencesMenu } from "./PreferencesMenu";
@@ -70,6 +74,7 @@ export function WorkspaceHeader({
   const hasSelection = useSelectionStore(
     (s) => s.selections.length > 0 || s.geoSelection !== null,
   );
+  const toolboxOpen = useProcessingStore((s) => s.open);
 
   const [savedNote, setSavedNote] = useState(false);
   /** One timer, held so a second save re-arms it instead of letting the first
@@ -190,7 +195,7 @@ export function WorkspaceHeader({
           rightCollapsed ? "Expand details panel" : "Collapse details panel"
         }
         data-tooltip-align="end"
-        disabled={!hasSelection}
+        disabled={!hasSelection && !toolboxOpen}
         onClick={toggleRightCollapsed}
       >
         <svg viewBox="0 0 24 24">
