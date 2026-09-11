@@ -4,6 +4,12 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 const runQuery = vi.fn();
 vi.mock("../../../../src/insights/duckdb", () => ({
   runQuery: (sql: string) => runQuery(sql),
+  // Every mock of this module carries the status subscription, whether or not
+  // the file under test reaches it today. The moment one of its suites renders
+  // something that does, a factory without them fails the whole file with
+  // vitest's `No "subscribeDuckDBStatus" export is defined on the … mock`.
+  subscribeDuckDBStatus: () => () => {},
+  getDuckDBStatusVersion: () => 0,
 }));
 
 const { useLayerCounts } =

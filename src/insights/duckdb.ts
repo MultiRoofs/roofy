@@ -100,10 +100,23 @@ const statusListeners = new Set<() => void>();
 function setStatus(next: DuckDBStatus): void {
   status = next;
   statusVersion += 1;
-  // Over a COPY: a listener is allowed to unsubscribe from inside its own
-  // notification, and mutating the set mid-iteration would silently skip the
-  // listener that happens to follow it.
-  for (const listener of Array.from(statusListeners)) listener();
+  // Over a COPY, so this dispatch's membership is frozen: a listener that
+  // subscribes or unsubscribes from inside its own notification changes who
+  // hears the NEXT transition, never who hears the one in flight.
+  for (const listener of Array.from(statusListeners)) {
+    // Per listener, because a subscriber is an OBSERVER and this is engine
+    // work. `setStatus` is called from `doInit` — the `initializing` publish
+    // sits before its try — so an escaping exception would abort the boot with
+    // the status stranded at `initializing`, and one thrown from the `failed`
+    // publish would jump over the Worker terminate and the memo reset in the
+    // catch, stranding a wasm heap no Retry could reach. It would also skip
+    // every listener queued after the thrower.
+    try {
+      listener();
+    } catch (error) {
+      console.error("A DuckDB status listener threw:", error);
+    }
+  }
 }
 
 export function subscribeDuckDBStatus(listener: () => void): () => void {

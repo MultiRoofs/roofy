@@ -13,6 +13,10 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 const queries: string[] = [];
 const refuse = new Set<string>();
 let failBundle = false;
+/** Fails the boot AFTER the Worker exists, which is the only way to watch
+ *  `doInit`'s catch terminate it. */
+let failInstantiate = false;
+const terminations = { count: 0 };
 
 vi.mock("@duckdb/duckdb-wasm", () => {
   class FakeConnection {
@@ -29,7 +33,9 @@ vi.mock("@duckdb/duckdb-wasm", () => {
   }
   return {
     AsyncDuckDB: class {
-      async instantiate() {}
+      async instantiate() {
+        if (failInstantiate) throw new Error("wasm refused");
+      }
       async connect() {
         return new FakeConnection();
       }
@@ -49,7 +55,9 @@ vi.mock("@duckdb/duckdb-wasm", () => {
 
 // jsdom has neither of these, and `doInit` uses both to wrap the CDN worker.
 class FakeWorker {
-  terminate() {}
+  terminate() {
+    terminations.count += 1;
+  }
 }
 
 type DuckdbModule = typeof import("../../../src/insights/duckdb");
@@ -61,6 +69,8 @@ beforeEach(async () => {
   queries.length = 0;
   refuse.clear();
   failBundle = false;
+  failInstantiate = false;
+  terminations.count = 0;
   vi.stubGlobal("Worker", FakeWorker);
   // `duckdb.ts` is a module singleton: a fresh copy per test is the only way
   // to observe a BOOT, which happens exactly once per module instance.
@@ -80,6 +90,10 @@ beforeEach(async () => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  // Belt and braces for the `console.error` spies below: an assertion that
+  // fails before their own `mockRestore()` would otherwise leave console.error
+  // silenced for every test after it.
+  vi.restoreAllMocks();
 });
 
 /** Every state the module published, in order, for one test. */
@@ -191,6 +205,49 @@ describe("duckdb.ts publishes every transition", () => {
     expect(status.extensions.spatial.state).toBe("unloaded");
   });
 
+  it("isolates a THROWING listener: the boot finishes and the others still hear it", async () => {
+    // A subscriber is an observer. `setStatus` is called from `doInit` — the
+    // `initializing` publish is BEFORE its try — so an exception escaping a
+    // listener would abort the boot with the status stranded at
+    // `initializing`, and would also skip every listener after the thrower.
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    duckdb.subscribeDuckDBStatus(() => {
+      throw new Error("listener exploded");
+    });
+    const { seen, stop } = record();
+    await duckdb.initDuckDB();
+    stop();
+    expect(seen).toEqual(["initializing", "ready:unloaded"]);
+    expect(duckdb.getDuckDBStatus().state).toBe("ready");
+    expect(
+      errors.mock.calls.some((call) =>
+        call.some(
+          (arg) => arg instanceof Error && arg.message === "listener exploded",
+        ),
+      ),
+    ).toBe(true);
+    errors.mockRestore();
+  });
+
+  it("isolates a THROWING listener on the FAILURE path: the Worker still dies", async () => {
+    // The same exception on the `failed` publish would jump over the Worker
+    // terminate and the memo reset in `doInit`'s catch, leaving a zombie wasm
+    // heap and a rejected-once memo no Retry could clear.
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    failInstantiate = true;
+    duckdb.subscribeDuckDBStatus(() => {
+      throw new Error("listener exploded");
+    });
+    await duckdb.initDuckDB();
+    expect(duckdb.getDuckDBStatus().state).toBe("failed");
+    expect(terminations.count).toBe(1);
+    // …and the memo was still reset, so a Retry really retries.
+    failInstantiate = false;
+    await duckdb.initDuckDB();
+    expect(duckdb.getDuckDBStatus().state).toBe("ready");
+    errors.mockRestore();
+  });
+
   it("sends nothing to a listener that has unsubscribed", async () => {
     await duckdb.initDuckDB();
     const { seen, stop } = record();
@@ -227,13 +284,36 @@ describe("useDuckDBStatus", () => {
   });
 
   it("stops listening when the component unmounts", async () => {
+    // The unsubscribe is OBSERVED, not inferred: the hook hands
+    // `subscribeDuckDBStatus` straight to `useSyncExternalStore`, so wrapping
+    // the function is the only place the teardown is visible from outside.
+    const real = duckdb.subscribeDuckDBStatus;
+    const stops: Array<ReturnType<typeof vi.fn>> = [];
+    const spy = vi
+      .spyOn(duckdb, "subscribeDuckDBStatus")
+      .mockImplementation((listener: () => void) => {
+        const stop = real(listener);
+        const wrapped = vi.fn(() => {
+          stop();
+        });
+        stops.push(wrapped);
+        return wrapped;
+      });
+
     const view = render(<Probe />);
+    expect(stops.length).toBeGreaterThan(0);
+    expect(stops.every((s) => s.mock.calls.length === 0)).toBe(true);
     await act(async () => {
       await duckdb.initDuckDB();
     });
+
     view.unmount();
-    // No act() wrapper and no warning: nothing is subscribed any more, so this
-    // transition must not schedule a React update at all.
+    // Every subscription the hook opened was closed again.
+    expect(stops.every((s) => s.mock.calls.length === 1)).toBe(true);
+    spy.mockRestore();
+
+    // …and with nobody listening the module goes on working: this transition
+    // needs no act() wrapper because it can no longer schedule a React update.
     await duckdb.ensureExtension("spatial");
     expect(duckdb.isExtensionLoaded("spatial")).toBe(true);
   });
