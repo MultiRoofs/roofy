@@ -70,7 +70,10 @@ import {
 import { installGeoJsonPreparation } from "../features/geoLayers/geoJsonPreparation";
 import { resolveGeoLayerBounds } from "../features/geoLayers/geoLayerBounds";
 import { installLayerTableLifecycle } from "../features/layers/layerTableLifecycle";
-import { installStaleWatcher } from "../features/processing/runQueue";
+import {
+  installStaleWatcher,
+  installTargetRemovalWatcher,
+} from "../features/processing/runQueue";
 import { installMapFilterSync } from "../features/query/mapFilterSync";
 import { useLayerFileLoader } from "../features/layers/useLayerFileLoader";
 import { ensureModelCrsLoadable } from "../features/layers/ensureCrs";
@@ -837,6 +840,14 @@ export function App({
    * freed. See `features/rules/ruleDraftStore.ts`.
    */
   useEffect(() => installRuleDraftInvariants(), []);
+
+  /**
+   * Spec §6.1: removing a layer while a run of its own is queued or executing
+   * fails that run with "Layer removed" instead of letting it compute against
+   * — and write onto — a layer the user has thrown away. Same installed-once
+   * shape as the invariants above.
+   */
+  useEffect(() => installTargetRemovalWatcher(), []);
   useEffect(() => installGeoJsonPreparation(), []);
 
   useEffect(

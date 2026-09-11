@@ -291,6 +291,17 @@ function discardUndo(id: string): void {
   ).catch(() => {});
 }
 
+/**
+ * Has something already failed this run with a reason of its own?
+ *
+ * Only one thing can: the target-removal watcher, which patches the card and
+ * THEN aborts. `execute` hears that abort as an ordinary cancel, and would
+ * overwrite "Layer removed" with a cancel the user never asked for.
+ */
+function failedAlready(id: string): boolean {
+  return runById(id)?.status === "failed";
+}
+
 async function execute(
   id: string,
   request: FrozenRequest,
@@ -362,7 +373,9 @@ async function execute(
     // Cancelled while the scope query was in flight. `cancelRun` has patched the
     // card already, but a run that is about to start must not.
     if (signal.aborted) {
-      patch(id, { status: "cancelled", phase: null, elapsedMs: elapsed() });
+      if (!failedAlready(id)) {
+        patch(id, { status: "cancelled", phase: null, elapsedMs: elapsed() });
+      }
       return;
     }
     patch(id, {
@@ -544,6 +557,10 @@ async function execute(
     });
     useProcessingStore.getState().pushNotice(summary.line);
   } catch (error) {
+    // The target-removal watcher aborts the run AND says why (§6.1's "Layer
+    // removed"). Its abort is what lands here, so the reason it wrote outranks
+    // the plain cancel this would otherwise report.
+    if (failedAlready(id)) return;
     if (error instanceof CancelledError || signal.aborted) {
       patch(id, {
         status: "cancelled",
@@ -646,6 +663,66 @@ export async function undoRun(id: string): Promise<void> {
   }
   undoState.delete(id);
   patch(id, { undoable: false, note: "Undone" });
+}
+
+let disposeTargetWatcher: (() => void) | null = null;
+
+/**
+ * Spec §6.1: "Removing the target or the source layer during a run cancels it
+ * ('Layer removed')."
+ *
+ * The head of the queue already refuses a run whose layer is gone, but that is
+ * only checked ONCE, before the executor: a layer removed while the tool is
+ * computing left the run measuring a layer the user had thrown away, and the
+ * write then landed on its table. So the removal has to reach the run where it
+ * is, which is what the controller is for.
+ *
+ * The card is patched BEFORE the abort, deliberately: the abort surfaces in
+ * `execute` as an ordinary cancel, and the reason has to be on the record by
+ * then for `failedAlready` to keep it.
+ *
+ * Installed once, by the app shell, disposing any earlier install — the same
+ * single-live-installer shape as `installRuleDraftInvariants`: a hot reload
+ * must not leave two watchers failing the same runs twice.
+ */
+export function installTargetRemovalWatcher(): () => void {
+  disposeTargetWatcher?.();
+
+  const failRunsWithoutTarget = () => {
+    const layerIds = new Set(useLayerStore.getState().layers.map((l) => l.id));
+    for (const run of useProcessingStore.getState().runs) {
+      if (
+        run.status !== "queued" &&
+        run.status !== "running" &&
+        run.status !== "cancelling"
+      ) {
+        continue;
+      }
+      if (layerIds.has(run.targetLayerId)) continue;
+      patch(run.id, {
+        status: "failed",
+        phase: null,
+        error: "Layer removed",
+        elapsedMs: Math.max(0, Date.now() - run.startedAt),
+      });
+      controllers.get(run.id)?.abort();
+    }
+  };
+
+  const unsubscribe = useLayerStore.subscribe((state, previous) => {
+    // Only the LIST matters here; the store's other writes (a colour, a filter,
+    // a merged attribute) are not removals.
+    if (state.layers === previous.layers) return;
+    failRunsWithoutTarget();
+  });
+  failRunsWithoutTarget();
+
+  const dispose = () => {
+    unsubscribe();
+    if (disposeTargetWatcher === dispose) disposeTargetWatcher = null;
+  };
+  disposeTargetWatcher = dispose;
+  return dispose;
 }
 
 /**

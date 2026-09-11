@@ -157,8 +157,14 @@ vi.mock("../../../../src/insights/layerTables", async () => {
 });
 
 const tables = await import("../../../../src/insights/layerTables");
-const { submitRun, retryRun, cancelRun, undoRun, installStaleWatcher } =
-  await import("../../../../src/features/processing/runQueue");
+const {
+  submitRun,
+  retryRun,
+  cancelRun,
+  undoRun,
+  installStaleWatcher,
+  installTargetRemovalWatcher,
+} = await import("../../../../src/features/processing/runQueue");
 const { registerExecutor, EXECUTORS } =
   await import("../../../../src/features/processing/tools");
 const { runById, useProcessingStore } =
@@ -804,6 +810,84 @@ describe("undoRun", () => {
     sql.length = 0;
     await undoRun(id);
     expect(sql).toEqual([]);
+  });
+});
+
+describe("installTargetRemovalWatcher", () => {
+  it("fails a QUEUED run whose target was removed, before it can start", async () => {
+    const stop = installTargetRemovalWatcher();
+    const hold = deferred<void>();
+    let calls = 0;
+    registerExecutor("height-from-extent", async () => {
+      calls += 1;
+      if (calls === 1) await hold.promise;
+      return {
+        columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+        rows: new Map([["a", { extent_height_m: 4 }]]),
+        measured: 1,
+        skipped: [],
+      };
+    });
+    const first = submitRun(request());
+    const second = submitRun(request());
+    await vi.waitFor(() => expect(runById(first)?.status).toBe("running"));
+
+    useLayerStore.setState({ layers: [] });
+    expect(runById(second)?.status).toBe("failed");
+    expect(runById(second)?.error).toBe("Layer removed");
+
+    hold.resolve();
+    // The queued run never reached its executor: the head saw the abort.
+    await vi.waitFor(() => expect(runById(first)?.status).not.toBe("running"));
+    expect(calls).toBe(1);
+    stop();
+  });
+
+  it("aborts a RUNNING run whose target was removed and says why", async () => {
+    // Spec §6.1: "Removing the target or the source layer during a run cancels
+    // it ('Layer removed')" — the run must not go on measuring a layer the user
+    // has thrown away, and must not publish onto it either.
+    const stop = installTargetRemovalWatcher();
+    let seen: AbortSignal | null = null;
+    registerExecutor("height-from-extent", async (_run, ctx) => {
+      seen = ctx.signal;
+      await new Promise((_resolve, reject) => {
+        ctx.signal.addEventListener("abort", () => reject(new Error("stop")));
+      });
+      throw new Error("unreachable");
+    });
+    const id = submitRun(request());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("running"));
+
+    useLayerStore.setState({ layers: [] });
+    expect((seen as AbortSignal | null)?.aborted).toBe(true);
+    expect(runById(id)?.status).toBe("failed");
+    expect(runById(id)?.error).toBe("Layer removed");
+    expect(runById(id)?.elapsedMs).toBeGreaterThanOrEqual(0);
+
+    // The executor's rejection arrives afterwards and must not rewrite the
+    // reason as a plain cancel.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(runById(id)?.status).toBe("failed");
+    expect(runById(id)?.error).toBe("Layer removed");
+    expect(sql).not.toContain("BEGIN TRANSACTION");
+    stop();
+  });
+
+  it("leaves finished runs and other layers' runs alone", async () => {
+    const stop = installTargetRemovalWatcher();
+    registerExecutor("height-from-extent", async () => ({
+      columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+    const id = submitRun(request());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    useLayerStore.setState({ layers: [{ ...layer(), id: "L2" }] });
+    expect(runById(id)?.status).toBe("done");
+    expect(runById(id)?.error).toBeNull();
+    stop();
   });
 });
 
