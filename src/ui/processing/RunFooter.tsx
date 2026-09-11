@@ -54,7 +54,12 @@ export function RunFooter({ run, canRun, reason }: Props) {
           aria-busy="true"
           aria-label={status === "cancelling" ? "Cancelling" : "Running"}
         />
-        <p className="processing-phases">{phaseLine(run.phase)}</p>
+        {/* The phase is the only thing that CHANGES under a screen reader here;
+            the elapsed ticker beside it is deliberately NOT a live region — at
+            250 ms it would talk over every other announcement. */}
+        <p className="processing-phases" aria-live="polite">
+          {phaseLine(run.phase)}
+        </p>
         <div className="processing-footer__row">
           <span className="processing-elapsed">{seconds(elapsed)}</span>
           <button

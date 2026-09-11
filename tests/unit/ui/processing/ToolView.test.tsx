@@ -318,6 +318,24 @@ describe("ToolView", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
+  it("announces the running phase in a polite live region", () => {
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() =>
+      useProcessingStore.getState().upsertRun(
+        runFixture({
+          status: "running",
+          phase: "compute",
+          targetLayerId: layerId,
+        }),
+      ),
+    );
+    expect(screen.getByText(/Computing/)).toHaveAttribute(
+      "aria-live",
+      "polite",
+    );
+  });
+
   it("retries a failed run with its FROZEN parameters, not the draft", () => {
     const layerId = addCityLayer();
     render(<ToolView toolId="height-from-extent" />);

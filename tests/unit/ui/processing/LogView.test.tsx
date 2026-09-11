@@ -62,6 +62,20 @@ afterEach(() => {
 });
 
 describe("LogView", () => {
+  it("lists a warning the run raised twice, without colliding keys", () => {
+    const twice = "ST_3DVolume skipped 37 invalid solids";
+    useProcessingStore
+      .getState()
+      .upsertRun(runFixture({ warnings: [twice, twice] }));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<LogView runId="r1" />);
+    expect(screen.getAllByText(twice)).toHaveLength(2);
+    expect(errors.mock.calls.map((c) => String(c[0])).join("\n")).not.toMatch(
+      /same key/,
+    );
+    errors.mockRestore();
+  });
+
   it("renders the header, the statement and the warning", () => {
     useProcessingStore.getState().upsertRun(runFixture());
     render(<LogView runId="r1" />);

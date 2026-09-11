@@ -88,6 +88,10 @@ export function LogView({ runId }: { readonly runId: string }) {
           </div>
         ))}
       </dl>
+      {/* Both lists are APPEND-ONLY records of a finished run and are never
+          reordered or filtered, so the index is a stable part of the key; the
+          label / text alone is not unique (a tool may warn the same thing
+          twice, or issue the same labelled statement twice). */}
       {run.log.map((entry, i) => (
         <div key={`${entry.label}-${i}`} className="processing-log__entry">
           <p className="processing-log__label">{entry.label}</p>
@@ -98,8 +102,8 @@ export function LogView({ runId }: { readonly runId: string }) {
           </p>
         </div>
       ))}
-      {run.warnings.map((warning) => (
-        <p key={warning} className="processing-warning">
+      {run.warnings.map((warning, i) => (
+        <p key={`${warning}-${i}`} className="processing-warning">
           {warning}
         </p>
       ))}
