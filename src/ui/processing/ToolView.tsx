@@ -180,6 +180,26 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
       </fieldset>
       <fieldset className="processing-section" disabled={locked}>
         <legend className="processing-group__label">OUTPUT</legend>
+        {/* §6: OUTPUT "starts with the destination, Write to". Its second
+            radio, New layer, is a later milestone — so the one destination
+            there is shows as a checked, disabled radio rather than as nothing
+            at all: where the columns land is part of reading the form, and an
+            invisible answer is one the user has to assume. */}
+        <div className="processing-field">
+          <span>Write to</span>
+          <div
+            className="processing-radios"
+            role="radiogroup"
+            aria-label="Write to"
+          >
+            <label>
+              {/* `readOnly` beside `checked`: the radio can never change (it is
+                  the only destination), and React asks for one or the other. */}
+              <input type="radio" name="writeTo" checked readOnly disabled />
+              This layer{f.target === null ? "" : ` (${f.target.name})`}
+            </label>
+          </div>
+        </div>
         <label className="processing-field">
           <span>Prefix</span>
           <input

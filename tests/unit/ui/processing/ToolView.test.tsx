@@ -261,6 +261,20 @@ describe("ToolView", () => {
     );
   });
 
+  it("opens OUTPUT with Write to, on the target, with no other destination", () => {
+    // §6: OUTPUT "starts with the destination, Write to". New layer is a later
+    // milestone, so the one radio is checked and disabled rather than absent —
+    // the user can see where the columns are going.
+    addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    const writeTo = screen.getByRole("radio", {
+      name: "This layer (Delft)",
+    });
+    expect(writeTo).toBeChecked();
+    expect(writeTo).toBeDisabled();
+    expect(screen.queryByRole("radio", { name: /New layer/ })).toBeNull();
+  });
+
   it("reads a count that has not arrived as pending, not as zero", () => {
     counts.all = null;
     addCityLayer();
