@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildCountSql,
   buildFeatureIdsSql,
+  buildFeatureRowsSql,
   buildFeatureScopeWhere,
   buildPageSql,
   buildRootTypesSql,
@@ -189,6 +190,20 @@ describe("buildFeatureIdsSql", () => {
   it("returns every id when there is no filter", () => {
     expect(buildFeatureIdsSql("layer_1", null)).toBe(
       'SELECT "id" FROM "layer_1"',
+    );
+  });
+});
+
+describe("buildFeatureRowsSql", () => {
+  it("projects the id beside its feature root, feature-scoped", () => {
+    expect(buildFeatureRowsSql("layer_1", `"id" IN ('a-part')`)).toBe(
+      'SELECT "id", COALESCE("feature_id", "id") AS f FROM "layer_1" WHERE COALESCE("feature_id", "id") IN (SELECT COALESCE("feature_id", "id") FROM "layer_1" WHERE "id" IN (\'a-part\'))',
+    );
+  });
+
+  it("returns every row when there is no filter", () => {
+    expect(buildFeatureRowsSql("layer_1", null)).toBe(
+      'SELECT "id", COALESCE("feature_id", "id") AS f FROM "layer_1"',
     );
   });
 });

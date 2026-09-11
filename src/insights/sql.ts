@@ -455,6 +455,25 @@ export function buildFeatureIdsSql(
 }
 
 /**
+ * The rows `where` names, each beside its FEATURE ROOT.
+ *
+ * A processing run needs both halves of that pair and cannot derive one from
+ * the other: it writes to every ROW of a matched feature (attributes live on
+ * the `Building`, geometry on its `BuildingPart`s), while the scope it reports
+ * to the user — "All 1,115 buildings" — counts FEATURES. `id` alone cannot say
+ * which rows share a root, so the root travels with it as `f`.
+ */
+export function buildFeatureRowsSql(
+  table: string,
+  where: string | null,
+): string {
+  const t = quoteIdent(table);
+  const select = `SELECT "id", COALESCE("feature_id", "id") AS f FROM ${t}`;
+  const scope = buildFeatureScopeWhere(table, where);
+  return scope === null ? select : `${select} WHERE ${scope}`;
+}
+
+/**
  * The layer's TOP-LEVEL object types — what the export dialog offers.
  *
  * `parents IS NULL` is the test, not a type-name heuristic: the reader writes
