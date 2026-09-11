@@ -29,6 +29,8 @@ import type { ToolId } from "../../features/processing/types";
 import { useEligibilityContext } from "./useEligibilityContext";
 import { useActiveLayer } from "../../features/workspace/activeLayer";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
+import type { RunRecord } from "../../features/processing/types";
+import type { RunRequest } from "../../features/processing/runQueue";
 
 /** Output column names per tool; M1 knows one tool, later milestones extend this map. */
 export const OUTPUT_COLUMNS: Readonly<
@@ -46,6 +48,33 @@ export const OUTPUT_COLUMNS: Readonly<
  *  asked for, and the collision check below is what refuses it when they are
  *  already the source's. */
 const PREFIX_RE = /^(?:[a-z][a-z0-9_]*)?$/i;
+
+/** Every output column of every M1 tool is DOUBLE (spec §7). */
+function asColumns(names: ReadonlyArray<string>): RunRequest["columns"] {
+  return names.map((name) => ({ name, type: "DOUBLE" as const }));
+}
+
+/**
+ * The request a Retry / Re-run repeats (spec §6.3: "the same parameters").
+ *
+ * The columns are re-derived from the tool's own map rather than read off the
+ * record, so a record written by an older session still gets the names this
+ * build would write; `run.columns` is the fallback for a tool the map does not
+ * know.
+ */
+export function requestFromRun(run: RunRecord): RunRequest {
+  const names =
+    OUTPUT_COLUMNS[run.toolId]?.(run.prefix, run.params) ?? run.columns;
+  return {
+    toolId: run.toolId,
+    targetLayerId: run.targetLayerId,
+    scope: run.scope,
+    lod: run.lod,
+    params: run.params,
+    prefix: run.prefix,
+    columns: asColumns(names),
+  };
+}
 
 export function useToolForm(toolId: ToolId) {
   const tool = toolById(toolId);

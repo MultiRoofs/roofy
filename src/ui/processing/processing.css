@@ -357,3 +357,114 @@
   padding: 0 10px;
   font-size: 11px;
 }
+
+/* ── Recent runs (spec §5) ─────────────────────────────────────────── */
+.processing-run-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.processing-run-row {
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.processing-run-row:first-child {
+  border-top: 0;
+}
+.processing-run-row__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg);
+}
+.processing-run-row__dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fg-dim);
+}
+.processing-run-row__dot[data-status="done"] {
+  background: var(--lime-500);
+}
+.processing-run-row__dot[data-status="failed"] {
+  background: var(--brand-secondary);
+}
+.processing-run-row__dot[data-status="cancelled"],
+.processing-run-row__dot[data-status="cancelling"] {
+  background: var(--fg-dim);
+}
+.processing-run-row__dot[data-status="running"] {
+  background: var(--lime-500);
+  animation: processing-pulse 1.2s ease-in-out infinite;
+}
+.processing-run-row__dot[data-status="queued"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--fg-dim);
+}
+@keyframes processing-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .processing-run-row__dot[data-status="running"] {
+    animation: none;
+  }
+}
+.processing-run-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.processing-run-row__actions button {
+  min-height: var(--control-height-compact);
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+/* ── Log view (spec §6.4) ──────────────────────────────────────────── */
+.processing-log__copy {
+  margin-left: auto;
+  min-height: var(--control-height-compact);
+  padding: 0 10px;
+  font-size: 11px;
+}
+.processing-log__header {
+  margin: 10px 0 14px;
+}
+.processing-log__row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 11px;
+}
+.processing-log__row dt {
+  color: var(--fg-muted);
+}
+.processing-log__row dd {
+  margin: 0;
+  color: var(--fg);
+  word-break: break-word;
+}
+.processing-log__entry {
+  margin-bottom: 10px;
+}
+.processing-log__label {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fg);
+}
+.processing-log__entry pre {
+  margin: 0 0 4px;
+  padding: 8px;
+  overflow-x: auto;
+  border-radius: var(--control-radius);
+  background: var(--bg-raised);
+  font: 11px/1.5 var(--font-mono);
+  color: var(--fg);
+}

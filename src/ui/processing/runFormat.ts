@@ -2,6 +2,7 @@
  * Pure formatting for a run's card, its row in the history and its log. Kept
  * out of the components so the strings can be asserted without rendering.
  */
+import { toolById } from "../../features/processing/toolRegistry";
 import type { RunPhase, RunRecord } from "../../features/processing/types";
 
 export const PHASES: ReadonlyArray<{
@@ -67,7 +68,7 @@ export const STATUS_WORD: Readonly<Record<RunRecord["status"], string>> = {
 /** Spec §6.4's Copy: the whole log as plain text. */
 export function formatRunLog(run: RunRecord): string {
   const lines: string[] = [];
-  lines.push(`Tool: ${run.toolId}`);
+  lines.push(`Tool: ${toolById(run.toolId).name}`);
   lines.push(`Target layer: ${run.targetName}`);
   lines.push(`Source layer: ${run.sourceName ?? "—"}`);
   lines.push(
