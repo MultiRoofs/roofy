@@ -107,6 +107,7 @@ const {
   getLayerTable,
   resetLayerTablesForTest,
   retryEngine,
+  runOnTableQueue,
   useLayerTableStore,
 } = await import("../../../src/insights/layerTables");
 
@@ -405,5 +406,40 @@ describe("rebuild", () => {
     await Promise.all([a, b]);
     expect(getLayerTable("A")!.table).toBe("layer_1");
     expect(getLayerTable("B")!.table).toBe("layer_2");
+  });
+});
+
+describe("runOnTableQueue", () => {
+  it("runs after work already queued and before work queued later", async () => {
+    const order: string[] = [];
+    // NOT the module-level `gate` (the mock's hold-the-CREATE hook): these
+    // tasks send no SQL, they only need a latch of their own.
+    const hold = makeGate();
+    const first = runOnTableQueue(async () => {
+      await hold.promise;
+      order.push("first");
+    });
+    const second = runOnTableQueue(async () => {
+      order.push("second");
+      return 42;
+    });
+    hold.open();
+    await expect(second).resolves.toBe(42);
+    await first;
+    // A door that merely called the task would let `second` finish while
+    // `first` was still held, which is exactly the interleaving a run's
+    // ALTER must never do to a CREATE OR REPLACE.
+    expect(order).toEqual(["first", "second"]);
+  });
+
+  it("propagates a rejection without stalling the queue", async () => {
+    await expect(
+      runOnTableQueue(async () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    // The tail swallows both branches, so one failed run cannot wedge every
+    // later build behind it.
+    await expect(runOnTableQueue(async () => "next")).resolves.toBe("next");
   });
 });

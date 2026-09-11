@@ -339,6 +339,12 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
   return next;
 }
 
+/** Public door onto the ONE queue for work that must not interleave with a
+ *  table build: a processing run's ALTER/UPDATE on a layer table. */
+export function runOnTableQueue<T>(task: () => Promise<T>): Promise<T> {
+  return enqueue(task);
+}
+
 export function resetLayerTablesForTest(): void {
   registry.clear();
   cancelBefore.clear();
