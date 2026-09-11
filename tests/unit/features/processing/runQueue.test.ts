@@ -239,6 +239,26 @@ function deferred<T>(): {
   return { promise, resolve };
 }
 
+/**
+ * Mark a column of the fake table as one an EARLIER RUN wrote.
+ *
+ * The distinction is load-bearing since §6's source-column rule is enforced at
+ * the head of the queue: a column with no provenance belongs to the FILE, and a
+ * run that would overwrite it is refused. A test that puts a column on the
+ * table and then runs over it is describing a computed column, and has to say
+ * so the way the app knows it — through the registry.
+ */
+function computedAlready(column: string): void {
+  useComputedColumnStore.getState().setProvenance("L1", column, {
+    runId: "run_0",
+    toolName: "Height from extent",
+    summary: "All 1 building",
+    at: Date.now(),
+    partial: null,
+    previous: null,
+  });
+}
+
 /** One run request, with the height-from-extent tool's real shape. */
 function request(overrides: Record<string, unknown> = {}) {
   return {
@@ -497,6 +517,76 @@ describe("submitRun", () => {
     expect(seen[1]).toEqual(["a"]);
   });
 
+  it("refuses at the head a column that now belongs to the source data", async () => {
+    // §6.1's re-validation names it: "a column that now belongs to the file
+    // fails the run with that reason". The form checked before the run queued;
+    // by the head the table can hold a column of the file's own — and DuckDB's
+    // identifiers being case-insensitive, "EXTENT_height_m" IS that column.
+    liveColumns = ["id", "feature_id", "extent_height_m"];
+    tableInfo = {
+      ...freshTable(),
+      columns: liveColumns.map((name) => ({
+        name,
+        type: "VARCHAR",
+        kind: "scalar" as const,
+      })),
+    };
+    let calls = 0;
+    registerExecutor("height-from-extent", async () => {
+      calls += 1;
+      return {
+        columns: [{ name: "EXTENT_height_m", type: "DOUBLE" }],
+        rows: new Map([["a", { EXTENT_height_m: 4 }]]),
+        measured: 1,
+        skipped: [],
+      };
+    });
+    const id = submitRun(
+      request({
+        prefix: "EXTENT_",
+        columns: [{ name: "EXTENT_height_m", type: "DOUBLE" }],
+      }),
+    );
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
+    expect(runById(id)?.error).toBe(
+      "'extent_height_m' belongs to the source data; choose another prefix",
+    );
+    expect(calls).toBe(0);
+    expect(sql).not.toContain("BEGIN TRANSACTION");
+  });
+
+  it("replaces a COMPUTED column whose case differs, rather than creating it", async () => {
+    // The other half of the same fact: a column an earlier run wrote is the
+    // run's to replace, whatever case the prefix is typed in — and it must be
+    // BACKED UP, or this run's Undo would drop a column it did not create.
+    liveColumns = ["id", "feature_id", "extent_height_m"];
+    tableInfo = {
+      ...freshTable(),
+      columns: liveColumns.map((name) => ({
+        name,
+        type: "VARCHAR",
+        kind: "scalar" as const,
+      })),
+    };
+    computedAlready("extent_height_m");
+    registerExecutor("height-from-extent", async () => ({
+      columns: [{ name: "EXTENT_height_m", type: "DOUBLE" }],
+      rows: new Map([["a", { EXTENT_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+    const id = submitRun(
+      request({
+        prefix: "EXTENT_",
+        columns: [{ name: "EXTENT_height_m", type: "DOUBLE" }],
+      }),
+    );
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    expect(sql.some((s) => s.startsWith(`CREATE TABLE "__undo_${id}"`))).toBe(
+      true,
+    );
+  });
+
   it("has nothing to retry for a run it never froze", () => {
     expect(retryRun("run_nope")).toBeNull();
   });
@@ -649,6 +739,7 @@ describe("a run over a column an earlier run wrote", () => {
   it("takes the earlier run's Undo away and drops its backup", async () => {
     // The column is already on the table, so BOTH runs replace it.
     liveColumns = ["id", "feature_id", "extent_height_m"];
+    computedAlready("extent_height_m");
     tableInfo = {
       ...freshTable(),
       columns: liveColumns.map((name) => ({
@@ -680,6 +771,7 @@ describe("a run over a column an earlier run wrote", () => {
     // and by the time it reaches the head its backup describes the state TWO
     // writes ago — restoring it would delete what run 2 just wrote.
     liveColumns = ["id", "feature_id", "extent_height_m"];
+    computedAlready("extent_height_m");
     tableInfo = {
       ...freshTable(),
       columns: liveColumns.map((name) => ({
@@ -893,9 +985,10 @@ describe("installTargetRemovalWatcher", () => {
 
 describe("installStaleWatcher", () => {
   it("marks the layer's runs stale when its table is rebuilt", async () => {
-    // The column is pre-existing, so the run keeps a backup table — a rebuilt
-    // table makes that copy unreadable as well as useless.
+    // The column is one an earlier run wrote, so this run keeps a backup table
+    // — a rebuilt table makes that copy unreadable as well as useless.
     liveColumns = ["id", "feature_id", "extent_height_m"];
+    computedAlready("extent_height_m");
     tableInfo = {
       ...freshTable(),
       columns: liveColumns.map((name) => ({

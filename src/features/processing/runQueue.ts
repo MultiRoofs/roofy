@@ -31,6 +31,7 @@
 import { runQuery, type QueryOutcome } from "../../insights/duckdb";
 import { quoteIdent } from "../../insights/sql";
 import {
+  computedColumnsOf,
   undoComputedColumns,
   useComputedColumnStore,
   writeComputedColumns,
@@ -347,6 +348,30 @@ async function execute(
       });
       return;
     }
+    // Spec §6.1: "a column that now belongs to the file fails the run with that
+    // reason". The form checked when the user typed the prefix; by the head the
+    // table may hold a column of the file's own under that name, and DuckDB's
+    // identifiers are CASE-INSENSITIVE — "EXTENT_height_m" would overwrite
+    // "extent_height_m" without the run ever noticing.
+    const owned = new Set(
+      [...computedColumnsOf(request.targetLayerId)].map((c) => c.toLowerCase()),
+    );
+    const source = table.columns.find(
+      (c) =>
+        !owned.has(c.name.toLowerCase()) &&
+        request.columns.some(
+          (out) => out.name.toLowerCase() === c.name.toLowerCase(),
+        ),
+    );
+    if (source) {
+      patch(id, {
+        status: "failed",
+        // The TABLE's spelling: that is the column that belongs to the data.
+        error: `'${source.name}' belongs to the source data; choose another prefix`,
+        elapsedMs: elapsed(),
+      });
+      return;
+    }
     const executor = EXECUTORS[request.toolId];
     if (!executor) {
       patch(id, {
@@ -437,7 +462,16 @@ async function execute(
     }
 
     patch(id, { phase: "write" });
-    const existing = new Set(table.columns.map((c) => c.name));
+    // Which of THIS run's columns the table already has — matched the way
+    // DuckDB matches them, without regard to case. A column classified as new
+    // because its case differs would be backed up by nobody and DROPPED by
+    // this run's Undo, taking the earlier run's values with it.
+    const onTable = new Set(table.columns.map((c) => c.name.toLowerCase()));
+    const existing = new Set(
+      result.columns
+        .map((c) => c.name)
+        .filter((name) => onTable.has(name.toLowerCase())),
+    );
     const t0 = performance.now();
     const written = await writeComputedColumns({
       runId: id,

@@ -149,8 +149,19 @@ export function useToolForm(toolId: ToolId) {
       ? tableInfo.info.columns.map((c) => c.name)
       : [];
   const computed = target ? computedColumnsOf(target.id) : new Set<string>();
-  const existing = columns.filter((c) => tableColumns.includes(c));
-  const sourceCollisions = existing.filter((c) => !computed.has(c));
+  // DuckDB identifiers are CASE-INSENSITIVE, so "EXTENT_height_m" and
+  // "extent_height_m" are one column: a case-sensitive check here would let a
+  // prefix the user typed in capitals overwrite the file's own data. The map
+  // keeps the table's spelling, which is the one the error names — it is the
+  // column that belongs to the source.
+  const onTable = new Map(
+    tableColumns.map((name) => [name.toLowerCase(), name]),
+  );
+  const computedLower = new Set([...computed].map((c) => c.toLowerCase()));
+  const existing = columns.filter((c) => onTable.has(c.toLowerCase()));
+  const sourceCollisions = existing
+    .filter((c) => !computedLower.has(c.toLowerCase()))
+    .map((c) => onTable.get(c.toLowerCase()) ?? c);
   const prefixError = !PREFIX_RE.test(draft.prefix)
     ? "Use letters, digits and underscores, starting with a letter"
     : sourceCollisions.length > 0

@@ -343,6 +343,23 @@ describe("ToolView", () => {
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
 
+  it("rejects a prefix that collides in DuckDB's eyes, whatever its case", () => {
+    // DuckDB identifiers are case-insensitive: writing "EXTENT_height_m" over
+    // a source "extent_height_m" overwrites the file's own column.
+    addCityLayer([column("extent_height_m")]);
+    render(<ToolView toolId="height-from-extent" />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Prefix" }), {
+      target: { value: "EXTENT_" },
+    });
+    expect(
+      screen.getByText(
+        // The TABLE's spelling: that is the column that belongs to the data.
+        "'extent_height_m' belongs to the source data; choose another prefix",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+  });
+
   it("rejects a prefix that is not a name", () => {
     addCityLayer();
     render(<ToolView toolId="height-from-extent" />);
