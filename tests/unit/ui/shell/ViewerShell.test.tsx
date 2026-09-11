@@ -210,6 +210,29 @@ describe("ViewerShell collapsed pills with the toolbox open", () => {
     );
     expect(useShellStore.getState().rightCollapsed).toBe(false);
   });
+
+  it("each pill expands the panel on the tab it names", () => {
+    // §4.2: two pills, two tabs. A pill that only un-collapses the panel
+    // shows whichever tab happened to be up — clicking Details could reveal
+    // Tools, and the other way round.
+    useShellStore.setState({ rightCollapsed: true });
+    useProcessingStore.getState().setTab("tools");
+    shell({
+      right: <div data-testid="the-right" />,
+      rightMode: "tools",
+      hasSelection: true,
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Details · Building 1/ }),
+    );
+    expect(useProcessingStore.getState().activeTab).toBe("details");
+    expect(useShellStore.getState().rightCollapsed).toBe(false);
+
+    act(() => useShellStore.getState().setRightCollapsed(true));
+    fireEvent.click(screen.getByRole("button", { name: "Tools" }));
+    expect(useProcessingStore.getState().activeTab).toBe("tools");
+    expect(useShellStore.getState().rightCollapsed).toBe(false);
+  });
 });
 
 describe("ViewerShell right-panel resize", () => {

@@ -31,6 +31,13 @@ import { useProcessingStore } from "../../features/processing/processingStore";
 /** The width of the collapsed left column, which `LeftRail` fills. */
 const LEFT_RAIL_WIDTH = "40px";
 
+/** Bring the right panel back with a named tab up (spec §4.2's two pills).
+ *  The tab first, so the panel is never painted on the wrong one. */
+function expandOnTab(tab: "tools" | "details"): void {
+  useProcessingStore.getState().setTab(tab);
+  useShellStore.getState().setRightCollapsed(false);
+}
+
 export interface ViewerShellProps {
   readonly header: ReactNode;
   /** Full-height left panel (or rail when collapsed — the caller passes
@@ -126,13 +133,14 @@ export function ViewerShell({
             </button>
           )}
           {right !== null && rightCollapsed && rightMode === "tools" && (
+            /* Each pill expands the panel ON ITS OWN TAB (§4.2): with the
+               toolbox holding the column, un-collapsing alone would show
+               whichever tab was last up, so Details could open Tools. */
             <div className="details-pills">
               <button
                 type="button"
                 className="details-pill"
-                onClick={() =>
-                  useShellStore.getState().setRightCollapsed(false)
-                }
+                onClick={() => expandOnTab("tools")}
               >
                 Tools{toolsRunning ? " · running" : ""}
               </button>
@@ -140,9 +148,7 @@ export function ViewerShell({
                 <button
                   type="button"
                   className="details-pill"
-                  onClick={() =>
-                    useShellStore.getState().setRightCollapsed(false)
-                  }
+                  onClick={() => expandOnTab("details")}
                 >
                   Details · {rightTitle}
                 </button>
