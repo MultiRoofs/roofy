@@ -795,10 +795,16 @@ describe("a run over a column an earlier run wrote", () => {
 
     const held = deferred<void>();
     gate = { needle: "COMMIT", promise: held.promise };
+    // Cleared BEFORE run 2 is submitted: run 1's own COMMIT is still in the
+    // log, so a wait for "COMMIT" would return instantly and the Undo below
+    // would be pressed before run 2 had started — which is not the race this
+    // is about.
+    sql.length = 0;
     const second = submitRun(request());
     await vi.waitFor(() => expect(sql).toContain("COMMIT"));
-    sql.length = 0;
-    // Pressed while run 1 still says it can be undone.
+    expect(runById(second)?.status).toBe("running");
+    // Pressed while run 1 still says it can be undone, with run 2 held
+    // mid-transaction.
     const undoing = undoRun(first);
     held.resolve();
     await undoing;
