@@ -5,7 +5,7 @@
  * It is a footer and not four components because the states REPLACE each other
  * in the same place — the user's eye stays where it was when they pressed Run.
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useProcessingStore } from "../../features/processing/processingStore";
 import {
   cancelRun,
@@ -23,12 +23,35 @@ import { phaseLine, plural, seconds } from "./runFormat";
 import { useLayerStore } from "../../features/layers/layerStore";
 import { useRuleDraftStore } from "../../features/rules/ruleDraftStore";
 import { useLayerTableStore } from "../../insights/layerTables";
-import { runQuery } from "../../insights/duckdb";
+import {
+  formatDuckDBError,
+  runQuery,
+  type QueryOutcome,
+} from "../../insights/duckdb";
 import { quoteIdent } from "../../insights/sql";
 import { NEW_RULE_COLOR_HEX } from "../../scene/cityColors";
 
 /** §6.2's reason for a Style-by-result button with nothing to style. */
 const ALL_VALUES_EMPTY = "All values are empty";
+
+/** The median read behind Style by result, as an outcome the caller reports.
+ *  A table that is not ready never reaches DuckDB, so it borrows the failing
+ *  entry's OWN message rather than inventing one; `formatDuckDBError` turns
+ *  the empty case into the app's existing "The query failed." */
+async function readMedian(
+  layerId: string,
+  column: string,
+): Promise<QueryOutcome> {
+  const entry = useLayerTableStore.getState().tables[layerId];
+  if (entry?.state !== "ready")
+    return {
+      ok: false,
+      message: entry?.state === "failed" ? entry.message : "",
+    };
+  return await runQuery(
+    `SELECT median(${quoteIdent(column)}) AS m FROM ${quoteIdent(entry.info.table)}`,
+  );
+}
 
 /**
  * §6.2's "Style by result": open the target's STYLE section with Color by =
@@ -37,39 +60,83 @@ const ALL_VALUES_EMPTY = "All values are empty";
  *
  * The value is read from the data at click time (§7.4: "rule on
  * `extent_height_m` > median"), which is why this is async: the median is one
- * DuckDB round trip, and the navigation waits for it so the editor never
- * opens on a value that is about to be replaced.
+ * DuckDB round trip, and the navigation waits for it.
+ *
+ * A read that does not produce a number opens NOTHING and says why in the
+ * toast (§6.2's own failure surface). The rejected alternative was a `> 0`
+ * fallback: it looks exactly like a real answer, and DuckDB had already
+ * handed us the reason it failed.
+ *
+ * `pending` and `token` are the two guards the awaited gap needs: the button
+ * is disabled while its read is in flight, so two overlapping reads cannot
+ * each replace the whole draft on arrival, and the token invalidates a read
+ * whose card has gone (the effect below sets it to -1 on unmount) or that a
+ * newer click has superseded.
  */
-async function styleByResult(run: RunRecord, column: string): Promise<void> {
-  // The run's own target is the frozen truth (§6.1), as for Open table.
-  const layerId = run.targetLayerId;
-  const entry = useLayerTableStore.getState().tables[layerId];
-  const table = entry?.state === "ready" ? entry.info.table : null;
-  let median = 0;
-  if (table !== null) {
-    const outcome = await runQuery(
-      `SELECT median(${quoteIdent(column)}) AS m FROM ${quoteIdent(table)}`,
-    );
-    const value = outcome.ok ? outcome.rows[0]?.["m"] : undefined;
-    // A failed query, an empty table or an all-NULL column all read as 0: the
-    // draft is a starting point the user edits, so a number they can see beats
-    // an editor that refuses to open.
-    if (typeof value === "number" && Number.isFinite(value)) median = value;
-  }
-  useRuleDraftStore.getState().setDraft(layerId, {
-    editingId: null,
-    open: true,
-    form: {
-      // Unnamed, exactly as "+ Add rule" starts: the user names their rule.
-      name: "",
-      color: NEW_RULE_COLOR_HEX,
-      logic: "AND",
-      conditions: [{ field: column, operator: ">", value: median }],
+function useStyleByResult(): {
+  readonly pending: boolean;
+  readonly start: (run: RunRecord, column: string) => void;
+} {
+  const [pending, setPending] = useState(false);
+  const tokenRef = useRef(0);
+  useEffect(
+    () => () => {
+      tokenRef.current = -1;
     },
-  });
-  useLayerStore.getState().updateLayer(layerId, { colorBy: "rules" });
-  // Last, so the panel opens on a draft that is already written.
-  useShellStore.getState().requestSection(layerId, "style");
+    [],
+  );
+
+  const start = useCallback((run: RunRecord, column: string) => {
+    // The run's own target is the frozen truth (§6.1), as for Open table.
+    const layerId = run.targetLayerId;
+    const token = tokenRef.current + 1;
+    tokenRef.current = token;
+    setPending(true);
+    void (async () => {
+      try {
+        const outcome = await readMedian(layerId, column);
+        if (tokenRef.current !== token) return;
+        // The layer can be removed while the read is in flight, and
+        // `requestSection` activates whatever id it is handed
+        // (shellStore.ts:173) — which would resurrect it. Abandon silently:
+        // the user removed the layer, they are not waiting for news about it.
+        const alive = useLayerStore
+          .getState()
+          .layers.some((l) => l.id === layerId);
+        if (!alive) return;
+        if (!outcome.ok) {
+          useProcessingStore
+            .getState()
+            .pushNotice(formatDuckDBError(outcome.message));
+          return;
+        }
+        const value = outcome.rows[0]?.["m"];
+        // NULL, or no row at all: the column has no value to style by.
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+          useProcessingStore.getState().pushNotice(ALL_VALUES_EMPTY);
+          return;
+        }
+        useRuleDraftStore.getState().setDraft(layerId, {
+          editingId: null,
+          open: true,
+          form: {
+            // Unnamed, exactly as "+ Add rule" starts: the user names it.
+            name: "",
+            color: NEW_RULE_COLOR_HEX,
+            logic: "AND",
+            conditions: [{ field: column, operator: ">", value }],
+          },
+        });
+        useLayerStore.getState().updateLayer(layerId, { colorBy: "rules" });
+        // Last, so the panel opens on a draft that is already written.
+        useShellStore.getState().requestSection(layerId, "style");
+      } finally {
+        if (tokenRef.current === token) setPending(false);
+      }
+    })();
+  }, []);
+
+  return { pending, start };
 }
 
 interface Props {
@@ -98,6 +165,7 @@ function useElapsed(run: RunRecord | null): number {
 
 export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
   const elapsed = useElapsed(run);
+  const style = useStyleByResult();
   const status = run?.status ?? null;
 
   if (run !== null && (status === "running" || status === "cancelling")) {
@@ -146,6 +214,10 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
     // §6.2/§7: the draft styles the FIRST column the run wrote, in the tool's
     // own order (`extent_height_m` for Height from extent, §7.4).
     const styleColumn = run.columns[0];
+    // §6.2: "disabled with 'All values are empty' when the chosen column is
+    // NULL for every object in the run". A reason the user can READ, not only
+    // a tooltip on a disabled control — the same muted note Run's reason gets.
+    const styleReason = run.summary?.measured === 0 ? ALL_VALUES_EMPTY : null;
     return (
       <div className="processing-footer processing-footer--card">
         <div className="processing-card">
@@ -194,11 +266,9 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
             {styleColumn !== undefined && (
               <button
                 type="button"
-                disabled={run.summary?.measured === 0}
-                title={
-                  run.summary?.measured === 0 ? ALL_VALUES_EMPTY : undefined
-                }
-                onClick={() => void styleByResult(run, styleColumn)}
+                disabled={styleReason !== null || style.pending}
+                title={styleReason ?? undefined}
+                onClick={() => style.start(run, styleColumn)}
               >
                 Style by result
               </button>
@@ -212,6 +282,9 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
               Log
             </button>
           </div>
+          {styleColumn !== undefined && styleReason !== null && (
+            <p className="processing-note">{styleReason}</p>
+          )}
         </div>
         <div className="processing-footer__row">
           {/* Not a submit: it unlocks the form, it does not re-run. Never

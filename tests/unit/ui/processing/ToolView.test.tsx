@@ -30,7 +30,7 @@ vi.mock("../../../../src/insights/duckdb", () => ({
   })),
   isExtensionLoaded: vi.fn(() => false),
   ensureExtension: vi.fn(async () => false),
-  formatDuckDBError: (e: unknown) => String(e),
+  formatDuckDBError: vi.fn((e: unknown) => String(e)),
   runQuery: vi.fn(async () => ({ ok: false, message: "no engine" })),
   ddl: vi.fn(async () => ({ ok: false, message: "no engine" })),
   registerBuffer: vi.fn(async () => false),
@@ -76,7 +76,8 @@ const { useQueryStore, layerQuery } =
   await import("../../../../src/features/query/queryStore");
 const { useRuleDraftStore } =
   await import("../../../../src/features/rules/ruleDraftStore");
-const { runQuery } = await import("../../../../src/insights/duckdb");
+const { runQuery, formatDuckDBError } =
+  await import("../../../../src/insights/duckdb");
 const { NEW_RULE_COLOR_HEX } = await import("../../../../src/scene/cityColors");
 
 type LayerInput = Parameters<LayerStoreActions["addLayer"]>[0];
@@ -156,6 +157,36 @@ function runFixture(patch: Partial<RunRecord>): RunRecord {
   };
 }
 
+/** The done run the Style-by-result cases all start from. */
+function doneRun(layerId: string): RunRecord {
+  return runFixture({
+    status: "done",
+    targetLayerId: layerId,
+    summary: {
+      line: "2 buildings measured · 0.3 s",
+      detail: null,
+      measured: 2,
+      skipped: [],
+    },
+  });
+}
+
+type Outcome = Awaited<ReturnType<typeof runQuery>>;
+
+/** A median read the test resolves BY HAND, so it can act while the query is
+ *  still in flight (remove the layer, click again, unmount the card). */
+function deferredQuery(): {
+  readonly promise: Promise<Outcome>;
+  readonly resolve: (outcome: Outcome) => void;
+} {
+  let resolve!: (outcome: Outcome) => void;
+  const promise = new Promise<Outcome>((r) => {
+    resolve = r;
+  });
+  vi.mocked(runQuery).mockReturnValueOnce(promise);
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   counts.all = 2;
   counts.matching = null;
@@ -172,6 +203,10 @@ afterEach(() => {
   useComputedColumnStore.setState({ byLayer: {} });
   useQueryStore.setState({ queries: {} });
   useRuleDraftStore.setState({ drafts: {} });
+  // `requestedSection` is consumed by the layer panel, which no test here
+  // renders — so without this a case that asserts "nothing was requested"
+  // would read the PREVIOUS case's request.
+  useShellStore.getState().requestSection(null);
 });
 
 describe("ToolView", () => {
@@ -503,36 +538,109 @@ describe("ToolView", () => {
     const button = screen.getByRole("button", { name: "Style by result" });
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("title", "All values are empty");
+    // The reason has to be READABLE, not only a tooltip on a disabled control
+    // (which no keyboard or screen-reader user ever reaches) — the same muted
+    // note the Run button's reason gets.
+    expect(
+      screen.getByText("All values are empty", { selector: "p" }),
+    ).toBeInTheDocument();
   });
 
-  it("falls back to 0 when the median cannot be read", async () => {
+  it("says why when the median query fails, and opens no draft", async () => {
     const layerId = addCityLayer();
     render(<ToolView toolId="height-from-extent" />);
-    act(() =>
-      useProcessingStore.getState().upsertRun(
-        runFixture({
-          status: "done",
-          targetLayerId: layerId,
-          summary: {
-            line: "2 buildings measured · 0.3 s",
-            detail: null,
-            measured: 2,
-            skipped: [],
-          },
-        }),
-      ),
-    );
-    // The engine mock's default outcome is a failure.
+    act(() => useProcessingStore.getState().upsertRun(doneRun(layerId)));
+    const message = 'Catalog Error: Table "layer_1" does not exist';
+    vi.mocked(runQuery).mockResolvedValueOnce({ ok: false, message });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
     });
+    // The engine already told us what went wrong; discarding that for a
+    // plausible-looking "> 0" rule is the bug this pins. The message goes
+    // through `formatDuckDBError` (stubbed here as a passthrough — its own
+    // trimming is `duckdb.ts`'s to test).
+    expect(formatDuckDBError).toHaveBeenCalledWith(message);
+    expect(useProcessingStore.getState().notice).toBe(message);
+    expect(useRuleDraftStore.getState().drafts[layerId]).toBeUndefined();
+    expect(useShellStore.getState().requestedSection).toBeNull();
+  });
+
+  it("says All values are empty when the median is NULL, and opens no draft", async () => {
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() => useProcessingStore.getState().upsertRun(doneRun(layerId)));
+    vi.mocked(runQuery).mockResolvedValueOnce({
+      ok: true,
+      columns: ["m"],
+      rows: [{ m: null }],
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    });
+    expect(useProcessingStore.getState().notice).toBe("All values are empty");
+    expect(useRuleDraftStore.getState().drafts[layerId]).toBeUndefined();
+    expect(useShellStore.getState().requestedSection).toBeNull();
+  });
+
+  it("abandons silently when the target layer goes while the median is in flight", async () => {
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() => useProcessingStore.getState().upsertRun(doneRun(layerId)));
+    const pending = deferredQuery();
+    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    act(() => useLayerStore.getState().removeLayer(layerId));
+    await act(async () => {
+      pending.resolve({ ok: true, columns: ["m"], rows: [{ m: 4.2 }] });
+      await pending.promise;
+    });
+    // `requestSection` activates whatever id it is handed (shellStore.ts:173),
+    // so writing here would resurrect a layer the user has removed.
+    expect(useRuleDraftStore.getState().drafts[layerId]).toBeUndefined();
+    expect(useShellStore.getState().requestedSection).toBeNull();
+    expect(useProcessingStore.getState().notice).toBeNull();
+  });
+
+  it("takes one click at a time, and ignores a query that outlives the card", async () => {
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() => useProcessingStore.getState().upsertRun(doneRun(layerId)));
+    const pending = deferredQuery();
+    const button = screen.getByRole("button", { name: "Style by result" });
+    fireEvent.click(button);
+    // Disabled while its query runs: two overlapping reads would each replace
+    // the WHOLE draft on arrival, in whatever order they landed.
+    expect(
+      screen.getByRole("button", { name: "Style by result" }),
+    ).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    expect(runQuery).toHaveBeenCalledTimes(1);
+    // The card goes (Run again, another tool, the toolbox closing) before the
+    // read lands: the completion is stale and must write nothing.
+    cleanup();
+    await act(async () => {
+      pending.resolve({ ok: true, columns: ["m"], rows: [{ m: 4.2 }] });
+      await pending.promise;
+    });
+    expect(useRuleDraftStore.getState().drafts[layerId]).toBeUndefined();
+    expect(useShellStore.getState().requestedSection).toBeNull();
+  });
+
+  it("re-enables Style by result once its query has landed", async () => {
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() => useProcessingStore.getState().upsertRun(doneRun(layerId)));
+    const pending = deferredQuery();
+    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    await act(async () => {
+      pending.resolve({ ok: true, columns: ["m"], rows: [{ m: 4.2 }] });
+      await pending.promise;
+    });
+    expect(
+      screen.getByRole("button", { name: "Style by result" }),
+    ).not.toBeDisabled();
     expect(
       useRuleDraftStore.getState().drafts[layerId]?.form.conditions[0],
-    ).toEqual({ field: "extent_height_m", operator: ">", value: 0 });
-    expect(useShellStore.getState().requestedSection).toEqual({
-      layerId,
-      section: "style",
-    });
+    ).toEqual({ field: "extent_height_m", operator: ">", value: 4.2 });
   });
 
   it("appends the run's columns to a customised table list, once", () => {

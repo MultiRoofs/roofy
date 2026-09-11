@@ -137,11 +137,24 @@ describe("App processing toast", () => {
 
   it("raises the SAME line again when a second run finishes", () => {
     // `notice` alone would not change, so the subscription keys off
-    // `noticeSeq`: two identical runs both get their toast.
-    renderViewer();
-    act(() => useProcessingStore.getState().pushNotice("Done · 0.1 s"));
-    act(() => useProcessingStore.getState().pushNotice("Done · 0.1 s"));
-    expect(screen.getByText("Done · 0.1 s")).toBeInTheDocument();
-    expect(useProcessingStore.getState().noticeSeq).toBe(2);
+    // `noticeSeq`: two identical runs both get their toast. The first toast is
+    // DISMISSED before the second is pushed, so the assertion is about a toast
+    // that was raised again — not about one that never went away.
+    vi.useFakeTimers();
+    try {
+      renderViewer();
+      act(() => useProcessingStore.getState().pushNotice("Done · 0.1 s"));
+      expect(screen.getByText("Done · 0.1 s")).toBeInTheDocument();
+      // STATUS_TOAST_MS, the duration the subscription asks for.
+      act(() => {
+        vi.advanceTimersByTime(3000);
+      });
+      expect(screen.queryByText("Done · 0.1 s")).toBeNull();
+      act(() => useProcessingStore.getState().pushNotice("Done · 0.1 s"));
+      expect(screen.getByText("Done · 0.1 s")).toBeInTheDocument();
+      expect(useProcessingStore.getState().noticeSeq).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
