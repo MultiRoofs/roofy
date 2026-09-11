@@ -125,6 +125,71 @@ describe("writeComputedColumns", () => {
     expect(result).toEqual({ ok: false, message: "Binder Error: x" });
     expect(calls).toContain("ROLLBACK");
   });
+
+  it("rolls back instead of committing when the run was cancelled", async () => {
+    // Spec §6.1: a cancel that lands BEFORE publication leaves nothing behind.
+    // The window this closes is the UPDATE: it is the longest statement of the
+    // write, and the abort arrives while it is in flight.
+    const calls: string[] = [];
+    const controller = new AbortController();
+    vi.mocked(duck.runQuery).mockImplementation(async (sql) => {
+      calls.push(sql);
+      // The user presses Cancel while the UPDATE is running.
+      if (sql.startsWith("UPDATE")) controller.abort();
+      return { ok: true, columns: [], rows: [] };
+    });
+    vi.mocked(duck.ddl).mockImplementation(async (sql) => {
+      calls.push(sql);
+      return { ok: true, columns: [], rows: [] };
+    });
+    const result = await cc.writeComputedColumns({
+      runId: "r3",
+      table: "layer_1",
+      columns: [{ name: "a", type: "DOUBLE" }],
+      rows: new Map([["x", { a: 1 }]]),
+      existing: new Set(["a"]),
+      signal: controller.signal,
+    });
+    expect(result).toEqual({
+      ok: false,
+      cancelled: true,
+      message: "Cancelled",
+    });
+    expect(calls).toContain("ROLLBACK");
+    expect(calls).not.toContain("COMMIT");
+    // The backup CTAS is inside the transaction, so the ROLLBACK is what takes
+    // it away — no separate DROP, exactly as on the failure path.
+    expect(calls.at(-1)).toBe("ROLLBACK");
+    expect(duck.dropBuffer).toHaveBeenCalledWith("__vals_r3.json");
+  });
+
+  it("commits a write whose cancel arrived after the last statement", async () => {
+    // The abort is checked ONCE, immediately before COMMIT: an abort that
+    // arrives after it cannot un-commit anything, and the run says so on its
+    // card ("finished before the cancel arrived").
+    const calls: string[] = [];
+    const controller = new AbortController();
+    vi.mocked(duck.runQuery).mockImplementation(async (sql) => {
+      calls.push(sql);
+      if (sql === "COMMIT") controller.abort();
+      return { ok: true, columns: [], rows: [] };
+    });
+    vi.mocked(duck.ddl).mockImplementation(async (sql) => {
+      calls.push(sql);
+      return { ok: true, columns: [], rows: [] };
+    });
+    const result = await cc.writeComputedColumns({
+      runId: "r4",
+      table: "layer_1",
+      columns: [{ name: "a", type: "DOUBLE" }],
+      rows: new Map([["x", { a: 1 }]]),
+      existing: new Set(),
+      signal: controller.signal,
+    });
+    expect(result).toEqual({ ok: true, backupTable: null });
+    expect(calls.at(-1)).toBe("COMMIT");
+    expect(calls).not.toContain("ROLLBACK");
+  });
 });
 
 describe("undoComputedColumns", () => {

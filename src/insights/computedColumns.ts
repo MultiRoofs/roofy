@@ -95,11 +95,29 @@ export interface WriteInput {
   readonly rows: ReadonlyMap<string, Readonly<Record<string, unknown>>>;
   /** Column names that already exist on the table (they get backed up). */
   readonly existing: ReadonlySet<string>;
+  /**
+   * The run's cancellation, read ONCE: immediately before COMMIT (spec §6.1).
+   *
+   * The write is the last thing a run does, and it is where a Cancel most
+   * often lands — the UPDATE over every scoped row is the longest statement
+   * of the whole run. Without this the transaction commits anyway and the
+   * user, who pressed Cancel, gets their columns.
+   *
+   * It is deliberately not checked between every statement: the engine has no
+   * statement-level cancel, so an earlier check would only ROLLBACK work that
+   * the check before COMMIT rolls back just as completely.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export type WriteOutcome =
   | { readonly ok: true; readonly backupTable: string | null }
-  | { readonly ok: false; readonly message: string };
+  /** `cancelled` is the user's own Cancel, never an error to report. */
+  | {
+      readonly ok: false;
+      readonly message: string;
+      readonly cancelled?: true;
+    };
 
 async function step(
   sql: string,
@@ -152,7 +170,6 @@ export async function writeComputedColumns(
     ),
     "query",
   ]);
-  statements.push(["COMMIT", "query"]);
   try {
     for (const [sql, use] of statements) {
       const out = await step(sql, use);
@@ -160,6 +177,19 @@ export async function writeComputedColumns(
         await step("ROLLBACK");
         return { ok: false, message: out.message };
       }
+    }
+    // The COMMIT is OUTSIDE the loop because this check has to sit right
+    // before it: everything above is undone by the ROLLBACK — the backup
+    // table included, DuckDB's DDL being transactional — and after the COMMIT
+    // nothing can be.
+    if (input.signal?.aborted) {
+      await step("ROLLBACK");
+      return { ok: false, cancelled: true, message: "Cancelled" };
+    }
+    const committed = await step("COMMIT");
+    if (!committed.ok) {
+      await step("ROLLBACK");
+      return { ok: false, message: committed.message };
     }
     return { ok: true, backupTable };
   } finally {

@@ -54,11 +54,23 @@ let scopeRows: Array<{ id: string; f: string }> = [];
 let gate: { needle: string; promise: Promise<void> } | null = null;
 /** The columns the fake database holds, tracked from the ALTERs it is sent. */
 let liveColumns: string[] = ["id", "feature_id"];
+/** What they were when the open transaction began, for its ROLLBACK. */
+let columnsAtBegin: string[] | null = null;
 
 vi.mock("../../../../src/insights/duckdb", () => {
   const run = async (statement: string) => {
     sql.push(statement);
     if (gate && statement.includes(gate.needle)) await gate.promise;
+    // DuckDB's DDL is transactional, and a cancelled write leans on exactly
+    // that: the ROLLBACK is what takes the added columns (and the backup
+    // table) away again. A fake that kept them would let a broken write look
+    // clean.
+    if (statement === "BEGIN TRANSACTION") columnsAtBegin = [...liveColumns];
+    if (statement === "ROLLBACK" && columnsAtBegin !== null) {
+      liveColumns = columnsAtBegin;
+      columnsAtBegin = null;
+    }
+    if (statement === "COMMIT") columnsAtBegin = null;
     // The registry's column list is what decides CREATE vs REPLACE on the next
     // run, so the fake database has to actually change shape.
     const added =
@@ -242,6 +254,7 @@ beforeEach(() => {
   scopeRows = [];
   gate = null;
   liveColumns = ["id", "feature_id"];
+  columnsAtBegin = null;
   tableInfo = freshTable();
   useSelectionStore.getState().clear();
   useLayerStore.setState({ layers: [layer()] });
@@ -676,6 +689,40 @@ describe("a cancel that lost the race", () => {
     expect(runById(id)?.note).toBe("finished before the cancel arrived");
     expect(runById(id)?.undoable).toBe(true);
     expect(attributesOf("a").extent_height_m).toBe(4);
+  });
+});
+
+describe("a cancel during the write", () => {
+  it("rolls the transaction back and publishes nothing", async () => {
+    // Spec §6.1: a cancel that lands BEFORE publication leaves nothing
+    // changed. The UPDATE is the window — the longest statement of the write —
+    // and the cancel arrives while it is still in flight.
+    const held = deferred<void>();
+    gate = { needle: "UPDATE", promise: held.promise };
+    registerExecutor("height-from-extent", async () => ({
+      columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+    const id = submitRun(request());
+    await vi.waitFor(() =>
+      expect(sql.some((s) => s.startsWith("UPDATE"))).toBe(true),
+    );
+    cancelRun(id);
+    expect(runById(id)?.status).toBe("cancelling");
+    held.resolve();
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("cancelled"));
+
+    expect(sql).toContain("ROLLBACK");
+    expect(sql).not.toContain("COMMIT");
+    // Nothing published: not the table's shape, not the model, not the
+    // provenance the card would have claimed.
+    expect(liveColumns).toEqual(["id", "feature_id"]);
+    expect(attributesOf("a").extent_height_m).toBeUndefined();
+    expect(computedColumnsOf("L1").size).toBe(0);
+    expect(runById(id)?.undoable).toBe(false);
+    expect(runById(id)?.error).toBeNull();
   });
 });
 

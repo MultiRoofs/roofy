@@ -387,6 +387,9 @@ async function execute(
       columns: result.columns,
       rows: result.rows,
       existing,
+      // Spec §6.1: the write is the publication, so the LAST moment a cancel
+      // can still mean "nothing changed" is inside it, before its COMMIT.
+      signal,
     });
     log.push({
       label: "Writing results",
@@ -394,7 +397,14 @@ async function execute(
       ms: Math.round(performance.now() - t0),
       rows: result.rows.size,
     });
-    if (!written.ok) throw new Error(written.message);
+    // A cancelled write is the user's Cancel arriving during the transaction,
+    // not a failure: nothing was committed, so the card reads cancelled and
+    // says nothing about an error.
+    if (!written.ok) {
+      throw written.cancelled
+        ? new CancelledError()
+        : new Error(written.message);
+    }
 
     // Publication: model, then provenance, then the card. Past the commit, so
     // none of it can be rolled back and none of it may fail the run.
