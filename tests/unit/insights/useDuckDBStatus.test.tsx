@@ -18,6 +18,20 @@ let failBundle = false;
 let holdQuery: { needle: string; promise: Promise<void> } | null = null;
 /** Holds `instantiate` the same way, so a BOOT can be caught in flight. */
 let holdInstantiate: Promise<void> | null = null;
+/** What the engine's METADATA reads answer. Captured when the statement is
+ *  issued, not when it is released, so a read held across a death keeps the
+ *  dead engine's values — which is the whole point of the case below. */
+let platformValue = "wasm_eh";
+let tooltipExtension = "cityjson";
+
+/** A fake Arrow table: the module reads only `numRows` and
+ *  `getChild(name).get(i)`. */
+function arrow(rows: ReadonlyArray<Record<string, unknown>>) {
+  return {
+    numRows: rows.length,
+    getChild: (name: string) => ({ get: (i: number) => rows[i]?.[name] }),
+  };
+}
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
@@ -38,11 +52,21 @@ vi.mock("@duckdb/duckdb-wasm", () => {
   class FakeConnection {
     async query(sql: string) {
       queries.push(sql);
+      // Read BEFORE the hold: the answer is the engine's at the moment it was
+      // asked, whatever has happened to the world by the time it arrives.
+      const platformNow = platformValue;
+      const tooltipNow = tooltipExtension;
       const held = holdQuery;
       if (held && sql.includes(held.needle)) await held.promise;
       const named = /^(?:INSTALL|LOAD)\s+(\w+)/.exec(sql);
       if (named && refuse.has(named[1]!)) {
         throw new Error(`Extension "${named[1]!}" not found\nLINE 1: ${sql}`);
+      }
+      if (sql === "PRAGMA platform") return arrow([{ platform: platformNow }]);
+      if (sql.startsWith("SELECT extension_name")) {
+        return arrow([
+          { extension_name: tooltipNow, extension_version: "0.4.0" },
+        ]);
       }
       // `readPlatform` and `readLoadedExtensions` are best-effort and both
       // tolerate this shape (`getChild(...)?.get(0)`, `numRows`).
@@ -124,6 +148,8 @@ beforeEach(async () => {
   failInstantiate = false;
   holdQuery = null;
   holdInstantiate = null;
+  platformValue = "wasm_eh";
+  tooltipExtension = "cityjson";
   terminations.count = 0;
   workers.length = 0;
   vi.stubGlobal("Worker", FakeWorker);
@@ -422,6 +448,75 @@ describe("duckdb.ts publishes every transition", () => {
     const status = duckdb.getDuckDBStatus();
     if (status.state !== "failed") throw new Error("unreachable");
     expect(status.error).toContain("memory access out of bounds");
+    errors.mockRestore();
+  });
+
+  it("does not let a dead engine's METADATA land on the live one", async () => {
+    // `platform` and the tooltip's extension list are shared module state, and
+    // the reads that fill them are two awaits at the end of the boot. A read
+    // released after the worker died and a Retry succeeded would overwrite the
+    // NEW engine's metadata with the dead one's — and the next `publishReady`
+    // would show it, on a status whose state is perfectly `ready`.
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    platformValue = "wasm_dead";
+    tooltipExtension = "from_the_corpse";
+    const gate = deferred();
+    holdQuery = { needle: "PRAGMA platform", promise: gate.promise };
+    const booting = duckdb.initDuckDB();
+    await vi.waitFor(() => expect(queries).toContain("PRAGMA platform"));
+
+    liveWorker().die("worker gone");
+
+    holdQuery = null;
+    platformValue = "wasm_eh";
+    tooltipExtension = "cityjson";
+    await duckdb.initDuckDB();
+    const revived = duckdb.getDuckDBStatus();
+    if (revived.state !== "ready") throw new Error("unreachable");
+    expect(revived.platform).toBe("wasm_eh");
+
+    // The dead engine's reads now arrive.
+    gate.resolve();
+    await booting;
+
+    // Nothing has been published since, so this is asserted through the next
+    // publish — a refused lazy load, which republishes without re-reading the
+    // tooltip list.
+    refuse.add("spatial");
+    await duckdb.ensureExtension("spatial");
+    const status = duckdb.getDuckDBStatus();
+    if (status.state !== "ready") throw new Error("unreachable");
+    expect(status.platform).toBe("wasm_eh");
+    expect(status.loadedExtensions).toEqual([
+      { name: "cityjson", version: "0.4.0" },
+    ]);
+    errors.mockRestore();
+  });
+
+  it("tells a DEATH waiter once, and forgets it", async () => {
+    // The signal the run queue races its awaits against. It fires from
+    // `markEngineDead` only — a boot that never came up is not a death — and a
+    // listener is dropped as it fires, so the next engine's death is a new
+    // subscription.
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    await duckdb.initDuckDB();
+    let deaths = 0;
+    const stop = duckdb.onEngineDeath(() => {
+      deaths += 1;
+    });
+    liveWorker().die("first");
+    liveWorker().die("second");
+    expect(deaths).toBe(1);
+    stop();
+
+    let afterUnsubscribe = 0;
+    const stopAgain = duckdb.onEngineDeath(() => {
+      afterUnsubscribe += 1;
+    });
+    stopAgain();
+    await duckdb.initDuckDB();
+    liveWorker().die("third");
+    expect(afterUnsubscribe).toBe(0);
     errors.mockRestore();
   });
 

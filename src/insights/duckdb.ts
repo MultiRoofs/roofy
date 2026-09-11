@@ -299,8 +299,9 @@ async function loadExtension(
 /** `PRAGMA platform` — "wasm_eh" or "wasm_mvp". Which one a session got
  *  decides WHICH extension artefacts the community repo served it, so a
  *  schema-drift report is unactionable without it. Best effort. */
-async function readPlatform(): Promise<string | null> {
-  const connection = conn;
+async function readPlatform(
+  connection: duckdb.AsyncDuckDBConnection | null = conn,
+): Promise<string | null> {
   if (!connection) return null;
   try {
     const result = await connection.query("PRAGMA platform");
@@ -313,8 +314,9 @@ async function readPlatform(): Promise<string | null> {
 
 /** The extensions actually loaded, for the status tooltip. Best effort: a
  *  database that cannot answer this is still perfectly usable. */
-async function readLoadedExtensions(): Promise<ReadonlyArray<LoadedExtension>> {
-  const connection = conn;
+async function readLoadedExtensions(
+  connection: duckdb.AsyncDuckDBConnection | null = conn,
+): Promise<ReadonlyArray<LoadedExtension>> {
   if (!connection) return [];
   try {
     const result = await connection.query(
@@ -420,9 +422,16 @@ async function doInit(): Promise<void> {
     // them, and `spatial` alone is a 23 MB download.
     await loadExtension("cityjson", connection);
     if (stale()) return;
-    platform = await readPlatform();
-    loadedExtensions = await readLoadedExtensions();
+    // Into LOCALS, and only committed past the generation check. `platform`
+    // and `loadedExtensions` are shared module state that the next
+    // `publishReady` shows: an assignment here from a read released after this
+    // engine died would put the corpse's metadata on the live engine's status,
+    // in a state that reads perfectly `ready`.
+    const detectedPlatform = await readPlatform(connection);
+    const detectedExtensions = await readLoadedExtensions(connection);
     if (stale()) return;
+    platform = detectedPlatform;
+    loadedExtensions = detectedExtensions;
     publishReady();
   } catch (err) {
     // The death that interrupted this boot has already published the reason
@@ -493,8 +502,13 @@ export async function ensureExtension(name: ExtensionName): Promise<boolean> {
     if (gen !== generation) return ok;
     // A successful lazy load changes what `duckdb_extensions()` reports, and
     // THAT list is the status tooltip — without this re-read the tooltip goes
-    // on claiming the extension the user just triggered is absent.
-    if (ok) loadedExtensions = await readLoadedExtensions();
+    // on claiming the extension the user just triggered is absent. Read into a
+    // LOCAL and committed past the check, for the reason `doInit` gives.
+    if (ok) {
+      const detected = await readLoadedExtensions();
+      if (gen !== generation) return ok;
+      loadedExtensions = detected;
+    }
     if (gen !== generation) return ok;
     if (status.state === "ready") publishReady();
     return ok;
