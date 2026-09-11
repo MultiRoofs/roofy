@@ -613,6 +613,29 @@ describe("ToolView", () => {
     expect(submitRun).toHaveBeenCalledTimes(1);
   });
 
+  it("never lets a dismissal suppress a run that is still in flight", () => {
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() => {
+      useProcessingStore.getState().upsertRun(
+        runFixture({
+          status: "running",
+          phase: "compute",
+          targetLayerId: layerId,
+        }),
+      );
+      // A dismissal left over from the run's own done card, or written by
+      // "Edit & run": it must not unlock a form whose run is still going.
+      useProcessingStore.getState().dismissRun("r1");
+    });
+    expect(screen.getByRole("progressbar")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Cancel run" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Prefix" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
+  });
+
   it("leaves the form editable under a FAILED card (§6.3 offers Retry and Log only)", () => {
     const layerId = addCityLayer();
     render(<ToolView toolId="height-from-extent" />);

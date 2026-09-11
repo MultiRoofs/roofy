@@ -113,6 +113,22 @@ describe("processingStore", () => {
     expect(useProcessingStore.getState().dismissedRunIds).toEqual([]);
   });
 
+  it("dismisses the latest DONE run of a pair, and never one in flight", () => {
+    const store = useProcessingStore.getState();
+    store.upsertRun(
+      run("other-target", { targetLayerId: "L2", status: "done" }),
+    );
+    store.upsertRun(run("older", { status: "done" }));
+    store.upsertRun(run("newer", { status: "done" }));
+    store.dismissDoneRun("height-from-extent", "L1");
+    // The newest of the pair, not the oldest — and nothing on the other target.
+    expect(useProcessingStore.getState().dismissedRunIds).toEqual(["newer"]);
+
+    useProcessingStore.getState().upsertRun(run("live", { status: "running" }));
+    useProcessingStore.getState().dismissDoneRun("height-from-extent", "L1");
+    expect(useProcessingStore.getState().dismissedRunIds).toEqual(["newer"]);
+  });
+
   it("publishes a notice with a sequence number", () => {
     const s = useProcessingStore.getState();
     s.pushNotice("done");

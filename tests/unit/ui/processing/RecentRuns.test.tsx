@@ -176,6 +176,31 @@ describe("RecentRuns", () => {
     expect(useProcessingStore.getState().dismissedRunIds).toContain("r1");
   });
 
+  it("clears the LATEST done card of the pair, not only the row clicked", () => {
+    // The tool view watches the latest run of a (tool, target) pair, so
+    // dismissing the older row the user clicked would leave the newer card —
+    // and its lock — over the form.
+    useProcessingStore.getState().upsertRun(runFixture({ id: "older" }));
+    useProcessingStore.getState().upsertRun(runFixture({ id: "newer" }));
+    render(<RecentRuns />);
+    const rows = screen.getAllByRole("button", { name: "Edit & run" });
+    fireEvent.click(rows[1]!); // the older row
+    expect(useProcessingStore.getState().dismissedRunIds).toEqual(["newer"]);
+  });
+
+  it("dismisses nothing when the pair's latest run is still in flight", () => {
+    useProcessingStore.getState().upsertRun(runFixture({ id: "done" }));
+    useProcessingStore
+      .getState()
+      .upsertRun(
+        runFixture({ id: "live", status: "running", phase: "compute" }),
+      );
+    render(<RecentRuns />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit & run" })[1]!);
+    // §6.1: the form opens LOCKED under the running run's progress block.
+    expect(useProcessingStore.getState().dismissedRunIds).toEqual([]);
+  });
+
   it("lists the newest run first", () => {
     useProcessingStore.getState().upsertRun(runFixture({ id: "old" }));
     useProcessingStore

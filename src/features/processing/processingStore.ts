@@ -64,6 +64,15 @@ interface ProcessingActions {
   upsertRun(run: RunRecord): void;
   /** §6.2 "Run again unlocks the form": hide this run's card, run nothing. */
   dismissRun(id: string): void;
+  /**
+   * Clear the result card the tool view would show for this (tool, target).
+   *
+   * The view watches the LATEST run of the pair, so the row the user clicked in
+   * Recent runs is not necessarily the card in its way. A latest run that is
+   * still in flight is left alone: §6.1 locks the form while it runs, and no
+   * dismissal may take its progress block or its Cancel away.
+   */
+  dismissDoneRun(toolId: ToolId, targetLayerId: string): void;
   patchRun(id: string, patch: Partial<RunRecord>): void;
   pushNotice(text: string): void;
   resetForTest(): void;
@@ -134,6 +143,13 @@ export const useProcessingStore = create<ProcessingState & ProcessingActions>(
           ? {}
           : { dismissedRunIds: [id, ...s.dismissedRunIds].slice(0, MAX_RUNS) },
       ),
+    dismissDoneRun: (toolId, targetLayerId) => {
+      // `runs` is newest first, so the first match IS the latest of the pair.
+      const latest = get().runs.find(
+        (r) => r.toolId === toolId && r.targetLayerId === targetLayerId,
+      );
+      if (latest?.status === "done") get().dismissRun(latest.id);
+    },
     patchRun: (id, patch) =>
       set((s) => {
         // A patch for an id the history no longer holds (evicted past
