@@ -727,7 +727,7 @@ function RuleForm({
               </option>
             ))}
             {computedFields.length > 0 && (
-              <optgroup label="Computed">
+              <optgroup label="COMPUTED">
                 {computedFields.map((f) => (
                   <option key={f} value={f}>
                     {f}

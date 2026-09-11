@@ -6260,16 +6260,24 @@ button.file-label:disabled {
   margin-bottom: 0.45rem;
 }
 
-/* The Computed sub-heading inside the attributes section (spec §8): the same
-   label as a section title, set apart from the file's rows above it. The
-   second selector beats `workspace.css`'s `.viewer-shell
-   .details-section-title { margin: 0 … }`, which would otherwise close the gap
-   this divider needs. */
+/* The COMPUTED sub-heading inside the attributes section (spec §8: "a mono
+   sub-heading COMPUTED"), set apart from the file's rows above it. It is the
+   toolbox's own group label (`.processing-group__label`), because that is the
+   label family the spec is pointing at.
+
+   The second selector carries both classes so it beats `workspace.css`'s
+   `.viewer-shell :is(.details-section-title, …)` reset, which otherwise
+   replaces the mono family, the tracking and the weight — and its `margin: 0`
+   would close the gap this divider needs. */
 .details-computed-title,
 .viewer-shell .details-section-title.details-computed-title {
   margin-top: 0.9rem;
   padding-top: 0.6rem;
   border-top: 1px solid var(--border);
+  font: 500 11px/1.4 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
 }
 
 .details-placeholder {

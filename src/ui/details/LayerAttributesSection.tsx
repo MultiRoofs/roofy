@@ -63,7 +63,7 @@ export function LayerAttributesSection({
         computedKeys.length === 0 ? null : (
           <div role="group" aria-label="Computed attributes">
             <h4 className="details-section-title details-computed-title">
-              Computed
+              COMPUTED
             </h4>
             {computedKeys.map((key) => (
               <AttrRow

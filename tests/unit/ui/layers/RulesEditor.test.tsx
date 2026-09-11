@@ -845,7 +845,7 @@ describe("RulesEditor — computed attributes", () => {
     };
   }
 
-  it("groups the layer's computed columns under a Computed optgroup", () => {
+  it("groups the layer's computed columns under a COMPUTED optgroup", () => {
     // `mergeAttributes` has already put the run's values on the objects, so
     // `collectAttributeFields` lists the column; only the GROUPING is new.
     const model = modelWith({ function: "residential", extent_height_m: 8.2 });
@@ -864,9 +864,14 @@ describe("RulesEditor — computed attributes", () => {
     fireEvent.click(screen.getByText("+ Add rule"));
 
     const select = screen.getByLabelText("Attribute") as HTMLSelectElement;
-    const group = select.querySelector('optgroup[label="Computed"]');
-    expect(group).not.toBeNull();
-    expect([...group!.querySelectorAll("option")].map((o) => o.value)).toEqual([
+    // The label is read off the element, never matched with an attribute
+    // SELECTOR: jsdom compares attribute values case-insensitively, so
+    // `optgroup[label="COMPUTED"]` happily matches a "Computed" that spec §8
+    // does not allow.
+    const groups = [...select.querySelectorAll("optgroup")];
+    expect(groups.map((g) => g.getAttribute("label"))).toEqual(["COMPUTED"]);
+    const group = groups[0]!;
+    expect([...group.querySelectorAll("option")].map((o) => o.value)).toEqual([
       "extent_height_m",
     ]);
     // …and it is listed ONCE: the plain options keep the file's fields only.
@@ -880,7 +885,7 @@ describe("RulesEditor — computed attributes", () => {
     ).toContain("function");
   });
 
-  it("offers no Computed group when nothing was computed for this layer", () => {
+  it("offers no COMPUTED group when nothing was computed for this layer", () => {
     const model = modelWith({ function: "residential" });
     useLayerStore.setState({ layers: [baseLayer({ model })] });
     useWorkspaceStore.setState({ activeLayerId: "L" });
@@ -889,6 +894,6 @@ describe("RulesEditor — computed attributes", () => {
     fireEvent.click(screen.getByText("+ Add rule"));
 
     const select = screen.getByLabelText("Attribute") as HTMLSelectElement;
-    expect(select.querySelector('optgroup[label="Computed"]')).toBeNull();
+    expect(select.querySelectorAll("optgroup")).toHaveLength(0);
   });
 });

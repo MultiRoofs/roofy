@@ -48,8 +48,11 @@ it("lists a computed column under COMPUTED and leaves the file's own above", () 
       attributes={{ function: "x", extent_height_m: 4.2 }}
     />,
   );
-  // `details-section-title` uppercases in CSS; the DOM text is the label.
-  expect(screen.getByText("Computed")).toBeTruthy();
+  // Spec 8 names the heading COMPUTED, so the literal is in the DOM (the
+  // shell's `.details-section-title` reset turns CSS uppercasing off). Its
+  // own class is what carries the mono label rule.
+  const heading = screen.getByText("COMPUTED");
+  expect(heading.className).toContain("details-computed-title");
   const group = computedGroup();
   expect(within(group).getByText("extent_height_m")).toBeTruthy();
   expect(within(group).queryByText("function")).toBeNull();
@@ -69,7 +72,7 @@ it("shows no COMPUTED heading when the layer has no computed columns", () => {
       attributes={{ function: "x" }}
     />,
   );
-  expect(screen.queryByText("Computed")).toBeNull();
+  expect(screen.queryByText("COMPUTED")).toBeNull();
 });
 
 it("still shows the computed group when the file carried no attributes at all", () => {
