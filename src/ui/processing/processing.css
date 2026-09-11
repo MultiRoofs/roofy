@@ -116,12 +116,6 @@
   text-transform: uppercase;
   color: var(--fg-muted);
 }
-.processing-back {
-  min-height: var(--control-height-compact);
-  margin-bottom: 8px;
-  padding: 0 10px;
-  font-size: 12px;
-}
 .processing-tool-row {
   display: flex;
   flex-direction: column;
@@ -196,15 +190,17 @@
   color: var(--fg-muted);
 }
 /* A back chevron is an icon button, not a field: the shared fill and 38px
-   height would make the form's first row look like a control. */
+   height would make the form's first row look like a control. Square at the
+   compact field height, so it lines up with the panel's other inline actions;
+   `!important` only because flatControls sets every button's min-height. */
 .processing-back {
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
-  min-height: 30px !important;
+  width: var(--control-height-compact);
+  height: var(--control-height-compact);
+  min-height: var(--control-height-compact) !important;
   padding: 0;
   font-size: 16px;
   background: transparent !important;
