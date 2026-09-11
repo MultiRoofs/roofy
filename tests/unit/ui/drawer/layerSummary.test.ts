@@ -19,6 +19,7 @@ function record(
     lod: null,
     surfaceCount: 0,
     roofMetrics: [],
+    geometryLods: [],
     footprintAreaSqM: 0,
     volumeCuM: null,
     parents: [],
@@ -77,13 +78,25 @@ describe("layer summary", () => {
       P1: record("P1", "BuildingPart", {
         parents: ["B1"],
         roofMetrics: [
-          { areaSqM: 10, inclinationDeg: 0, azimuthDeg: 0, elevationM: 0 },
+          {
+            areaSqM: 10,
+            inclinationDeg: 0,
+            azimuthDeg: 0,
+            elevationM: 0,
+            lod: "2.2",
+          },
         ],
       }),
       P2: record("P2", "BuildingPart", {
         parents: ["B1"],
         roofMetrics: [
-          { areaSqM: 15, inclinationDeg: 0, azimuthDeg: 0, elevationM: 0 },
+          {
+            areaSqM: 15,
+            inclinationDeg: 0,
+            azimuthDeg: 0,
+            elevationM: 0,
+            lod: "2.2",
+          },
         ],
       }),
     });
