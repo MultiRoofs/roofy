@@ -624,20 +624,28 @@ Carried to 13.2 / M2 — things a user can notice today:
   yet" rather than "Add a vector layer to join with" until it is implemented.
 - **Style by result sets `Color by = Rules` eagerly**, so a layer that was on
   Surface type or Single colour repaints to the unmatched colour before the
-  draft rule is saved. The draft rule's own colour still waits for Save — and
-  the draft cannot be saved until the user types a rule name.
+  draft rule is saved. The draft rule's own colour still waits for Save.
 - **No rule-colour palette rotation**: every Style by result draft takes the
   editor's one default new-rule colour, so successive drafts share it.
-- "Run again" dismisses the done card for that run (store-level
-  `dismissedRunIds`, capped with the 20-run history) rather than re-submitting;
-  Retry re-runs the frozen request.
+- **Runtime engine-death recovery is not implemented** (§6.1 "Analytics engine
+  stopped": failing the running and queued runs, rebuilding every layer table
+  from the in-memory models, invalidating every Undo). Deferred to M2 as a
+  design task — the reviewer ruled it too large for a fix wave.
+- A run that goes stale or is undone while a Style by result median is in
+  flight still opens the draft the median produced.
+- Cancel is best-effort at statement granularity: it is seen between
+  statements, so a long one runs to completion before the run gives up.
+- The write step is logged as a step with its timing, but its SQL is not in the
+  log view — a planner cannot read the UPDATE back and repeat it by hand.
+- "Open table" appends the run's columns to a customised column list but does
+  not scroll them into view (§6.2 asks for both).
+- A queued run's "Matching" ids are resolved at the HEAD of the queue, from the
+  filter frozen at Run. Ruled correct; recorded because the log header shows
+  `scopeCount 0` until then.
 - The run's live elapsed timer starts at submit but is measured from execute,
-  so it can jump back once; a queued run's log header shows `scopeCount 0`.
-- §6.1 re-validation of an output column that has come to belong to the file
-  itself is not implemented; a corrupt bbox with `zmin > zmax` writes a
-  negative height and reports it honestly rather than guarding.
-- The right panel's collapse chevron is disabled without a selection, so a
-  toolbox-only session cannot reach the "Tools" pill.
+  so it can jump back once.
+- A corrupt bbox with `zmin > zmax` writes a negative height and reports it
+  honestly rather than guarding.
 
 ## Cross-Cutting Workstreams
 
