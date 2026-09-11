@@ -422,6 +422,18 @@ async function execute(
     // is already "cancelled" — this only stops the work.
     if (signal.aborted) return;
 
+    // ONE execution start for the whole run, stamped here and never again.
+    //
+    // The footer's live ticker is `Date.now() - run.startedAt` while the run is
+    // in flight, and the card's final `elapsedMs` is measured from `started`
+    // above — the same instant. A `startedAt` re-stamped at a phase change
+    // (which is what the extension phase and the compute phase each used to do)
+    // made a long extension download's ticker drop back to zero at the
+    // hand-off: the run looked like it had restarted, and the two numbers
+    // described different spans. The record's own `startedAt` from `submitRun`
+    // is the QUEUED stamp, and the ticker is not live for a queued run.
+    patch(id, { startedAt: Date.now() });
+
     const layer = useLayerStore
       .getState()
       .layers.find((l) => l.id === request.targetLayerId);
@@ -499,11 +511,7 @@ async function execute(
     // let the run start against a table that is being rebuilt underneath it.
     const tool = toolById(request.toolId);
     if (tool.extension !== null && !isExtensionLoaded(tool.extension)) {
-      patch(id, {
-        status: "running",
-        phase: "extension",
-        startedAt: Date.now(),
-      });
+      patch(id, { status: "running", phase: "extension" });
       const loaded = await ensureExtension(tool.extension);
       // `ensureExtension` cannot be aborted (it is one memoised INSTALL/LOAD
       // per extension), so a Cancel pressed during the download is honoured
@@ -559,7 +567,6 @@ async function execute(
       phase: "compute",
       featureIds: scope.featureIds,
       scopeCount: scope.count,
-      startedAt: Date.now(),
     });
 
     const ctx: ToolContext = {

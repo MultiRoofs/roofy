@@ -319,6 +319,9 @@ afterEach(() => {
   (tables as unknown as Resettable).__resetQueue();
   delete EXECUTORS["height-from-extent"];
   delete EXECUTORS["measure-solids"];
+  // The offline test defines an own `onLine` over jsdom's prototype getter;
+  // deleting it uncovers the getter again for every other test.
+  Reflect.deleteProperty(navigator, "onLine");
 });
 
 describe("submitRun", () => {
@@ -1251,32 +1254,60 @@ describe("installStaleWatcher", () => {
 });
 
 describe("the Loading extension phase (spec §6.1)", () => {
-  it("loads the tool's extension under its own phase before computing", async () => {
+  /** The one request these tests submit: `measure-solids` declares `three_d`. */
+  function solidsRequest() {
+    return request({
+      toolId: "measure-solids",
+      lod: "2.2",
+      prefix: "solid_",
+      columns: [{ name: "solid_volume_m3", type: "DOUBLE" as const }],
+    });
+  }
+
+  /**
+   * A `measure-solids` executor, and the flag that says whether it ran.
+   *
+   * "The run never reached the tool" is the assertion behind most of §6.1's
+   * refusals, and a spy is the only way to tell it apart from a tool that ran
+   * and produced nothing.
+   */
+  function registerSolids(): () => boolean {
+    let ran = false;
+    registerExecutor("measure-solids", async () => {
+      ran = true;
+      return {
+        columns: [{ name: "solid_volume_m3", type: "DOUBLE" as const }],
+        rows: new Map([["a", { solid_volume_m3: 1 }]]),
+        measured: 1,
+        skipped: [],
+      };
+    });
+    return () => ran;
+  }
+
+  /** Every distinct phase the newest run passed through, in order. */
+  function recordPhases(): {
+    readonly phases: Array<string | null>;
+    readonly stop: () => void;
+  } {
     const phases: Array<string | null> = [];
-    const unsub = useProcessingStore.subscribe((s) => {
+    const stop = useProcessingStore.subscribe((s) => {
       const run = s.runs[0];
       if (run && phases[phases.length - 1] !== run.phase)
         phases.push(run.phase);
     });
+    return { phases, stop };
+  }
+
+  it("loads the tool's extension under its own phase before computing", async () => {
+    const { phases, stop } = recordPhases();
     vi.mocked(isExtensionLoaded).mockReturnValue(false);
     vi.mocked(ensureExtension).mockResolvedValue(true);
-    registerExecutor("measure-solids", async () => ({
-      columns: [{ name: "solid_volume_m3", type: "DOUBLE" as const }],
-      rows: new Map([["b1", { solid_volume_m3: 1 }]]),
-      measured: 1,
-      skipped: [],
-    }));
+    registerSolids();
 
-    const id = submitRun(
-      request({
-        toolId: "measure-solids",
-        lod: "2.2",
-        prefix: "solid_",
-        columns: [{ name: "solid_volume_m3", type: "DOUBLE" as const }],
-      }),
-    );
+    const id = submitRun(solidsRequest());
     await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
-    unsub();
+    stop();
 
     expect(ensureExtension).toHaveBeenCalledWith("three_d");
     expect(phases).toContain("extension");
@@ -1284,25 +1315,95 @@ describe("the Loading extension phase (spec §6.1)", () => {
     expect(runById(id)?.status).toBe("done");
   });
 
-  it("skips the phase when the extension is already loaded", async () => {
-    vi.mocked(isExtensionLoaded).mockReturnValue(true);
-    registerExecutor("measure-solids", async () => ({
-      columns: [{ name: "solid_volume_m3", type: "DOUBLE" as const }],
-      rows: new Map([["b1", { solid_volume_m3: 1 }]]),
+  it("keeps ONE execution start across the extension hand-off", async () => {
+    // The footer's live ticker is `Date.now() - run.startedAt` while the run is
+    // in flight (`RunFooter.useElapsed`). A `startedAt` re-stamped at the
+    // compute phase makes a long download's ticker drop back to zero at the
+    // hand-off — the run appears to restart. One stamp per execution, so the
+    // ticker and the card's final `elapsedMs` measure the SAME run.
+    const load = deferred<boolean>();
+    vi.mocked(isExtensionLoaded).mockReturnValue(false);
+    vi.mocked(ensureExtension).mockReturnValue(load.promise);
+    registerSolids();
+
+    const id = submitRun(solidsRequest());
+    await vi.waitFor(() => expect(runById(id)?.phase).toBe("extension"));
+    const startedAt = runById(id)!.startedAt;
+    // A real download takes time; without it `Date.now()` cannot tell a second
+    // stamp from the first.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    load.resolve(true);
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+
+    expect(runById(id)?.startedAt).toBe(startedAt);
+    // And the elapsed the card finally reports still covers the download.
+    expect(runById(id)?.elapsedMs).toBeGreaterThanOrEqual(10);
+  });
+
+  it("holds the tool and the queue behind the load until it settles", async () => {
+    const load = deferred<boolean>();
+    vi.mocked(isExtensionLoaded).mockReturnValue(false);
+    vi.mocked(ensureExtension).mockReturnValue(load.promise);
+    const solidsRan = registerSolids();
+    registerExecutor("height-from-extent", async (run) => ({
+      columns: [{ name: `${run.prefix}height_m`, type: "DOUBLE" }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
       measured: 1,
       skipped: [],
     }));
 
-    const id = submitRun(
-      request({
-        toolId: "measure-solids",
-        lod: "2.2",
-        prefix: "solid_",
-        columns: [{ name: "solid_volume_m3", type: "DOUBLE" as const }],
-      }),
-    );
-    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    const first = submitRun(solidsRequest());
+    const second = submitRun(request());
+    await vi.waitFor(() => expect(runById(first)?.phase).toBe("extension"));
 
+    // The load is INSIDE `runOnTableQueue`, so nothing else touches the table
+    // while it is in flight: not this run's tool, and not the run behind it.
+    expect(solidsRan()).toBe(false);
+    expect(runById(first)?.status).toBe("running");
+    expect(runById(second)?.status).toBe("queued");
+    expect(sql).toEqual([]);
+
+    load.resolve(true);
+    await vi.waitFor(() => expect(runById(second)?.status).toBe("done"));
+    expect(solidsRan()).toBe(true);
+    expect(runById(first)?.status).toBe("done");
+  });
+
+  it("cancelled during the load, it writes nothing once the load settles", async () => {
+    const load = deferred<boolean>();
+    vi.mocked(isExtensionLoaded).mockReturnValue(false);
+    vi.mocked(ensureExtension).mockReturnValue(load.promise);
+    const solidsRan = registerSolids();
+
+    const id = submitRun(solidsRequest());
+    await vi.waitFor(() => expect(runById(id)?.phase).toBe("extension"));
+    cancelRun(id);
+    expect(runById(id)?.status).toBe("cancelling");
+    // `ensureExtension` cannot be aborted, so the Cancel is honoured on the far
+    // side of it — and everything after it must stay untouched.
+    load.resolve(true);
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("cancelled"));
+
+    expect(solidsRan()).toBe(false);
+    expect(sql).toEqual([]);
+    expect(attributesOf("a").solid_volume_m3).toBeUndefined();
+    expect(computedColumnsOf("L1").size).toBe(0);
+    expect(runById(id)?.undoable).toBe(false);
+    expect(runById(id)?.phase).toBeNull();
+  });
+
+  it("skips the phase when the extension is already loaded", async () => {
+    const { phases, stop } = recordPhases();
+    vi.mocked(isExtensionLoaded).mockReturnValue(true);
+    registerSolids();
+
+    const id = submitRun(solidsRequest());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    stop();
+
+    // Not merely "nothing was downloaded": §6.1 skips the PHASE, so the card
+    // never shows "Loading extension" for an extension that is already there.
+    expect(phases).not.toContain("extension");
     expect(ensureExtension).not.toHaveBeenCalled();
   });
 
@@ -1319,23 +1420,12 @@ describe("the Loading extension phase (spec §6.1)", () => {
       loadedExtensions: [],
       platform: "wasm_eh",
     });
-    let ran = false;
-    registerExecutor("measure-solids", async () => {
-      ran = true;
-      throw new Error("unreachable");
-    });
+    const solidsRan = registerSolids();
 
-    const id = submitRun(
-      request({
-        toolId: "measure-solids",
-        lod: "2.2",
-        prefix: "solid_",
-        columns: [{ name: "solid_volume_m3", type: "DOUBLE" as const }],
-      }),
-    );
+    const id = submitRun(solidsRequest());
     await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
 
-    expect(ran).toBe(false);
+    expect(solidsRan()).toBe(false);
     const run = runById(id);
     expect(run?.status).toBe("failed");
     expect(run?.error).toBe(
@@ -1345,5 +1435,40 @@ describe("the Loading extension phase (spec §6.1)", () => {
     // the card shows — including the offline one, which replaces it.
     expect(run?.warnings).toContain("three_d: HTTP 404");
     expect(run?.undoable).toBe(false);
+    expect(sql).toEqual([]);
+  });
+
+  it("tells an offline browser what it can act on, and still records DuckDB's reason", async () => {
+    // §6.3: "for the offline case, that it needs a network connection". The
+    // detection is advisory — jsdom's `onLine` is a prototype getter, so the
+    // test defines an own property over it and `afterEach` deletes it again.
+    Object.defineProperty(navigator, "onLine", {
+      value: false,
+      configurable: true,
+    });
+    vi.mocked(isExtensionLoaded).mockReturnValue(false);
+    vi.mocked(ensureExtension).mockResolvedValue(false);
+    vi.mocked(getDuckDBStatus).mockReturnValue({
+      state: "ready",
+      extensions: {
+        cityjson: { state: "loaded" },
+        spatial: { state: "unloaded" },
+        three_d: { state: "failed", error: "Failed to fetch" },
+      },
+      loadedExtensions: [],
+      platform: "wasm_eh",
+    });
+    registerSolids();
+
+    const id = submitRun(solidsRequest());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
+
+    const run = runById(id);
+    expect(run?.error).toBe(
+      "The three_d extension could not be loaded; it needs a network connection.",
+    );
+    // "Failed to fetch" is true and useless to the user, and indispensable in a
+    // bug report — so it is kept as the run's warning, not as its message.
+    expect(run?.warnings).toContain("three_d: Failed to fetch");
   });
 });
