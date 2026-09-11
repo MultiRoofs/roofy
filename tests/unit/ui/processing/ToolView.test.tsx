@@ -634,6 +634,23 @@ describe("ToolView", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Prefix" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
+
+    // The dismissal WAITS for the run: once it is done, the card it would have
+    // shown is the one the dismissal suppresses, and the form comes back.
+    act(() =>
+      useProcessingStore.getState().patchRun("r1", {
+        status: "done",
+        summary: {
+          line: "2 buildings measured · 0.3 s",
+          detail: null,
+          measured: 2,
+          skipped: [],
+        },
+      }),
+    );
+    expect(screen.queryByRole("button", { name: "Run again" })).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Prefix" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Run" })).toBeInTheDocument();
   });
 
   it("leaves the form editable under a FAILED card (§6.3 offers Retry and Log only)", () => {
