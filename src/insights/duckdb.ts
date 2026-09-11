@@ -314,8 +314,16 @@ export async function ensureExtension(name: ExtensionName): Promise<boolean> {
     // `loadExtension` cannot announce it itself — `doInit` calls that function
     // for `cityjson` before the status is `ready` at all, so a publish inside
     // it would announce a half-built engine.
-    extensions = { ...extensions, [name]: { state: "loading" } };
-    if (status.state === "ready") publishReady();
+    //
+    // Guarded on the SAME condition `loadExtension` bails on. Without a
+    // connection that function returns `false` before writing anything, so a
+    // pre-boot call is a no-op — and a `loading` written here would have
+    // nothing to move it: the boot's own `publishReady()` would publish it and
+    // the chip would read "Loading…" for the rest of the session.
+    if (conn !== null) {
+      extensions = { ...extensions, [name]: { state: "loading" } };
+      if (status.state === "ready") publishReady();
+    }
     const ok = await loadExtension(name);
     // A successful lazy load changes what `duckdb_extensions()` reports, and
     // THAT list is the status tooltip — without this re-read the tooltip goes

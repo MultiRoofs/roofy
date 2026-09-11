@@ -171,6 +171,26 @@ describe("duckdb.ts publishes every transition", () => {
     expect(seen).toEqual(["ready:loading", "ready:loaded"]);
   });
 
+  it("publishes NOTHING when asked before the engine has booted", async () => {
+    // `loadExtension` bails on a null connection before it writes anything, so
+    // a pre-boot `ensureExtension` has always been a no-op — and it has to STAY
+    // one. A `loading` written here has nothing to move it: the boot's own
+    // `publishReady()` would then publish it, and §6.1's chip would read
+    // "Loading the spatial extension…" for the rest of the session.
+    const { seen, stop } = record();
+    expect(await duckdb.ensureExtension("spatial")).toBe(false);
+    stop();
+    expect(seen).toEqual([]);
+    expect(duckdb.getDuckDBStatusVersion()).toBe(0);
+    expect(duckdb.getDuckDBStatus()).toEqual({ state: "uninitialized" });
+
+    // …and no `loading` survives into the status the boot publishes.
+    await duckdb.initDuckDB();
+    const status = duckdb.getDuckDBStatus();
+    if (status.state !== "ready") throw new Error("unreachable");
+    expect(status.extensions.spatial.state).toBe("unloaded");
+  });
+
   it("sends nothing to a listener that has unsubscribed", async () => {
     await duckdb.initDuckDB();
     const { seen, stop } = record();
