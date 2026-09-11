@@ -1014,3 +1014,57 @@ describe("the engine's death (spec §6.1)", () => {
     expect(useLayerTableStore.getState().tables["L1"]?.state).toBe("ready");
   });
 });
+
+describe("a build the engine's death overtook", () => {
+  it("abandons a build that was QUEUED when the engine died", async () => {
+    // The invalidation marks every entry failed, and then the queue goes on
+    // running the builds that were already on it. A build that does not know
+    // its engine has gone writes `building` over the invalidation, asks
+    // `initDuckDB` for an engine, and can publish `ready` for a table that was
+    // never created in the database anyone is now talking to.
+    await enqueueLayerTable("L1", readerSource());
+    onStatement = async (statement) => {
+      if (statement.startsWith("DESCRIBE")) killEngine();
+    };
+    const first = enqueueLayerTable("L1", readerSource());
+    const second = enqueueLayerTable("L2", readerSource());
+    await Promise.all([first, second]);
+
+    expect(useLayerTableStore.getState().tables["L2"]).toEqual({
+      state: "failed",
+      message: "Analytics engine stopped",
+    });
+    expect(getLayerTable("L2")).toBeNull();
+    // …and it never got as far as a table of its own.
+    expect(sql.some((q) => q.includes("layer_3"))).toBe(false);
+  });
+
+  it("does not restore the old table when a build fails after the death", async () => {
+    // The catch has two paths that would undo the invalidation: it puts the
+    // captured `previous` back as `ready` (a table that died with the engine),
+    // and it parks the source so `retryEngine` rebuilds it — which is the
+    // rebuild this milestone deliberately does not do.
+    await enqueueLayerTable("L1", readerSource());
+    failures = { "CREATE OR REPLACE TABLE": "boom" };
+    onStatement = async (statement) => {
+      if (statement.startsWith("DESCRIBE")) killEngine();
+    };
+    await enqueueLayerTable("L1", readerSource());
+
+    expect(useLayerTableStore.getState().tables["L1"]).toEqual({
+      state: "failed",
+      message: "Analytics engine stopped",
+    });
+    expect(getLayerTable("L1")).toBeNull();
+
+    // The status bar's Retry reboots the engine. It revives what it PARKED —
+    // and nothing was parked here, so the layer stays honestly table-less.
+    engineDead = false;
+    failures = {};
+    await retryEngine();
+    expect(useLayerTableStore.getState().tables["L1"]).toEqual({
+      state: "failed",
+      message: "Analytics engine stopped",
+    });
+  });
+});
