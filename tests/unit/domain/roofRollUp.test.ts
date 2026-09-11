@@ -60,7 +60,8 @@ describe("rollUpRoofSurfaces", () => {
     const out = rollUpRoofSurfaces([s(10, 0, 0), s(4, 2, 90)], 5)!;
     expect(out.azimuthDeg).toBeNull();
     expect(out.flatShare).toBe(1);
-    expect(out.slopeDeg).toBeCloseTo((10 * 0 + 4 * 2) / 14, 10);
+    // Area-weighted over both: (10 m² × 0°) + (4 m² × 2°) = 8, over 14 m².
+    expect(out.slopeDeg).toBeCloseTo(8 / 14, 10);
   });
 
   it("has no share and no slope when the surfaces are all zero-area", () => {
