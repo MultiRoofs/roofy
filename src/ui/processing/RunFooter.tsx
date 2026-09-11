@@ -33,21 +33,43 @@ import { NEW_RULE_COLOR_HEX } from "../../scene/cityColors";
 
 /** §6.2's reason for a Style-by-result button with nothing to style. */
 const ALL_VALUES_EMPTY = "All values are empty";
+/** §7's reason: the layer's table was rebuilt after the run, so the run no
+ *  longer describes what a median would be read from. Same string the card
+ *  already prints for a stale run. */
+const STALE_LAYER_RELOADED = "stale: layer reloaded";
 
-/** The median read behind Style by result, as an outcome the caller reports.
- *  A table that is not ready never reaches DuckDB, so it borrows the failing
- *  entry's OWN message rather than inventing one; `formatDuckDBError` turns
- *  the empty case into the app's existing "The query failed." */
+/**
+ * §6.3's "The first error line", for the toast.
+ *
+ * The split happens BEFORE `formatDuckDBError`, not after: the formatter
+ * JOINS every line it keeps into one string (duckdb.ts:122), so by the time
+ * it has run there are no lines left to take the first of.
+ */
+function firstErrorLine(message: string): string {
+  const first =
+    message
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line !== "") ?? "";
+  return formatDuckDBError(first);
+}
+
+/**
+ * The median read behind Style by result, or `null` when there is no table to
+ * read it from.
+ *
+ * `null` is not a failure to report: the button is only offered on a DONE run
+ * whose own writes went into that table, and a table that has since gone
+ * takes the layer out of the tool's target list altogether
+ * (`useToolForm.ts:83`). There is no true sentence to show the user about it,
+ * so the caller abandons silently rather than invent one.
+ */
 async function readMedian(
   layerId: string,
   column: string,
-): Promise<QueryOutcome> {
+): Promise<QueryOutcome | null> {
   const entry = useLayerTableStore.getState().tables[layerId];
-  if (entry?.state !== "ready")
-    return {
-      ok: false,
-      message: entry?.state === "failed" ? entry.message : "",
-    };
+  if (entry?.state !== "ready") return null;
   return await runQuery(
     `SELECT median(${quoteIdent(column)}) AS m FROM ${quoteIdent(entry.info.table)}`,
   );
@@ -70,10 +92,12 @@ async function readMedian(
  * `pending` and `token` are the two guards the awaited gap needs: the button
  * is disabled while its read is in flight, so two overlapping reads cannot
  * each replace the whole draft on arrival, and the token invalidates a read
- * whose card has gone (the effect below sets it to -1 on unmount) or that a
- * newer click has superseded.
+ * whose CONTEXT has gone — a newer click, an unmount, or the card being
+ * dismissed by Run again, which swaps `run` for null without unmounting the
+ * footer (`ToolView.tsx:209-215`). That last one is why the invalidation is
+ * keyed on the run's identity and not on the unmount alone.
  */
-function useStyleByResult(): {
+function useStyleByResult(runId: string | null): {
   readonly pending: boolean;
   readonly start: (run: RunRecord, column: string) => void;
 } {
@@ -81,9 +105,12 @@ function useStyleByResult(): {
   const tokenRef = useRef(0);
   useEffect(
     () => () => {
-      tokenRef.current = -1;
+      // Leaving this run's card: whatever it started is no longer wanted, and
+      // the card that replaces it starts with a button of its own.
+      tokenRef.current += 1;
+      setPending(false);
     },
-    [],
+    [runId],
   );
 
   const start = useCallback((run: RunRecord, column: string) => {
@@ -96,6 +123,9 @@ function useStyleByResult(): {
       try {
         const outcome = await readMedian(layerId, column);
         if (tokenRef.current !== token) return;
+        // No table to read: an impossible state for a done run, and one with
+        // nothing true to say about it. See `readMedian`.
+        if (outcome === null) return;
         // The layer can be removed while the read is in flight, and
         // `requestSection` activates whatever id it is handed
         // (shellStore.ts:173) — which would resurrect it. Abandon silently:
@@ -107,7 +137,7 @@ function useStyleByResult(): {
         if (!outcome.ok) {
           useProcessingStore
             .getState()
-            .pushNotice(formatDuckDBError(outcome.message));
+            .pushNotice(firstErrorLine(outcome.message));
           return;
         }
         const value = outcome.rows[0]?.["m"];
@@ -165,7 +195,7 @@ function useElapsed(run: RunRecord | null): number {
 
 export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
   const elapsed = useElapsed(run);
-  const style = useStyleByResult();
+  const style = useStyleByResult(run?.id ?? null);
   const status = run?.status ?? null;
 
   if (run !== null && (status === "running" || status === "cancelling")) {
@@ -217,7 +247,15 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
     // §6.2: "disabled with 'All values are empty' when the chosen column is
     // NULL for every object in the run". A reason the user can READ, not only
     // a tooltip on a disabled control — the same muted note Run's reason gets.
-    const styleReason = run.summary?.measured === 0 ? ALL_VALUES_EMPTY : null;
+    // A STALE run is disabled too: its table has been rebuilt under it, so a
+    // median would describe data the run never saw. The card already prints
+    // that reason above the actions, so it is not repeated below them.
+    const styleReason =
+      run.summary?.measured === 0
+        ? ALL_VALUES_EMPTY
+        : run.stale
+          ? STALE_LAYER_RELOADED
+          : null;
     return (
       <div className="processing-footer processing-footer--card">
         <div className="processing-card">
@@ -282,9 +320,11 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
               Log
             </button>
           </div>
-          {styleColumn !== undefined && styleReason !== null && (
-            <p className="processing-note">{styleReason}</p>
-          )}
+          {styleColumn !== undefined &&
+            styleReason !== null &&
+            styleReason !== STALE_LAYER_RELOADED && (
+              <p className="processing-note">{styleReason}</p>
+            )}
         </div>
         <div className="processing-footer__row">
           {/* Not a submit: it unlocks the form, it does not re-run. Never

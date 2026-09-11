@@ -59,6 +59,7 @@ vi.mock("../../../../src/ui/table/useLayerCounts", () => ({
 }));
 
 const { ToolView } = await import("../../../../src/ui/processing/ToolView");
+const { RunFooter } = await import("../../../../src/ui/processing/RunFooter");
 const { submitRun, cancelRun, undoRun } =
   await import("../../../../src/features/processing/runQueue");
 const { useProcessingStore } =
@@ -158,7 +159,7 @@ function runFixture(patch: Partial<RunRecord>): RunRecord {
 }
 
 /** The done run the Style-by-result cases all start from. */
-function doneRun(layerId: string): RunRecord {
+function doneRun(layerId: string, patch: Partial<RunRecord> = {}): RunRecord {
   return runFixture({
     status: "done",
     targetLayerId: layerId,
@@ -168,6 +169,7 @@ function doneRun(layerId: string): RunRecord {
       measured: 2,
       skipped: [],
     },
+    ...patch,
   });
 }
 
@@ -550,17 +552,25 @@ describe("ToolView", () => {
     const layerId = addCityLayer();
     render(<ToolView toolId="height-from-extent" />);
     act(() => useProcessingStore.getState().upsertRun(doneRun(layerId)));
-    const message = 'Catalog Error: Table "layer_1" does not exist';
-    vi.mocked(runQuery).mockResolvedValueOnce({ ok: false, message });
+    // §6.3: "The first error line" — a DuckDB error is several lines, and the
+    // toast is one line of chrome. `formatDuckDBError` JOINS the lines it
+    // keeps (duckdb.ts:122), so the split has to happen BEFORE it.
+    vi.mocked(runQuery).mockResolvedValueOnce({
+      ok: false,
+      message:
+        'Binder Error: Referenced column "zone_id" not found in FROM clause\nCandidate bindings: "zone_code"\nLINE 1: SELECT median("zone_id")',
+    });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
     });
     // The engine already told us what went wrong; discarding that for a
-    // plausible-looking "> 0" rule is the bug this pins. The message goes
-    // through `formatDuckDBError` (stubbed here as a passthrough — its own
-    // trimming is `duckdb.ts`'s to test).
-    expect(formatDuckDBError).toHaveBeenCalledWith(message);
-    expect(useProcessingStore.getState().notice).toBe(message);
+    // plausible-looking "> 0" rule is the bug this pins.
+    expect(formatDuckDBError).toHaveBeenCalledWith(
+      'Binder Error: Referenced column "zone_id" not found in FROM clause',
+    );
+    expect(useProcessingStore.getState().notice).toBe(
+      'Binder Error: Referenced column "zone_id" not found in FROM clause',
+    );
     expect(useRuleDraftStore.getState().drafts[layerId]).toBeUndefined();
     expect(useShellStore.getState().requestedSection).toBeNull();
   });
@@ -600,13 +610,12 @@ describe("ToolView", () => {
     expect(useProcessingStore.getState().notice).toBeNull();
   });
 
-  it("takes one click at a time, and ignores a query that outlives the card", async () => {
+  it("takes one click at a time", async () => {
     const layerId = addCityLayer();
     render(<ToolView toolId="height-from-extent" />);
     act(() => useProcessingStore.getState().upsertRun(doneRun(layerId)));
     const pending = deferredQuery();
-    const button = screen.getByRole("button", { name: "Style by result" });
-    fireEvent.click(button);
+    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
     // Disabled while its query runs: two overlapping reads would each replace
     // the WHOLE draft on arrival, in whatever order they landed.
     expect(
@@ -614,13 +623,83 @@ describe("ToolView", () => {
     ).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
     expect(runQuery).toHaveBeenCalledTimes(1);
-    // The card goes (Run again, another tool, the toolbox closing) before the
-    // read lands: the completion is stale and must write nothing.
-    cleanup();
     await act(async () => {
       pending.resolve({ ok: true, columns: ["m"], rows: [{ m: 4.2 }] });
       await pending.promise;
     });
+  });
+
+  it("drops a median that lands after Run again", async () => {
+    // Run again DISMISSES the run (ToolView.tsx:209-215), which takes the card
+    // away WITHOUT unmounting the footer — so an unmount-only invalidation
+    // misses it, and the read lands on a card the user has already left.
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() => useProcessingStore.getState().upsertRun(doneRun(layerId)));
+    const pending = deferredQuery();
+    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Run again" }));
+    });
+    expect(screen.getByRole("button", { name: "Run" })).toBeInTheDocument();
+    await act(async () => {
+      pending.resolve({ ok: true, columns: ["m"], rows: [{ m: 4.2 }] });
+      await pending.promise;
+    });
+    expect(useRuleDraftStore.getState().drafts[layerId]).toBeUndefined();
+    expect(useShellStore.getState().requestedSection).toBeNull();
+    expect(useProcessingStore.getState().notice).toBeNull();
+    // And the replacement context starts clean: the next run's button is not
+    // still disabled by the abandoned read's `pending`.
+    act(() =>
+      useProcessingStore
+        .getState()
+        .upsertRun(doneRun(layerId, { id: "r2", elapsedMs: 400 })),
+    );
+    expect(
+      screen.getByRole("button", { name: "Style by result" }),
+    ).not.toBeDisabled();
+  });
+
+  it("disables Style by result on a stale run, with the spec's reason", async () => {
+    // §7: a layer whose table was rebuilt after the run. The median would be
+    // read from a table the run no longer describes.
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() =>
+      useProcessingStore
+        .getState()
+        .upsertRun(doneRun(layerId, { stale: true })),
+    );
+    const button = screen.getByRole("button", { name: "Style by result" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "stale: layer reloaded");
+    expect(
+      screen.getByText("stale: layer reloaded", { selector: "p" }),
+    ).toBeInTheDocument();
+  });
+
+  it("abandons silently when the target has no table to read", async () => {
+    // Impossible for a non-stale done run — the run itself wrote to that
+    // table — so there is nothing to tell the user, and no failure message to
+    // invent. The card is rendered DIRECTLY here because `ToolView` cannot
+    // reach this state: a layer without a ready table leaves the tool's target
+    // list entirely (`useToolForm.ts:83`), taking the card with it.
+    const layerId = addCityLayer();
+    act(() => useLayerTableStore.setState({ tables: {} }));
+    render(
+      <RunFooter
+        run={doneRun(layerId)}
+        canRun={true}
+        reason={null}
+        onRunAgain={() => {}}
+      />,
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    });
+    expect(runQuery).not.toHaveBeenCalled();
+    expect(useProcessingStore.getState().notice).toBeNull();
     expect(useRuleDraftStore.getState().drafts[layerId]).toBeUndefined();
     expect(useShellStore.getState().requestedSection).toBeNull();
   });
