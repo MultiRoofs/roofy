@@ -9,10 +9,12 @@
  * WHY THE ROLL-UP IS NOT `GROUP BY`. A CityJSON feature is a ROOT object plus
  * its parts, each of which is its own ROW with its own bbox, and the height of
  * the building is the extent of the WHOLE feature (max zmax − min zmin across
- * root and parts). Every member row then receives the feature's values, so the
- * column reads the same whichever part of a building the user clicks. SQL could
- * do it with a window function; doing it here keeps the SQL a plain projection
- * that is readable in the run's log, and the counts (FEATURES measured, features
+ * root and parts). The ROOT row carries that roll-up; a PART row carries its
+ * OWN extent, because §8 promises exactly that — "a Building shows the
+ * aggregated value, a part its own" — and a part stamped with its building's
+ * height is a measurement of something the user never selected. SQL could do it
+ * with a window function; doing it here keeps the SQL a plain projection that is
+ * readable in the run's log, and the counts (FEATURES measured, features
  * skipped) fall out of the same pass.
  *
  * "Includes chimneys and antennas; not a roof or terrain height" is the tool's
@@ -75,25 +77,32 @@ export function buildExtentSql(
   );
 }
 
+type Extent = { zmin: number; zmax: number } | null;
+
 /**
- * Roll the rows up per feature and hand every member the feature's values.
+ * Roll the rows up per feature: the feature's extent onto its ROOT row, each
+ * part's own extent onto the part.
  *
  * A feature is skipped ONLY when no member has a bbox: a part with a null bbox
  * beside a root that has one does not poison the building, in either arrival
- * order.
+ * order — that part's own three values are NULL, and the building's are not.
+ *
+ * The root is the row whose id IS its feature id (`buildExtentSql` reads
+ * `COALESCE("feature_id", "id")`, so a root answers with itself); a feature
+ * whose root is not in the read has no row to carry the roll-up, and only its
+ * parts are written.
  */
 export function rollUpExtents(
   rows: ReadonlyArray<ExtentRow>,
   prefix: string,
 ): RollUp {
-  const extents = new Map<string, { zmin: number; zmax: number } | null>();
-  const members = new Map<string, string[]>();
+  const extents = new Map<string, Extent>();
   for (const row of rows) {
-    const seen = members.get(row.f);
-    if (seen) seen.push(row.id);
-    else members.set(row.f, [row.id]);
-
-    if (row.zmin === null || row.zmax === null) {
+    const own: Extent =
+      row.zmin === null || row.zmax === null
+        ? null
+        : { zmin: row.zmin, zmax: row.zmax };
+    if (own === null) {
       if (!extents.has(row.f)) extents.set(row.f, null);
       continue;
     }
@@ -102,29 +111,39 @@ export function rollUpExtents(
       row.f,
       current
         ? {
-            zmin: Math.min(current.zmin, row.zmin),
-            zmax: Math.max(current.zmax, row.zmax),
+            zmin: Math.min(current.zmin, own.zmin),
+            zmax: Math.max(current.zmax, own.zmax),
           }
-        : { zmin: row.zmin, zmax: row.zmax },
+        : own,
     );
   }
 
   // Three names, fixed by §7.4 and by this tool's registry entry; the `!`s
   // below are `noUncheckedIndexedAccess`, not a doubt about the shape.
   const [heightCol, zminCol, zmaxCol] = columnNames(prefix);
+  const values = (extent: Extent): Record<string, number | null> => ({
+    [heightCol!]: extent ? extent.zmax - extent.zmin : null,
+    [zminCol!]: extent ? extent.zmin : null,
+    [zmaxCol!]: extent ? extent.zmax : null,
+  });
+
   const out = new Map<string, Record<string, number | null>>();
+  for (const row of rows) {
+    const isRoot = row.id === row.f;
+    const own: Extent =
+      row.zmin === null || row.zmax === null
+        ? null
+        : { zmin: row.zmin, zmax: row.zmax };
+    out.set(row.id, values(isRoot ? (extents.get(row.f) ?? null) : own));
+  }
+
+  // The accounting is per FEATURE, as §7 counts everything: a building with one
+  // measurable member is one building measured, whatever its parts lack.
   let measured = 0;
   let skipped = 0;
-  for (const [feature, extent] of extents) {
+  for (const extent of extents.values()) {
     if (extent) measured += 1;
     else skipped += 1;
-    for (const id of members.get(feature) ?? []) {
-      out.set(id, {
-        [heightCol!]: extent ? extent.zmax - extent.zmin : null,
-        [zminCol!]: extent ? extent.zmin : null,
-        [zmaxCol!]: extent ? extent.zmax : null,
-      });
-    }
   }
   return {
     rows: out,

@@ -100,6 +100,60 @@ describe("rollUpExtents", () => {
     expect(out.skipped).toEqual([{ cause: "no geometry", count: 1 }]);
   });
 
+  it("gives the ROOT the feature's roll-up and each PART its own extent", () => {
+    // Spec §8: "a Building shows the aggregated value, a part its own". The
+    // root row is the one whose id IS its feature id; the parts keep the
+    // measurements a user can check against the part they clicked.
+    const out = rollUpExtents(
+      [
+        { id: "B", f: "B", zmin: 2, zmax: 3 },
+        { id: "B-1", f: "B", zmin: 1, zmax: 6 },
+        { id: "B-2", f: "B", zmin: 0, zmax: 4 },
+      ],
+      "extent_",
+    );
+    expect(out.rows.get("B")).toEqual({
+      extent_height_m: 6,
+      extent_zmin_m: 0,
+      extent_zmax_m: 6,
+    });
+    expect(out.rows.get("B-1")).toEqual({
+      extent_height_m: 5,
+      extent_zmin_m: 1,
+      extent_zmax_m: 6,
+    });
+    expect(out.rows.get("B-2")).toEqual({
+      extent_height_m: 4,
+      extent_zmin_m: 0,
+      extent_zmax_m: 4,
+    });
+    // One FEATURE, measured once.
+    expect(out.measured).toBe(1);
+    expect(out.skipped).toEqual([]);
+  });
+
+  it("nulls a PART with no bbox without skipping its feature", () => {
+    const out = rollUpExtents(
+      [
+        { id: "B", f: "B", zmin: 1, zmax: 5 },
+        { id: "B-1", f: "B", zmin: null, zmax: null },
+      ],
+      "extent_",
+    );
+    expect(out.rows.get("B")).toEqual({
+      extent_height_m: 4,
+      extent_zmin_m: 1,
+      extent_zmax_m: 5,
+    });
+    expect(out.rows.get("B-1")).toEqual({
+      extent_height_m: null,
+      extent_zmin_m: null,
+      extent_zmax_m: null,
+    });
+    expect(out.measured).toBe(1);
+    expect(out.skipped).toEqual([]);
+  });
+
   it("measures a feature whose OTHER member has a bbox, whichever came first", () => {
     // Spec §7: only a feature with no bbox on ANY member is skipped. The member
     // that had none still receives the feature's values, so the column is not
