@@ -318,6 +318,39 @@ describe("ToolView", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
+  it("retries a failed run with its FROZEN parameters, not the draft", () => {
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() =>
+      useProcessingStore.getState().upsertRun(
+        runFixture({
+          status: "failed",
+          targetLayerId: layerId,
+          error: "Binder Error: x",
+          elapsedMs: 1200,
+        }),
+      ),
+    );
+    // §6.3 leaves the form editable after a failure, so the draft can drift —
+    // and drift into a state that would refuse a fresh Run.
+    fireEvent.change(screen.getByRole("textbox", { name: "Prefix" }), {
+      target: { value: "1 bad" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(submitRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolId: "height-from-extent",
+        targetLayerId: layerId,
+        prefix: "extent_",
+        columns: [
+          { name: "extent_height_m", type: "DOUBLE" },
+          { name: "extent_zmin_m", type: "DOUBLE" },
+          { name: "extent_zmax_m", type: "DOUBLE" },
+        ],
+      }),
+    );
+  });
+
   it("opens the drawer and the STYLE section from the result card", () => {
     const layerId = addCityLayer();
     render(<ToolView toolId="height-from-extent" />);

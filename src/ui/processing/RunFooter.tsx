@@ -7,7 +7,12 @@
  */
 import { useEffect, useState } from "react";
 import { useProcessingStore } from "../../features/processing/processingStore";
-import { cancelRun, undoRun } from "../../features/processing/runQueue";
+import {
+  cancelRun,
+  submitRun,
+  undoRun,
+} from "../../features/processing/runQueue";
+import { requestFromRun } from "./useToolForm";
 import type { RunRecord } from "../../features/processing/types";
 import { activateLayer } from "../../features/workspace/layerCoordination";
 import { useShellStore } from "../shell/shellStore";
@@ -20,7 +25,6 @@ interface Props {
   readonly canRun: boolean;
   /** Why Run is disabled, or the queue note — rendered under the button. */
   readonly reason: string | null;
-  readonly onRun: () => void;
 }
 
 /** Ticks while the run is in flight; the finished run's own `elapsedMs` after. */
@@ -37,7 +41,7 @@ function useElapsed(run: RunRecord | null): number {
   return live ? Math.max(0, now - run.startedAt) : run.elapsedMs;
 }
 
-export function RunFooter({ run, canRun, reason, onRun }: Props) {
+export function RunFooter({ run, canRun, reason }: Props) {
   const elapsed = useElapsed(run);
   const status = run?.status ?? null;
 
@@ -149,7 +153,13 @@ export function RunFooter({ run, canRun, reason, onRun }: Props) {
           </p>
           <p className="processing-error">{run.error}</p>
           <div className="processing-card__actions">
-            <button type="button" onClick={onRun}>
+            {/* §6.3: "Retry re-runs with the same parameters" — the run's own
+                frozen request, never the form's draft, which the user is free
+                to edit (or invalidate) while a failure is on screen. */}
+            <button
+              type="button"
+              onClick={() => submitRun(requestFromRun(run))}
+            >
               Retry
             </button>
             <button type="button" onClick={() => openRunLog(run.id)}>

@@ -172,7 +172,6 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
           footerReason ??
           (f.queuedBehind === null ? null : `Queued behind ${f.queuedBehind}`)
         }
-        onRun={run}
       />
     </form>
   );
