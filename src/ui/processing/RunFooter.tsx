@@ -196,12 +196,17 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
         </p>
         <div className="processing-footer__row">
           <span className="processing-elapsed">{seconds(elapsed)}</span>
+          {/* §6.1's button is "Cancel". The label is what tells a screen
+              reader WHICH Cancel this is — the idle footer's Cancel leaves the
+              tool, this one stops the run — and it is the name every test
+              reaches the button by. */}
           <button
             type="button"
+            aria-label="Cancel run"
             disabled={status === "cancelling"}
             onClick={() => cancelRun(run.id)}
           >
-            Cancel run
+            Cancel
           </button>
         </div>
       </div>
@@ -213,8 +218,12 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
       <div className="processing-footer processing-footer--progress">
         <p className="processing-phases">{reason ?? "Queued"}</p>
         <div className="processing-footer__row">
-          <button type="button" onClick={() => cancelRun(run.id)}>
-            Cancel run
+          <button
+            type="button"
+            aria-label="Cancel run"
+            onClick={() => cancelRun(run.id)}
+          >
+            Cancel
           </button>
         </div>
       </div>

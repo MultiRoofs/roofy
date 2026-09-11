@@ -369,9 +369,11 @@ describe("ToolView", () => {
     );
     expect(screen.getByText(/Computing/)).toBeInTheDocument();
     expect(screen.getByText(/Loading extension ✓/)).toBeInTheDocument();
+    // §6.1's button reads "Cancel"; the label only tells a screen reader
+    // which Cancel this is (the idle footer's returns to the catalogue).
     expect(
       screen.getByRole("button", { name: "Cancel run" }),
-    ).toBeInTheDocument();
+    ).toHaveTextContent(/^Cancel$/);
     fireEvent.click(screen.getByRole("button", { name: "Cancel run" }));
     expect(cancelRun).toHaveBeenCalledWith("r1");
 
@@ -914,7 +916,7 @@ describe("ToolView", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Cancel run" }),
-    ).toBeInTheDocument();
+    ).toHaveTextContent(/^Cancel$/);
   });
 
   it("locks the form while the run is in flight and while its card shows, and Run again only unlocks it", () => {
