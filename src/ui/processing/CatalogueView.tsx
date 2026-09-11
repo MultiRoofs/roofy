@@ -4,7 +4,7 @@
  * second line and a tooltip — and still opens the tool view, so the user can
  * read the parameters and switch the target layer there.
  */
-import { useMemo } from "react";
+import { useId, useMemo } from "react";
 import { useProcessingStore } from "../../features/processing/processingStore";
 import {
   GROUP_LABELS,
@@ -122,6 +122,13 @@ function ToolRow({
   // why. It is also the one reason Retry can act on: a row disabled for a
   // missing layer or a failed table is not a download away from working.
   const canRetry = ext !== null && extensionState[ext] === "failed";
+  // The download sentence, for the elements a KEYBOARD can reach. The chip
+  // carries it as a native `title`, but a `<span>` is not focusable, so on
+  // that element alone the explanation is mouse-only — and the row a keyboard
+  // does land on says "Not available yet" (M2's outranking reason), which
+  // explains nothing about the failed download. Same string as the chip and
+  // as `eligibility.ts`'s row reason.
+  const failureId = useId();
   return (
     // A wrapper, because the Retry link is a BUTTON and the row is a button:
     // nesting them is invalid HTML and browsers un-nest it unpredictably.
@@ -131,6 +138,9 @@ function ToolRow({
         className="processing-tool-row"
         aria-disabled={reason !== null}
         title={reason ?? undefined}
+        // Failure-only: a row whose extension is merely unloaded must not
+        // describe itself with a download failure that has not happened.
+        aria-describedby={canRetry ? failureId : undefined}
         onClick={() => openToolView(tool.id)}
       >
         <span className="processing-tool-row__head">
@@ -151,19 +161,41 @@ function ToolRow({
         )}
       </button>
       {canRetry && (
-        <button
-          type="button"
-          className="processing-retry"
-          // `ensureExtension`, NOT `retryEngine`: the engine is up, one
-          // extension is not. Rebooting DuckDB would rebuild every layer table
-          // to fix a download. The result is not awaited — the status publishes
-          // `loading` and then `loaded`/`failed`, and the chip follows.
-          onClick={() => {
-            void ensureExtension(ext);
-          }}
-        >
-          Retry
-        </button>
+        <>
+          {/* The sentence behind the chip's tooltip, for assistive tech and
+              for anything that reaches this row by keyboard. Clipped rather
+              than `display: none`, which would take it out of the
+              accessibility tree along with the pixels — the same idiom as
+              `.left-rail-count` in `app.css`. */}
+          <span id={failureId} className="processing-sr-only">
+            {chipTitle(ext, "failed")}
+          </span>
+          <button
+            type="button"
+            className="processing-retry"
+            // A failed `spatial` renders one Retry per spatial tool, so three
+            // buttons named "Retry" would be indistinguishable in a screen
+            // reader's list of controls. The visible word stays "Retry", and
+            // it is a PREFIX of the name (WCAG 2.5.3, Label in Name).
+            aria-label={`Retry loading the ${ext} extension`}
+            aria-describedby={failureId}
+            // The same sentence on hover, for a pointer user who never sees
+            // the chip's tooltip because the chip is not what they are aiming
+            // at. `aria-describedby` outranks it in the accessibility tree,
+            // so the description is not doubled.
+            title={chipTitle(ext, "failed")}
+            // `ensureExtension`, NOT `retryEngine`: the engine is up, one
+            // extension is not. Rebooting DuckDB would rebuild every layer
+            // table to fix a download. The result is not awaited — the status
+            // publishes `loading` and then `loaded`/`failed`, and the chip
+            // follows.
+            onClick={() => {
+              void ensureExtension(ext);
+            }}
+          >
+            Retry
+          </button>
+        </>
       )}
     </div>
   );

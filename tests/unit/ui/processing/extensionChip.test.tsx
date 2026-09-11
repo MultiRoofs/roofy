@@ -151,6 +151,20 @@ function addCityLayer(): string {
 /** The chip for one extension. Both chips carry their label as their text. */
 const chip = (label: "Spatial" | "3D") => screen.getAllByText(label)[0]!;
 
+/** The Retry links for one extension. The accessible name says WHICH
+ *  extension, because a failed `spatial` renders one Retry per spatial tool
+ *  and three buttons all named "Retry" are indistinguishable to a screen
+ *  reader; the visible text stays "Retry". */
+const retries = (ext: "spatial" | "three_d") =>
+  screen.queryAllByRole("button", {
+    name: `Retry loading the ${ext} extension`,
+  });
+
+/** The sentence §5 gives a download failure, on the chip, the Retry link and
+ *  the row's accessible description. */
+const FAILED_REASON =
+  "The spatial extension could not be downloaded; check the connection and retry";
+
 beforeEach(async () => {
   refuse.clear();
   gate = null;
@@ -189,6 +203,10 @@ afterEach(() => {
   cleanup();
   useWorkspaceStore.getState().setActiveLayerId(null);
   vi.unstubAllGlobals();
+  // Belt and braces for the `console.warn` spies in the failure cases: an
+  // assertion that fails before its own `mockRestore()` would otherwise leave
+  // console.warn silenced for every test after it.
+  vi.restoreAllMocks();
 });
 
 describe("the capability chips (spec §5)", () => {
@@ -224,10 +242,14 @@ describe("the capability chips (spec §5)", () => {
       "title",
       "Loads the three_d extension on first run (about 1 MB, once per session)",
     );
-    expect(screen.queryAllByRole("button", { name: "Retry" })).toHaveLength(0);
+    expect(retries("spatial")).toHaveLength(0);
   });
 
   it("mutes the chip and offers Retry when the REAL load fails", async () => {
+    // The refused load is EXPECTED, and `loadExtension` reports it on
+    // console.warn. Scoped so the run stays quiet AND the report is asserted
+    // rather than merely suppressed.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     refuse.add("spatial");
     await act(async () => {
       await duckdb.initDuckDB();
@@ -236,24 +258,33 @@ describe("the capability chips (spec §5)", () => {
     await act(async () => {
       await duckdb.ensureExtension("spatial");
     });
+    expect(
+      warn.mock.calls.some((call) =>
+        String(call[0]).includes('DuckDB extension "spatial" did not load'),
+      ),
+    ).toBe(true);
     expect(chip("Spatial")).toHaveAttribute("data-state", "failed");
     // §5's sentence lives on the CHIP in M2: all three spatial tools are still
     // `implemented: false`, and `eligibility.ts`'s "Not available yet"
     // outranks the extension reason, so the row's second line reads "Not
     // available yet". The row-level reason becomes reachable when a spatial
     // tool ships (M13.3).
-    expect(chip("Spatial")).toHaveAttribute(
-      "title",
-      "The spatial extension could not be downloaded; check the connection and retry",
-    );
+    expect(chip("Spatial")).toHaveAttribute("title", FAILED_REASON);
     // One per spatial tool: join-by-location, aggregate-per-area,
     // distance-to-nearest.
-    expect(screen.getAllByRole("button", { name: "Retry" })).toHaveLength(3);
+    expect(retries("spatial")).toHaveLength(3);
     // The 3D chip is untouched, and carries no Retry of its own.
     expect(chip("3D")).toHaveAttribute("data-state", "unloaded");
+    expect(retries("three_d")).toHaveLength(0);
+    warn.mockRestore();
   });
 
-  it("Retry asks the engine to load the extension again, and the chip follows", async () => {
+  it("puts the failure reason where a keyboard can reach it", async () => {
+    // A `title` on a non-focusable `<span>` is a mouse-only tooltip: the chip
+    // cannot be tabbed to, and the row a keyboard DOES land on says only "Not
+    // available yet". So the same sentence is an accessible DESCRIPTION on
+    // both focusable elements, and a `title` on the Retry link itself.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     refuse.add("spatial");
     await act(async () => {
       await duckdb.initDuckDB();
@@ -262,7 +293,39 @@ describe("the capability chips (spec §5)", () => {
     await act(async () => {
       await duckdb.ensureExtension("spatial");
     });
-    expect(screen.getAllByRole("button", { name: "Retry" })).toHaveLength(3);
+    const row = screen.getByRole("button", {
+      name: /Join attributes by location/,
+    });
+    expect(row).toHaveAccessibleDescription(FAILED_REASON);
+    const retry = retries("spatial")[0]!;
+    expect(retry).toHaveAccessibleDescription(FAILED_REASON);
+    expect(retry).toHaveAttribute("title", FAILED_REASON);
+    // The visible text is still the one word the design calls for.
+    expect(retry.textContent).toBe("Retry");
+    // Failure-only: a row whose extension is merely unloaded describes nothing,
+    // or every disabled row would carry a download sentence that is not true
+    // of it.
+    const solids = screen.getByRole("button", { name: /Measure solids/ });
+    expect(solids).not.toHaveAttribute("aria-describedby");
+    warn.mockRestore();
+  });
+
+  it("Retry asks the engine to load the extension again, and the chip follows", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    refuse.add("spatial");
+    await act(async () => {
+      await duckdb.initDuckDB();
+    });
+    render(<CatalogueView />);
+    await act(async () => {
+      await duckdb.ensureExtension("spatial");
+    });
+    expect(retries("spatial")).toHaveLength(3);
+    expect(
+      warn.mock.calls.some((call) =>
+        String(call[0]).includes('DuckDB extension "spatial" did not load'),
+      ),
+    ).toBe(true);
 
     // The network comes back, and the user presses Retry. Nothing here fakes a
     // status: the click calls `ensureExtension`, which really loads and really
@@ -270,17 +333,20 @@ describe("the capability chips (spec §5)", () => {
     // promise is un-awaited by design, so the assertion waits for the render
     // rather than counting the chain's microtasks.
     refuse.clear();
-    fireEvent.click(screen.getAllByRole("button", { name: "Retry" })[0]!);
+    fireEvent.click(retries("spatial")[0]!);
+    // Waits for the LOADED tooltip, not for the Retry links to go: those
+    // disappear the moment the state leaves "failed", which is the start of
+    // the attempt, not its success. Waiting on their absence would let the
+    // assertions below race the remaining queries.
     await waitFor(() => {
-      expect(screen.queryAllByRole("button", { name: "Retry" })).toHaveLength(
-        0,
+      expect(chip("Spatial")).toHaveAttribute(
+        "title",
+        "The spatial extension is loaded",
       );
     });
     expect(duckdb.isExtensionLoaded("spatial")).toBe(true);
-    expect(chip("Spatial")).toHaveAttribute(
-      "title",
-      "The spatial extension is loaded",
-    );
+    expect(retries("spatial")).toHaveLength(0);
+    warn.mockRestore();
   });
 
   it("shows the loading state while a load is in flight", async () => {
