@@ -203,13 +203,14 @@ describe("heightFromExtent executor", () => {
     expect(result.measured).toBe(1);
   });
 
-  it("coerces the engine's values: a BigInt-ish id and undefined bbox fields", async () => {
-    // duckdb-wasm hands back whatever the column's arrow type is; an id can
-    // arrive as a number and a missing STRUCT field as `undefined`.
+  it("coerces the engine's values: a BigInt id and undefined bbox fields", async () => {
+    // duckdb-wasm hands back whatever the column's arrow type is: an id can
+    // arrive as a BigInt, a DECIMAL as a string, and a missing STRUCT field as
+    // `undefined`.
     const fake = fakeContext(
       [
-        { id: 7, f: 7, zmin: "1.5", zmax: "4" },
-        { id: 8, f: 8, zmin: undefined, zmax: undefined },
+        { id: 7n, f: 7n, zmin: "1.5", zmax: "4" },
+        { id: 8n, f: 8n, zmin: undefined, zmax: undefined },
       ],
       null,
     );
