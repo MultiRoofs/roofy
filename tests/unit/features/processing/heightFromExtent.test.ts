@@ -109,6 +109,7 @@ describe("rollUpExtents", () => {
         { id: "B", f: "B", zmin: 2, zmax: 3 },
         { id: "B-1", f: "B", zmin: 1, zmax: 6 },
         { id: "B-2", f: "B", zmin: 0, zmax: 4 },
+        { id: "B-3", f: "B", zmin: null, zmax: null },
       ],
       "extent_",
     );
@@ -126,6 +127,13 @@ describe("rollUpExtents", () => {
       extent_height_m: 4,
       extent_zmin_m: 0,
       extent_zmax_m: 4,
+    });
+    // A part with no bbox is NULL on its own row and takes nothing from the
+    // building it belongs to.
+    expect(out.rows.get("B-3")).toEqual({
+      extent_height_m: null,
+      extent_zmin_m: null,
+      extent_zmax_m: null,
     });
     // One FEATURE, measured once.
     expect(out.measured).toBe(1);
