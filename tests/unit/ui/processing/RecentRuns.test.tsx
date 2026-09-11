@@ -8,13 +8,13 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { RunRecord } from "../../../../src/features/processing/types";
 
 vi.mock("../../../../src/features/processing/runQueue", () => ({
-  submitRun: vi.fn(() => "run_2"),
+  retryRun: vi.fn(() => "run_2"),
   cancelRun: vi.fn(),
   undoRun: vi.fn(async () => {}),
 }));
 
 const { RecentRuns } = await import("../../../../src/ui/processing/RecentRuns");
-const { submitRun, cancelRun, undoRun } =
+const { retryRun, cancelRun, undoRun } =
   await import("../../../../src/features/processing/runQueue");
 const { useProcessingStore } =
   await import("../../../../src/features/processing/processingStore");
@@ -119,19 +119,10 @@ describe("RecentRuns", () => {
     render(<RecentRuns />);
     expect(screen.getByText("Binder Error: x")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(submitRun).toHaveBeenCalledWith({
-      toolId: "height-from-extent",
-      targetLayerId: "L1",
-      scope: "all",
-      lod: null,
-      params: {},
-      prefix: "extent_",
-      columns: [
-        { name: "extent_height_m", type: "DOUBLE" },
-        { name: "extent_zmin_m", type: "DOUBLE" },
-        { name: "extent_zmax_m", type: "DOUBLE" },
-      ],
-    });
+    // The QUEUE holds that request — the scope's frozen ids included — so the
+    // row repeats a run by id and never rebuilds one from what it renders
+    // (`runQueue.test.ts` owns what the repeat then resolves).
+    expect(retryRun).toHaveBeenCalledWith("r1");
   });
 
   it("offers Cancel while a run is queued or running", () => {
@@ -151,7 +142,7 @@ describe("RecentRuns", () => {
     render(<RecentRuns />);
     expect(screen.getByText("stale: layer reloaded")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Re-run" }));
-    expect(submitRun).toHaveBeenCalledTimes(1);
+    expect(retryRun).toHaveBeenCalledWith("r1");
   });
 
   it("opens the tool view prefilled through Edit & run", () => {

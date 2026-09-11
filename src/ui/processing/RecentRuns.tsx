@@ -8,14 +8,13 @@
 import { useProcessingStore } from "../../features/processing/processingStore";
 import {
   cancelRun,
-  submitRun,
+  retryRun,
   undoRun,
 } from "../../features/processing/runQueue";
 import { toolById } from "../../features/processing/toolRegistry";
 import type { RunRecord } from "../../features/processing/types";
 import { openRunLog, openToolView } from "./revealTools";
 import { STATUS_WORD, seconds } from "./runFormat";
-import { requestFromRun } from "./useToolForm";
 
 export function RecentRuns() {
   const runs = useProcessingStore((s) => s.runs);
@@ -50,7 +49,11 @@ function RunRow({ run }: { readonly run: RunRecord }) {
       ? run.targetName
       : `${run.targetName} ← ${run.sourceName}`;
   const line = secondLine(run);
-  const again = () => submitRun(requestFromRun(run));
+  // Retry and Re-run repeat the run the QUEUE froze (§6.1/§6.3), ids and all —
+  // not a request rebuilt from this row, which would re-resolve "Selected"
+  // against whatever is selected now. A row whose frozen request the history
+  // has dropped has no card here either, so `null` never reaches a click.
+  const again = () => retryRun(run.id);
   return (
     <li className="processing-run-row">
       <div className="processing-run-row__head">

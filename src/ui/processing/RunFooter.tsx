@@ -9,10 +9,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useProcessingStore } from "../../features/processing/processingStore";
 import {
   cancelRun,
-  submitRun,
+  retryRun,
   undoRun,
 } from "../../features/processing/runQueue";
-import { requestFromRun } from "./useToolForm";
 import type { RunRecord } from "../../features/processing/types";
 import { activateLayer } from "../../features/workspace/layerCoordination";
 import { useShellStore } from "../shell/shellStore";
@@ -347,11 +346,11 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
           <div className="processing-card__actions">
             {/* §6.3: "Retry re-runs with the same parameters" — the run's own
                 frozen request, never the form's draft, which the user is free
-                to edit (or invalidate) while a failure is on screen. */}
-            <button
-              type="button"
-              onClick={() => submitRun(requestFromRun(run))}
-            >
+                to edit (or invalidate) while a failure is on screen. The
+                queue keeps that request, ids and all: a Retry rebuilt from
+                the card would re-resolve "Selected" against whatever is
+                selected NOW. */}
+            <button type="button" onClick={() => retryRun(run.id)}>
               Retry
             </button>
             <button type="button" onClick={() => openRunLog(run.id)}>

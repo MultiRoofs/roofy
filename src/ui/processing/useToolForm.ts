@@ -45,7 +45,12 @@ function asColumns(names: ReadonlyArray<string>): RunRequest["columns"] {
 }
 
 /**
- * The request a Retry / Re-run repeats (spec §6.3: "the same parameters").
+ * A run RECORD read back as a request.
+ *
+ * NOT what Retry and Re-run use: §6.3's "the same parameters" includes the
+ * scope's resolved ids, which the record does not carry, so those two repeat
+ * the request the QUEUE froze (`retryRun`). This is the record-only view, for
+ * the paths that prefill a form the user is about to edit.
  *
  * The columns are re-derived from the tool's own map rather than read off the
  * record, so a record written by an older session still gets the names this

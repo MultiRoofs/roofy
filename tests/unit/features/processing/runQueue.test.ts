@@ -157,7 +157,7 @@ vi.mock("../../../../src/insights/layerTables", async () => {
 });
 
 const tables = await import("../../../../src/insights/layerTables");
-const { submitRun, cancelRun, undoRun, installStaleWatcher } =
+const { submitRun, retryRun, cancelRun, undoRun, installStaleWatcher } =
   await import("../../../../src/features/processing/runQueue");
 const { registerExecutor, EXECUTORS } =
   await import("../../../../src/features/processing/tools");
@@ -450,6 +450,49 @@ describe("submitRun", () => {
     expect(sql.some((s) => s.includes(`"id" IN ('a')`))).toBe(true);
     expect(sql.some((s) => s.includes("'other'"))).toBe(false);
     expect(seen[1]).toEqual(["a"]);
+  });
+
+  it("retries a failed run on the ids it froze, not on today's selection", async () => {
+    // §6.3: "Retry re-runs with the same parameters" — and the scope is one of
+    // them (§6.1's frozen parameters). The user selected one building, the run
+    // failed, they clicked another, then pressed Retry: the retry measures the
+    // FIRST one.
+    featureTotal = 3;
+    scopeRows = [{ id: "a", f: "a" }];
+    const seen: Array<ReadonlyArray<string> | null> = [];
+    let calls = 0;
+    registerExecutor("height-from-extent", async (_run, ctx) => {
+      calls += 1;
+      seen.push(ctx.featureIds);
+      if (calls === 1) throw new Error("Binder Error: x");
+      return {
+        columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+        rows: new Map([["a", { extent_height_m: 4 }]]),
+        measured: 1,
+        skipped: [],
+      };
+    });
+    useSelectionStore
+      .getState()
+      .selectMany([{ kind: "object", layerId: "L1", objectId: "a" }]);
+    const first = submitRun(request({ scope: "selected" }));
+    await vi.waitFor(() => expect(runById(first)?.status).toBe("failed"));
+
+    useSelectionStore
+      .getState()
+      .selectMany([{ kind: "object", layerId: "L1", objectId: "other" }]);
+    sql.length = 0;
+    const retried = retryRun(first);
+    expect(retried).not.toBeNull();
+    expect(retried).not.toBe(first);
+    await vi.waitFor(() => expect(runById(retried!)?.status).toBe("done"));
+    expect(sql.some((s) => s.includes(`"id" IN ('a')`))).toBe(true);
+    expect(sql.some((s) => s.includes("'other'"))).toBe(false);
+    expect(seen[1]).toEqual(["a"]);
+  });
+
+  it("has nothing to retry for a run it never froze", () => {
+    expect(retryRun("run_nope")).toBeNull();
   });
 
   it("refuses a run whose table was rebuilt while it queued", async () => {

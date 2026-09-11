@@ -43,6 +43,7 @@ vi.mock("../../../../src/insights/duckdb", () => ({
 
 vi.mock("../../../../src/features/processing/runQueue", () => ({
   submitRun: vi.fn(() => "run_1"),
+  retryRun: vi.fn(() => "run_2"),
   cancelRun: vi.fn(),
   undoRun: vi.fn(async () => {}),
 }));
@@ -60,7 +61,7 @@ vi.mock("../../../../src/ui/table/useLayerCounts", () => ({
 
 const { ToolView } = await import("../../../../src/ui/processing/ToolView");
 const { RunFooter } = await import("../../../../src/ui/processing/RunFooter");
-const { submitRun, cancelRun, undoRun } =
+const { submitRun, retryRun, cancelRun, undoRun } =
   await import("../../../../src/features/processing/runQueue");
 const { useProcessingStore } =
   await import("../../../../src/features/processing/processingStore");
@@ -456,18 +457,11 @@ describe("ToolView", () => {
       target: { value: "1 bad" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(submitRun).toHaveBeenCalledWith(
-      expect.objectContaining({
-        toolId: "height-from-extent",
-        targetLayerId: layerId,
-        prefix: "extent_",
-        columns: [
-          { name: "extent_height_m", type: "DOUBLE" },
-          { name: "extent_zmin_m", type: "DOUBLE" },
-          { name: "extent_zmax_m", type: "DOUBLE" },
-        ],
-      }),
-    );
+    // The frozen request lives in the QUEUE (its scope's resolved ids with
+    // it), so Retry repeats the run by id and never rebuilds a request from
+    // the card — the draft beside it cannot leak in.
+    expect(retryRun).toHaveBeenCalledWith("r1");
+    expect(submitRun).not.toHaveBeenCalled();
   });
 
   it("opens the drawer and the STYLE section from the result card", async () => {

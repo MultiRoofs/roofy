@@ -122,6 +122,19 @@ interface UndoState {
 }
 
 const undoState = new Map<string, UndoState>();
+/**
+ * What each run froze, kept for as long as its card is in the history.
+ *
+ * Retry and Re-run repeat a run, and §6.3's "the same parameters" includes the
+ * ones the user cannot see: the selection and the filter the run resolved its
+ * scope from. Rebuilding the request from the RECORD loses exactly those — the
+ * record keeps `scope: "selected"`, not WHICH buildings — so a Retry pressed
+ * after clicking elsewhere would quietly measure something else.
+ *
+ * A module Map rather than a field on the record: none of this is state the UI
+ * renders, and nothing about a run survives the session.
+ */
+const frozenById = new Map<string, FrozenRequest>();
 let counter = 0;
 
 function fmt(n: number): string {
@@ -174,6 +187,37 @@ const patch = (id: string, p: Partial<RunRecord>) =>
  * cancel from the first frame.
  */
 export function submitRun(request: RunRequest): string {
+  return queueRun({
+    ...request,
+    snapshot: snapshotScopeInputs(request.targetLayerId),
+    tableName: getLayerTable(request.targetLayerId)?.table ?? null,
+  });
+}
+
+/**
+ * Spec §6.3: "Retry re-runs with the same parameters" — including the frozen
+ * scope, which is why this exists instead of rebuilding a request from the
+ * record. Recent runs' Re-run (a stale run, §7) takes the same door.
+ *
+ * The new run is a NEW run: its own id, its own card, its own controller. Only
+ * the snapshot is inherited; the TABLE is read afresh, because the retry is
+ * aimed at the layer as it is now — a Re-run after a rebuild that reused the
+ * old table name would refuse itself with "Layer changed while running".
+ *
+ * `null` when the run is not one this session queued (an id from nowhere, or a
+ * card the history has since evicted): there is nothing to repeat.
+ */
+export function retryRun(runId: string): string | null {
+  const frozen = frozenById.get(runId);
+  if (!frozen) return null;
+  return queueRun({
+    ...frozen,
+    tableName: getLayerTable(frozen.targetLayerId)?.table ?? null,
+  });
+}
+
+function queueRun(frozen: FrozenRequest): string {
+  const request: RunRequest = frozen;
   const layer = useLayerStore
     .getState()
     .layers.find((l) => l.id === request.targetLayerId);
@@ -209,14 +253,15 @@ export function submitRun(request: RunRequest): string {
   // A run pushed past MAX_RUNS has no card left to press Undo on, so its backup
   // table is dead weight in the database.
   const held = new Set(useProcessingStore.getState().runs.map((r) => r.id));
-  for (const gone of before) if (!held.has(gone)) discardUndo(gone);
+  for (const gone of before) {
+    if (held.has(gone)) continue;
+    discardUndo(gone);
+    // The card is gone, so nothing can ask to repeat it.
+    frozenById.delete(gone);
+  }
   const controller = new AbortController();
   controllers.set(id, controller);
-  const frozen: FrozenRequest = {
-    ...request,
-    snapshot: snapshotScopeInputs(request.targetLayerId),
-    tableName: getLayerTable(request.targetLayerId)?.table ?? null,
-  };
+  frozenById.set(id, frozen);
   // The queue's rejection is not this caller's business: every failure mode a
   // run has is already a patched card.
   void runOnTableQueue(() => execute(id, frozen, controller.signal)).catch(

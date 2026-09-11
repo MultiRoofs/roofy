@@ -36,6 +36,7 @@ vi.mock("../../../../src/insights/duckdb", () => ({
 
 vi.mock("../../../../src/features/processing/runQueue", () => ({
   submitRun: vi.fn(() => "run_1"),
+  retryRun: vi.fn(() => "run_2"),
   cancelRun: vi.fn(),
   undoRun: vi.fn(async () => {}),
 }));
