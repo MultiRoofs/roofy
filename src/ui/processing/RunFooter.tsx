@@ -25,6 +25,8 @@ interface Props {
   readonly canRun: boolean;
   /** Why Run is disabled, or the queue note — rendered under the button. */
   readonly reason: string | null;
+  /** §6.2: dismiss the result card and hand the form back, unlocked. */
+  readonly onRunAgain: () => void;
 }
 
 /** Ticks while the run is in flight; the finished run's own `elapsedMs` after. */
@@ -41,7 +43,7 @@ function useElapsed(run: RunRecord | null): number {
   return live ? Math.max(0, now - run.startedAt) : run.elapsedMs;
 }
 
-export function RunFooter({ run, canRun, reason }: Props) {
+export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
   const elapsed = useElapsed(run);
   const status = run?.status ?? null;
 
@@ -139,11 +141,13 @@ export function RunFooter({ run, canRun, reason }: Props) {
           </div>
         </div>
         <div className="processing-footer__row">
-          <button type="submit" className="processing-run" disabled={!canRun}>
+          {/* Not a submit: it unlocks the form, it does not re-run. Never
+              disabled — a draft that Run would refuse is exactly the draft the
+              user has come back to fix. */}
+          <button type="button" className="processing-run" onClick={onRunAgain}>
             Run again
           </button>
         </div>
-        {reason !== null && <p className="processing-note">{reason}</p>}
       </div>
     );
   }

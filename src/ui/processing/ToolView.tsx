@@ -6,6 +6,7 @@
  * `disabled` on every control. The footer is a separate component because its
  * four states replace each other in the same place (§6.1–§6.3).
  */
+import { useState } from "react";
 import { useProcessingStore } from "../../features/processing/processingStore";
 import { submitRun } from "../../features/processing/runQueue";
 import type { ToolId } from "../../features/processing/types";
@@ -19,11 +20,25 @@ const fmt = (n: number | null) =>
 
 export function ToolView({ toolId }: { readonly toolId: ToolId }) {
   const f = useToolForm(toolId);
+  // §6.2's "Run again unlocks the form with the same values": it DISMISSES the
+  // card for that run rather than submitting anything. The dismissal is local
+  // to the view, so leaving the tool and coming back shows the card again —
+  // the run is still the latest thing that happened to this layer.
+  const [dismissedRunId, setDismissedRunId] = useState<string | null>(null);
+  const latestRun =
+    f.latestRun !== null && f.latestRun.id === dismissedRunId
+      ? null
+      : f.latestRun;
+  // The form locks while the run is in flight (§6.1) AND while its result card
+  // stands in for the footer (§6.2). A FAILED card does not lock: §6.3 offers
+  // Retry and Log only, and Retry repeats the FROZEN request, so the user is
+  // free to edit the draft and run it afresh.
   const locked =
-    f.latestRun !== null &&
-    (f.latestRun.status === "running" ||
-      f.latestRun.status === "queued" ||
-      f.latestRun.status === "cancelling");
+    latestRun !== null &&
+    (latestRun.status === "running" ||
+      latestRun.status === "queued" ||
+      latestRun.status === "cancelling" ||
+      latestRun.status === "done");
   // Spec §6 puts Run's reason under the button; the prefix error is the one
   // reason that is ALREADY on screen, inline under the field it belongs to, and
   // printing the same sentence twice reads as two problems.
@@ -166,12 +181,13 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
         )}
       </fieldset>
       <RunFooter
-        run={f.latestRun}
+        run={latestRun}
         canRun={f.canRun}
         reason={
           footerReason ??
           (f.queuedBehind === null ? null : `Queued behind ${f.queuedBehind}`)
         }
+        onRunAgain={() => setDismissedRunId(latestRun?.id ?? null)}
       />
     </form>
   );

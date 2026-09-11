@@ -421,7 +421,7 @@ describe("ToolView", () => {
     ).toBeInTheDocument();
   });
 
-  it("locks the form while its run is in flight and offers Run again after", () => {
+  it("locks the form while the run is in flight and while its card shows, and Run again only unlocks it", () => {
     const layerId = addCityLayer();
     render(<ToolView toolId="height-from-extent" />);
     act(() =>
@@ -434,6 +434,8 @@ describe("ToolView", () => {
       ),
     );
     expect(screen.getByRole("textbox", { name: "Prefix" })).toBeDisabled();
+
+    // §6.2: the card stands in for the form until the user asks for it back.
     act(() =>
       useProcessingStore.getState().patchRun("r1", {
         status: "done",
@@ -445,9 +447,39 @@ describe("ToolView", () => {
         },
       }),
     );
-    expect(screen.getByRole("textbox", { name: "Prefix" })).not.toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Prefix" })).toBeDisabled();
+
+    // "Run again unlocks the form with the same values" — it does NOT run.
     fireEvent.click(screen.getByRole("button", { name: "Run again" }));
+    expect(submitRun).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Prefix" })).not.toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Prefix" })).toHaveValue(
+      "extent_",
+    );
+    expect(screen.getByRole("button", { name: "Run" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Run again" }),
+    ).not.toBeInTheDocument();
+
+    // And the unlocked Run is the ordinary one.
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
     expect(submitRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the form editable under a FAILED card (§6.3 offers Retry and Log only)", () => {
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() =>
+      useProcessingStore.getState().upsertRun(
+        runFixture({
+          status: "failed",
+          targetLayerId: layerId,
+          error: "Binder Error: x",
+        }),
+      ),
+    );
+    expect(screen.getByRole("textbox", { name: "Prefix" })).not.toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Layer" })).not.toBeDisabled();
   });
 
   it("says a streaming target only covers the loaded buildings", () => {
