@@ -13,8 +13,9 @@ import { useToolForm } from "./useToolForm";
 import { RunFooter } from "./RunFooter";
 import { plural } from "./runFormat";
 
+/** An unknown count is still loading, so it reads as pending, never as zero. */
 const fmt = (n: number | null) =>
-  n === null ? "?" : n.toLocaleString("en-US");
+  n === null ? "…" : n.toLocaleString("en-US");
 
 export function ToolView({ toolId }: { readonly toolId: ToolId }) {
   const f = useToolForm(toolId);
@@ -95,7 +96,9 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
                 checked={f.draft.scope === "all"}
                 onChange={() => f.setDraft({ scope: "all" })}
               />
-              All {plural(f.counts.all ?? 0, "building", "buildings")}
+              {f.counts.all === null
+                ? "All … buildings"
+                : `All ${plural(f.counts.all, "building", "buildings")}`}
             </label>
             <label title={f.noFilter ? "No filter applied" : undefined}>
               <input
@@ -170,7 +173,6 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
           (f.queuedBehind === null ? null : `Queued behind ${f.queuedBehind}`)
         }
         onRun={run}
-        targetLayerId={f.target?.id ?? null}
       />
     </form>
   );

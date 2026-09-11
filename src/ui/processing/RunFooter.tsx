@@ -21,7 +21,6 @@ interface Props {
   /** Why Run is disabled, or the queue note — rendered under the button. */
   readonly reason: string | null;
   readonly onRun: () => void;
-  readonly targetLayerId: string | null;
 }
 
 /** Ticks while the run is in flight; the finished run's own `elapsedMs` after. */
@@ -38,13 +37,7 @@ function useElapsed(run: RunRecord | null): number {
   return live ? Math.max(0, now - run.startedAt) : run.elapsedMs;
 }
 
-export function RunFooter({
-  run,
-  canRun,
-  reason,
-  onRun,
-  targetLayerId,
-}: Props) {
+export function RunFooter({ run, canRun, reason, onRun }: Props) {
   const elapsed = useElapsed(run);
   const status = run?.status ?? null;
 
@@ -60,7 +53,11 @@ export function RunFooter({
         <p className="processing-phases">{phaseLine(run.phase)}</p>
         <div className="processing-footer__row">
           <span className="processing-elapsed">{seconds(elapsed)}</span>
-          <button type="button" onClick={() => cancelRun(run.id)}>
+          <button
+            type="button"
+            disabled={status === "cancelling"}
+            onClick={() => cancelRun(run.id)}
+          >
             Cancel run
           </button>
         </div>
@@ -104,7 +101,9 @@ export function RunFooter({
             <button
               type="button"
               onClick={() => {
-                if (targetLayerId !== null) activateLayer(targetLayerId);
+                // The run's own target is the frozen truth (§6.1); the form's
+                // select may have moved on since it finished.
+                activateLayer(run.targetLayerId);
                 useShellStore.getState().openDrawer();
               }}
             >
@@ -112,10 +111,11 @@ export function RunFooter({
             </button>
             <button
               type="button"
-              onClick={() => {
-                if (targetLayerId === null) return;
-                useShellStore.getState().requestSection(targetLayerId, "style");
-              }}
+              onClick={() =>
+                useShellStore
+                  .getState()
+                  .requestSection(run.targetLayerId, "style")
+              }
             >
               Style by result
             </button>

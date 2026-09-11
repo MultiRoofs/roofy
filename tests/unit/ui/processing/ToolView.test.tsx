@@ -200,6 +200,15 @@ describe("ToolView", () => {
     );
   });
 
+  it("reads a count that has not arrived as pending, not as zero", () => {
+    counts.all = null;
+    addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    expect(
+      screen.getByRole("radio", { name: "All … buildings" }),
+    ).toBeChecked();
+  });
+
   it("names the reason Run is blocked under the button", () => {
     addCityLayer();
     render(<ToolView toolId="height-from-extent" />);

@@ -300,6 +300,8 @@
 .processing-run:hover:not(:disabled) {
   background: var(--accent-fill-hover) !important;
 }
+/* Not a control, so not --control-radius: a 3px indeterminate bar at 8px would
+   be a lozenge. 2px is the radius that reads as a bar at this height. */
 .processing-progress {
   position: relative;
   height: 3px;
@@ -349,13 +351,13 @@
 .processing-card__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   margin-top: 8px;
 }
 .processing-card__actions button {
   min-height: var(--control-height-compact);
   padding: 0 10px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* ── Recent runs (spec §5) ─────────────────────────────────────────── */
@@ -416,13 +418,13 @@
 .processing-run-row__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   margin-top: 6px;
 }
 .processing-run-row__actions button {
   min-height: var(--control-height-compact);
   padding: 0 10px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* ── Log view (spec §6.4) ──────────────────────────────────────────── */
@@ -430,7 +432,7 @@
   margin-left: auto;
   min-height: var(--control-height-compact);
   padding: 0 10px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .processing-log__header {
   margin: 10px 0 14px;
