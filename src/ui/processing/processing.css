@@ -167,6 +167,45 @@
   background: var(--lime-100);
   color: var(--lime-900);
 }
+/* One row and, when its extension failed, its Retry link beside it (spec §5).
+   The wrapper carries the row's bottom margin so the link does not gain one. */
+.processing-tool-row-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.processing-tool-row-wrap .processing-tool-row {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-bottom: 0;
+}
+/* A muted chip: still readable, visibly not a capability you have. */
+.processing-chip[data-state="failed"] {
+  background: var(--control-hover);
+  color: var(--fg-muted);
+}
+.processing-chip[data-state="loading"] {
+  opacity: 0.6;
+}
+/* A link, not a control: the row it sits beside is already a 2-line list item,
+   and a 38px filled button next to it would read as the row's primary action.
+   `!important` only because flatControls sets every button's fill, colour and
+   min-height; the focus ring still comes from the shared rule. */
+.processing-retry {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 2px 8px !important;
+  min-height: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  color: var(--accent) !important;
+  font-size: 12px;
+  text-decoration: underline;
+}
+.processing-retry:hover {
+  background: var(--control-hover) !important;
+}
 
 /* ── Tool view (spec §6) ───────────────────────────────────────────── */
 .processing-tool {
