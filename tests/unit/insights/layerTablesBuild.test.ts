@@ -13,6 +13,10 @@ let failures: Record<string, string> = {};
 /** The engine's readiness, and a gate to hold `initDuckDB` open with. */
 let engineReady = true;
 let initGate: Promise<void> | null = null;
+/** The worker has died: `duckdb.ts` publishes `failed` and every subscriber
+ *  hears it. Separate from `engineReady`, which is "not up YET". */
+let engineDead = false;
+const statusListeners = new Set<() => void>();
 /**
  * Whether `registerBuffer` accepts a buffer.
  *
@@ -51,21 +55,26 @@ vi.mock("../../../src/insights/duckdb", () => {
     initDuckDB: vi.fn(async () => {
       if (initGate) await initGate;
     }),
-    subscribeDuckDBStatus: vi.fn(() => () => {}),
     getDuckDBStatusVersion: vi.fn(() => 0),
+    subscribeDuckDBStatus: vi.fn((listener: () => void) => {
+      statusListeners.add(listener);
+      return () => statusListeners.delete(listener);
+    }),
     getDuckDBStatus: vi.fn(() =>
-      engineReady
-        ? {
-            state: "ready",
-            extensions: {
-              cityjson: { state: "loaded" },
-              spatial: { state: "unloaded" },
-              three_d: { state: "unloaded" },
-            },
-            loadedExtensions: [{ name: "cityjson", version: "0.4.0" }],
-            platform: "wasm_eh",
-          }
-        : { state: "uninitialized" },
+      engineDead
+        ? { state: "failed", error: "worker gone" }
+        : engineReady
+          ? {
+              state: "ready",
+              extensions: {
+                cityjson: { state: "loaded" },
+                spatial: { state: "unloaded" },
+                three_d: { state: "unloaded" },
+              },
+              loadedExtensions: [{ name: "cityjson", version: "0.4.0" }],
+              platform: "wasm_eh",
+            }
+          : { state: "uninitialized" },
     ),
     isExtensionLoaded: vi.fn(() => true),
     ensureExtension: vi.fn(async () => false),
@@ -203,6 +212,7 @@ beforeEach(() => {
   countValue = 2231;
   failures = {};
   engineReady = true;
+  engineDead = false;
   initGate = null;
   registerAccepts = true;
   onStatement = null;
@@ -966,5 +976,41 @@ describe("flat-fallback layer table", () => {
     expect(records).not.toHaveBeenCalled();
     await promise;
     expect(records).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** The worker died: the value first, then every subscriber, as `duckdb.ts`
+ *  publishes it. */
+function killEngine(): void {
+  engineDead = true;
+  for (const listener of statusListeners) listener();
+}
+
+describe("the engine's death (spec §6.1)", () => {
+  it("invalidates every live table rather than leaving it looking usable", async () => {
+    // The database went with the worker. The entry and the registry both
+    // describe a table that no longer exists anywhere, and a Retry reboots the
+    // engine WITHOUT rebuilding them — so a catalogue row reading the rebooted
+    // engine's `ready` would offer a tool that fails on a missing table.
+    await enqueueLayerTable("L1", readerSource());
+    expect(useLayerTableStore.getState().tables["L1"]?.state).toBe("ready");
+    expect(getLayerTable("L1")).not.toBeNull();
+
+    killEngine();
+
+    expect(useLayerTableStore.getState().tables["L1"]).toEqual({
+      state: "failed",
+      message: "Analytics engine stopped",
+    });
+    // The REGISTRY too: `getLayerTable` reads that and not the store, and it
+    // is what a run's head-of-queue check asks.
+    expect(getLayerTable("L1")).toBeNull();
+  });
+
+  it("says nothing about a boot that never came up", async () => {
+    await enqueueLayerTable("L1", readerSource());
+    engineReady = false;
+    for (const listener of statusListeners) listener();
+    expect(useLayerTableStore.getState().tables["L1"]?.state).toBe("ready");
   });
 });

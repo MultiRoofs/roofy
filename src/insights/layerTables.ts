@@ -38,6 +38,7 @@ import {
   initDuckDB,
   registerBuffer,
   runQuery,
+  subscribeDuckDBStatus,
 } from "./duckdb";
 import {
   encodeRowsAsJson,
@@ -255,6 +256,9 @@ const pendingSources = new Map<string, PendingSource>();
  *  rather than imported because `duckdb.ts` keeps it private — but it must
  *  READ the same, or the panel says two different things about one cause. */
 const ENGINE_NOT_RUNNING = "The analytics engine is not running.";
+/** Spec §6.1's sentence for a table whose database stopped existing. The same
+ *  words the run queue puts on a run the death took. */
+const ENGINE_STOPPED = "Analytics engine stopped";
 let seqCounter = 0;
 let counter = 0;
 let chain: Promise<void> = Promise.resolve();
@@ -387,6 +391,50 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
 export function runOnTableQueue<T>(task: () => Promise<T>): Promise<T> {
   return enqueue(task);
 }
+
+/**
+ * Spec §6.1: the DuckDB worker died, so every table it held died with it.
+ *
+ * INVALIDATION, not recovery. The status bar's Retry reboots the engine but
+ * rebuilds only what `retryEngine` parked in {@link pendingSources} — sources
+ * refused while the engine was coming UP — so a table that was `ready` when
+ * the worker crashed is simply not there any more. Left alone, its entry would
+ * still read `ready` over a rebooted engine, and the catalogue would offer
+ * tools that fail on a missing table; the grid would page rows from nothing.
+ *
+ * The REGISTRY is cleared beside the store, as every other failure site here
+ * does: {@link getLayerTable} reads the registry, and that is what a run's
+ * head-of-queue check asks.
+ *
+ * Nothing is re-parked: reviving these would be the rebuild this milestone
+ * deliberately does not do, and the entries stay `failed` until the page is
+ * reloaded.
+ *
+ * A TRANSITION, `ready` → `failed`, and not the value: a boot that never came
+ * up publishes the same `failed`, and it must not condemn tables that were
+ * built by an engine that worked.
+ */
+function invalidateTablesOnEngineDeath(): void {
+  for (const [layerId, entry] of Object.entries(
+    useLayerTableStore.getState().tables,
+  )) {
+    if (entry.state === "failed") continue;
+    registry.delete(layerId);
+    setState(layerId, { state: "failed", message: ENGINE_STOPPED });
+  }
+}
+
+/**
+ * Installed at module load, deliberately: the invalidation is a fact about the
+ * DATABASE, and must not depend on any feature having installed a watcher.
+ */
+let previousEngineState = getDuckDBStatus().state;
+subscribeDuckDBStatus(() => {
+  const state = getDuckDBStatus().state;
+  const died = previousEngineState === "ready" && state === "failed";
+  previousEngineState = state;
+  if (died) invalidateTablesOnEngineDeath();
+});
 
 export function resetLayerTablesForTest(): void {
   registry.clear();
