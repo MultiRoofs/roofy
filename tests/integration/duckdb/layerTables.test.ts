@@ -699,6 +699,7 @@ describe.skipIf(!enabled)("layer tables over real fixtures", () => {
         table: TABLE,
         lodSuffix: "2_2",
         attributes: ["yearOfConstruction"],
+        computedAttributes: [],
         where: null,
       }),
     );
@@ -790,5 +791,52 @@ describe.skipIf(!enabled)("layer tables over real fixtures", () => {
     // `afterAll` is what keeps the working tree clean. In the browser the VFS
     // entry IS the file, so the two coincide.)
     expect(db.query("SELECT file FROM glob('exp_*')")).toEqual([]);
+  });
+
+  it("joins a computed column into the CityParquet source read", () => {
+    // Spec §8: "computed columns are included … in CityParquet as attributes".
+    // They exist on the LAYER's table only, so the one read of the source
+    // picks them up by object id — every row of a feature carrying its own
+    // value. What this proves against the real engine is that the join and the
+    // feature-scope predicate coexist: `id` comes through `USING` and
+    // `feature_id` exists on the reader's side alone, so neither is ambiguous.
+    const layerTable = `${TABLE}_computed`;
+    const scratchSchema = `${EXPORT_BASE}_join`;
+    const sourceName = `${EXPORT_BASE}_join.city.json`;
+    db.query(
+      `CREATE OR REPLACE TABLE ${quoteIdent(layerTable)} AS SELECT * FROM ${quoteIdent(TABLE)}`,
+    );
+    db.query(
+      `ALTER TABLE ${quoteIdent(layerTable)} ADD COLUMN IF NOT EXISTS "extent_height_m" DOUBLE`,
+    );
+    db.query(
+      `UPDATE ${quoteIdent(layerTable)} SET "extent_height_m" = 12.5 * length("id")`,
+    );
+    db.query(`CREATE SCHEMA ${quoteIdent(scratchSchema)}`);
+    db.register(sourceName, "two-buildings.city.json");
+
+    db.query(
+      buildCityParquetSourceSql({
+        scratchSchema,
+        reader: "read_cityjson",
+        sourceFile: sourceName,
+        table: layerTable,
+        lodSuffix: "2_2",
+        attributes: ["yearOfConstruction"],
+        computedAttributes: ["extent_height_m"],
+        where: `"id" IS NOT NULL`,
+      }),
+    );
+    const rows = db.query(
+      `SELECT "id", "extent_height_m" FROM ${quoteIdent(scratchSchema)}."src" ORDER BY "id"`,
+    );
+    expect(rows.length).toBe(3);
+    for (const row of rows) {
+      expect(row.extent_height_m).toBe(12.5 * String(row.id).length);
+    }
+
+    db.query(`DROP SCHEMA IF EXISTS ${quoteIdent(scratchSchema)} CASCADE`);
+    db.query(`DROP TABLE IF EXISTS ${quoteIdent(layerTable)}`);
+    db.dropFile(sourceName);
   });
 });

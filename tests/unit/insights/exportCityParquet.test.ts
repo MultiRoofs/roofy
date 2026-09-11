@@ -98,6 +98,7 @@ function request(over: Record<string, unknown> = {}) {
     sourceExtension: "city.json",
     lodSuffix: "2_2",
     attributes: ["b3_h_dak_max"],
+    computedAttributes: [] as ReadonlyArray<string>,
     where: null,
     rootTypes: ["Building"],
     epsg: 7415,
@@ -140,6 +141,24 @@ describe("CityParquet package export", () => {
     );
     expect(sql[8]).toMatch(
       /^SELECT \* FROM cityparquet_write\('exp_\d+', 'exp_\d+', crs => 'EPSG:7415'\)$/,
+    );
+  });
+
+  it("joins a computed column in from the layer table (§8)", async () => {
+    // §8: "computed columns are included … in CityParquet as attributes". The
+    // reader has never heard of them, so the one read of the source picks them
+    // up from the table the run wrote them to, by object id.
+    await runExport(
+      request({
+        attributes: ["b3_h_dak_max", "extent_height_m"],
+        computedAttributes: ["extent_height_m"],
+      }),
+    );
+    expect(sql[2]).toContain(
+      '"b3_h_dak_max", "extent_height_m" FROM read_cityjson(',
+    );
+    expect(sql[2]).toContain(
+      'LEFT JOIN (SELECT "id", "extent_height_m" FROM "layer_1") AS "computed" USING ("id")',
     );
   });
 

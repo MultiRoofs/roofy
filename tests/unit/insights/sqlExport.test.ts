@@ -173,6 +173,7 @@ describe("buildCityParquetSourceSql", () => {
         table: "layer_1",
         lodSuffix: "2_2",
         attributes: ["b3_h_dak_max", "bouwjaar"],
+        computedAttributes: [],
         where: `"b3_h_dak_max" > 10`,
       }),
     ).toBe(
@@ -189,6 +190,7 @@ describe("buildCityParquetSourceSql", () => {
         table: "layer_3",
         lodSuffix: "1_2",
         attributes: [],
+        computedAttributes: [],
         where: null,
       }),
     ).toBe(
@@ -205,9 +207,70 @@ describe("buildCityParquetSourceSql", () => {
         table: "t",
         lodSuffix: "0_0",
         attributes: [],
+        computedAttributes: [],
         where: null,
       }),
     ).toContain('"geometry_lod0_0", "geometry_properties_lod0_0"');
+  });
+
+  it("takes a computed column from the layer table, joined by object id", () => {
+    // Spec §8: "computed columns are included … in CityParquet as attributes".
+    // They exist only on the layer's table — the reader has never heard of
+    // them — so asking the reader for one is a missing-column error.
+    expect(
+      buildCityParquetSourceSql({
+        scratchSchema: "exp_src_4",
+        reader: "read_cityjson",
+        sourceFile: "exp_4_src.city.json",
+        table: "layer_1",
+        lodSuffix: "2_2",
+        attributes: ["bouwjaar"],
+        computedAttributes: ["extent_height_m"],
+        where: null,
+      }),
+    ).toBe(
+      'CREATE TABLE "exp_src_4"."src" AS SELECT "id", "feature_id", "object_type", "parents", "children", "children_roles", "bbox", "geometry_lod2_2", "geometry_properties_lod2_2", "bouwjaar", "extent_height_m" FROM read_cityjson(\'exp_4_src.city.json\') LEFT JOIN (SELECT "id", "extent_height_m" FROM "layer_1") AS "computed" USING ("id")',
+    );
+  });
+
+  it("keeps the scope WHERE readable beside the computed join", () => {
+    // The join is a DERIVED table, not the layer table itself: `feature_id`
+    // lives only on the reader's side and `USING ("id")` leaves one `id`, so
+    // the scope predicate needs no qualifying and reads as it always did.
+    expect(
+      buildCityParquetSourceSql({
+        scratchSchema: "e",
+        reader: "read_cityjson",
+        sourceFile: "s.json",
+        table: "layer_1",
+        lodSuffix: "2_2",
+        attributes: [],
+        computedAttributes: ["extent_height_m", "extent_zmin_m"],
+        where: `"bouwjaar" > 1900`,
+      }),
+    ).toContain(
+      'LEFT JOIN (SELECT "id", "extent_height_m", "extent_zmin_m" FROM "layer_1") AS "computed" USING ("id") WHERE COALESCE("feature_id", "id") IN (SELECT COALESCE("feature_id", "id") FROM "layer_1" WHERE "bouwjaar" > 1900)',
+    );
+  });
+
+  it("names a computed column once, even when the attribute list repeats it", () => {
+    // The dialog's attribute list is cut from the LAYER's columns, computed
+    // ones included, so the same name can arrive on both sides. A repeat makes
+    // `CREATE TABLE … AS SELECT` fail on a duplicate column name.
+    expect(
+      buildCityParquetSourceSql({
+        scratchSchema: "e",
+        reader: "read_cityjson",
+        sourceFile: "s.json",
+        table: "t",
+        lodSuffix: "2_2",
+        attributes: ["extent_height_m", "bouwjaar"],
+        computedAttributes: ["extent_height_m"],
+        where: null,
+      }),
+    ).toBe(
+      'CREATE TABLE "e"."src" AS SELECT "id", "feature_id", "object_type", "parents", "children", "children_roles", "bbox", "geometry_lod2_2", "geometry_properties_lod2_2", "bouwjaar", "extent_height_m" FROM read_cityjson(\'s.json\') LEFT JOIN (SELECT "id", "extent_height_m" FROM "t") AS "computed" USING ("id")',
+    );
   });
 
   it("names every column ONCE, whatever the attribute list repeats", () => {
@@ -225,6 +288,7 @@ describe("buildCityParquetSourceSql", () => {
           "bouwjaar",
           "bouwjaar",
         ],
+        computedAttributes: [],
         where: null,
       }),
     ).toBe(

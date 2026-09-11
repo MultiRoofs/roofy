@@ -20,6 +20,7 @@ import {
   type LayerTable,
 } from "../../insights/layerTables";
 import { runExport, type ExportRequest } from "../../insights/export";
+import { computedColumnsOf } from "../../insights/computedColumns";
 import {
   buildRootTypesSql,
   compileFilter,
@@ -360,6 +361,13 @@ export function ExportDialog({
       const attributes = attributeColumns
         .filter((c) => selectedAttributes.has(c.name))
         .map((c) => c.name);
+      // Spec §8: a tool's columns export as attributes too — but they were
+      // never in the file, so the CityParquet path has to read them from the
+      // layer's table rather than from the re-registered source.
+      const computed = computedColumnsOf(layerId);
+      const computedAttributes = attributes.filter((name) =>
+        computed.has(name),
+      );
 
       // ONE selection, both routes. The type tick-boxes used to reach the
       // CityParquet request only, so a CSV of "Buildings" came back holding
@@ -393,6 +401,7 @@ export function ExportDialog({
             reader === "read_cityjsonseq" ? "city.jsonl" : "city.json",
           lodSuffix: lod.suffix,
           attributes,
+          computedAttributes,
           where,
           rootTypes: chosenTypes,
           epsg,
@@ -434,6 +443,7 @@ export function ExportDialog({
     format,
     layerName,
     lod,
+    layerId,
     effectiveScope,
     query.applied,
     rootTypes,

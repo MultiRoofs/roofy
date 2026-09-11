@@ -393,6 +393,9 @@ export interface CityParquetExportRequest {
    *  label re-spelled here. */
   readonly lodSuffix: string;
   readonly attributes: ReadonlyArray<string>;
+  /** Those of the requested attributes a tool computed (spec §8): they are on
+   *  the layer's table, never in the reader, so they are joined in by id. */
+  readonly computedAttributes: ReadonlyArray<string>;
   readonly where: string | null;
   readonly rootTypes: ReadonlyArray<string>;
   readonly epsg: number;
@@ -566,6 +569,7 @@ async function exportCityParquet(
         table: request.table,
         lodSuffix: request.lodSuffix,
         attributes: request.attributes,
+        computedAttributes: request.computedAttributes,
         where: request.where,
       }),
     );

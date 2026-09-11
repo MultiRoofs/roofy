@@ -652,6 +652,9 @@ export const CITYPARQUET_REQUIRED_COLUMNS: ReadonlyArray<string> = [
 /** The scratch table's name inside its own schema. */
 export const CITYPARQUET_SOURCE_TABLE = "src";
 
+/** The derived table the layer's computed columns are joined in as. */
+const CITYPARQUET_COMPUTED_ALIAS = "computed";
+
 /**
  * ONE read of the re-registered source, filtered to the export's feature scope.
  *
@@ -690,18 +693,46 @@ export function buildCityParquetSourceSql(input: {
   readonly table: string;
   readonly lodSuffix: string;
   readonly attributes: ReadonlyArray<string>;
+  /**
+   * The requested attributes a TOOL wrote (spec §8: "computed columns are
+   * included … in CityParquet as attributes").
+   *
+   * They are named separately because they are the ones the reader has never
+   * heard of: they live on the layer's table only, so asking the reader for
+   * `extent_height_m` is a missing-column error. A name here is dropped from
+   * the reader's select list even if the caller also put it in `attributes`.
+   */
+  readonly computedAttributes: ReadonlyArray<string>;
   readonly where: string | null;
 }): string {
+  const computed = [...new Set(input.computedAttributes)];
+  const fromTable = new Set(computed.map((c) => c.toLowerCase()));
   const columns = [
     ...CITYPARQUET_REQUIRED_COLUMNS,
     `geometry_lod${input.lodSuffix}`,
     `geometry_properties_lod${input.lodSuffix}`,
     ...input.attributes,
   ];
-  const select = [...new Set(columns)].map(quoteIdent).join(", ");
+  const fromReader = [...new Set(columns)].filter(
+    (name) => !fromTable.has(name.toLowerCase()),
+  );
+  const select = [...fromReader, ...computed].map(quoteIdent).join(", ");
+  // A DERIVED table, not the layer table itself, and joined with USING: the
+  // derived side carries `id` and the computed columns and nothing else, so
+  // `feature_id` stays unambiguous, `USING` leaves ONE `id`, and the scope
+  // predicate below needs no qualifying. An empty computed list emits no join
+  // at all — the statement the reader path has always sent.
+  const join =
+    computed.length === 0
+      ? ""
+      : ` LEFT JOIN (SELECT ${["id", ...computed]
+          .map(quoteIdent)
+          .join(", ")} FROM ${quoteIdent(input.table)}) AS ${quoteIdent(
+          CITYPARQUET_COMPUTED_ALIAS,
+        )} USING (${quoteIdent("id")})`;
   const scope = buildFeatureScopeWhere(input.table, input.where);
   const whereClause = scope === null ? "" : ` WHERE ${scope}`;
-  return `CREATE TABLE ${quoteIdent(input.scratchSchema)}.${quoteIdent(CITYPARQUET_SOURCE_TABLE)} AS SELECT ${select} FROM ${input.reader}(${quoteLiteral(input.sourceFile)})${whereClause}`;
+  return `CREATE TABLE ${quoteIdent(input.scratchSchema)}.${quoteIdent(CITYPARQUET_SOURCE_TABLE)} AS SELECT ${select} FROM ${input.reader}(${quoteLiteral(input.sourceFile)})${join}${whereClause}`;
 }
 
 /**
