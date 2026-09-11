@@ -52,6 +52,31 @@ export function defaultColumns(
   ];
 }
 
+/** Spec §6.2: Open table shows the target "with the new columns appended
+ * after the existing ones". `defaultColumns` covers the untouched list; once
+ * the user has customised it, nothing consults the registry again, so the
+ * result card appends the run's own columns through this.
+ *
+ * `null` (the default list) is returned unchanged — the default path already
+ * appends the registered computed columns — and so is the SAME array when the
+ * run added nothing, which is what lets the caller skip a `setColumns` that
+ * would only reset the page. The user can hide the columns afterwards; this
+ * runs once per Open table, never as an enforced visibility set. */
+export function appendColumns(
+  current: ReadonlyArray<string> | null,
+  names: ReadonlyArray<string>,
+): ReadonlyArray<string> | null {
+  if (current === null) return null;
+  const present = new Set(current);
+  const added: string[] = [];
+  for (const name of names) {
+    if (present.has(name)) continue;
+    present.add(name);
+    added.push(name);
+  }
+  return added.length === 0 ? current : [...current, ...added];
+}
+
 export function columnLabel(name: string): string {
   return (
     DERIVED_COLUMNS.find((column) => name.endsWith(column.key))?.label ?? name

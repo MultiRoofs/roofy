@@ -16,6 +16,8 @@ import { requestFromRun } from "./useToolForm";
 import type { RunRecord } from "../../features/processing/types";
 import { activateLayer } from "../../features/workspace/layerCoordination";
 import { useShellStore } from "../shell/shellStore";
+import { layerQuery, useQueryStore } from "../../features/query/queryStore";
+import { appendColumns } from "../drawer/columnPolicy";
 import { openRunLog } from "./revealTools";
 import { phaseLine, plural, seconds } from "./runFormat";
 
@@ -116,6 +118,17 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
                 // select may have moved on since it finished.
                 activateLayer(run.targetLayerId);
                 useShellStore.getState().openDrawer();
+                // §6.2: "the new columns appended after the existing ones".
+                // Only for a list the user has customised — a default list
+                // picks the run's columns up on its own, and re-appending to
+                // it would freeze the default.
+                const columns = layerQuery(
+                  useQueryStore.getState(),
+                  run.targetLayerId,
+                ).columns;
+                const next = appendColumns(columns, run.columns);
+                if (next !== null && next !== columns)
+                  useQueryStore.getState().setColumns(run.targetLayerId, next);
               }}
             >
               Open table

@@ -72,7 +72,7 @@ const { useLayerTableStore } =
 const { useComputedColumnStore } =
   await import("../../../../src/insights/computedColumns");
 const { useShellStore } = await import("../../../../src/ui/shell/shellStore");
-const { useQueryStore } =
+const { useQueryStore, layerQuery } =
   await import("../../../../src/features/query/queryStore");
 
 type LayerInput = Parameters<LayerStoreActions["addLayer"]>[0];
@@ -421,6 +421,48 @@ describe("ToolView", () => {
       layerId,
       section: "style",
     });
+  });
+
+  it("appends the run's columns to a customised table list, once", () => {
+    // §6.2: Open table "opens the drawer on the target with the new columns
+    // appended after the existing ones". Once the user has customised the
+    // list, the default path (which appends the registry's columns) is no
+    // longer consulted, so the card has to do the appending itself.
+    const layerId = addCityLayer();
+    act(() => useQueryStore.getState().setColumns(layerId, ["id"]));
+    render(<ToolView toolId="height-from-extent" />);
+    act(() =>
+      useProcessingStore
+        .getState()
+        .upsertRun(runFixture({ status: "done", targetLayerId: layerId })),
+    );
+    const openTable = screen.getByRole("button", { name: "Open table" });
+    fireEvent.click(openTable);
+    expect(layerQuery(useQueryStore.getState(), layerId).columns).toEqual([
+      "id",
+      "extent_height_m",
+      "extent_zmin_m",
+      "extent_zmax_m",
+    ]);
+    fireEvent.click(openTable);
+    expect(layerQuery(useQueryStore.getState(), layerId).columns).toEqual([
+      "id",
+      "extent_height_m",
+      "extent_zmin_m",
+      "extent_zmax_m",
+    ]);
+  });
+
+  it("leaves a default table list on the default path", () => {
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() =>
+      useProcessingStore
+        .getState()
+        .upsertRun(runFixture({ status: "done", targetLayerId: layerId })),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open table" }));
+    expect(layerQuery(useQueryStore.getState(), layerId).columns).toBeNull();
   });
 
   it("says nothing about a queue before anything is queued", () => {
