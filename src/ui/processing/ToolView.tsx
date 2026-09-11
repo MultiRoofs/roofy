@@ -44,6 +44,15 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
   // printing the same sentence twice reads as two problems.
   const footerReason =
     f.runReason !== null && f.runReason === f.prefixError ? null : f.runReason;
+  // Precedence, explicit: while THIS form's run waits in the queue, the queue
+  // note is the only thing the footer says — a reason left over from the draft
+  // would read as "and it will fail too". The note never appears before the run
+  // is queued: another tool executing leaves Run enabled and silent (§6.1).
+  const queueNote =
+    latestRun?.status === "queued" && f.queuedBehind !== null
+      ? `Queued behind ${f.queuedBehind}`
+      : null;
+  const footerNote = queueNote ?? footerReason;
   const run = () => {
     if (!f.target || !f.canRun) return;
     submitRun({
@@ -183,10 +192,7 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
       <RunFooter
         run={latestRun}
         canRun={f.canRun}
-        reason={
-          footerReason ??
-          (f.queuedBehind === null ? null : `Queued behind ${f.queuedBehind}`)
-        }
+        reason={footerNote}
         onRunAgain={() => setDismissedRunId(latestRun?.id ?? null)}
       />
     </form>

@@ -396,6 +396,58 @@ describe("ToolView", () => {
     });
   });
 
+  it("says nothing about a queue before anything is queued", () => {
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() =>
+      useProcessingStore.getState().upsertRun(
+        runFixture({
+          id: "other",
+          toolId: "measure-solids",
+          status: "running",
+          phase: "compute",
+          targetLayerId: layerId,
+        }),
+      ),
+    );
+    // §6.1 only promises the note for the run that WAS queued; until the user
+    // presses Run, this form has queued nothing.
+    expect(screen.queryByText(/Queued behind/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run" })).not.toBeDisabled();
+  });
+
+  it("lets a queued run's note win over the reason Run was blocked", () => {
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() => {
+      useProcessingStore.getState().setDraft("height-from-extent", {
+        targetLayerId: layerId,
+        scope: "selected",
+        lod: null,
+        prefix: "extent_",
+        params: {},
+      });
+      useProcessingStore.getState().upsertRun(
+        runFixture({
+          id: "other",
+          toolId: "measure-solids",
+          status: "running",
+          phase: "compute",
+          targetLayerId: layerId,
+        }),
+      );
+      useProcessingStore
+        .getState()
+        .upsertRun(runFixture({ status: "queued", targetLayerId: layerId }));
+    });
+    expect(
+      screen.getByText("Queued behind Measure solids"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Nothing selected on this layer"),
+    ).not.toBeInTheDocument();
+  });
+
   it("names the running tool a queued run waits behind", () => {
     const layerId = addCityLayer();
     render(<ToolView toolId="height-from-extent" />);
