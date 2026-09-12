@@ -21,6 +21,7 @@ import { useStreamStore } from "../streaming/streamStore";
 import { getResidentModel } from "../streaming/residentModel";
 import { clearMapFilter, forgetMapFilter } from "../query/mapFilterSync";
 import { useQueryStore } from "../query/queryStore";
+import { useProcessingStore } from "../processing/processingStore";
 import {
   dropLayerTable,
   enqueueLayerTable,
@@ -57,10 +58,10 @@ export function residentTableSource(layerId: string): LayerTableSource {
 /**
  * Rebuild one streaming layer's table immediately.
  *
- * The export dialog's door. The debounced rebuild above only runs while the
- * table panel is open, so a user who opens Export straight from a collapsed
- * panel would otherwise write whatever was resident the last time anyone
- * looked.
+ * The export dialog's door. The debounced rebuild above only runs while one of
+ * the table's CONSUMERS is looking (see `rebuildWanted`), and Export is not one
+ * of them — so a user who opens Export straight from a collapsed panel would
+ * otherwise write whatever was resident the last time anyone looked.
  *
  * RETURNS THE OUTCOME, and the caller is expected to read it. A failed rebuild
  * deliberately restores the previous table as `ready` — right for a grid, and
@@ -79,12 +80,40 @@ export function installLayerTableLifecycle(): () => void {
   const knownVersions = new Map<string, number>();
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  // Only while somebody is LOOKING. A stream commits on every camera settle,
-  // and rebuilding a table nothing is reading is pure cost. An EXPORT does not
-  // widen this: it forces one rebuild when its dialog opens
-  // (`refreshStreamingTable`) and then wants the table to hold still.
-  const rebuildWanted = (): boolean =>
-    useLayerTableStore.getState().tablePanelOpen;
+  /**
+   * Is a run over `layerId` still going to READ its table?
+   *
+   * A queued run resolves its scope against the table at the head of the queue
+   * and a running one is reading it now, so both want the residents the camera
+   * has actually delivered. A `done` run is deliberately not a reader: its card
+   * describes the table that exists, and a rebuild for its sake would only
+   * retire it as stale.
+   */
+  const runInFlightFor = (layerId: string): boolean =>
+    useProcessingStore
+      .getState()
+      .runs.some(
+        (run) =>
+          run.targetLayerId === layerId &&
+          (run.status === "queued" ||
+            run.status === "running" ||
+            run.status === "cancelling"),
+      );
+
+  // Only while a CONSUMER of the table is looking. A stream commits on every
+  // camera settle, and rebuilding a table nothing is reading is pure cost —
+  // but the grid is not the only reader. The processing toolbox takes a run's
+  // scope, its counts and its "currently loaded" note from this same table, so
+  // a toolbox that is open (or a run of this layer still in flight behind a
+  // closed one) wants the rebuild exactly as much as the panel does; without it
+  // Tools opened over a collapsed grid reads "All 0 buildings" with Run
+  // disabled, and a run after a pan measures rows the camera has replaced.
+  // An EXPORT still does not widen this: it forces one rebuild when its dialog
+  // opens (`refreshStreamingTable`) and then wants the table to hold still.
+  const rebuildWanted = (layerId: string): boolean =>
+    useLayerTableStore.getState().tablePanelOpen ||
+    useProcessingStore.getState().open ||
+    runInFlightFor(layerId);
 
   /** Cancel `layerId`'s armed rebuild, if it has one. */
   const cancelRebuild = (layerId: string): void => {
@@ -104,7 +133,7 @@ export function installLayerTableLifecycle(): () => void {
         // second is long enough to close the panel inside the window, and a
         // rebuild for a grid nobody is looking at any more is the exact cost
         // this gate exists to avoid.
-        if (!rebuildWanted()) return;
+        if (!rebuildWanted(layerId)) return;
         // The drawn set was computed from the table this rebuild REPLACES.
         // The panel's own effect recomputes it once the new table lands;
         // leaving the old ids in place would draw a filter over a table that
@@ -157,28 +186,51 @@ export function installLayerTableLifecycle(): () => void {
       // then be read as "nothing changed" and never rebuild anything.
       if (!knownLayerIds.has(layerId)) continue;
       knownVersions.set(layerId, version);
-      if (rebuildWanted()) scheduleRebuild(layerId);
+      if (rebuildWanted(layerId)) scheduleRebuild(layerId);
     }
   });
 
-  let panelWasOpen = useLayerTableStore.getState().tablePanelOpen;
-  const unsubscribePanel = useLayerTableStore.subscribe((state) => {
-    if (state.tablePanelOpen === panelWasOpen) return;
-    panelWasOpen = state.tablePanelOpen;
-    if (!panelWasOpen) return;
-    // Opening the panel: every streaming layer's version moved while it was
-    // shut, and the tables it is about to show are stale by exactly that much.
+  /**
+   * A consumer just opened: rebuild every streaming layer's table now.
+   *
+   * Every one of their versions moved while nothing was reading, and the tables
+   * the consumer is about to read are stale by exactly that much. Shared by the
+   * table panel and the processing toolbox because they read the same tables for
+   * the same reason — a toolbox opened over a collapsed grid would otherwise
+   * show the resident set as it was the last time the grid was up.
+   */
+  const sweepStreamingLayers = (): void => {
     for (const layer of useLayerStore.getState().layers) {
       if (!layer.isStreaming) continue;
-      // Disarm first: a commit that landed while the panel was open, before it
+      // Disarm first: a commit that landed while a consumer was open, before it
       // was shut, can still have a timer pending. Its fire-time gate would find
-      // the panel open AGAIN and rebuild a second time, moments after this one.
+      // a consumer open AGAIN and rebuild a second time, moments after this one.
       cancelRebuild(layer.id);
       // Same reason as `scheduleRebuild`: the ids belong to the table being
       // replaced, and an id query for it may still be out.
       clearMapFilter(layer.id);
       void enqueueLayerTable(layer.id, residentTableSource(layer.id));
     }
+  };
+
+  let panelWasOpen = useLayerTableStore.getState().tablePanelOpen;
+  const unsubscribePanel = useLayerTableStore.subscribe((state) => {
+    if (state.tablePanelOpen === panelWasOpen) return;
+    panelWasOpen = state.tablePanelOpen;
+    if (!panelWasOpen) return;
+    sweepStreamingLayers();
+  });
+
+  // The toolbox's own door, mirroring the panel's. `open` is the whole test and
+  // not `activeTab`/`panelCollapsed`: a run's scope is frozen from the stores
+  // whatever tab is showing, and the drafts a collapsed toolbox holds are still
+  // read against these tables.
+  let toolboxWasOpen = useProcessingStore.getState().open;
+  const unsubscribeProcessing = useProcessingStore.subscribe((state) => {
+    if (state.open === toolboxWasOpen) return;
+    toolboxWasOpen = state.open;
+    if (!toolboxWasOpen) return;
+    sweepStreamingLayers();
   });
 
   return () => {
@@ -187,5 +239,6 @@ export function installLayerTableLifecycle(): () => void {
     unsubscribeLayers();
     unsubscribeStreams();
     unsubscribePanel();
+    unsubscribeProcessing();
   };
 }
