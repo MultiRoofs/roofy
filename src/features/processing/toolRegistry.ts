@@ -23,10 +23,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
         ? "Pick at least one measure"
         : null,
     normaliseParams: (params) => ({ ...roofParams(params) }),
-    // Task 13 flips this, once the executor, the LoD select and the parameters
-    // all exist. Until then the row reads "Not available yet" and a run of it
-    // fails with the same words rather than hanging.
-    implemented: false,
+    implemented: true,
   },
   {
     id: "measure-solids",

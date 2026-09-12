@@ -110,14 +110,11 @@ describe("toolEligibility", () => {
     });
   });
 
-  /** The M2 registry entry, as Task 13 will switch it on. */
-  const enabledRoof = { ...toolById("roof-metrics"), implemented: true };
-
   it("lets Roof metrics run on a streaming layer with no reader", () => {
     // Spec §7.1: "works on every city layer kind including streaming (resident
     // set) and CityGML". Nothing about it needs a reader or an extension.
     expect(
-      toolEligibility(enabledRoof, {
+      toolEligibility(toolById("roof-metrics"), {
         targetKind: "streaming",
         sourceEncoding: "flatcitybuf",
         hasReader: false,
@@ -132,7 +129,7 @@ describe("toolEligibility", () => {
 
   it("refuses Roof metrics on a vector layer", () => {
     expect(
-      toolEligibility(enabledRoof, {
+      toolEligibility(toolById("roof-metrics"), {
         targetKind: "vector",
         sourceEncoding: null,
         hasReader: false,
@@ -143,20 +140,5 @@ describe("toolEligibility", () => {
         extensionState: { spatial: "unloaded", three_d: "unloaded" },
       }),
     ).toEqual({ ok: false, reason: "Needs a city model layer" });
-  });
-
-  it("still reads 'Not available yet' until Task 13 switches it on", () => {
-    expect(
-      toolEligibility(toolById("roof-metrics"), {
-        targetKind: "city",
-        sourceEncoding: "cityjson",
-        hasReader: true,
-        sourceAvailable: true,
-        tableState: "ready",
-        engineState: "ready",
-        hasVectorLayer: false,
-        extensionState: { spatial: "unloaded", three_d: "unloaded" },
-      }),
-    ).toEqual({ ok: false, reason: "Not available yet" });
   });
 });

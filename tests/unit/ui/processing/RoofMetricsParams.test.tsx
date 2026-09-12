@@ -52,31 +52,6 @@ vi.mock("../../../../src/ui/table/useLayerCounts", () => ({
   useLayerCounts: () => counts,
 }));
 
-/**
- * Roof metrics is `implemented: false` until Task 13. `TOOLS` is an array of
- * plain readonly object literals, so a getter spy has nothing to attach to —
- * the registry is MOCKED instead, the same way `useToolForm.test.tsx` already
- * enables `measure-solids`. Task 13 deletes this block and reruns these
- * assertions against the real registry.
- */
-vi.mock("../../../../src/features/processing/toolRegistry", async () => {
-  const actual = await vi.importActual<
-    typeof import("../../../../src/features/processing/toolRegistry")
-  >("../../../../src/features/processing/toolRegistry");
-  const TOOLS = actual.TOOLS.map((t) =>
-    t.id === "roof-metrics" ? { ...t, implemented: true } : t,
-  );
-  return {
-    ...actual,
-    TOOLS,
-    toolById: (id: string) => {
-      const tool = TOOLS.find((t) => t.id === id);
-      if (!tool) throw new Error(`Unknown tool: ${id}`);
-      return tool;
-    },
-  };
-});
-
 const { ToolView } = await import("../../../../src/ui/processing/ToolView");
 const { submitRun } =
   await import("../../../../src/features/processing/runQueue");

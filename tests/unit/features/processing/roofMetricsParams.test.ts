@@ -136,8 +136,8 @@ describe("the roof-metrics registry entry", () => {
     });
   });
 
-  it("is not switched on yet — Task 13 flips it", () => {
-    expect(roof.implemented).toBe(false);
+  it("is switched on, and asks the form for a LoD", () => {
+    expect(roof.implemented).toBe(true);
     expect(roof.needsLod).toBe(true);
   });
 });

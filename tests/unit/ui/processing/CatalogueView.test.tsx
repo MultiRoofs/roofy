@@ -109,8 +109,9 @@ describe("CatalogueView", () => {
       name: /Join attributes by location/,
     });
     expect(join).toHaveAttribute("aria-disabled", "true");
-    // Every tool but Height from extent is still unimplemented, so that is the
-    // reason `toolEligibility` returns for the rest of the catalogue. The
+    // Every tool but Height from extent and Roof metrics is still
+    // unimplemented, so that is the reason `toolEligibility` returns for the
+    // rest of the catalogue. The
     // spec's per-cause copy is pinned in `eligibility.test.ts`; what this
     // asserts is that a disabled row RENDERS its reason as a second line.
     expect(screen.getAllByText("Not available yet").length).toBeGreaterThan(0);
