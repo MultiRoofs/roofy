@@ -131,6 +131,62 @@ describe("rollUpSolids", () => {
     ).toBeNull();
   });
 
+  it("gives NULL, not 0, for a measure NO contributor supplied", () => {
+    // §7: a feature with no remaining contributor FOR A MEASURE gets NULL for
+    // it. A zero is a measurement — "this building's envelope is 0 m²" — and
+    // writing one where the engine answered nothing publishes a fact nobody
+    // computed. Every per-measure roll-up has to say "not measured" the same
+    // way: the areas, the two elevations, and the height between them.
+    const rollUp = rollUpSolids([
+      solidRow("p1", "B", {
+        envelope_m2: null,
+        footprint_m2: null,
+        ground_m: null,
+        ridge_m: null,
+      }),
+      solidRow("p2", "B", {
+        envelope_m2: null,
+        footprint_m2: null,
+        ground_m: null,
+        ridge_m: null,
+      }),
+    ]);
+    expect(rollUp).toMatchObject({
+      envelope: null,
+      footprint: null,
+      ground: null,
+      ridge: null,
+      height: null,
+    });
+  });
+
+  it("sums the contributors that HAVE an area and ignores those that do not", () => {
+    // Mixed: one part answered, the other did not. The sum is over what was
+    // actually measured — the same "left out, not poisoning" rule an unparsed
+    // contributor gets. (Volume is the ONE measure §7 makes stricter.)
+    expect(
+      rollUpSolids([
+        solidRow("p1", "B", { envelope_m2: 20, footprint_m2: 10 }),
+        solidRow("p2", "B", { envelope_m2: null, footprint_m2: null }),
+      ]),
+    ).toMatchObject({ envelope: 20, footprint: 10 });
+  });
+
+  it("keeps a genuine zero a zero", () => {
+    // The flip side of the rule above: 0 m² measured is not "not measured".
+    expect(
+      rollUpSolids([
+        solidRow("p1", "B", { envelope_m2: 0, footprint_m2: 0, ridge_m: 0 }),
+      ]),
+    ).toMatchObject({
+      envelope: 0,
+      footprint: 0,
+      ground: 0,
+      ridge: 0,
+      height: 0,
+    });
+  });
+
   it("takes height as the COMBINED extent, never a sum of part heights", () => {
     // §7: "height: combined extent, max ridge over parts minus min ground over
     // parts (never the sum or max of part heights)". Two 8 m parts sitting at
@@ -651,6 +707,35 @@ describe("measureSolids", () => {
       solid_footprint_m2: 80,
       solid_height_m: 8.4,
       solid_valid: false,
+    });
+  });
+
+  it("writes NULL for an area the engine did not answer for, never 0", async () => {
+    // End to end: the feature WAS measured (it has a parsed solid and a
+    // validity verdict), and the areas the statement returned NULL for reach
+    // the column as NULL. A 0 there would be styled, averaged and exported as
+    // a building with no envelope.
+    const layer = layerWith({ B1: ["2.2"] });
+    const { ctx } = context(layer, [
+      scopeRows([["B1", "B1"]]),
+      sourceIds(["B1"]),
+      measured([
+        solidRow("B1", "B1", {
+          envelope_m2: null,
+          footprint_m2: null,
+          ground_m: null,
+          ridge_m: null,
+        }),
+      ]),
+    ]);
+    const result = await measureSolids(run(), ctx as never);
+    expect(result.measured).toBe(1);
+    expect(result.rows.get("B1")).toEqual({
+      solid_volume_m3: 100,
+      solid_envelope_m2: null,
+      solid_footprint_m2: null,
+      solid_height_m: null,
+      solid_valid: true,
     });
   });
 

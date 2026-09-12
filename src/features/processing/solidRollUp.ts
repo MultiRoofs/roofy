@@ -153,8 +153,13 @@ export function rollUpSolids(
   const rows = contributors.filter(isMeasurableSolid);
   if (rows.length === 0) return null;
   let volume: number | null = 0;
-  let envelope = 0;
-  let footprint = 0;
+  // NULL until a contributor actually supplies one, so "no contributor answered
+  // for this measure" stays NULL instead of becoming a measured-looking 0 — and
+  // a genuine 0 m² still sums to 0. Volume is the ONE measure that starts at 0,
+  // because §7 makes it stricter (any NULL poisons the whole sum) rather than
+  // laxer.
+  let envelope: number | null = null;
+  let footprint: number | null = null;
   let ground = Number.POSITIVE_INFINITY;
   let ridge = Number.NEGATIVE_INFINITY;
   let hasInvalid = false;
@@ -162,8 +167,9 @@ export function rollUpSolids(
   for (const row of rows) {
     if (row.volume_m3 === null) volume = null;
     else if (volume !== null) volume += row.volume_m3;
-    envelope += row.envelope_m2 ?? 0;
-    footprint += row.footprint_m2 ?? 0;
+    if (row.envelope_m2 !== null) envelope = (envelope ?? 0) + row.envelope_m2;
+    if (row.footprint_m2 !== null)
+      footprint = (footprint ?? 0) + row.footprint_m2;
     if (row.ground_m !== null) ground = Math.min(ground, row.ground_m);
     if (row.ridge_m !== null) ridge = Math.max(ridge, row.ridge_m);
     // READ, never re-derived (finding D1): the statement already guards every
