@@ -11,6 +11,7 @@ import {
   roofColumnNames,
   roofParams,
 } from "../../../../src/features/processing/roofMetricsParams";
+import { toolById } from "../../../../src/features/processing/toolRegistry";
 
 describe("roofParams", () => {
   it("reads an EMPTY draft as every measure at the default threshold", () => {
@@ -88,5 +89,55 @@ describe("roofColumnNames", () => {
     expect(new Set(ROOF_MEASURES.map((m) => m.label)).size).toBe(
       ROOF_MEASURES.length,
     );
+  });
+});
+
+/**
+ * The registry entry is the GLUE: the form reads the promise, `submitRun`
+ * freezes the normalised bag and Run reads the message, all through the
+ * definition rather than through this module. A working module wired to a
+ * definition that forgot one of the three hooks is the failure these pin.
+ */
+describe("the roof-metrics registry entry", () => {
+  const roof = toolById("roof-metrics");
+
+  it("promises §7.1's columns for a draft nobody has touched", () => {
+    expect(roof.outputColumns!("roof_", {})).toEqual([
+      "roof_area_m2",
+      "roof_flat_m2",
+      "roof_flat_share",
+      "roof_slope_deg",
+      "roof_azimuth_deg",
+      "roof_surfaces_n",
+    ]);
+  });
+
+  it("blocks Run with §6's words once every measure is unticked", () => {
+    expect(roof.validateParams!({ measures: [] })).toBe(
+      "Pick at least one measure",
+    );
+    expect(roof.validateParams!({})).toBeNull();
+  });
+
+  it("freezes the real values, not the empty bag the user never touched", () => {
+    // §6.4: the log is "the reproducible record of the run". An untouched
+    // draft is `{}`, and a log that prints "Parameters: —" for a run that used
+    // six measures and a 5° threshold is not reproducible.
+    expect(roof.normaliseParams!({})).toEqual({
+      measures: [
+        "area",
+        "flatArea",
+        "flatShare",
+        "slope",
+        "azimuth",
+        "surfaces",
+      ],
+      flatThresholdDeg: 5,
+    });
+  });
+
+  it("is not switched on yet — Task 13 flips it", () => {
+    expect(roof.implemented).toBe(false);
+    expect(roof.needsLod).toBe(true);
   });
 });
