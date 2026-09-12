@@ -392,6 +392,22 @@ describe("the capability chips (spec §5)", () => {
     // of it.
     const solids = screen.getByRole("button", { name: /Measure solids/ });
     expect(solids).not.toHaveAttribute("aria-describedby");
+
+    // The described element is CLIPPED, never hidden: `display: none` or
+    // `aria-hidden` would take the sentence out of the accessibility tree
+    // along with the pixels, and `toHaveAccessibleDescription` above would be
+    // the only place it existed. It also sits in the wrapper that reveals it on
+    // focus (`processing.css`'s `:focus-within` rule — jsdom applies no CSS, so
+    // the pixels are the browser smoke's half of this check).
+    const described = document.getElementById(
+      row.getAttribute("aria-describedby")!,
+    );
+    expect(described?.textContent).toBe(FAILED_REASON);
+    expect(described).not.toHaveAttribute("aria-hidden");
+    expect(described).toHaveClass("processing-sr-only");
+    expect(described?.closest(".processing-tool-row-wrap")).toBe(
+      retry.closest(".processing-tool-row-wrap"),
+    );
     warn.mockRestore();
   });
 

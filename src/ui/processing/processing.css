@@ -177,12 +177,19 @@
    The wrapper carries the row's bottom margin so the link does not gain one. */
 .processing-tool-row-wrap {
   display: flex;
+  /* WRAPS so the clipped description below can take a line of its own when
+     focus reveals it, instead of squeezing itself between the row and Retry. */
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 4px;
   margin-bottom: 4px;
 }
 .processing-tool-row-wrap .processing-tool-row {
-  flex: 1 1 auto;
+  /* Basis ZERO, not `auto`: with `flex-wrap` on, a row sized from its content
+     no longer shrinks to make room for Retry — it takes the whole first line and
+     pushes the link onto its own. Growing from nothing keeps them side by side
+     and still lets the revealed description wrap below both. */
+  flex: 1 1 0;
   min-width: 0;
   margin-bottom: 0;
 }
@@ -209,6 +216,30 @@
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+/* And UN-clipped while the row or its Retry has focus.
+   A native `title` is a mouse tooltip: a keyboard user who tabs onto the row or
+   onto Retry gets nothing on screen, and the row's own second line reads "Not
+   available yet" (M2's outranking reason), which explains nothing about a failed
+   download. `aria-describedby` already tells a screen reader; this tells the
+   sighted keyboard user the same thing, in the same words.
+   `:focus-within` on the WRAPPER rather than an adjacent-sibling selector
+   because the two focusable elements sit on either side of this span, and a
+   sibling combinator only reaches forwards. `order` puts the revealed line after
+   both buttons, and the 100% basis drops it onto the wrapper's second row. */
+.processing-tool-row-wrap:focus-within .processing-sr-only {
+  position: static;
+  flex: 1 0 100%;
+  order: 1;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0 10px 2px;
+  overflow: visible;
+  clip-path: none;
+  white-space: normal;
+  font-size: 11px;
+  color: var(--fg-muted);
 }
 /* A link, not a control: the row it sits beside is already a 2-line list item,
    and a 38px filled button next to it would read as the row's primary action.

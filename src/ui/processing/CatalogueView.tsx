@@ -166,7 +166,9 @@ function ToolRow({
               for anything that reaches this row by keyboard. Clipped rather
               than `display: none`, which would take it out of the
               accessibility tree along with the pixels — the same idiom as
-              `.left-rail-count` in `app.css`. */}
+              `.left-rail-count` in `app.css`. `processing.css` un-clips it
+              while the row or the Retry link has focus, so a sighted keyboard
+              user reads the reason a mouse user gets from the tooltip. */}
           <span id={failureId} className="processing-sr-only">
             {chipTitle(ext, "failed")}
           </span>
