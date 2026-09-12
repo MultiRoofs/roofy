@@ -14,7 +14,10 @@ import "../../../../src/features/processing/tools/register";
 import { EXECUTORS } from "../../../../src/features/processing/tools";
 
 describe("tools/register", () => {
-  it("registers exactly M1's executors", () => {
-    expect(Object.keys(EXECUTORS)).toEqual(["height-from-extent"]);
+  it("registers exactly M2's executors, in `register.ts`'s import order", () => {
+    expect(Object.keys(EXECUTORS)).toEqual([
+      "height-from-extent",
+      "roof-metrics",
+    ]);
   });
 });

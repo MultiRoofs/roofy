@@ -99,6 +99,21 @@ export interface ToolContext {
   query(label: string, sql: string): Promise<QueryOutcome>;
   phase(p: RunPhase): void;
   warn(text: string): void;
+  /**
+   * Throw if the user has cancelled — the ONE way a long, query-free executor
+   * can stop EARLY.
+   *
+   * It does not make cancellation correct: `execute` already refuses to publish
+   * an aborted run (it re-checks `signal.aborted` the moment the executor
+   * returns, and its catch reads `CancelledError` as "cancelled"), so a Cancel
+   * during a long compute was always honoured. What a query-free executor lacks
+   * is the early EXIT: without this it computes to the end first. `ctx.query`
+   * already does the same check, which is enough for a tool whose work IS
+   * queries. `CancelledError` is private to this module on purpose: it is what
+   * makes `execute`'s catch read "cancelled" rather than "failed", and an
+   * executor must not be able to fake either.
+   */
+  throwIfCancelled(): void;
 }
 
 export interface ToolResult {
@@ -657,6 +672,9 @@ async function execute(
         patch(id, { log: [...log] });
         if (!out.ok) throw new Error(out.message);
         return out;
+      },
+      throwIfCancelled() {
+        if (signal.aborted) throw new CancelledError();
       },
       phase(p) {
         patch(id, { phase: p });

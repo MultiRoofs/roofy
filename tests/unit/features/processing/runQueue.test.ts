@@ -298,6 +298,11 @@ function request(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  // `tools/register` registers the REAL Roof metrics executor at module load
+  // (`runQueue.ts` imports it). This file's tools are fakes and one of its
+  // cases needs a tool with NO executor, so the real one is taken off here
+  // rather than left to whichever test ran first.
+  delete EXECUTORS["roof-metrics"];
   sql.length = 0;
   registered.length = 0;
   featureTotal = 1;
@@ -736,9 +741,9 @@ describe("submitRun", () => {
   });
 
   it("fails a tool with no executor rather than hanging", async () => {
-    // A tool NOTHING registers in this milestone, deliberately: asking for
-    // "height-from-extent" here would pass only because the previous test's
-    // `afterEach` deleted the executor Task 10 registers at module load.
+    // A tool with no executor, which `beforeEach` guarantees by deleting the
+    // real Roof metrics one: asking for "height-from-extent" here would pass
+    // only because the previous test's `afterEach` deleted its fake.
     const id = submitRun(request({ toolId: "roof-metrics" }));
     await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
     expect(runById(id)?.error).toBe("Not available yet");

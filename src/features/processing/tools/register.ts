@@ -8,3 +8,4 @@
  * "Not available yet" instead of hanging.
  */
 import "./heightFromExtent";
+import "./roofMetrics";
