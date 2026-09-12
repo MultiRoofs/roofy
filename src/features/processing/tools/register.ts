@@ -9,3 +9,4 @@
  */
 import "./heightFromExtent";
 import "./roofMetrics";
+import "./measureSolids";

@@ -10,21 +10,17 @@
  *
  * The static/streaming split for solids lives HERE and nowhere else.
  */
-import type { CityJSONGeometryType } from "@cityjson/navara-core";
 import type { Layer } from "../layers/layerStore";
 import { lodOptionsBy, type LodOption } from "./roofGeometrySource";
-
-/**
- * The three CityJSON geometry types that carry a solid.
- *
- * `MultiSolid` and `CompositeSolid` are in because §7.2's roll-up sums volume
- * over contributors, which is the right answer for a multi-shell building
- * whether the engine parses it as one solid or the app sums several. Every
- * surface type, `null` (CityParquet, which has no such information) and an
- * absent tag (a hand-built `Surface`) read as NOT a solid.
- */
-const SOLID_TYPES: ReadonlySet<CityJSONGeometryType> =
-  new Set<CityJSONGeometryType>(["Solid", "MultiSolid", "CompositeSolid"]);
+// The three CityJSON geometry types that carry a solid come from the ONE place
+// that spells them (`solidRollUp.ts`, which the executors read the reader's
+// `geometry_properties_lod*.type` against). The MODEL's tags and the READER's
+// properties struct answer the same question about the same file, so two lists
+// would be two answers: a type added there and not here would offer the user an
+// LoD whose every feature the run then skipped as "not a solid". Every surface
+// type, `null` (CityParquet, which has no such information) and an absent tag
+// (a hand-built `Surface`) read as NOT a solid.
+import { SOLID_GEOMETRY_TYPES } from "./solidRollUp";
 
 /**
  * A per-object solid test for one layer, built once and then O(1) per call.
@@ -47,7 +43,7 @@ export function hasSolidAt(
       if (
         surface.lod !== null &&
         geometryType != null &&
-        SOLID_TYPES.has(geometryType)
+        SOLID_GEOMETRY_TYPES.has(geometryType)
       ) {
         lods.add(surface.lod);
       }

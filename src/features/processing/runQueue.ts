@@ -128,6 +128,20 @@ export interface ToolResult {
   /** FEATURES measured, for the summary line. */
   readonly measured: number;
   readonly skipped: ReadonlyArray<SkipCount>;
+  /**
+   * Spec §6.2: the card's OWN first phrase, when "N buildings measured" is not
+   * what this tool measured — "1,143 buildings joined" (§7.5), "6 areas
+   * aggregated over 1,204 buildings" (§7.6), "1,079 valid" (§7.3). Absent for
+   * a tool whose line is the default, which Measure solids' is.
+   */
+  readonly line?: string;
+  /**
+   * §6.2's CAVEATS: objects that WERE evaluated, with something withheld —
+   * "37 invalid solids (no volume)". Distinct from `skipped`, which is "could
+   * not be evaluated" and NULL everywhere. Optional: the M1 and M2 executors
+   * have none and say nothing.
+   */
+  readonly caveats?: ReadonlyArray<SkipCount>;
 }
 
 export type ToolExecutor = (
@@ -201,8 +215,16 @@ export function summarise(
 ): RunSummary {
   const skippedTotal = result.skipped.reduce((a, s) => a + s.count, 0);
   const parts = [
-    plural(result.measured, "building measured", "buildings measured"),
+    result.line ??
+      plural(result.measured, "building measured", "buildings measured"),
   ];
+  // §6.2's order, from the mockup's own card: "1,115 buildings measured · 37
+  // invalid solids (no volume) · 12 skipped · 2.4 s". A caveat sits between the
+  // measured count and the skipped count because it qualifies the first and is
+  // not part of the second.
+  for (const caveat of result.caveats ?? []) {
+    parts.push(`${fmt(caveat.count)} ${caveat.cause}`);
+  }
   if (skippedTotal > 0) parts.push(`${fmt(skippedTotal)} skipped`);
   parts.push(`${(elapsedMs / 1000).toFixed(1)} s`);
 

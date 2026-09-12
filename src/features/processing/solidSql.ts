@@ -75,6 +75,27 @@ export function buildScopeRowsSql(
 }
 
 /**
+ * The ids the SOURCE still holds, and nothing else — spec §6.1's id join.
+ *
+ * SEPARATE from the measure statement on purpose. The join's threshold is EVERY
+ * SCOPED row, roots and non-contributors included (the scope-wide identity
+ * ruling): a root displaced by its part, or a part with no geometry at this LoD,
+ * is measured by nobody, so a check folded into the measure statement could only
+ * ever cover the contributors and would miss a file that had stopped holding
+ * the rest. Asking for the ids alone keeps the answer cheap — no
+ * `ST_3DTryFromWKB`, no validation report, nothing but the reader's own id
+ * column — and `ids === null` (scope "all") carries no `WHERE` at all, so the
+ * widest scope is also the shortest statement in §6.4's log.
+ */
+export function buildSourceIdsSql(input: {
+  readonly from: string;
+  /** The SCOPE's row ids, or null for "every row the reader returns". */
+  readonly ids: ReadonlyArray<string> | null;
+}): string {
+  return `SELECT "id" FROM ${input.from}${idFilter(input.ids)}`;
+}
+
+/**
  * The subquery both statements share: one parse and one report per row, beside
  * the CityJSON geometry type the executor classifies on.
  */

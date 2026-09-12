@@ -25,6 +25,7 @@ import {
   buildScopeRowsSql,
   buildSolidMeasureSql,
   buildSolidValidationSql,
+  buildSourceIdsSql,
 } from "../../../../src/features/processing/solidSql";
 
 const FROM = "read_cityjson('two.city.json', lod => '2.2')";
@@ -188,6 +189,32 @@ describe("buildScopeRowsSql", () => {
     );
     expect(buildScopeRowsSql("layer_3", ["a", "b"])).toBe(
       'SELECT "id", COALESCE("feature_id", "id") AS f FROM "layer_3" WHERE "id" IN (\'a\', \'b\')',
+    );
+  });
+});
+
+describe("buildSourceIdsSql", () => {
+  it("asks the SOURCE for ids only — no parse, no report", () => {
+    // §6.1's id join is a question about which objects the file still holds, so
+    // it must not pay for a single `ST_3DTryFromWKB`.
+    const sql = buildSourceIdsSql({ from: FROM, ids: null });
+    expect(sql).toBe(`SELECT "id" FROM ${FROM}`);
+    expect(sql).not.toContain("ST_3D");
+  });
+
+  it("carries no WHERE for scope 'all', and the SCOPE's ids otherwise", () => {
+    // "All" is `ctx.featureIds === null`: a 100k-building IN list would be the
+    // longest statement in §6.4's log and would say nothing the reader's own
+    // row-per-object answer does not.
+    expect(buildSourceIdsSql({ from: FROM, ids: null })).not.toContain("WHERE");
+    expect(buildSourceIdsSql({ from: FROM, ids: ["a", "b"] })).toBe(
+      `SELECT "id" FROM ${FROM} WHERE "id" IN ('a', 'b')`,
+    );
+  });
+
+  it("quotes an id that carries a quote", () => {
+    expect(buildSourceIdsSql({ from: FROM, ids: ["O'Hara"] })).toContain(
+      `WHERE "id" IN ('O''Hara')`,
     );
   });
 });

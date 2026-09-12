@@ -2073,6 +2073,43 @@ describe("summarise", () => {
     );
   });
 
+  it("prints a caveat between the measured count and the skipped count", () => {
+    // §6.2, and the mockup's own card: "1,115 buildings measured · 37 invalid
+    // solids (no volume) · 12 skipped · 2.4 s". A caveat qualifies the measured
+    // count — the building WAS measured, with its volume withheld — so it is
+    // not part of the skipped count and does not sit after it.
+    const summary = summarise(
+      {
+        ...result([["a", { solid_volume_m3: 5 }]], ["solid_volume_m3"]),
+        measured: 1115,
+        skipped: [{ cause: "no geometry at LoD 2.2", count: 12 }],
+        caveats: [{ cause: "invalid solids (no volume)", count: 37 }],
+      },
+      2400,
+      { streaming: false },
+    );
+    expect(summary.line).toBe(
+      "1,115 buildings measured · 37 invalid solids (no volume) · 12 skipped · 2.4 s",
+    );
+    // The caveat is NOT in the skip breakdown: that line explains objects that
+    // could not be evaluated at all.
+    expect(summary.detail).toBe("12 skipped: 12 no geometry at LoD 2.2");
+  });
+
+  it("lets a tool speak its OWN first phrase instead of the default", () => {
+    // §6.2's `line`, which §7.3's "1,079 valid" and §7.5's "1,143 buildings
+    // joined" need. Measure solids does not set it; the default stands.
+    const summary = summarise(
+      {
+        ...result([["a", { solid_valid: true }]], ["solid_valid"]),
+        line: "1,079 valid",
+      },
+      1000,
+      { streaming: false },
+    );
+    expect(summary.line).toBe("1,079 valid · 1.0 s");
+  });
+
   it("keeps the skip breakdown beside the resident-set note", () => {
     const summary = summarise(
       {
@@ -2085,6 +2122,26 @@ describe("summarise", () => {
     expect(summary.detail).toBe(
       "Over the resident set: the buildings loaded when the run started. · " +
         "3 skipped: 3 no roof surfaces at LoD 2",
+    );
+  });
+});
+
+describe("a caveat on the card (spec §6.2)", () => {
+  it("survives the queue and reaches the finished run's summary", async () => {
+    // The pure `summarise` cases above pin the arithmetic; this one pins that
+    // `canonicalise` and the publication carry the new field through, which is
+    // what the user actually reads.
+    registerExecutor("height-from-extent", async () => ({
+      columns: [{ name: "extent_height_m", type: "DOUBLE" as const }],
+      rows: new Map([["a", { extent_height_m: 3 }]]),
+      measured: 1115,
+      skipped: [{ cause: "no geometry at LoD 2.2", count: 12 }],
+      caveats: [{ cause: "invalid solids (no volume)", count: 37 }],
+    }));
+    const id = submitRun(request());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    expect(runById(id)?.summary?.line).toMatch(
+      /^1,115 buildings measured · 37 invalid solids \(no volume\) · 12 skipped · /,
     );
   });
 });

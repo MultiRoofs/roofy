@@ -28,6 +28,7 @@ import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import {
   buildSolidMeasureSql,
   buildSolidValidationSql,
+  buildSourceIdsSql,
 } from "../../../src/features/processing/solidSql";
 import type { Harness } from "./harness";
 
@@ -687,5 +688,35 @@ describe.skipIf(!enabled)("three_d against real DuckDB 1.5.5", () => {
       open_n: 0,
       ori_n: 0,
     });
+  });
+
+  // Task 7's THIRD statement: §6.1's id join asks the source which objects it
+  // still holds, over the whole SCOPE (roots and non-contributors included) and
+  // with no parse at all. The reader's row-per-object answer is what makes the
+  // join's "every id" threshold meaningful, so it is pinned here on the engine
+  // rather than assumed.
+  it("answers the id join: a row per object, scoped or whole", () => {
+    const reader = `read_cityjson('${SOURCE}', lod => '${LOD}')`;
+
+    const all = db.query(buildSourceIdsSql({ from: reader, ids: null }));
+    expect(all.map((row) => String(row["id"])).sort()).toEqual(
+      [INVALID, NOT_A_SOLID, VALID].sort(),
+    );
+    // ONE column: nothing here pays for a solid.
+    expect(Object.keys(all[0] ?? {})).toEqual(["id"]);
+
+    const scoped = db.query(
+      buildSourceIdsSql({ from: reader, ids: [VALID, INVALID] }),
+    );
+    expect(scoped.map((row) => String(row["id"])).sort()).toEqual(
+      [INVALID, VALID].sort(),
+    );
+
+    // An id the file does NOT hold simply does not come back — which is the
+    // whole mechanism: the executor compares what it asked for against this.
+    const gone = db.query(
+      buildSourceIdsSql({ from: reader, ids: [VALID, "NL.IMBAG.Pand.9999"] }),
+    );
+    expect(gone.map((row) => String(row["id"]))).toEqual([VALID]);
   });
 });
