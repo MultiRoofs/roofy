@@ -32,15 +32,17 @@ import {
   type LodColumn,
 } from "./columnKind";
 import {
-  ddl,
-  dropBuffer,
+  ddl as sendDdl,
+  dropBuffer as sendDropBuffer,
   getDuckDBStatus,
   getEngineGeneration,
-  initDuckDB,
+  initDuckDB as bootEngine,
   onEngineDeath,
-  registerBuffer,
-  runQuery,
+  registerBuffer as sendRegisterBuffer,
+  runQuery as sendQuery,
+  type QueryOutcome,
 } from "./duckdb";
+import { EngineDeadError, racedWithDeath } from "./engineAwait";
 import {
   encodeRowsAsJson,
   flatRowsFromModel,
@@ -54,6 +56,46 @@ import {
   quoteLiteral,
   READ_JSON_OPTIONS,
 } from "./sql";
+
+/**
+ * EVERY engine await in this module, raced against the engine's DEATH.
+ *
+ * The names shadow `duckdb.ts`'s deliberately, so a call site cannot reach the
+ * unraced primitive by accident and a new one gets the protection for free.
+ *
+ * WHY IT IS NEEDED HERE ABOVE ALL. duckdb-wasm drops the promises of the
+ * requests that were in flight when its worker died — WITHOUT rejecting them —
+ * so a `CREATE`, a `DESCRIBE`, a register or a boot caught by the death never
+ * settles. A build sitting on one holds the ONE FIFO these builds share with
+ * every processing run, for the life of the page: the entry stays `building`
+ * under a spinner nothing will stop, and every later build and run waits behind
+ * a task that can never finish. The race turns that into an
+ * {@link EngineDeadError}, which the build reads as "the database is gone" —
+ * `enqueueLayerTable`'s abandonment — rather than as a failure of the statement.
+ *
+ * Awaits STARTED after the death need no protection and get none: `onEngineDeath`
+ * fires once per engine, and by then every primitive below answers immediately
+ * on its own (no `db`, and a status that is not `ready`).
+ */
+function runQuery(sql: string): Promise<QueryOutcome> {
+  return racedWithDeath(sendQuery(sql));
+}
+
+function ddl(sql: string): Promise<QueryOutcome> {
+  return racedWithDeath(sendDdl(sql));
+}
+
+function registerBuffer(name: string, bytes: Uint8Array): Promise<boolean> {
+  return racedWithDeath(sendRegisterBuffer(name, bytes));
+}
+
+function dropBuffer(name: string): Promise<void> {
+  return racedWithDeath(sendDropBuffer(name));
+}
+
+function initDuckDB(): Promise<void> {
+  return racedWithDeath(bootEngine());
+}
 
 /**
  * Re-registers a layer's source bytes for an export.
@@ -964,7 +1006,11 @@ export function enqueueLayerTable(
     return ENGINE_DEAD;
   };
 
-  return enqueue(async () => {
+  /**
+   * The build itself. A function of its own so the queued task below can put
+   * ONE guard around all of it — see there.
+   */
+  const build = async (): Promise<LayerTableOutcome> => {
     // Checked SYNCHRONOUSLY, before the first await: a build still WAITING
     // when the drop arrived is skipped outright and never touches DuckDB.
     if (superseded()) return SUPERSEDED;
@@ -1144,6 +1190,25 @@ export function enqueueLayerTable(
       // asked for had succeeded.
       return { ok: false, message };
     }
+  };
+
+  return enqueue(async () => {
+    try {
+      return await build();
+    } catch (error) {
+      // THE DEATH RELEASED AN AWAIT THAT WOULD NEVER HAVE SETTLED (see the
+      // wrappers at the top of this file). Two awaits reach here rather than
+      // the catch inside: the `initDuckDB` wait, which sits before that try,
+      // and the cleanup INSIDE the catch — `discardHalfBuilt`'s DROP and the
+      // VFS releases, which a death can take just as easily as the build's own
+      // statements. Either way the answer is §6.1's: the database is gone, the
+      // table went with it, and nothing may be said about the build's own SQL.
+      //
+      // Rethrown for anything else, because a bug in this module must not be
+      // reported to the user as a dead engine.
+      if (error instanceof EngineDeadError) return abandon();
+      throw error;
+    }
   });
 }
 
@@ -1186,10 +1251,19 @@ export function dropLayerTable(layerId: string): Promise<void> {
     const info = registry.get(layerId);
     if (info) {
       registry.delete(layerId);
-      // DROP TABLE first, dropBuffer second (inside `retire`): a VFS name that
-      // has been dropped still RESOLVES, to zero bytes, so releasing it under a
-      // live table invites a misleading parse error instead of a clean drop.
-      await retire(info);
+      try {
+        // DROP TABLE first, dropBuffer second (inside `retire`): a VFS name that
+        // has been dropped still RESOLVES, to zero bytes, so releasing it under a
+        // live table invites a misleading parse error instead of a clean drop.
+        await retire(info);
+      } catch (error) {
+        // The engine died under that DROP, so it will never settle (see the
+        // wrappers at the top of this file). There is nothing left to drop —
+        // the table went with the database — and the store still has to be
+        // cleared below, which is the whole reason this is caught HERE rather
+        // than allowed to reject the drop.
+        if (!(error instanceof EngineDeadError)) throw error;
+      }
     }
     // Clear the store AGAIN, and this is not belt-and-braces. It guards against
     // the writers that are NOT in this queue and so can land between the

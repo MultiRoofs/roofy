@@ -1158,6 +1158,51 @@ describe("a build whose engine went while it ran", () => {
     });
   });
 
+  it("releases a build whose statement NEVER settles, and the queue behind it", async () => {
+    // THE ONE THING THE REAL ENGINE DOES that every other case here does not
+    // model: duckdb-wasm drops the promises of the requests that were in flight
+    // when its worker died — its `onError` clears the pending map WITHOUT
+    // rejecting them — so the `CREATE` this build is awaiting NEVER settles.
+    // Nothing resolves it by hand below, because nothing would in a browser.
+    //
+    // Unreleased, the build sits on that await for the life of the page holding
+    // the shared FIFO, and every later build and every later run queues behind
+    // a task that can never finish: the table panel's entries stay `building`
+    // under a spinner and a Run does nothing at all.
+    const never = new Promise<void>(() => {});
+    holdStatement = { needle: "CREATE OR REPLACE TABLE", promise: never };
+    const building = enqueueLayerTable("L1", readerSource());
+    // Enqueued BEFORE the death, so it is genuinely stuck behind the stranded
+    // build rather than starting on a queue that had already drained.
+    const behind = enqueueLayerTable("L2", readerSource());
+    await vi.waitFor(() =>
+      expect(sql.some((q) => q.startsWith("CREATE OR REPLACE TABLE"))).toBe(
+        true,
+      ),
+    );
+    const issued = sql.length;
+
+    killEngine();
+
+    expect(await building).toEqual({
+      ok: false,
+      message: "Analytics engine stopped",
+    });
+    expect(stateOf("L1")).toEqual({
+      state: "failed",
+      message: "Analytics engine stopped",
+    });
+    expect(getLayerTable("L1")).toBeNull();
+    // No further SQL: the half-built table died with the database, and a DROP
+    // for a corpse is nothing to hold the queue on.
+    expect(sql.slice(issued)).toEqual([]);
+    // …and the FIFO accepted the next task.
+    expect(await behind).toEqual({
+      ok: false,
+      message: "Analytics engine stopped",
+    });
+  });
+
   it("abandons a build whose engine was REPLACED under it", async () => {
     // A worker that dies while the status is `initializing` publishes `failed`
     // from there, which is not the `ready` → `failed` transition the
