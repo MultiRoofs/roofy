@@ -28,7 +28,13 @@
 }
 
 /* ── Right-panel Tools tab (spec §4.2) ─────────────────────────────── */
+/* The tool form's caption column, shared by every labelled row in the panel —
+   §6's TARGET/PARAMETERS/OUTPUT sections read as ONE grid only if the captions
+   and the controls line up across them. 84px is what the widest caption needs
+   ("Flat threshold" measures 70px at 12px); a 64px field column left the
+   slider's control 22px to the right of every select. */
 .processing-panel {
+  --processing-caption: 84px;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -268,7 +274,7 @@
 }
 .processing-field {
   display: grid;
-  grid-template-columns: 64px 1fr;
+  grid-template-columns: var(--processing-caption, 84px) 1fr;
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
@@ -312,7 +318,7 @@
    styled once for the whole app in flatControls.css; nothing here touches it. */
 .processing-slider {
   display: grid;
-  grid-template-columns: 84px 1fr 28px;
+  grid-template-columns: var(--processing-caption, 84px) 1fr 28px;
   gap: 8px;
   align-items: center;
   font-size: 12px;
