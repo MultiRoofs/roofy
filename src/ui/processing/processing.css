@@ -294,6 +294,37 @@
   gap: 6px;
   font-size: 12px;
 }
+/* §6's two-column checkbox grid. It drops to one column in a narrow panel
+   rather than clipping a label — the panel is resizable. */
+.processing-checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px 12px;
+  margin-bottom: 10px;
+}
+.processing-checks label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+/* Caption, slider, value — the Sun & shade sheet's shape. The input itself is
+   styled once for the whole app in flatControls.css; nothing here touches it. */
+.processing-slider {
+  display: grid;
+  grid-template-columns: 84px 1fr 28px;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+.processing-slider > span:first-child {
+  color: var(--fg-muted);
+}
+.processing-slider__value {
+  text-align: right;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
 .processing-note,
 .processing-columns,
 .processing-phases,

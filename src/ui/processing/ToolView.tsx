@@ -10,6 +10,7 @@ import { useProcessingStore } from "../../features/processing/processingStore";
 import { submitRun } from "../../features/processing/runQueue";
 import type { ToolId } from "../../features/processing/types";
 import { useToolForm } from "./useToolForm";
+import { RoofMetricsParams } from "./RoofMetricsParams";
 import { RunFooter } from "./RunFooter";
 import { plural } from "./runFormat";
 
@@ -46,11 +47,15 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
       latestRun.status === "queued" ||
       latestRun.status === "cancelling" ||
       latestRun.status === "done");
-  // Spec §6 puts Run's reason under the button; the prefix error is the one
-  // reason that is ALREADY on screen, inline under the field it belongs to, and
-  // printing the same sentence twice reads as two problems.
+  // Spec §6 puts Run's reason under the button; the prefix and parameter errors
+  // are the reasons that are ALREADY on screen — §6's "validation is inline",
+  // each under the field it belongs to — and printing the same sentence twice
+  // reads as two problems. Run is still disabled; only the echo is dropped.
   const footerReason =
-    f.runReason !== null && f.runReason === f.prefixError ? null : f.runReason;
+    f.runReason !== null &&
+    (f.runReason === f.prefixError || f.runReason === f.paramsError)
+      ? null
+      : f.runReason;
   // Precedence, explicit: while THIS form's run waits in the queue, the queue
   // note is the only thing the footer says — a reason left over from the draft
   // would read as "and it will fail too". The note never appears before the run
@@ -78,7 +83,11 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
       targetLayerId: f.target.id,
       scope: f.draft.scope,
       lod: f.draft.lod,
-      params: f.draft.params,
+      // §6.1 freezes "everything the run needs" and §6.4 makes the log the
+      // reproducible record of it, so what is frozen is the NORMALISED bag: an
+      // untouched draft is `{}`, and a log reading "Parameters: —" for a run
+      // that used six measures and a 5° threshold records nothing.
+      params: f.tool.normaliseParams?.(f.draft.params) ?? f.draft.params,
       prefix: f.draft.prefix,
       columns: f.columns.map((name) => ({ name, type: "DOUBLE" as const })),
     });
@@ -205,6 +214,23 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
           )}
         </div>
       </fieldset>
+      {/* §6's "PARAMETERS: tool-specific" — one conditional per parameterised
+          tool, each one a component of its own, so the form does not grow a
+          branch per tool. */}
+      {toolId === "roof-metrics" && (
+        <fieldset className="processing-section" disabled={locked}>
+          <legend className="processing-group__label">PARAMETERS</legend>
+          <RoofMetricsParams
+            params={f.draft.params}
+            onChange={(params) => f.setDraft({ params })}
+          />
+          {f.paramsError !== null && (
+            <p className="processing-error" role="alert">
+              {f.paramsError}
+            </p>
+          )}
+        </fieldset>
+      )}
       <fieldset className="processing-section" disabled={locked}>
         <legend className="processing-group__label">OUTPUT</legend>
         {/* §6: OUTPUT "starts with the destination, Write to". Its second
@@ -251,6 +277,12 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
               {f.existing.length} of these columns exist; they will be replaced.
             </span>
           </p>
+        )}
+        {/* §6: "Extension note when the tool's extension is not yet loaded" —
+            the same sentence the catalogue's chip shows as its tooltip, here as
+            a line the user does not have to hover to read. */}
+        {f.extensionNote !== null && (
+          <p className="processing-note">{f.extensionNote}</p>
         )}
       </fieldset>
       <RunFooter

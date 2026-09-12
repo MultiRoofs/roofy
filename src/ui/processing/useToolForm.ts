@@ -149,6 +149,15 @@ export function useToolForm(toolId: ToolId) {
     : sourceCollisions.length > 0
       ? `'${sourceCollisions[0]}' belongs to the source data; choose another prefix`
       : null;
+  // Spec §6: "Validation is inline and blocks Run" — the message comes from the
+  // tool's own definition, so the rule and the columns it governs live together.
+  const paramsError = tool.validateParams?.(draft.params) ?? null;
+  // §6: "Extension note when the tool's extension is not yet loaded."
+  const ext = tool.extension;
+  const extensionNote =
+    ext !== null && targetCtx.extensionState[ext] !== "loaded"
+      ? `Loads the ${ext} extension on first run (about ${ext === "spatial" ? "24 MB" : "1 MB"}, once per session).`
+      : null;
   const scopeCount =
     draft.scope === "all"
       ? counts.all
@@ -165,10 +174,10 @@ export function useToolForm(toolId: ToolId) {
           : null;
   // Precedence, top to bottom: what the TOOL cannot do here (eligibility),
   // what the TARGET cannot offer (no qualifying LoD), then the things the user
-  // can fix in the form — the prefix, the parameters (Task 12), the scope.
+  // can fix in the form — the prefix, the parameters, the scope.
   const runReason = !eligibility.ok
     ? eligibility.reason
-    : (lods.emptyReason ?? prefixError ?? scopeReason);
+    : (lods.emptyReason ?? prefixError ?? paramsError ?? scopeReason);
   const latestRun =
     runs.find((r) => r.toolId === toolId && r.targetLayerId === target?.id) ??
     null;
@@ -194,6 +203,8 @@ export function useToolForm(toolId: ToolId) {
     columns,
     existing,
     prefixError,
+    paramsError,
+    extensionNote,
     eligibility,
     canRun: runReason === null && target !== null,
     runReason,

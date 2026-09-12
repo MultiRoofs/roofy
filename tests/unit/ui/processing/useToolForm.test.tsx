@@ -55,8 +55,12 @@ vi.mock("../../../../src/ui/table/useLayerCounts", () => ({
   }),
 }));
 
-/** Measure solids is M2's, but it is the only tool whose eligibility can fail
- *  on one ready layer and pass on another (it needs a reader). */
+/** Measure solids is still M3's, and it is still the only tool whose
+ *  eligibility can fail on one ready layer and pass on another (it needs a
+ *  reader). M2's Roof metrics needs neither a reader nor an extension and runs
+ *  on streaming targets too, so it cannot discriminate the ready-table
+ *  `candidates` any more than Height from extent can — this mock stays until a
+ *  reader- or extension-needing tool ships. */
 vi.mock("../../../../src/features/processing/toolRegistry", async () => {
   const actual = await vi.importActual<
     typeof import("../../../../src/features/processing/toolRegistry")
