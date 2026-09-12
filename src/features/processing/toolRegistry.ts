@@ -1,4 +1,5 @@
 import { roofColumnNames, roofParams } from "./roofMetricsParams";
+import { solidColumns, solidParams } from "./solidParams";
 import type { ToolDefinition, ToolId } from "./types";
 
 /** Spec §5 catalogue, in display order. Names and descriptions verbatim. */
@@ -38,6 +39,16 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     needsVectorSource: false,
     needsLod: true,
     defaultPrefix: "solid_",
+    outputColumns: (prefix, params) =>
+      solidColumns(prefix, solidParams(params)),
+    validateParams: (params) =>
+      solidParams(params).measures.length === 0
+        ? "Pick at least one measure"
+        : null,
+    normaliseParams: (params) => ({ ...solidParams(params) }),
+    // Task 8 flips this, in the SAME commit that teaches `useLodOptions` about
+    // solids — a flip without the hook renders an empty LoD select, and §6's
+    // rule is that an unimplemented tool claims no fact about the user's data.
     implemented: false,
   },
   {

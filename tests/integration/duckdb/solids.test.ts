@@ -15,12 +15,20 @@
  * `ST_3DVolume` only under `is_valid` — exist only because of what is
  * asserted here.
  *
- * The statement in `MEASURE_SQL` is the shape `buildSolidMeasureSql` (Task 6)
- * emits. It is spelled literally because that builder does not exist yet;
- * Task 6 pins its output to this exact text and appends a case here that runs
- * the builder's own output.
+ * The statements in `MEASURE_SQL` and `VALIDATE_SQL` are the shapes
+ * `buildSolidMeasureSql` and `buildSolidValidationSql` emit: the last case of
+ * this suite asserts each builder's output IS the constant beside it and then
+ * runs it, so a literal here cannot describe a statement the app does not
+ * issue. Task 6 added the `geometry_type` column to both, for the reason
+ * `parsedRows` in `solidSql.ts` gives (a CompositeSolid's WKB name is
+ * "GeometryCollection Z", so "is this a solid?" is answerable only from the
+ * CityJSON type in the properties struct).
  */
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
+import {
+  buildSolidMeasureSql,
+  buildSolidValidationSql,
+} from "../../../src/features/processing/solidSql";
 import type { Harness } from "./harness";
 
 const enabled = process.env.DUCKDB_INTEGRATION === "1";
@@ -57,7 +65,7 @@ const VALID = "NL.IMBAG.Pand.0002";
  * restores exactly the §7.2 output (`valid` NULL for a row that is not a
  * solid). See the "tells a NULL solid's report apart" case below for the pin.
  */
-const MEASURE_SQL = `SELECT "id", COALESCE("feature_id", "id") AS f, s IS NOT NULL AS parsed, CASE WHEN s IS NOT NULL THEN r.is_valid END AS is_valid, CASE WHEN s IS NOT NULL AND r.is_valid THEN ST_3DVolume(s) END AS volume_m3, ST_3DSurfaceArea(s) AS envelope_m2, ST_3DFootprintArea(s) AS footprint_m2, ST_3DZMin(s) AS ground_m, ST_3DZMax(s) AS ridge_m FROM (SELECT "id", "feature_id", ST_3DTryFromWKB("geometry_lod2_2") AS s, ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r FROM read_cityjson('two.city.json', lod => '2.2'))`;
+const MEASURE_SQL = `SELECT "id", COALESCE("feature_id", "id") AS f, geometry_type, s IS NOT NULL AS parsed, CASE WHEN s IS NOT NULL THEN r.is_valid END AS is_valid, CASE WHEN s IS NOT NULL AND r.is_valid THEN ST_3DVolume(s) END AS volume_m3, ST_3DSurfaceArea(s) AS envelope_m2, ST_3DFootprintArea(s) AS footprint_m2, ST_3DZMin(s) AS ground_m, ST_3DZMax(s) AS ridge_m FROM (SELECT "id", "feature_id", "geometry_properties_lod2_2".type AS geometry_type, ST_3DTryFromWKB("geometry_lod2_2") AS s, ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r FROM read_cityjson('two.city.json', lod => '2.2'))`;
 
 /**
  * §7.3's statement, the same way: all EIGHT report fields a validation run
@@ -70,10 +78,13 @@ const MEASURE_SQL = `SELECT "id", COALESCE("feature_id", "id") AS f, s IS NOT NU
  * plan's field list omits it. `code` and `message` are deliberately NOT
  * selected: see the garbage case below.
  *
- * Task 10's `buildSolidValidationSql` must emit this shape. Like MEASURE_SQL,
- * the TEXT is that task's to pin; this constant is the ENGINE fact until then.
+ * `buildSolidValidationSql` (Task 6) emits this text and the last case pins it;
+ * Task 10 spends the columns. The statement reads `orientation_error_count`
+ * although §7.3 names only seven columns: it is the only thing that explains an
+ * `is_oriented` of false, and a second statement to fetch it would parse every
+ * solid twice.
  */
-const VALIDATE_SQL = `SELECT "id", COALESCE("feature_id", "id") AS f, s IS NOT NULL AS parsed, CASE WHEN s IS NOT NULL THEN r.is_valid END AS is_valid, CASE WHEN s IS NOT NULL THEN r.is_closed END AS is_closed, CASE WHEN s IS NOT NULL THEN r.is_manifold END AS is_manifold, CASE WHEN s IS NOT NULL THEN r.is_oriented END AS is_oriented, CASE WHEN s IS NOT NULL THEN r.open_edge_count END AS open_n, CASE WHEN s IS NOT NULL THEN r.non_manifold_edge_count END AS nm_n, CASE WHEN s IS NOT NULL THEN r.degenerate_face_count END AS deg_n, CASE WHEN s IS NOT NULL THEN r.orientation_error_count END AS ori_n FROM (SELECT "id", "feature_id", ST_3DTryFromWKB("geometry_lod2_2") AS s, ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r FROM read_cityjson('two.city.json', lod => '2.2'))`;
+const VALIDATE_SQL = `SELECT "id", COALESCE("feature_id", "id") AS f, geometry_type, s IS NOT NULL AS parsed, CASE WHEN s IS NOT NULL THEN r.is_valid END AS is_valid, CASE WHEN s IS NOT NULL THEN r.is_closed END AS is_closed, CASE WHEN s IS NOT NULL THEN r.is_manifold END AS is_manifold, CASE WHEN s IS NOT NULL THEN r.is_oriented END AS is_oriented, CASE WHEN s IS NOT NULL THEN r.open_edge_count END AS open_n, CASE WHEN s IS NOT NULL THEN r.non_manifold_edge_count END AS nm_n, CASE WHEN s IS NOT NULL THEN r.degenerate_face_count END AS deg_n, CASE WHEN s IS NOT NULL THEN r.orientation_error_count END AS ori_n FROM (SELECT "id", "feature_id", "geometry_properties_lod2_2".type AS geometry_type, ST_3DTryFromWKB("geometry_lod2_2") AS s, ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r FROM read_cityjson('two.city.json', lod => '2.2'))`;
 
 /**
  * The same statement against the CityJSONSeq reader, by swapping ONLY the
@@ -613,6 +624,68 @@ describe.skipIf(!enabled)("three_d against real DuckDB 1.5.5", () => {
       footprint: 80,
       ground: 0,
       ridge: 8.4,
+    });
+  });
+
+  it("runs the APP's own builders, not this file's literals", () => {
+    // The literals above and the builders must be ONE statement each. This is
+    // where that stops being a convention and becomes a test: the builders are
+    // pure string functions, so nothing here is mocked and no engine door is
+    // crossed to reach them.
+    const reader = `read_cityjson('${SOURCE}', lod => '${LOD}')`;
+    const columns = {
+      geometryColumn: "geometry_lod2_2",
+      propertiesColumn: "geometry_properties_lod2_2",
+    } as const;
+
+    const built = buildSolidMeasureSql({ from: reader, ...columns, ids: null });
+    expect(built).toBe(MEASURE_SQL);
+    const rows = db.query(built);
+    expect(rows).toHaveLength(3);
+    // §7.2's three outcomes, off the builder's own statement, and with the
+    // CityJSON type that tells "not a solid" from "no geometry" (D4).
+    const byId = new Map(rows.map((r) => [String(r["id"]), r]));
+    expectRow(byId.get(VALID), {
+      geometry_type: "Solid",
+      parsed: true,
+      is_valid: true,
+      volume_m3: 2178,
+    });
+    expectRow(byId.get(INVALID), {
+      geometry_type: "Solid",
+      parsed: true,
+      is_valid: false,
+      volume_m3: null,
+      envelope_m2: 388,
+    });
+    expectRow(byId.get(NOT_A_SOLID), {
+      geometry_type: "MultiSurface",
+      parsed: false,
+      is_valid: null,
+      volume_m3: null,
+    });
+
+    const validation = buildSolidValidationSql({
+      from: reader,
+      ...columns,
+      ids: null,
+    });
+    expect(validation).toBe(VALIDATE_SQL);
+
+    // And SCOPED, which is the shape a run over a selection issues: the filter
+    // is inside the subquery, so exactly the asked-for row comes back.
+    const scoped = db.query(
+      buildSolidValidationSql({ from: reader, ...columns, ids: [VALID] }),
+    );
+    expect(scoped).toHaveLength(1);
+    expectRow(scoped[0], {
+      id: VALID,
+      geometry_type: "Solid",
+      parsed: true,
+      is_valid: true,
+      is_closed: true,
+      open_n: 0,
+      ori_n: 0,
     });
   });
 });
