@@ -31,19 +31,50 @@ export interface ToolDefinition {
   readonly target: "city" | "vector";
   /** Needs a second, vector layer as the source. */
   readonly needsVectorSource: boolean;
+  /**
+   * Does the form offer a LoD select (spec §6)?
+   *
+   * True for the tools that read GEOMETRY at one level of detail. False for
+   * Height from extent (the bbox is unioned across every LoD in the file) and
+   * for the cross-layer tools, whose building geometry is a PROXY radio rather
+   * than a LoD. An UNIMPLEMENTED tool never renders the control whatever this
+   * says — it has no source of truthful counts (see `useLodOptions`).
+   */
+  readonly needsLod: boolean;
   readonly defaultPrefix: string;
   /**
    * The names this tool's run will write, for a prefix and a parameter set.
    *
    * It lives on the DEFINITION, which is pure data, because two places need the
    * same answer at different times: the form prints it before any run exists,
-   * and the executor writes it. Absent for a tool whose executor has not
-   * shipped — the form then promises nothing.
+   * and the executor writes it. Absent for a tool whose columns are not
+   * settled yet — the form then promises nothing.
    */
   readonly outputColumns?: (
     prefix: string,
     params: Readonly<Record<string, unknown>>,
   ) => string[];
+
+  /**
+   * Spec §6: "Validation is inline and blocks Run". The message, or null when
+   * the parameters are runnable. Absent for a tool with no parameters.
+   */
+  readonly validateParams?: (
+    params: Readonly<Record<string, unknown>>,
+  ) => string | null;
+
+  /**
+   * The draft's parameter bag with every default filled in, for FREEZING.
+   *
+   * Spec §6.1 freezes "everything the run needs", and §6.4 makes the log "the
+   * reproducible record of the run: a planner can read it back and rerun by
+   * hand". A draft the user never touched is `{}`, so without this the log
+   * would print "Parameters: —" for a run that used six measures and a 5°
+   * threshold. Absent for a tool with no parameters.
+   */
+  readonly normaliseParams?: (
+    params: Readonly<Record<string, unknown>>,
+  ) => Readonly<Record<string, unknown>>;
   /** False until a later milestone ships the executor. */
   readonly implemented: boolean;
 }

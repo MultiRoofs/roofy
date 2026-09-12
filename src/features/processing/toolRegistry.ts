@@ -1,3 +1,4 @@
+import { roofColumnNames, roofParams } from "./roofMetricsParams";
 import type { ToolDefinition, ToolId } from "./types";
 
 /** Spec §5 catalogue, in display order. Names and descriptions verbatim. */
@@ -13,7 +14,18 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     needsReader: false,
     target: "city",
     needsVectorSource: false,
+    needsLod: true,
     defaultPrefix: "roof_",
+    outputColumns: (prefix, params) =>
+      roofColumnNames(prefix, roofParams(params)),
+    validateParams: (params) =>
+      roofParams(params).measures.length === 0
+        ? "Pick at least one measure"
+        : null,
+    normaliseParams: (params) => ({ ...roofParams(params) }),
+    // Task 13 flips this, once the executor, the LoD select and the parameters
+    // all exist. Until then the row reads "Not available yet" and a run of it
+    // fails with the same words rather than hanging.
     implemented: false,
   },
   {
@@ -27,6 +39,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     needsReader: true,
     target: "city",
     needsVectorSource: false,
+    needsLod: true,
     defaultPrefix: "solid_",
     implemented: false,
   },
@@ -41,6 +54,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     needsReader: true,
     target: "city",
     needsVectorSource: false,
+    needsLod: true,
     defaultPrefix: "solid_",
     implemented: false,
   },
@@ -55,6 +69,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     needsReader: false,
     target: "city",
     needsVectorSource: false,
+    needsLod: false,
     defaultPrefix: "extent_",
     outputColumns: (p) => [`${p}height_m`, `${p}zmin_m`, `${p}zmax_m`],
     implemented: true,
@@ -70,6 +85,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     needsReader: false,
     target: "city",
     needsVectorSource: true,
+    needsLod: false,
     defaultPrefix: "",
     implemented: false,
   },
@@ -84,6 +100,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     needsReader: false,
     target: "vector",
     needsVectorSource: false,
+    needsLod: false,
     defaultPrefix: "bld_",
     implemented: false,
   },
@@ -98,6 +115,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     needsReader: false,
     target: "city",
     needsVectorSource: true,
+    needsLod: false,
     defaultPrefix: "",
     implemented: false,
   },
