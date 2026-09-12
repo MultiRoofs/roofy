@@ -157,3 +157,28 @@ export async function openDuckDB(): Promise<Harness> {
     },
   };
 }
+
+/**
+ * `INSTALL` + `LOAD` for one of the app's two lazy extensions, through the
+ * harness's own connection.
+ *
+ * The app's door is `ensureExtension(name)` (`duckdb.ts:540`), which issues
+ * exactly these two statements once per session and memoises the promise. The
+ * node harness cannot call it (it boots a Worker from a jsDelivr blob), so the
+ * statements are spelled here — the ONE place in the integration suites that
+ * may, and the reason a probe suite for both extensions is possible at all.
+ *
+ * `three_d` comes from the COMMUNITY repository and `spatial` from core, which
+ * is the only difference between them. Left to throw: a failure is the report
+ * the suite exists to make — the slot for this DuckDB version is gone or was
+ * rebuilt — and the extension's own words say more than any wrapper could.
+ */
+export function installExtension(
+  db: Harness,
+  name: "spatial" | "three_d",
+): void {
+  db.query(
+    name === "three_d" ? "INSTALL three_d FROM community;" : "INSTALL spatial;",
+  );
+  db.query(`LOAD ${name};`);
+}
