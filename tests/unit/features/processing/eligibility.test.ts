@@ -24,7 +24,12 @@ describe("toolEligibility", () => {
   });
 
   it("rejects an unimplemented tool with the release note", () => {
-    expect(toolEligibility(toolById("measure-solids"), base)).toEqual({
+    // The tool is unimplemented BY DECLARATION, not by whichever registry entry
+    // has not shipped yet — Measure solids ships in this commit, and the rule
+    // §6 states ("a tool whose executor has not shipped claims no fact about
+    // the user's data") outlives every one of them.
+    const tool = { ...toolById("measure-solids"), implemented: false };
+    expect(toolEligibility(tool, base)).toEqual({
       ok: false,
       reason: "Not available yet",
     });
@@ -40,7 +45,9 @@ describe("toolEligibility", () => {
   });
 
   it("names the encoding when a reader is missing", () => {
-    const tool = { ...toolById("measure-solids"), implemented: true };
+    // The REAL Measure solids entry: it is implemented now, so these are the
+    // reasons its catalogue row actually shows per layer.
+    const tool = toolById("measure-solids");
     expect(
       toolEligibility(tool, {
         ...base,
@@ -56,17 +63,51 @@ describe("toolEligibility", () => {
       toolEligibility(tool, {
         ...base,
         hasReader: false,
+        sourceEncoding: "cityparquet",
+      }),
+    ).toEqual({
+      ok: false,
+      reason:
+        "Needs a CityJSON or CityJSONSeq source; this layer was loaded from CityParquet",
+    });
+    // A streaming FlatCityBuf target: a city layer kind the tool accepts, with
+    // no reader to re-read the geometry from.
+    expect(
+      toolEligibility(tool, {
+        ...base,
+        hasReader: false,
         sourceEncoding: "flatcitybuf",
         targetKind: "streaming",
-      }).ok,
-    ).toBe(false);
+      }),
+    ).toEqual({
+      ok: false,
+      reason:
+        "Needs a CityJSON or CityJSONSeq source; this layer was loaded from a streaming FlatCityBuf",
+    });
   });
 
   it("reports an unavailable restored file", () => {
-    const tool = { ...toolById("measure-solids"), implemented: true };
-    expect(toolEligibility(tool, { ...base, sourceAvailable: false })).toEqual({
+    expect(
+      toolEligibility(toolById("measure-solids"), {
+        ...base,
+        sourceAvailable: false,
+      }),
+    ).toEqual({
       ok: false,
       reason: "The source file is no longer available; add the layer again",
+    });
+  });
+
+  it("reports a three_d download that failed, for a 3D tool that ships", () => {
+    expect(
+      toolEligibility(toolById("measure-solids"), {
+        ...base,
+        extensionState: { spatial: "loaded", three_d: "failed" },
+      }),
+    ).toEqual({
+      ok: false,
+      reason:
+        "The three_d extension could not be downloaded; check the connection and retry",
     });
   });
 

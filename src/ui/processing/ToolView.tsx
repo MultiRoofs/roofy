@@ -11,6 +11,7 @@ import { submitRun } from "../../features/processing/runQueue";
 import type { ToolId } from "../../features/processing/types";
 import { useToolForm } from "./useToolForm";
 import { RoofMetricsParams } from "./RoofMetricsParams";
+import { SolidParams } from "./SolidParams";
 import { RunFooter } from "./RunFooter";
 import { plural } from "./runFormat";
 
@@ -224,6 +225,20 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
         <fieldset className="processing-section" disabled={locked}>
           <legend className="processing-group__label">PARAMETERS</legend>
           <RoofMetricsParams
+            params={f.draft.params}
+            onChange={(params) => f.setDraft({ params })}
+          />
+          {f.paramsError !== null && (
+            <p className="processing-error" role="alert">
+              {f.paramsError}
+            </p>
+          )}
+        </fieldset>
+      )}
+      {toolId === "measure-solids" && (
+        <fieldset className="processing-section" disabled={locked}>
+          <legend className="processing-group__label">PARAMETERS</legend>
+          <SolidParams
             params={f.draft.params}
             onChange={(params) => f.setDraft({ params })}
           />

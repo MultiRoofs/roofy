@@ -8,11 +8,11 @@
  * subscription marker). A static layer's options never move, and the hook
  * memoises on the model's identity.
  *
- * AN UNIMPLEMENTED TOOL GETS NOTHING. Measure solids and Validate solids need
- * "does this object have a SOLID at this LoD", which nothing in M2 can answer;
- * printing "No solid geometry in this layer" for them would be a verdict on the
- * user's data that the app never reached. Their rows already say the true
- * thing — "Not available yet" — and their forms show no LoD control at all.
+ * AN UNIMPLEMENTED TOOL GETS NOTHING. A tool whose executor has not shipped has
+ * no source of truthful counts, and printing "No solid geometry in this layer"
+ * for it would be a verdict on the user's data that the app never reached. Its
+ * row already says the true thing — "Not available yet" — and its form shows no
+ * LoD control at all.
  */
 import { useMemo } from "react";
 import type { Layer } from "../../features/layers/layerStore";
@@ -21,6 +21,7 @@ import {
   roofLodOptions,
   type LodOption,
 } from "../../features/processing/roofGeometrySource";
+import { solidLodOptions } from "../../features/processing/solidGeometrySource";
 import { useStreamStore } from "../../features/streaming/streamStore";
 
 export interface LodChoices {
@@ -45,14 +46,28 @@ export function useLodOptions(
   const isStreaming = target?.isStreaming ?? false;
   return useMemo(() => {
     if (!tool.needsLod || !tool.implemented || target === null) return NO_LOD;
-    if (tool.id !== "roof-metrics") return NO_LOD;
-    const options = roofLodOptions(target);
-    return {
-      options,
-      noun: "with roof surfaces",
-      emptyReason:
-        options.length === 0 ? "No roof surfaces in this layer" : null,
-    };
+    if (tool.id === "roof-metrics") {
+      const options = roofLodOptions(target);
+      return {
+        options,
+        noun: "with roof surfaces",
+        emptyReason:
+          options.length === 0 ? "No roof surfaces in this layer" : null,
+      };
+    }
+    if (tool.id === "measure-solids") {
+      // §6, verbatim: the option reads "2.2 (1,115 buildings with a solid)" and
+      // the empty select reads "No solid geometry in this layer". TAGS ONLY
+      // (`solidLodOptions`) — opening a dropdown measures nothing.
+      const options = solidLodOptions(target);
+      return {
+        options,
+        noun: "with a solid",
+        emptyReason:
+          options.length === 0 ? "No solid geometry in this layer" : null,
+      };
+    }
+    return NO_LOD;
     // `version` and `model` are the two things that can change the answer: a
     // streaming commit, or a layer whose model was replaced (`mergeAttributes`
     // mints a new one). `target` itself changes identity on every layer patch,

@@ -10,6 +10,7 @@ import {
   cleanup,
   fireEvent,
   render,
+  renderHook,
   screen,
 } from "@testing-library/react";
 
@@ -103,6 +104,10 @@ const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
 const { useStreamStore } =
   await import("../../../../src/features/streaming/streamStore");
+const { useLodOptions } =
+  await import("../../../../src/ui/processing/useLodOptions");
+const { toolById } =
+  await import("../../../../src/features/processing/toolRegistry");
 const { addRoofLayer } = await import("./roofLayerFixture");
 
 beforeEach(() => {
@@ -174,15 +179,22 @@ describe("the LoD select (spec §6)", () => {
     expect(screen.queryByRole("combobox", { name: "LoD" })).toBeNull();
   });
 
-  it("does not offer a LoD, or any geometry verdict, for an UNIMPLEMENTED tool", () => {
-    // Measure solids has `needsLod: true` and no source of counts in M2. A
-    // select reading "No solid geometry in this layer" over a layer full of
-    // solids would be a fact the app never checked.
+  it("answers NOTHING for an unimplemented tool, whatever the layer holds", () => {
+    // §6: a tool whose executor has not shipped has no source of truthful
+    // counts, so printing "No solid geometry in this layer" over a layer full
+    // of solids would be a verdict the app never reached. Stated on a
+    // definition that declares itself unimplemented, so the invariant survives
+    // every tool in the registry shipping — and the view-level half of it now
+    // lives in `solidsEnabled.test.tsx`, where Measure solids really is on.
     addRoofLayer();
-    render(<ToolView toolId="measure-solids" />);
-    expect(screen.queryByRole("combobox", { name: "LoD" })).toBeNull();
-    expect(screen.queryByText(/No solid geometry/)).toBeNull();
-    expect(screen.getByText("Not available yet")).toBeInTheDocument();
+    const target = useLayerStore.getState().layers[0]!;
+    const tool = { ...toolById("measure-solids"), implemented: false };
+    const { result } = renderHook(() => useLodOptions(tool, target));
+    expect(result.current).toEqual({
+      options: [],
+      noun: "",
+      emptyReason: null,
+    });
   });
 
   it("submits the chosen LoD with the run", () => {

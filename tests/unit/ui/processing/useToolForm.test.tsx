@@ -1,8 +1,13 @@
 /**
  * `eligibleTargets`: spec §6's "a layer select listing only layers the tool can
- * target", which is more than "the table is ready". The only implemented M1
- * tool can never fail per layer (no reader, no extension, city target), so the
- * registry is mocked here to make one that can.
+ * target", which is more than "the table is ready".
+ *
+ * Measure solids is the tool these cases drive because it is the first shipped
+ * one whose eligibility can fail on one ready layer and pass on another (it
+ * needs a reader). Roof metrics and Height from extent need neither a reader nor
+ * an extension and run on streaming targets too, so neither can discriminate the
+ * ready-table `candidates` at all — which is why this suite used to mock the
+ * registry to invent a tool that could.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -57,30 +62,6 @@ vi.mock("../../../../src/ui/table/useLayerCounts", () => ({
     message: null,
   }),
 }));
-
-/** Measure solids is still M3's, and it is still the only tool whose
- *  eligibility can fail on one ready layer and pass on another (it needs a
- *  reader). M2's Roof metrics needs neither a reader nor an extension and runs
- *  on streaming targets too, so it cannot discriminate the ready-table
- *  `candidates` any more than Height from extent can — this mock stays until a
- *  reader- or extension-needing tool ships. */
-vi.mock("../../../../src/features/processing/toolRegistry", async () => {
-  const actual = await vi.importActual<
-    typeof import("../../../../src/features/processing/toolRegistry")
-  >("../../../../src/features/processing/toolRegistry");
-  const TOOLS = actual.TOOLS.map((t) =>
-    t.id === "measure-solids" ? { ...t, implemented: true } : t,
-  );
-  return {
-    ...actual,
-    TOOLS,
-    toolById: (id: string) => {
-      const tool = TOOLS.find((t) => t.id === id);
-      if (!tool) throw new Error(`Unknown tool: ${id}`);
-      return tool;
-    },
-  };
-});
 
 const { ToolView } = await import("../../../../src/ui/processing/ToolView");
 const { useLayerStore } =

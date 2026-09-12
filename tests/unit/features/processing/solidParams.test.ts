@@ -165,9 +165,10 @@ describe("the measure-solids registry entry", () => {
     });
   });
 
-  it("is still NOT implemented — Task 8 flips it with the LoD answer", () => {
-    // §6: an unimplemented tool claims no fact about the user's data, and a
-    // flip without `useLodOptions` would render an empty LoD select.
-    expect(solids.implemented).toBe(false);
+  it("is implemented, which is what makes the form reachable at all", () => {
+    // Flipped in the same commit that taught `useLodOptions` about solids: §6's
+    // rule is that an unimplemented tool claims no fact about the user's data,
+    // and a flip without the hook would render an empty LoD select.
+    expect(solids.implemented).toBe(true);
   });
 });
