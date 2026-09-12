@@ -289,6 +289,11 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
         {f.extensionNote !== null && (
           <p className="processing-note">{f.extensionNote}</p>
         )}
+        {/* §6: "a workload note when the target's source is large" — beside the
+            extension note, because both say what this Run is about to cost. */}
+        {f.workloadNote !== null && (
+          <p className="processing-note">{f.workloadNote}</p>
+        )}
       </fieldset>
       <RunFooter
         run={latestRun}

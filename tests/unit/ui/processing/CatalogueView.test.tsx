@@ -79,6 +79,8 @@ function addCityLayer(): string {
           reader: null,
           columns: [],
           lods: [],
+          extension: null,
+          sourceBytes: null,
           rowCount: 2,
         },
       },

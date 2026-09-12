@@ -104,6 +104,8 @@ function readyTableInfo(withReader: boolean): LayerTable {
     sourceName: withReader ? "delft.city.json" : null,
     source: withReader ? ({} as never) : null,
     reader: withReader ? "read_cityjson" : null,
+    extension: withReader ? "city.json" : null,
+    sourceBytes: null,
     columns: [],
     lods: [],
     rowCount: 2,

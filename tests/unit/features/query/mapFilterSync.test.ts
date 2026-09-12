@@ -54,6 +54,8 @@ const TABLE = {
     { name: "object_type", type: "VARCHAR", kind: "scalar" as const },
   ],
   lods: [],
+  extension: null,
+  sourceBytes: null,
   rowCount: 3,
 };
 

@@ -636,7 +636,15 @@ async function execute(
     }
     patch(id, {
       status: "running",
-      phase: "compute",
+      // §6.1's phases are discrete and in order: "Reading source (registering
+      // bytes; skipped for tools that need none), Computing". A tool that
+      // re-reads its source starts there and calls `ctx.phase("compute")` once
+      // its handle is open; a tool that needs no source never shows the phase
+      // at all (`roofMetrics.ts` and `heightFromExtent.ts` go straight to
+      // Computing). Deciding it here rather than inside the executor is what
+      // stops the progress block flashing "Computing" for one frame before a
+      // 300 MB read.
+      phase: tool.needsReader ? "source" : "compute",
       featureIds: scope.featureIds,
       scopeCount: scope.count,
     });

@@ -170,6 +170,25 @@ export interface LayerTable {
   readonly sourceName: string | null;
   readonly source: SourceProvider | null;
   readonly reader: "read_cityjson" | "read_cityjsonseq" | null;
+  /**
+   * The VFS spelling the reader expects, or null for a fallback table.
+   *
+   * It is reconstructible today only by parsing `sourceName`
+   * (`` `${table}.${extension}` ``), which is exactly the fragility
+   * `export.ts` routed around by making its CALLER pass `sourceExtension`
+   * (`CityParquetExportRequest`). Stated once, here, so a second reader of the
+   * source does not have to guess.
+   */
+  readonly extension: ReaderExtension | null;
+  /**
+   * The source's size in bytes at BUILD time, or null when there was none.
+   *
+   * Captured before `registerBuffer` detaches the array, because after that
+   * the number exists nowhere: spec §6's workload note ("Re-reads a 180 MB
+   * source…") has to be shown BEFORE any run, and re-obtaining the bytes to
+   * measure them is the very cost the note warns about.
+   */
+  readonly sourceBytes: number | null;
   readonly columns: ReadonlyArray<ColumnInfo>;
   /** From the reader's own `geometry_lod*` names — each rung carries the label
    *  to SHOW and the suffix to BUILD A COLUMN NAME WITH, because the two are
@@ -594,6 +613,9 @@ async function buildFromReader(
   scratch: BuildScratch,
 ): Promise<LayerTable> {
   const sourceName = `${table}.${source.extension}`;
+  // BEFORE the register: `registerBuffer` transfers the array to the worker and
+  // DETACHES it, after which `byteLength` is 0.
+  const sourceBytes = source.bytes.byteLength;
   const registered = await registerBuffer(sourceName, source.bytes);
   if (!registered) {
     throw new BuildError("The source bytes could not be handed to DuckDB.");
@@ -620,6 +642,8 @@ async function buildFromReader(
       sourceName,
       source: source.provider,
       reader: source.reader,
+      extension: source.extension,
+      sourceBytes,
       columns: kept,
       // From ALL the described names, never the kept ones: the `geometry_lod*`
       // columns the ladder is read from are exactly the ones dropped.
@@ -724,6 +748,10 @@ async function buildFromRows(
       sourceName: null,
       source: null,
       reader: null,
+      // A fallback table has no reader and no source of its own: it was built
+      // from ROWS, so there is nothing to re-read and nothing to measure.
+      extension: null,
+      sourceBytes: null,
       columns: columnsFromDescribe(described.rows),
       lods: [],
       rowCount: await countRows(table),

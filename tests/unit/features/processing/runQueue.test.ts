@@ -28,6 +28,8 @@ let tableInfo: {
   reader: null;
   columns: Array<{ name: string; type: string; kind: "scalar" }>;
   lods: [];
+  extension: null;
+  sourceBytes: null;
   rowCount: number | null;
 } = freshTable();
 
@@ -42,6 +44,8 @@ function freshTable() {
       { name: "feature_id", type: "VARCHAR", kind: "scalar" as const },
     ],
     lods: [] as [],
+    extension: null,
+    sourceBytes: null,
     rowCount: 3 as number | null,
   };
 }
@@ -1334,7 +1338,11 @@ describe("the Loading extension phase (spec §6.1)", () => {
 
     expect(ensureExtension).toHaveBeenCalledWith("three_d");
     expect(phases).toContain("extension");
-    expect(phases.indexOf("extension")).toBeLessThan(phases.indexOf("compute"));
+    // §6.1's order is "Loading extension, Reading source, Computing", and
+    // `measure-solids` re-reads its file — so the phase that follows the
+    // extension is "source". Computing is the EXECUTOR's to announce once its
+    // handle is open, and this fake one opens none.
+    expect(phases.indexOf("extension")).toBeLessThan(phases.indexOf("source"));
     expect(runById(id)?.status).toBe("done");
   });
 
@@ -1493,6 +1501,40 @@ describe("the Loading extension phase (spec §6.1)", () => {
     // "Failed to fetch" is true and useless to the user, and indispensable in a
     // bug report — so it is kept as the run's warning, not as its message.
     expect(run?.warnings).toContain("three_d: Failed to fetch");
+  });
+});
+
+describe("the Reading source phase (spec §6.1)", () => {
+  it("hands a reader-backed executor the Reading source phase, not Computing", async () => {
+    // §6.1: the phases are discrete and in order — "Loading extension (skipped
+    // once loaded), Reading source (registering bytes; skipped for tools that
+    // need none), Computing". A run that re-reads a 300 MB source must not show
+    // "Computing" for the length of the read.
+    //
+    // `three_d` reads as ALREADY LOADED, so the extension phase is skipped
+    // outright: this suite's `beforeEach` leaves `isExtensionLoaded` false and
+    // `ensureExtension` resolving false, which would fail a `measure-solids` run
+    // with the offline sentence before any executor ran.
+    vi.mocked(isExtensionLoaded).mockReturnValue(true);
+    let phaseOnEntry: string | null = null;
+    registerExecutor("measure-solids", async (record) => {
+      // The record as the queue left it the instant before the call.
+      phaseOnEntry = runById(record.id)?.phase ?? null;
+      return { columns: [], rows: new Map(), measured: 0, skipped: [] };
+    });
+    const first = submitRun(request({ toolId: "measure-solids" }));
+    await vi.waitFor(() => expect(runById(first)?.status).toBe("done"));
+    expect(phaseOnEntry).toBe("source");
+
+    // And the tool that needs no source still starts in Computing.
+    let heightPhase: string | null = null;
+    registerExecutor("height-from-extent", async (record) => {
+      heightPhase = runById(record.id)?.phase ?? null;
+      return { columns: [], rows: new Map(), measured: 0, skipped: [] };
+    });
+    const second = submitRun(request({ toolId: "height-from-extent" }));
+    await vi.waitFor(() => expect(runById(second)?.status).toBe("done"));
+    expect(heightPhase).toBe("compute");
   });
 });
 

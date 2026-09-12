@@ -89,6 +89,8 @@ const READER_TABLE = {
     { label: "1.2", suffix: "1_2" },
     { label: "2.2", suffix: "2_2" },
   ],
+  extension: "city.json" as const,
+  sourceBytes: null,
   rowCount: 10,
 };
 
@@ -97,6 +99,7 @@ const FALLBACK_TABLE = {
   sourceName: null,
   source: null,
   reader: null,
+  extension: null,
   lods: [],
 };
 

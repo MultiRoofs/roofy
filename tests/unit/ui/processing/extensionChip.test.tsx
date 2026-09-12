@@ -140,6 +140,8 @@ function addCityLayer(): string {
           reader: "read_cityjson",
           columns: [column("id"), column("feature_id")],
           lods: [],
+          extension: "city.json",
+          sourceBytes: null,
           rowCount: 2,
         },
       },

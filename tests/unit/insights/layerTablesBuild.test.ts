@@ -290,6 +290,10 @@ describe("reader-backed layer table", () => {
       table: "layer_1",
       sourceName: "layer_1.city.json",
       reader: "read_cityjson",
+      extension: "city.json",
+      // The MOCKED provider's `new Uint8Array(16)` — asserting the number is
+      // what proves the capture happens BEFORE `registerBuffer` detaches it.
+      sourceBytes: 16,
       rowCount: 2231,
       lods: [
         { label: "1.2", suffix: "1_2" },
@@ -975,6 +979,8 @@ describe("flat-fallback layer table", () => {
     expect(info).toMatchObject({
       reader: null,
       source: null,
+      extension: null,
+      sourceBytes: null,
       lods: [],
       rowCount: 1,
     });

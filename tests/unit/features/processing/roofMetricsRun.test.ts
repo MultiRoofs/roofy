@@ -42,6 +42,8 @@ let tableInfo: {
   reader: null;
   columns: Array<{ name: string; type: string; kind: "scalar" }>;
   lods: [];
+  extension: null;
+  sourceBytes: null;
   rowCount: number | null;
 } = freshTable();
 
@@ -56,6 +58,8 @@ function freshTable() {
       { name: "feature_id", type: "VARCHAR", kind: "scalar" as const },
     ],
     lods: [] as [],
+    extension: null,
+    sourceBytes: null,
     rowCount: 3 as number | null,
   };
 }

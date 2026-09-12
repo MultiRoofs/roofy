@@ -24,6 +24,7 @@ import {
 } from "../../features/processing/processingStore";
 import { toolById } from "../../features/processing/toolRegistry";
 import { toolEligibility } from "../../features/processing/eligibility";
+import { sourceWorkloadNote } from "../../features/processing/sourceRead";
 import type { ToolId } from "../../features/processing/types";
 import {
   eligibilityContextFor,
@@ -163,6 +164,19 @@ export function useToolForm(toolId: ToolId) {
     ext !== null && targetCtx.extensionState[ext] !== "loaded"
       ? `Loads the ${ext} extension on first run (about ${ext === "spatial" ? "24 MB" : "1 MB"}, once per session).`
       : null;
+  // §6: "a workload note when the target's source is large". Only for a tool
+  // that RE-READS the source — a tool computing from the table or the model
+  // pays none of this cost, and a warning about a read that will not happen is
+  // a false alarm.
+  //
+  // `tableInfo?.state`, not `tableInfo !== null`: `tableInfo` is
+  // `tables[target.id]` under an indexed lookup, so its type carries
+  // `undefined` as well as `null` and the line above it uses the same truthy
+  // shape.
+  const workloadNote =
+    tool.needsReader && tableInfo?.state === "ready"
+      ? sourceWorkloadNote(tableInfo.info)
+      : null;
   const scopeCount =
     draft.scope === "all"
       ? counts.all
@@ -210,6 +224,7 @@ export function useToolForm(toolId: ToolId) {
     prefixError,
     paramsError,
     extensionNote,
+    workloadNote,
     eligibility,
     canRun: runReason === null && target !== null,
     runReason,

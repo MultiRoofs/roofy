@@ -55,6 +55,8 @@ const table = {
   reader: null,
   columns: [{ name: "status", type: "VARCHAR", kind: "scalar" as const }],
   lods: [],
+  extension: null,
+  sourceBytes: null,
   rowCount: 3,
 };
 

@@ -48,6 +48,8 @@ const TABLE = {
     { name: "g", type: "BLOB", kind: "blob" as const },
   ],
   lods: [],
+  extension: null,
+  sourceBytes: null,
   rowCount: 42,
 };
 

@@ -136,6 +136,8 @@ function addCityLayer(
           reader: null,
           columns,
           lods: [],
+          extension: null,
+          sourceBytes: null,
           rowCount: 2,
         },
       },
@@ -1162,6 +1164,28 @@ describe("ToolView", () => {
     expect(screen.getByRole("button", { name: "Run" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Prefix" })).not.toBeDisabled();
     expect(screen.getByRole("combobox", { name: "Layer" })).not.toBeDisabled();
+  });
+
+  it("warns about a large source only for a tool that re-reads it", () => {
+    // §6, verbatim, with the REAL number: "Re-reads a 180 MB source; this can
+    // take a minute and needs memory".
+    const id = addCityLayer();
+    useLayerTableStore.setState((s) => {
+      const entry = s.tables[id];
+      if (entry?.state !== "ready") return s;
+      return {
+        tables: {
+          ...s.tables,
+          [id]: {
+            ...entry,
+            info: { ...entry.info, sourceBytes: 180_000_000 },
+          },
+        },
+      };
+    });
+    render(<ToolView toolId="height-from-extent" />);
+    // `needsReader: false` — no read, no note.
+    expect(screen.queryByText(/Re-reads a/)).toBeNull();
   });
 
   it("says a streaming target only covers the loaded buildings", () => {

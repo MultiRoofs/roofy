@@ -35,6 +35,8 @@ const TABLE = {
   source: null,
   reader: null,
   lods: [],
+  extension: null,
+  sourceBytes: null,
   rowCount: 3,
   columns: [
     { name: "id", type: "VARCHAR", kind: "scalar" as const },
