@@ -17,13 +17,13 @@
 Carried from M1 and M2 (unchanged, and every one still applies):
 
 - Never run bare `vite`/`vp dev`/`vp build`; use `npm run dev`, `npm run build`, `npx vp check`, `npx vitest run`, `npx tsc -b --noEmit`. `.env` is dotenvx-encrypted.
-- `src/insights/duckdb.ts` is the ONLY importer of `@duckdb/duckdb-wasm`. **Every NEW export from `duckdb.ts` must be added to all 32 `vi.mock(".../insights/duckdb", …)` factories**, and every new export from `layerTables.ts` to all 6 `vi.mock(".../insights/layerTables", …)` factories (counts verified on `develop` @ `55e4e00`). The task that adds an export lists the files and does the sweep in its own commit. A task that adds a FIELD to an exported TYPE sweeps something else — the hand-built literals of that type — and says so: Task 5 sweeps the 16 `LayerTable` literals, Task 21 sweeps the 12 `Layer` literals AND adds two `layerTables` exports to the 6 factories.
+- `src/insights/duckdb.ts` is the ONLY importer of `@duckdb/duckdb-wasm`. **Every NEW export from `duckdb.ts` must be added to all 32 `vi.mock(".../insights/duckdb", …)` factories**, and every new export from `layerTables.ts` to all 6 `vi.mock(".../insights/layerTables", …)` factories (counts verified on `develop` @ `55e4e00`). **Both counts are the BASELINE, not a constant**: a task that authors a new suite mocking either module raises its count, and the sweeping task greps rather than trusting the number (Task 11 adds a seventh `layerTables` factory, which Task 21's sweep therefore covers). The task that adds an export lists the files and does the sweep in its own commit. A task that adds a FIELD to an exported TYPE sweeps something else — the hand-built literals of that type — and says so: Task 5 sweeps the 16 `LayerTable` literals, Task 21 sweeps the 12 `Layer` literals AND adds two `layerTables` exports to the 6 factories.
 - Test files import from `"vitest"`, never `"vite-plus/test"`. Vitest runs under Node 24: `export PATH="$HOME/.local/share/mise/shims:$PATH"`. The full suite runs in the BACKGROUND to a file, never in the foreground.
 - `npx vp check` baseline is **0 errors / 56 warnings**. A task that adds a warning fixes it before review; the baseline is a gate.
 - Submodule-first: commit inside `packages/cityjson-navara-plugins`, push it (`git -C packages/cityjson-navara-plugins push origin main`), then the pointer bump plus parent-side fixture fixes in the parent. Always `cd` into the submodule for pnpm; never `pnpm -C`. `pnpm install` again after any app-side `npm install`.
 - Commits: small, one change each, prefixed `feat:` / `fix:` / `test:` / `docs:` / `refactor:` / `chore:`; directly on `develop`. **No attribution trailers of any kind** (the harness's `Claude-Session:` line included).
 - UI: Soft Utility tokens from `src/app/flatControls.css` (`--control-radius` 8px, `--control-height` 38px, `--control-height-compact` 30px, `--processing-caption` 84px). Verify new controls against peers in a real browser.
-- Copy: every user-visible string is verbatim from the spec, or one of the sixteen **[adapted copy]** strings the repo owner ACCEPTED at the plan gate (the table under "Copy table", and "Decisions recorded (2026-09-12)" items 2, 3 and 5). Every one is settled; no task invents a string, reopens one as a question, or gates work on an answer.
+- Copy: every user-visible string is verbatim from the spec, or one of the seventeen **[adapted copy]** strings the repo owner ACCEPTED at the plan gate (the table under "Copy table", and "Decisions recorded (2026-09-12)" items 2, 3 and 5). Every one is settled; no task invents a string, reopens one as a question, or gates work on an answer.
 - Features, not rows (§7): a BuildingPart never counts as a building; roll-ups are per feature (`COALESCE("feature_id","id")`); the Style-by-result median is over root rows (`buildMedianSql`, `sql.ts:438-439`).
 - `!implemented` outranks every eligibility reason (`eligibility.ts:44`). A tool flips to `implemented: true` in the SAME commit that extends `useLodOptions` for it (M2 ledger, Task 11 concern) and only after its executor, LoD answer and parameters exist.
 - No unimplemented tool may claim a fact about the user's data: `implemented === false` renders no LoD control, no column list and no geometry verdict.
@@ -131,13 +131,13 @@ Every file:line below was read on this checkout. Treat a citation that does not 
 
 ### The UI, the layer stores and the vector path
 
-- **There is no `CityLayer` type**; it is `Layer` (`layerStore.ts:28-132`). The store holds an ARRAY only (`:134-136`) — no active id, no z-order. `addLayer` (`:139-187`, impl `:326-379`) **appends** (`:347-349`); there is **no layer reorder, no rename action** (rename is `updateLayer(id, { name })`, `:189-197`) and **no palette action**. Ids: `crypto.randomUUID()` (`:327`).
+- **There is no `CityLayer` type**; it is `Layer` (`layerStore.ts:28-132`). The store holds an ARRAY only (`:134-136`) — no active id, no z-order. `addLayer` (`:139-187`, impl `:326-379`) **appends** (`:347-349`); there is **no layer reorder, no rename action** (rename is `updateLayer(id, { name })`, `:189-197`) and **no palette action**. Ids: `input.id ?? crypto.randomUUID()` (`:327`) — `id` is ALREADY an optional field of `addLayer`'s input (`:158-161`, added for `openStreamingLayer`), which is what lets Task 21's `publish()` mint the id first and adopt the table before the row exists.
 - The active layer lives in `useWorkspaceStore.activeLayerId` (`workspaceStore.ts:19`, setter `:67-71`, which clears a selection belonging to another layer). The public door is `activateLayer(id)` (`features/workspace/layerCoordination.ts:34`); `unifiedLayerOrder` puts every city layer before every geo layer (`activeLayer.ts:30-35`).
 - `addCityLayer.ts:139-165` — `addCityLayer(input)` adds the row, then **fire-and-forget** `void enqueueLayerTable(layerId, input.duckdb).catch(warn)` (`:154-164`). **It does not activate the layer.** `modelTableSource` (`:96-120`) chooses `{kind:"model"}` for CityGML or byte-less input, else `{kind:"bytes", reader, extension, provider}`.
 - `layerTableLifecycle.ts` — `rebuildWanted(layerId)` is `tablePanelOpen || processing.open || runInFlightFor(layerId)` (`:113-116`); `sweepStreamingLayers()` (`:202-214`) runs on the table-panel and processing subscriptions (`:216-234`) and is **unconditional**, which is the M2 residual that retires a finished card as stale. `knownVersions` is the map to compare against.
 - **proj4 is called in exactly ONE place**: `src/scene/cursorCrsReadout.ts:68`. The reusable door is `crsFromGeodetic(lngDeg, latDeg, height, epsg): readonly [number, number, number] | null` (`:53-79`) — 2-D only (height passes through), guarded by the SYNCHRONOUS `ensureProjDef(epsg)` (`:59`), and returning `null` (never NaN) on a non-finite input or a proj4 throw. Its companion is `epsgForLayer(referenceSystem): number | null` (`:35-41`). The ASYNC warm-up for a code proj4 does not yet know is `ensureModelCrsLoadable(model)` (`ensureCrs.ts:32-48`); until something awaits it, `crsFromGeodetic` returns `null` for that code. `features/` may import from `scene/` (`geoLayers/categorize.ts:26-29` already does).
 - `geoLayerStore.ts:89-101` — `GeoLayer` is a discriminated union on `kind`; the geojson config is `{ data?, url?, preparedData?, preparation?, preparationError?, preparationEpoch? }` (`:36-47`). **`GeoLayerPatch` (`:120-130`) deliberately excludes `config`**; the only config writers are `relinkGeoJsonLayer` (`:278-292`, which DROPS `url` and `preparationEpoch`) and `setPreparedGeoJson` (`:294-309`, which spreads into a NEW config object). **There is no geo analogue of `mergeAttributes`.**
-- `config.preparedData` is documented "Engine-only normalized clone; **never persisted**" (`geoLayerStore.ts:42-43`) and is what the engine (`geoLayerSync.ts:245`), the records panel (`GeoRecordsPanel.tsx:25`) and the GeoJSON export (`GeoLayerExport.tsx:24`) all read. **"Color by attribute" is the exception**: it reads the RAW document (`GeoStyleControls.tsx:190-193, 198-217`), so a property written only into `preparedData` would paint and tabulate but not appear in its select.
+- `config.preparedData` is documented "Engine-only normalized clone; **never persisted**" (`geoLayerStore.ts:42-43`) and is what the engine (`geoLayerDescriptions.ts:55-57`, `geoSourceDescription`), the records panel (`GeoRecordsPanel.tsx:25`) and the GeoJSON export (`GeoLayerExport.tsx:24`) all read. **"Color by attribute" is the exception**: it reads the RAW document (`GeoStyleControls.tsx:190-193, 198-217`), so a property written only into `preparedData` would paint and tabulate but not appear in its select.
 - `geoJsonRecords.ts:2` — `GEO_STABLE_FEATURE_KEY = "__roofy_stable_feature_id"`, stamped as a `StableFeatureEnvelope` (`:4-8`, `:66-84`); `readGeoStableFeatureId(properties)` (`:11-21`), `normalizeGeoJsonDocument(document)` (`:33-95`), `publicGeoProperties(properties)` (`:98-114`). `geoRecords.ts:5-53` — `GEO_RECORD_ID` symbol, `geoRecords(document)`, `geoRecordColumns(records)` (types `DOUBLE` if any row's value is a number, else `VARCHAR`).
 - `geoLayerSync.ts:524` — the engine pair is torn down and rebuilt when `entry.config !== layer.config || entry.kind !== layer.kind`; visibility/opacity/style alone take the cheap `Layer.update()` path (`:539-557`). So ONE config replacement per run is ONE rebuild.
 - **No computed badge on geo rows today**: `GeoRecordsPanel.tsx:118-144` passes neither `layerId` nor `derivedColumnNames` to `DataGrid` (whose gates are `DataGrid.tsx:54-58, 83-89, 140-146`). `GeoFeatureDetails.tsx:20-28` renders a bare `AttrRow` list with **no COMPUTED group, no badge, no provenance** — unlike `LayerAttributesSection.tsx:42-82`, which has all three for city layers.
@@ -237,18 +237,23 @@ export function resolveStyleValueSource(
 //       while running" / source-column pre-flights, and the stale watcher. The
 //       target-removal watcher checks BOTH ids (§6.1: removing the target OR the
 //       source cancels the run).
+// src/features/geoLayers/geoLayerStore.ts  (Task 11)
+/** The union's GeoJSON arm. Every reader of a vector layer's CONTENT reads
+ *  `config.preparedData`, which only this arm has. */
+export type GeoJsonLayer = Extract<GeoLayer, { kind: "geojson" }>;
+
 export type ToolTarget =
   | { readonly kind: "city"; readonly layer: Layer; readonly table: LayerTable }
   | {
       readonly kind: "vector";
-      readonly layer: GeoLayer;
+      readonly layer: GeoJsonLayer;
       readonly records: ReadonlyArray<GeoRecord>;
     };
 export type ToolSource =
   | { readonly kind: "city"; readonly layer: Layer; readonly table: LayerTable }
   | {
       readonly kind: "vector";
-      readonly layer: GeoLayer;
+      readonly layer: GeoJsonLayer;
       readonly table: string;
       readonly propertyKeys: ReadonlyArray<string>;
       readonly skipped: number;
@@ -298,6 +303,28 @@ export async function readSource(input: {
   readonly lod: string; // the LoD LABEL ("2.2"), never a suffix
   readonly signal: AbortSignal;
 }): Promise<ReadSourceHandle>;
+/** §6.1's sentence for an error raised while re-reading the source — at the
+ *  fetch, at the hand-off, or INSIDE the reader statement — or null when the
+ *  error is not a source problem and must travel as it is. A `CancelledError`
+ *  and an `EngineDeadError` come back UNCHANGED. */
+export function classifySourceFailure(error: unknown): Error | null;
+/** §6.1's id join: throws `SOURCE_IDS_DIFFER` when the reader did not answer
+ *  for every id the run asked about. */
+export function assertSourceIds(
+  requested: ReadonlyArray<string>,
+  returned: ReadonlySet<string>,
+): void;
+/** `ctx.query` for a statement that reads the RE-READ SOURCE: §6.1's sentence
+ *  on a source failure, the engine's own words into `ctx.warn`, and anything
+ *  that is not a source problem rethrown untouched. */
+export async function readerQuery(
+  ctx: Pick<ToolContext, "query" | "warn">,
+  label: string,
+  sql: string,
+): Promise<Extract<QueryOutcome, { readonly ok: true }>>;
+// `sourceRead.ts` therefore gains two TYPE-ONLY imports (erased, so the module
+// still reaches no queue at runtime): `type { QueryOutcome } from
+// "../../insights/duckdb"` and `type { ToolContext } from "./runQueue"`.
 
 // src/insights/layerTables.ts  (Task 5, Task 21)
 // LayerTable gains:
@@ -387,10 +414,18 @@ export interface VectorPreflight {
   readonly propertyTypes: ReadonlyMap<string, ColumnType>;
   readonly polygonOnly: boolean; // every kept feature is (Multi)Polygon
 }
-export function reprojectGeoLayer(
+/** A run's cancel checkpoint, handed in so the walk can yield without knowing
+ *  about the queue. `checkpoint` is the run's `ctx.throwIfCancelled`. */
+export interface YieldControl {
+  readonly checkpoint?: () => void;
+}
+/** ASYNC: the walk yields a macrotask every 500 features and every 20,000
+ *  coordinates, calling `control.checkpoint()` immediately before each yield. */
+export async function reprojectGeoLayer(
   document: unknown,
   epsg: number,
-): VectorPreflight;
+  control?: YieldControl,
+): Promise<VectorPreflight>;
 /**
  * The same type inference, for the FORM — §7.5's fields checklist shows each
  * property's type before Run, and preflight only happens inside a run. Pure,
@@ -406,9 +441,11 @@ export function geoPropertyTypes(
 export function vectorTableName(runId: string): string; // `__src_${runId}`
 export function buildVectorTableSql(table: string, file: string): string;
 export function buildDropVectorTableSql(table: string): string;
-export function encodeProjectedFeatures(
+/** ASYNC, and yielding on the same bounded-batch rule as `reprojectGeoLayer`. */
+export async function encodeProjectedFeatures(
   features: ReadonlyArray<ProjectedFeature>,
-): Uint8Array; // NDJSON, read back with read_json(columns=…) — never read_json_auto
+  control?: YieldControl,
+): Promise<Uint8Array>; // NDJSON, read back with read_json(columns=…) — never read_json_auto
 export interface VectorTableHandle {
   readonly table: string;
   release(): Promise<void>;
@@ -417,6 +454,7 @@ export async function createVectorTable(input: {
   readonly runId: string;
   readonly preflight: VectorPreflight;
   readonly query: (label: string, sql: string) => Promise<QueryOutcome>;
+  readonly control?: YieldControl;
 }): Promise<VectorTableHandle>;
 
 // src/features/processing/buildingProxy.ts  (Task 14)
@@ -503,6 +541,36 @@ export function mergeGeoDocumentProperties(
   document: unknown,
   byStableId: ReadonlyMap<string, Readonly<Record<string, unknown>>>,
 ): unknown | null;
+/** The marker for "this feature had no such property before the run", so an
+ *  Undo can DELETE it rather than write `undefined` back. */
+export const GEO_PROPERTY_ABSENT: unique symbol;
+/** Per feature, the value each of ONE run's columns held before the merge. */
+export type GeoPreviousValues = ReadonlyMap<
+  string,
+  Readonly<Record<string, unknown | typeof GEO_PROPERTY_ABSENT>>
+>;
+/** The Undo's pure half: merge `previous` back into whatever the document is by
+ *  now, deleting the properties marked ABSENT. Null when nothing matched. */
+export function restoreGeoDocumentProperties(
+  document: unknown,
+  previous: GeoPreviousValues,
+): unknown | null;
+
+// src/features/geoLayers/geoJsonRecords.ts  (Task 18)
+/** Re-read one picked feature's current values, by stable id. */
+export function findGeoFeatureProperties(
+  document: unknown,
+  stableId: string,
+): Readonly<Record<string, unknown>> | null;
+
+// src/features/geoLayers/geoSelectionRefresh.ts  (Task 18, new module)
+/** Pure: what a geo selection becomes when its layer's `config` identity moves
+ *  — refreshed properties, or null when the feature is gone. */
+export function refreshedGeoSelection(input: {
+  readonly selection: GeoFeatureSelection;
+  readonly layer: GeoLayer | undefined;
+  readonly previousConfig: unknown;
+}): GeoFeatureSelection | null;
 
 // src/features/processing/deriveLayer.ts  (Task 21, Task 23)
 export interface DerivedPlan {
@@ -546,6 +614,13 @@ export async function prepareDerivedCityLayer(input: {
    *  `runQuery` behind the run's back and the copy's `CREATE TABLE` would never
    *  reach §6.4's log. Task 22 passes `ctx.query` straight through. */
   readonly query: (label: string, sql: string) => Promise<QueryOutcome>;
+  /** Task 27: hand the run's log the statements this preparation's WRITE
+   *  issued (§6.4). Optional; supplied by `execute`, called on failure too. */
+  readonly recordWrite?: (
+    statements: ReadonlyArray<string>,
+    ms: number,
+    rows: number,
+  ) => void;
 }): Promise<DerivedPlan>;
 export async function prepareDerivedVectorLayer(input: {
   readonly runId: string;
@@ -569,9 +644,23 @@ export function requestColumnReveal(
   layerId: string,
   columns: ReadonlyArray<string>,
 ): void;
+export interface ColumnReveal {
+  readonly layerId: string;
+  readonly columns: ReadonlyArray<string>;
+}
+/** The listener ANSWERS: true = honoured, false = leave the request
+ *  outstanding (the grid has no `<th>` yet, or it is another layer's grid).
+ *  `Listener` itself stays module-private; the exported functions spell it. */
 export function subscribeColumnReveal(
-  listener: (r: { layerId: string; columns: ReadonlyArray<string> }) => void,
+  listener: (reveal: ColumnReveal) => boolean,
 ): () => void;
+/** Replay every request still outstanding at this listener — the channel
+ *  RETAINS the latest request per layer until one is acknowledged. */
+export function drainColumnReveals(
+  listener: (reveal: ColumnReveal) => boolean,
+): void;
+/** Tests only: the channel is module state and now retains requests. */
+export function clearColumnReveals(): void;
 
 // src/insights/computedColumns.ts  (Task 27)
 // WriteOutcome's ok branch gains:  statements: ReadonlyArray<string>
@@ -666,6 +755,9 @@ export const CAVEAT_INVALID_SOLIDS = "invalid solids (no volume)";
 //       id" needs its own slot.
 export function documentGeometryKinds(document: unknown): ReadonlySet<string>;
 export function documentHasFeatureIds(document: unknown): boolean;
+/** §7.5's "The source layer has no features", decided without a preflight —
+ *  the FORM asks it before any run exists. Task 15, beside the two above. */
+export function documentHasFeatures(document: unknown): boolean;
 
 // src/features/processing/buildingProxy.ts  (Task 14)
 /** The three proxies, ONE row per FEATURE — `(id, f, g GEOMETRY)`. This is the
@@ -733,9 +825,60 @@ export function eligibilityContextFor(
 // src/features/processing/runQueue.ts  (Task 18, Task 22)
 // UndoState becomes a discriminated union on `kind`:
 //   { kind: "city";   table; backupTable; created; replaced; ids; previousModelValues }
-//   { kind: "vector"; layerId; previousPreparedData; created; replaced }
-// and Task 22 wraps BOTH in `RunUndo`:
-//   { kind: "columns" } & UndoState  |  { kind: "layer"; layerId; table; … }
+//   { kind: "vector"; layerId; previousValues: GeoPreviousValues; created; replaced }
+//       (Task 18: PER-COLUMN previous values, not a `previousPreparedData`
+//       document snapshot — §6.2 steals a run's Undo only where two runs share
+//       a COLUMN, so two runs on one vector layer are both undoable at once and
+//       a snapshot taken before the first would erase the second's results.)
+// and Task 22 wraps BOTH in `RunUndo` — NESTED, not intersected, because
+// `{ kind: "columns" } & UndoState` is `never` once `UndoState`'s own `kind`
+// is "city" | "vector":
+//   { kind: "columns"; state: UndoState }
+//   | { kind: "layer"; layerId: string; table: string; runIds: ReadonlySet<string> }
+// Two MODULE-PRIVATE helpers in the same file, lifted out of the city path by
+// Task 18 so both destinations run one copy of each rule; Task 22 calls both
+// from the New-layer branch rather than writing a second loop:
+//   function publishProvenance(runId, layerId, result: ToolResult,
+//     toolName: string, request: FrozenRequest,
+//     scope: { featureIds: ReadonlyArray<string> | null; count: number;
+//              total: number }): void
+//   function stealUndo(runId: string, layerId: string, result: ToolResult): void
+
+// src/features/processing/types.ts + runQueue.ts + insights/sql.ts  (Task 9)
+// TWO CHANGED CONTRACTS on names the plan already carries, neither renamed:
+//   RunSummary.firstColumnNonNull: number
+//     BECOMES  nonNullByColumn: Readonly<Record<string, number>>
+//       `summarise` counts non-NULLs for EVERY written column, because the
+//       styled column is `pick(written)` and for Validate solids that is the
+//       LAST one. Tasks 16, 17, 19 and 22 write summary fixtures and use the
+//       map form; the `firstColumnNonNull` literals in `tests/` are swept in
+//       Task 9's own commit.
+//   buildMedianSql(table, column) now emits `median(CAST(<col> AS DOUBLE))`
+//       Same name, same signature, different text (the M2 DECIMAL trap). The
+//       two existing expectations in `tests/unit/insights/sqlQuery.test.ts`
+//       move with it.
+
+// src/features/processing/deriveLayer.ts  (Task 20)
+/** [adapted copy A2], the ONE copy of the sentence. `ToolView.tsx` imports it
+ *  and declares nothing of its own, so the disabled radio's reason line, the
+ *  form's `destinationReason` and the queue's head guard cannot drift apart. */
+export const STREAMING_NO_NEW_LAYER: string;
+
+// src/features/processing/runQueue.ts  (Task 22)
+/** §6.2's Undo block reason for a New-layer run — "Used by a later run; remove
+ *  the layer from the layer list instead" — or null when Undo is still
+ *  offered. */
+export function newLayerUndoBlock(run: RunRecord): string | null;
+/** §6.2's "Created <name> · …" card for a New-layer run. `features` is `number
+ *  | null`: a vector copy passes null so §7.6's own head segment survives
+ *  instead of being replaced by the SOURCE's scoped building count. */
+export function summariseCreated(
+  result: ToolResult,
+  elapsedMs: number,
+  layerName: string,
+  features: number | null,
+  options: { readonly streaming: boolean },
+): RunSummary;
 
 // src/ui/processing/runFormat.ts  (Task 27)
 /** One frozen parameter's value, as §6.4's record: a primitive as itself, a
@@ -789,76 +932,79 @@ export function derivedNotSavedNote(count: number): string | null;
 
 **Create:**
 
-| Path                                                 | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Task       |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| `tests/integration/duckdb/solids.test.ts`            | Real-engine probe: every `three_d` fact this plan's SQL rests on, spelled LITERALLY (the builders do not exist yet). Task 6 appends the case that runs its builders' own text against the same engine.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 1          |
-| `tests/integration/duckdb/crossLayer.test.ts`        | Real-engine probe: `spatial` load, LoD 0 WKB parse, the PolyhedralSurface refusal, the vector table read with `read_json(columns=…)`, the three predicates, nearest and largest-overlap. Tasks 13, 14 and 19 append their builders' own text to it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 1          |
-| `fixtures/composite-solid.city.json`                 | A minimal CityJSON 2.0 Building whose LoD `2.2` geometry is a `CompositeSolid` of two unit cubes sharing a face (members' volumes sum to 2). The repo had no CompositeSolid; Decisions recorded item 4 settled that one is added.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | 1          |
-| `src/features/processing/solidGeometrySource.ts`     | `hasSolidAt(layer)` and `solidLodOptions(layer)` from surface TAGS only. The static/streaming split for solids lives here and nowhere else.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | 3          |
-| `src/features/processing/sourceRead.ts`              | The `"source"` phase: `readSource` (fresh bytes → `registerBuffer` → the reader `FROM` clause and its LoD column names), `release()`, and `sourceWorkloadNote`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | 5          |
-| `src/features/processing/solidParams.ts`             | Pure: `SOLID_MEASURES` in §7.2 order, `solidParams`, `solidColumns`, `validationColumns`. The ONE answer for the registry, the executor, the frozen request and the form.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | 6          |
-| `src/features/processing/solidSql.ts`                | Pure SQL builders for §7.2 and §7.3, guarded exactly as the probes pinned them.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | 6          |
-| `src/features/processing/tools/measureSolids.ts`     | The §7.2 executor: source phase, one statement, §7's roll-ups, skip accounting.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | 7          |
-| `src/ui/processing/SolidParams.tsx`                  | The PARAMETERS section for `measure-solids`: six checkboxes, `{ params, onChange }` like `RoofMetricsParams`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | 8          |
-| `src/features/processing/tools/validateSolids.ts`    | The §7.3 executor: flags AND, counts sum, the "N valid · M with issues" card line.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | 10         |
-| `src/features/processing/vectorSource.ts`            | Pure: `reprojectGeoLayer(document, epsg)` → reprojected WKT + preflight skip counts, through `crsFromGeodetic`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | 12         |
-| `src/features/processing/vectorTable.ts`             | `__src_<runId>`: NDJSON encoding, `CREATE TABLE`, `ST_GeomFromText`, and a `release()` the run calls in a `finally`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 13         |
-| `src/features/processing/buildingProxy.ts`           | The three proxies (§7.5): which are available on a table, the default, the log label and the one SQL builder producing `(id, f, g)`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | 14         |
-| `src/features/processing/crossLayerParams.ts`        | Pure params + column names for Join, Distance and Aggregate, including `slugifyField` and the "resolves to the same column" check.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | 15         |
-| `src/ui/processing/CrossLayerParams.tsx`             | The PARAMETERS sections for the three cross-layer tools (source select, proxy radio, predicate, fields checklist, tie rule, distance limit, aggregate rows).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | 15         |
-| `src/features/processing/tools/joinByLocation.ts`    | The §7.5 executor.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | 16         |
-| `src/features/processing/tools/distanceToNearest.ts` | The §7.7 executor.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | 17         |
-| `src/features/processing/tools/aggregatePerArea.ts`  | The §7.6 executor (vector target).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | 19         |
-| `src/features/processing/deriveLayer.ts`             | The name rules (`derivedLayerName`, `nameTaken`, `disambiguate`) in Task 20, which CREATES the module; then `DerivedPlan` and the two `prepare…` functions that build a derived layer's model, table and row WITHOUT publishing them. ONE module, one creator.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | 20, 21, 23 |
-| `src/features/rules/nextRuleColor.ts`                | `nextRuleColor(rules)` — the palette rotation both the editor's "+ Add rule" and Style by result use.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 26         |
-| `src/ui/table/revealColumns.ts`                      | The one-shot "scroll these columns into view" channel between the result card and `DataGrid`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | 27         |
-| `scripts/smoke/processing-m3.md`                     | The browser smoke recipe and its record (scenarios 2, 3, 5's second half, 8, 10, 11, 12).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | 29         |
-| `src/app/snapshotLayers.ts`                          | Pure: which layers a snapshot holds (a derived layer is omitted, §8) and where the active-layer INDEX lands after the filter. Lifted out of `App.tsx` so the index/filter relationship is testable.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 24         |
-| Tests                                                | `tests/unit/features/processing/{solidGeometrySource,sourceRead,solidParams,solidSql,measureSolids,validateSolids,vectorSource,vectorTable,buildingProxy,crossLayerParams,joinByLocation,distanceToNearest,aggregatePerArea,deriveLayer,derivedRun,crossLayerRun,engineDeath}.test.ts`; `tests/unit/ui/processing/{styleByResult,SolidParams,solidsEnabled,CrossLayerParams,crossLayerEnabled,outputDestination,derivedCard}.test.tsx`; `tests/unit/ui/layers/derivedLayerRow.test.tsx`; `tests/unit/ui/table/{geoComputedBadge,revealColumns}.test.tsx`; `tests/unit/features/geoLayers/mergeGeoProperties.test.ts`; `tests/unit/features/rules/nextRuleColor.test.ts`; `tests/unit/app/derivedSnapshot.test.tsx`; plugin-side `packages/…/navara-core/tests/citymodel/geometryType.test.ts` | —          |
+| Path                                                 | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Task       |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `tests/integration/duckdb/solids.test.ts`            | Real-engine probe: every `three_d` fact this plan's SQL rests on, spelled LITERALLY (the builders do not exist yet). Task 6 appends the case that runs its builders' own text against the same engine.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | 1          |
+| `tests/integration/duckdb/crossLayer.test.ts`        | Real-engine probe: `spatial` load, LoD 0 WKB parse, the PolyhedralSurface refusal, the vector table read with `read_json(columns=…)`, the three predicates, nearest and largest-overlap. Tasks 13, 14, 16 and 19 append their builders' own text to it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | 1          |
+| `fixtures/composite-solid.city.json`                 | A minimal CityJSON 2.0 Building whose LoD `2.2` geometry is a `CompositeSolid` of two unit cubes sharing a face (members' volumes sum to 2). The repo had no CompositeSolid; Decisions recorded item 4 settled that one is added.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | 1          |
+| `fixtures/invalid-solid.city.json`                   | One CityJSON 2.0 Building with NO parts whose LoD `2.2` `Solid` is not closed — `NL.IMBAG.Pand.0001`'s own solid lifted out of `two-buildings.city.json` with its nine vertices (7 faces, 2 open edges, 1 non-manifold edge; envelope 388 m², footprint 80 m², zmin 0, zmax 8.4). `two-buildings` cannot express a FEATURE-level invalid solid: its `NL.IMBAG.Pand.0001` has a MultiSurface part at 2.2, so §7's contributor rule reads the whole feature as "not a solid".                                                                                                                                                                                                                                                                                                                                         | 1          |
+| `src/features/processing/solidGeometrySource.ts`     | `hasSolidAt(layer)` and `solidLodOptions(layer)` from surface TAGS only. The static/streaming split for solids lives here and nowhere else.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 3          |
+| `src/features/processing/sourceRead.ts`              | The `"source"` phase: `readSource` (fresh bytes → `registerBuffer` → the reader `FROM` clause and its LoD column names), `release()`, and `sourceWorkloadNote`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | 5          |
+| `src/features/processing/solidParams.ts`             | Pure: `SOLID_MEASURES` in §7.2 order, `solidParams`, `solidColumns`, `validationColumns`. The ONE answer for the registry, the executor, the frozen request and the form.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 6          |
+| `src/features/processing/solidSql.ts`                | Pure SQL builders for §7.2 and §7.3, guarded exactly as the probes pinned them.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | 6          |
+| `src/features/processing/tools/measureSolids.ts`     | The §7.2 executor: source phase, one statement, §7's roll-ups, skip accounting.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | 7          |
+| `src/ui/processing/SolidParams.tsx`                  | The PARAMETERS section for `measure-solids`: six checkboxes, `{ params, onChange }` like `RoofMetricsParams`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | 8          |
+| `src/features/processing/tools/validateSolids.ts`    | The §7.3 executor: flags AND, counts sum, the "N valid · M with issues" card line.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | 10         |
+| `src/features/processing/vectorSource.ts`            | Engine-free: `reprojectGeoLayer(document, epsg, control?)` → reprojected WKT + preflight skip counts, through `crsFromGeodetic`, walked in bounded batches that yield.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | 12         |
+| `src/features/processing/vectorTable.ts`             | `__src_<runId>`: NDJSON encoding, `CREATE TABLE`, `ST_GeomFromText`, and a `release()` the run calls in a `finally`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | 13         |
+| `src/features/processing/buildingProxy.ts`           | The three proxies (§7.5): which are available on a table, the default, the log label and the one SQL builder producing `(id, f, g)`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | 14         |
+| `src/features/processing/crossLayerParams.ts`        | Pure params + column names for Join, Distance and Aggregate, including `slugifyField` and the "resolves to the same column" check.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | 15         |
+| `src/ui/processing/CrossLayerParams.tsx`             | The PARAMETERS sections for the three cross-layer tools (source select, proxy radio, predicate, fields checklist, tie rule, distance limit, aggregate rows).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 15         |
+| `src/features/processing/tools/joinByLocation.ts`    | The §7.5 executor.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | 16         |
+| `src/features/processing/tools/distanceToNearest.ts` | The §7.7 executor.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | 17         |
+| `src/features/processing/tools/aggregatePerArea.ts`  | The §7.6 executor (vector target).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | 19         |
+| `src/features/processing/deriveLayer.ts`             | The name rules (`derivedLayerName`, `nameTaken`, `disambiguate`) in Task 20, which CREATES the module; then `DerivedPlan` and the two `prepare…` functions that build a derived layer's model, table and row WITHOUT publishing them. ONE module, one creator.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | 20, 21, 23 |
+| `src/features/rules/nextRuleColor.ts`                | `nextRuleColor(rules)` — the palette rotation both the editor's "+ Add rule" and Style by result use.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | 26         |
+| `src/features/geoLayers/geoSelectionRefresh.ts`      | Pure: what a geo selection becomes when its layer's `config` identity moves (refreshed properties, or dropped).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | 18         |
+| `src/ui/table/revealColumns.ts`                      | The one-shot "scroll these columns into view" channel between the result card and `DataGrid`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | 27         |
+| `scripts/smoke/processing-m3.md`                     | The browser smoke recipe and its record (scenarios 2, 3, 5's second half, 8, 10, 11, 12).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 29         |
+| `src/app/snapshotLayers.ts`                          | Pure: which layers a snapshot holds (a derived layer is omitted, §8) and where the active-layer INDEX lands after the filter. Lifted out of `App.tsx` so the index/filter relationship is testable.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | 24         |
+| Tests                                                | `tests/unit/features/processing/{solidGeometrySource,sourceRead,solidParams,solidSql,measureSolids,validateSolids,vectorSource,vectorTable,buildingProxy,crossLayerParams,joinByLocation,distanceToNearest,aggregatePerArea,deriveLayer,derivedRun,crossLayerRun,engineDeath}.test.ts`; `tests/unit/ui/processing/{styleByResult,SolidParams,solidsEnabled,CrossLayerParams,crossLayerEnabled,outputDestination,derivedCard}.test.tsx`; `tests/unit/ui/layers/derivedLayerRow.test.tsx`; `tests/unit/ui/table/{geoComputedBadge,revealColumns}.test.tsx`; `tests/unit/features/geoLayers/{mergeGeoProperties,geoSelectionRefresh}.test.ts`; `tests/unit/features/rules/nextRuleColor.test.ts`; `tests/unit/app/derivedSnapshot.test.tsx`; plugin-side `packages/…/navara-core/tests/citymodel/geometryType.test.ts` | —          |
 
 **Modify:**
 
-| Path                                                                  | Change                                                                                                                                                                                                                                                                            | Task                                   |
-| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `packages/…/navara-core/src/citymodel/types.ts`                       | `Surface.geometryType?: CityJSONGeometryType \| null` (OPTIONAL as well as nullable).                                                                                                                                                                                             | 2                                      |
-| `packages/…/navara-core/src/citymodel/cityjson/parseHelpers.ts`       | `buildSurface`'s literal carries `geometryType: geom.type` (one site; all five cases inherit it).                                                                                                                                                                                 | 2                                      |
-| `packages/…/navara-cityparquet/src/decodeTable.ts`                    | `geometryType: null` on its independently built surfaces (it has no geometry-type information — Design decision (a)).                                                                                                                                                             | 2                                      |
-| `src/features/processing/roofGeometrySource.ts`                       | Extract `lodOptionsBy(layer, qualifies)`; `roofLodOptions` becomes its one-line wrapper.                                                                                                                                                                                          | 3                                      |
-| `src/features/processing/types.ts`                                    | `outputColumns` returns `ReadonlyArray<OutputColumn>`; then `styleByResult`, `sourceKind`, `destinations`.                                                                                                                                                                        | 4, 9, 11, 20                           |
-| `src/features/processing/toolRegistry.ts`                             | Typed columns on the two implemented tools; then the five new entries' columns, params, style descriptors, source kinds and destinations; three `implemented` flips.                                                                                                              | 4, 6, 8, 9, 10, 11, 15, 16, 17, 19, 20 |
-| `src/ui/processing/ToolView.tsx`                                      | Stop hard-coding `"DOUBLE"`; the SOURCE field; the PARAMETERS dispatch for four more tools; the OUTPUT destination radios and Name field; the workload note.                                                                                                                      | 4, 15, 20                              |
-| `src/ui/processing/useToolForm.ts`                                    | `sourceOptions`/`sourceReason`; `destination`/`newLayerName` with §6's name validation; `workloadNote`; the `runReason` precedence.                                                                                                                                               | 15, 20                                 |
-| `src/ui/processing/useLodOptions.ts`                                  | The solids branch (in the same commit as each `implemented` flip).                                                                                                                                                                                                                | 8, 10                                  |
-| `src/ui/processing/useEligibilityContext.ts`                          | `hasCityLayer` beside `hasVectorLayer`.                                                                                                                                                                                                                                           | 11                                     |
-| `src/features/processing/eligibility.ts`                              | `sourceKind` replaces `needsVectorSource`; the Aggregate source reason.                                                                                                                                                                                                           | 11                                     |
-| `src/features/processing/processingStore.ts`                          | `ToolDraft` gains `sourceLayerId`, `destination`, `newLayerName`.                                                                                                                                                                                                                 | 15, 20                                 |
-| `src/features/processing/runQueue.ts`                                 | `"source"` phase; the SOURCE layer and vector TARGET; the per-run vector table's `finally`; the destination branch and its single publication; `undoRun`'s death short-circuit and the derived-layer removal; the write step's SQL in the log.                                    | 5, 11, 13, 22, 25, 27                  |
-| `src/features/processing/scope.ts`                                    | `resolveScope` honours `LayerTable.sourceFeatureIds`, so scope "all" on a derived layer is that layer's rows and not its parent's. **No vector branch**: Aggregate's scope resolves against the SOURCE city layer's table like every other tool (Design decision (c)).            | 21                                     |
-| `src/features/processing/tools/register.ts`                           | Five `import "./…";` lines.                                                                                                                                                                                                                                                       | 7, 10, 16, 17, 19                      |
-| `src/ui/processing/RunFooter.tsx`                                     | One `styleByResult` branch instead of the `">"`-on-`columns[0]` special case; the New-layer card and its Zoom to layer action; `colorBy` set at Save, not at draft; the stale/undone guard; palette rotation.                                                                     | 9, 22, 26                              |
-| `src/ui/processing/LogView.tsx`, `runFormat.ts`                       | The real "Building geometry" row; the write step's statements.                                                                                                                                                                                                                    | 15, 27                                 |
-| `src/insights/layerTables.ts`                                         | `LayerTable.extension` and `.sourceBytes`; then `.sourceFeatureIds`, `nextTableName`, `adoptLayerTable`; `retryEngine`'s generation check.                                                                                                                                        | 5, 21, 25                              |
-| `src/insights/sql.ts`                                                 | `buildCityParquetSourceSql` ANDs a derived layer's `sourceFeatureIds` into its `where`; `buildMostFrequentSql` beside `buildMedianSql`.                                                                                                                                           | 9, 24                                  |
-| `src/ui/table/ExportDialog.tsx`                                       | Pass the derived layer's `sourceFeatureIds` into the CityParquet request.                                                                                                                                                                                                         | 24                                     |
-| `src/insights/duckdb.ts`                                              | `runQuery` / `ddl` / `registerBuffer` / `readFile` race their in-flight await against the local death signal.                                                                                                                                                                     | 25                                     |
-| `src/insights/computedColumns.ts`                                     | `WriteOutcome.statements`.                                                                                                                                                                                                                                                        | 27                                     |
-| `src/features/layers/layerStore.ts`                                   | `Layer.derivedFrom`; `addLayer`'s `insertAfterId`.                                                                                                                                                                                                                                | 21                                     |
-| `src/features/layers/layerTableLifecycle.ts`                          | The derived layer is never rebuilt from a stream; the version-aware sweep.                                                                                                                                                                                                        | 21, 27                                 |
-| `src/features/geoLayers/geoLayerStore.ts`                             | `mergeGeoFeatureProperties`, `replaceGeoPreparedData`.                                                                                                                                                                                                                            | 18                                     |
-| `src/ui/table/GeoRecordsPanel.tsx`                                    | Pass `layerId` to `DataGrid` so computed geo columns get the badge.                                                                                                                                                                                                               | 18                                     |
-| `src/ui/details/GeoFeatureDetails.tsx`                                | The COMPUTED group, badge and provenance tooltip, as `LayerAttributesSection` has.                                                                                                                                                                                                | 18                                     |
-| `src/ui/layers/GeoStyleControls.tsx`                                  | The attribute source reads `preparedData` first, so computed properties appear in Color by attribute.                                                                                                                                                                             | 18                                     |
-| `src/ui/layers/GeoLayerExport.tsx`                                    | Nothing structural — a test that the computed properties are in the GeoJSON it already writes.                                                                                                                                                                                    | 18                                     |
-| `src/features/layers/layerPresentation.ts`                            | `LayerStateInput.derivedFrom`; `cityStateLine`'s "· Derived from Delft" tail.                                                                                                                                                                                                     | 24                                     |
-| `src/ui/layers/LayerRowMenu.tsx`, `LayerList.tsx`, `LayerRow.tsx`     | The "Derived · not saved in workspaces" marker and the "Show run log" item.                                                                                                                                                                                                       | 24                                     |
-| `src/ui/layers/RulesEditor.tsx`                                       | `defaultRuleFormValues` takes the next palette colour.                                                                                                                                                                                                                            | 26                                     |
-| `src/scene/cityColors.ts`, `tests/unit/scene/cityColors.test.ts`      | `RULE_PALETTE_HEX` and its collision assertions.                                                                                                                                                                                                                                  | 26                                     |
-| `src/ui/drawer/columnPolicy.ts`                                       | The synthetic roof columns' header explanation.                                                                                                                                                                                                                                   | 27                                     |
-| `docs/roadmap.md`, `docs/architecture-notes.md`, `fixtures/README.md` | 13.3's record, the M13.3 seams, any fixture added by Task 1.                                                                                                                                                                                                                      | 28                                     |
-| `src/ui/shell/shellStore.ts`                                          | `requestedZoom: string \| null` and `requestZoom(layerId)`, mirroring `requestedSection` — the door §6.2's **Zoom to layer** needs, since zooming lives in `App`.                                                                                                                 | 22                                     |
-| `src/app/App.tsx`                                                     | The `requestedZoom` effect that calls `sceneRef.current?.fitLayer(id)` (22); then the snapshot skips derived layers and repoints the active index, and the Save toast's extra sentence (24).                                                                                      | 22, 24                                 |
-| `src/features/geoLayers/geoLayerStore.ts`                             | `GeoLayerBase.derivedFrom`, `GeoLayerInput`'s `Omit` of it, and `addGeoLayer`'s `insertAfterId` — a derived VECTOR layer's identity and its placement under its parent.                                                                                                           | 23                                     |
-| 6 `vi.mock(".../insights/layerTables")` factories                     | `nextTableName` and `adoptLayerTable`, the two new `layerTables` exports. (Task 25 adds no export, so the 32 `vi.mock(".../insights/duckdb")` factories are untouched by this milestone; Task 5 adds FIELDS, not exports, and its sweep is the 16 `LayerTable` literals instead.) | 21                                     |
+| Path                                                                  | Change                                                                                                                                                                                                                                                                                                                                                           | Task                                   |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `packages/…/navara-core/src/citymodel/types.ts`                       | `Surface.geometryType?: CityJSONGeometryType \| null` (OPTIONAL as well as nullable).                                                                                                                                                                                                                                                                            | 2                                      |
+| `packages/…/navara-core/src/citymodel/cityjson/parseHelpers.ts`       | `buildSurface`'s literal carries `geometryType: geom.type` (one site; all five cases inherit it).                                                                                                                                                                                                                                                                | 2                                      |
+| `packages/…/navara-cityparquet/src/decodeTable.ts`                    | `geometryType: null` on its independently built surfaces (it has no geometry-type information — Design decision (a)).                                                                                                                                                                                                                                            | 2                                      |
+| `src/features/processing/roofGeometrySource.ts`                       | Extract `lodOptionsBy(layer, qualifies)`; `roofLodOptions` becomes its one-line wrapper.                                                                                                                                                                                                                                                                         | 3                                      |
+| `src/features/processing/types.ts`                                    | `outputColumns` returns `ReadonlyArray<OutputColumn>`; then `styleByResult`, `sourceKind`, `destinations`.                                                                                                                                                                                                                                                       | 4, 9, 11, 20                           |
+| `src/features/processing/toolRegistry.ts`                             | Typed columns on the two implemented tools; then the five new entries' columns, params, style descriptors, source kinds and destinations; three `implemented` flips.                                                                                                                                                                                             | 4, 6, 8, 9, 10, 11, 15, 16, 17, 19, 20 |
+| `src/ui/processing/ToolView.tsx`                                      | Stop hard-coding `"DOUBLE"`; the SOURCE field; the PARAMETERS dispatch for four more tools; the OUTPUT destination radios and Name field; the workload note.                                                                                                                                                                                                     | 4, 15, 20                              |
+| `src/ui/processing/useToolForm.ts`                                    | `sourceOptions`/`sourceReason`; `destination`/`newLayerName` with §6's name validation; `workloadNote`; the `runReason` precedence.                                                                                                                                                                                                                              | 15, 20                                 |
+| `src/ui/processing/useLodOptions.ts`                                  | The solids branch (in the same commit as each `implemented` flip).                                                                                                                                                                                                                                                                                               | 8, 10                                  |
+| `src/ui/processing/useEligibilityContext.ts`                          | `hasCityLayer` beside `hasVectorLayer`.                                                                                                                                                                                                                                                                                                                          | 11                                     |
+| `src/features/processing/eligibility.ts`                              | `sourceKind` replaces `needsVectorSource`; the Aggregate source reason.                                                                                                                                                                                                                                                                                          | 11                                     |
+| `src/features/processing/processingStore.ts`                          | `ToolDraft` gains `sourceLayerId`, `destination`, `newLayerName`.                                                                                                                                                                                                                                                                                                | 15, 20                                 |
+| `src/features/processing/runQueue.ts`                                 | `"source"` phase; the SOURCE layer and vector TARGET; the per-run vector table's `finally`; the destination branch and its single publication; the vector publication and its per-column Undo; one literal becomes `SOURCE_NEEDS_AREAS`; `undoRun`'s death short-circuit and the derived-layer removal; the write step's SQL in the log.                         | 5, 11, 13, 15, 18, 22, 25, 27          |
+| `src/features/processing/scope.ts`                                    | `resolveScope` honours `LayerTable.sourceFeatureIds`, so scope "all" on a derived layer is that layer's rows and not its parent's. **No vector branch**: Aggregate's scope resolves against the SOURCE city layer's table like every other tool (Design decision (c)).                                                                                           | 21                                     |
+| `src/features/processing/tools/register.ts`                           | Five `import "./…";` lines.                                                                                                                                                                                                                                                                                                                                      | 7, 10, 16, 17, 19                      |
+| `src/ui/processing/RunFooter.tsx`                                     | One `styleByResult` branch instead of the `">"`-on-`columns[0]` special case; the New-layer card and its Zoom to layer action; `colorBy` set at Save, not at draft; the stale/undone guard; palette rotation.                                                                                                                                                    | 9, 22, 26                              |
+| `src/ui/processing/LogView.tsx`, `runFormat.ts`                       | The real "Building geometry" row; the write step's statements.                                                                                                                                                                                                                                                                                                   | 15, 27                                 |
+| `src/insights/layerTables.ts`                                         | `LayerTable.extension` and `.sourceBytes`; then `.sourceFeatureIds`, `nextTableName`, `adoptLayerTable`; `retryEngine`'s generation check.                                                                                                                                                                                                                       | 5, 21, 25                              |
+| `src/insights/sql.ts`                                                 | `buildCityParquetSourceSql` ANDs a derived layer's `sourceFeatureIds` into its `where`; `buildMostFrequentSql` beside `buildMedianSql`.                                                                                                                                                                                                                          | 9, 24                                  |
+| `src/ui/table/ExportDialog.tsx`                                       | Pass the derived layer's `sourceFeatureIds` into the CityParquet request.                                                                                                                                                                                                                                                                                        | 24                                     |
+| `src/insights/duckdb.ts`                                              | `runQuery` / `ddl` / `registerBuffer` / `readFile` race their in-flight await against the local death signal.                                                                                                                                                                                                                                                    | 25                                     |
+| `src/insights/computedColumns.ts`                                     | `WriteOutcome.statements`.                                                                                                                                                                                                                                                                                                                                       | 27                                     |
+| `src/features/layers/layerStore.ts`                                   | `Layer.derivedFrom`; `addLayer`'s `insertAfterId`.                                                                                                                                                                                                                                                                                                               | 21                                     |
+| `src/features/layers/layerTableLifecycle.ts`                          | The derived layer is never rebuilt from a stream; the version-aware sweep.                                                                                                                                                                                                                                                                                       | 21, 27                                 |
+| `src/features/geoLayers/geoLayerStore.ts`                             | `mergeGeoFeatureProperties`, `replaceGeoPreparedData`, `GEO_PROPERTY_ABSENT`/`GeoPreviousValues`/`restoreGeoDocumentProperties` (the Undo's per-column half).                                                                                                                                                                                                    | 18                                     |
+| `src/features/geoLayers/geoJsonRecords.ts`                            | `findGeoFeatureProperties(document, stableId)`, for re-reading a picked feature's values.                                                                                                                                                                                                                                                                        | 18                                     |
+| `src/ui/table/GeoRecordsPanel.tsx`                                    | Pass `layerId` to `DataGrid` so computed geo columns get the badge.                                                                                                                                                                                                                                                                                              | 18                                     |
+| `src/ui/details/GeoFeatureDetails.tsx`                                | The COMPUTED group, badge and provenance tooltip, as `LayerAttributesSection` has.                                                                                                                                                                                                                                                                               | 18                                     |
+| `src/ui/layers/GeoStyleControls.tsx`                                  | The attribute source reads `preparedData` first, so computed properties appear in Color by attribute **and in its categories**.                                                                                                                                                                                                                                  | 18                                     |
+| `src/ui/layers/GeoLayerExport.tsx`                                    | Nothing structural — a test that the computed properties are in the GeoJSON it already writes.                                                                                                                                                                                                                                                                   | 18                                     |
+| `src/features/layers/layerPresentation.ts`                            | `LayerStateInput.derivedFrom`; `cityStateLine`'s "· Derived from Delft" tail.                                                                                                                                                                                                                                                                                    | 24                                     |
+| `src/ui/layers/LayerRowMenu.tsx`, `LayerList.tsx`, `LayerRow.tsx`     | The "Derived · not saved in workspaces" marker and the "Show run log" item.                                                                                                                                                                                                                                                                                      | 24                                     |
+| `src/ui/layers/RulesEditor.tsx`                                       | `defaultRuleFormValues` takes the next palette colour.                                                                                                                                                                                                                                                                                                           | 26                                     |
+| `src/scene/cityColors.ts`, `tests/unit/scene/cityColors.test.ts`      | `RULE_PALETTE_HEX` and its collision assertions.                                                                                                                                                                                                                                                                                                                 | 26                                     |
+| `src/ui/drawer/columnPolicy.ts`                                       | The synthetic roof columns' header explanation.                                                                                                                                                                                                                                                                                                                  | 27                                     |
+| `docs/roadmap.md`, `docs/architecture-notes.md`, `fixtures/README.md` | 13.3's record, the M13.3 seams, any fixture added by Task 1.                                                                                                                                                                                                                                                                                                     | 28                                     |
+| `src/ui/shell/shellStore.ts`                                          | `requestedZoom: string \| null` and `requestZoom(layerId)`, mirroring `requestedSection` — the door §6.2's **Zoom to layer** needs, since zooming lives in `App`.                                                                                                                                                                                                | 22                                     |
+| `src/app/App.tsx`                                                     | The geo-selection effect asks `refreshedGeoSelection` when a layer's `config` identity moves (18); the `requestedZoom` effect that calls `sceneRef.current?.fitLayer(id)` (22); then the snapshot skips derived layers and repoints the active index, and the Save toast's extra sentence (24).                                                                  | 18, 22, 24                             |
+| `src/features/geoLayers/geoLayerStore.ts`                             | `GeoLayerBase.derivedFrom`, `GeoLayerInput`'s `Omit` of it, and `addGeoLayer`'s `insertAfterId` — a derived VECTOR layer's identity and its placement under its parent.                                                                                                                                                                                          | 23                                     |
+| 7 `vi.mock(".../insights/layerTables")` factories                     | `nextTableName` and `adoptLayerTable`, the two new `layerTables` exports — the six on `develop` plus the one Task 11 authors in `crossLayerRun.test.ts`. (Task 25 adds no export, so the 32 `vi.mock(".../insights/duckdb")` factories are untouched by this milestone; Task 5 adds FIELDS, not exports, and its sweep is the 16 `LayerTable` literals instead.) | 21                                     |
 
 ---
 
@@ -898,7 +1044,7 @@ The spec assumes this already ("every surface is tagged with its LoD and its geo
 
 ### (c) One cross-layer run shape: the city table is the compute ground, the vector layer is a per-run table, and a vector target's results live in its feature properties
 
-**Decision: every cross-layer run occupies the CITY layer's slot on the one table FIFO and computes over the city table (`ctx.table`), whatever the destination. The vector layer becomes `__src_<runId>`, created in the `"source"` phase from an app-built NDJSON of reprojected features and dropped in a `finally`. A vector TARGET's results are merged into `config.preparedData` through one new store action; provenance goes in `useComputedColumnStore` under the geo layer's id; Undo restores the previous `preparedData` object.**
+**Decision: every cross-layer run occupies the CITY layer's slot on the one table FIFO and computes over the city table (`ctx.table`), whatever the destination. The vector layer becomes `__src_<runId>`, created in the `"source"` phase from an app-built NDJSON of reprojected features and dropped in a `finally`. A vector TARGET's results are merged into `config.preparedData` through one new store action; provenance goes in `useComputedColumnStore` under the geo layer's id; Undo puts the run's OWN columns back into the current document, on the same table FIFO.**
 
 There is ONE queue, not one per layer (`layerTables.ts:417-419`), so "which layer's FIFO" is not a real choice — what matters is that the run holds the queue for its whole life so no rebuild of the city table can move underneath it, which `runOnTableQueue(() => execute(…))` (`runQueue.ts:404-406`) already gives unchanged.
 
@@ -906,25 +1052,25 @@ There is ONE queue, not one per layer (`layerTables.ts:417-419`), so "which laye
 
 **Why NDJSON + `registerBuffer` + `read_json` with an explicit `columns=` + `ST_GeomFromText`, and not the two alternatives.** The app reprojects app-side anyway (Global Constraints), so whatever DuckDB reads is a document the app has just built; the question is only its shape. A `VALUES` literal needs no VFS name but puts every ring of every feature into one statement string, which is unbounded and lands verbatim in the run's log. `read_json` of a GeoJSON FeatureCollection with `ST_GeomFromGeoJSON` works (probed) but walks into the verified trap that an empty `coordinates` array yields an EMPTY geometry rather than NULL or an error — a trap preflight has already removed app-side, so paying for it in SQL buys nothing. NDJSON of `{idx, props, wkt}` is the shape `computedColumns.ts:152-186` already uses for the write (`__vals_<runId>.json`), it is one `registerBuffer` and one `dropBuffer`, and `props` reads back with `props->>'name'` and `(props->>'n')::DOUBLE` as the probe pinned. **The read is `read_json(file, format = 'newline_delimited', columns = {… props: 'JSON' …})`, never `read_json_auto`**: auto-inference reads the nested `props` object as a STRUCT, which answers none of those accessors, and a heterogeneous source (one feature with a property, another without) is exactly what inference gets wrong. The explicit `columns=` also pins the other column TYPES, so an `idx` that happens to be uniform cannot come back as something else. (The WRITE path keeps `read_json_auto` over its flat `__vals_<runId>.json`, which has no nested object — that statement is unchanged.)
 
-**Where a vector target's results go, and why not `config.data`.** A geo layer has no DuckDB table and no model; what the app holds is the document. `config.preparedData` is what the ENGINE, the records panel and the GeoJSON export all read (`geoLayerSync.ts:245`, `GeoRecordsPanel.tsx:25`, `GeoLayerExport.tsx:24`), and it is documented "never persisted" (`geoLayerStore.ts:42-43`) — which is exactly §8's "nothing new is saved". Writing `config.data` instead would materialise a URL-backed layer's whole fetched document into the layer row and thence into the snapshot, persisting results the spec says are session-only. The one leak is that "Color by attribute" reads the RAW document (`GeoStyleControls.tsx:190-193, 198-217`), so §7.6's "Style by result opens Color by attribute set to the first output column" would find nothing; the fix is to read `preparedData` first there, which is strictly more correct anyway (it is the document every other reader uses).
+**Where a vector target's results go, and why not `config.data`.** A geo layer has no DuckDB table and no model; what the app holds is the document. `config.preparedData` is what the ENGINE, the records panel and the GeoJSON export all read (`geoLayerDescriptions.ts:55-57`, `GeoRecordsPanel.tsx:25`, `GeoLayerExport.tsx:24`), and it is documented "never persisted" (`geoLayerStore.ts:42-43`) — which is exactly §8's "nothing new is saved". Writing `config.data` instead would materialise a URL-backed layer's whole fetched document into the layer row and thence into the snapshot, persisting results the spec says are session-only. The one leak is that "Color by attribute" reads the RAW document (`GeoStyleControls.tsx:190-193, 198-217`), so §7.6's "Style by result opens Color by attribute set to the first output column" would find nothing; the fix is to read `preparedData` first there, which is strictly more correct anyway (it is the document every other reader uses).
 
 **One config replacement per run.** `geoLayerSync.ts:524` rebuilds the engine pair on `config` identity, so the merge must be ONE `setState` producing one new config — not one per feature.
 
 **Provenance.** `useComputedColumnStore.byLayer` is `Record<layerId, Record<column, Provenance>>` with nothing city-specific (`computedColumns.ts:265-274`); a geo layer id is a string like any other. The badge and tooltip then need only a consumer on the geo side (Task 18), not a second registry.
 
-**Undo.** The previous `preparedData` object is captured before the merge and restored by `replaceGeoPreparedData`, which is `UndoState.previousModelValues`' exact analogue: one object, one write, no per-feature diff.
+**Undo.** What is captured before the merge is, per feature, the value each of THIS run's columns held — with an explicit ABSENT marker for a property that was not there — and the Undo merges those back into whatever the document is by then, through `replaceGeoPreparedData`. That is `UndoState.previousModelValues`' exact analogue, and it is not a document snapshot for a reason: §6.2 steals a run's Undo only where two runs share a COLUMN, so a count run and a sum run on one layer are both undoable at once, and restoring a snapshot taken before the first would erase the second's results while its own card still offered Undo. The Undo runs INSIDE `runOnTableQueue` and re-reads the layer at the head, although it writes no table: a cross-layer run holds that queue for its whole life and has captured this layer's records, so replacing the document underneath it would leave it computing against something nothing on screen shows.
 
 **Cost if wrong:** one store action and one `GeoStyleControls` read to revert.
 
-### (d) Reprojection is app-side, through the app's single proj4 door, and preflight is a pure function
+### (d) Reprojection is app-side, through the app's single proj4 door, and preflight reaches no store and no engine
 
-**Decision: `reprojectGeoLayer(document, epsg)` is pure, walks the document once, and calls `crsFromGeodetic(lng, lat, 0, epsg)` (`src/scene/cursorCrsReadout.ts:53-79`) per coordinate. A feature is SKIPPED — and counted — when its geometry is null, has empty coordinates, is unparseable, or when any coordinate fails to project. `ensureModelCrsLoadable(targetModel)` is awaited before the walk, because `crsFromGeodetic`'s guard is synchronous and returns `null` for a definition proj4 has not loaded yet.**
+**Decision: `reprojectGeoLayer(document, epsg, control?)` reaches no store and no engine, walks the document once in BOUNDED BATCHES, and calls `crsFromGeodetic(lng, lat, 0, epsg)` (`src/scene/cursorCrsReadout.ts:53-79`) per coordinate. It yields a macrotask every 500 features and every 20,000 coordinates, calling `control.checkpoint()` (the run's `ctx.throwIfCancelled`) immediately before each yield, so a Cancel lands inside the phase and the frame keeps painting on a 200 MB source. A feature is SKIPPED — and counted — when its geometry is null, has empty coordinates, is unparseable, or when any coordinate fails to project. `ensureModelCrsLoadable(targetModel)` is awaited before the walk, because `crsFromGeodetic`'s guard is synchronous and returns `null` for a definition proj4 has not loaded yet.**
 
 `crsFromGeodetic` is the app's only proj4 call site and already has the three properties preflight needs: it is 2-D (the spec's operations are all 2-D in the target's CRS), it returns `null` rather than NaN on a non-finite input or a proj4 throw, and it is guarded by `ensureProjDef`. Importing it from `features/processing/` is legal and has a precedent (`features/geoLayers/categorize.ts:26-29`).
 
 **The async warm-up is not optional.** A city layer's CRS definition is loaded by `ensureModelCrsLoadable` at layer-add time, but a run must not depend on that having happened for THIS layer in THIS session; awaiting it in the `"source"` phase costs nothing when it is already loaded and is the difference between "4 areas skipped" and "every area skipped" on a cold definition.
 
-**Purity buys the tests.** Every §7.5 preflight sentence ("4 areas skipped: invalid geometry", "No usable areas in Zones", "The source layer has no features") is decided by counting `VectorPreflight.skipped` against `features.length`, in a pure unit test with no engine.
+**Engine-freedom buys the tests.** Every §7.5 preflight sentence ("4 areas skipped: invalid geometry", "No usable areas in Zones", "The source layer has no features") is decided by counting `VectorPreflight.skipped` against `features.length`, in a pure unit test with no engine.
 
 **Alternatives rejected.** `ST_Transform` exists in the wasm build, but §2 chose app-side reprojection and the design "does not depend on it"; using it would put the CRS answer in two places and make the offline story depend on whether `spatial` ships PROJ data. A second proj4 import inside `features/` would be a second door to a singleton-registry library the app deliberately dedupes (CLAUDE.md).
 
@@ -1066,24 +1212,25 @@ M2's final fix wave made the toolbox a table consumer, so opening Tools sweeps e
 
 **[adapted copy] — ACCEPTED BY THE OWNER 2026-09-12** (Decisions recorded, items 2, 3 and 5). Each is written to the spec's own pattern; none is in §5-§8. Every one below is settled: implement it verbatim, and no task may reword one or reopen it as a question.
 
-| #   | Proposed string                                                                                                                                                                                                                                                      | Where the spec is silent                                                                                         | Task |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---- |
-| A1  | `No solid geometry in this layer` as the LoD option NOUN tail: `2.2 (1,115 buildings with a solid)`                                                                                                                                                                  | §6 gives the option pattern but not the solids noun; M2's roof equivalent was `with roof surfaces`               | 8    |
-| A2  | `New layer is not available for a streaming layer: its loaded buildings carry no geometry to copy.` (the disabled New-layer radio's reason on a FlatCityBuf target)                                                                                                  | §6 assumes a resident snapshot can be copied; `ResidentObjectRecord` carries no boundaries (Design decision (f)) | 20   |
-| A3  | `Add a city model layer to aggregate` (Aggregate's disabled row when a vector layer is active but no city layer exists)                                                                                                                                              | §5 gives the mirror sentence for a vector SOURCE only                                                            | 11   |
-| A4  | `This vector layer is still loading` / `This vector layer could not be loaded` (a vector target or source whose `config.preparation` is not `ready`)                                                                                                                 | §7.5-§7.7 assume a loaded document                                                                               | 11   |
-| A5  | `Volume (m³)` · `Envelope area (m²)` · `Footprint area (m²)` · `Height (m)` · `Ground elevation (m)` · `Ridge elevation (m)` (the six measure labels), with hovers `Ridge minus ground at this LoD` on Height and `Only for a closed, valid solid` on Volume         | §6's mockup shows short labels; the units and the hovers follow M2's decision 5                                  | 6, 8 |
-| A6  | `Validity is always written as <prefix>valid.` (the note under Validate solids' empty PARAMETERS section)                                                                                                                                                            | §7.3 has no parameters and the spec shows no form                                                                | 10   |
-| A7  | `Derived from <parent>` in the log header's `Target layer` row for a derived layer                                                                                                                                                                                   | §6.4 lists the header rows but not this case                                                                     | 22   |
-| A8  | `Roof area here is the drawer's own per-page figure over every roof surface. The computed roof_area_m2 follows the tool's contributor rule, so a building that stores its roof on both itself and its parts counts it once.` (the synthetic column's header tooltip) | §7.1 says the synthetic columns stay; nothing explains the difference                                            | 27   |
-| A9  | The rule palette: `#7cb518` (unchanged first), then seven more that pass `cityColors.test.ts`'s collision rule                                                                                                                                                       | §6.2 says "the next palette colour"; no palette exists                                                           | 26   |
-| A10 | `Writing results` log entries carrying their real SQL, labelled `Writing results (1/4)` …                                                                                                                                                                            | §6.4 asks for "the SQL statements issued in order"; M1 logged one entry with `sql: null`                         | 27   |
-| A11 | `A distance limit must be a positive number` (Distance's PARAMETERS validation)                                                                                                                                                                                      | §6 states the rule as a clause and gives no message                                                              | 15   |
-| A12 | `Scope applies to the source layer's buildings.` (the muted line under Aggregate's scope radios, which stay under TARGET)                                                                                                                                            | §7.6 says scope applies to the SOURCE buildings but never words the form                                         | 15   |
-| A13 | `Name the new layer` (an empty Name at Run)                                                                                                                                                                                                                          | §6 says an empty name "is flagged inline at Run" and gives no sentence                                           | 20   |
-| A14 | `A layer is already called that` (a duplicate Name at Run)                                                                                                                                                                                                           | §6 says a duplicate name "is flagged inline at Run" and gives no sentence                                        | 20   |
-| A15 | `Renamed to "<name>": a layer already had that name` (the done card's note after the " (2)" rule fired at publication)                                                                                                                                               | §10.12 says only "the card says so"                                                                              | 22   |
-| A16 | `2 derived layers are not saved; export them to keep them` (the plural Save toast)                                                                                                                                                                                   | §8 gives the singular only                                                                                       | 24   |
+| #   | Proposed string                                                                                                                                                                                                                                                      | Where the spec is silent                                                                                                                                                                                                   | Task   |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| A1  | `No solid geometry in this layer` as the LoD option NOUN tail: `2.2 (1,115 buildings with a solid)`                                                                                                                                                                  | §6 gives the option pattern but not the solids noun; M2's roof equivalent was `with roof surfaces`                                                                                                                         | 8      |
+| A2  | `New layer is not available for a streaming layer: its loaded buildings carry no geometry to copy.` (the disabled New-layer radio's reason on a FlatCityBuf target)                                                                                                  | §6 assumes a resident snapshot can be copied; `ResidentObjectRecord` carries no boundaries (Design decision (f))                                                                                                           | 20     |
+| A3  | `Add a city model layer to aggregate` (Aggregate's disabled row when a vector layer is active but no city layer exists)                                                                                                                                              | §5 gives the mirror sentence for a vector SOURCE only                                                                                                                                                                      | 11     |
+| A4  | `This vector layer is still loading` / `This vector layer could not be loaded` (a vector target or source whose `config.preparation` is not `ready`)                                                                                                                 | §7.5-§7.7 assume a loaded document                                                                                                                                                                                         | 11, 15 |
+| A5  | `Volume (m³)` · `Envelope area (m²)` · `Footprint area (m²)` · `Height (m)` · `Ground elevation (m)` · `Ridge elevation (m)` (the six measure labels), with hovers `Ridge minus ground at this LoD` on Height and `Only for a closed, valid solid` on Volume         | §6's mockup shows short labels; the units and the hovers follow M2's decision 5                                                                                                                                            | 6, 8   |
+| A6  | `Validity is always written as <prefix>valid.` (the note under Validate solids' empty PARAMETERS section)                                                                                                                                                            | §7.3 has no parameters and the spec shows no form                                                                                                                                                                          | 10     |
+| A7  | `Derived from <parent>` in the log header's `Target layer` row for a derived layer                                                                                                                                                                                   | §6.4 lists the header rows but not this case                                                                                                                                                                               | 22     |
+| A8  | `Roof area here is the drawer's own per-page figure over every roof surface. The computed roof_area_m2 follows the tool's contributor rule, so a building that stores its roof on both itself and its parts counts it once.` (the synthetic column's header tooltip) | §7.1 says the synthetic columns stay; nothing explains the difference                                                                                                                                                      | 27     |
+| A9  | The rule palette: `#7cb518` (unchanged first), then seven more that pass `cityColors.test.ts`'s collision rule                                                                                                                                                       | §6.2 says "the next palette colour"; no palette exists                                                                                                                                                                     | 26     |
+| A10 | `Writing results` log entries carrying their real SQL, labelled `Writing results (1/4)` …                                                                                                                                                                            | §6.4 asks for "the SQL statements issued in order"; M1 logged one entry with `sql: null`                                                                                                                                   | 27     |
+| A11 | `A distance limit must be a positive number` (Distance's PARAMETERS validation)                                                                                                                                                                                      | §6 states the rule as a clause and gives no message                                                                                                                                                                        | 15     |
+| A12 | `Scope applies to the source layer's buildings.` (the muted line under Aggregate's scope radios, which stay under TARGET)                                                                                                                                            | §7.6 says scope applies to the SOURCE buildings but never words the form                                                                                                                                                   | 15     |
+| A13 | `Name the new layer` (an empty Name at Run)                                                                                                                                                                                                                          | §6 says an empty name "is flagged inline at Run" and gives no sentence                                                                                                                                                     | 20     |
+| A14 | `A layer is already called that` (a duplicate Name at Run)                                                                                                                                                                                                           | §6 says a duplicate name "is flagged inline at Run" and gives no sentence                                                                                                                                                  | 20     |
+| A15 | `Renamed to "<name>": a layer already had that name` (the done card's note after the " (2)" rule fired at publication)                                                                                                                                               | §10.12 says only "the card says so"                                                                                                                                                                                        | 22     |
+| A16 | `2 derived layers are not saved; export them to keep them` (the plural Save toast)                                                                                                                                                                                   | §8 gives the singular only                                                                                                                                                                                                 | 24     |
+| A17 | `Choose a column to summarise` (Aggregate's blocking error beside the offending row, and the aggregate row's own placeholder option)                                                                                                                                 | §7.6 requires "a numeric column select of the source layer" for every aggregate except count and words no message for an unfilled one; §7.7's accepted `Choose the property to copy` is the same sentence about a property | 15     |
 
 ---
 
@@ -1095,8 +1242,8 @@ Execution order. One writer at a time; every shared seam lands before its consum
 
 **Files:**
 
-- Create: `tests/integration/duckdb/solids.test.ts`, `tests/integration/duckdb/crossLayer.test.ts`, `fixtures/composite-solid.city.json` (Decisions recorded item 4)
-- Modify: `tests/integration/duckdb/harness.ts` (an installer beside the `cityjson` install in `openDuckDB`). `fixtures/README.md`'s row for the new fixture is Task 28's.
+- Create: `tests/integration/duckdb/solids.test.ts`, `tests/integration/duckdb/crossLayer.test.ts`, `fixtures/composite-solid.city.json` (Decisions recorded item 4), `fixtures/invalid-solid.city.json` (the commander's fixture ruling)
+- Modify: `tests/integration/duckdb/harness.ts` (an installer beside the `cityjson` install in `openDuckDB`). `fixtures/README.md`'s rows for the two new fixtures are Task 28's.
 
 **Interfaces:**
 
@@ -1107,11 +1254,177 @@ Execution order. One writer at a time; every shared seam lands before its consum
 
 **This suite is opt-in and offline-safe.** It matches `tests/**/*.test.ts`, so the default run COLLECTS it and `describe.skipIf` keeps it from executing. The harness is imported DYNAMICALLY inside `beforeAll`, exactly as `layerTables.test.ts:128` does it, because a top-level import would evaluate the node bindings in every offline run.
 
-**What this task pins and what it does NOT.** It pins the ENGINE's behaviour, spelled literally, for both extensions. It does not pin any builder's TEXT: `buildSolidMeasureSql` / `buildSolidValidationSql` (Task 6), `buildVectorTableSql` (Task 13), `buildFeatureProxySql` (Task 14) and `buildAggregateSql` (Task 19) are each pinned by their OWN task, which appends a case running that builder's output against this same engine — Task 6 to `solids.test.ts`, Tasks 13, 14 and 19 to `crossLayer.test.ts`. (Tasks 16 and 17 append nothing: their statements are `buildFeatureProxySql` joined to the vector table, and both halves are already pinned.) No later task may say "Task 1 already covers it": Task 1 covers the FACT, the owning task covers the TEXT.
+**What this task pins and what it does NOT.** It pins the ENGINE's behaviour, spelled literally, for both extensions. It does not pin any builder's TEXT: `buildSolidMeasureSql` / `buildSolidValidationSql` (Task 6), `buildVectorTableSql` (Task 13), `buildFeatureProxySql` (Task 14) and `buildAggregateSql` (Task 19) are each pinned by their OWN task, which appends a case running that builder's output against this same engine — Task 6 to `solids.test.ts`, Tasks 13, 14, 16 and 19 to `crossLayer.test.ts` — Task 16's append is the three PREDICATES (`ST_CoveredBy` vs `ST_Within`, a boundary centre, a degenerate `ST_MakeEnvelope`), which a unit test over a fake `query` cannot see. (Task 17 appends nothing: its statement is `buildFeatureProxySql` joined to the vector table, and both halves are already pinned.) No later task may say "Task 1 already covers it": Task 1 covers the FACT, the owning task covers the TEXT.
 
-**This task also adds the CompositeSolid fixture** (Decisions recorded item 4). `fixtures/composite-solid.city.json` is a minimal CityJSON 2.0 file with one Building whose LoD `"2.2"` geometry is a `CompositeSolid` of two unit cubes sharing a face — `(0,0,0)`-`(1,1,1)` and `(1,0,0)`-`(2,1,1)`, so the members' volumes sum to exactly 2. Author it, run the probe, and fix the ring winding until `ST_3DValidationReport(s).is_valid` is true — an unoriented fixture makes `ST_3DVolume` RAISE, which is the very trap this plan's guard exists for. Its row goes into `fixtures/README.md` (Task 28).
+**This task also adds TWO fixtures, both spelled out in full in Step 1.**
 
-- [ ] **Step 1: Write the failing solids probe**
+`fixtures/composite-solid.city.json` (Decisions recorded item 4) is a minimal CityJSON 2.0 file with one Building whose LoD `"2.2"` geometry is a `CompositeSolid` of two unit cubes sharing a face — local `(0,0,0)`-`(1,1,1)` and `(1,0,0)`-`(2,1,1)` over the RD translate, so the members' volumes sum to exactly 2. Every ring is wound counter-clockwise seen from OUTSIDE (each member's signed volume is `+1`, checked by the divergence formula before this plan was written), because an unoriented fixture makes `ST_3DVolume` RAISE — the very trap this plan's guard exists for.
+
+`fixtures/invalid-solid.city.json` (the commander's fixture ruling) is one Building with **no parts** whose LoD `"2.2"` `Solid` is NOT closed: it is `NL.IMBAG.Pand.0001`'s own solid from `two-buildings.city.json`, lifted out with the nine vertices it uses — 7 faces, 2 open edges, 1 non-manifold edge, `is_valid` false, `is_closed` false, envelope 388 m², footprint 80 m², zmin 0, zmax 8.4. It exists because `two-buildings.city.json` cannot express "a building whose solid is invalid" at the FEATURE level: `NL.IMBAG.Pand.0001` has a MultiSurface PART at 2.2, so §7's contributor rule makes the PART the contributor and the whole feature reads "not a solid". Over `two-buildings`, Measure solids therefore measures ONE feature (`NL.IMBAG.Pand.0002`, valid, volume 2178) and skips one ("not a solid"); every FEATURE-level "invalid solid" expectation in this milestone uses `invalid-solid.city.json` instead.
+
+Both rows go into `fixtures/README.md` (Task 28).
+
+- [ ] **Step 1: Add the two fixtures**
+
+Create `fixtures/composite-solid.city.json`:
+
+```json
+{
+  "type": "CityJSON",
+  "version": "2.0",
+  "transform": {
+    "scale": [1.0, 1.0, 1.0],
+    "translate": [85000.0, 446000.0, 0.0]
+  },
+  "metadata": {
+    "referenceSystem": "https://www.opengis.net/def/crs/EPSG/0/7415",
+    "title": "CompositeSolid fixture",
+    "identifier": "fixture-composite-solid"
+  },
+  "CityObjects": {
+    "NL.TEST.Composite.0001": {
+      "type": "Building",
+      "attributes": {
+        "measuredHeight": 1.0,
+        "roofType": "flat"
+      },
+      "geometry": [
+        {
+          "type": "CompositeSolid",
+          "lod": "2.2",
+          "boundaries": [
+            [
+              [
+                [[0, 3, 2, 1]],
+                [[4, 5, 6, 7]],
+                [[0, 1, 5, 4]],
+                [[1, 2, 6, 5]],
+                [[2, 3, 7, 6]],
+                [[3, 0, 4, 7]]
+              ]
+            ],
+            [
+              [
+                [[1, 2, 9, 8]],
+                [[5, 10, 11, 6]],
+                [[1, 8, 10, 5]],
+                [[8, 9, 11, 10]],
+                [[9, 2, 6, 11]],
+                [[2, 1, 5, 6]]
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "vertices": [
+    [0, 0, 0],
+    [1, 0, 0],
+    [1, 1, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+    [1, 0, 1],
+    [1, 1, 1],
+    [0, 1, 1],
+    [2, 0, 0],
+    [2, 1, 0],
+    [2, 0, 1],
+    [2, 1, 1]
+  ]
+}
+```
+
+The nesting is CityJSON 2.0's: a `CompositeSolid`'s boundaries are an array of SOLIDS, each solid an array of SHELLS, each shell an array of SURFACES, each surface an array of RINGS. The two solids share the face `x = 1` (vertices 1, 2, 6, 5), which is why this is a composite and not a MultiSolid of two disjoint boxes. No `semantics` block: semantics are optional and nothing here reads them — the parser test for `geometryType` is Task 2's, on hand-built models.
+
+Create `fixtures/invalid-solid.city.json`:
+
+```json
+{
+  "type": "CityJSON",
+  "version": "2.0",
+  "transform": {
+    "scale": [0.001, 0.001, 0.001],
+    "translate": [85000.0, 446000.0, 0.0]
+  },
+  "metadata": {
+    "referenceSystem": "https://www.opengis.net/def/crs/EPSG/0/7415",
+    "title": "Invalid solid fixture",
+    "identifier": "fixture-invalid-solid"
+  },
+  "CityObjects": {
+    "NL.IMBAG.Pand.0001": {
+      "type": "Building",
+      "attributes": {
+        "measuredHeight": 8.4,
+        "roofType": "gabled",
+        "yearOfConstruction": 1923,
+        "status": "in use",
+        "function": "residential"
+      },
+      "geometry": [
+        {
+          "type": "Solid",
+          "lod": "2.2",
+          "boundaries": [
+            [
+              [[0, 3, 2, 1]],
+              [[4, 5, 6, 7]],
+              [[8, 5, 4]],
+              [[0, 1, 5, 4]],
+              [[1, 2, 6, 5]],
+              [[2, 3, 7, 6]],
+              [[3, 0, 4, 7]]
+            ]
+          ],
+          "semantics": {
+            "surfaces": [
+              {
+                "type": "GroundSurface"
+              },
+              {
+                "type": "RoofSurface"
+              },
+              {
+                "type": "RoofSurface",
+                "slope": 35.0
+              },
+              {
+                "type": "WallSurface"
+              },
+              {
+                "type": "WallSurface"
+              },
+              {
+                "type": "WallSurface"
+              },
+              {
+                "type": "WallSurface"
+              }
+            ],
+            "values": [[0, 1, 2, 3, 4, 5, 6]]
+          }
+        }
+      ]
+    }
+  },
+  "vertices": [
+    [0, 0, 0],
+    [10000, 0, 0],
+    [10000, 8000, 0],
+    [0, 8000, 0],
+    [0, 0, 6000],
+    [10000, 0, 6000],
+    [10000, 8000, 6000],
+    [0, 8000, 6000],
+    [5000, 0, 8400]
+  ]
+}
+```
+
+The gable face `[[8, 5, 4]]` is the reason the solid does not close: it is a ridge triangle over a flat roof that was never opened, so two of its edges belong to one face only and one belongs to three. That is the DEFECT this fixture carries, and it is verbatim what `two-buildings.city.json` already contains — kept identical so the row-level numbers the probe below asserts on the two files agree.
+
+- [ ] **Step 2: Write the failing solids probe**
 
 Create `tests/integration/duckdb/solids.test.ts`:
 
@@ -1391,10 +1704,40 @@ describe.skipIf(!enabled)("three_d against real DuckDB 1.5.5", () => {
     expect(Number(rows[0]?.["volume"])).toBeCloseTo(2, 6);
     expect(Number(rows[0]?.["shells"])).toBe(2);
   });
+
+  // The FEATURE-level invalid solid. `two-buildings.city.json` cannot express
+  // one: its `NL.IMBAG.Pand.0001` has a MultiSurface PART at 2.2, so §7's
+  // contributor rule reads the whole feature as "not a solid". This fixture is
+  // that same solid on a building with NO parts, so a run over it measures one
+  // building and withholds one volume — which is what every FEATURE-level
+  // "invalid solid" expectation in this milestone rests on.
+  it("measures the invalid-solid fixture: every measure but the volume", () => {
+    db.register("invalid.city.json", "invalid-solid.city.json");
+    const rows = db.query(
+      `SELECT "id", s IS NOT NULL AS parsed, r.is_valid AS valid, r.is_closed AS closed,
+              r.open_edge_count AS open_n, r.non_manifold_edge_count AS nm_n,
+              CASE WHEN r.is_valid THEN ST_3DVolume(s) END AS volume,
+              ST_3DSurfaceArea(s) AS envelope, ST_3DFootprintArea(s) AS footprint,
+              ST_3DZMin(s) AS ground, ST_3DZMax(s) AS ridge
+       FROM (SELECT "id", ST_3DTryFromWKB("geometry_lod2_2") AS s,
+                    ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r
+             FROM read_cityjson('invalid.city.json', lod => '2.2'))`,
+    );
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
+    expect(row).toMatchObject({ parsed: true, valid: false, closed: false });
+    expect(Number(row?.["open_n"])).toBe(2);
+    expect(Number(row?.["nm_n"])).toBe(1);
+    expect(row?.["volume"]).toBeNull();
+    expect(Number(row?.["envelope"])).toBeCloseTo(388, 0);
+    expect(Number(row?.["footprint"])).toBeCloseTo(80, 0);
+    expect(Number(row?.["ground"])).toBeCloseTo(0, 3);
+    expect(Number(row?.["ridge"])).toBeCloseTo(8.4, 1);
+  });
 });
 ```
 
-- [ ] **Step 2: Run and watch it fail**
+- [ ] **Step 3: Run and watch it fail**
 
 ```bash
 export PATH="$HOME/.local/share/mise/shims:$PATH"
@@ -1403,7 +1746,7 @@ DUCKDB_INTEGRATION=1 npx vitest run tests/integration/duckdb/solids.test.ts
 
 Expected: FAIL — `harness.installExtension is not a function` in `beforeAll`.
 
-- [ ] **Step 3: Add the installer to the harness**
+- [ ] **Step 4: Add the installer to the harness**
 
 In `tests/integration/duckdb/harness.ts`, after `openDuckDB` (the file's last export), append:
 
@@ -1434,16 +1777,16 @@ export function installExtension(
 }
 ```
 
-- [ ] **Step 4: Run the solids probe to pass**
+- [ ] **Step 5: Run the solids probe to pass**
 
 ```bash
 export PATH="$HOME/.local/share/mise/shims:$PATH"
 DUCKDB_INTEGRATION=1 npx vitest run tests/integration/duckdb/solids.test.ts
 ```
 
-Expected: PASS (13 passed, 1 skipped). A failure on the first `INSTALL` means the community slot moved — report it, do not work around it.
+Expected: PASS, all 14 cases, none skipped (`describe.skipIf(!enabled)` is off because `DUCKDB_INTEGRATION=1`). A failure on the first `INSTALL` means the community slot moved — report it, do not work around it.
 
-- [ ] **Step 5: Write the cross-layer probe**
+- [ ] **Step 6: Write the cross-layer probe**
 
 Create `tests/integration/duckdb/crossLayer.test.ts`:
 
@@ -1508,6 +1851,14 @@ const VECTOR_NDJSON = [
   .map((row) => JSON.stringify(row))
   .join("\n");
 
+/**
+ * Tasks 13, 14, 16 and 19 APPEND their own cases INSIDE this `describe`, at the
+ * bottom, beside the ones below — `db` is the block's own binding and there is
+ * ONE harness for the file, opened once here. An appended case that opens its
+ * own harness pays the extension download again and races this one's `afterAll`.
+ * Some of those appended cases are `async` (they await the app's own encoder);
+ * the `it` signature is per case, so that is no constraint on this block.
+ */
 describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
   let db: Harness;
 
@@ -1628,8 +1979,10 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
   });
 
   it("LEFT JOINs buildings to areas, leaving the unmatched ones NULL", () => {
+    // The copied field is read out of the JSON `props` column — the table has
+    // no `name` column of its own, and §7.5's copy is always a key lookup.
     const rows = db.query(
-      `SELECT b.x, s.name FROM (SELECT UNNEST([25, 400]) AS x) b LEFT JOIN "${VECTOR_TABLE}" s ON ST_Intersects(ST_Point(b.x, 50), s.geom) ORDER BY b.x`,
+      `SELECT b.x, s."props"->>'name' AS name FROM (SELECT UNNEST([25, 400]) AS x) b LEFT JOIN "${VECTOR_TABLE}" s ON ST_Intersects(ST_Point(b.x, 50), s.geom) ORDER BY b.x`,
     );
     expect(rows[0]).toMatchObject({ name: "A" });
     expect(rows[1]?.["name"]).toBeNull();
@@ -1657,7 +2010,7 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
 });
 ```
 
-- [ ] **Step 6: Run both probes**
+- [ ] **Step 7: Run both probes**
 
 ```bash
 export PATH="$HOME/.local/share/mise/shims:$PATH"
@@ -1672,10 +2025,13 @@ npx vitest run tests/integration/duckdb
 
 Expected: PASS with every case skipped, and no network access.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
+
+The two fixtures are STAGED here, with the suites that read them — a probe whose fixture is not in the tree is a suite nobody else can run.
 
 ```bash
-git add tests/integration/duckdb/harness.ts tests/integration/duckdb/solids.test.ts \
+git add fixtures/composite-solid.city.json fixtures/invalid-solid.city.json \
+  tests/integration/duckdb/harness.ts tests/integration/duckdb/solids.test.ts \
   tests/integration/duckdb/crossLayer.test.ts
 git commit -m "test: probe three_d and spatial against real DuckDB 1.5.5"
 ```
@@ -1929,10 +2285,13 @@ git -C /data2/hideba/multiroof-viewer/packages/cityjson-navara-plugins push orig
 cd /data2/hideba/multiroof-viewer
 export PATH="$HOME/.local/share/mise/shims:$PATH"
 npx tsc -b --noEmit
-npx vitest run tests/unit
+# Global Constraints: a full-suite run goes to a FILE in the BACKGROUND.
+npx vitest run tests/unit > /tmp/m3-t2-unit.log 2>&1 &
+wait
+tail -5 /tmp/m3-t2-unit.log
 ```
 
-Expected: PASS — the app consumes `Surface` through `src/domain/citymodel/types.ts`'s re-export and the new field is optional, so nothing app-side changes yet.
+Expected: PASS (report the exit status) — the app consumes `Surface` through `src/domain/citymodel/types.ts`'s re-export and the new field is optional, so nothing app-side changes yet.
 
 ```bash
 git add packages/cityjson-navara-plugins
@@ -2567,14 +2926,23 @@ const PROVENANCE = {
 
 beside the other fixtures, importing `useComputedColumnStore` from `src/insights/computedColumns`.
 
-Append to `tests/unit/ui/processing/ToolView.test.tsx`, inside the same describe as "renders TARGET, scope counts, OUTPUT columns and runs with the draft":
+Append to `tests/unit/ui/processing/ToolView.test.tsx`, inside the same describe as "renders TARGET, scope counts, OUTPUT columns and runs with the draft". **It uses `addRoofLayer`, not this file's `addCityLayer`**: `addCityLayer`'s model is `objects: {}`, so Roof metrics has no qualifying LoD, the select is empty, Run is disabled with "No roof surfaces in this layer" and the click would assert nothing. `roofLayerFixture.tsx` is the shared roof-bearing layer three suites already run against, so add
+
+```ts
+import { addRoofLayer } from "./roofLayerFixture";
+```
+
+to the file's imports (a static import beside the other test-local ones — the fixture touches only stores, not the engine), and make sure the suite's `afterEach` clears `useLayerStore`/`useLayerTableStore` as it already does for `addCityLayer`.
 
 ```ts
 it("prints the column NAMES and freezes the typed columns", () => {
   // The two halves of the same list: the mono line is names (§6's "column
   // list in mono"), and what `submitRun` freezes is the typed columns the
   // write path needs (`buildAddColumnSql` interpolates `col.type`).
-  addCityLayer();
+  //
+  // The ROOF layer, because Roof metrics needs a qualifying LoD before Run is
+  // enabled at all — `addCityLayer`'s model has no surfaces.
+  addRoofLayer();
   render(<ToolView toolId="roof-metrics" />);
   expect(
     screen.getByText(
@@ -2814,7 +3182,7 @@ git commit -m "refactor: a tool's output columns carry their SQL types"
 
 **Interfaces:**
 
-- Consumes: `LayerTable`, `SourceProvider`, `LodColumn { label, suffix }`, `registerBuffer`/`dropBuffer`, `raced`.
+- Consumes: `LayerTable`, `SourceProvider`, `LodColumn { label, suffix }`, `registerBuffer`/`dropBuffer`/`getDuckDBStatus` (`duckdb.ts:196`, `:724-743`), `raced`/`racedWithDeath`/`CancelledError`/`EngineDeadError` (`engineAwait.ts:70-106`), `quoteLiteral` (`sql.ts:39-48`); type-only `QueryOutcome` and `ToolContext`.
 - Produces:
 
 ```ts
@@ -2837,11 +3205,30 @@ export async function readSource(input: {
   readonly lod: string; // the LoD LABEL ("2.2"), never a suffix
   readonly signal: AbortSignal;
 }): Promise<ReadSourceHandle>;
+/** §6.1's sentence for an error raised while re-reading the source — at the
+ *  fetch, at the hand-off, or INSIDE the reader statement — or null when the
+ *  error is not a source problem and must travel as it is. A `CancelledError`
+ *  and an `EngineDeadError` come back UNCHANGED. */
+export function classifySourceFailure(error: unknown): Error | null;
+/** §6.1's id join: throws `SOURCE_IDS_DIFFER` when the reader did not answer
+ *  for every id the run asked about. */
+export function assertSourceIds(
+  requested: ReadonlyArray<string>,
+  returned: ReadonlySet<string>,
+): void;
+/** `ctx.query` for a statement that reads the RE-READ SOURCE: §6.1's sentence
+ *  on a source failure, the engine's own words into `ctx.warn`, and anything
+ *  that is not a source problem rethrown untouched. */
+export async function readerQuery(
+  ctx: Pick<ToolContext, "query" | "warn">,
+  label: string,
+  sql: string,
+): Promise<Extract<QueryOutcome, { readonly ok: true }>>;
 ```
 
 `runQueue` starts a `needsReader` run in the `"source"` phase instead of `"compute"`; the executor calls `ctx.phase("compute")` once its handle is open. `useToolForm` gains `workloadNote`, rendered by `ToolView` beside the extension note.
 
-**Three §6.1 sentences also land here, as exported constants.** `readSource` itself can raise two of them; the third is the _executor's_ to raise, because §6.1 says the id mismatch is "detected by the id join, the only check possible" and `readSource` has no `query` door. Putting all three in this module is what stops a later task inventing a fourth wording:
+**Three §6.1 sentences also land here, as exported constants**, and so do the two functions that decide WHEN to raise them (`classifySourceFailure`, `assertSourceIds`). `readSource` itself can raise two of the sentences; the third is the _executor's_ to raise, because §6.1 says the id mismatch is "detected by the id join, the only check possible" and `readSource` has no `query` door — but the CHECK is written once, here, beside its sentence, and Tasks 7 and 10 call it rather than each re-deciding what "the id join failed" means. Putting all of it in this module is what stops a later task inventing a fourth wording or a second threshold:
 
 ```ts
 export const SOURCE_READ_FAILED =
@@ -2871,9 +3258,25 @@ Create `tests/unit/features/processing/sourceRead.test.ts`:
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LayerTable } from "../../../../src/insights/layerTables";
+// The REAL classes, because the module tells a cancellation from a read
+// failure with `instanceof` and both of them extend `Error` with the name
+// `"Error"` (`engineAwait.ts:33, 44`) — a `.name` check would read every
+// cancellation as a source failure. `engineAwait.ts` imports only
+// `onEngineDeath` from `insights/duckdb`, which the factory below fakes, so
+// this is a static import of an engine-free module.
+import {
+  CancelledError,
+  EngineDeadError,
+} from "../../../../src/insights/engineAwait";
 
 const registerBuffer = vi.fn(async () => true);
 const dropBuffer = vi.fn(async () => {});
+/** The engine's own status, module-level so a case can move it: a refused
+ *  `registerBuffer` means "too large" only while the engine is still ready. */
+const READY_STATUS = { state: "ready", extensions: {} } as const;
+const getDuckDBStatus = vi.fn(
+  (): { state: string; extensions: Record<string, unknown> } => READY_STATUS,
+);
 /** Every death listener `raced` installs, so a test can fire one. */
 const deathListeners: Array<() => void> = [];
 
@@ -2883,7 +3286,7 @@ vi.mock("../../../../src/insights/duckdb", () => ({
   runQuery: vi.fn(async () => ({ ok: false, message: "not used here" })),
   ddl: vi.fn(async () => ({ ok: false, message: "not used here" })),
   readFile: vi.fn(async () => null),
-  getDuckDBStatus: vi.fn(() => ({ state: "ready", extensions: {} })),
+  getDuckDBStatus,
   getDuckDBStatusVersion: vi.fn(() => 0),
   subscribeDuckDBStatus: vi.fn(() => () => {}),
   getEngineGeneration: vi.fn(() => 1),
@@ -2906,7 +3309,10 @@ const {
   SOURCE_IDS_DIFFER,
   SOURCE_OUT_OF_MEMORY,
   SOURCE_READ_FAILED,
+  assertSourceIds,
+  classifySourceFailure,
   readSource,
+  readerQuery,
   sourceWorkloadNote,
 } = await import("../../../../src/features/processing/sourceRead");
 
@@ -2932,6 +3338,7 @@ function table(over: Partial<LayerTable> = {}): LayerTable {
 afterEach(() => {
   vi.clearAllMocks();
   registerBuffer.mockImplementation(async () => true);
+  getDuckDBStatus.mockImplementation(() => READY_STATUS);
   deathListeners.length = 0;
 });
 
@@ -2974,8 +3381,11 @@ describe("readSource", () => {
     }).then((handle) => {
       expect(handle.geometryColumn).toBe("geometry_lod0_0");
       expect(handle.propertiesColumn).toBe("geometry_properties_lod0_0");
+      // The TABLE's own name is `layer_3` (see `table()` above), so the VFS
+      // name is `layer_3_run_1` — it is minted from the table, never from the
+      // layer's position in the list.
       expect(handle.from).toBe(
-        "read_cityjson('layer_1_run_1.city.json', lod => '0')",
+        "read_cityjson('layer_3_run_1.city.json', lod => '0')",
       );
     });
   });
@@ -3066,6 +3476,28 @@ describe("readSource", () => {
     expect(dropBuffer).not.toHaveBeenCalled();
   });
 
+  it("tells a DEAD engine apart from a refused allocation on the same `false`", async () => {
+    // `registerBuffer` answers `false` for both (`duckdb.ts:728`), and the
+    // hand-off races the ABORT signal only — so a death never rejects it. The
+    // status is the only thing that separates §6.1's memory sentence from
+    // "Analytics engine stopped", and reading it the other way round tells the
+    // user their file is too large when the engine has simply gone.
+    registerBuffer.mockImplementation(async () => false);
+    getDuckDBStatus.mockImplementation(() => ({
+      state: "failed",
+      extensions: {},
+    }));
+    await expect(
+      readSource({
+        runId: "run_6c",
+        table: table(),
+        lod: "2.2",
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toBeInstanceOf(EngineDeadError);
+    expect(dropBuffer).not.toHaveBeenCalled();
+  });
+
   it("refuses a LoD the table does not have, and a table with no reader", async () => {
     await expect(
       readSource({
@@ -3086,6 +3518,10 @@ describe("readSource", () => {
   });
 
   it("cancels while the provider is in flight, before anything is registered", async () => {
+    // IDENTITY, not a message: `raced` rejects with `new CancelledError()`,
+    // whose message is EMPTY and whose `.name` is "Error". A `/cancelled/i`
+    // match would never fire and a `.name === "CancelledError"` check would
+    // read this as a source failure.
     const controller = new AbortController();
     const pending = readSource({
       runId: "run_9",
@@ -3094,8 +3530,72 @@ describe("readSource", () => {
       signal: controller.signal,
     });
     controller.abort();
-    await expect(pending).rejects.toThrow(/cancelled/i);
+    await expect(pending).rejects.toBeInstanceOf(CancelledError);
     expect(registerBuffer).not.toHaveBeenCalled();
+  });
+
+  it("lets the engine's DEATH through the provider await as itself", async () => {
+    const pending = readSource({
+      runId: "run_9b",
+      table: table({ source: () => new Promise<Uint8Array>(() => {}) }),
+      lod: "2.2",
+      signal: new AbortController().signal,
+    });
+    for (const listener of [...deathListeners]) listener();
+    await expect(pending).rejects.toBeInstanceOf(EngineDeadError);
+    expect(registerBuffer).not.toHaveBeenCalled();
+  });
+
+  it("cancels DURING the hand-off, and drops a registration that lands late", async () => {
+    // `registerBuffer` awaits the worker, and duckdb-wasm's `onError` clears
+    // its pending requests WITHOUT rejecting them — so this await is raced
+    // like every other. The hand-off that succeeds AFTER the race was lost
+    // would otherwise leave a multi-megabyte buffer in the wasm heap under a
+    // name nobody holds.
+    let settle: (ok: boolean) => void = () => {};
+    registerBuffer.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          settle = resolve;
+        }),
+    );
+    const controller = new AbortController();
+    const pending = readSource({
+      runId: "run_9c",
+      table: table(),
+      lod: "2.2",
+      signal: controller.signal,
+    });
+    // WAIT FOR THE HAND-OFF TO BE IN FLIGHT. `raced(registration, signal)` is
+    // entered in the same continuation as `registerBuffer`, so once this has
+    // passed the abort lands INSIDE that race. A bare `await Promise.resolve()`
+    // fires a tick too early and would test `raced`'s already-aborted fast
+    // path instead.
+    await vi.waitFor(() => expect(registerBuffer).toHaveBeenCalled());
+    controller.abort();
+    await expect(pending).rejects.toBeInstanceOf(CancelledError);
+    settle(true);
+    await vi.waitFor(() =>
+      expect(dropBuffer).toHaveBeenCalledWith("layer_3_run_9c.city.json"),
+    );
+  });
+
+  it("lets the engine's DEATH through the hand-off as itself", async () => {
+    registerBuffer.mockImplementationOnce(() => new Promise<boolean>(() => {}));
+    const pending = readSource({
+      runId: "run_9d",
+      table: table(),
+      lod: "2.2",
+      signal: new AbortController().signal,
+    });
+    // Again: wait until the hand-off's race is ACTUALLY installed. `raced`
+    // removes its listeners on settle and `onEngineDeath` drops its waiters as
+    // it fires (`engineAwait.ts`: "a `raced` STARTED after the death hears
+    // nothing"), so firing between the two races would reach neither and this
+    // promise would never settle.
+    await vi.waitFor(() => expect(registerBuffer).toHaveBeenCalled());
+    for (const listener of [...deathListeners]) listener();
+    await expect(pending).rejects.toBeInstanceOf(EngineDeadError);
   });
 
   it("exports the id-mismatch sentence for the executor's id join to raise", () => {
@@ -3104,6 +3604,139 @@ describe("readSource", () => {
     // with the other two, so nothing invents a fourth.
     expect(SOURCE_IDS_DIFFER).toBe(
       "The source no longer reads as the loaded layer (object ids differ); add the layer again",
+    );
+  });
+});
+
+describe("assertSourceIds", () => {
+  it("passes when the reader answered for every id that was asked about", () => {
+    expect(() =>
+      assertSourceIds(["a", "b"], new Set(["a", "b", "c"])),
+    ).not.toThrow();
+    // Nothing was asked, so nothing can be missing.
+    expect(() => assertSourceIds([], new Set())).not.toThrow();
+  });
+
+  it("fails on a PARTIAL answer, not only on an empty one", () => {
+    // The bug this replaces: "no match at all" let a source that had lost
+    // half its objects publish half a run, with the missing features written
+    // as "not a solid" — a verdict on geometry nobody looked at.
+    expect(() => assertSourceIds(["a", "b"], new Set(["a"]))).toThrow(
+      SOURCE_IDS_DIFFER,
+    );
+    expect(() => assertSourceIds(["a"], new Set())).toThrow(SOURCE_IDS_DIFFER);
+  });
+});
+
+describe("classifySourceFailure", () => {
+  it("returns a cancellation and a death UNCHANGED", () => {
+    const cancelled = new CancelledError();
+    const dead = new EngineDeadError();
+    expect(classifySourceFailure(cancelled)).toBe(cancelled);
+    expect(classifySourceFailure(dead)).toBe(dead);
+  });
+
+  it("is §6.1's memory sentence for an allocation failure, wherever it came from", () => {
+    expect(
+      classifySourceFailure(new RangeError("Array buffer allocation failed"))
+        ?.message,
+    ).toBe(SOURCE_OUT_OF_MEMORY);
+    // The engine's own wording, as `formatDuckDBError` leaves it.
+    expect(
+      classifySourceFailure(
+        new Error("Out of Memory Error: failed to allocate block"),
+      )?.message,
+    ).toBe(SOURCE_OUT_OF_MEMORY);
+  });
+
+  it("is §6.1's read sentence for a reader, IO or decompression failure", () => {
+    for (const message of [
+      "Invalid Input Error: Malformed JSON in file",
+      "IO Error: Could not read from file",
+      "Serialization Error: unexpected end of gzip stream",
+    ]) {
+      expect(classifySourceFailure(new Error(message))?.message).toBe(
+        SOURCE_READ_FAILED,
+      );
+    }
+  });
+
+  it("is NULL for an error that is OUR SQL's fault, so it travels as itself", () => {
+    // A Binder, Catalog or Parser error means the statement this app built is
+    // wrong. Dressing it as "network or decompression error" would send the
+    // user to check their connection over a bug in the app.
+    expect(
+      classifySourceFailure(new Error("Binder Error: no such column")),
+    ).toBeNull();
+    expect(
+      classifySourceFailure(
+        new Error(
+          "Catalog Error: Scalar Function with name st_3dvolume does not exist!",
+        ),
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("readerQuery", () => {
+  /** `ctx.query`'s own contract: it THROWS on a failed statement. */
+  const ctxWith = (error: unknown) => {
+    const warnings: string[] = [];
+    return {
+      warnings,
+      ctx: {
+        query: async () => {
+          throw error;
+        },
+        warn: (text: string) => warnings.push(text),
+      },
+    };
+  };
+
+  it("returns the rows of a statement that worked", async () => {
+    const warnings: string[] = [];
+    const out = await readerQuery(
+      {
+        query: async () => ({
+          ok: true as const,
+          columns: ["id"],
+          rows: [{ id: "a" }],
+        }),
+        warn: (text: string) => warnings.push(text),
+      } as never,
+      "Measuring solids",
+      "SELECT 1",
+    );
+    expect(out.rows).toEqual([{ id: "a" }]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("turns a reader failure into §6.1's sentence, engine words to the log", async () => {
+    const { ctx, warnings } = ctxWith(
+      new Error("IO Error: Could not read from file"),
+    );
+    await expect(
+      readerQuery(ctx as never, "Measuring solids", "SELECT 1"),
+    ).rejects.toThrow(SOURCE_READ_FAILED);
+    expect(warnings).toEqual(["IO Error: Could not read from file"]);
+  });
+
+  it("rethrows a cancellation, a death and OUR own SQL errors untouched", async () => {
+    const cancelled = ctxWith(new CancelledError());
+    await expect(
+      readerQuery(cancelled.ctx as never, "Measuring solids", "SELECT 1"),
+    ).rejects.toBeInstanceOf(CancelledError);
+    const dead = ctxWith(new EngineDeadError());
+    await expect(
+      readerQuery(dead.ctx as never, "Measuring solids", "SELECT 1"),
+    ).rejects.toBeInstanceOf(EngineDeadError);
+    const ours = ctxWith(new Error("Binder Error: no such column"));
+    await expect(
+      readerQuery(ours.ctx as never, "Measuring solids", "SELECT 1"),
+    ).rejects.toThrow(/Binder Error/);
+    // Nothing was translated, so nothing was worth repeating into the log.
+    expect([...cancelled.warnings, ...dead.warnings, ...ours.warnings]).toEqual(
+      [],
     );
   });
 });
@@ -3216,10 +3849,22 @@ Create `src/features/processing/sourceRead.ts`:
  * No `@duckdb/duckdb-wasm` import: the engine is reached through
  * `insights/duckdb.ts`.
  */
-import { dropBuffer, registerBuffer } from "../../insights/duckdb";
-import { raced, racedWithDeath } from "../../insights/engineAwait";
+import {
+  dropBuffer,
+  getDuckDBStatus,
+  registerBuffer,
+} from "../../insights/duckdb";
+import {
+  CancelledError,
+  EngineDeadError,
+  raced,
+  racedWithDeath,
+} from "../../insights/engineAwait";
 import { quoteLiteral } from "../../insights/sql";
 import type { LayerTable } from "../../insights/layerTables";
+import type { QueryOutcome } from "../../insights/duckdb";
+// TYPE-ONLY, and therefore erased: this module reaches no queue at runtime.
+import type { ToolContext } from "./runQueue";
 
 /** Spec §6.1's three source-failure first lines, verbatim, in one place. */
 export const SOURCE_READ_FAILED =
@@ -3270,6 +3915,118 @@ function isMemoryFailure(error: unknown): boolean {
   );
 }
 
+/**
+ * An error the APP built the statement wrong with, rather than one the SOURCE
+ * caused.
+ *
+ * DuckDB names its own categories and `formatDuckDBError` keeps the first line
+ * whole (`duckdb.ts:263-273`), so the prefix survives to here. A Binder,
+ * Catalog or Parser error is this app's SQL being wrong; telling the user to
+ * "check the connection" over it would send them to fix their network because
+ * we misspelled a column.
+ */
+const OUR_FAULT = /^(Binder|Catalog|Parser|Syntax) Error/i;
+
+/**
+ * Anything the reader, the decompressor or the file itself raised. DuckDB's
+ * own categories for a source it cannot read, plus the shapes a provider's
+ * fetch/gunzip produces.
+ *
+ * `Conversion Error` is IN, deliberately: in a statement whose only inputs are
+ * the reader's own columns, it is the file handing back a value the reader
+ * cannot turn into the type it declared — a bad WKB blob, a malformed
+ * coordinate — and not a cast this app wrote.
+ */
+const SOURCE_FAULT =
+  /invalid input|io error|serialization error|conversion error|decompress|gzip|zstd|json/i;
+
+/**
+ * Spec §6.1's source-failure sentence for an error raised while re-reading the
+ * source, or `null` when the error is not a source problem and must travel as
+ * it is.
+ *
+ * ONE classifier for BOTH stages. The fetch is the obvious one, but the READER
+ * STATEMENT is where the parse and the wasm allocation actually happen: a
+ * 300 MB CityJSON that gunzips to garbage or exhausts the heap fails THERE, and
+ * without this the user would read DuckDB's own words where §6.1 promises a
+ * sentence. The executors call it around their reader statement; `readSource`
+ * calls it around the fetch and the hand-off.
+ *
+ * A `CancelledError` and an `EngineDeadError` come back UNCHANGED — `instanceof`
+ * and never `.name`, because both classes extend `Error` without setting one
+ * (`engineAwait.ts:33, 44`), so a `.name` test reads every cancellation as a
+ * read failure. Neither is a failure of the source: the queue's own catch turns
+ * them into "cancelled" and §6.1's "Analytics engine stopped".
+ */
+export function classifySourceFailure(error: unknown): Error | null {
+  if (error instanceof CancelledError || error instanceof EngineDeadError) {
+    return error;
+  }
+  if (isMemoryFailure(error)) return new Error(SOURCE_OUT_OF_MEMORY);
+  const message = error instanceof Error ? error.message : String(error);
+  if (OUR_FAULT.test(message)) return null;
+  return SOURCE_FAULT.test(message) ? new Error(SOURCE_READ_FAILED) : null;
+}
+
+/**
+ * Spec §6.1's id join — "the only check possible" — as ONE rule both solids
+ * tools obey.
+ *
+ * The threshold is EVERY id, not "no match at all". A contributor is chosen
+ * because the loaded MODEL says it has geometry at this LoD, and the reader
+ * returns a row per object of the file; so an id that does not come back means
+ * the file no longer holds that object, which is precisely §6.1's "no longer
+ * reads as the loaded layer". Accepting a partial answer would publish the
+ * missing features as "not a solid" — a verdict on geometry nobody looked at.
+ *
+ * What §6.1 excludes is still excluded: a URL whose CONTENT changed under the
+ * same ids answers for every id and is not detected. That is the spec's own
+ * stated limit, not a gap here.
+ */
+export function assertSourceIds(
+  requested: ReadonlyArray<string>,
+  returned: ReadonlySet<string>,
+): void {
+  for (const id of requested) {
+    if (!returned.has(id)) throw new Error(SOURCE_IDS_DIFFER);
+  }
+}
+
+/**
+ * `ctx.query` for a statement that reads the RE-READ SOURCE.
+ *
+ * Both solids tools issue exactly one such statement and both owe §6.1 the
+ * same three things: its sentence when the SOURCE failed, the engine's own
+ * words kept in the log, and an error that is the APP's fault rethrown as
+ * itself. Written once, here, beside the classifier — a second copy in the
+ * second tool is how the two would come to disagree.
+ *
+ * The `ToolContext` import is TYPE-ONLY and therefore erased, so this module
+ * still pulls in no queue at runtime.
+ */
+export async function readerQuery(
+  ctx: Pick<ToolContext, "query" | "warn">,
+  label: string,
+  sql: string,
+): Promise<Extract<QueryOutcome, { readonly ok: true }>> {
+  try {
+    const out = await ctx.query(label, sql);
+    // A type guard, not logic: `ctx.query` throws on a failed statement.
+    if (!out.ok) throw new Error(out.message);
+    return out;
+  } catch (error) {
+    const failure = classifySourceFailure(error);
+    // `null` is "not a source problem" and `failure === error` is a
+    // cancellation or a death: both travel exactly as they are.
+    if (failure === null || failure === error) throw error;
+    // §6.4 keeps the reproducible record — the same shape the extension phase
+    // already uses, which logs DuckDB's reason while the card shows §5's
+    // sentence (`runQueue.ts:596-601`).
+    ctx.warn(error instanceof Error ? error.message : String(error));
+    throw failure;
+  }
+}
+
 export async function readSource(input: {
   readonly runId: string;
   readonly table: LayerTable;
@@ -3300,19 +4057,48 @@ export async function readSource(input: {
     // "cancelled" rather than "failed".
     bytes = await raced(source(), signal);
   } catch (error) {
-    if (error instanceof Error && error.name === "CancelledError") throw error;
-    // `EngineDeadError` too: the queue's catch turns it into §6.1's "Analytics
-    // engine stopped", which is a truer sentence than a read failure.
-    if (error instanceof Error && error.name === "EngineDeadError") throw error;
-    throw new Error(
-      isMemoryFailure(error) ? SOURCE_OUT_OF_MEMORY : SOURCE_READ_FAILED,
-    );
+    // A cancellation and a death come back from the classifier UNCHANGED, so
+    // the queue's catch still reads them as "cancelled" and §6.1's "Analytics
+    // engine stopped". Everything a PROVIDER can raise is a read failure by
+    // definition — it only fetches and decompresses — so the `null` case
+    // (an error the classifier does not recognise) falls back to §6.1's read
+    // sentence here rather than travelling raw.
+    throw classifySourceFailure(error) ?? new Error(SOURCE_READ_FAILED);
   }
 
-  if (!(await registerBuffer(name, bytes))) {
-    // The hand-off to the worker was refused. The engine is up (a dead one
-    // would have rejected the `raced` above), so what is left is the wasm
-    // heap: §6.1's memory sentence.
+  // RACED, like every other engine await. `registerBuffer` posts to the worker
+  // and waits, and duckdb-wasm's `onError` clears its pending requests WITHOUT
+  // rejecting them — so an unraced hand-off inside the run's FIFO slot strands
+  // the shared queue for the life of the page. Task 25 puts the same race
+  // inside the primitive; this is the one call that cannot wait for it,
+  // because Task 8 switches a tool that goes through here ON before then.
+  const registration = registerBuffer(name, bytes);
+  let registered: boolean;
+  try {
+    registered = await raced(registration, signal);
+  } catch (error) {
+    // The hand-off may still SUCCEED after the race was lost — a cancel does
+    // not reach the worker. Drop what lands, or a multi-megabyte buffer sits
+    // in the wasm heap under a name nobody holds. Fire-and-forget and
+    // swallowed: the caller is already leaving with the real error.
+    void registration.then(
+      (ok) => {
+        if (ok) void racedWithDeath(dropBuffer(name)).catch(() => {});
+      },
+      () => {},
+    );
+    throw classifySourceFailure(error) ?? new Error(SOURCE_READ_FAILED);
+  }
+  if (!registered) {
+    // The hand-off was REFUSED (not lost), and `false` means two different
+    // things: `registerBuffer` returns it for a DEAD engine as well as for a
+    // refused allocation (`duckdb.ts:728` — `if (!db || status.state !==
+    // "ready") return false;`), and `raced(…, signal)` above races the ABORT
+    // signal only, so a death does not reject it. Telling the user the source
+    // was too large when the engine had stopped is the wrong sentence, so the
+    // status decides — the same distinction `vectorTable.ts` makes on the same
+    // `false`.
+    if (getDuckDBStatus().state !== "ready") throw new EngineDeadError();
     throw new Error(SOURCE_OUT_OF_MEMORY);
   }
 
@@ -3360,14 +4146,14 @@ except where the fixture describes a reader-backed layer, where the honest pair 
           sourceBytes: null,
 ```
 
-In `tests/unit/insights/layerTablesBuild.test.ts`, the assertion at `:293` is a `toMatchObject` over a real build of `two-buildings.city.json`, so it may additionally assert the real values:
+In `tests/unit/insights/layerTablesBuild.test.ts`, the reader build's `toMatchObject` ("publishes the table with its column kinds, LoDs and row count", around `:286`) additionally asserts the two new fields. That suite's source is the MOCKED `new Uint8Array(16)` its `PROVIDER`/`bytes` fixture hands in (`:187, :192`), not `fixtures/two-buildings.city.json` — the whole engine is a `vi.mock` there — so the honest byte count is **16**, and asserting it is what proves the capture happens BEFORE `registerBuffer` detaches the array:
 
 ```ts
       extension: "city.json",
-      sourceBytes: 3880,
+      sourceBytes: 16,
 ```
 
-and the flat-fallback build's assertion (`:979`) gains `extension: null, sourceBytes: null`.
+and the flat-fallback build's assertion (the `toMatchObject` with `reader: null, source: null`, around `:975`) gains `extension: null, sourceBytes: null`.
 
 - [ ] **Step 7: Start a reader-backed run in the `"source"` phase**
 
@@ -3409,29 +4195,35 @@ it("hands a reader-backed executor the Reading source phase, not Computing", asy
   // once loaded), Reading source (registering bytes; skipped for tools that
   // need none), Computing". A run that re-reads a 300 MB source must not show
   // "Computing" for the length of the read.
+  //
+  // `three_d` reads as ALREADY LOADED, so the extension phase is skipped
+  // outright: this suite's `beforeEach` leaves `isExtensionLoaded` false and
+  // `ensureExtension` resolving false, which would fail a `measure-solids` run
+  // with the offline sentence before any executor ran.
+  vi.mocked(isExtensionLoaded).mockReturnValue(true);
   let phaseOnEntry: string | null = null;
   registerExecutor("measure-solids", async (record) => {
     // The record as the queue left it the instant before the call.
     phaseOnEntry = runById(record.id)?.phase ?? null;
     return { columns: [], rows: new Map(), measured: 0, skipped: [] };
   });
-  const id = submitRun(request({ toolId: "measure-solids" }));
-  await flush();
+  const first = submitRun(request({ toolId: "measure-solids" }));
+  await vi.waitFor(() => expect(runById(first)?.status).toBe("done"));
   expect(phaseOnEntry).toBe("source");
+
   // And the tool that needs no source still starts in Computing.
   let heightPhase: string | null = null;
   registerExecutor("height-from-extent", async (record) => {
     heightPhase = runById(record.id)?.phase ?? null;
     return { columns: [], rows: new Map(), measured: 0, skipped: [] };
   });
-  submitRun(request({ toolId: "height-from-extent" }));
-  await flush();
+  const second = submitRun(request({ toolId: "height-from-extent" }));
+  await vi.waitFor(() => expect(runById(second)?.status).toBe("done"));
   expect(heightPhase).toBe("compute");
-  expect(id).not.toBe("");
 });
 ```
 
-(`request`, `flush` and `runById` are the suite's own helpers/imports; `measure-solids` is already in its `afterEach` cleanup list at `runQueue.test.ts:344`.)
+(`request`, `runById`, `isExtensionLoaded` and `registerExecutor` are the suite's own helpers/imports. There is NO `flush()` in this suite — every case settles with `await vi.waitFor(() => expect(runById(id)?.status).toBe("done"))`, and this one does the same. `measure-solids` is already in its `afterEach` cleanup list.)
 
 - [ ] **Step 8: Show the workload note in the form**
 
@@ -3448,22 +4240,27 @@ and, immediately after the `extensionNote` block:
 // that RE-READS the source — a tool computing from the table or the model
 // pays none of this cost, and a warning about a read that will not happen is
 // a false alarm.
+//
+// `tableInfo?.state`, not `tableInfo !== null`: `tableInfo` is
+// `tables[target.id]` under an indexed lookup (`useToolForm.ts:132-133`), so
+// its type carries `undefined` as well as `null` and the line above it uses
+// the same truthy shape.
 const workloadNote =
-  tool.needsReader && tableInfo !== null && tableInfo.state === "ready"
+  tool.needsReader && tableInfo?.state === "ready"
     ? sourceWorkloadNote(tableInfo.info)
     : null;
 ```
 
 and add `workloadNote,` to the returned object beside `extensionNote`.
 
-In `src/ui/processing/ToolView.tsx`, after the extension-note block:
+In `src/ui/processing/ToolView.tsx`, after the extension-note block, insert the `{…}` block below — the `<>` and `</>` are only there to keep the snippet valid on its own (a bare `{…}` in a code fence is a BLOCK statement, and the formatter rewrites it into one with a stray `;` inside the JSX). They are not part of the edit:
 
 ```tsx
-{
-  f.workloadNote !== null && (
+<>
+  {f.workloadNote !== null && (
     <p className="processing-note">{f.workloadNote}</p>
-  );
-}
+  )}
+</>
 ```
 
 and append to `tests/unit/ui/processing/ToolView.test.tsx`:
@@ -3501,12 +4298,15 @@ This task adds two `LayerTable` FIELDS and no new `layerTables` EXPORT, so the s
 ```bash
 grep -rl "insights/layerTables" tests/ | xargs grep -l "vi.mock"
 export PATH="$HOME/.local/share/mise/shims:$PATH"
-npx vitest run tests/unit
 npx tsc -b --noEmit
 npx vp check
+# Global Constraints: a full-suite run goes to a FILE in the BACKGROUND.
+npx vitest run tests/unit > /tmp/m3-t5-unit.log 2>&1 &
+wait
+tail -5 /tmp/m3-t5-unit.log
 ```
 
-Expected: PASS, and `vp check` still at 0 errors / 56 warnings.
+Expected: PASS (report the exit status), and `vp check` still at 0 errors / 56 warnings.
 
 - [ ] **Step 10: Commit**
 
@@ -4192,7 +4992,7 @@ git commit -m "feat: Measure solids' parameters, columns and guarded SQL"
 
 **Interfaces:**
 
-- Consumes: `ToolExecutor`, `ToolContext` (`table`, `layer`, `featureIds`, `query`, `phase`, `warn`, `throwIfCancelled`), `readSource` + `SOURCE_IDS_DIFFER` (Task 5), `buildSolidMeasureSql` + `buildScopeRowsSql` (Task 6), `solidColumns`, `solidParams` (Task 6), `geometryLodsByObject` (Task 3).
+- Consumes: `ToolExecutor`, `ToolContext` (`table`, `layer`, `featureIds`, `query`, `phase`, `warn`, `throwIfCancelled`), `readSource` + `assertSourceIds` + `classifySourceFailure` (Task 5), `buildSolidMeasureSql` + `buildScopeRowsSql` (Task 6), `solidColumns`, `solidParams` (Task 6), `geometryLodsByObject` (Task 3).
 - Produces: `measureSolids: ToolExecutor` and `registerExecutor("measure-solids", measureSolids)`; `solidRollUp.ts`'s `FeatureRow`, `SolidRow`, `FeatureGroup`, `groupContributors`, `rollUpSolids`, `SKIP_NOT_A_SOLID`, `skipNoGeometry(lod)`, `CAVEAT_INVALID_SOLIDS`; and on `runQueue`'s `ToolResult`:
 
 ```ts
@@ -4227,9 +5027,12 @@ git commit -m "feat: Measure solids' parameters, columns and guarded SQL"
 | `no geometry` (skipped)  | the MODEL's tags: the feature has no contributor at the LoD (`geometryLodsByObject`), decided before any SQL |
 | `not a solid` (skipped)  | the reader's `parsed` column (`s IS NULL`), per contributor                                                  |
 | `invalid solid` (caveat) | `parsed && is_valid === false` — never `is_valid` alone, which is NULL for an unparsed row                   |
-| ids differ (failure)     | the id join: contributors were requested and the reader returned NOTHING                                     |
+| ids differ (failure)     | `assertSourceIds` (Task 5): the reader did not answer for EVERY contributor id the run asked about           |
+| a reader-statement error | `readerQuery` (Task 5): §6.1's read or memory sentence, with the engine's own words into `ctx.warn`          |
 
-The id-join threshold is "no match at all", not "any missing row". §6.1 puts the check there to catch a source that is now a DIFFERENT FILE ("a URL whose content changed but still carries the same ids is not detected"), and a different file matches nothing. An individually absent contributor is counted as `no geometry`, which is what the reader is saying about it.
+**The id-join threshold is EVERY id, not "no match at all".** A contributor is chosen because the loaded MODEL says it has geometry at this LoD, and `read_cityjson` returns a row per object of the file — so an id that does not come back means the file no longer holds that object, which is exactly §6.1's "no longer reads as the loaded layer". Accepting a partial answer would write those features as `not a solid`: a verdict on geometry nobody looked at, published as a result. What §6.1 excludes stays excluded — a URL whose CONTENT changed under the same ids answers for every id and is not detected — and that is the spec's own stated limit. The rule itself is `assertSourceIds`'s, so both solids tools obey one threshold.
+
+**A failure of the READER STATEMENT is a source failure too.** The fetch is the obvious place for one, but the parse and the wasm allocation happen inside `ctx.query`'s statement: a source that gunzips to garbage or exhausts the heap fails there, and §6.1 promises a sentence for it. `readerQuery` (Task 5) is the one door for such a statement, over the one classifier both stages share. It returns `null`-classified errors — a Binder/Catalog/Parser error, this app's own SQL being wrong — untouched, rather than telling the user to check their connection over a bug in the app, and the engine's own words go into `ctx.warn`, exactly as the extension phase already keeps DuckDB's reason in the log while the card shows the offline sentence (`runQueue.ts:596-601`).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4288,7 +5091,7 @@ vi.mock("../../../../src/insights/duckdb", () => ({
   queryParquetBuffer: vi.fn(async () => null),
 }));
 
-const { SOURCE_IDS_DIFFER } =
+const { SOURCE_IDS_DIFFER, SOURCE_READ_FAILED } =
   await import("../../../../src/features/processing/sourceRead");
 const { groupContributors, rollUpSolids } =
   await import("../../../../src/features/processing/solidRollUp");
@@ -4461,25 +5264,36 @@ function context(
   over: { featureIds?: ReadonlyArray<string> | null } = {},
 ) {
   const labels: string[] = [];
+  /** The SQL of each statement, in order — what the cases assert against. */
+  const statements: string[] = [];
   const phases: string[] = [];
+  const warnings: string[] = [];
   let next = 0;
   return {
     labels,
+    statements,
     phases,
+    warnings,
     ctx: {
       table: TABLE,
       layer,
       featureIds: over.featureIds ?? null,
       signal: new AbortController().signal,
-      query: vi.fn(async (label: string) => {
+      // BOTH parameters, and the SQL is KEPT. A one-parameter `vi.fn` infers
+      // the tuple `[label: string]`, so `ctx.query.mock.calls[1]?.[1]` is a
+      // type error and the statement would be unassertable — the cases below
+      // read `statements[1]` instead, which needs no indexing past a tuple's
+      // length and leaves no unused parameter for the lint to refuse.
+      query: vi.fn(async (label: string, sql: string) => {
         labels.push(label);
+        statements.push(sql);
         const answer = answers[next++];
         if (!answer) throw new Error(`unexpected query: ${label}`);
         if (!answer.ok) throw new Error(answer.message);
         return answer;
       }),
       phase: (p: string) => phases.push(p),
-      warn: vi.fn(),
+      warn: (text: string) => warnings.push(text),
       throwIfCancelled: () => {},
     },
   };
@@ -4702,7 +5516,7 @@ describe("measureSolids", () => {
 
   it("scopes the reader statement to the CONTRIBUTOR rows only", async () => {
     const layer = layerWith({ B1: ["2.2"], B1P: ["2.2"] });
-    const { ctx } = context(layer, [
+    const { ctx, statements } = context(layer, [
       {
         ok: true,
         columns: ["id", "f"],
@@ -4714,7 +5528,7 @@ describe("measureSolids", () => {
       { ok: true, columns: [], rows: [solidRow("B1P", "B1")] },
     ]);
     await measureSolids(run(), ctx as never);
-    const measureSql = String(ctx.query.mock.calls[1]?.[1]);
+    const measureSql = statements[1] ?? "";
     // The ROOT is displaced by its part (§7), so its solid is never parsed.
     expect(measureSql).toContain(`WHERE "id" IN ('B1P')`);
     expect(measureSql).not.toContain("'B1'");
@@ -4733,15 +5547,57 @@ describe("measureSolids", () => {
     expect(release).toHaveBeenCalled();
   });
 
-  it("releases the bytes when the measure statement fails", async () => {
-    const layer = layerWith({ B1: ["2.2"] });
+  it("fails on a PARTIAL answer too, rather than publishing half a run", async () => {
+    // §6.1's id join over EVERY contributor. B1 came back and B2 did not: the
+    // file no longer holds B2. Counting B2 as "not a solid" would publish a
+    // verdict on geometry nobody looked at, alongside a real measurement.
+    const layer = layerWith({ B1: ["2.2"], B2: ["2.2"] });
     const { ctx } = context(layer, [
+      {
+        ok: true,
+        columns: ["id", "f"],
+        rows: [
+          { id: "B1", f: "B1" },
+          { id: "B2", f: "B2" },
+        ],
+      },
+      { ok: true, columns: [], rows: [solidRow("B1", "B1")] },
+    ]);
+    await expect(measureSolids(run(), ctx as never)).rejects.toThrow(
+      SOURCE_IDS_DIFFER,
+    );
+    expect(release).toHaveBeenCalled();
+  });
+
+  it("gives a reader failure §6.1's own sentence, engine words to the log", async () => {
+    // The parse and the wasm allocation happen INSIDE this statement, so a
+    // source that gunzips to garbage fails here — §6.1 promises a sentence for
+    // it, and §6.4 keeps DuckDB's own reason in the log.
+    const layer = layerWith({ B1: ["2.2"] });
+    const { ctx, warnings } = context(layer, [
+      { ok: true, columns: ["id", "f"], rows: [{ id: "B1", f: "B1" }] },
+      { ok: false, message: "Invalid Input Error: Malformed JSON in file" },
+    ]);
+    await expect(measureSolids(run(), ctx as never)).rejects.toThrow(
+      SOURCE_READ_FAILED,
+    );
+    expect(warnings).toEqual(["Invalid Input Error: Malformed JSON in file"]);
+    expect(release).toHaveBeenCalled();
+  });
+
+  it("lets an error that is OUR SQL's fault travel as itself", async () => {
+    // A Binder Error is this app's statement being wrong. "Could not re-read
+    // the source (network or decompression error)" would send the user to
+    // check their connection over a bug in the app.
+    const layer = layerWith({ B1: ["2.2"] });
+    const { ctx, warnings } = context(layer, [
       { ok: true, columns: ["id", "f"], rows: [{ id: "B1", f: "B1" }] },
       { ok: false, message: "Binder Error: no such column" },
     ]);
     await expect(measureSolids(run(), ctx as never)).rejects.toThrow(
       /Binder Error/,
     );
+    expect(warnings).toEqual([]);
     expect(release).toHaveBeenCalled();
   });
 
@@ -4956,7 +5812,7 @@ Create `src/features/processing/tools/measureSolids.ts`:
  */
 import type { OutputColumn } from "../../../insights/computedColumns";
 import { geometryLodsByObject } from "../roofGeometrySource";
-import { SOURCE_IDS_DIFFER, readSource } from "../sourceRead";
+import { assertSourceIds, readSource, readerQuery } from "../sourceRead";
 import { solidColumns, solidParams, type SolidParams } from "../solidParams";
 import { buildScopeRowsSql, buildSolidMeasureSql } from "../solidSql";
 import {
@@ -5063,7 +5919,8 @@ export const measureSolids: ToolExecutor = async (run, ctx) => {
 
     const byId = new Map<string, SolidRow>();
     if (contributorIds.length > 0) {
-      const measured = await ctx.query(
+      const measured = await readerQuery(
+        ctx,
         "Measuring solids",
         buildSolidMeasureSql({
           from: handle.from,
@@ -5071,15 +5928,15 @@ export const measureSolids: ToolExecutor = async (run, ctx) => {
           ids: contributorIds,
         }),
       );
-      if (!measured.ok) throw new Error(measured.message);
-      // §6.1's id join, "the only check possible". A source that is now a
-      // DIFFERENT FILE matches nothing; a single absent row is the reader
-      // saying this object has no geometry here, and is counted as such.
-      if (measured.rows.length === 0) throw new Error(SOURCE_IDS_DIFFER);
       for (const row of measured.rows) {
         const solid = toSolidRow(row);
         byId.set(solid.id, solid);
       }
+      // §6.1's id join, "the only check possible", over EVERY contributor: the
+      // reader returns a row per object of the file, so an id that did not come
+      // back means the file no longer holds that object. Accepting a partial
+      // answer would write those features as "not a solid".
+      assertSourceIds(contributorIds, new Set(byId.keys()));
     }
     // The parse is done; a multi-megabyte buffer must not outlive it.
     await handle.release();
@@ -5224,14 +6081,14 @@ it("prints a caveat between the measured count and the skipped count", async () 
     caveats: [{ cause: "invalid solids (no volume)", count: 37 }],
   }));
   const id = submitRun(request());
-  await flush();
+  await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
   expect(runById(id)?.summary?.line).toMatch(
     /^1,115 buildings measured · 37 invalid solids \(no volume\) · 12 skipped · /,
   );
 });
 ```
 
-(Use the suite's own `request`/`flush` helpers.)
+(Use the suite's own `request` helper. There is no `flush()` in that suite — every case settles with `await vi.waitFor(() => expect(runById(id)?.status).toBe("done"))`.)
 
 - [ ] **Step 6: Wire the executor**
 
@@ -5282,7 +6139,7 @@ git commit -m "feat: Measure solids computes volume, envelope, footprint and hei
 **Files:**
 
 - Create: `src/ui/processing/SolidParams.tsx`
-- Modify: `src/features/processing/toolRegistry.ts` (`implemented: true`), `src/ui/processing/useLodOptions.ts`, `src/ui/processing/ToolView.tsx`
+- Modify: `src/features/processing/toolRegistry.ts` (`implemented: true`), `src/ui/processing/useLodOptions.ts`, `src/ui/processing/ToolView.tsx`, and the two suites that used `measure-solids` AS their unimplemented example: `tests/unit/features/processing/eligibility.test.ts` and `tests/unit/ui/processing/lodSelect.test.tsx` (Step 5, same commit)
 - Test: `tests/unit/ui/processing/SolidParams.test.tsx`, `tests/unit/ui/processing/solidsEnabled.test.tsx`
 
 **Interfaces:**
@@ -5293,6 +6150,10 @@ git commit -m "feat: Measure solids computes volume, envelope, footprint and hei
 **The noun is §6 VERBATIM, not an adapted string.** §6's option pattern is spelled out in full there: `"2.2 (1,115 buildings with a solid)"`. `ToolView` renders `` `${lod} (${plural(features, "building", "buildings")} ${noun})` ``, so the noun is `with a solid` and the rendered option is §6's own sentence. (The plan's adapted-copy proposal A1 asked for exactly this; the spec already carries it, so no owner answer gates it.)
 
 **The flip and the hook are ONE commit.** `ToolView` renders the LoD field on `needsLod && implemented` (`ToolView.tsx:136`), so `implemented: true` without the `useLodOptions` branch shows an empty, disabled select with a `null` reason in it — a control that claims nothing and blocks nothing. This is the M2 ledger's binding rule and the single thing a reviewer can reject here without rejecting any of the machinery.
+
+**The flip also takes TWO existing tests with it, in the same commit.** Both use `measure-solids` as their stand-in for "an unimplemented tool", and both start asserting the opposite of the truth the moment it ships: `eligibility.test.ts`'s "rejects an unimplemented tool with the release note" (which expects `{ ok: false, reason: "Not available yet" }` for it) and `lodSelect.test.tsx`'s "does not offer a LoD, or any geometry verdict, for an UNIMPLEMENTED tool" (which expects no LoD combobox and the text "Not available yet"). The INVARIANT they protect is real and must survive — §6's rule that an unimplemented tool claims no fact about the user's data — so neither is deleted. Both move to an **explicitly unimplemented tool definition**, `{ ...toolById("measure-solids"), implemented: false }`, which is a fact the test states itself rather than borrowing from the registry. That also settles Task 10: retargeting them at `validate-solids` would buy one task's grace and then need doing again, because after Task 10 every `needsLod` tool in the registry is implemented.
+
+Step 5 does both edits; `lodSelect`'s needs the hook rather than the view, because `ToolView` reads the registry by id and a hand-made definition cannot reach it through `toolId`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -5785,11 +6646,11 @@ In `src/ui/processing/ToolView.tsx`, add the import beside `RoofMetricsParams`:
 import { SolidParams } from "./SolidParams";
 ```
 
-and after the `roof-metrics` PARAMETERS block, add:
+and after the `roof-metrics` PARAMETERS block, add the `{…}` block below — the `<>` and `</>` are only there to keep the snippet valid on its own (a bare `{…}` in a code fence is a BLOCK statement, and the formatter rewrites it into one with a stray `;` inside the JSX). They are not part of the edit:
 
 ```tsx
-{
-  toolId === "measure-solids" && (
+<>
+  {toolId === "measure-solids" && (
     <fieldset className="processing-section" disabled={locked}>
       <legend className="processing-group__label">PARAMETERS</legend>
       <SolidParams
@@ -5802,8 +6663,8 @@ and after the `roof-metrics` PARAMETERS block, add:
         </p>
       )}
     </fieldset>
-  );
-}
+  )}
+</>
 ```
 
 In `src/features/processing/toolRegistry.ts`, in the `measure-solids` entry, replace the `implemented: false` line and the comment above it with:
@@ -5812,7 +6673,57 @@ In `src/features/processing/toolRegistry.ts`, in the `measure-solids` entry, rep
     implemented: true,
 ```
 
-- [ ] **Step 6: Run to pass, and verify the control in a browser**
+- [ ] **Step 6: Move the unimplemented-tool invariant onto a definition that says so**
+
+In `tests/unit/features/processing/eligibility.test.ts`, replace the "rejects an unimplemented tool with the release note" case:
+
+```ts
+it("rejects an unimplemented tool with the release note", () => {
+  // The tool is unimplemented BY DECLARATION, not by whichever registry entry
+  // has not shipped yet — Measure solids ships in this commit, and the rule
+  // §6 states ("a tool whose executor has not shipped claims no fact about
+  // the user's data") outlives every one of them.
+  const tool = { ...toolById("measure-solids"), implemented: false };
+  expect(toolEligibility(tool, base)).toEqual({
+    ok: false,
+    reason: "Not available yet",
+  });
+});
+```
+
+In `tests/unit/ui/processing/lodSelect.test.tsx`, the case "does not offer a LoD, or any geometry verdict, for an UNIMPLEMENTED tool" drives `<ToolView toolId="measure-solids" />`, which reads the registry by id and so cannot be handed a definition. Replace it with a hook-level case that can, keeping the view-level half that is still true (Measure solids is implemented now, so the honest view-level assertion moves into `solidsEnabled.test.tsx`, where Step 1 already made it). Add `renderHook` to the `@testing-library/react` import and
+
+```ts
+const { useLodOptions } =
+  await import("../../../../src/ui/processing/useLodOptions");
+const { toolById } =
+  await import("../../../../src/features/processing/toolRegistry");
+```
+
+beside the suite's other dynamic imports, then:
+
+```tsx
+it("answers NOTHING for an unimplemented tool, whatever the layer holds", () => {
+  // §6: a tool whose executor has not shipped has no source of truthful
+  // counts, so printing "No solid geometry in this layer" over a layer full
+  // of solids would be a verdict the app never reached. Stated on a
+  // definition that declares itself unimplemented, so the invariant survives
+  // every tool in the registry shipping.
+  addRoofLayer();
+  const target = useLayerStore.getState().layers[0]!;
+  const tool = { ...toolById("measure-solids"), implemented: false };
+  const { result } = renderHook(() => useLodOptions(tool, target));
+  expect(result.current).toEqual({
+    options: [],
+    noun: "",
+    emptyReason: null,
+  });
+});
+```
+
+(`addRoofLayer` and `useLayerStore` are the suite's own; the roof layer is used because it is the one it already stands up — the point is that a real layer with real geometry still gets nothing.)
+
+- [ ] **Step 7: Run to pass, and verify the control in a browser**
 
 ```bash
 export PATH="$HOME/.local/share/mise/shims:$PATH"
@@ -5825,13 +6736,15 @@ Expected: PASS, and `vp check` still 0 errors / 56 warnings.
 
 Then, per the UI consistency rule, check the new checkbox group against its peer in a real browser: `npm run dev`, open Tools → Measure solids, and compare the six checkboxes against Roof metrics' six — same 8 px radius, same row spacing, same focus ring (they share `.processing-checks`, so a difference means a token was bypassed).
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add src/ui/processing/SolidParams.tsx src/ui/processing/useLodOptions.ts \
   src/ui/processing/ToolView.tsx src/features/processing/toolRegistry.ts \
   tests/unit/ui/processing/SolidParams.test.tsx \
-  tests/unit/ui/processing/solidsEnabled.test.tsx
+  tests/unit/ui/processing/solidsEnabled.test.tsx \
+  tests/unit/features/processing/eligibility.test.ts \
+  tests/unit/ui/processing/lodSelect.test.tsx
 git commit -m "feat: switch Measure solids on"
 ```
 
@@ -5841,8 +6754,8 @@ git commit -m "feat: switch Measure solids on"
 
 **Files:**
 
-- Modify: `src/features/processing/types.ts` (`StyleValueSource`, `StyleByResult` incl. the two function-union fields, `resolveStyleOperator`, `resolveStyleValueSource`, `ToolDefinition.styleByResult`, `RunSummary.nonNullByColumn`), `src/features/processing/toolRegistry.ts` (a descriptor on all seven), `src/features/processing/runQueue.ts` (`summarise` counts every column), `src/ui/processing/RunFooter.tsx`, `src/insights/sql.ts` (`buildMostFrequentSql`)
-- Test: `tests/unit/ui/processing/styleByResult.test.tsx`, additions to `tests/unit/insights/sql.test.ts`
+- Modify: `src/features/processing/types.ts` (`StyleValueSource`, `StyleByResult` incl. the two function-union fields, `resolveStyleOperator`, `resolveStyleValueSource`, `ToolDefinition.styleByResult`, `RunSummary.nonNullByColumn`), `src/features/processing/toolRegistry.ts` (a descriptor on all seven), `src/features/processing/runQueue.ts` (`summarise` counts every column), `src/ui/processing/RunFooter.tsx`, `src/insights/sql.ts` (`buildMostFrequentSql`, and the CAST inside `buildMedianSql`)
+- Test: `tests/unit/ui/processing/styleByResult.test.tsx`, additions to `tests/unit/insights/sqlQuery.test.ts` (where `buildMedianSql`'s cases already are — there is **no** `tests/unit/insights/sql.test.ts`), one case appended to `tests/unit/ui/layers/RulesEditor.test.tsx`, and one appended to `tests/integration/duckdb/computedColumns.test.ts` (which already imports `buildMedianSql` and runs it against a real table, `:577`)
 
 **Interfaces:**
 
@@ -5896,7 +6809,10 @@ export function resolveStyleValueSource(
     : descriptor.value;
 }
 // ToolDefinition gains:  styleByResult: StyleByResult | null   (required on all seven)
+// RunSummary:            firstColumnNonNull: number  BECOMES
+//                        nonNullByColumn: Readonly<Record<string, number>>
 // sql.ts gains:          buildMostFrequentSql(table, column): string
+// sql.ts changes:        buildMedianSql casts to DOUBLE (the M2 DECIMAL trap)
 ```
 
 `RunFooter` reads the descriptor; `run.columns[0]` becomes `tool.styleByResult.pick(written)`. No `toolId` may remain in `RunFooter`.
@@ -5907,7 +6823,36 @@ export function resolveStyleValueSource(
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `tests/unit/insights/sql.test.ts`:
+In `tests/unit/insights/sqlQuery.test.ts` — the suite that already owns `buildMedianSql`'s cases — first REPLACE the two existing `buildMedianSql` expectations with the cast form (the front matter's "`median` must CAST to DOUBLE", never implemented until now):
+
+```ts
+describe("buildMedianSql", () => {
+  it("casts to DOUBLE, and takes the median over the ROOT rows only", () => {
+    // The M2 DECIMAL trap. `median()` over a DECIMAL column answers with a
+    // DECIMAL, which arrives in JS as an OBJECT — `typeof value === "number"`
+    // in `RunFooter` is then false and §6.2's Style by result reports "All
+    // values are empty" over a column full of numbers. Every computed column
+    // this app writes is DOUBLE today, but a JOINED column (§7.5) copies the
+    // source's own type, so the cast is the difference between a working
+    // button and a silent one.
+    //
+    // Root rows only for the reason it always was: a run copies its value onto
+    // the root AND its parts (§7.3), so a median over every row weights each
+    // building by how many parts it happens to have modelled.
+    expect(buildMedianSql("layer_1", "extent_height_m")).toBe(
+      'SELECT median(CAST("extent_height_m" AS DOUBLE)) AS m FROM "layer_1" WHERE "feature_id" IS NULL OR "feature_id" = "id"',
+    );
+  });
+
+  it("quotes a column whose name would otherwise end the identifier", () => {
+    expect(buildMedianSql("layer_1", 'roof"area')).toBe(
+      'SELECT median(CAST("roof""area" AS DOUBLE)) AS m FROM "layer_1" WHERE "feature_id" IS NULL OR "feature_id" = "id"',
+    );
+  });
+});
+```
+
+and then append:
 
 ```ts
 describe("buildMostFrequentSql", () => {
@@ -5928,6 +6873,30 @@ describe("buildMostFrequentSql", () => {
 });
 ```
 
+And append to `tests/integration/duckdb/computedColumns.test.ts`, inside the same `describe` as its existing `buildMedianSql` case (`:543-580`), which already imports the builder and runs it against a real table:
+
+```ts
+it("reads a DECIMAL column back as a NUMBER through buildMedianSql", () => {
+  // The M2 DECIMAL trap, against the real engine and through the BUILDER —
+  // not through a hand-written `median(CAST(...))`, which would pass while the
+  // builder went on emitting the uncast form. A joined column (§7.5) carries
+  // the source's own type, and DuckDB hands a DECIMAL to JS as an object.
+  const TABLE = "layer_cc5";
+  db.query(
+    `CREATE OR REPLACE TABLE ${quoteIdent(TABLE)} AS
+       SELECT "id", "feature_id", CAST("v" AS DECIMAL(18, 3)) AS "zones_rate"
+       FROM (VALUES
+         ('b1', 'b1', 1.5),
+         ('b2', 'b2', 2.5),
+         ('b3', 'b3', 9.5)
+       ) AS t("id", "feature_id", "v")`,
+  );
+  const rows = db.query(buildMedianSql(TABLE, "zones_rate"));
+  expect(typeof rows[0]?.["m"]).toBe("number");
+  expect(Number(rows[0]?.["m"])).toBeCloseTo(2.5, 6);
+});
+```
+
 Create `tests/unit/ui/processing/styleByResult.test.tsx`:
 
 ```tsx
@@ -5935,11 +6904,21 @@ Create `tests/unit/ui/processing/styleByResult.test.tsx`:
  * §6.2's "Style by result", through ONE descriptor on the tool definition.
  *
  * What is asserted is the DRAFT the button produces — attribute, operator,
- * value — for each of the three value sources, plus the two reasons the button
- * is disabled and the one case where it is absent. The rule editor and the
- * evaluator are then exercised on the boolean draft, because a BOOLEAN `=` rule
- * is the shape Validate solids needs and nothing in the app has produced one
- * before.
+ * value — plus the two reasons the button is disabled, the one case where it is
+ * absent, and the descriptors themselves.
+ *
+ * EVERY CASE SEEDS ITS RUN INTO THE PROCESSING STORE. The click handler
+ * re-reads the run by id before it writes a draft (§7: a run that went stale or
+ * was undone while the read was in flight no longer describes the column the
+ * value came from), so a record that exists only as a prop is a run that
+ * `runById` cannot find and the draft is never written.
+ *
+ * THE `mostFrequent` PATH IS NOT EXERCISED THROUGH THE FOOTER HERE. Its only
+ * descriptor is Join's, whose `pick` looks for a VARCHAR column, and a column's
+ * TYPE is reproduced from `tool.outputColumns` — which Join does not have until
+ * Task 15 embeds its `fieldTypes`. So this file pins Join's descriptor
+ * DIRECTLY (the `pick` and the resolvers, over columns it types itself) and
+ * Task 16, where Join ships, adds the end-to-end footer case.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -5951,11 +6930,23 @@ import {
 } from "@testing-library/react";
 import type { RunRecord } from "../../../../src/features/processing/types";
 
-const runQuery = vi.fn(async () => ({
+/**
+ * Every statement the footer's value read issued, in order. The cases read THIS
+ * rather than `runQuery.mock.calls[0]?.[0]`: a zero-parameter `vi.fn` types its
+ * call tuple as `[]`, so the indexed read is `undefined` and the assertion
+ * cannot compile. Declaring the parameter and using it also keeps
+ * `no-unused-vars: error` happy.
+ */
+const statements: string[] = [];
+const MEDIAN_ROWS = () => ({
   ok: true as const,
   columns: ["m"],
   rows: [{ m: 4.2 } as Record<string, unknown>],
-}));
+});
+const runQuery = vi.fn(async (sql: string) => {
+  statements.push(sql);
+  return MEDIAN_ROWS();
+});
 vi.mock("../../../../src/insights/duckdb", () => ({
   runQuery,
   ddl: vi.fn(async () => ({ ok: false, message: "no engine" })),
@@ -5997,7 +6988,12 @@ const { useLayerTableStore } =
   await import("../../../../src/insights/layerTables");
 const { useRuleDraftStore } =
   await import("../../../../src/features/rules/ruleDraftStore");
-const { evaluateRule } = await import("@cityjson/navara-core");
+const { useProcessingStore } =
+  await import("../../../../src/features/processing/processingStore");
+const { toolById } =
+  await import("../../../../src/features/processing/toolRegistry");
+const { resolveStyleOperator, resolveStyleValueSource } =
+  await import("../../../../src/features/processing/types");
 
 function addLayer(): string {
   const id = useLayerStore.getState().addLayer({
@@ -6085,17 +7081,31 @@ function doneRun(over: Partial<RunRecord>): RunRecord {
   } as RunRecord;
 }
 
+/**
+ * The record, IN THE STORE and handed back for the prop.
+ *
+ * The click handler re-reads the run by id before it writes a draft (§7: a
+ * stale or undone run no longer describes the column the value came from), so a
+ * record that lives only as a prop is one `runById` cannot find — and every
+ * case below would silently assert an empty draft store.
+ */
+function seed(run: RunRecord): RunRecord {
+  useProcessingStore.setState({ runs: [run] });
+  return run;
+}
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
-  runQuery.mockImplementation(async () => ({
-    ok: true as const,
-    columns: ["m"],
-    rows: [{ m: 4.2 } as Record<string, unknown>],
-  }));
+  statements.length = 0;
+  runQuery.mockImplementation(async (sql: string) => {
+    statements.push(sql);
+    return MEDIAN_ROWS();
+  });
   useLayerStore.getState().removeAllLayers();
   useLayerTableStore.setState({ tables: {} });
   useRuleDraftStore.setState({ drafts: {} });
+  useProcessingStore.getState().resetForTest();
 });
 
 describe("Style by result, from the descriptor", () => {
@@ -6103,7 +7113,7 @@ describe("Style by result, from the descriptor", () => {
     const id = addLayer();
     render(
       <RunFooter
-        run={doneRun({ targetLayerId: id })}
+        run={seed(doneRun({ targetLayerId: id }))}
         canRun
         reason={null}
         onRunAgain={() => {}}
@@ -6125,15 +7135,17 @@ describe("Style by result, from the descriptor", () => {
     const id = addLayer();
     render(
       <RunFooter
-        run={doneRun({
-          targetLayerId: id,
-          params: { measures: ["footprint"] },
-          columns: ["solid_footprint_m2", "solid_valid"],
-          summary: {
-            ...doneRun({}).summary!,
-            nonNullByColumn: { solid_footprint_m2: 2, solid_valid: 2 },
-          },
-        })}
+        run={seed(
+          doneRun({
+            targetLayerId: id,
+            params: { measures: ["footprint"] },
+            columns: ["solid_footprint_m2", "solid_valid"],
+            summary: {
+              ...doneRun({}).summary!,
+              nonNullByColumn: { solid_footprint_m2: 2, solid_valid: 2 },
+            },
+          }),
+        )}
         canRun
         reason={null}
         onRunAgain={() => {}}
@@ -6147,32 +7159,36 @@ describe("Style by result, from the descriptor", () => {
     });
   });
 
-  it("needs no query for a LITERAL value, and the boolean draft evaluates", async () => {
+  it("needs no query for a LITERAL value, and writes a BOOLEAN condition", async () => {
     // §7.3's descriptor: `solid_valid = false`. The value is not read from the
-    // data, so no round trip happens at all — and the rule the draft carries is
-    // one the evaluator honours, which is the fact nothing in the app has
-    // produced before.
+    // data, so no round trip happens at all, and the condition carries the
+    // BOOLEAN `false` — not the string "false", which `evaluateCondition`'s
+    // strict `===` would never match. The editor's own Save path for this
+    // draft is pinned in `RulesEditor.test.tsx` (Step 1b), where the editor
+    // already has a harness.
     const id = addLayer();
     render(
       <RunFooter
-        run={doneRun({
-          targetLayerId: id,
-          toolId: "validate-solids",
-          params: {},
-          columns: [
-            "solid_closed",
-            "solid_manifold",
-            "solid_oriented",
-            "solid_valid",
-            "solid_open_edges_n",
-            "solid_nonmanifold_edges_n",
-            "solid_degenerate_faces_n",
-          ],
-          summary: {
-            ...doneRun({}).summary!,
-            nonNullByColumn: { solid_valid: 2 },
-          },
-        })}
+        run={seed(
+          doneRun({
+            targetLayerId: id,
+            toolId: "validate-solids",
+            params: {},
+            columns: [
+              "solid_closed",
+              "solid_manifold",
+              "solid_oriented",
+              "solid_valid",
+              "solid_open_edges_n",
+              "solid_nonmanifold_edges_n",
+              "solid_degenerate_faces_n",
+            ],
+            summary: {
+              ...doneRun({}).summary!,
+              nonNullByColumn: { solid_valid: 2 },
+            },
+          }),
+        )}
         canRun
         reason={null}
         onRunAgain={() => {}}
@@ -6185,61 +7201,40 @@ describe("Style by result, from the descriptor", () => {
       );
     });
     expect(runQuery).not.toHaveBeenCalled();
-    const form = useRuleDraftStore.getState().drafts[id]?.form;
-    const rule = {
-      id: "r1",
-      name: form!.name,
-      color: form!.color,
-      logic: form!.logic,
-      conditions: form!.conditions,
-      enabled: true,
-    };
-    expect(evaluateRule(rule as never, { solid_valid: false } as never)).toBe(
-      true,
-    );
-    expect(evaluateRule(rule as never, { solid_valid: true } as never)).toBe(
-      false,
-    );
+    expect(
+      typeof useRuleDraftStore.getState().drafts[id]?.form?.conditions?.[0]
+        ?.value,
+    ).toBe("boolean");
   });
 
-  it("reads the MOST FREQUENT value for a text column", async () => {
-    runQuery.mockImplementation(async () => ({
-      ok: true as const,
-      columns: ["m"],
-      rows: [{ m: "Centrum" } as Record<string, unknown>],
-    }));
-    const id = addLayer();
-    render(
-      <RunFooter
-        run={doneRun({
-          targetLayerId: id,
-          toolId: "join-by-location",
-          prefix: "zones_",
-          params: {
-            fields: ["name"],
-            tie: "first",
-            writeMatchCount: false,
-            proxy: "centre",
-            predicate: "intersects",
-          },
-          columns: ["zones_name"],
-          summary: {
-            ...doneRun({}).summary!,
-            nonNullByColumn: { zones_name: 2 },
-          },
-        })}
-        canRun
-        reason={null}
-        onRunAgain={() => {}}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
-    await waitFor(() => {
-      expect(useRuleDraftStore.getState().drafts[id]?.form?.conditions).toEqual(
-        [{ field: "zones_name", operator: "=", value: "Centrum" }],
-      );
+  it("reads §7.5's descriptor DIRECTLY: the first copied TEXT field, most frequent", () => {
+    // Join's descriptor, without the footer. Its `pick` looks for a VARCHAR,
+    // and a written column's TYPE is reproduced from `tool.outputColumns` —
+    // which Join does not have until Task 15 embeds its `fieldTypes`. So the
+    // columns are typed HERE, and Task 16, where Join ships, adds the footer
+    // case that presses the button and reads `mode(` off the statement.
+    const descriptor = toolById("join-by-location").styleByResult!;
+    const text = { name: "zones_name", type: "VARCHAR" as const };
+    const count = { name: "zones_matches_n", type: "DOUBLE" as const };
+
+    expect(descriptor.pick([text, count])).toEqual(text);
+    expect(resolveStyleOperator(descriptor, text)).toBe("=");
+    expect(resolveStyleValueSource(descriptor, text)).toEqual({
+      kind: "mostFrequent",
     });
-    expect(String(runQuery.mock.calls[0]?.[0])).toContain("mode(");
+    // No text field copied: nothing to style by YET. §7.5's other half
+    // (`<prefix>matches_n > 0`, which is what the operator/value FUNCTION
+    // unions exist for) is Task 16's, with the tool that ships it.
+    expect(descriptor.pick([count])).toBeNull();
+  });
+
+  it("resolves a PLAIN descriptor's operator and value as they are", () => {
+    // The five tools that need one answer pass it plainly, and the resolvers
+    // must hand those straight back — `RunFooter` has no branch of its own.
+    const solids = toolById("measure-solids").styleByResult!;
+    const column = { name: "solid_volume_m3", type: "DOUBLE" as const };
+    expect(resolveStyleOperator(solids, column)).toBe(">");
+    expect(resolveStyleValueSource(solids, column)).toEqual({ kind: "median" });
   });
 
   it("disables the button with §6.2's reason when the CHOSEN column is empty", () => {
@@ -6248,13 +7243,15 @@ describe("Style by result, from the descriptor", () => {
     const id = addLayer();
     render(
       <RunFooter
-        run={doneRun({
-          targetLayerId: id,
-          summary: {
-            ...doneRun({}).summary!,
-            nonNullByColumn: { solid_volume_m3: 0, solid_envelope_m2: 2 },
-          },
-        })}
+        run={seed(
+          doneRun({
+            targetLayerId: id,
+            summary: {
+              ...doneRun({}).summary!,
+              nonNullByColumn: { solid_volume_m3: 0, solid_envelope_m2: 2 },
+            },
+          }),
+        )}
         canRun
         reason={null}
         onRunAgain={() => {}}
@@ -6271,20 +7268,22 @@ describe("Style by result, from the descriptor", () => {
     const id = addLayer();
     render(
       <RunFooter
-        run={doneRun({
-          targetLayerId: id,
-          toolId: "join-by-location",
-          prefix: "zones_",
-          params: {
-            fields: [],
-            tie: "countOnly",
-            writeMatchCount: true,
-            proxy: "centre",
-            predicate: "intersects",
-          },
-          columns: [],
-          summary: { ...doneRun({}).summary!, nonNullByColumn: {} },
-        })}
+        run={seed(
+          doneRun({
+            targetLayerId: id,
+            toolId: "join-by-location",
+            prefix: "zones_",
+            params: {
+              fields: [],
+              tie: "countOnly",
+              writeMatchCount: true,
+              proxy: "centre",
+              predicate: "intersects",
+            },
+            columns: [],
+            summary: { ...doneRun({}).summary!, nonNullByColumn: {} },
+          }),
+        )}
         canRun
         reason={null}
         onRunAgain={() => {}}
@@ -6297,14 +7296,105 @@ describe("Style by result, from the descriptor", () => {
 });
 ```
 
+- [ ] **Step 1b: Pin the editor's BOOLEAN Save path where the editor has a harness**
+
+§7.3's draft is the first BOOLEAN `=` rule anything in this app has produced, and the front matter's design decision (e) says Task 9 pins that rather than assuming it. The assertion belongs in `tests/unit/ui/layers/RulesEditor.test.tsx`, which already stands the editor up (`render(<RulesEditor model={emptyModel()} layerId="A" />)`, layers "A" and "B" in its `beforeEach`, the draft store cleared in its `afterEach`, and Save spelled **"Add"** for a new rule). Append to its draft `describe`:
+
+```tsx
+it("saves a BOOLEAN condition from a draft as a boolean, and it evaluates", () => {
+  // The draft §6.2's Style by result writes for Validate solids
+  // (`solid_valid = false`). The value must survive Save as a BOOLEAN:
+  // `evaluateCondition` compares `=` with a strict `===`, so the string
+  // "false" would match nothing and the map would simply not change.
+  //
+  // The layer is set up the way a RUN leaves it, not the way the shortest
+  // test would: `runQueue` merges the values onto the objects (so
+  // `collectAttributeFields` finds the column) and registers the provenance
+  // (so it renders in the editor's COMPUTED optgroup). The condition's field
+  // is then an option the select actually offers, which is the path
+  // production takes — a controlled select whose value is in none of its
+  // options renders with nothing chosen.
+  useLayerStore.setState({
+    layers: [
+      baseLayer({
+        id: "A",
+        name: "Delft",
+        model: {
+          ...emptyModel(),
+          objects: {
+            b1: {
+              id: "b1",
+              objectType: "Building",
+              attributes: { solid_valid: false },
+              surfaces: [],
+              bbox: null,
+              children: [],
+              parents: [],
+              lod: null,
+            },
+          },
+        } as unknown as CityModel,
+      }),
+      baseLayer({ id: "B", name: "Rotterdam" }),
+    ],
+  });
+  useComputedColumnStore.getState().setProvenance("A", "solid_valid", {
+    runId: "run_1",
+    toolName: "Validate solids",
+    summary: "1 valid",
+    at: 0,
+    partial: null,
+    previous: null,
+  });
+  useRuleDraftStore.getState().setDraft("A", {
+    editingId: null,
+    open: true,
+    form: {
+      name: "solid_valid",
+      color: NEW_RULE_COLOR_HEX,
+      logic: "AND",
+      conditions: [{ field: "solid_valid", operator: "=", value: false }],
+    },
+  });
+  const model = useLayerStore
+    .getState()
+    .layers.find((l) => l.id === "A")!.model;
+  render(<RulesEditor model={model} layerId="A" />);
+  // The select offers the column, in its own COMPUTED group (spec §8).
+  expect(screen.getByRole("combobox", { name: "Attribute" })).toHaveValue(
+    "solid_valid",
+  );
+  fireEvent.click(screen.getByText("Add"));
+
+  const rule = useLayerStore.getState().layers.find((l) => l.id === "A")!
+    .rules[0]!;
+  expect(rule.conditions).toEqual([
+    { field: "solid_valid", operator: "=", value: false },
+  ]);
+  // `evaluateRule(attributes, metrics, rule)` — attributes FIRST.
+  const metrics = {
+    areaSqM: 0,
+    inclinationDeg: 0,
+    azimuthDeg: 0,
+    elevationM: 0,
+  };
+  expect(evaluateRule({ solid_valid: false }, metrics, rule)).toBe(true);
+  expect(evaluateRule({ solid_valid: true }, metrics, rule)).toBe(false);
+});
+```
+
+with `import { evaluateRule } from "@cityjson/navara-core";` added to that file's imports (`NEW_RULE_COLOR_HEX`, `useRuleDraftStore`, `useLayerStore`, `useComputedColumnStore`, `CityModel`, `baseLayer` and `emptyModel` are all already there, and its `afterEach` already clears both stores).
+
 - [ ] **Step 2: Run and watch it fail**
 
 ```bash
 export PATH="$HOME/.local/share/mise/shims:$PATH"
-npx vitest run tests/unit/insights/sql.test.ts tests/unit/ui/processing/styleByResult.test.tsx
+npx vitest run tests/unit/insights/sqlQuery.test.ts \
+  tests/unit/ui/processing/styleByResult.test.tsx \
+  tests/unit/ui/layers/RulesEditor.test.tsx
 ```
 
-Expected: FAIL — `buildMostFrequentSql` and `ToolDefinition.styleByResult` do not exist, and `RunSummary` has `firstColumnNonNull`.
+Expected: FAIL — `buildMostFrequentSql` and `ToolDefinition.styleByResult` do not exist, `buildMedianSql` emits the uncast form, and `RunSummary` has `firstColumnNonNull`.
 
 - [ ] **Step 3: Declare the descriptor**
 
@@ -6475,9 +7565,23 @@ grep -rn "firstColumnNonNull" src/ tests/
 
 Every remaining hit is a test fixture's summary literal; replace `firstColumnNonNull: N` with `nonNullByColumn: { <the column>: N }`.
 
-- [ ] **Step 5: Add the modal-value builder**
+- [ ] **Step 5: Cast the median, and add the modal-value builder**
 
-In `src/insights/sql.ts`, immediately after `buildMedianSql`:
+In `src/insights/sql.ts`, replace `buildMedianSql`'s body (`:438-439`) — its doc comment's root-row paragraph stays exactly as it is:
+
+```ts
+export function buildMedianSql(table: string, column: string): string {
+  // CAST to DOUBLE, always. `median()` over a DECIMAL column answers with a
+  // DECIMAL, which reaches JS as an OBJECT — `typeof value === "number"` in
+  // `RunFooter` is then false, and §6.2's Style by result reports "All values
+  // are empty" over a column full of numbers. Every column the tools write
+  // today is DOUBLE, but §7.5's Join copies the SOURCE's own type, so this is
+  // the difference between a working button and a silently dead one.
+  return `SELECT median(CAST(${quoteIdent(column)} AS DOUBLE)) AS m FROM ${quoteIdent(table)} WHERE "feature_id" IS NULL OR "feature_id" = "id"`;
+}
+```
+
+and immediately after it:
 
 ```ts
 /**
@@ -6587,12 +7691,18 @@ In `src/ui/processing/RunFooter.tsx`, add the imports:
 
 ```ts
 import { toolById } from "../../features/processing/toolRegistry";
-import type { StyleByResult } from "../../features/processing/types";
+import {
+  resolveStyleOperator,
+  resolveStyleValueSource,
+  type StyleByResult,
+  type StyleValueSource,
+} from "../../features/processing/types";
+import { runById } from "../../features/processing/processingStore";
 import type { OutputColumn } from "../../insights/computedColumns";
 import { buildMedianSql, buildMostFrequentSql } from "../../insights/sql";
 ```
 
-(replacing the existing single-name `buildMedianSql` import), then replace `readMedian` with:
+(replacing the existing single-name `buildMedianSql` import; `useProcessingStore` is already imported from `processingStore`, so `runById` joins that line rather than adding a second one. The two resolvers are VALUES, not types — they are called below.) Then replace `readMedian` with:
 
 ```ts
 /**
@@ -6629,7 +7739,11 @@ function writtenColumns(run: RunRecord): ReadonlyArray<OutputColumn> {
 async function readStyleValue(
   layerId: string,
   column: string,
-  source: StyleByResult["value"],
+  // The RESOLVED source, never `StyleByResult["value"]` — that union includes
+  // a FUNCTION of the picked column (§7.5 needs two answers), and `.kind` does
+  // not exist on it. The caller resolves it with `resolveStyleValueSource`,
+  // which is the one place either function-union field is read.
+  source: StyleValueSource,
 ): Promise<
   QueryOutcome | null | { readonly literal: number | string | boolean }
 > {
@@ -6730,7 +7844,7 @@ useLayerStore.getState().updateLayer(layerId, { colorBy: "rules" });
 useShellStore.getState().requestSection(layerId, "style");
 ```
 
-(`runById` is imported from `../../features/processing/processingStore`. The eager `colorBy: "rules"` stays exactly where it is — moving it to the editor's Save is Task 26's change, and doing both at once would make one commit two bugs' worth of behaviour.)
+(The eager `colorBy: "rules"` stays exactly where it is — moving it to the editor's Save is Task 26's change, and doing both at once would make one commit two bugs' worth of behaviour.)
 
 In the `status === "done"` branch, replace:
 
@@ -6767,20 +7881,24 @@ and the two `styleColumn !== undefined` guards become `styleColumn !== null`, wi
 
 ```bash
 export PATH="$HOME/.local/share/mise/shims:$PATH"
-npx vitest run tests/unit/insights tests/unit/ui/processing tests/unit/features/processing
+npx vitest run tests/unit/insights tests/unit/ui/processing \
+  tests/unit/features/processing tests/unit/ui/layers/RulesEditor.test.tsx
 npx tsc -b --noEmit
 grep -rn "toolId ===" src/ui/processing/RunFooter.tsx
+DUCKDB_INTEGRATION=1 npx vitest run tests/integration/duckdb/computedColumns.test.ts
 ```
 
-Expected: PASS, and the last grep prints nothing — `RunFooter` no longer knows a tool by name.
+Expected: PASS, and the grep prints nothing — `RunFooter` no longer knows a tool by name.
 
 - [ ] **Step 9: Commit**
 
 ```bash
 git add src/features/processing/types.ts src/features/processing/toolRegistry.ts \
   src/features/processing/runQueue.ts src/ui/processing/RunFooter.tsx \
-  src/insights/sql.ts tests/unit/insights/sql.test.ts \
-  tests/unit/ui/processing/styleByResult.test.tsx
+  src/insights/sql.ts tests/unit/insights/sqlQuery.test.ts \
+  tests/unit/ui/processing/styleByResult.test.tsx \
+  tests/unit/ui/layers/RulesEditor.test.tsx \
+  tests/integration/duckdb/computedColumns.test.ts
 # plus the `firstColumnNonNull` → `nonNullByColumn` fixtures from Step 4:
 git add $(git diff --name-only -- tests/)
 git commit -m "refactor: Style by result reads one descriptor, not a branch per tool"
@@ -6794,11 +7912,11 @@ git commit -m "refactor: Style by result reads one descriptor, not a branch per 
 
 - Create: `src/features/processing/tools/validateSolids.ts`
 - Modify: `src/features/processing/toolRegistry.ts`, `src/features/processing/tools/register.ts`, `src/ui/processing/useLodOptions.ts`, `src/ui/processing/ToolView.tsx`, `tests/unit/features/processing/register.test.ts`
-- Test: `tests/unit/features/processing/validateSolids.test.ts`, plus two cases appended to `tests/unit/ui/processing/solidsEnabled.test.tsx`
+- Test: `tests/unit/features/processing/validateSolids.test.ts`, plus two cases appended to `tests/unit/ui/processing/solidsEnabled.test.tsx` and one to `tests/unit/features/processing/runQueue.test.ts` (the card §7.3 prints, through `summarise`, which that suite already imports)
 
 **Interfaces:**
 
-- Consumes: `validationColumns(prefix)`, `buildSolidValidationSql`, `buildScopeRowsSql` (Task 6), `readSource` + `SOURCE_IDS_DIFFER` (Task 5), `groupContributors` / `countsAsSkips` / the two skip causes (Task 7), `solidLodOptions` (Task 3), `StyleByResult` (Task 9).
+- Consumes: `validationColumns(prefix)`, `buildSolidValidationSql`, `buildScopeRowsSql` (Task 6), `readSource` + `assertSourceIds` + `readerQuery` (Task 5), `groupContributors` / `countsAsSkips` / the two skip causes (Task 7), `ToolResult.line` + `.caveats` (Task 7), `solidLodOptions` (Task 3), `StyleByResult` (Task 9).
 - Produces: `validateSolids: ToolExecutor`; the registry entry's `outputColumns`, its `styleByResult`
 
 ```ts
@@ -6812,6 +7930,8 @@ git commit -m "refactor: Style by result reads one descriptor, not a branch per 
 ```
 
 (already in place from Task 9), `implemented: true`, and the `useLodOptions` branch — **all in one commit**, since the tool has no parameters to stage.
+
+**§7.3's card line is `line`, not two caveats.** The spec's card is `"1,079 valid · 125 with issues"` — the VALID count is this tool's own first phrase, which is exactly what `ToolResult.line` exists for (Task 7 declares it for this case). Putting both halves in `caveats` and leaving `line` unset would print the default phrase first and read `"1,204 buildings measured · 1,079 valid · 125 with issues · 2.4 s"` — a card with three counts where the spec has two, and a "measured" count the spec never shows for this tool. So `line` is `"<valid> valid"` and the ONE caveat is `"with issues"`; `measured` still carries `valid + withIssues`, because that is what the provenance summary and §6.2's "N objects" are counted from.
 
 **`<prefix>valid` is INTERPOLATED, never the literal `solid_valid`.** The prefix is the user's (`defaultPrefix: "solid_"`, editable), so §7.3's names are `${prefix}closed` … `${prefix}degenerate_faces_n`. Task 9's `pick` matches `endsWith("valid")` for the same reason: the table's spelling wins over the typed one, so an exact interpolated match could miss a column whose case the table changed.
 
@@ -6866,6 +7986,8 @@ vi.mock("../../../../src/insights/duckdb", () => ({
   queryParquetBuffer: vi.fn(async () => null),
 }));
 
+const { SOURCE_IDS_DIFFER, SOURCE_READ_FAILED } =
+  await import("../../../../src/features/processing/sourceRead");
 const { validateSolids } =
   await import("../../../../src/features/processing/tools/validateSolids");
 
@@ -6938,22 +8060,32 @@ const TABLE = {
 function context(layer: Layer, answers: ReadonlyArray<QueryOutcome>) {
   let next = 0;
   const labels: string[] = [];
+  /** The SQL of each statement, in order — what the cases assert against. */
+  const statements: string[] = [];
+  const warnings: string[] = [];
   return {
     labels,
+    statements,
+    warnings,
     ctx: {
       table: TABLE,
       layer,
       featureIds: null,
       signal: new AbortController().signal,
-      query: vi.fn(async (label: string) => {
+      // BOTH parameters, and the SQL is KEPT: a one-parameter `vi.fn` infers
+      // the tuple `[label: string]`, so `ctx.query.mock.calls[1]?.[1]` is a
+      // type error — and an assertion over `String(undefined)` would pass
+      // against anything, including a statement that never ran.
+      query: vi.fn(async (label: string, sql: string) => {
         labels.push(label);
+        statements.push(sql);
         const answer = answers[next++];
         if (!answer) throw new Error(`unexpected query: ${label}`);
         if (!answer.ok) throw new Error(answer.message);
         return answer;
       }),
       phase: () => {},
-      warn: vi.fn(),
+      warn: (text: string) => warnings.push(text),
       throwIfCancelled: () => {},
     },
   };
@@ -7093,9 +8225,11 @@ describe("validateSolids", () => {
     ]);
   });
 
-  it("carries §7.3's card line as a caveat pair", async () => {
-    // §7.3: 'Card: "1,079 valid · 125 with issues"'. Both halves are FEATURES,
-    // and they sum to the measured count.
+  it("carries §7.3's card line: the valid count IS the line", async () => {
+    // §7.3: 'Card: "1,079 valid · 125 with issues"'. Two counts, not three —
+    // so the VALID half is the tool's own `line` and only "with issues" is a
+    // caveat. Both halves are FEATURES and they sum to `measured`, which is
+    // what the provenance summary counts from even though the card omits it.
     const layer = layerWith({ B1: ["2.2"], B2: ["2.2"], B3: ["2.2"] });
     const { ctx } = context(layer, [
       {
@@ -7123,10 +8257,8 @@ describe("validateSolids", () => {
     ]);
     const result = await validateSolids(run(), ctx as never);
     expect(result.measured).toBe(3);
-    expect(result.caveats).toEqual([
-      { cause: "valid", count: 2 },
-      { cause: "with issues", count: 1 },
-    ]);
+    expect(result.line).toBe("2 valid");
+    expect(result.caveats).toEqual([{ cause: "with issues", count: 1 }]);
   });
 
   it("omits an empty half of the card line", async () => {
@@ -7136,17 +8268,56 @@ describe("validateSolids", () => {
       { ok: true, columns: [], rows: [reportRow("B1", "B1")] },
     ]);
     const result = await validateSolids(run(), ctx as never);
-    expect(result.caveats).toEqual([{ cause: "valid", count: 1 }]);
+    expect(result.line).toBe("1 valid");
+    expect(result.caveats).toEqual([]);
   });
 
   it("never issues ST_3DVolume, and releases the bytes", async () => {
     const layer = layerWith({ B1: ["2.2"] });
-    const { ctx } = context(layer, [
+    const { ctx, statements } = context(layer, [
       { ok: true, columns: ["id", "f"], rows: [{ id: "B1", f: "B1" }] },
       { ok: true, columns: [], rows: [reportRow("B1", "B1")] },
     ]);
     await validateSolids(run(), ctx as never);
-    expect(String(ctx.query.mock.calls[1]?.[1])).not.toContain("ST_3DVolume");
+    // The REAL statement, not `String(undefined)` — which would satisfy
+    // `.not.toContain("ST_3DVolume")` even if no statement had run at all.
+    const sql = statements[1] ?? "";
+    expect(sql).toContain("ST_3DValidationReport");
+    expect(sql).toContain("r.is_closed AS closed");
+    expect(sql).not.toContain("ST_3DVolume");
+    expect(release).toHaveBeenCalled();
+  });
+
+  it("fails with §6.1's id sentence on a PARTIAL answer from the source", async () => {
+    // The same threshold as §7.2's: every contributor, not "no match at all".
+    const layer = layerWith({ B1: ["2.2"], B2: ["2.2"] });
+    const { ctx } = context(layer, [
+      {
+        ok: true,
+        columns: ["id", "f"],
+        rows: [
+          { id: "B1", f: "B1" },
+          { id: "B2", f: "B2" },
+        ],
+      },
+      { ok: true, columns: [], rows: [reportRow("B1", "B1")] },
+    ]);
+    await expect(validateSolids(run(), ctx as never)).rejects.toThrow(
+      SOURCE_IDS_DIFFER,
+    );
+    expect(release).toHaveBeenCalled();
+  });
+
+  it("gives a reader failure §6.1's own sentence, engine words to the log", async () => {
+    const layer = layerWith({ B1: ["2.2"] });
+    const { ctx, warnings } = context(layer, [
+      { ok: true, columns: ["id", "f"], rows: [{ id: "B1", f: "B1" }] },
+      { ok: false, message: "IO Error: Could not read from file" },
+    ]);
+    await expect(validateSolids(run(), ctx as never)).rejects.toThrow(
+      SOURCE_READ_FAILED,
+    );
+    expect(warnings).toEqual(["IO Error: Could not read from file"]);
     expect(release).toHaveBeenCalled();
   });
 
@@ -7156,6 +8327,30 @@ describe("validateSolids", () => {
       validateSolids(run({ lod: null }), ctx as never),
     ).rejects.toThrow("No solid geometry in this layer");
   });
+});
+```
+
+And append to `tests/unit/features/processing/runQueue.test.ts`, which already imports `summarise`, the card §7.3 actually prints:
+
+```ts
+it("prints a tool's OWN line in place of the measured count", async () => {
+  // §7.3's card, verbatim: "1,079 valid · 125 with issues". TWO counts, not
+  // three — the valid count IS the line, so the default "N buildings
+  // measured" phrase never appears for this tool.
+  expect(
+    summarise(
+      {
+        columns: [],
+        rows: new Map(),
+        measured: 1204,
+        skipped: [],
+        line: "1,079 valid",
+        caveats: [{ cause: "with issues", count: 125 }],
+      },
+      2400,
+      { streaming: false },
+    ).line,
+  ).toBe("1,079 valid · 125 with issues · 2.4 s");
 });
 ```
 
@@ -7225,7 +8420,7 @@ Create `src/features/processing/tools/validateSolids.ts`:
  */
 import type { OutputColumn } from "../../../insights/computedColumns";
 import { geometryLodsByObject } from "../roofGeometrySource";
-import { SOURCE_IDS_DIFFER, readSource } from "../sourceRead";
+import { assertSourceIds, readSource, readerQuery } from "../sourceRead";
 import { validationColumns } from "../solidParams";
 import { buildScopeRowsSql, buildSolidValidationSql } from "../solidSql";
 import {
@@ -7364,7 +8559,8 @@ export const validateSolids: ToolExecutor = async (run, ctx) => {
 
     const byId = new Map<string, ReportRow>();
     if (contributorIds.length > 0) {
-      const reported = await ctx.query(
+      const reported = await readerQuery(
+        ctx,
         "Validating solids",
         buildSolidValidationSql({
           from: handle.from,
@@ -7372,13 +8568,13 @@ export const validateSolids: ToolExecutor = async (run, ctx) => {
           ids: contributorIds,
         }),
       );
-      if (!reported.ok) throw new Error(reported.message);
-      // §6.1's id join: a source that is now a different file matches nothing.
-      if (reported.rows.length === 0) throw new Error(SOURCE_IDS_DIFFER);
       for (const row of reported.rows) {
         const report = toReportRow(row);
         byId.set(report.id, report);
       }
+      // §6.1's id join, over EVERY contributor — the same threshold Measure
+      // solids uses, because it is the same rule from the same module.
+      assertSourceIds(contributorIds, new Set(byId.keys()));
     }
     await handle.release();
     ctx.throwIfCancelled();
@@ -7434,17 +8630,24 @@ export const validateSolids: ToolExecutor = async (run, ctx) => {
     return {
       columns,
       rows: out,
+      // Every feature the run reached a verdict on. The CARD does not print
+      // it (§7.3's line is the valid count), but the provenance summary and
+      // §6.2's object count are taken from here.
       measured: valid + withIssues,
       skipped: countsAsSkips([
         [skipNoGeometry(lod), noGeometry],
         [SKIP_NOT_A_SOLID, notASolid],
       ]),
-      // §7.3's card: "1,079 valid · 125 with issues", rendered by `summarise`
-      // between the measured count and the skipped count.
-      caveats: countsAsSkips([
-        ["valid", valid],
-        ["with issues", withIssues],
-      ]),
+      // §7.3's card, verbatim: "1,079 valid · 125 with issues". TWO counts,
+      // so the valid half is this tool's OWN first phrase (`line`) and only
+      // the other half is a caveat — `summarise` prints `line`, then each
+      // caveat as "<count> <cause>", then the skipped count and the elapsed
+      // time. Both halves as caveats would print a third count in front of
+      // them that §7.3 never shows.
+      //
+      // Grouped like `summarise`'s own `fmt`, which is `toLocaleString`.
+      line: `${valid.toLocaleString("en-US")} valid`,
+      caveats: countsAsSkips([["with issues", withIssues]]),
     };
   } finally {
     await handle.release();
@@ -7508,22 +8711,22 @@ and replace with:
 
 - [ ] **Step 5: Give it a PARAMETERS section that is one note**
 
-In `src/ui/processing/ToolView.tsx`, after the `measure-solids` block:
+In `src/ui/processing/ToolView.tsx`, after the `measure-solids` block, insert the `{…}` block below — the `<>` and `</>` are only there to keep the snippet valid on its own (a bare `{…}` in a code fence is a BLOCK statement, and the formatter rewrites it into one with a stray `;` inside the JSX). They are not part of the edit:
 
 ```tsx
-{
-  toolId === "validate-solids" && (
+<>
+  {toolId === "validate-solids" && (
     <fieldset className="processing-section" disabled={locked}>
       <legend className="processing-group__label">PARAMETERS</legend>
       {/* §7.3 has no parameters. The section is still here, with the one
-              thing a user would otherwise look for: §6.2's Style by result
-              opens a rule on this column, so its name is worth stating. */}
+          thing a user would otherwise look for: §6.2's Style by result
+          opens a rule on this column, so its name is worth stating. */}
       <p className="processing-note">
         Validity is always written as &lt;prefix&gt;valid.
       </p>
     </fieldset>
-  );
-}
+  )}
+</>
 ```
 
 - [ ] **Step 6: Run to pass**
@@ -7545,6 +8748,7 @@ git add src/features/processing/tools/validateSolids.ts \
   src/ui/processing/useLodOptions.ts src/ui/processing/ToolView.tsx \
   tests/unit/features/processing/validateSolids.test.ts \
   tests/unit/features/processing/register.test.ts \
+  tests/unit/features/processing/runQueue.test.ts \
   tests/unit/ui/processing/solidsEnabled.test.tsx
 git commit -m "feat: Validate solids reports closed, manifold, oriented and the counts behind them"
 ```
@@ -7553,7 +8757,7 @@ git commit -m "feat: Validate solids reports closed, manifold, oriented and the 
 
 **Files:**
 
-- Modify: `src/features/processing/runQueue.ts`, `src/features/processing/types.ts`, `src/features/processing/eligibility.ts`, `src/features/processing/processingStore.ts` (read only — `ToolDraft` gains its fields in Task 15), `src/features/processing/scope.ts` (read only — no change), `src/ui/processing/useEligibilityContext.ts`, `src/ui/processing/useToolForm.ts` (the two `eligibilityContextFor` call sites), `src/ui/processing/RecentRuns.tsx` and `src/ui/processing/LogView.tsx` (**no production edit needed** — both already read `run.sourceName`; this task's commit adds the tests that the field finally arrives)
+- Modify: `src/features/processing/runQueue.ts`, `src/features/processing/types.ts`, `src/features/processing/eligibility.ts`, `src/features/geoLayers/geoLayerStore.ts` (one exported type alias — see Step 3), `src/features/processing/processingStore.ts` (read only — `ToolDraft` gains its fields in Task 15), `src/features/processing/scope.ts` (read only — no change), `src/ui/processing/useEligibilityContext.ts`, `src/ui/processing/useToolForm.ts` (the two `eligibilityContextFor` call sites), `src/ui/processing/RecentRuns.tsx` and `src/ui/processing/LogView.tsx` (**no production edit needed** — both already read `run.sourceName`; this task's commit adds the tests that the field finally arrives)
 - Test: `tests/unit/features/processing/crossLayerRun.test.ts`, additions to `tests/unit/features/processing/runQueue.test.ts` and `tests/unit/features/processing/eligibility.test.ts`, additions to `tests/unit/ui/processing/RecentRuns.test.tsx`
 
 **Interfaces:**
@@ -7562,18 +8766,23 @@ git commit -m "feat: Validate solids reports closed, manifold, oriented and the 
 - Produces:
 
 ```ts
+// src/features/geoLayers/geoLayerStore.ts — the union's geojson arm, named
+// once. Every cross-layer reader of a vector layer reads `config.preparedData`,
+// which only this arm has; the bare `GeoLayer` union does not typecheck there.
+export type GeoJsonLayer = Extract<GeoLayer, { kind: "geojson" }>;
+
 export type ToolTarget =
   | { readonly kind: "city"; readonly layer: Layer; readonly table: LayerTable }
   | {
       readonly kind: "vector";
-      readonly layer: GeoLayer;
+      readonly layer: GeoJsonLayer;
       readonly records: ReadonlyArray<GeoRecord>;
     };
 export type ToolSource =
   | { readonly kind: "city"; readonly layer: Layer; readonly table: LayerTable }
   | {
       readonly kind: "vector";
-      readonly layer: GeoLayer;
+      readonly layer: GeoJsonLayer;
       readonly table: string;
       readonly propertyKeys: ReadonlyArray<string>;
       /** The SOURCE's property types, as preflight inferred them — the ONE
@@ -7880,11 +9089,13 @@ beforeEach(() => {
   useGeoLayerStore.setState({ layers: [] });
   delete EXECUTORS["aggregate-per-area"];
   delete EXECUTORS["join-by-location"];
+  delete EXECUTORS["distance-to-nearest"];
 });
 
 afterEach(() => {
   delete EXECUTORS["aggregate-per-area"];
   delete EXECUTORS["join-by-location"];
+  delete EXECUTORS["distance-to-nearest"];
 });
 
 describe("a run that names a source layer", () => {
@@ -8172,6 +9383,23 @@ Expected: FAIL — `submitRun` does not accept `sourceLayerId` (a TypeScript err
 
 - [ ] **Step 3: `sourceKind` replaces `needsVectorSource`, and `ToolResult` gains its two card fields**
 
+In `src/features/geoLayers/geoLayerStore.ts`, name the union's geojson arm once, directly under the `GeoLayer` declaration (`:89-101`):
+
+```ts
+/**
+ * The union's GeoJSON arm.
+ *
+ * Every reader of a vector layer's CONTENT — the cross-layer run, the records
+ * panel, the export, the style controls — reads `config.preparedData`, which
+ * only this arm has; typing such a reader `GeoLayer` does not compile and casting
+ * it would be a lie the compiler cannot check. `Extract` rather than a second
+ * hand-written record, so a change to the arm cannot leave this behind.
+ */
+export type GeoJsonLayer = Extract<GeoLayer, { kind: "geojson" }>;
+```
+
+(`useToolForm.ts` declares that alias locally today; Task 15 replaces its local copy with this import, so there is one spelling.)
+
 In `src/features/processing/types.ts`, replace
 
 ```ts
@@ -8303,7 +9531,10 @@ return queueRun({
 Still in `runQueue.ts`, add above `queueRun` (and import `useGeoLayerStore` and `geoRecords`/`GeoRecord` at the top — `features/` importing `features/` needs no new rule):
 
 ```ts
-import { useGeoLayerStore, type GeoLayer } from "../geoLayers/geoLayerStore";
+import {
+  useGeoLayerStore,
+  type GeoJsonLayer,
+} from "../geoLayers/geoLayerStore";
 import { geoRecords, type GeoRecord } from "../geoLayers/geoRecords";
 ```
 
@@ -8363,12 +9594,16 @@ In `runQueue.ts`, add `type ColumnType` to the existing `../../insights/computed
  * has no table and no model, and what the app holds is the document — so the
  * executor is handed the same `GeoRecord` list the records panel builds, keyed
  * by the stable feature id the results come back under (Design decision (c)).
+ *
+ * The vector arm is `GeoJsonLayer`, not `GeoLayer`: every consumer reads
+ * `layer.config.preparedData`, and the raster and tiles arms have no such field.
+ * `execute` narrows once, at the resolution below, so nothing downstream casts.
  */
 export type ToolTarget =
   | { readonly kind: "city"; readonly layer: Layer; readonly table: LayerTable }
   | {
       readonly kind: "vector";
-      readonly layer: GeoLayer;
+      readonly layer: GeoJsonLayer;
       readonly records: ReadonlyArray<GeoRecord>;
     };
 
@@ -8385,7 +9620,7 @@ export type ToolSource =
   | { readonly kind: "city"; readonly layer: Layer; readonly table: LayerTable }
   | {
       readonly kind: "vector";
-      readonly layer: GeoLayer;
+      readonly layer: GeoJsonLayer;
       readonly table: string;
       readonly propertyKeys: ReadonlyArray<string>;
       /** The SOURCE's property types, as preflight inferred them — the ONE
@@ -8953,6 +10188,7 @@ Expected: PASS, `tsc` clean, `vp check` at 0 errors / 56 warnings. `tsc` names e
 ```bash
 git add src/features/processing/runQueue.ts src/features/processing/types.ts \
   src/features/processing/eligibility.ts src/features/processing/toolRegistry.ts \
+  src/features/geoLayers/geoLayerStore.ts \
   src/ui/processing/useEligibilityContext.ts src/ui/processing/useToolForm.ts \
   tests/unit/features/processing/crossLayerRun.test.ts \
   tests/unit/features/processing/runQueue.test.ts \
@@ -8993,10 +10229,17 @@ export interface VectorPreflight {
   readonly propertyTypes: ReadonlyMap<string, ColumnType>;
   readonly polygonOnly: boolean; // every kept feature is (Multi)Polygon
 }
-export function reprojectGeoLayer(
+/** What a batched walk reports to and asks permission from — see deviation 3. */
+export interface YieldControl {
+  /** Called once per batch, before the yield. The run passes
+   *  `ctx.throwIfCancelled` (or an `AbortSignal` check); it THROWS to stop. */
+  readonly checkpoint?: () => void;
+}
+export async function reprojectGeoLayer(
   document: unknown,
   epsg: number,
-): VectorPreflight;
+  control?: YieldControl,
+): Promise<VectorPreflight>;
 export function geoPropertyTypes(
   records: ReadonlyArray<GeoRecord>,
 ): ReadonlyMap<string, ColumnType>;
@@ -9007,12 +10250,14 @@ export function documentGeometryKinds(document: unknown): ReadonlySet<string>;
 
 - Tasks 13, 15, 16, 17 and 19 consume it.
 
-**Two deviations from the ledger, both named.**
+**Four deviations from the ledger, all named.**
 
 1. **`ProjectedFeature` gains `featureId`.** §7.7's nearest-id select "defaults to the GeoJSON feature `id` when the source has one", and a feature's `id` is a sibling of `properties`, not a member of it — `publicGeoProperties` only strips the renderer envelope. Recovering it from `stableId`'s `"id:string:z1"` spelling would make an internal format a public contract.
 2. **`documentGeometryKinds` is added.** §7.5's source select disables a point or line layer with "Needs areas (polygons)" BEFORE any run, and `reprojectGeoLayer` cannot answer that question for the form: it needs an EPSG and a loaded proj4 definition, and until `ensureModelCrsLoadable` has resolved, `crsFromGeodetic` returns `null` for every coordinate — every feature skips, `features` is empty and `polygonOnly` is vacuously true. One cheap synchronous scan of the document's geometry types is the honest answer for a select that is drawn on every keystroke.
+3. **`reprojectGeoLayer` is ASYNC and walks in bounded batches** (commander's ruling, after the plan review). The ledger spelled it synchronous. A 200 MB roads layer is millions of coordinates, and one synchronous walk blocks the frame and the Cancel button for as long as it takes — the same hazard M2's "nothing walks a whole layer's geometry synchronously" names. The walk therefore yields a MACROTASK every `FEATURE_BATCH` features **and** every `COORDINATE_BUDGET` coordinates, calling `control.checkpoint()` before each yield so a cancelled run stops inside the phase rather than after it. The coordinate budget is spent POSITION by position wherever the walk is, so a single 400,000-vertex commune boundary yields inside its own ring — a per-feature batch alone would not.
+4. **Geometry STRUCTURE is validated, and a same-family `GeometryCollection` is converted rather than skipped.** The ledger's preflight only checked nesting and non-emptiness, so a one-position `LineString`, a three-position polygon ring and an unclosed ring all reached `ST_GeomFromText` — which RAISES, and the vector table is ONE statement, so one malformed feature would fail the whole run instead of being skipped and counted (§7.5: "null, empty or unparseable geometry are skipped and counted"). Each type's real rule is checked here: a line needs 2 positions, a ring 4 and a closing position equal to its first, a polygon at least one ring. And §7.7's source is "a vector layer of any geometry type": a `GeometryCollection` whose members are all points, all lines or all areas is converted to the matching multi-geometry (the members' parts concatenated), which is exactly equivalent for every operation §7.5-§7.7 performs; a MIXED collection is still skipped and counted, because no single WKT multi-geometry says it and `GEOMETRYCOLLECTION` is a shape no probe in this plan has pinned.
 
-**The async warm-up is the CALLER's, and that is deliberate.** `reprojectGeoLayer` is PURE and synchronous, which is what lets every §7.5 preflight sentence be decided in a unit test with no engine. `ensureModelCrsLoadable(targetModel)` must be awaited before it is called, because `crsFromGeodetic`'s `ensureProjDef` guard is synchronous and answers `null` for a definition proj4 has not fetched yet — the difference between "4 areas skipped" and "every area skipped" on a cold CRS. Task 13's `"source"` phase and Task 19's executor each await it; this module states the requirement and does not perform it.
+**The async warm-up is still the CALLER's, and that is deliberate.** `reprojectGeoLayer` reaches no store and no engine — its only async is its own yielding — which is what lets every §7.5 preflight sentence be decided in a unit test with no engine. `ensureModelCrsLoadable(targetModel)` must be awaited before it is called, because `crsFromGeodetic`'s `ensureProjDef` guard is synchronous and answers `null` for a definition proj4 has not fetched yet — the difference between "4 areas skipped" and "every area skipped" on a cold CRS. Task 13's `"source"` phase and Task 19's executor each await it; this module states the requirement and does not perform it.
 
 **`idx` is the DOCUMENT index, gaps included.** §7.5's tie rule is "first, by source order", and a skipped feature must not renumber the ones after it: an index that closed the gaps would make the tie rule depend on which features happened to be unprojectable. The executors build `Map<idx, ProjectedFeature>`, so gaps cost nothing.
 
@@ -9078,8 +10323,8 @@ const SQUARE: Array<[number, number]> = [
 ];
 
 describe("reprojectGeoLayer", () => {
-  it("projects a polygon into the target's CRS, 2-D, ring closed", () => {
-    const out = reprojectGeoLayer(
+  it("projects a polygon into the target's CRS, 2-D, ring closed", async () => {
+    const out = await reprojectGeoLayer(
       collection(polygon("z1", { zone: "A" }, SQUARE)),
       28992,
     );
@@ -9094,16 +10339,19 @@ describe("reprojectGeoLayer", () => {
     expect(out.polygonOnly).toBe(true);
   });
 
-  it("carries the stable feature id the records panel and the write-back use", () => {
+  it("carries the stable feature id the records panel and the write-back use", async () => {
     // `normalizeGeoJsonDocument`'s own spelling for a unique source id — the
     // key §7.6's results are merged back under, and the key the records panel
     // already identifies a row by.
-    const out = reprojectGeoLayer(collection(polygon("z1", {}, SQUARE)), 28992);
+    const out = await reprojectGeoLayer(
+      collection(polygon("z1", {}, SQUARE)),
+      28992,
+    );
     expect(out.features[0]?.stableId).toBe("id:string:z1");
   });
 
-  it("drops the third ordinate and keeps a MultiPolygon's holes", () => {
-    const out = reprojectGeoLayer(
+  it("drops the third ordinate and keeps a MultiPolygon's holes", async () => {
+    const out = await reprojectGeoLayer(
       collection({
         type: "Feature",
         properties: {},
@@ -9135,8 +10383,8 @@ describe("reprojectGeoLayer", () => {
     );
   });
 
-  it("projects points and lines too — §7.7's source is any geometry type", () => {
-    const out = reprojectGeoLayer(
+  it("projects points and lines too — §7.7's source is any geometry type", async () => {
+    const out = await reprojectGeoLayer(
       collection(
         {
           type: "Feature",
@@ -9164,8 +10412,8 @@ describe("reprojectGeoLayer", () => {
     expect(out.polygonOnly).toBe(false);
   });
 
-  it("skips and COUNTS a null, an empty and an unknown geometry", () => {
-    const out = reprojectGeoLayer(
+  it("skips and COUNTS a null, an empty and an unknown geometry", async () => {
+    const out = await reprojectGeoLayer(
       collection(
         { type: "Feature", properties: {}, geometry: null },
         {
@@ -9187,8 +10435,8 @@ describe("reprojectGeoLayer", () => {
     expect(out.features).toHaveLength(1);
   });
 
-  it("skips a feature whose coordinates do not reproject", () => {
-    const out = reprojectGeoLayer(
+  it("skips a feature whose coordinates do not reproject", async () => {
+    const out = await reprojectGeoLayer(
       collection(
         polygon("z1", {}, [
           [999, 52],
@@ -9205,8 +10453,8 @@ describe("reprojectGeoLayer", () => {
     expect(out.features[0]?.featureId).toBe("z2");
   });
 
-  it("keeps SOURCE order in idx, gaps and all", () => {
-    const out = reprojectGeoLayer(
+  it("keeps SOURCE order in idx, gaps and all", async () => {
+    const out = await reprojectGeoLayer(
       collection(
         { type: "Feature", properties: {}, geometry: null },
         polygon("z2", {}, SQUARE),
@@ -9220,8 +10468,8 @@ describe("reprojectGeoLayer", () => {
     expect(out.features.map((f) => f.idx)).toEqual([1, 3]);
   });
 
-  it("reports every feature skipped, which is the run's own refusal", () => {
-    const out = reprojectGeoLayer(
+  it("reports every feature skipped, which is the run's own refusal", async () => {
+    const out = await reprojectGeoLayer(
       collection(
         { type: "Feature", properties: {}, geometry: null },
         { type: "Feature", properties: {}, geometry: null },
@@ -9234,14 +10482,14 @@ describe("reprojectGeoLayer", () => {
     expect(out.skipped).toBe(2);
   });
 
-  it("answers empty for a document that is not GeoJSON at all", () => {
-    const out = reprojectGeoLayer({ hello: "world" }, 28992);
+  it("answers empty for a document that is not GeoJSON at all", async () => {
+    const out = await reprojectGeoLayer({ hello: "world" }, 28992);
     expect(out).toMatchObject({ features: [], skipped: 0, polygonOnly: true });
     expect(out.propertyKeys).toEqual([]);
   });
 
-  it("lists the KEPT features' property keys, in first-seen order, typed", () => {
-    const out = reprojectGeoLayer(
+  it("lists the KEPT features' property keys, in first-seen order, typed", async () => {
+    const out = await reprojectGeoLayer(
       collection(
         polygon("z1", { zone: "A", noise: 62, quiet: false }, SQUARE),
         polygon("z2", { zone: "B", extra: "x" }, SQUARE),
@@ -9259,14 +10507,17 @@ describe("reprojectGeoLayer", () => {
     ]);
   });
 
-  it("never exposes the renderer's stable-id envelope as a property", () => {
-    const out = reprojectGeoLayer(collection(polygon("z1", {}, SQUARE)), 28992);
+  it("never exposes the renderer's stable-id envelope as a property", async () => {
+    const out = await reprojectGeoLayer(
+      collection(polygon("z1", {}, SQUARE)),
+      28992,
+    );
     expect(out.propertyKeys).toEqual([]);
     expect(out.features[0]?.properties).toEqual({});
   });
 
-  it("stringifies a numeric feature id, and reports null when there is none", () => {
-    const out = reprojectGeoLayer(
+  it("stringifies a numeric feature id, and reports null when there is none", async () => {
+    const out = await reprojectGeoLayer(
       collection(
         { ...polygon(undefined, {}, SQUARE), id: 7 },
         polygon(undefined, {}, SQUARE),
@@ -9274,6 +10525,198 @@ describe("reprojectGeoLayer", () => {
       28992,
     );
     expect(out.features.map((f) => f.featureId)).toEqual(["7", null]);
+  });
+});
+
+describe("the structure §7.5 calls unparseable", () => {
+  // Every case here would reach `ST_GeomFromText` as text it RAISES on, and the
+  // vector table is ONE statement — so one malformed feature would fail the
+  // whole run instead of being skipped and counted.
+  it("skips a line with one position and a ring with three", async () => {
+    const out = await reprojectGeoLayer(
+      collection(
+        {
+          type: "Feature",
+          properties: {},
+          geometry: { type: "LineString", coordinates: [[4, 52]] },
+        },
+        polygon("z2", {}, [
+          [4, 52],
+          [5, 52],
+          [4, 52],
+        ]),
+        polygon("z3", {}, SQUARE),
+      ),
+      28992,
+    );
+    expect(out.skipped).toBe(2);
+    expect(out.features.map((f) => f.featureId)).toEqual(["z3"]);
+  });
+
+  it("skips a ring whose last position is not its first", async () => {
+    const out = await reprojectGeoLayer(
+      collection(
+        polygon("z1", {}, [
+          [4, 52],
+          [5, 52],
+          [5, 53],
+          [4, 53],
+        ]),
+      ),
+      28992,
+    );
+    expect(out.skipped).toBe(1);
+    expect(out.features).toHaveLength(0);
+  });
+
+  it("skips a polygon whose HOLE is malformed, not just its shell", async () => {
+    const out = await reprojectGeoLayer(
+      collection({
+        type: "Feature",
+        properties: {},
+        geometry: {
+          type: "Polygon",
+          coordinates: [
+            SQUARE,
+            [
+              [4.2, 52.2],
+              [4.4, 52.2],
+            ],
+          ],
+        },
+      }),
+      28992,
+    );
+    expect(out.skipped).toBe(1);
+  });
+
+  it("keeps the good features when the document is a mixture", async () => {
+    const out = await reprojectGeoLayer(
+      collection(
+        polygon("z1", { zone: "A" }, SQUARE),
+        { type: "Feature", properties: {}, geometry: null },
+        polygon("z3", { zone: "C" }, [
+          [4, 52],
+          [5, 52],
+          [4, 52],
+        ]),
+        polygon("z4", { zone: "D" }, SQUARE),
+      ),
+      28992,
+    );
+    expect(out.features.map((f) => f.featureId)).toEqual(["z1", "z4"]);
+    expect(out.skipped).toBe(2);
+    expect(out.propertyKeys).toEqual(["zone"]);
+  });
+});
+
+describe("a GeometryCollection (§7.7's source is any geometry type)", () => {
+  it("converts a same-family collection to the matching multi-geometry", async () => {
+    const out = await reprojectGeoLayer(
+      collection({
+        type: "Feature",
+        properties: {},
+        geometry: {
+          type: "GeometryCollection",
+          geometries: [
+            { type: "Polygon", coordinates: [SQUARE] },
+            {
+              type: "MultiPolygon",
+              coordinates: [
+                [
+                  [
+                    [6, 52],
+                    [7, 52],
+                    [7, 53],
+                    [6, 52],
+                  ],
+                ],
+              ],
+            },
+          ],
+        },
+      }),
+      28992,
+    );
+    expect(out.features[0]?.wkt).toBe(
+      "MULTIPOLYGON (((4000 52000, 5000 52000, 5000 53000, 4000 53000, 4000 52000)), " +
+        "((6000 52000, 7000 52000, 7000 53000, 6000 52000)))",
+    );
+    // An area is an area however the document wrapped it, so §7.5's source
+    // select and `polygonOnly` both say so.
+    expect(out.polygonOnly).toBe(true);
+  });
+
+  it("skips a MIXED collection, which no single multi-geometry says", async () => {
+    const out = await reprojectGeoLayer(
+      collection({
+        type: "Feature",
+        properties: {},
+        geometry: {
+          type: "GeometryCollection",
+          geometries: [
+            { type: "Point", coordinates: [4, 52] },
+            { type: "Polygon", coordinates: [SQUARE] },
+          ],
+        },
+      }),
+      28992,
+    );
+    expect(out.skipped).toBe(1);
+    expect(out.features).toHaveLength(0);
+  });
+});
+
+describe("the batched walk", () => {
+  /** 600 squares: past FEATURE_BATCH, so the walk has to yield at least once. */
+  function manyAreas(count: number): unknown {
+    return collection(
+      ...Array.from({ length: count }, (_, i) => polygon(`z${i}`, {}, SQUARE)),
+    );
+  }
+
+  it("checkpoints between batches, and a throwing checkpoint stops the walk", async () => {
+    let seen = 0;
+    await expect(
+      reprojectGeoLayer(manyAreas(600), 28992, {
+        checkpoint: () => {
+          seen += 1;
+          // What the run passes is `ctx.throwIfCancelled`, which throws
+          // `CancelledError`; preflight neither catches nor translates it.
+          throw new Error("cancelled");
+        },
+      }),
+    ).rejects.toThrow("cancelled");
+    expect(seen).toBe(1);
+  });
+
+  it("yields the event loop, so a Cancel and a repaint can land", async () => {
+    let turned = false;
+    setTimeout(() => {
+      turned = true;
+    }, 0);
+    const out = await reprojectGeoLayer(manyAreas(600), 28992);
+    expect(out.features).toHaveLength(600);
+    // A synchronous walk would finish before any macrotask ran.
+    expect(turned).toBe(true);
+  });
+
+  it("yields INSIDE one very large feature too", async () => {
+    // One ring of 60,000 positions: past COORDINATE_BUDGET, so a per-FEATURE
+    // batch alone would never yield.
+    const ring: Array<[number, number]> = Array.from(
+      { length: 60_000 },
+      (_, i) => [4 + i / 1_000_000, 52],
+    );
+    ring.push([4, 52]);
+    let checkpoints = 0;
+    const out = await reprojectGeoLayer(
+      collection(polygon("big", {}, ring)),
+      28992,
+      { checkpoint: () => (checkpoints += 1) },
+    );
+    expect(out.features).toHaveLength(1);
+    expect(checkpoints).toBeGreaterThan(0);
   });
 });
 
@@ -9316,6 +10759,21 @@ describe("documentGeometryKinds", () => {
     ]).toEqual(["Polygon", "Point"]);
   });
 
+  it("reports a collection's MEMBERS, so a collection of areas reads as areas", () => {
+    expect([
+      ...documentGeometryKinds(
+        collection({
+          type: "Feature",
+          properties: {},
+          geometry: {
+            type: "GeometryCollection",
+            geometries: [{ type: "Polygon", coordinates: [SQUARE] }],
+          },
+        }),
+      ),
+    ]).toEqual(["Polygon"]);
+  });
+
   it("is empty for a document with no geometry at all", () => {
     expect(documentGeometryKinds(null).size).toBe(0);
     expect(
@@ -9345,10 +10803,20 @@ Create `src/features/processing/vectorSource.ts`:
  * A vector layer's features, reprojected into a city layer's CRS, with §7.5's
  * preflight counted rather than swallowed.
  *
- * PURE AND SYNCHRONOUS, which is the point: every sentence §7.5 asks for — "4
+ * NO STORE AND NO ENGINE, which is the point: every sentence §7.5 asks for — "4
  * areas skipped: invalid geometry", "No usable areas in Zones", "The source
  * layer has no features" — is decided by counting `skipped` against
- * `features.length`, in a unit test with no engine and no store.
+ * `features.length`, in a unit test with nothing mocked but proj4.
+ *
+ * ASYNC, AND IN BOUNDED BATCHES. A 200 MB roads layer is millions of
+ * coordinates; one synchronous walk blocks the frame and the Cancel button for
+ * as long as it takes, which is the hazard M2's "nothing walks a whole layer's
+ * geometry synchronously" names. The walk yields a MACROTASK every
+ * {@link FEATURE_BATCH} features and every {@link COORDINATE_BUDGET}
+ * coordinates, and calls `control.checkpoint()` — the run's
+ * `ctx.throwIfCancelled` — immediately before each yield, so a cancelled run
+ * stops INSIDE the phase. The budget is spent position by position wherever the
+ * walk is, so one enormous ring yields as well as ten thousand small ones.
  *
  * THE CALLER MUST AWAIT `ensureModelCrsLoadable(targetModel)` FIRST.
  * `crsFromGeodetic`'s `ensureProjDef` guard is synchronous and returns `null`
@@ -9433,80 +10901,267 @@ function ordinate(value: number): string {
   return String(Number(value.toFixed(4)));
 }
 
-const POLYGONAL = new Set(["Polygon", "MultiPolygon"]);
+/** How many coordinates the walk converts before it yields the event loop. */
+const COORDINATE_BUDGET = 20_000;
+/** How many features it converts before it yields, whatever their size. */
+const FEATURE_BATCH = 500;
+
+export interface YieldControl {
+  /**
+   * Called once per batch, immediately BEFORE the yield, and allowed to throw.
+   *
+   * The run passes `ctx.throwIfCancelled`, so a cancelled run stops inside the
+   * walk instead of after it. Absent for the form's own uses, which have
+   * nothing to cancel.
+   */
+  readonly checkpoint?: () => void;
+}
+
+/** The coordinate budget, as one cell the whole walk shares. */
+interface Budget {
+  left: number;
+}
 
 /**
- * A nested coordinate structure as a WKT body — or null if ANY coordinate
- * fails, because half a ring is not a geometry (§7.5 skips the FEATURE).
+ * Spend `n` coordinates, and yield when the budget runs out.
  *
- * `depth` is how many array levels sit above a coordinate pair: 0 a position,
- * 1 a ring or a line, 2 a polygon or a multi-line, 3 a multi-polygon. Every
- * level from 2 up parenthesises its children, so the caller wraps the result
- * exactly once whatever the type.
+ * A MACROTASK, not `Promise.resolve()`: a microtask does not let the browser
+ * paint or a click land, which is the whole point of the batching.
  */
-function project(
-  coordinates: unknown,
+async function spend(
+  n: number,
+  budget: Budget,
+  control: YieldControl | undefined,
+): Promise<void> {
+  budget.left -= n;
+  if (budget.left > 0) return;
+  control?.checkpoint?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  budget.left = COORDINATE_BUDGET;
+}
+
+/** One position as `"x y"`, or null when it is not a projectable pair. */
+function position(value: unknown, epsg: number): string | null {
+  if (!Array.isArray(value)) return null;
+  const lng = value[0];
+  const lat = value[1];
+  if (typeof lng !== "number" || typeof lat !== "number") return null;
+  const xy = crsFromGeodetic(lng, lat, 0, epsg);
+  if (xy === null) return null;
+  return `${ordinate(xy[0])} ${ordinate(xy[1])}`;
+}
+
+/**
+ * A list of positions, projected — or null when the STRUCTURE is wrong.
+ *
+ * `minimum` is the type's own rule (2 positions for a line, 4 for a ring) and
+ * `closed` is the ring rule. Both matter: `ST_GeomFromText` RAISES on a
+ * one-position line and on an unclosed ring, and the vector table is ONE
+ * statement, so a malformed feature that reached it would fail the whole run
+ * instead of being skipped and counted (§7.5). An EMPTY array is §7.5's "empty
+ * geometry" — the probed `ST_GeomFromGeoJSON` trap in reverse.
+ */
+async function positionList(
+  value: unknown,
   epsg: number,
-  depth: number,
-): string | null {
-  if (depth === 0) {
-    if (!Array.isArray(coordinates)) return null;
-    const lng = coordinates[0];
-    const lat = coordinates[1];
-    if (typeof lng !== "number" || typeof lat !== "number") return null;
-    const xy = crsFromGeodetic(lng, lat, 0, epsg);
-    if (xy === null) return null;
-    return `${ordinate(xy[0])} ${ordinate(xy[1])}`;
-  }
-  // An EMPTY coordinate array is §7.5's "empty geometry", which is a skip and
-  // not an empty WKT — the probed `ST_GeomFromGeoJSON` trap in reverse.
-  if (!Array.isArray(coordinates) || coordinates.length === 0) return null;
+  minimum: number,
+  closed: boolean,
+  budget: Budget,
+  control: YieldControl | undefined,
+): Promise<ReadonlyArray<string> | null> {
+  if (!Array.isArray(value) || value.length < minimum) return null;
   const parts: string[] = [];
-  for (const child of coordinates) {
-    const text = project(child, epsg, depth - 1);
+  for (const entry of value) {
+    const text = position(entry, epsg);
+    // Half a ring is not a geometry: §7.5 skips the FEATURE.
     if (text === null) return null;
-    parts.push(depth >= 2 ? `(${text})` : text);
+    parts.push(text);
+    await spend(1, budget, control);
+  }
+  if (closed && parts[0] !== parts[parts.length - 1]) return null;
+  return parts;
+}
+
+/** A polygon's rings as `"(shell), (hole)"`, or null if any ring is not one. */
+async function ringsOf(
+  value: unknown,
+  epsg: number,
+  budget: Budget,
+  control: YieldControl | undefined,
+): Promise<string | null> {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const parts: string[] = [];
+  for (const ring of value) {
+    const positions = await positionList(ring, epsg, 4, true, budget, control);
+    if (positions === null) return null;
+    parts.push(`(${positions.join(", ")})`);
   }
   return parts.join(", ");
 }
 
-/** The WKT body's nesting depth per geometry type, and its WKT keyword. */
-const GEOMETRY: Readonly<
-  Record<string, { readonly keyword: string; readonly depth: number }>
-> = {
-  Point: { keyword: "POINT", depth: 0 },
-  MultiPoint: { keyword: "MULTIPOINT", depth: 1 },
-  LineString: { keyword: "LINESTRING", depth: 1 },
-  MultiLineString: { keyword: "MULTILINESTRING", depth: 2 },
-  Polygon: { keyword: "POLYGON", depth: 2 },
-  MultiPolygon: { keyword: "MULTIPOLYGON", depth: 3 },
-};
-
-/** A geometry as 2-D WKT in `epsg`, or null when it cannot be one. */
-function geometryToWkt(geometry: unknown, epsg: number): string | null {
-  if (!isRecord(geometry)) return null;
-  const spec =
-    typeof geometry.type === "string" ? GEOMETRY[geometry.type] : undefined;
-  // A GeometryCollection and anything the list does not name read as
-  // unparseable, which §7.5 COUNTS rather than fails on.
-  if (spec === undefined) return null;
-  const body = project(geometry.coordinates, epsg, spec.depth);
-  if (body === null) return null;
-  return `${spec.keyword} (${body})`;
+/**
+ * A geometry as its FAMILY and its multi-parts.
+ *
+ * This shape is what makes a same-family `GeometryCollection` convertible: the
+ * members' parts simply concatenate. A part carries no outer parentheses;
+ * {@link wktOf} adds them, so one rule renders `POINT`/`MULTIPOINT`,
+ * `LINESTRING`/`MULTILINESTRING` and `POLYGON`/`MULTIPOLYGON` alike.
+ */
+interface Shape {
+  readonly family: "POINT" | "LINESTRING" | "POLYGON";
+  /** The SOURCE said multi, so the WKT says multi even with one part. */
+  readonly multi: boolean;
+  readonly parts: ReadonlyArray<string>;
 }
 
-export function reprojectGeoLayer(
+async function shapeOf(
+  geometry: unknown,
+  epsg: number,
+  budget: Budget,
+  control: YieldControl | undefined,
+): Promise<Shape | null> {
+  if (!isRecord(geometry)) return null;
+  const coordinates = geometry.coordinates;
+  switch (geometry.type) {
+    case "Point": {
+      const text = position(coordinates, epsg);
+      await spend(1, budget, control);
+      return text === null
+        ? null
+        : { family: "POINT", multi: false, parts: [text] };
+    }
+    case "MultiPoint": {
+      const list = await positionList(
+        coordinates,
+        epsg,
+        1,
+        false,
+        budget,
+        control,
+      );
+      return list === null
+        ? null
+        : { family: "POINT", multi: true, parts: list };
+    }
+    case "LineString": {
+      const list = await positionList(
+        coordinates,
+        epsg,
+        2,
+        false,
+        budget,
+        control,
+      );
+      return list === null
+        ? null
+        : { family: "LINESTRING", multi: false, parts: [list.join(", ")] };
+    }
+    case "MultiLineString": {
+      if (!Array.isArray(coordinates) || coordinates.length === 0) return null;
+      const parts: string[] = [];
+      for (const line of coordinates) {
+        const list = await positionList(line, epsg, 2, false, budget, control);
+        if (list === null) return null;
+        parts.push(list.join(", "));
+      }
+      return { family: "LINESTRING", multi: true, parts };
+    }
+    case "Polygon": {
+      const rings = await ringsOf(coordinates, epsg, budget, control);
+      return rings === null
+        ? null
+        : { family: "POLYGON", multi: false, parts: [rings] };
+    }
+    case "MultiPolygon": {
+      if (!Array.isArray(coordinates) || coordinates.length === 0) return null;
+      const parts: string[] = [];
+      for (const polygon of coordinates) {
+        const rings = await ringsOf(polygon, epsg, budget, control);
+        if (rings === null) return null;
+        parts.push(rings);
+      }
+      return { family: "POLYGON", multi: true, parts };
+    }
+    case "GeometryCollection":
+      return await collectionShape(geometry.geometries, epsg, budget, control);
+    default:
+      // A type the list does not name reads as unparseable, which §7.5 COUNTS
+      // rather than fails on.
+      return null;
+  }
+}
+
+/**
+ * A `GeometryCollection` as one multi-geometry, or null.
+ *
+ * §7.7's source is "a vector layer of any geometry type", and a collection of
+ * areas IS areas: concatenating the members' parts gives a MULTIPOLYGON that
+ * every operation §7.5-§7.7 performs — intersects, covered-by, area,
+ * distance — answers identically. A MIXED collection is skipped and counted:
+ * no single multi-geometry says it, and `GEOMETRYCOLLECTION` is a shape no
+ * probe in this plan has pinned. A NESTED collection resolves through the same
+ * recursion, so a collection of one collection of polygons still converts.
+ */
+async function collectionShape(
+  members: unknown,
+  epsg: number,
+  budget: Budget,
+  control: YieldControl | undefined,
+): Promise<Shape | null> {
+  if (!Array.isArray(members) || members.length === 0) return null;
+  const parts: string[] = [];
+  let family: Shape["family"] | null = null;
+  for (const member of members) {
+    const shape = await shapeOf(member, epsg, budget, control);
+    if (shape === null) return null;
+    if (family === null) family = shape.family;
+    else if (family !== shape.family) return null;
+    parts.push(...shape.parts);
+  }
+  return family === null ? null : { family, multi: true, parts };
+}
+
+const KEYWORDS: Readonly<Record<Shape["family"], readonly [string, string]>> = {
+  POINT: ["POINT", "MULTIPOINT"],
+  LINESTRING: ["LINESTRING", "MULTILINESTRING"],
+  POLYGON: ["POLYGON", "MULTIPOLYGON"],
+};
+
+/** A shape as 2-D WKT. A multi keyword when the source said so or when the
+ *  collection concatenated more than one part. */
+function wktOf(shape: Shape): string {
+  const multi = shape.multi || shape.parts.length > 1;
+  const keyword = KEYWORDS[shape.family][multi ? 1 : 0];
+  // A MULTIPOINT's parts are bare positions; every other multi parenthesises
+  // each of its parts.
+  const body =
+    multi && shape.family !== "POINT"
+      ? shape.parts.map((part) => `(${part})`).join(", ")
+      : shape.parts.join(", ");
+  return `${keyword} (${body})`;
+}
+
+export async function reprojectGeoLayer(
   document: unknown,
   epsg: number,
-): VectorPreflight {
+  control?: YieldControl,
+): Promise<VectorPreflight> {
   const features: ProjectedFeature[] = [];
   let skipped = 0;
   let polygonOnly = true;
-  featuresOf(document).forEach((feature, idx) => {
-    const wkt = geometryToWkt(feature.geometry, epsg);
-    if (wkt === null) {
+  const budget: Budget = { left: COORDINATE_BUDGET };
+  const source = featuresOf(document);
+  for (const [idx, feature] of source.entries()) {
+    // A batch of small features costs no coordinates worth yielding for, so the
+    // feature counter is what bounds it; `spend` bounds the other direction.
+    if (idx > 0 && idx % FEATURE_BATCH === 0) {
+      control?.checkpoint?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    const shape = await shapeOf(feature.geometry, epsg, budget, control);
+    if (shape === null) {
       skipped += 1;
-      return;
+      continue;
     }
     const rawProperties = isRecord(feature.properties)
       ? feature.properties
@@ -9516,17 +11171,18 @@ export function reprojectGeoLayer(
     // spelling that function mints, so no feature is silently dropped.
     const stableId = readGeoStableFeatureId(rawProperties) ?? `index:${idx}`;
     const id = feature.id;
-    const kind = isRecord(feature.geometry) ? feature.geometry.type : null;
-    if (typeof kind !== "string" || !POLYGONAL.has(kind)) polygonOnly = false;
+    // The FAMILY, not the document's type word: a collection of areas is
+    // areas, and §7.5's source select should read it that way.
+    if (shape.family !== "POLYGON") polygonOnly = false;
     features.push({
       idx,
       stableId,
       featureId:
         typeof id === "string" || typeof id === "number" ? String(id) : null,
       properties: publicGeoProperties(rawProperties),
-      wkt,
+      wkt: wktOf(shape),
     });
-  });
+  }
 
   const propertyKeys: string[] = [];
   const seen = new Set<string>();
@@ -9608,14 +11264,22 @@ export function geoPropertyTypes(
  * drawn before any CRS is resolved. `reprojectGeoLayer` cannot answer it — on
  * a cold proj4 definition every feature is skipped and `polygonOnly` is
  * vacuously true.
+ *
+ * A `GeometryCollection` reports its MEMBERS' types rather than itself, for the
+ * same reason `reprojectGeoLayer` converts a same-family one: a collection of
+ * areas is areas, and the select must not refuse a layer the run would accept.
  */
 export function documentGeometryKinds(document: unknown): ReadonlySet<string> {
   const kinds = new Set<string>();
-  for (const feature of featuresOf(document)) {
-    const geometry = feature.geometry;
-    if (!isRecord(geometry) || typeof geometry.type !== "string") continue;
+  const add = (geometry: unknown): void => {
+    if (!isRecord(geometry) || typeof geometry.type !== "string") return;
+    if (geometry.type === "GeometryCollection") {
+      if (Array.isArray(geometry.geometries)) geometry.geometries.forEach(add);
+      return;
+    }
     kinds.add(geometry.type);
-  }
+  };
+  for (const feature of featuresOf(document)) add(feature.geometry);
   return kinds;
 }
 ```
@@ -9650,16 +11314,21 @@ git commit -m "feat: reproject a vector layer app-side, with a counted preflight
 
 **Interfaces:**
 
-- Consumes: `ProjectedFeature`, `VectorPreflight`, `reprojectGeoLayer` (Task 12); `ToolSource`, `ToolContext`, `FrozenRequest.computeLayerId` (Task 11); `registerBuffer`/`dropBuffer`/`ddl` (`duckdb.ts:724-743`, `:695-697`); `racedWithDeath`/`EngineDeadError` (`engineAwait.ts:104-106`); `epsgForLayer` (`cursorCrsReadout.ts:35-41`); `ensureModelCrsLoadable` (`src/features/layers/ensureCrs.ts:32`); `quoteIdent`/`quoteLiteral` (`sql.ts:28-48`).
+- Consumes: `ProjectedFeature`, `VectorPreflight`, `YieldControl`, `reprojectGeoLayer` (Task 12); `ToolSource`, `ToolContext`, `FrozenRequest.computeLayerId` (Task 11); `SOURCE_OUT_OF_MEMORY` (Task 5's `sourceRead.ts`); `registerBuffer`/`dropBuffer`/`ddl`/`getDuckDBStatus` (`duckdb.ts:724-743`, `:695-697`, `:196`); `racedWithDeath`/`EngineDeadError` (`engineAwait.ts:104-106`); `epsgForLayer` (`cursorCrsReadout.ts:35-41`); `ensureModelCrsLoadable` (`src/features/layers/ensureCrs.ts:32`); `quoteIdent`/`quoteLiteral` (`sql.ts:28-48`).
 - Produces:
 
 ```ts
 export function vectorTableName(runId: string): string; // `__src_${runId}`
 export function buildVectorTableSql(table: string, file: string): string;
 export function buildDropVectorTableSql(table: string): string;
-export function encodeProjectedFeatures(
+/** NDJSON, one feature per line. ASYNC and batched for the same reason
+ *  `reprojectGeoLayer` is (Task 12's deviation 3): it yields every
+ *  `ENCODE_BATCH` features and holds one batch of strings at a time, not the
+ *  whole document three times over. */
+export async function encodeProjectedFeatures(
   features: ReadonlyArray<ProjectedFeature>,
-): Uint8Array; // NDJSON, one feature per line
+  control?: YieldControl,
+): Promise<Uint8Array>;
 export interface VectorTableHandle {
   readonly table: string;
   release(): Promise<void>;
@@ -9668,6 +11337,9 @@ export async function createVectorTable(input: {
   readonly runId: string;
   readonly preflight: VectorPreflight;
   readonly query: (label: string, sql: string) => Promise<QueryOutcome>;
+  /** Passed straight to `encodeProjectedFeatures`; the run gives its
+   *  `ctx.throwIfCancelled`. */
+  readonly control?: YieldControl;
 }): Promise<VectorTableHandle>;
 ```
 
@@ -9701,6 +11373,9 @@ const registered: Array<{ name: string; text: string }> = [];
 const dropped: string[] = [];
 const statements: string[] = [];
 let registerOk = true;
+/** What `getDuckDBStatus()` reports — the only way to tell a dead engine from
+ *  a registration that merely failed (`duckdb.ts:725-736`). */
+let engineState: "ready" | "failed" = "ready";
 
 vi.mock("../../../../src/insights/duckdb", () => ({
   registerBuffer: vi.fn(async (name: string, bytes: Uint8Array) => {
@@ -9718,11 +11393,26 @@ vi.mock("../../../../src/insights/duckdb", () => ({
   runQuery: vi.fn(async () => ({ ok: true as const, columns: [], rows: [] })),
   onEngineDeath: vi.fn(() => () => {}),
   getDuckDBStatus: vi.fn(() => ({
-    state: "ready",
+    state: engineState,
     extensions: {},
     loadedExtensions: [],
     platform: null,
   })),
+  // The rest of the seam, so `sourceRead` (whose §6.1 sentences this file
+  // imports) links against the mock rather than pulling in the ONE module that
+  // imports `@duckdb/duckdb-wasm`. A named import missing from a mock factory
+  // is a link error, not a lazy one.
+  ddlBatch: vi.fn(async () => ({ ok: true as const, columns: [], rows: [] })),
+  readFile: vi.fn(async () => null),
+  queryDuckDB: vi.fn(async () => null),
+  queryParquetBuffer: vi.fn(async () => null),
+  initDuckDB: vi.fn(async () => {}),
+  isExtensionLoaded: vi.fn(() => true),
+  ensureExtension: vi.fn(async () => true),
+  formatDuckDBError: (e: unknown) => String(e),
+  getEngineGeneration: vi.fn(() => 1),
+  subscribeDuckDBStatus: vi.fn(() => () => {}),
+  getDuckDBStatusVersion: vi.fn(() => 0),
 }));
 
 const {
@@ -9766,6 +11456,7 @@ beforeEach(() => {
   dropped.length = 0;
   statements.length = 0;
   registerOk = true;
+  engineState = "ready";
 });
 
 describe("the per-run names and statements", () => {
@@ -9791,9 +11482,9 @@ describe("the per-run names and statements", () => {
 });
 
 describe("encodeProjectedFeatures", () => {
-  it("writes one JSON object per line, with the five columns", () => {
+  it("writes one JSON object per line, with the five columns", async () => {
     const text = new TextDecoder().decode(
-      encodeProjectedFeatures([feature(0), feature(3)]),
+      await encodeProjectedFeatures([feature(0), feature(3)]),
     );
     expect(text.trimEnd().split("\n")).toEqual([
       '{"idx":0,"sid":"id:string:z0","fid":"z0","props":{"zone":"A","noise":62},"wkt":"POLYGON ((0 0, 1 0, 1 1, 0 0))"}',
@@ -9801,20 +11492,48 @@ describe("encodeProjectedFeatures", () => {
     ]);
   });
 
-  it("keeps a null feature id as null rather than dropping the key", () => {
+  it("keeps a null feature id as null rather than dropping the key", async () => {
     const text = new TextDecoder().decode(
-      encodeProjectedFeatures([feature(0, { featureId: null })]),
+      await encodeProjectedFeatures([feature(0, { featureId: null })]),
     );
     expect(text).toContain('"fid":null');
   });
 
-  it("survives a BIGINT property, which JSON.stringify refuses outright", () => {
+  it("survives a BIGINT property, which JSON.stringify refuses outright", async () => {
     const text = new TextDecoder().decode(
-      encodeProjectedFeatures([
+      await encodeProjectedFeatures([
         feature(0, { properties: { big: 9007199254740993n } }),
       ]),
     );
     expect(text).toContain('"big":"9007199254740993"');
+  });
+
+  it("encodes in batches: it checkpoints and yields on a large source", async () => {
+    const many = Array.from({ length: 2_500 }, (_, i) => feature(i));
+    let checkpoints = 0;
+    let turned = false;
+    setTimeout(() => {
+      turned = true;
+    }, 0);
+    const bytes = await encodeProjectedFeatures(many, {
+      checkpoint: () => (checkpoints += 1),
+    });
+    expect(checkpoints).toBeGreaterThan(0);
+    expect(turned).toBe(true);
+    expect(new TextDecoder().decode(bytes).trimEnd().split("\n")).toHaveLength(
+      2_500,
+    );
+  });
+
+  it("stops where a throwing checkpoint says, without building the rest", async () => {
+    const many = Array.from({ length: 2_500 }, (_, i) => feature(i));
+    await expect(
+      encodeProjectedFeatures(many, {
+        checkpoint: () => {
+          throw new Error("cancelled");
+        },
+      }),
+    ).rejects.toThrow("cancelled");
   });
 });
 
@@ -9870,8 +11589,9 @@ describe("createVectorTable", () => {
     expect(dropped).toContain("__src_run_7.json");
   });
 
-  it("reads a refused registration as the engine being gone", async () => {
+  it("reads a refused registration as the engine being gone ONLY when it is", async () => {
     registerOk = false;
+    engineState = "failed";
     await expect(
       createVectorTable({
         runId: "run_7",
@@ -9881,6 +11601,26 @@ describe("createVectorTable", () => {
     ).rejects.toBeInstanceOf(
       (await import("../../../../src/insights/engineAwait")).EngineDeadError,
     );
+  });
+
+  it("reports an ordinary registration failure as §6.1's memory sentence", async () => {
+    // `registerBuffer` answers false for ANY exception — an allocation that
+    // could not be served included (`duckdb.ts:725-736`) — so a false with the
+    // engine still `ready` is NOT a death, and saying "Analytics engine
+    // stopped" about it would send the user to Retry for nothing.
+    registerOk = false;
+    engineState = "ready";
+    const { SOURCE_OUT_OF_MEMORY } =
+      await import("../../../../src/features/processing/sourceRead");
+    await expect(
+      createVectorTable({
+        runId: "run_7",
+        preflight: preflight(feature(0)),
+        query,
+      }),
+    ).rejects.toThrow(SOURCE_OUT_OF_MEMORY);
+    // And the buffer name it may have half-claimed is released either way.
+    expect(dropped).toContain("__src_run_7.json");
   });
 
   it("never throws out of release, whatever the engine says", async () => {
@@ -9930,15 +11670,28 @@ Create `src/features/processing/vectorTable.ts`:
 import {
   ddl,
   dropBuffer,
+  getDuckDBStatus,
   registerBuffer,
   type QueryOutcome,
 } from "../../insights/duckdb";
 import { EngineDeadError, racedWithDeath } from "../../insights/engineAwait";
 import { quoteIdent, quoteLiteral } from "../../insights/sql";
-import type { ProjectedFeature, VectorPreflight } from "./vectorSource";
+import { SOURCE_OUT_OF_MEMORY } from "./sourceRead";
+import type {
+  ProjectedFeature,
+  VectorPreflight,
+  YieldControl,
+} from "./vectorSource";
 
-/** §6.1's own phase label, so the log names the step the spec names. */
+/** The log entry's own label for the one statement below — a statement label,
+ *  not spec copy (§6.1's PHASE label "Reading source" is `runFormat.ts:13`'s
+ *  and is unchanged). */
 const SOURCE_LABEL = "Reading source layer";
+
+/** How many features one encode batch holds before it is flushed and the walk
+ *  yields. Small enough that no batch's strings are a large allocation, big
+ *  enough that the yields are not the cost. */
+const ENCODE_BATCH = 1_000;
 
 export function vectorTableName(runId: string): string {
   return `__src_${runId}`;
@@ -9983,26 +11736,61 @@ export function buildDropVectorTableSql(table: string): string {
  * geometry. Every key is written even when its value is null, so the column
  * list above is satisfied by every line.
  */
-export function encodeProjectedFeatures(
+export async function encodeProjectedFeatures(
   features: ReadonlyArray<ProjectedFeature>,
-): Uint8Array {
-  const lines = features.map((f) =>
-    JSON.stringify(
-      {
-        idx: f.idx,
-        sid: f.stableId,
-        fid: f.featureId,
-        props: f.properties,
-        wkt: f.wkt,
-      },
-      // A BIGINT that came from an upstream table arrives as a `BigInt`, which
-      // `JSON.stringify` refuses outright rather than skipping — the same
-      // replacer `computedColumns.ts:156-160` needs.
-      (_key, value: unknown) =>
-        typeof value === "bigint" ? value.toString() : value,
-    ),
-  );
-  return new TextEncoder().encode(`${lines.join("\n")}\n`);
+  control?: YieldControl,
+): Promise<Uint8Array> {
+  const encoder = new TextEncoder();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  let batch: string[] = [];
+  const flush = (): void => {
+    if (batch.length === 0) return;
+    const bytes = encoder.encode(`${batch.join("\n")}\n`);
+    chunks.push(bytes);
+    total += bytes.byteLength;
+    // The batch's strings are released here; the whole document never exists
+    // as one string, which on a 200 MB source is the difference between one
+    // copy and three.
+    batch = [];
+  };
+  for (const [index, f] of features.entries()) {
+    batch.push(
+      JSON.stringify(
+        {
+          idx: f.idx,
+          sid: f.stableId,
+          fid: f.featureId,
+          props: f.properties,
+          wkt: f.wkt,
+        },
+        // A BIGINT that came from an upstream table arrives as a `BigInt`,
+        // which `JSON.stringify` refuses outright rather than skipping — the
+        // same replacer `computedColumns.ts:156-160` needs.
+        (_key, value: unknown) =>
+          typeof value === "bigint" ? value.toString() : value,
+      ),
+    );
+    if (batch.length < ENCODE_BATCH) continue;
+    flush();
+    // Same contract as `reprojectGeoLayer`'s walk: checkpoint (the run's
+    // `ctx.throwIfCancelled`, which THROWS), then a macrotask so a Cancel and
+    // a repaint can land.
+    if (index + 1 < features.length) {
+      control?.checkpoint?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+  flush();
+  // ONE allocation of the final size, filled from the chunks — `Blob` and
+  // `concat` both cost a second copy of the whole document.
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return out;
 }
 
 export interface VectorTableHandle {
@@ -10039,6 +11827,7 @@ export async function createVectorTable(input: {
   readonly runId: string;
   readonly preflight: VectorPreflight;
   readonly query: (label: string, sql: string) => Promise<QueryOutcome>;
+  readonly control?: YieldControl;
 }): Promise<VectorTableHandle> {
   const table = vectorTableName(input.runId);
   const file = `${table}.json`;
@@ -10046,14 +11835,21 @@ export async function createVectorTable(input: {
     table,
     release: () => releaseVectorTable(table, file),
   };
-  const bytes = encodeProjectedFeatures(input.preflight.features);
+  const bytes = await encodeProjectedFeatures(
+    input.preflight.features,
+    input.control,
+  );
   if (!(await registerBuffer(file, bytes))) {
-    // `registerBuffer` answers false only when there is no database or its
-    // status is not `ready` (`duckdb.ts:728`). By this point in a run the
-    // engine has already built a table and answered a scope query, so a false
-    // here IS the worker having died — and §6.1 has a sentence for that, which
-    // `execute`'s catch writes from this error class. No new copy is invented.
-    throw new EngineDeadError();
+    // `registerBuffer` answers false for THREE different things: no database,
+    // a status that is not `ready`, and ANY exception from
+    // `registerFileBuffer` — it catches and returns false (`duckdb.ts:725-736`).
+    // So the engine's own status is what tells a death from a registration
+    // that merely failed, and only the first is §6.1's "Analytics engine
+    // stopped". The second is an allocation the wasm heap could not serve,
+    // which §6.1 already has a sentence for; no new copy is invented for it.
+    await racedWithDeath(dropBuffer(file)).catch(() => {});
+    if (getDuckDBStatus().state !== "ready") throw new EngineDeadError();
+    throw new Error(SOURCE_OUT_OF_MEMORY);
   }
   try {
     await input.query(SOURCE_LABEL, buildVectorTableSql(table, file));
@@ -10140,6 +11936,13 @@ if (tool.sourceKind === "vector") {
     return;
   }
   const epsg = epsgForLayer(layer.model.metadata?.referenceSystem);
+  // The run's own cancel, handed to the batched walk so a Cancel lands
+  // INSIDE the reprojection of a large source rather than after it.
+  const control = {
+    checkpoint: () => {
+      if (signal.aborted) throw new CancelledError();
+    },
+  };
   // A city layer always has a recognised metric CRS (§7.5; the loader
   // refuses the others), so a null here is a layer nothing can be projected
   // INTO — the same outcome as every area failing to reproject, which §7.5
@@ -10153,13 +11956,20 @@ if (tool.sourceKind === "vector") {
           propertyTypes: new Map(),
           polygonOnly: true,
         }
-      : reprojectGeoLayer(geo.config.preparedData, epsg);
+      : await reprojectGeoLayer(geo.config.preparedData, epsg, control);
   if (preflight.features.length === 0) {
+    // §7.5's source must be AREAS, so "No usable areas in Zones" is ITS
+    // sentence; §7.7's source is any geometry type and its only sentence is
+    // "The source layer has no features" (§7.7: "An empty source (no usable
+    // geometry after preflight) disables Run with …"). Task 15's
+    // `SOURCE_NEEDS_AREAS` is the FORM's copy of the same fact and replaces
+    // this literal when it lands.
+    const sourceMustBeAreas = tool.id === "join-by-location";
     patch(id, {
       status: "failed",
       phase: null,
       error:
-        preflight.skipped > 0
+        preflight.skipped > 0 && sourceMustBeAreas
           ? `No usable areas in ${geo.name}`
           : "The source layer has no features",
       elapsedMs: elapsed(),
@@ -10178,6 +11988,7 @@ if (tool.sourceKind === "vector") {
     runId: id,
     preflight,
     query,
+    control,
   });
   source = {
     kind: "vector",
@@ -10309,6 +12120,40 @@ describe("the per-run vector table", () => {
     });
   });
 
+  it("tells §7.7's all-skipped source apart from §7.5's, by tool", async () => {
+    // §7.7's source is any geometry type, so "No usable AREAS" would be a
+    // sentence about a rule that tool does not have.
+    const roads = useGeoLayerStore.getState().addGeoLayer({
+      name: "Roads",
+      kind: "geojson",
+      config: {
+        data: {
+          type: "FeatureCollection",
+          features: [{ type: "Feature", properties: {}, geometry: null }],
+        },
+      },
+    });
+    capturing();
+    registerExecutor("distance-to-nearest", async (run) => ({
+      columns: [{ name: `${run.prefix}distance_m`, type: "DOUBLE" as const }],
+      rows: new Map(),
+      measured: 0,
+      skipped: [],
+    }));
+    const id = submitRun({
+      toolId: "distance-to-nearest",
+      targetLayerId: "CITY",
+      sourceLayerId: roads,
+      scope: "all",
+      lod: null,
+      params: {},
+      prefix: "roads_",
+      columns: [{ name: "roads_distance_m", type: "DOUBLE" }],
+    });
+    await settle();
+    expect(runById(id)?.error).toBe("The source layer has no features");
+  });
+
   it("refuses an EMPTY source with §7.5's other sentence", async () => {
     const zones = useGeoLayerStore.getState().addGeoLayer({
       name: "Zones",
@@ -10404,7 +12249,7 @@ it("round-trips the app's OWN vector-table statement", async () => {
       wkt: "POLYGON ((20 0, 30 0, 30 10, 20 0))",
     },
   ];
-  db.registerBytes("__src_probe.json", encodeProjectedFeatures(features));
+  db.registerBytes("__src_probe.json", await encodeProjectedFeatures(features));
   db.query(buildVectorTableSql("__src_probe", "__src_probe.json"));
   const rows = db.query(
     `SELECT "idx", "sid", "fid", "props"->>'zone' AS zone,
@@ -10501,7 +12346,7 @@ export function proxyDistanceNote(proxy: BuildingProxy): string;
 1. **`buildFeatureProxySql` is added beside `buildProxySql`.** The ledger's builder returns `(id, f, g)` — one row per TABLE ROW — but §7 is explicit that the joined fields, the nearest id and the distance are "evaluated ONCE on the feature's proxy geometry (the union of its parts' footprints, or the feature's combined extent), then copied to root and parts alike", and Task 16's reviewer rejects "a per-row join". The ledger's shape stays as the inner relation; the per-feature roll-up is one `GROUP BY f` on top of it, and the three executors read THAT. Making `buildProxySql` itself per-feature would have contradicted its stated `(id, f, g)` signature.
 2. **`lodZeroLabel` and `proxyDistanceNote` are added.** The first is the only honest way to reach LoD 0 — the hard rule is that `"0"` and `"0.0"` are DIFFERENT columns and only the file knows which it has, so the label comes out of `table.lods` and goes into `readSource`, and nothing ever re-spells a suffix. The second is §7.7's own copy, `2D distance to the building footprint / extent / centre`, collapsed to the one the run used; the copy table assigns that string to Tasks 14 and 17 jointly, so its single producer is here.
 
-**§7's contributor rule does not apply to a PROXY, and that is not an oversight.** The rule exists because 3D BAG stores the same building on both the root and its parts, and summing both double-counts. A proxy is a UNION, not a sum: unioning a root's footprint with its identical part's footprint is the same polygon, and `MIN`/`MAX` over a root's bbox and its parts' bboxes is the same rectangle. §7 says so itself — "the union of its parts' footprints, or the feature's combined extent". So the per-feature builder aggregates over every row of the feature and needs no contributor selection.
+**§7's contributor rule applies to the FOOTPRINT proxy, and not to the two extent proxies — because §7 words them differently.** §7 says the proxy is "the union of its PARTS' footprints, or the feature's COMBINED extent". The footprint half is the contributor rule verbatim: where any part has an LoD 0 footprint the parts are the contributors and the root's own footprint is ignored, exactly as everywhere else in §7. Unioning the root in as well is only harmless when the root's footprint IS its parts' (3D BAG's duplication, which the rule exists for); a file whose root carries a different LoD 0 polygon from its parts — a courtyard block whose root is the whole site — would join against a shape no part has. The extent half is deliberately NOT contributor-filtered: "combined extent" is the whole feature's, which is also how §7.4's own `extent_height_m` reads it (`MIN`/`MAX` over the root AND its parts), and a bbox that is a strict superset of its parts' is the same rectangle rather than a double count. So `buildFeatureProxySql` selects contributors on the footprint path and aggregates every row on the bbox paths, and each half says which sentence of §7 it is.
 
 **Footprint is offered ONLY with an LoD 0 column AND a reader.** `ST_GeomFromWKB` RAISES "Unsupported geometry type in WKB" on the PolyhedralSurface Z every solid LoD produces (probed), and one such row fails the whole statement — so a footprint from LoD 2.2 is not a worse answer, it is a failed run. The browsing table has no geometry columns at all (`isDroppedColumn`, `columnKind.ts:74-80`), which is why footprint reads from the READER and the other two read the table's `bbox` struct — a struct every layer kind has, because `layerTables.ts:642-653` forces the type on the flat path too.
 
@@ -10638,6 +12483,23 @@ describe("buildProxySql — one row per TABLE ROW", () => {
     );
   });
 
+  it("restricts the READER relation to the frozen ids, like the table one", () => {
+    // Without this a Selected run reads every building in the file and the
+    // cross-layer counts silently include buildings outside the scope.
+    expect(
+      buildProxySql({
+        proxy: "footprint",
+        table: "layer_1",
+        from: "read_cityjson('layer_1_run_7.city.json', lod => '0')",
+        geometryColumn: "geometry_lod0",
+        ids: ["b1", "b1p"],
+      }),
+    ).toContain(
+      "FROM read_cityjson('layer_1_run_7.city.json', lod => '0') " +
+        "WHERE \"id\" IN ('b1', 'b1p')",
+    );
+  });
+
   it("builds the rectangle and the centre from the table's bbox struct", () => {
     expect(
       buildProxySql({
@@ -10683,7 +12545,9 @@ describe("buildProxySql — one row per TABLE ROW", () => {
 });
 
 describe("buildFeatureProxySql — one row per FEATURE", () => {
-  it("unions the footprints of a feature's rows, NULLs excluded", () => {
+  it("unions the PART rows' footprints, falling back to the root's (§7)", () => {
+    // §7's contributor rule, in SQL: where any part has an LoD 0 footprint the
+    // parts ARE the contributors and the root's own polygon is ignored.
     expect(
       buildFeatureProxySql({
         proxy: "footprint",
@@ -10693,7 +12557,9 @@ describe("buildFeatureProxySql — one row per FEATURE", () => {
         ids: null,
       }),
     ).toBe(
-      'SELECT "f", ST_Union_Agg("g") FILTER (WHERE "g" IS NOT NULL) AS g FROM (' +
+      'SELECT "f", ST_Union_Agg("g") FILTER (WHERE "g" IS NOT NULL AND ("id" <> "f") = "parts") AS g ' +
+        'FROM (SELECT *, COALESCE(BOOL_OR("g" IS NOT NULL AND "id" <> "f") ' +
+        'OVER (PARTITION BY "f"), FALSE) AS "parts" FROM (' +
         buildProxySql({
           proxy: "footprint",
           table: "layer_1",
@@ -10701,7 +12567,7 @@ describe("buildFeatureProxySql — one row per FEATURE", () => {
           geometryColumn: "geometry_lod0",
           ids: null,
         }) +
-        ') GROUP BY "f"',
+        ')) GROUP BY "f"',
     );
   });
 
@@ -10910,9 +12776,14 @@ export function buildProxySql(input: ProxySqlInput): string {
       throw new Error("The footprint proxy needs a reader and an LoD 0 column");
     }
     const col = quoteIdent(input.geometryColumn);
+    // The SCOPE applies to the reader relation too. Without this a Selected or
+    // Matching run reads every building in the file: the join then counts
+    // buildings outside the scope, and §7.6's per-area counts are wrong in a
+    // way no output column shows. The reader's own `id` column is the same id
+    // the table's rows carry, which is what makes one `whereIds` serve both.
     return (
       `${head}CASE WHEN ${col} IS NULL THEN NULL ELSE ST_GeomFromWKB(${col}) END AS g ` +
-      `FROM ${input.from}`
+      `FROM ${input.from}${whereIds(input.ids)}`
     );
   }
   const geometry =
@@ -10935,12 +12806,15 @@ export function buildProxySql(input: ProxySqlInput): string {
  * join would count a three-part building three times in §7.6 and would give
  * §7.5's tie rule a different answer per part.
  *
- * §7's CONTRIBUTOR rule (parts win, the root's own geometry is ignored) does
- * NOT apply here, and that is not an oversight: it exists because SUMMING a
- * root and its identical parts double-counts. A union is idempotent and
- * MIN/MAX is idempotent, so aggregating every row of the feature gives exactly
- * the same polygon and the same rectangle — which is why §7 words the proxy as
- * a union rather than as a contributor choice.
+ * §7's CONTRIBUTOR rule applies to the FOOTPRINT and not to the two extent
+ * proxies, because §7 words them differently: "the union of its PARTS'
+ * footprints, or the feature's COMBINED extent". So the footprint path selects
+ * the part rows wherever any part has a footprint and the root's own row
+ * otherwise — the rule verbatim — while the bbox paths aggregate every row of
+ * the feature, which is also how §7.4's `extent_height_m` reads "combined".
+ * Unioning the root's footprint in as well is harmless only when it IS its
+ * parts' (3D BAG's duplication); a root carrying the whole site's polygon
+ * would otherwise be joined against a shape no part has.
  *
  * A feature whose rows all have NULL geometry keeps its row with `g` NULL,
  * because the executors LEFT JOIN from this relation and §6.2's value rule
@@ -10948,11 +12822,17 @@ export function buildProxySql(input: ProxySqlInput): string {
  */
 export function buildFeatureProxySql(input: ProxySqlInput): string {
   if (input.proxy === "footprint") {
-    // FILTER rather than a WHERE inside: a feature with no footprint must keep
-    // its row, and an aggregate over an empty filtered set is NULL.
+    // `parts` is "some PART of this feature has a footprint", answered as a
+    // window over the feature rather than in a second pass; `("id" <> "f") =
+    // "parts"` then keeps the PART rows when there are any and the root's row
+    // when there are none. FILTER rather than a WHERE inside: a feature with no
+    // footprint at all must keep its row, and an aggregate over an empty
+    // filtered set is NULL.
     return (
-      `SELECT "f", ST_Union_Agg("g") FILTER (WHERE "g" IS NOT NULL) AS g FROM (` +
-      `${buildProxySql(input)}) GROUP BY "f"`
+      `SELECT "f", ST_Union_Agg("g") FILTER (WHERE "g" IS NOT NULL AND ("id" <> "f") = "parts") AS g ` +
+      `FROM (SELECT *, COALESCE(BOOL_OR("g" IS NOT NULL AND "id" <> "f") ` +
+      `OVER (PARTITION BY "f"), FALSE) AS "parts" FROM (${buildProxySql(input)})) ` +
+      `GROUP BY "f"`
     );
   }
   const geometry =
@@ -11117,6 +12997,36 @@ it("aggregates a feature's proxy the way buildFeatureProxySql does", () => {
   expect(centre).toEqual([{ f: "b1", x: 10, y: 5 }]);
   db.query(`DROP TABLE IF EXISTS probe_rows`);
 });
+
+it("picks the PART footprints and honours the scope, on the real engine", () => {
+  // The footprint path is the one that reads the READER rather than the table,
+  // so it is probed against a relation shaped like the reader's: `id`,
+  // `feature_id` and an LoD 0 WKB column. `BOOL_OR(…) OVER (PARTITION BY …)`,
+  // `ST_Union_Agg` with a FILTER and `ST_GeomFromWKB` all have to hold at once.
+  const reader = `(SELECT * FROM (VALUES
+       ('b1', 'b1', ST_AsWKB(ST_GeomFromText('POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))'))),
+       ('b1p', 'b1', ST_AsWKB(ST_GeomFromText('POLYGON ((0 0, 4 0, 4 4, 0 4, 0 0))'))),
+       ('b2', 'b2', NULL),
+       ('b3', 'b3', ST_AsWKB(ST_GeomFromText('POLYGON ((20 0, 30 0, 30 10, 20 0))')))
+     ) AS t("id", "feature_id", "geometry_lod0"))`;
+  const rows = db.query(
+    `SELECT f, ST_Area(g) AS a FROM (${buildFeatureProxySql({
+      proxy: "footprint",
+      table: "unused",
+      from: reader,
+      geometryColumn: "geometry_lod0",
+      ids: ["b1", "b1p", "b2"],
+    })}) ORDER BY f`,
+  );
+  expect(rows).toEqual([
+    // §7's contributor rule: the PART's 16 m², never the root's 100 and never
+    // their union.
+    { f: "b1", a: 16 },
+    // No footprint at all: the row survives with a NULL proxy (§6.2).
+    { f: "b2", a: null },
+    // `b3` is outside the frozen scope, so it is not here at all.
+  ]);
+});
 ```
 
 `db` is Task 1's `Harness` (`query`/`registerBytes`/`dropFile`, `harness.ts:41-52`), with `spatial` loaded by that suite's `installExtension(db, "spatial")`.
@@ -11150,7 +13060,7 @@ git commit -m "feat: one building-geometry proxy for every cross-layer tool"
 **Files:**
 
 - Create: `src/features/processing/crossLayerParams.ts`, `src/ui/processing/CrossLayerParams.tsx`
-- Modify: `src/ui/processing/ToolView.tsx`, `src/ui/processing/useToolForm.ts`, `src/features/processing/processingStore.ts`, `src/features/processing/toolRegistry.ts`, `src/features/processing/types.ts` (one optional argument on `outputColumns` — see the deviations), `src/ui/processing/RecentRuns.tsx` ("Edit & run" carries the source)
+- Modify: `src/ui/processing/ToolView.tsx`, `src/ui/processing/useToolForm.ts`, `src/features/processing/processingStore.ts`, `src/features/processing/toolRegistry.ts`, `src/features/processing/types.ts` (one optional argument on `outputColumns` — see the deviations), `src/features/processing/runQueue.ts` (one literal becomes `SOURCE_NEEDS_AREAS`, Step 6), `src/ui/processing/RecentRuns.tsx` ("Edit & run" carries the source)
 - Test: `tests/unit/features/processing/crossLayerParams.test.ts`, `tests/unit/ui/processing/CrossLayerParams.test.tsx`, additions to `tests/unit/ui/processing/useToolForm.test.tsx`
 
 **Interfaces:**
@@ -11250,7 +13160,7 @@ export function numericColumnsOf(
 
 **§7.5's and §7.7's prefix default lands here.** "OUTPUT prefix defaults to the source layer name slugified (`zones_`)" is the one §7.5 requirement that has no other home: the registry's `defaultPrefix` is `""` for both tools and cannot know the source. It is DERIVED in the hook from the resolved source, never stored, so a later source change re-offers the new name — and a slug §6's own prefix rule would reject (one starting with a digit) falls back to the tool's default rather than opening the form on an invalid value.
 
-**Two adapted strings, both accepted at the plan gate.** §6 says "a distance limit must be a positive number" but gives no message; this task uses **[adapted copy A11]** `A distance limit must be a positive number` — the spec's own clause as a sentence. Decisions recorded item 4 settles Aggregate's scope wording as proposed: the radios stay under TARGET with the muted line **[adapted copy A12]** `Scope applies to the source layer's buildings.` Both are rows in the front matter's adapted-copy table; implement them verbatim.
+**Three adapted strings, each with a row in the front matter's adapted-copy table; implement them verbatim.** §6 says "a distance limit must be a positive number" but gives no message, so this task uses **[adapted copy A11]** `A distance limit must be a positive number` — the spec's own clause as a sentence. Decisions recorded item 4 settles Aggregate's scope wording as proposed: the radios stay under TARGET with the muted line **[adapted copy A12]** `Scope applies to the source layer's buildings.` And §7.6 requires "a numeric column select of the source layer" for every aggregate except count but words no message for an unfilled one, so the row's placeholder option and its blocking error are both **[adapted copy A17]** `Choose a column to summarise` — §7.7's accepted `Choose the property to copy` for the sibling case, said about a column.
 
 **Aggregate's scope counts come from the SOURCE, and the prefix check from the TARGET.** Two different layers in one form: the scope radios count the city layer's FEATURES (§7.6: "Scope applies to the SOURCE buildings"), so `useLayerCounts` is called with the city layer's id; and §6's "'height' belongs to the source data" is about the TARGET, so for a vector target it compares against the target document's public property KEYS rather than the city table's columns. A form that got either the wrong way round would count areas as buildings or refuse a prefix over a column on another layer.
 
@@ -11278,6 +13188,7 @@ import {
   numericColumnsOf,
   resolveCrossLayerParams,
   slugifyField,
+  type CrossLayerContext,
 } from "../../../../src/features/processing/crossLayerParams";
 import type { LayerTable } from "../../../../src/insights/layerTables";
 import type { ColumnType } from "../../../../src/insights/computedColumns";
@@ -11305,6 +13216,16 @@ function table(over: Partial<LayerTable> = {}): LayerTable {
   } as LayerTable;
 }
 
+// The shape `fieldTypes` takes INSIDE the frozen bag: a plain JSON object
+// keyed by the RAW property name (Decisions item 6 (iii)). DECLARED FIRST:
+// `ctx` reads it at module scope, and a `const` read before its own line is a
+// TDZ throw, not a hoist.
+const TYPES: Readonly<Record<string, ColumnType>> = {
+  "Zone Name": "VARCHAR",
+  noise: "DOUBLE",
+  flood: "BOOLEAN",
+};
+
 const ctx: CrossLayerContext = {
   table: table(),
   sourcePropertyKeys: ["Zone Name", "noise", "flood"],
@@ -11322,14 +13243,6 @@ const BAG_ONLY: CrossLayerContext = {
   sourcePropertyTypes: new Map(),
   sourceHasFeatureIds: true,
   numericColumns: [],
-};
-
-// The shape `fieldTypes` takes INSIDE the frozen bag: a plain JSON object
-// keyed by the RAW property name (Decisions item 6 (iii)).
-const TYPES: Readonly<Record<string, ColumnType>> = {
-  "Zone Name": "VARCHAR",
-  noise: "DOUBLE",
-  flood: "BOOLEAN",
 };
 
 describe("slugifyField", () => {
@@ -11380,6 +13293,24 @@ describe("resolveCrossLayerParams", () => {
           table: table({ lods: [] }),
         },
       ),
+    ).toMatchObject({ proxy: "centre" });
+  });
+
+  it("keeps an explicit proxy when the context has no table", () => {
+    // The registry's `normaliseParams` re-resolves with `BAG_ONLY`. Only a
+    // TABLE can say a proxy is unavailable, so this pass must keep the
+    // footprint the form resolved — otherwise the FROZEN request submits a
+    // centre join and §6.4's log names a proxy that was never used.
+    expect(
+      resolveCrossLayerParams(
+        "join-by-location",
+        { proxy: "footprint" },
+        BAG_ONLY,
+      ),
+    ).toMatchObject({ proxy: "footprint" });
+    // With nothing in the bag either, the safe proxy is still the centre.
+    expect(
+      resolveCrossLayerParams("join-by-location", {}, BAG_ONLY),
     ).toMatchObject({ proxy: "centre" });
   });
 
@@ -11676,6 +13607,35 @@ describe("the validation §6 puts inline and blocks Run with", () => {
         sourceHasFeatureIds: false,
       }),
     ).toBe("Choose the property to copy");
+  });
+
+  it("refuses a row that would write nothing, even beside a valid one", () => {
+    // The mixed case: the count is fine, the sum has no column, and
+    // `aggregateColumns` would quietly drop the sum. **[adapted copy A17]**
+    expect(
+      crossLayerParamsError(
+        "aggregate-per-area",
+        {
+          rows: [
+            { op: "count", column: null },
+            { op: "sum", column: null },
+          ],
+        },
+        ctx,
+      ),
+    ).toBe("Choose a column to summarise");
+    expect(
+      crossLayerParamsError(
+        "aggregate-per-area",
+        {
+          rows: [
+            { op: "count", column: null },
+            { op: "sum", column: "roof_area_m2" },
+          ],
+        },
+        ctx,
+      ),
+    ).toBeNull();
   });
 
   it("refuses an aggregate with no rows, and two rows on one column", () => {
@@ -12057,15 +14017,24 @@ export function resolveCrossLayerParams(
   // §7.5: "footprint when available, otherwise extent centre" — and a proxy
   // the CURRENT table cannot offer is replaced, because the draft is kept per
   // tool for the session and survives a retarget.
-  const offered = ctx.table === null ? [] : proxyOptions(ctx.table);
+  //
+  // Only a TABLE can say a proxy is unavailable, so a context with none keeps
+  // what the bag has. This is the same "an empty context is no opinion" rule as
+  // the fields and the aggregate columns below, and here it is load-bearing in
+  // the same way: `normaliseParams` re-resolves the form's already-resolved bag
+  // with `BAG_ONLY`, and narrowing to "centre" there would freeze a run against
+  // a proxy the form never showed — §6.4's record would name a proxy that was
+  // not used, and a footprint join would silently become a centre join.
   const chosen = pick(raw["proxy"], PROXIES, "centre");
-  const available = offered.some((o) => o.key === chosen && o.available);
   const proxy =
-    raw["proxy"] === undefined || !available
-      ? ctx.table === null
-        ? "centre"
-        : defaultProxy(ctx.table)
-      : chosen;
+    ctx.table === null
+      ? chosen
+      : raw["proxy"] === undefined ||
+          !proxyOptions(ctx.table).some(
+            (option) => option.key === chosen && option.available,
+          )
+        ? defaultProxy(ctx.table)
+        : chosen;
   const known = new Set(ctx.sourcePropertyKeys);
   // No source in this context (the registry's `BAG_ONLY`) means "no opinion",
   // never "no properties": the caller that HAS the source has already pruned.
@@ -12197,8 +14166,18 @@ export function crossLayerParamsError(
 
   if (toolId === "aggregate-per-area") {
     const p = aggregateParams(raw);
+    // §7.6's "+ Add aggregate" list, empty. `Pick at least one measure` is
+    // REUSED here verbatim (Decisions recorded item 5).
+    if (p.rows.length === 0) return "Pick at least one measure";
+    // EVERY row, not just the ones that produced a column. `aggregateColumns`
+    // skips a row whose op needs a column and has none, so a `count` beside a
+    // column-less `sum` would otherwise pass validation with one column and the
+    // sum would vanish between the form and the write — a run that silently
+    // did less than it was asked. **[adapted copy A17]**
+    if (p.rows.some((row) => row.op !== "count" && row.column === null)) {
+      return "Choose a column to summarise";
+    }
     const columns = aggregateColumns("", p);
-    if (columns.length === 0) return "Pick at least one measure";
     const duplicate = firstDuplicate(columns.map((c) => c.name));
     return duplicate === null
       ? null
@@ -12247,6 +14226,17 @@ export function documentHasFeatureIds(document: unknown): boolean {
     (feature) =>
       typeof feature.id === "string" || typeof feature.id === "number",
   );
+}
+
+/**
+ * Does the document carry a feature at all?
+ *
+ * §7.5 and §7.7's "The source layer has no features" is about the SOURCE
+ * select, which is drawn per keystroke over every candidate layer — so it is
+ * one array length per layer, not a walk of anyone's geometry.
+ */
+export function documentHasFeatures(document: unknown): boolean {
+  return featuresOf(document).length > 0;
 }
 ```
 
@@ -12367,6 +14357,14 @@ const BAG_ONLY: CrossLayerContext = {
 ```
 
 `normaliseParams` is reached only from `ToolView.run()`, which hands it the ALREADY-resolved bag (`f.params`), so the permissive context here never has to invent a default — it is idempotent over a resolved bag by construction.
+
+And in `src/features/processing/runQueue.ts`, the source phase's one-tool literal becomes the shared set now that it exists — Task 13 wrote it with a note saying so:
+
+```ts
+const sourceMustBeAreas = SOURCE_NEEDS_AREAS.has(tool.id);
+```
+
+with `SOURCE_NEEDS_AREAS` added to the `./crossLayerParams` import. One fact, one owner: the form's disabled row and the run's refusal cannot come to disagree about which tools need areas.
 
 - [ ] **Step 7: Write the failing test for the form**
 
@@ -12592,6 +14590,21 @@ describe("Aggregate buildings per area (§7.6)", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows the unfilled column select's own sentence (§7.6)", () => {
+    // Reachable when the source layer has no numeric column at all. The select
+    // must not render its first option as if it were chosen — the bag says
+    // null, and `crossLayerParamsError` blocks Run with the same sentence.
+    renderSection(
+      "aggregate-per-area",
+      { rows: [{ op: "sum", column: null }] },
+      { numericColumns: [] },
+    );
+    expect(screen.getByLabelText("Column 1")).toHaveValue("");
+    expect(
+      screen.getByRole("option", { name: "Choose a column to summarise" }),
+    ).toBeInTheDocument();
+  });
+
   it("adds and removes rows", async () => {
     const onChange = renderSection("aggregate-per-area", {
       proxy: "footprint",
@@ -12770,11 +14783,9 @@ export function CrossLayerParams({
 function PredicateSelect({
   value,
   onPick,
-  proxy,
 }: {
   readonly value: JoinPredicate;
   readonly onPick: (next: JoinPredicate) => void;
-  readonly proxy: string;
 }) {
   return (
     <label className="processing-field">
@@ -12784,19 +14795,16 @@ function PredicateSelect({
         value={value}
         onChange={(e) => onPick(e.target.value as JoinPredicate)}
       >
+        {/* §7.5's own parentheticals are the options' titles — including
+            "forces the centre proxy", which is the whole of what the reader
+            needs to know about `centre within` and is the spec's own wording.
+            No second sentence is invented under the select for it. */}
         {PREDICATES.map((option) => (
           <option key={option.key} value={option.key} title={option.hint}>
             {option.label}
           </option>
         ))}
       </select>
-      {value === "centreWithin" && proxy !== "centre" && (
-        // §7.5: "centre within" FORCES the centre proxy. Said, not silently
-        // done — the radio above still reads the user's own choice.
-        <p className="processing-note">
-          Centre within uses the extent centre whatever the proxy above says.
-        </p>
-      )}
     </label>
   );
 }
@@ -12828,7 +14836,6 @@ function JoinFields({
     <>
       <PredicateSelect
         value={current.predicate}
-        proxy={current.proxy}
         onPick={(predicate) => onChange({ ...params, predicate })}
       />
       <div className="processing-field">
@@ -12974,7 +14981,10 @@ function DistanceFields({
                 one. Its value is the empty string, which is `null` in the bag
                 — the same spelling `distanceParams` reads. */}
             {hasFeatureIds && <option value="">The feature&apos;s id</option>}
-            {!hasFeatureIds && <option value="">Choose a property…</option>}
+            {!hasFeatureIds && (
+              // §7.7's own sentence for this state, verbatim.
+              <option value="">Choose the property to copy</option>
+            )}
             {keys.map((key) => (
               <option key={key} value={key}>
                 {key}
@@ -13009,7 +15019,6 @@ function AggregateFields({
     <>
       <PredicateSelect
         value={current.predicate}
-        proxy={current.proxy}
         onPick={(predicate) => onChange({ ...params, predicate })}
       />
       {current.rows.map((row, index) => (
@@ -13041,9 +15050,21 @@ function AggregateFields({
               aria-label={`Column ${index + 1}`}
               value={row.column ?? ""}
               onChange={(e) =>
-                replace(index, { op: row.op, column: e.target.value })
+                replace(index, {
+                  op: row.op,
+                  column: e.target.value === "" ? null : e.target.value,
+                })
               }
             >
+              {/* A row with no column is a REAL state — a source layer with no
+                  numeric column has nothing to offer — and a controlled select
+                  whose value matches no option renders the first one instead,
+                  which would show a column the bag does not carry. The
+                  placeholder is the same sentence the blocking error uses.
+                  **[adapted copy A17]** */}
+              {row.column === null && (
+                <option value="">Choose a column to summarise</option>
+              )}
               {numericColumns.map((column) => (
                 <option key={column} value={column}>
                   {column}
@@ -13083,14 +15104,14 @@ function AggregateFields({
 
 - [ ] **Step 9: The hook learns the second layer**
 
-Replace `src/ui/processing/useToolForm.ts`'s body from the imports down. The parts that do not appear below — the `PREFIX_RE` constant, the module doc comment, the LoD default rule, the streaming note — are unchanged; everything else is:
+Replace `src/ui/processing/useToolForm.ts`'s body from the imports down. The parts that do not appear below — the `PREFIX_RE` constant, the module doc comment, the LoD default rule, the streaming note — are unchanged, and **every field Task 5 added to the returned object stays in it** (`workloadNote` is spelled out below for exactly that reason: `ToolView` renders it, and a rewrite that dropped it would take §6's "Re-reads a 180 MB source…" note off the screen and fail `tsc`). Everything else is:
 
 ```ts
 import { useMemo } from "react";
 import { useLayerStore, type Layer } from "../../features/layers/layerStore";
 import {
   useGeoLayerStore,
-  type GeoLayer,
+  type GeoJsonLayer,
 } from "../../features/geoLayers/geoLayerStore";
 import { geoRecords } from "../../features/geoLayers/geoRecords";
 import { useLayerCounts } from "../table/useLayerCounts";
@@ -13118,8 +15139,10 @@ import {
 import {
   documentGeometryKinds,
   documentHasFeatureIds,
+  documentHasFeatures,
   geoPropertyTypes,
 } from "../../features/processing/vectorSource";
+import { sourceWorkloadNote } from "../../features/processing/sourceRead";
 import type { ToolId } from "../../features/processing/types";
 import {
   eligibilityContextFor,
@@ -13128,8 +15151,6 @@ import {
 import { useActiveLayer } from "../../features/workspace/activeLayer";
 import { useLodOptions } from "./useLodOptions";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
-
-type GeoJsonLayer = Extract<GeoLayer, { kind: "geojson" }>;
 
 /** One row of the TARGET or SOURCE select. */
 export interface LayerOption {
@@ -13145,6 +15166,33 @@ function hasAreas(layer: GeoJsonLayer): boolean {
   return [...documentGeometryKinds(layer.config.preparedData)].some((kind) =>
     POLYGONAL_KINDS.has(kind),
   );
+}
+
+/**
+ * Why a vector layer cannot be this tool's SOURCE, or null.
+ *
+ * IN THE SPEC'S OWN ORDER, and the order is the whole of it: a layer that is
+ * still loading, or that failed, has no document to ask about geometry — and
+ * asking anyway answers "no polygons", which would put "Needs areas
+ * (polygons)" on a layer that is full of them. So preparation first
+ * (**[adapted copy A4]**, the same two sentences `eligibility.ts` says about a
+ * vector TARGET), then §7.5/§7.7's empty-source sentence, and only then the
+ * geometry kind §7.5 needs.
+ */
+function vectorSourceReason(
+  layer: GeoJsonLayer,
+  toolId: ToolId,
+): string | null {
+  const preparation = layer.config.preparation;
+  if (preparation === "loading") return "This vector layer is still loading";
+  if (preparation === "failed") return "This vector layer could not be loaded";
+  if (!documentHasFeatures(layer.config.preparedData)) {
+    return "The source layer has no features";
+  }
+  if (SOURCE_NEEDS_AREAS.has(toolId) && !hasAreas(layer)) {
+    return "Needs areas (polygons)";
+  }
+  return null;
 }
 
 export function useToolForm(toolId: ToolId) {
@@ -13286,13 +15334,8 @@ export function useToolForm(toolId: ToolId) {
   const sourceOptions: ReadonlyArray<LayerOption> = useMemo(() => {
     if (tool.sourceKind === "vector") {
       return vectorCandidates.map((l) => {
-        const needsAreas = SOURCE_NEEDS_AREAS.has(toolId) && !hasAreas(l);
-        return {
-          id: l.id,
-          name: l.name,
-          disabled: needsAreas,
-          reason: needsAreas ? "Needs areas (polygons)" : null,
-        };
+        const reason = vectorSourceReason(l, toolId);
+        return { id: l.id, name: l.name, disabled: reason !== null, reason };
       });
     }
     if (tool.sourceKind === "city") {
@@ -13455,15 +15498,13 @@ export function useToolForm(toolId: ToolId) {
     vectorTargeted && vectorTarget !== null && !hasAreas(vectorTarget)
       ? "The layer has no areas"
       : null;
+  // §5's rule is that Run repeats the chosen row's own reason, and
+  // `vectorSourceReason` has already asked the questions in the spec's order
+  // (still loading / could not be loaded / no features / needs areas), so there
+  // is exactly one producer of each sentence.
   const chosenSourceOption =
     sourceOptions.find((o) => o.id === sourceLayerId) ?? null;
-  const sourceReason =
-    chosenSourceOption?.reason ??
-    (tool.sourceKind === "vector" &&
-    sourceLayerId !== null &&
-    sourceRecords.length === 0
-      ? "The source layer has no features"
-      : null);
+  const sourceReason = chosenSourceOption?.reason ?? null;
 
   const scopeCount =
     draft.scope === "all"
@@ -13531,6 +15572,24 @@ export function useToolForm(toolId: ToolId) {
     prefixError,
     paramsError,
     extensionNote,
+    // Task 5's expression, KEPT — `ToolView` renders it and this task rewrites
+    // the hook. Only the TABLE is adjusted: the note is about the layer whose
+    // SOURCE the run re-reads, which for Aggregate is the city SOURCE and not
+    // the vector target. `cityTable` is that table under both directions, and
+    // for every one-layer tool it is the target's own table, exactly as Task 5
+    // wrote it.
+    //
+    // Task 5's `tool.needsReader` GUARD is kept too, and widened rather than
+    // dropped: a warning about a read that will not happen is a false alarm,
+    // and the three cross-layer tools declare `needsReader: false` because
+    // their source read is OPTIONAL — only the footprint proxy re-reads. So the
+    // same question is asked of the resolved proxy, and a run on the extent
+    // rectangle or the extent centre shows no note at all.
+    workloadNote:
+      cityTable !== null &&
+      (tool.needsReader || params["proxy"] === "footprint")
+        ? sourceWorkloadNote(cityTable)
+        : null,
     eligibility,
     canRun: runReason === null && targetLayerId !== null,
     runReason,
@@ -13774,6 +15833,43 @@ describe("the SOURCE select and the prefix it names (§7.5, §7.7)", () => {
     ).toBeChecked();
   });
 
+  it("warns about a large source only when the PROXY will re-read it", () => {
+    // Task 5 guarded the note with `tool.needsReader`, and the three
+    // cross-layer tools declare `needsReader: false` because their source read
+    // is OPTIONAL — only the footprint proxy re-reads. So the guard follows the
+    // resolved proxy here, and the note is about the CITY layer (§7.6's
+    // Aggregate re-reads the source's buildings, never the vector target).
+    const id = addCityLayer("Delft", true);
+    addGeoLayer("Zones", "Polygon");
+    useLayerTableStore.setState((state) => {
+      const entry = state.tables[id];
+      if (entry?.state !== "ready") return state;
+      return {
+        tables: {
+          ...state.tables,
+          [id]: {
+            ...entry,
+            info: { ...entry.info, sourceBytes: 180_000_000 },
+          },
+        },
+      };
+    });
+    render(<ToolView toolId="join-by-location" />);
+    // The fixture's table has an LoD 0 rung, so the default proxy IS the
+    // footprint (the case above) and §6's note is due, verbatim.
+    expect(
+      screen.getByText(
+        "Re-reads a 180 MB source; this can take a minute and needs memory",
+      ),
+    ).toBeInTheDocument();
+
+    // Switch to a proxy that reads the browsing table's `bbox` and nothing
+    // else: no read, no note. A warning about a read that will not happen is
+    // the false alarm Task 5's guard exists to prevent.
+    fireEvent.click(screen.getByRole("radio", { name: "Extent rectangle" }));
+    expect(screen.queryByText(/Re-reads a/)).toBeNull();
+  });
+
   it("counts the SOURCE city layer's buildings for Aggregate (§7.6)", () => {
     addCityLayer("Delft", true);
     addGeoLayer("Zones", "Polygon");
@@ -13786,6 +15882,55 @@ describe("the SOURCE select and the prefix it names (§7.5, §7.7)", () => {
     expect(
       screen.getByText("Scope applies to the source layer's buildings."),
     ).toBeInTheDocument();
+  });
+
+  it("freezes the proxy the form SHOWED, through `normaliseParams`", () => {
+    // The registry's `normaliseParams` re-resolves the already-resolved bag
+    // with a context that has no table. If that pass narrowed the proxy, the
+    // run submitted here would be a CENTRE join while the form said footprint
+    // — and §6.4's log would name a proxy that was never used. The assertion is
+    // on the request the mocked `submitRun` actually received.
+    addCityLayer("Delft", true);
+    addGeoLayer("Zones", "Polygon");
+    render(<ToolView toolId="join-by-location" />);
+    expect(
+      screen.getByRole("radio", { name: "Footprint (LoD 0)" }),
+    ).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(submitRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolId: "join-by-location",
+        params: expect.objectContaining({ proxy: "footprint" }),
+      }),
+    );
+  });
+
+  it("says why a source row is unusable, in §7.5's own order", () => {
+    // A layer whose document is still loading has no geometry to ask about, so
+    // "Needs areas (polygons)" would be a sentence about a fact nobody knows.
+    addCityLayer("Delft", true);
+    const loading = useGeoLayerStore.getState().addGeoLayer({
+      name: "Pending",
+      kind: "geojson",
+      config: { url: "https://x/zones.geojson", preparation: "loading" },
+    });
+    const empty = useGeoLayerStore.getState().addGeoLayer({
+      name: "Empty",
+      kind: "geojson",
+      config: { data: { type: "FeatureCollection", features: [] } },
+    });
+    render(<ToolView toolId="join-by-location" />);
+    const options = [
+      ...screen
+        .getByRole("combobox", { name: "Source" })
+        .querySelectorAll("option"),
+    ];
+    const titleOf = (id: string) =>
+      options
+        .find((o) => o.getAttribute("value") === id)
+        ?.getAttribute("title");
+    expect(titleOf(loading)).toBe("This vector layer is still loading");
+    expect(titleOf(empty)).toBe("The source layer has no features");
   });
 
   it("drops the parameters when the SOURCE changes, so stale fields cannot freeze", () => {
@@ -13811,7 +15956,12 @@ describe("the SOURCE select and the prefix it names (§7.5, §7.7)", () => {
 `@testing-library/react` import, and add
 `useGeoLayerStore.setState({ layers: [] })` to its `afterEach`. The fixture's
 `readyTable(true)` needs `lods: [{ label: "0", suffix: "0" }]` for the footprint
-radio to be offered — one field on an existing helper.)
+radio to be offered — one field on an existing helper. `submitRun` is the
+`vi.fn` from that file's existing `runQueue` mock: import it from
+`../../../../src/features/processing/runQueue` and clear it in the same
+`afterEach`, so the frozen-request assertion above reads one call.
+`useLayerTableStore` is already imported by `addCityLayer`'s own helper, which
+is what the workload case reaches through.)
 
 - [ ] **Step 12: Run to pass**
 
@@ -13829,6 +15979,7 @@ Expected: PASS, `tsc` clean, `vp check` still 0 errors / 56 warnings. Then check
 ```bash
 git add src/features/processing/crossLayerParams.ts src/features/processing/vectorSource.ts \
   src/features/processing/processingStore.ts src/features/processing/toolRegistry.ts \
+  src/features/processing/runQueue.ts \
   src/features/processing/types.ts src/ui/processing/CrossLayerParams.tsx \
   src/ui/processing/ToolView.tsx src/ui/processing/useToolForm.ts \
   src/ui/processing/RecentRuns.tsx \
@@ -13846,11 +15997,11 @@ git commit -m "feat: the cross-layer parameter forms and their validation"
 
 - Create: `src/features/processing/tools/joinByLocation.ts`
 - Modify: `src/features/processing/toolRegistry.ts` (`styleByResult`, `implemented: true`), `src/features/processing/tools/register.ts`, `tests/unit/features/processing/register.test.ts`
-- Test: `tests/unit/features/processing/joinByLocation.test.ts`
+- Test: `tests/unit/features/processing/joinByLocation.test.ts`, additions to `tests/integration/duckdb/crossLayer.test.ts` (the three predicates, Step 5)
 
 **Interfaces:**
 
-- Consumes: `createVectorTable`/`VectorTableHandle` (Task 13, through `ctx.source`), `buildFeatureProxySql`/`lodZeroLabel`/`proxyDistanceNote` (Task 14), `joinParams`/`joinColumns`/`slugifyField` (Task 15), `readSource`/`ReadSourceHandle` (Task 5), `ToolExecutor`/`ToolContext`/`ToolResult` (Task 11), `quoteIdent`/`quoteLiteral` (`sql.ts:28-48`).
+- Consumes: `createVectorTable`/`VectorTableHandle` (Task 13, through `ctx.source`), `buildFeatureProxySql`/`lodZeroLabel`/`proxyDistanceNote` (Task 14), `joinParams`/`joinColumns`/`slugifyField` (Task 15), `readSource`/`ReadSourceHandle`/`readerQuery`/`assertSourceIds` (Task 5 — the footprint statement reads the re-read source, so §6.1's sentence and the id-join threshold come from there and are not decided again here), `ToolExecutor`/`ToolContext`/`ToolResult` (Task 11), `quoteIdent`/`quoteLiteral` (`sql.ts:28-48`).
 - Produces: `buildJoinSql(input)` and `joinByLocation: ToolExecutor` in `tools/joinByLocation.ts`, plus `registerExecutor("join-by-location", joinByLocation)`; the registry entry's `styleByResult` and `implemented: true`. **Nothing in `types.ts`**: Task 9 already declares `StyleByResult.operator` and `.value` as `T | ((picked: OutputColumn) => T)` and already exports `resolveStyleOperator` / `resolveStyleValueSource`, and `RunFooter` already routes through them.
 
 **This task SUPPLIES a descriptor and nothing more** (commander's ruling, Decisions recorded item 6 (ii)). §7.5's Style by result is "a rule on the first copied text field `=` its most frequent value; if no text field was copied, on `<prefix>matches_n > 0`" — two different OPERATORS and two different value sources, chosen by which column `pick` returned. That is exactly what Task 9's function unions exist for: this entry passes functions where the other six pass plain values. Do not widen the type, do not add a resolver, do not touch `RunFooter`.
@@ -13859,7 +16010,7 @@ git commit -m "feat: the cross-layer parameter forms and their validation"
 
 **Three exact SQL decisions, each with its reason.**
 
-- **`centre within` builds the CENTRE proxy and uses `ST_Intersects`, not `ST_Within`.** §7.5: "a centre exactly on a shared boundary matches BOTH areas and the tie rule below applies". `ST_Within` of a point ON the boundary is FALSE in OGC semantics, so `within` would match neither area and the tie rule would never be reached. `within` for a polygon proxy stays `ST_Within` (§7.5's "the whole proxy inside the area, boundary included").
+- **`within` is `ST_CoveredBy`, and `centre within` is `ST_Intersects`. Neither is `ST_Within`.** §7.5 words `within` as "the whole proxy inside the area, BOUNDARY INCLUDED", and `ST_Within` is exactly the predicate that excludes the boundary: a footprint sharing an edge with its zone — the ordinary case for a building on a parcel line — is `ST_Within` FALSE and `ST_CoveredBy` TRUE. Covered-by is the OGC predicate for "inside, boundary included", so it is the one the sentence names. `centre within` keeps `ST_Intersects` for the same reason stated the other way: §7.5 wants "a centre exactly on a shared boundary" to match BOTH areas so the tie rule decides, and for a point `ST_Intersects` and `ST_CoveredBy` agree. Both are probed against the real engine in Step 5, boundary cases and a degenerate (zero-area) extent included, because this is the one place where a wrong predicate silently drops matches rather than failing.
 - **The tie is `ROW_NUMBER() OVER (PARTITION BY f ORDER BY …)`, never `arg_min`.** `arg_min`'s behaviour on equal keys is unspecified, and §7.5's rule is explicit: largest overlap first, "equal overlaps fall back to first", and first is by SOURCE ORDER (`idx`). Two `ORDER BY` keys say exactly that; one `arg_min` cannot.
 - **`matches_n` is `CASE WHEN the proxy is NULL THEN NULL ELSE COUNT(idx) END`.** §6.2's value rule: NULL means "could not be evaluated" (no proxy geometry), and a count that WAS evaluated and found nothing is 0.
 
@@ -13897,11 +16048,24 @@ vi.mock("../../../../src/features/processing/sourceRead", () => ({
       released.push(input.runId);
     },
   })),
+  // Task 5's other two source doors, spied rather than reimplemented: what the
+  // §6.1 sentences and the id-join THRESHOLD do is `sourceRead.test.ts`'s to
+  // assert, and what this executor owns is that it goes through them.
+  readerQuery: vi.fn(
+    async (
+      ctx: { query: (label: string, sql: string) => Promise<unknown> },
+      label: string,
+      sql: string,
+    ) => ctx.query(label, sql),
+  ),
+  assertSourceIds: vi.fn(),
   sourceWorkloadNote: () => null,
 }));
 
 const { buildJoinSql, joinByLocation } =
   await import("../../../../src/features/processing/tools/joinByLocation");
+const { assertSourceIds, readerQuery } =
+  await import("../../../../src/features/processing/sourceRead");
 import type { LayerTable } from "../../../../src/insights/layerTables";
 import type {
   ToolContext,
@@ -13986,6 +16150,8 @@ function row(
 
 beforeEach(() => {
   released.length = 0;
+  vi.mocked(readerQuery).mockClear();
+  vi.mocked(assertSourceIds).mockClear();
 });
 
 function context(
@@ -14052,10 +16218,12 @@ describe("buildJoinSql", () => {
     );
   });
 
-  it("uses ST_Within for `within` and ST_Intersects for `centre within`", () => {
-    expect(buildJoinSql({ ...base, predicate: "within" })).toContain(
-      'ST_Within(b."g", s."geom")',
-    );
+  it("uses ST_CoveredBy for `within` — §7.5 includes the boundary", () => {
+    const within = buildJoinSql({ ...base, predicate: "within" });
+    expect(within).toContain('ST_CoveredBy(b."g", s."geom")');
+    // `ST_Within` drops a footprint that shares an edge with its zone, which
+    // is the ordinary case for a building on a parcel line.
+    expect(within).not.toContain("ST_Within(");
     // §7.5: a centre ON a shared boundary must match BOTH areas, and
     // ST_Within of a boundary point is FALSE.
     const centre = buildJoinSql({ ...base, predicate: "centreWithin" });
@@ -14207,11 +16375,63 @@ describe("joinByLocation", () => {
     expect(released).toEqual(["run_1"]);
   });
 
+  it("sends the footprint statement through Task 5's two source doors", async () => {
+    // The RULES are `sourceRead.test.ts`'s — §6.1's sentences and the id-join
+    // threshold. What this asserts is that the executor does not write a second
+    // copy of either, which is how the two solids tools and the three
+    // cross-layer tools came to disagree in the review.
+    const { ctx } = context([row("B1", "B1", 1, { zones_matches_n: 1 })], {
+      featureIds: ["B1", "B2"],
+    });
+    await joinByLocation(run({ ...params, proxy: "footprint" }), ctx);
+    expect(vi.mocked(readerQuery)).toHaveBeenCalledWith(
+      ctx,
+      "Joining attributes",
+      expect.stringContaining("read_cityjson('layer_1_run_1.city.json'"),
+    );
+    // EVERY requested id, not "no match at all": the statement answered for B1
+    // only, so the file no longer holds B2 and §6.1's sentence is due.
+    expect(vi.mocked(assertSourceIds)).toHaveBeenCalledWith(
+      ["B1", "B2"],
+      new Set(["B1"]),
+    );
+  });
+
+  it("leaves both doors alone for a proxy that reads no source", async () => {
+    const { ctx } = context([row("B1", "B1", 1, { zones_matches_n: 1 })]);
+    await joinByLocation(run(params), ctx);
+    expect(vi.mocked(readerQuery)).not.toHaveBeenCalled();
+    expect(vi.mocked(assertSourceIds)).not.toHaveBeenCalled();
+  });
+
   it("refuses a run whose source is not a vector layer", async () => {
     const { ctx } = context([], { source: null });
     await expect(joinByLocation(run(params), ctx)).rejects.toThrow(
       "Add a vector layer to join with",
     );
+  });
+
+  it("refuses when a FROZEN field is not in the source any more (§6.1)", async () => {
+    // The run was queued with `zone` and `noise`; the source layer was
+    // re-linked while it waited and now carries neither. Copying NULL into
+    // every building and calling it a join is the failure this prevents.
+    const { ctx, sql } = context([], {
+      source: source({ propertyKeys: ["district"] }),
+    });
+    await expect(joinByLocation(run(params), ctx)).rejects.toThrow(
+      "Layer changed while running; run again",
+    );
+    expect(sql).toEqual([]);
+  });
+
+  it("does not mind a changed source when no field is copied", async () => {
+    // "Count only" copies nothing, so the source's properties are not part of
+    // what was promised.
+    const { ctx } = context([row("B1", "B1", 1, { zones_matches_n: 1 })], {
+      source: source({ propertyKeys: [] }),
+    });
+    const out = await joinByLocation(run({ ...params, tie: "countOnly" }), ctx);
+    expect(out.columns).toEqual([{ name: "zones_matches_n", type: "DOUBLE" }]);
   });
 });
 ```
@@ -14255,11 +16475,14 @@ Create `src/features/processing/tools/joinByLocation.ts`:
  * ORDER. Two `ORDER BY` keys state exactly that; `arg_min` on equal keys is
  * unspecified.
  *
- * WHY `centre within` USES `ST_Intersects`. §7.5: "a centre exactly on a shared
- * boundary matches BOTH areas and the tie rule below applies". `ST_Within` of a
- * point on the boundary is FALSE, so the predicate would match neither area and
- * the tie rule would never be reached. The proxy is forced to the centre, as
- * §7.5 says.
+ * WHY `within` IS `ST_CoveredBy` AND `centre within` IS `ST_Intersects`. §7.5
+ * words `within` as "the whole proxy inside the area, BOUNDARY INCLUDED", and
+ * `ST_Within` is the predicate that excludes the boundary — a footprint sharing
+ * an edge with its zone is `ST_Within` FALSE. Covered-by is the OGC predicate
+ * for the sentence §7.5 wrote. `centre within` wants the opposite emphasis: "a
+ * centre exactly on a shared boundary matches BOTH areas and the tie rule below
+ * applies", and for a point `ST_Intersects` and `ST_CoveredBy` agree. The proxy
+ * is forced to the centre, as §7.5 says.
  *
  * WHY `TRY_CAST`. A source property that is text in one feature and a number in
  * another would fail the whole statement under `::DOUBLE`; §6.2's rule for a
@@ -14281,7 +16504,12 @@ import {
   type JoinPredicate,
   type JoinTie,
 } from "../crossLayerParams";
-import { readSource, type ReadSourceHandle } from "../sourceRead";
+import {
+  assertSourceIds,
+  readSource,
+  readerQuery,
+  type ReadSourceHandle,
+} from "../sourceRead";
 import type { ToolExecutor } from "../runQueue";
 import type { SkipCount } from "../types";
 import { registerExecutor } from "./index";
@@ -14308,10 +16536,13 @@ export interface JoinSqlInput {
 }
 
 function predicateSql(predicate: JoinPredicate): string {
-  // `centreWithin`'s proxy is already the centre; the predicate is
-  // ST_Intersects so a point on a shared boundary matches both areas.
+  // §7.5's `within` is "the whole proxy inside the area, BOUNDARY INCLUDED",
+  // which is covered-by and not within: a footprint sharing an edge with its
+  // zone is `ST_Within` FALSE and `ST_CoveredBy` TRUE. `centreWithin`'s proxy
+  // is already the centre, and its predicate is `ST_Intersects` so a point on a
+  // shared boundary matches BOTH areas and the tie rule decides (§7.5).
   return predicate === "within"
-    ? `ST_Within(b."g", s."geom")`
+    ? `ST_CoveredBy(b."g", s."geom")`
     : `ST_Intersects(b."g", s."geom")`;
 }
 
@@ -14394,6 +16625,19 @@ export const joinByLocation: ToolExecutor = async (run, ctx) => {
     throw new Error("Add a vector layer to join with");
   }
   const params = joinParams(run.params);
+  // §6.1's head re-validation, for the SOURCE's own document. The fields were
+  // frozen at Run; the queue may have held this run for minutes, and the source
+  // layer can have been re-linked or re-prepared in between. `props->>'gone'`
+  // would then copy NULL into every building and the run would report a
+  // successful join of nothing — so the frozen bag is checked against what
+  // preflight actually read, and §6.1's own sentence for a subject that moved
+  // is used rather than a new one.
+  const missing = params.fields.filter(
+    (field) => !source.propertyKeys.includes(field),
+  );
+  if (params.tie !== "countOnly" && missing.length > 0) {
+    throw new Error("Layer changed while running; run again");
+  }
   const fields: JoinField[] =
     params.tie === "countOnly"
       ? []
@@ -14433,24 +16677,46 @@ export const joinByLocation: ToolExecutor = async (run, ctx) => {
       });
     }
     ctx.phase("compute");
-    const out = await ctx.query(
-      "Joining attributes",
-      buildJoinSql({
-        table: ctx.table.table,
-        source: source.table,
-        proxy: params.proxy,
-        from: handle?.from ?? null,
-        geometryColumn: handle?.geometryColumn ?? null,
-        ids: ctx.featureIds,
-        predicate: params.predicate,
-        tie: params.tie,
-        prefix: run.prefix,
-        fields,
-        writeMatchCount: params.writeMatchCount,
-      }),
-    );
+    const sql = buildJoinSql({
+      table: ctx.table.table,
+      source: source.table,
+      proxy: params.proxy,
+      from: handle?.from ?? null,
+      geometryColumn: handle?.geometryColumn ?? null,
+      ids: ctx.featureIds,
+      predicate: params.predicate,
+      tie: params.tie,
+      prefix: run.prefix,
+      fields,
+      writeMatchCount: params.writeMatchCount,
+    });
+    // With the footprint proxy this statement PARSES the re-read source, so a
+    // gunzip-to-garbage or a wasm allocation failure happens inside it and §6.1
+    // promises a sentence for it: Task 5's `readerQuery` is the one door, over
+    // the one classifier both stages share, and it keeps DuckDB's own words in
+    // the log. Every other proxy reads the browsing table only and stays on
+    // `ctx.query`.
+    const out =
+      handle === null
+        ? await ctx.query("Joining attributes", sql)
+        : await readerQuery(ctx, "Joining attributes", sql);
     // A type guard, not logic: the context throws on a failed query.
     if (!out.ok) throw new Error(out.message);
+    if (handle !== null) {
+      // §6.1's id join, at Task 5's ONE threshold. The footprint relation is
+      // built FROM the reader (`buildProxySql`'s footprint arm is
+      // `FROM <handle.from>`), so a file that no longer holds an object drops
+      // that building out of the final inner join and it would be written as
+      // "no geometry" — a verdict on geometry nobody looked at. `ctx.featureIds`
+      // is what this run asked about BY NAME; a null scope named nothing and the
+      // check is vacuous, which is `assertSourceIds`' own documented rule and
+      // the same limit §6.1 already states for a source that changed under its
+      // ids.
+      assertSourceIds(
+        ctx.featureIds ?? [],
+        new Set(out.rows.map((row) => String(row["id"]))),
+      );
+    }
 
     const rows = new Map<string, Record<string, unknown>>();
     const countColumn = `${run.prefix}matches_n`;
@@ -14568,17 +16834,170 @@ In `src/features/processing/toolRegistry.ts`, the `join-by-location` entry gains
 
 In `src/features/processing/tools/register.ts`, add `import "./joinByLocation";`, and add the id to `tests/unit/features/processing/register.test.ts`'s expected list.
 
-- [ ] **Step 5: Run to pass**
+- [ ] **Step 4b: The `mostFrequent` path, end to end through the footer**
+
+Task 9 could only pin Join's descriptor DIRECTLY: `RunFooter` types a run's
+written columns from `tool.outputColumns(run.prefix, run.params)`, and Join had
+none until Step 4 above. It does now, so this is where the button is actually
+pressed — and where Task 9's direct case is brought in line with the FUNCTION
+form Step 4 just installed.
+
+Two edits to `tests/unit/ui/processing/styleByResult.test.tsx` (Task 9's file;
+its helpers are `addLayer()`, `doneRun(over)`, `seed(run)` and the module-level
+`runQuery` spy). First, the last assertion of the direct case. Find:
+
+```ts
+// No text field copied: nothing to style by YET. §7.5's other half
+// (`<prefix>matches_n > 0`, which is what the operator/value FUNCTION
+// unions exist for) is Task 16's, with the tool that ships it.
+expect(descriptor.pick([count])).toBeNull();
+```
+
+Replace with §7.5's other half, which the descriptor now answers:
+
+```ts
+// §7.5's other half: "if no text field was copied, on
+// `<prefix>matches_n > 0`". Same descriptor, different column — which is
+// what the operator/value FUNCTION unions exist for.
+expect(descriptor.pick([count])).toEqual(count);
+expect(resolveStyleOperator(descriptor, count)).toBe(">");
+expect(resolveStyleValueSource(descriptor, count)).toEqual({
+  kind: "literal",
+  value: 0,
+});
+```
+
+Second, add the end-to-end case to the same `describe`, beside the direct one:
+
+```ts
+  it("styles a Join by the copied TEXT field's most frequent value (§7.5)", async () => {
+    // The footer's own path: `outputColumns(prefix, params)` types the written
+    // columns from the FROZEN `fieldTypes`, `pick` finds the VARCHAR, and the
+    // value is read with `mode(...)` over ROOT rows — never a median, and
+    // never a string handed to `>`.
+    const id = addLayer();
+    runQuery.mockImplementationOnce(async (sql: string) => {
+      statements.push(sql);
+      return {
+        ok: true as const,
+        columns: ["m"],
+        rows: [{ m: "Centrum" } as Record<string, unknown>],
+      };
+    });
+    render(
+      <RunFooter
+        run={seed(
+          doneRun({
+            targetLayerId: id,
+            toolId: "join-by-location",
+            lod: null,
+            prefix: "zones_",
+            params: {
+              proxy: "rectangle",
+              predicate: "intersects",
+              fields: ["name"],
+              tie: "first",
+              writeMatchCount: false,
+              fieldTypes: { name: "VARCHAR" },
+            },
+            columns: ["zones_name"],
+            summary: {
+              ...doneRun({}).summary!,
+              nonNullByColumn: { zones_name: 2 },
+            },
+          }),
+        )}
+        canRun
+        reason={null}
+        onRunAgain={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    await waitFor(() => {
+      expect(useRuleDraftStore.getState().drafts[id]?.form?.conditions).toEqual(
+        [{ field: "zones_name", operator: "=", value: "Centrum" }],
+      );
+    });
+    expect(statements[0]).toContain('mode("zones_name")');
+  });
+```
+
+Run both files; the direct case and the footer case must pass together:
+
+```bash
+export PATH="$HOME/.local/share/mise/shims:$PATH"
+npx vitest run tests/unit/ui/processing/styleByResult.test.tsx \
+  tests/unit/features/processing/joinByLocation.test.ts
+```
+
+- [ ] **Step 5: Pin the three predicates against the real engine**
+
+A wrong predicate here does not fail — it silently returns fewer matches, which
+no unit test over a fake `query` can see. Append to
+`tests/integration/duckdb/crossLayer.test.ts` (Task 1's suite, with `spatial`
+loaded by its `installExtension(db, "spatial")`):
+
+```ts
+it("is boundary-inclusive for `within`, which ST_Within is not", () => {
+  // Two zones sharing the line x = 10, and a footprint that sits inside the
+  // west zone with one edge ON that line — the ordinary case for a building on
+  // a parcel boundary, and §7.5's "boundary included".
+  const rows = db.query(
+    `SELECT ST_Within(b, a) AS within, ST_CoveredBy(b, a) AS covered,
+            ST_Intersects(b, a) AS intersects
+     FROM (SELECT ST_GeomFromText('POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))') AS a,
+                  ST_GeomFromText('POLYGON ((6 2, 10 2, 10 6, 6 6, 6 2))') AS b)`,
+  );
+  expect(rows).toEqual([{ within: false, covered: true, intersects: true }]);
+});
+
+it("matches a centre exactly on a shared boundary in BOTH areas", () => {
+  // §7.5: the tie rule decides which one wins, so the predicate has to offer
+  // both — which is why `centre within` is ST_Intersects.
+  const rows = db.query(
+    `SELECT ST_Intersects(p, west) AS in_west, ST_Intersects(p, east) AS in_east,
+            ST_Within(p, west) AS within_west
+     FROM (SELECT ST_Point(10, 5) AS p,
+                  ST_GeomFromText('POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))') AS west,
+                  ST_GeomFromText('POLYGON ((10 0, 20 0, 20 10, 10 10, 10 0))') AS east)`,
+  );
+  expect(rows).toEqual([{ in_west: true, in_east: true, within_west: false }]);
+});
+
+it("handles a DEGENERATE extent, which a one-point building has", () => {
+  // `ST_MakeEnvelope` over a bbox whose min and max are equal: a building with
+  // a single coordinate, or a flat one. It must parse and answer the
+  // predicates rather than raising, because one raise fails the whole join.
+  const rows = db.query(
+    `SELECT ST_Area(b) AS area, ST_CoveredBy(b, a) AS covered,
+            ST_Intersects(b, a) AS intersects
+     FROM (SELECT ST_MakeEnvelope(5.0, 5.0, 5.0, 5.0) AS b,
+                  ST_GeomFromText('POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))') AS a)`,
+  );
+  expect(rows).toEqual([{ area: 0, covered: true, intersects: true }]);
+});
+```
+
+If `ST_MakeEnvelope` refuses a degenerate rectangle, OR if `ST_CoveredBy` does
+not answer true on one that is plainly inside the area (a zero-area polygon is
+the kind of input a geometry engine is entitled to call invalid), the fix is in
+`buildProxySql`'s rectangle branch — a `CASE` down to `ST_Point` when both mins
+equal both maxes — and not in the predicate. Which of the two, and whether
+either is needed at all, is what the probe says; that is why it is a probe and
+not an assumption.
+
+- [ ] **Step 6: Run to pass**
 
 ```bash
 export PATH="$HOME/.local/share/mise/shims:$PATH"
 npx vitest run tests/unit/features/processing tests/unit/ui/processing
 npx tsc -b --noEmit
+DUCKDB_INTEGRATION=1 npx vitest run tests/integration/duckdb/crossLayer.test.ts
 ```
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/features/processing/tools/joinByLocation.ts \
@@ -14586,7 +17005,8 @@ git add src/features/processing/tools/joinByLocation.ts \
   src/features/processing/toolRegistry.ts src/features/processing/types.ts \
   src/ui/processing/RunFooter.tsx \
   tests/unit/features/processing/joinByLocation.test.ts \
-  tests/unit/features/processing/register.test.ts
+  tests/unit/features/processing/register.test.ts \
+  tests/integration/duckdb/crossLayer.test.ts
 git commit -m "feat: Join attributes by location copies area attributes onto buildings"
 ```
 
@@ -14602,7 +17022,7 @@ git commit -m "feat: Join attributes by location copies area attributes onto bui
 
 **Interfaces:**
 
-- Consumes: `createVectorTable` (Task 13, through `ctx.source`), `buildFeatureProxySql`/`lodZeroLabel`/`proxyDistanceNote` (Task 14), `distanceParams`/`distanceColumns` (Task 15), `readSource` (Task 5), `ToolExecutor`/`ToolContext` (Task 11).
+- Consumes: `createVectorTable` (Task 13, through `ctx.source`), `buildFeatureProxySql`/`lodZeroLabel`/`proxyDistanceNote` (Task 14), `distanceParams`/`distanceColumns` (Task 15), `readSource`/`readerQuery`/`assertSourceIds` (Task 5 — the footprint statement reads the re-read source), `ToolExecutor`/`ToolContext` (Task 11).
 - Produces: `buildDistanceSql(input)` and `distanceToNearest: ToolExecutor` in `tools/distanceToNearest.ts`, plus `registerExecutor("distance-to-nearest", distanceToNearest)`; the registry entry's `styleByResult` = `<prefix>distance_m <` median, and `implemented: true`.
 
 **The same one statement, one window, one join-back** as §7.5 — the only differences are the ordering key and the nearest-id projection, so the two executors read the same way and a reviewer can compare them line for line.
@@ -14637,11 +17057,24 @@ vi.mock("../../../../src/features/processing/sourceRead", () => ({
     propertiesColumn: "geometry_properties_lod0",
     release: async () => {},
   })),
+  // Task 5's other two source doors, spied rather than reimplemented: what the
+  // §6.1 sentences and the id-join THRESHOLD do is `sourceRead.test.ts`'s to
+  // assert, and what this executor owns is that it goes through them.
+  readerQuery: vi.fn(
+    async (
+      ctx: { query: (label: string, sql: string) => Promise<unknown> },
+      label: string,
+      sql: string,
+    ) => ctx.query(label, sql),
+  ),
+  assertSourceIds: vi.fn(),
   sourceWorkloadNote: () => null,
 }));
 
 const { buildDistanceSql, distanceToNearest } =
   await import("../../../../src/features/processing/tools/distanceToNearest");
+const { assertSourceIds, readerQuery } =
+  await import("../../../../src/features/processing/sourceRead");
 import type { LayerTable } from "../../../../src/insights/layerTables";
 import type {
   ToolContext,
@@ -14662,14 +17095,17 @@ function table(over: Partial<LayerTable> = {}): LayerTable {
   } as LayerTable;
 }
 
-const source = {
-  kind: "vector" as const,
-  layer: { id: "GEO", name: "Roads", kind: "geojson" },
-  table: "__src_run_1",
-  propertyKeys: ["name"],
-  propertyTypes: new Map([["name", "VARCHAR" as const]]),
-  skipped: 0,
-} as Extract<ToolSource, { kind: "vector" }>;
+function source(over: Partial<Extract<ToolSource, { kind: "vector" }>> = {}) {
+  return {
+    kind: "vector" as const,
+    layer: { id: "GEO", name: "Roads", kind: "geojson" },
+    table: "__src_run_1",
+    propertyKeys: ["name"],
+    propertyTypes: new Map([["name", "VARCHAR" as const]]),
+    skipped: 0,
+    ...over,
+  } as Extract<ToolSource, { kind: "vector" }>;
+}
 
 function run(params: Record<string, unknown>): RunRecord {
   return {
@@ -14709,7 +17145,10 @@ function row(
   return { id, f, no_proxy: false, ...values };
 }
 
-function context(rows: ReadonlyArray<Record<string, unknown>>): {
+function context(
+  rows: ReadonlyArray<Record<string, unknown>>,
+  over: Partial<ToolContext> = {},
+): {
   ctx: ToolContext;
   labels: string[];
   sql: string[];
@@ -14720,7 +17159,7 @@ function context(rows: ReadonlyArray<Record<string, unknown>>): {
     layer: { id: "L1", name: "Delft", isStreaming: false },
     table: table(),
     target: { kind: "city", layer: { id: "L1" }, table: table() },
-    source,
+    source: source(),
     featureIds: null,
     signal: new AbortController().signal,
     query: vi.fn(async (label: string, statement: string) => {
@@ -14731,6 +17170,7 @@ function context(rows: ReadonlyArray<Record<string, unknown>>): {
     phase: vi.fn(),
     warn: vi.fn(),
     throwIfCancelled: vi.fn(),
+    ...over,
   } as unknown as ToolContext;
   return { ctx, labels, sql };
 }
@@ -14853,6 +17293,35 @@ describe("distanceToNearest", () => {
     expect(labels).toEqual(["2D distance to the building centre"]);
   });
 
+  it("sends the footprint statement through Task 5's two source doors", async () => {
+    // §6.1's sentences and the id-join threshold belong to `sourceRead`; this
+    // executor's job is to go through them rather than decide them again.
+    vi.mocked(readerQuery).mockClear();
+    vi.mocked(assertSourceIds).mockClear();
+    const { ctx } = context([row("B1", "B1", { roads_distance_m: 1 })], {
+      featureIds: ["B1", "B2"],
+    });
+    await distanceToNearest(run({ ...params, proxy: "footprint" }), ctx);
+    expect(vi.mocked(readerQuery)).toHaveBeenCalledWith(
+      ctx,
+      "2D distance to the building footprint",
+      expect.stringContaining("read_cityjson('layer_1_run_1.city.json'"),
+    );
+    expect(vi.mocked(assertSourceIds)).toHaveBeenCalledWith(
+      ["B1", "B2"],
+      new Set(["B1"]),
+    );
+  });
+
+  it("leaves both doors alone for a proxy that reads no source", async () => {
+    vi.mocked(readerQuery).mockClear();
+    vi.mocked(assertSourceIds).mockClear();
+    const { ctx } = context([row("B1", "B1", { roads_distance_m: 1 })]);
+    await distanceToNearest(run({ ...params, proxy: "centre" }), ctx);
+    expect(vi.mocked(readerQuery)).not.toHaveBeenCalled();
+    expect(vi.mocked(assertSourceIds)).not.toHaveBeenCalled();
+  });
+
   it("omits the id column when the checkbox is off", async () => {
     const { ctx, sql } = context([row("B1", "B1", { roads_distance_m: 1 })]);
     const out = await distanceToNearest(
@@ -14861,6 +17330,30 @@ describe("distanceToNearest", () => {
     );
     expect(out.columns).toEqual([{ name: "roads_distance_m", type: "DOUBLE" }]);
     expect(sql[0]).not.toContain("roads_nearest_id");
+  });
+
+  it("refuses when the FROZEN id property left the source (§6.1)", async () => {
+    // Frozen with `name`; the source was re-linked while the run was queued and
+    // carries `label` now. `props->>'name'` would write NULL into every
+    // building under a card that says the run measured them all.
+    const { ctx, sql } = context([], {
+      source: source({ propertyKeys: ["label"] }),
+    });
+    await expect(
+      distanceToNearest(run({ ...params, nearestIdProperty: "name" }), ctx),
+    ).rejects.toThrow("Layer changed while running; run again");
+    expect(sql).toEqual([]);
+  });
+
+  it("does not mind a changed source when the id comes from the FEATURE id", async () => {
+    // `nearestIdProperty: null` is §7.7's "the GeoJSON feature `id`", which is
+    // `fid` — a column of the per-run table, not a property of the document.
+    const { ctx } = context(
+      [row("B1", "B1", { roads_distance_m: 1, roads_nearest_id: "r7" })],
+      { source: source({ propertyKeys: [] }) },
+    );
+    const out = await distanceToNearest(run(params), ctx);
+    expect(out.rows.get("B1")).toMatchObject({ roads_nearest_id: "r7" });
   });
 });
 ```
@@ -14907,7 +17400,12 @@ import {
   type BuildingProxy,
 } from "../buildingProxy";
 import { distanceColumns, distanceParams } from "../crossLayerParams";
-import { readSource, type ReadSourceHandle } from "../sourceRead";
+import {
+  assertSourceIds,
+  readSource,
+  readerQuery,
+  type ReadSourceHandle,
+} from "../sourceRead";
 import type { ToolExecutor } from "../runQueue";
 import type { SkipCount } from "../types";
 import { registerExecutor } from "./index";
@@ -14984,6 +17482,19 @@ export const distanceToNearest: ToolExecutor = async (run, ctx) => {
     throw new Error("Add a vector layer to join with");
   }
   const params = distanceParams(run.params);
+  // §6.1's head re-validation of the FROZEN parameters against the source
+  // preflight actually read: a run can wait minutes in the queue, and a source
+  // re-linked in between may no longer carry the property the nearest id was
+  // promised from. `props->>'gone'` writes NULL into every building and the
+  // card still says "1,204 buildings measured", which is the failure this
+  // prevents. §6.1's own sentence, not a new one.
+  if (
+    params.writeNearestId &&
+    params.nearestIdProperty !== null &&
+    !source.propertyKeys.includes(params.nearestIdProperty)
+  ) {
+    throw new Error("Layer changed while running; run again");
+  }
   const columns: ReadonlyArray<OutputColumn> = distanceColumns(
     run.prefix,
     params,
@@ -15008,26 +17519,40 @@ export const distanceToNearest: ToolExecutor = async (run, ctx) => {
       });
     }
     ctx.phase("compute");
-    const out = await ctx.query(
-      // §7.7: "The description and the log say '2D distance to the building
-      // footprint / extent / centre' accordingly."
-      proxyDistanceNote(params.proxy),
-      buildDistanceSql({
-        table: ctx.table.table,
-        source: source.table,
-        proxy: params.proxy,
-        from: handle?.from ?? null,
-        geometryColumn: handle?.geometryColumn ?? null,
-        ids: ctx.featureIds,
-        maxDistanceM: params.maxDistanceM,
-        prefix: run.prefix,
-        nearestId: params.writeNearestId
-          ? { property: params.nearestIdProperty }
-          : null,
-      }),
-    );
+    // §7.7: "The description and the log say '2D distance to the building
+    // footprint / extent / centre' accordingly."
+    const distanceLabel = proxyDistanceNote(params.proxy);
+    const sql = buildDistanceSql({
+      table: ctx.table.table,
+      source: source.table,
+      proxy: params.proxy,
+      from: handle?.from ?? null,
+      geometryColumn: handle?.geometryColumn ?? null,
+      ids: ctx.featureIds,
+      maxDistanceM: params.maxDistanceM,
+      prefix: run.prefix,
+      nearestId: params.writeNearestId
+        ? { property: params.nearestIdProperty }
+        : null,
+    });
+    // The footprint proxy parses the re-read source inside this statement, so
+    // it goes through Task 5's one door for §6.1's sentences; every other proxy
+    // reads the browsing table only.
+    const out =
+      handle === null
+        ? await ctx.query(distanceLabel, sql)
+        : await readerQuery(ctx, distanceLabel, sql);
     // A type guard, not logic: the context throws on a failed query.
     if (!out.ok) throw new Error(out.message);
+    if (handle !== null) {
+      // §6.1's id join at Task 5's ONE threshold — the same reasoning as Join's:
+      // the footprint relation is `FROM <handle.from>`, so a lost object leaves
+      // the building out of the result and it would be written as "no geometry".
+      assertSourceIds(
+        ctx.featureIds ?? [],
+        new Set(out.rows.map((row) => String(row["id"]))),
+      );
+    }
 
     const rows = new Map<string, Record<string, unknown>>();
     const byFeature = new Map<string, { proxy: boolean; inRange: boolean }>();
@@ -15131,8 +17656,9 @@ git commit -m "feat: Distance to nearest measures the 2D distance to a vector la
 
 **Files:**
 
-- Modify: `src/features/geoLayers/geoLayerStore.ts`, `src/ui/table/GeoRecordsPanel.tsx`, `src/ui/details/GeoFeatureDetails.tsx`, `src/ui/layers/GeoStyleControls.tsx`, `src/features/processing/runQueue.ts` (the vector publication and its Undo)
-- Test: `tests/unit/features/geoLayers/mergeGeoProperties.test.ts`, `tests/unit/ui/table/geoComputedBadge.test.tsx`, additions to `tests/unit/ui/layers/GeoLayerExport.test.tsx` (or whichever file covers the geo export) and to `tests/unit/features/processing/crossLayerRun.test.ts`
+- Create: `src/features/geoLayers/geoSelectionRefresh.ts`
+- Modify: `src/features/geoLayers/geoLayerStore.ts`, `src/features/geoLayers/geoJsonRecords.ts` (one reader, `findGeoFeatureProperties`), `src/ui/table/GeoRecordsPanel.tsx`, `src/ui/details/GeoFeatureDetails.tsx`, `src/ui/layers/GeoStyleControls.tsx`, `src/app/App.tsx` (the geo-selection effect), `src/features/processing/runQueue.ts` (the vector publication and its Undo)
+- Test: `tests/unit/features/geoLayers/mergeGeoProperties.test.ts`, `tests/unit/features/geoLayers/geoSelectionRefresh.test.ts`, `tests/unit/ui/table/geoComputedBadge.test.tsx`, additions to `tests/unit/features/geoLayers/geoExport.test.ts` (the geo export's own suite — it drives `geoExportText` directly and takes no render) and to `tests/unit/ui/layers/StyleSection.test.tsx` (where "Color by attribute" is covered) and to `tests/unit/features/processing/crossLayerRun.test.ts`
 
 **Interfaces:**
 
@@ -15159,13 +17685,55 @@ export function mergeGeoDocumentProperties(
   document: unknown,
   byStableId: ReadonlyMap<string, Readonly<Record<string, unknown>>>,
 ): unknown | null;
+
+/** The value a property had before a run wrote it, when it had none at all.
+ *  A sentinel and not `undefined`, because `{ x: undefined }` spread into a
+ *  properties bag leaves the KEY behind, which the grid and the export would
+ *  both still show. */
+export const GEO_PROPERTY_ABSENT: unique symbol;
+export type GeoPreviousValues = ReadonlyMap<
+  string,
+  Readonly<Record<string, unknown | typeof GEO_PROPERTY_ABSENT>>
+>;
+/** §6.2's Undo for a vector run: `previous`'s values put back into the CURRENT
+ *  document — a key with the ABSENT sentinel is REMOVED — or `null` when
+ *  nothing changed. Only this run's own columns are touched, so a later run's
+ *  results on the same layer survive an earlier run's Undo. */
+export function restoreGeoDocumentProperties(
+  document: unknown,
+  previous: GeoPreviousValues,
+): unknown | null;
+
+/** The PUBLIC properties of the feature with that stable id, or null when the
+ *  document no longer has it. `App.tsx` re-points a geo selection with it after
+ *  a property-only update (§8: the picked feature keeps showing its values). */
+export function findGeoFeatureProperties(
+  document: unknown,
+  stableId: string,
+): Readonly<Record<string, unknown>> | null;
+
+// src/features/geoLayers/geoSelectionRefresh.ts  (Task 18)
+/**
+ * What a geo selection becomes when its layer's `config` identity moves: the
+ * SAME selection with refreshed properties (a run's results, or its Undo), or
+ * `null` when the subject can no longer be trusted (the layer is gone, the
+ * document was replaced, the feature is not in it any more).
+ *
+ * Pure, so §8's "the picked feature's Details show the new values" is a unit
+ * test rather than a render of the whole shell.
+ */
+export function refreshedGeoSelection(input: {
+  readonly selection: GeoFeatureSelection;
+  readonly layer: GeoLayer | undefined;
+  readonly previousConfig: unknown;
+}): GeoFeatureSelection | null;
 ```
 
 plus `GeoRecordsPanel` passing `layerId` to `DataGrid`, `GeoFeatureDetails`' COMPUTED group, `GeoStyleControls`' `preparedData`-first attribute source, and `runQueue`'s vector publication (replacing Task 11's `"Not available yet"` guard) and its `undoState` vector variant.
 
 - Task 19 calls the store action `mergeGeoFeatureProperties` (through the queue's publication); Task 23 calls the exported `mergeGeoDocumentProperties` for the New-layer copy. Neither writes its own merge.
 
-**Why the results go into `config.preparedData` and never into `config.data`** (Design decision (c), restated so the implementer does not have to look it up): `preparedData` is documented "Engine-only normalized clone; **never persisted**" (`geoLayerStore.ts:42-43`) and it is what the engine (`geoLayerSync.ts:245`), the records panel (`GeoRecordsPanel.tsx:25`) and the GeoJSON export (`GeoLayerExport.tsx:24`) all read — which is exactly §8's "nothing new is saved". Writing `config.data` would materialise a URL-backed layer's whole fetched document into the layer row and thence into the snapshot, persisting results the spec says are session-only.
+**Why the results go into `config.preparedData` and never into `config.data`** (Design decision (c), restated so the implementer does not have to look it up): `preparedData` is documented "Engine-only normalized clone; **never persisted**" (`geoLayerStore.ts:42-43`) and it is what the engine (`geoLayerDescriptions.ts:55-57`, which hands `preparedData` to the source description when it is there), the records panel (`GeoRecordsPanel.tsx:25`) and the GeoJSON export (`GeoLayerExport.tsx:24`) all read — which is exactly §8's "nothing new is saved". Writing `config.data` would materialise a URL-backed layer's whole fetched document into the layer row and thence into the snapshot, persisting results the spec says are session-only.
 
 **ONE config replacement per run.** `geoLayerSync.ts:524` tears down and rebuilds the engine pair when `entry.config !== layer.config`, so the merge must be ONE `set` producing ONE new config object. A `set` per feature would rebuild the engine pair once per area.
 
@@ -15173,7 +17741,10 @@ plus `GeoRecordsPanel` passing `layerId` to `DataGrid`, `GeoFeatureDetails`' COM
 
 **Provenance needs no second registry.** `useComputedColumnStore.byLayer` is `Record<layerId, Record<column, Provenance>>` with nothing city-specific (`computedColumns.ts:265-274`); a geo layer id is a string like any other. So the badge and the tooltip need only a CONSUMER on the geo side.
 
-**Undo is one object, restored whole.** The previous `preparedData` is captured before the merge and put back by `replaceGeoPreparedData` — `UndoState.previousModelValues`' exact analogue, with no per-feature diff and no transaction, because there is no table.
+**Undo restores this run's PROPERTIES, not the whole document — and it runs on the FIFO.** Two corrections the review forced, and both are about the same thing: a vector layer is shared state, and a document snapshot says more than one run's Undo is entitled to say.
+
+- _Only the affected properties._ Undo steals the Undo of an earlier run only where the two share a COLUMN (`runQueue.ts:783-800`), so run A (a count) and run B (a sum) are both undoable at once. If A's Undo restored the whole `preparedData` it captured, B's results would vanish with it while B stayed "Undone"-less and undoable — the layer and the run history disagreeing about what is on screen. So the Undo state carries, per feature, the value each of THIS run's columns had before it wrote (with an explicit ABSENT marker for a property that was not there at all), and the Undo merges those back into the CURRENT document. Exactly the shape `previousModelValues` has for a city run, which is why the city half needs no rethinking.
+- _Inside the table FIFO._ The city Undo already runs on `runOnTableQueue` (`runQueue.ts:936`) and re-validates at the head. A vector Undo writes no table, so the first draft skipped the queue — and could then replace the document of a layer that a cross-layer run is at that moment computing against, invalidating the records it captured and the preflight it built from them. It goes through the same queue, and re-reads the layer at the head: gone or no longer a GeoJSON layer, and there is nothing to put back (commander's ruling).
 
 - [ ] **Step 1: Write the failing store test**
 
@@ -15189,7 +17760,11 @@ Create `tests/unit/features/geoLayers/mergeGeoProperties.test.ts`:
  * identity) and no mutation of the document that was handed in.
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import { useGeoLayerStore } from "../../../../src/features/geoLayers/geoLayerStore";
+import {
+  GEO_PROPERTY_ABSENT,
+  restoreGeoDocumentProperties,
+  useGeoLayerStore,
+} from "../../../../src/features/geoLayers/geoLayerStore";
 import { geoRecords } from "../../../../src/features/geoLayers/geoRecords";
 import { readGeoStableFeatureId } from "../../../../src/features/geoLayers/geoJsonRecords";
 
@@ -15307,6 +17882,71 @@ describe("mergeGeoFeatureProperties", () => {
   });
 });
 
+describe("restoreGeoDocumentProperties", () => {
+  /** The document after two runs wrote disjoint columns onto the same area. */
+  function afterTwoRuns(id: string): unknown {
+    const [first] = stableIds(id);
+    useGeoLayerStore
+      .getState()
+      .mergeGeoFeatureProperties(id, new Map([[first!, { count_n: 3 }]]));
+    useGeoLayerStore
+      .getState()
+      .mergeGeoFeatureProperties(id, new Map([[first!, { sum_m2: 90 }]]));
+    const layer = useGeoLayerStore.getState().layers[0];
+    return layer?.kind === "geojson" ? layer.config.preparedData : undefined;
+  }
+
+  it("undoes ONE run's columns and leaves the other run's alone", () => {
+    // The bug a whole-document snapshot has: undoing the count would take the
+    // sum with it, while the sum's run still says "undoable".
+    const id = addZones();
+    const [first] = stableIds(id);
+    const document = afterTwoRuns(id);
+    const undoneA = restoreGeoDocumentProperties(
+      document,
+      new Map([[first!, { count_n: GEO_PROPERTY_ABSENT }]]),
+    );
+    expect(geoRecords(undoneA)[0]).toMatchObject({ zone: "A", sum_m2: 90 });
+    expect(geoRecords(undoneA)[0]).toEqual(
+      expect.not.objectContaining({ count_n: 3 }),
+    );
+    // And the other order undoes the sum, leaving the count.
+    const undoneB = restoreGeoDocumentProperties(
+      document,
+      new Map([[first!, { sum_m2: GEO_PROPERTY_ABSENT }]]),
+    );
+    expect(geoRecords(undoneB)[0]).toMatchObject({ count_n: 3 });
+    expect(geoRecords(undoneB)[0]).toEqual(
+      expect.not.objectContaining({ sum_m2: 90 }),
+    );
+  });
+
+  it("restores a REPLACED value rather than removing the property", () => {
+    const id = addZones();
+    const [first] = stableIds(id);
+    useGeoLayerStore
+      .getState()
+      .mergeGeoFeatureProperties(id, new Map([[first!, { zone: "Z" }]]));
+    const layer = useGeoLayerStore.getState().layers[0];
+    const restored = restoreGeoDocumentProperties(
+      layer?.kind === "geojson" ? layer.config.preparedData : undefined,
+      new Map([[first!, { zone: "A" }]]),
+    );
+    expect(geoRecords(restored)[0]).toMatchObject({ zone: "A" });
+  });
+
+  it("is null when it would change nothing, so the engine is not rebuilt", () => {
+    addZones();
+    const layer = useGeoLayerStore.getState().layers[0];
+    expect(
+      restoreGeoDocumentProperties(
+        layer?.kind === "geojson" ? layer.config.preparedData : undefined,
+        new Map([["index:99", { count_n: GEO_PROPERTY_ABSENT }]]),
+      ),
+    ).toBeNull();
+  });
+});
+
 describe("replaceGeoPreparedData", () => {
   it("puts the previous document back, whole — §6.2's Undo for a vector run", () => {
     const id = addZones();
@@ -15417,6 +18057,111 @@ export function mergeGeoDocumentProperties(
   }
   return null;
 }
+
+/**
+ * What a property was before a run wrote it, when it was not there at all.
+ *
+ * A SENTINEL and not `undefined`: `{ ...properties, bld_buildings_n: undefined }`
+ * leaves the KEY in the bag, and the records grid, Details and the GeoJSON
+ * export would all still list it — an Undo that visibly did not undo.
+ */
+export const GEO_PROPERTY_ABSENT: unique symbol = Symbol("absent");
+
+export type GeoPreviousValues = ReadonlyMap<
+  string,
+  Readonly<Record<string, unknown | typeof GEO_PROPERTY_ABSENT>>
+>;
+
+/**
+ * §6.2's Undo for a vector run: this run's OWN columns put back, feature by
+ * feature, into the CURRENT document.
+ *
+ * NOT a stored snapshot of the whole document. Two runs can be undoable on one
+ * layer at the same time — Undo is stolen only where two runs share a COLUMN
+ * (`runQueue.ts:783-800`) — so restoring a snapshot taken before run A would
+ * also erase run B's results while B still read "undoable". Touching only the
+ * keys the run wrote makes the two Undos independent in either order, which is
+ * what §6.2 promises.
+ *
+ * Copy-on-write like {@link mergeGeoDocumentProperties}, and `null` when
+ * nothing changed so the caller can leave the layer record — and the engine
+ * pair — alone.
+ */
+export function restoreGeoDocumentProperties(
+  document: unknown,
+  previous: GeoPreviousValues,
+): unknown | null {
+  if (previous.size === 0) return null;
+  const source = document as { type?: unknown; features?: unknown[] } | null;
+  const restoreFeature = (feature: unknown): unknown => {
+    const record = feature as { properties?: unknown } | null;
+    const properties =
+      record?.properties && typeof record.properties === "object"
+        ? (record.properties as Record<string, unknown>)
+        : null;
+    if (properties === null) return feature;
+    const stableId = readGeoStableFeatureId(properties);
+    const values = stableId === null ? undefined : previous.get(stableId);
+    if (values === undefined) return feature;
+    const next: Record<string, unknown> = { ...properties };
+    let changed = false;
+    for (const [key, value] of Object.entries(values)) {
+      if (value === GEO_PROPERTY_ABSENT) {
+        if (key in next) {
+          delete next[key];
+          changed = true;
+        }
+        continue;
+      }
+      if (!(key in next) || next[key] !== value) changed = true;
+      next[key] = value;
+    }
+    return changed ? { ...record, properties: next } : feature;
+  };
+  if (source?.type === "FeatureCollection" && Array.isArray(source.features)) {
+    const features = source.features.map(restoreFeature);
+    const changed = features.some((f, i) => f !== source.features?.[i]);
+    return changed ? { ...source, features } : null;
+  }
+  if (source?.type === "Feature") {
+    const restored = restoreFeature(source);
+    return restored === source ? null : restored;
+  }
+  return null;
+}
+```
+
+And in `src/features/geoLayers/geoJsonRecords.ts`, the one reader §8 needs for a picked feature — beside `publicGeoProperties`, which it uses:
+
+```ts
+/**
+ * The PUBLIC properties of the feature carrying `stableId`, or null.
+ *
+ * A geo selection holds a SNAPSHOT of the properties it was made with
+ * (`domain/selection/types.ts:35-43`), so after a run merges its results the
+ * Details panel would still show the values from before the run. This is how
+ * `App.tsx` re-reads them for the same feature without a new pick.
+ */
+export function findGeoFeatureProperties(
+  document: unknown,
+  stableId: string,
+): Readonly<Record<string, unknown>> | null {
+  const source = document as { type?: unknown; features?: unknown[] } | null;
+  const features =
+    source?.type === "FeatureCollection" && Array.isArray(source.features)
+      ? source.features
+      : source?.type === "Feature"
+        ? [source]
+        : [];
+  for (const feature of features) {
+    const properties = (feature as { properties?: unknown } | null)?.properties;
+    if (properties === null || typeof properties !== "object") continue;
+    const bag = properties as Record<string, unknown>;
+    if (readGeoStableFeatureId(bag) === stableId)
+      return publicGeoProperties(bag);
+  }
+  return null;
+}
 ```
 
 with `import { normalizeGeoJsonDocument, readGeoStableFeatureId } from "./geoJsonRecords";` (the import already exists for `normalizeGeoJsonDocument`), and the two implementations inside the store:
@@ -15448,7 +18193,7 @@ with `import { normalizeGeoJsonDocument, readGeoStableFeatureId } from "./geoJso
 
 - [ ] **Step 4: The queue publishes a vector target's results**
 
-In `src/features/processing/runQueue.ts`, add the imports `useGeoLayerStore` (already there from Task 11) and `geoRecords` (already there), then replace the `UndoState` interface with the discriminated pair:
+In `src/features/processing/runQueue.ts`, extend the two geo imports Task 11 and Task 13 already added — `useGeoLayerStore` gains `GEO_PROPERTY_ABSENT`, `restoreGeoDocumentProperties` and the type `GeoPreviousValues`, and `geoRecords` gains `geoRecordId` — then replace the `UndoState` interface with the discriminated pair:
 
 ```ts
 /**
@@ -15476,11 +18221,38 @@ type UndoState =
   | {
       readonly kind: "vector";
       readonly layerId: string;
-      readonly previousPreparedData: unknown;
+      /**
+       * Per feature, what THIS run's columns held before it wrote — with
+       * `GEO_PROPERTY_ABSENT` for a property the feature did not have.
+       *
+       * Not the document: two runs writing disjoint columns onto one layer are
+       * both undoable (Undo is stolen only where they share a column), so a
+       * snapshot-restore of run A would erase run B's results behind its back.
+       * This is `previousModelValues`' exact analogue for a vector layer.
+       */
+      readonly previousValues: GeoPreviousValues;
       readonly created: ReadonlyArray<string>;
       readonly replaced: ReadonlyArray<string>;
     };
 ```
+
+The existing city literal gains the tag the union now discriminates on — one
+line, at the one existing `undoState.set` (`runQueue.ts:802-813`). Find:
+
+```ts
+    undoState.set(id, {
+      table: table.table,
+```
+
+and make it:
+
+```ts
+    undoState.set(id, {
+      kind: "city",
+      table: table.table,
+```
+
+`tsc` finds it if it is missed: `UndoState` has no member without a `kind`.
 
 `discardUndo` only has a table to drop for the city variant:
 
@@ -15498,7 +18270,42 @@ function discardUndo(id: string): void {
 }
 ```
 
-Replace Task 11's vector guard in `execute` (the `if (target.kind !== "city") { … "Not available yet" … }` block) with §7.6's publication:
+Task 11 made §6.1's "belongs to the source data" pre-flight city-only, and said the vector analogue was "Task 15's form validation plus Task 18's head re-check". This is that re-check: give the `if (target.kind === "city") { … }` block an `else`, right where it stands (`execute`, just after `target` is resolved):
+
+```ts
+} else {
+  // The same rule for a vector target, against its OWN attributes: the
+  // document's public property keys. The form checked them at Run, but a
+  // queued run can wait minutes and a re-linked source may have brought a
+  // `bld_buildings_n` of its own — and the merge would then overwrite a
+  // property of the file under a "computed" badge. The registry's own
+  // columns are excluded, exactly as on the city side: replacing a column a
+  // previous run wrote is what a re-run IS.
+  const owned = new Set(
+    [...computedColumnsOf(request.targetLayerId)].map((c) => c.toLowerCase()),
+  );
+  const keys = new Set(
+    target.records.flatMap((record) => Object.keys(record)),
+  );
+  const clash = [...keys].find(
+    (key) =>
+      !owned.has(key.toLowerCase()) &&
+      request.columns.some(
+        (out) => out.name.toLowerCase() === key.toLowerCase(),
+      ),
+  );
+  if (clash !== undefined) {
+    patch(id, {
+      status: "failed",
+      error: `'${clash}' belongs to the source data; choose another prefix`,
+      elapsedMs: elapsed(),
+    });
+    return;
+  }
+}
+```
+
+Then replace Task 11's vector guard in `execute` (the `if (target.kind !== "city") { … "Not available yet" … }` block) with §7.6's publication:
 
 ```ts
 if (target.kind === "vector") {
@@ -15536,8 +18343,28 @@ if (target.kind === "vector") {
       .map((c) => c.name)
       .filter((name) => onDocument.has(name.toLowerCase())),
   );
-  // Captured BEFORE the merge, which is what Undo restores (§6.2).
-  const previousPreparedData = target.layer.config.preparedData;
+  // Captured BEFORE the merge, per feature and per COLUMN — §6.2's Undo puts
+  // this run's own values back into whatever the document is by then, so a
+  // later run's results on the same layer survive it. `target.records` is the
+  // document as it was read for this run, which is the state being overwritten.
+  const before = new Map(
+    target.records.map((record) => [geoRecordId(record), record]),
+  );
+  const previousValues = new Map<
+    string,
+    Record<string, unknown | typeof GEO_PROPERTY_ABSENT>
+  >();
+  for (const stableId of result.rows.keys()) {
+    const record = before.get(stableId);
+    const prior: Record<string, unknown | typeof GEO_PROPERTY_ABSENT> = {};
+    for (const column of result.columns) {
+      prior[column.name] =
+        record !== undefined && column.name in record
+          ? record[column.name]
+          : GEO_PROPERTY_ABSENT;
+    }
+    previousValues.set(stableId, prior);
+  }
   useGeoLayerStore
     .getState()
     .mergeGeoFeatureProperties(target.layer.id, result.rows);
@@ -15552,7 +18379,7 @@ if (target.kind === "vector") {
   undoState.set(id, {
     kind: "vector",
     layerId: target.layer.id,
-    previousPreparedData,
+    previousValues,
     created: result.columns
       .map((c) => c.name)
       .filter((name) => !existing.has(name)),
@@ -15648,15 +18475,39 @@ export async function undoRun(id: string): Promise<void> {
   const state = undoState.get(id);
   if (!run || !run.undoable || !state) return;
   if (state.kind === "vector") {
-    // No table and no transaction: a vector layer's copy is ONE object, so the
-    // Undo is one store write and never reaches the FIFO. Nothing here can
-    // fail, which is why there is no `out.ok` branch.
-    useGeoLayerStore
-      .getState()
-      .replaceGeoPreparedData(state.layerId, state.previousPreparedData);
-    rollBackProvenance(state.layerId, state.created, state.replaced);
-    undoState.delete(id);
-    patch(id, { undoable: false, note: "Undone" });
+    // ON THE FIFO, like the city Undo (`runQueue.ts:936`), although it writes
+    // no table: a cross-layer run holds that queue for its whole life and has
+    // CAPTURED this layer's records and built its preflight from them, so
+    // replacing the document underneath it would leave the run computing
+    // against a document nothing on screen shows. Serialising is the whole fix
+    // and it costs one queue slot.
+    await runOnTableQueue(async () => {
+      // Re-validated at the head, as the city Undo is: the layer may have been
+      // removed, or replaced by one of another kind, while this waited. There
+      // is then nothing to put back and nothing to report.
+      const layer = useGeoLayerStore
+        .getState()
+        .layers.find((l) => l.id === state.layerId);
+      if (layer === undefined || layer.kind !== "geojson") {
+        undoState.delete(id);
+        patch(id, { undoable: false });
+        return;
+      }
+      // This run's OWN columns, back into whatever the document is NOW — never
+      // a stored snapshot, or a later run's disjoint results would go with it.
+      const restored = restoreGeoDocumentProperties(
+        layer.config.preparedData,
+        state.previousValues,
+      );
+      if (restored !== null) {
+        useGeoLayerStore
+          .getState()
+          .replaceGeoPreparedData(state.layerId, restored);
+      }
+      rollBackProvenance(state.layerId, state.created, state.replaced);
+      undoState.delete(id);
+      patch(id, { undoable: false, note: "Undone" });
+    });
     return;
   }
   /* …the existing queued city Undo, unchanged, with its tail replaced by… */
@@ -15776,7 +18627,7 @@ export function GeoFeatureDetails({
 }
 ```
 
-In `src/ui/layers/GeoStyleControls.tsx`, the attribute source reads the prepared document first:
+In `src/ui/layers/GeoStyleControls.tsx`, BOTH halves of "Color by attribute" read the prepared document first — the key list AND the categories. The key list alone would put `bld_buildings_n` in the select and then colour by a document that does not have it, which is worse than not offering it:
 
 ```tsx
 // `preparedData` FIRST: it is the document the engine, the records panel and
@@ -15793,9 +18644,135 @@ const inlineKeys = useMemo(() => {
 }, [layer.config.preparedData, layer.config.data]);
 ```
 
+and in `pickAttribute`, the same order — LIVE, because a run may have merged its results since this render (`GeoStyleControls.tsx:218-260`):
+
+```tsx
+const apply = (fallback: unknown) => {
+  // Read the LIVE record at write time: an async resolve may land after
+  // another edit, and spreading the render-time style would drop it.
+  const current = useGeoLayerStore
+    .getState()
+    .layers.find((l) => l.id === layer.id);
+  if (current === undefined || current.kind !== "geojson") return;
+  // The SAME preference as the key list above. `categoriesFor` over
+  // `config.data` would find no `bld_buildings_n` and prefill an empty
+  // category list for a column the select is offering — §7.6's Style by
+  // result opens exactly that column.
+  const document = current.config.preparedData ?? fallback;
+  updateGeoLayer(layer.id, {
+    style: {
+      ...current.style,
+      colorByAttribute: {
+        attribute,
+        categories: categoriesFor(document, attribute),
+      },
+    },
+  });
+};
+const inline = layer.config.preparedData ?? layer.config.data;
+if (inline !== undefined) {
+  apply(inline);
+  return;
+}
+```
+
+(the `resolveGeoJsonDocument` fallback below it is unchanged — it is the URL-backed case, where there is no prepared clone yet.)
+
 with `import { GEO_STABLE_FEATURE_KEY } from "../../features/geoLayers/geoJsonRecords";`.
 
-- [ ] **Step 6: Write the UI and lifecycle tests**
+- [ ] **Step 6: The picked feature keeps its selection, and shows the new values**
+
+`App.tsx:768-795` drops a geo selection whenever the layer's `config` identity
+moves, because `geoLayerSync` rebuilds the engine pair on that identity and the
+retained `batchId` would then name a different feature. A property merge IS a
+config replacement, so as it stands §7.6's run un-picks whatever the user had
+selected — and §8 says the opposite: a picked feature shows its computed values
+in Details. The rule needs one more case rather than a different rule, and it is
+pure, so it goes in its own module.
+
+Create `src/features/geoLayers/geoSelectionRefresh.ts`:
+
+```ts
+/**
+ * What a geo selection becomes when its layer's `config` identity moves.
+ *
+ * TWO different events wear the same clothes. A RE-LINK replaces the document:
+ * the batch ids are re-minted, the feature the selection names may not exist,
+ * and the selection has to go (that is why `App.tsx` compares config identity
+ * at all). A PROPERTY MERGE — a run's results, or its Undo — replaces the
+ * config over the SAME document: the feature is still there, still has its
+ * stable id, and §8 wants its new values in Details. Telling them apart is one
+ * comparison of the source fields, and re-reading the properties by stable id
+ * is what makes the selection correct afterwards rather than merely alive.
+ *
+ * The engine highlight survives on its own: `geoLayerSync` highlights by
+ * `highlightedStableFeatureId` when the selection carries one and falls back to
+ * the batch id only when it does not (`geoLayerSync.ts:236-240`), and every
+ * normalized document's features carry one.
+ */
+import type { GeoFeatureSelection } from "../../domain/selection/types";
+import { findGeoFeatureProperties } from "./geoJsonRecords";
+import type { GeoLayer, GeoJsonLayerConfig } from "./geoLayerStore";
+
+function isGeoJsonConfig(config: unknown): config is GeoJsonLayerConfig {
+  return typeof config === "object" && config !== null;
+}
+
+export function refreshedGeoSelection(input: {
+  readonly selection: GeoFeatureSelection;
+  readonly layer: GeoLayer | undefined;
+  /** The config the layer had when the feature was picked. */
+  readonly previousConfig: unknown;
+}): GeoFeatureSelection | null {
+  const { selection, layer, previousConfig } = input;
+  if (layer === undefined || layer.kind !== "geojson") return null;
+  if (layer.config === previousConfig) return selection;
+  // A property-only update keeps the SOURCE the selection was made on: the
+  // same inline document, the same url, the same preparation epoch. Anything
+  // else is a new document and the old subject is gone.
+  const previous = isGeoJsonConfig(previousConfig) ? previousConfig : null;
+  const sameSource =
+    previous !== null &&
+    layer.config.data === previous.data &&
+    layer.config.url === previous.url &&
+    layer.config.preparationEpoch === previous.preparationEpoch;
+  if (!sameSource || selection.stableFeatureId === undefined) return null;
+  const properties = findGeoFeatureProperties(
+    layer.config.preparedData,
+    selection.stableFeatureId,
+  );
+  // The feature itself can be gone even from the same source — a re-prepare
+  // that dropped it — and then there is nothing to show.
+  return properties === null ? null : { ...selection, properties };
+}
+```
+
+In `src/app/App.tsx`, the effect asks it instead of deciding for itself, and
+keeps the ref in step so the NEXT change is measured from the config the
+selection now belongs to:
+
+```tsx
+useEffect(() => {
+  if (geoSelection === null) return;
+  const layer = geoLayers.find((l) => l.id === geoSelection.geoLayerId);
+  const next = refreshedGeoSelection({
+    selection: geoSelection,
+    layer,
+    previousConfig: geoSelectionConfigRef.current,
+  });
+  if (next === null) {
+    selectGeoFeature(null);
+    return;
+  }
+  if (next === geoSelection) return;
+  // A run's results (or its Undo) landed on the picked feature: same feature,
+  // new properties, and the ref moves with it so this does not re-fire.
+  geoSelectionConfigRef.current = layer?.config ?? null;
+  selectGeoFeature(next);
+}, [geoLayers, geoSelection, selectGeoFeature]);
+```
+
+- [ ] **Step 7: Write the UI and lifecycle tests**
 
 Create `tests/unit/ui/table/geoComputedBadge.test.tsx`:
 
@@ -15872,30 +18849,22 @@ describe("the geo records grid", () => {
 });
 ```
 
-Append to the geo export suite (`tests/unit/ui/layers/GeoLayerExport.test.tsx`):
+Append to the geo export's own suite, `tests/unit/features/geoLayers/geoExport.test.ts`. That file drives `geoExportText(document, format, scope, matching, selected)` directly over a `normalizeGeoJsonDocument(...).data` fixture, so the case needs no render and no store — it merges through the exported pure function and exports the result:
 
-```tsx
+```ts
 it("carries a run's computed properties into the GeoJSON it writes (§7.6)", () => {
-  const id = addZones();
-  useGeoLayerStore
-    .getState()
-    .mergeGeoFeatureProperties(
-      id,
-      new Map([["id:string:z1", { bld_buildings_n: 3 }]]),
-    );
-  const layer = useGeoLayerStore.getState().layers[0];
-  const text = geoExportText(
-    layer?.kind === "geojson" ? layer.config.preparedData : undefined,
-    "geojson",
-    "all",
-    new Set(),
-    new Set(),
+  const merged = mergeGeoDocumentProperties(
+    data,
+    new Map([["id:string:a", { bld_buildings_n: 3 }]]),
   );
+  const text = geoExportText(merged, "geojson", "all", matching, selected);
   expect(text).toContain('"bld_buildings_n":3');
   // The renderer's own bookkeeping is still not exported.
   expect(text).not.toContain("__roofy_stable_feature_id");
 });
 ```
+
+(`data`, `matching` and `selected` are that file's own module-level fixtures; add `mergeGeoDocumentProperties` to its `geoLayerStore` import.)
 
 Append to `tests/unit/features/processing/crossLayerRun.test.ts` — the publication and the Undo through the real queue:
 
@@ -15959,11 +18928,263 @@ describe("a vector target's publication", () => {
 });
 ```
 
+```ts
+it("undoes one run without taking a later run's disjoint columns", async () => {
+  // §6.2 steals Undo only where two runs share a COLUMN, so both of these are
+  // undoable at once — and undoing the first must leave the second's results
+  // on the layer, which a whole-document restore could not do.
+  const zones = addZones();
+  const writer =
+    (column: string, value: number) =>
+    async (
+      run: import("../../../../src/features/processing/types").RunRecord,
+      ctx: Ctx,
+    ) => ({
+      columns: [{ name: column, type: "DOUBLE" as const }],
+      rows: new Map(
+        ctx.target.kind === "vector"
+          ? ctx.target.records.map((record) => [
+              geoRecordId(record),
+              { [column]: value },
+            ])
+          : [],
+      ),
+      measured: 2,
+      skipped: [],
+      line: run.prefix,
+    });
+  registerExecutor("aggregate-per-area", writer("bld_buildings_n", 3));
+  const first = submitRun({
+    toolId: "aggregate-per-area",
+    targetLayerId: zones,
+    sourceLayerId: "CITY",
+    scope: "all",
+    lod: null,
+    params: {},
+    prefix: "bld_",
+    columns: [{ name: "bld_buildings_n", type: "DOUBLE" }],
+  });
+  await settle();
+  registerExecutor("aggregate-per-area", writer("bld_sum_m2", 90));
+  const second = submitRun({
+    toolId: "aggregate-per-area",
+    targetLayerId: zones,
+    sourceLayerId: "CITY",
+    scope: "all",
+    lod: null,
+    params: {},
+    prefix: "bld_",
+    columns: [{ name: "bld_sum_m2", type: "DOUBLE" }],
+  });
+  await settle();
+  expect(runById(second)?.status).toBe("done");
+
+  await undoRun(first);
+  await settle();
+  const records = geoRecords(
+    (
+      useGeoLayerStore.getState().layers[0] as {
+        config: { preparedData: unknown };
+      }
+    ).config.preparedData,
+  );
+  expect(records[0]).toMatchObject({ bld_sum_m2: 90 });
+  expect(records[0]).toEqual(
+    expect.not.objectContaining({ bld_buildings_n: 3 }),
+  );
+  expect(runById(second)?.undoable).toBe(true);
+});
+
+it("refuses an output that would overwrite one of the layer's OWN properties", async () => {
+  // §6.1's "belongs to the source data", for a vector target: the document
+  // already carries `zone`, and no run may write over it under a computed
+  // badge. The city branch has had this since M1; this is its vector half.
+  const zones = addZones();
+  capturing();
+  const id = submitRun({
+    toolId: "aggregate-per-area",
+    targetLayerId: zones,
+    sourceLayerId: "CITY",
+    scope: "all",
+    lod: null,
+    params: {},
+    prefix: "",
+    columns: [{ name: "zone", type: "DOUBLE" }],
+  });
+  await settle();
+  expect(runById(id)?.error).toBe(
+    "'zone' belongs to the source data; choose another prefix",
+  );
+});
+```
+
 (import `undoRun` from `runQueue`, `computedColumnsOf` from
 `insights/computedColumns`, and `geoRecordId` + `geoRecords` from
 `features/geoLayers/geoRecords` at the top of that file.)
 
-- [ ] **Step 7: Run to pass**
+Create `tests/unit/features/geoLayers/geoSelectionRefresh.test.ts`:
+
+```ts
+/**
+ * §8: a picked vector feature shows its computed values — so a run's results
+ * must not un-pick it, and a re-link still must.
+ *
+ * Pure, over the two configs and the selection: `App.tsx` does nothing but ask
+ * this and obey.
+ */
+import { describe, expect, it } from "vitest";
+import { refreshedGeoSelection } from "../../../../src/features/geoLayers/geoSelectionRefresh";
+import {
+  mergeGeoDocumentProperties,
+  type GeoLayer,
+} from "../../../../src/features/geoLayers/geoLayerStore";
+import { normalizeGeoJsonDocument } from "../../../../src/features/geoLayers/geoJsonRecords";
+
+const data = {
+  type: "FeatureCollection",
+  features: [
+    { type: "Feature", id: "z1", properties: { zone: "A" }, geometry: null },
+  ],
+};
+const prepared = normalizeGeoJsonDocument(data).data;
+
+function layerWith(preparedData: unknown): GeoLayer {
+  return {
+    id: "GEO",
+    name: "Zones",
+    kind: "geojson",
+    visible: true,
+    opacity: 1,
+    style: { kind: "flat" },
+    config: { data, preparedData, preparation: "ready" },
+  } as unknown as GeoLayer;
+}
+
+const selection = {
+  geoLayerId: "GEO",
+  batchId: 4,
+  stableFeatureId: "id:string:z1",
+  properties: { zone: "A" },
+};
+
+describe("refreshedGeoSelection", () => {
+  it("keeps the selection and REFRESHES it after a property merge", () => {
+    const before = layerWith(prepared);
+    const merged = mergeGeoDocumentProperties(
+      prepared,
+      new Map([["id:string:z1", { bld_buildings_n: 3 }]]),
+    );
+    const after = layerWith(merged);
+    expect(
+      refreshedGeoSelection({
+        selection,
+        layer: after,
+        previousConfig: before.config,
+      }),
+    ).toEqual({
+      ...selection,
+      properties: { zone: "A", bld_buildings_n: 3 },
+    });
+  });
+
+  it("returns the SAME object when the config did not move", () => {
+    const layer = layerWith(prepared);
+    expect(
+      refreshedGeoSelection({
+        selection,
+        layer,
+        previousConfig: layer.config,
+      }),
+    ).toBe(selection);
+  });
+
+  it("drops it when the layer is gone, or is not a GeoJSON layer", () => {
+    expect(
+      refreshedGeoSelection({
+        selection,
+        layer: undefined,
+        previousConfig: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("drops it when the DOCUMENT was replaced, which is the original rule", () => {
+    const relinked = {
+      ...layerWith(prepared),
+      config: {
+        data: { type: "FeatureCollection", features: [] },
+        preparedData: normalizeGeoJsonDocument({
+          type: "FeatureCollection",
+          features: [],
+        }).data,
+        preparation: "ready",
+      },
+    } as unknown as GeoLayer;
+    expect(
+      refreshedGeoSelection({
+        selection,
+        layer: relinked,
+        previousConfig: layerWith(prepared).config,
+      }),
+    ).toBeNull();
+  });
+
+  it("drops it when the feature itself is no longer in the document", () => {
+    const without = layerWith(
+      normalizeGeoJsonDocument({ type: "FeatureCollection", features: [] })
+        .data,
+    );
+    expect(
+      refreshedGeoSelection({
+        selection,
+        layer: { ...without, config: { ...without.config, data } } as GeoLayer,
+        previousConfig: layerWith(prepared).config,
+      }),
+    ).toBeNull();
+  });
+});
+```
+
+Append to the `describe("StyleSection — a vector layer's Color by attribute")` block of `tests/unit/ui/layers/StyleSection.test.tsx`, using that block's own helpers — `addParcels()` (three inline features, none with a feature `id`, so `normalizeGeoJsonDocument` mints `index:0`…`index:2`), `<GeoHost id={…} />`, `attributeSelect()` and `readStyle(id)`:
+
+```tsx
+it("offers a computed property and colours by its real values (§7.6)", () => {
+  const id = addParcels();
+  useGeoLayerStore.getState().mergeGeoFeatureProperties(
+    id,
+    new Map([
+      ["index:0", { bld_buildings_n: 3 }],
+      ["index:1", { bld_buildings_n: 7 }],
+      ["index:2", { bld_buildings_n: 3 }],
+    ]),
+  );
+  render(<GeoHost id={id} />);
+
+  // The select reads the PREPARED document, so the run's column is offered —
+  // and the renderer's own envelope key still never is.
+  expect([...attributeSelect().options].map((o) => o.textContent)).toEqual([
+    "None",
+    "zone",
+    "name",
+    "bld_buildings_n",
+  ]);
+
+  fireEvent.change(attributeSelect(), { target: { value: "bld_buildings_n" } });
+
+  // The VALUES, not an empty list: `categoriesFor` read the prepared document
+  // too. Without that half, §7.6's Style by result would open Color by
+  // attribute on a column whose categories are empty.
+  expect(readStyle(id).colorByAttribute).toEqual({
+    attribute: "bld_buildings_n",
+    categories: [
+      { value: "3", color: CATEGORY_PALETTE_HEX[0] },
+      { value: "7", color: CATEGORY_PALETTE_HEX[1] },
+    ],
+  });
+});
+```
+
+- [ ] **Step 8: Run to pass**
 
 ```bash
 export PATH="$HOME/.local/share/mise/shims:$PATH"
@@ -15974,15 +19195,18 @@ npx vp check
 
 Expected: PASS, `tsc` clean, `vp check` at the baseline.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/features/geoLayers/geoLayerStore.ts src/features/processing/runQueue.ts \
+git add src/features/geoLayers/geoLayerStore.ts src/features/geoLayers/geoJsonRecords.ts \
+  src/features/geoLayers/geoSelectionRefresh.ts src/features/processing/runQueue.ts \
   src/ui/table/GeoRecordsPanel.tsx src/ui/details/GeoFeatureDetails.tsx \
-  src/ui/layers/GeoStyleControls.tsx \
+  src/ui/layers/GeoStyleControls.tsx src/app/App.tsx \
   tests/unit/features/geoLayers/mergeGeoProperties.test.ts \
+  tests/unit/features/geoLayers/geoSelectionRefresh.test.ts \
+  tests/unit/features/geoLayers/geoExport.test.ts \
   tests/unit/ui/table/geoComputedBadge.test.tsx \
-  tests/unit/ui/layers/GeoLayerExport.test.tsx \
+  tests/unit/ui/layers/StyleSection.test.tsx \
   tests/unit/features/processing/crossLayerRun.test.ts
 git commit -m "feat: a vector layer's computed properties behave like any other attribute"
 ```
@@ -15999,7 +19223,7 @@ git commit -m "feat: a vector layer's computed properties behave like any other 
 
 **Interfaces:**
 
-- Consumes: `ToolTarget` (`kind: "vector"`) and `ToolSource` (`kind: "city"`) (Task 11), `createVectorTable`/`VectorTableHandle` (Task 13 — here the TARGET areas are the reprojected side), `reprojectGeoLayer` (Task 12), `buildFeatureProxySql`/`lodZeroLabel` (Task 14) over the SOURCE city table, `aggregateParams`/`aggregateColumns`/`slugifyField` (Task 15), `mergeGeoFeatureProperties` (Task 18, through the queue's publication), `readSource` (Task 5), `ensureModelCrsLoadable` (`ensureCrs.ts:32`), `epsgForLayer` (`cursorCrsReadout.ts:35`).
+- Consumes: `ToolTarget` (`kind: "vector"`) and `ToolSource` (`kind: "city"`) (Task 11), `createVectorTable`/`VectorTableHandle` (Task 13 — here the TARGET areas are the reprojected side), `reprojectGeoLayer` (Task 12), `buildFeatureProxySql`/`lodZeroLabel` (Task 14) over the SOURCE city table, `aggregateParams`/`aggregateColumns`/`slugifyField` (Task 15), `mergeGeoFeatureProperties` (Task 18, through the queue's publication), `readSource`/`readerQuery` (Task 5 — `assertSourceIds` is deliberately not used: the statement's rows are AREAS, so there is no building-id set to join), `ensureModelCrsLoadable` (`ensureCrs.ts:32`), `epsgForLayer` (`cursorCrsReadout.ts:35`).
 - Produces: `buildAggregateSql(input)` and `aggregatePerArea: ToolExecutor` in `tools/aggregatePerArea.ts`, plus `registerExecutor("aggregate-per-area", aggregatePerArea)`; the registry entry's `styleByResult` = `{ kind: "attribute", pick: (w) => w[0] ?? null }` and `implemented: true`.
 
 **The direction is reversed, and the executor owns its own source phase.** For §7.5 and §7.7 the queue builds `__src_<runId>` from the SOURCE vector layer in the `"source"` phase (Task 13, `tool.sourceKind === "vector"`). Aggregate's `sourceKind` is `"city"`, so the queue builds nothing: the reprojected side is the TARGET's areas, and only the executor knows that. It therefore does its own `"source"` phase — `ensureModelCrsLoadable` on the SOURCE city model, `reprojectGeoLayer` on the target's `preparedData`, `createVectorTable`, and a `release()` in a `finally`. The areas' stored WGS84 geometry is never touched: `reprojectGeoLayer` is pure and returns WKT.
@@ -16063,6 +19287,17 @@ vi.mock("../../../../src/features/processing/sourceRead", () => ({
     propertiesColumn: "geometry_properties_lod0",
     release: async () => {},
   })),
+  // Task 5's other two source doors, spied rather than reimplemented: what the
+  // §6.1 sentences and the id-join THRESHOLD do is `sourceRead.test.ts`'s to
+  // assert, and what this executor owns is that it goes through them.
+  readerQuery: vi.fn(
+    async (
+      ctx: { query: (label: string, sql: string) => Promise<unknown> },
+      label: string,
+      sql: string,
+    ) => ctx.query(label, sql),
+  ),
+  assertSourceIds: vi.fn(),
   sourceWorkloadNote: () => null,
 }));
 
@@ -16074,6 +19309,8 @@ vi.mock("../../../../src/scene/cursorCrsReadout", () => ({
 
 const { aggregatePerArea, buildAggregateSql } =
   await import("../../../../src/features/processing/tools/aggregatePerArea");
+const { assertSourceIds, readerQuery } =
+  await import("../../../../src/features/processing/sourceRead");
 const { normalizeGeoJsonDocument } =
   await import("../../../../src/features/geoLayers/geoJsonRecords");
 const { geoRecords } =
@@ -16243,10 +19480,10 @@ describe("buildAggregateSql", () => {
     );
   });
 
-  it("uses ST_Within for `within` and the centre for `centre within`", () => {
-    expect(buildAggregateSql({ ...base, predicate: "within" })).toContain(
-      'ST_Within(p."g", s."geom")',
-    );
+  it("uses ST_CoveredBy for `within` and the centre for `centre within`", () => {
+    const within = buildAggregateSql({ ...base, predicate: "within" });
+    expect(within).toContain('ST_CoveredBy(p."g", s."geom")');
+    expect(within).not.toContain("ST_Within(");
     const centre = buildAggregateSql({ ...base, predicate: "centreWithin" });
     expect(centre).toContain('ST_Intersects(p."g", s."geom")');
     expect(centre).toContain("ST_Point(");
@@ -16367,6 +19604,32 @@ describe("aggregatePerArea", () => {
     expect(released).toEqual(["__src_run_1"]);
   });
 
+  it("sends the footprint statement through `readerQuery`, and joins no ids", async () => {
+    // §6.1's sentence for a failure INSIDE the reader statement is Task 5's,
+    // and this executor goes through its one door. The id join does NOT happen
+    // here and that is deliberate: these rows are the TARGET's areas, so there
+    // is no returned building-id set to join the requested one against.
+    vi.mocked(readerQuery).mockClear();
+    vi.mocked(assertSourceIds).mockClear();
+    const { ctx } = context([
+      {
+        sid: "id:string:z1",
+        bld_buildings_n: 0,
+        bld_sum_roof_area_m2: null,
+        multi_n: 0,
+        buildings_total: 0,
+        no_proxy_n: 0,
+      },
+    ]);
+    await aggregatePerArea(run({ ...params, proxy: "footprint" }), ctx);
+    expect(vi.mocked(readerQuery)).toHaveBeenCalledWith(
+      ctx,
+      "Aggregating buildings per area",
+      expect.stringContaining("read_cityjson('layer_1_run_1.city.json'"),
+    );
+    expect(vi.mocked(assertSourceIds)).not.toHaveBeenCalled();
+  });
+
   it("refuses a target with no usable areas, with §7.6's own sentence", async () => {
     const { ctx } = context([]);
     const emptyTarget = {
@@ -16431,6 +19694,59 @@ describe("aggregatePerArea", () => {
     await aggregatePerArea(run(params), withSkips);
     expect(warnings).toContain("1 area skipped: invalid geometry");
   });
+
+  it("writes NULL over an area preflight could not use, never stale values", async () => {
+    // §7.6: "the target's every feature is written." The area whose geometry
+    // became unusable is not in the statement's answer at all, so without an
+    // explicit NULL row it would keep the PREVIOUS run's numbers under this
+    // run's provenance.
+    const document = normalizeGeoJsonDocument({
+      type: "FeatureCollection",
+      features: [
+        { type: "Feature", id: "z1", properties: {}, geometry: null },
+        {
+          type: "Feature",
+          id: "z2",
+          properties: {},
+          geometry: { type: "Polygon", coordinates: [RING] },
+        },
+      ],
+    }).data;
+    const { ctx } = context([
+      {
+        sid: "id:string:z2",
+        bld_buildings_n: 4,
+        bld_sum_roof_area_m2: 120,
+        multi_n: 0,
+        buildings_total: 4,
+        no_proxy_n: 0,
+      },
+    ]);
+    const withSkips = {
+      ...ctx,
+      target: {
+        kind: "vector",
+        layer: {
+          id: "GEO",
+          name: "Zones",
+          kind: "geojson",
+          config: { preparedData: document },
+        },
+        records: geoRecords(document),
+      },
+    } as unknown as ToolContext;
+    const out = await aggregatePerArea(run(params), withSkips);
+    expect([...out.rows.keys()].sort()).toEqual([
+      "id:string:z1",
+      "id:string:z2",
+    ]);
+    expect(out.rows.get("id:string:z1")).toEqual({
+      bld_buildings_n: null,
+      bld_sum_roof_area_m2: null,
+    });
+    // And the card counts the areas that were AGGREGATED, not the written ones.
+    expect(out.line).toBe("1 area aggregated over 4 buildings");
+  });
 });
 ```
 
@@ -16458,8 +19774,8 @@ Create `src/features/processing/tools/aggregatePerArea.ts`:
  * on the SOURCE city model (`crsFromGeodetic`'s guard is synchronous),
  * `reprojectGeoLayer` on the target's `preparedData`, `createVectorTable`, and a
  * `release()` in a `finally` that runs on every exit path. The areas' STORED
- * WGS84 geometry is never touched — `reprojectGeoLayer` is pure and hands back
- * WKT.
+ * WGS84 geometry is never touched — `reprojectGeoLayer` mutates nothing and hands
+ * back WKT.
  *
  * EVERY TARGET AREA IS WRITTEN (§7.6), which is why the join runs FROM the areas
  * LEFT JOIN the buildings: an area with no buildings keeps its row, its count is
@@ -16477,6 +19793,7 @@ Create `src/features/processing/tools/aggregatePerArea.ts`:
 import type { OutputColumn } from "../../../insights/computedColumns";
 import { quoteIdent, quoteLiteral } from "../../../insights/sql";
 import { ensureModelCrsLoadable } from "../../layers/ensureCrs";
+import { geoRecordId } from "../../geoLayers/geoRecords";
 import { epsgForLayer } from "../../../scene/cursorCrsReadout";
 import {
   buildFeatureProxySql,
@@ -16489,7 +19806,12 @@ import {
   type AggregateOp,
   type JoinPredicate,
 } from "../crossLayerParams";
-import { readSource, type ReadSourceHandle } from "../sourceRead";
+import {
+  assertSourceIds,
+  readSource,
+  readerQuery,
+  type ReadSourceHandle,
+} from "../sourceRead";
 import { reprojectGeoLayer } from "../vectorSource";
 import { createVectorTable, type VectorTableHandle } from "../vectorTable";
 import type { ToolExecutor } from "../runQueue";
@@ -16525,9 +19847,14 @@ export function buildAggregateSql(input: AggregateSqlInput): string {
   // §7.6 shares §7.5's predicate, including "centre within" forcing the centre.
   const proxy: BuildingProxy =
     input.predicate === "centreWithin" ? "centre" : input.proxy;
+  // §7.5's `within` is boundary-INCLUSIVE ("the whole proxy inside the area,
+  // boundary included"), which is covered-by and not within — a footprint
+  // sharing an edge with its zone is `ST_Within` FALSE. §7.6 shares §7.5's
+  // predicate list, so it shares this reading of it; Task 16 probes both
+  // against the real engine.
   const predicate =
     input.predicate === "within"
-      ? `ST_Within(p."g", s."geom")`
+      ? `ST_CoveredBy(p."g", s."geom")`
       : `ST_Intersects(p."g", s."geom")`;
   const b = buildFeatureProxySql({
     proxy,
@@ -16646,7 +19973,11 @@ export const aggregatePerArea: ToolExecutor = async (run, ctx) => {
     const preflight =
       epsg === null
         ? null
-        : reprojectGeoLayer(target.layer.config.preparedData, epsg);
+        : await reprojectGeoLayer(target.layer.config.preparedData, epsg, {
+            // The batched walk's cancel hook — a Cancel lands inside the
+            // reprojection of a large target, not after it (Task 12).
+            checkpoint: () => ctx.throwIfCancelled(),
+          });
     if (preflight === null || preflight.features.length === 0) {
       // §7.6's own sentence for a target with nothing usable in it.
       throw new Error("The layer has no areas");
@@ -16662,6 +19993,7 @@ export const aggregatePerArea: ToolExecutor = async (run, ctx) => {
       runId: run.id,
       preflight,
       query: ctx.query,
+      control: { checkpoint: () => ctx.throwIfCancelled() },
     });
     if (params.proxy === "footprint" && params.predicate !== "centreWithin") {
       const label = lodZeroLabel(ctx.table);
@@ -16676,25 +20008,47 @@ export const aggregatePerArea: ToolExecutor = async (run, ctx) => {
     }
 
     ctx.phase("compute");
-    const out = await ctx.query(
-      "Aggregating buildings per area",
-      buildAggregateSql({
-        table: ctx.table.table,
-        source: areas.table,
-        proxy: params.proxy,
-        from: handle?.from ?? null,
-        geometryColumn: handle?.geometryColumn ?? null,
-        ids: ctx.featureIds,
-        predicate: params.predicate,
-        rows: specs,
-      }),
-    );
+    const sql = buildAggregateSql({
+      table: ctx.table.table,
+      source: areas.table,
+      proxy: params.proxy,
+      from: handle?.from ?? null,
+      geometryColumn: handle?.geometryColumn ?? null,
+      ids: ctx.featureIds,
+      predicate: params.predicate,
+      rows: specs,
+    });
+    // The footprint proxy parses the re-read source inside this statement, so it
+    // goes through Task 5's one door for §6.1's sentences.
+    //
+    // `assertSourceIds` is deliberately NOT called here, and this is the one
+    // place in the milestone where that is true: this statement's rows are the
+    // TARGET's areas, not the source's buildings, so there is no id set to join
+    // the requested one against. A building the file has lost is simply absent
+    // from the counts, which §6.1's own stated limit already covers (a source
+    // whose CONTENT moved under the same ids is not detectable) — and no
+    // executor re-decides the threshold, because none of them owns it.
+    const out =
+      handle === null
+        ? await ctx.query("Aggregating buildings per area", sql)
+        : await readerQuery(ctx, "Aggregating buildings per area", sql);
     // A type guard, not logic: the context throws on a failed query.
     if (!out.ok) throw new Error(out.message);
 
-    // §7.6: every target feature is written. The statement returns one row per
-    // AREA, keyed by the stable feature id the results are merged back under.
+    // §7.6: "the target's EVERY feature is written". The statement answers for
+    // the areas that reached the table, and preflight has already dropped the
+    // ones with unusable geometry — so every target feature starts at NULL and
+    // the evaluated ones are laid over it. Without that, an area whose geometry
+    // became unusable between two runs keeps the FIRST run's numbers under the
+    // second run's provenance: a value the layer no longer supports, with
+    // nothing on screen to say so. NULL is §6.2's "could not be evaluated",
+    // which is exactly what happened to it.
     const rows = new Map<string, Record<string, unknown>>();
+    const blank: Record<string, unknown> = {};
+    for (const column of columns) blank[column.name] = null;
+    for (const record of target.records) {
+      rows.set(geoRecordId(record), { ...blank });
+    }
     for (const row of out.rows) {
       const values: Record<string, unknown> = {};
       for (const column of columns)
@@ -16712,8 +20066,10 @@ export const aggregatePerArea: ToolExecutor = async (run, ctx) => {
       rows,
       measured: buildings,
       skipped,
-      // §7.6: "6 areas aggregated over 1,204 buildings".
-      line: `${plural(rows.size, "area", "areas")} aggregated over ${plural(
+      // §7.6: "6 areas aggregated over 1,204 buildings". The areas that were
+      // EVALUATED — `rows` also carries the ones preflight could not use, which
+      // are written as NULL and were not aggregated over anything.
+      line: `${plural(out.rows.length, "area", "areas")} aggregated over ${plural(
         buildings,
         "building",
         "buildings",
@@ -16768,7 +20124,7 @@ and three scalar sub-selects, and a string test cannot tell a binder error from 
 typo. Append to `tests/integration/duckdb/crossLayer.test.ts`:
 
 ```ts
-it("runs the app's OWN aggregate statement, every area kept", () => {
+it("runs the app's OWN aggregate statement, every area kept", async () => {
   db.query(
     `CREATE OR REPLACE TABLE agg_rows AS SELECT * FROM (VALUES
        ('b1', 'b1', 50.0, {'xmin': 1.0, 'ymin': 1.0, 'zmin': 0.0, 'xmax': 2.0, 'ymax': 2.0, 'zmax': 3.0}),
@@ -16779,7 +20135,7 @@ it("runs the app's OWN aggregate statement, every area kept", () => {
   );
   db.registerBytes(
     "__src_agg.json",
-    encodeProjectedFeatures([
+    await encodeProjectedFeatures([
       {
         idx: 0,
         stableId: "id:string:z1",
@@ -16905,6 +20261,10 @@ git commit -m "feat: Aggregate buildings per area summarises buildings inside ea
   //   newLayerName: string | null
 
   // src/features/processing/deriveLayer.ts  (this task CREATES the module)
+  /** §6's A2 reason, in ONE place: the form's disabled radio, the form's own
+   *  run reason and the queue's head pre-flight all say the same sentence, and
+   *  a UI module is not a home the run queue may import from. */
+  export const STREAMING_NO_NEW_LAYER: string;
   export function derivedLayerName(
     targetName: string,
     toolId: ToolId,
@@ -16928,7 +20288,9 @@ git commit -m "feat: Aggregate buildings per area summarises buildings inside ea
 
 **Intent:** §6's OUTPUT section as the spec draws it: two radios replacing today's single disabled one, a Name field prefilled `<target> · <tool noun>`, uniqueness compared trimmed and case-insensitively across ALL layers of the workspace, an empty or duplicate name flagged inline at Run, and the replace warning scoped to the copy (`2 inherited computed columns will be replaced in the new layer`). Gating the radio on `destinations` is what lets this land before the machinery exists without putting a live radio in front of nothing — the same staging M2 used for `implemented`, and the reason this task is separately rejectable. The streaming disabled reason is **[adapted copy A2]**. A reviewer rejects it for a radio that is reachable before Task 22, for a uniqueness check that misses geo layers, or for a name rule that differs between Run and publication.
 
-**The gating shape, decided once so every later task inherits it.** BOTH radios are always rendered — §6 draws two, and a hidden second destination is an answer the user has to assume, which is exactly the reasoning the current single disabled radio was written with (`ToolView.tsx`'s comment at the `Write to` field). `New layer` is `disabled` when the tool's `destinations` does not include `"new"` (no reason line: nothing is wrong with the user's form, the tool simply has no such destination yet, and Run's own reason is not about this), and `disabled` with **[adapted copy A2]** as its `title` and as a note under the radios when the tool DOES offer it but the chosen target `isStreaming` (Design decision (f)'s third parent kind). `execute` re-validates it at the head, so a `submitRun` from a stale draft — or from a test — cannot reach a branch Task 22 has not built.
+**The gating shape, decided once so every later task inherits it.** BOTH radios are always rendered — §6 draws two, and a hidden second destination is an answer the user has to assume, which is exactly the reasoning the current single disabled radio was written with (`ToolView.tsx`'s comment at the `Write to` field). `New layer` is `disabled` when the tool's `destinations` does not include `"new"` (no reason line: nothing is wrong with the user's form, the tool simply has no such destination yet, and Run's own reason is not about this), and `disabled` with **[adapted copy A2]** as its `title` and as a note under the radios when the tool DOES offer it but the chosen target `isStreaming` (Design decision (f)'s third parent kind).
+
+**Disabling the radio is NOT enough, and this is the part a reviewer checks.** The destination lives on the DRAFT, which survives a retarget: choose `New layer` on a static target, then switch the target to a streaming one and the draft still reads `destination: "new"` while the radio it came from is disabled. So the restriction is stated THREE times from one constant — the radio's `disabled` and note, the form's own `runReason` (which is what actually refuses Run), and `execute`'s head pre-flight, which refuses a request built from a stale draft or by hand. The constant lives in `deriveLayer.ts` and not in `ToolView.tsx`, because `runQueue` may not import a UI module and two copies of a sentence are two sentences.
 
 **Two new validation strings, and they are NOT in the spec.** §6 says "an empty or duplicate name is flagged inline at Run" and gives no sentence. The owner accepted both at the plan gate (Decisions recorded, item 5): **[adapted copy A13]** `Name the new layer` and **[adapted copy A14]** `A layer is already called that`, written to §6's own terse pattern (compare `Pick at least one measure`, `Choose the property to copy`). They are now rows in the front matter's adapted-copy table; implement them verbatim.
 
@@ -17077,6 +20439,20 @@ Create `src/features/processing/deriveLayer.ts`:
 import type { GeoLayer } from "../geoLayers/geoLayerStore";
 import type { Layer } from "../layers/layerStore";
 import type { ToolId } from "./types";
+
+/**
+ * Why §6's New-layer destination is refused on a streaming target
+ * (**[adapted copy A2]**, Decisions recorded item 1).
+ *
+ * THREE places say it and all three import this: the radio's `title` and the
+ * note under it, the form's `runReason` (a draft that already chose "new"
+ * survives a retarget onto a streaming layer, and the disabled radio does not
+ * unchoose it), and `execute`'s head pre-flight. `ToolView.tsx` would be the
+ * obvious home and is the wrong one — `runQueue.ts` may not import a UI module,
+ * and a second copy of a sentence is a second sentence.
+ */
+export const STREAMING_NO_NEW_LAYER =
+  "New layer is not available for a streaming layer: its loaded buildings carry no geometry to copy.";
 
 /**
  * Spec §6's prefilled name for a tool: "<target> · <tool noun>".
@@ -17492,8 +20868,39 @@ describe("OUTPUT destination", () => {
       ).toBeTruthy();
     });
   });
+
+  it("REFUSES RUN when a chosen New layer is retargeted to a streaming layer", () => {
+    // The draft outlives the radio. Disabling the control says nothing about
+    // the `destination: "new"` already on the draft, and without this the form
+    // would offer Run for a destination it has just declared impossible.
+    withNewLayer("height-from-extent", () => {
+      const stat = addCityLayer("Delft", []);
+      render(<ToolView toolId="height-from-extent" />);
+      fireEvent.click(newLayerRadio());
+      expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
+
+      const streaming = addCityLayer("Delft stream", [], true);
+      expect(stat).not.toBe(streaming);
+      fireEvent.change(screen.getByLabelText("Layer"), {
+        target: { value: streaming },
+      });
+
+      expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+      expect(
+        screen.getByText(
+          "New layer is not available for a streaming layer: its loaded buildings carry no geometry to copy.",
+        ),
+      ).toBeTruthy();
+    });
+  });
 });
 ```
+
+(`Layer` is TARGET's existing select — `aria-label="Layer"`, `ToolView.tsx:125`;
+Task 15 adds `Source layer` beside it and leaves this one's label alone.
+`addCityLayer` returns the id it added, and the second call leaves the first
+layer in the store, so the retarget is a real change of target rather than a
+re-render of the same one.)
 
 - [ ] **Step 6: Run it and watch it fail**
 
@@ -17630,6 +21037,7 @@ import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
 import {
   derivedLayerName,
   nameTaken,
+  STREAMING_NO_NEW_LAYER,
 } from "../../features/processing/deriveLayer";
 ```
 
@@ -17708,6 +21116,16 @@ const nameError =
       : nameTaken(newLayerName, layers, geoLayers)
         ? NAME_TAKEN
         : null;
+// §6.2's A2 case, as a REFUSAL and not only a disabled radio: the draft
+// keeps `destination: "new"` across a retarget, so a form that only greyed
+// the control would still offer Run for a destination it has just declared
+// impossible. Same constant as the radio's title and the head's pre-flight.
+const newLayerBlocked =
+  tool.destinations.includes("new") && target?.isStreaming === true;
+const destinationReason =
+  draft.destination === "new" && newLayerBlocked
+    ? STREAMING_NO_NEW_LAYER
+    : null;
 // §6: the replace warning is SCOPED TO THE COPY for a New-layer run — "2
 // inherited computed columns will be replaced in the new layer". The
 // non-computed collisions are already the prefix error (`sourceCollisions`),
@@ -17715,7 +21133,7 @@ const nameError =
 const inherited = existing.filter((c) => computedLower.has(c.toLowerCase()));
 ```
 
-6. The `runReason` chain gains `nameError`, after the parameters and before the scope — the order the user reads the form's own sections in for everything OUTPUT owns:
+6. The `runReason` chain gains OUTPUT's two reasons, after the parameters and before the scope — the order the user reads the form's own sections in for everything OUTPUT owns. `destinationReason` comes first of the two: when the destination itself is impossible, what the user typed in Name is not the thing to complain about.
 
 ```ts
 const runReason = !eligibility.ok
@@ -17731,6 +21149,7 @@ const runReason = !eligibility.ok
   : (lods.emptyReason ??
     prefixError ??
     paramsError ??
+    destinationReason ??
     nameError ??
     scopeReason);
 ```
@@ -17752,22 +21171,19 @@ becomes
     nameError,
     // §6's A2 case: the tool offers the destination, this target cannot take
     // it (Design decision (f) — a streaming parent has no geometry to copy).
-    newLayerBlocked:
-      tool.destinations.includes("new") && target?.isStreaming === true,
+    // Computed in step 5 above, because `runReason` needs it too.
+    newLayerBlocked,
+    destinationReason,
 ```
 
 - [ ] **Step 11: Render §6's two radios, the Name field and the scoped warning**
 
 In `src/ui/processing/ToolView.tsx`:
 
-1. Add **[adapted copy A2]** as a module constant under the `fmt` helper:
+1. Import **[adapted copy A2]** — it is declared in `deriveLayer.ts` (step 3), because the head's pre-flight says the same sentence and `runQueue.ts` may not import a UI module:
 
 ```ts
-/** §6's New-layer radio cannot be offered on a streaming target: its resident
- *  records carry no boundaries, so the copy would render nothing (Design
- *  decision (f)). [adapted copy A2]. */
-const STREAMING_NO_NEW_LAYER =
-  "New layer is not available for a streaming layer: its loaded buildings carry no geometry to copy.";
+import { STREAMING_NO_NEW_LAYER } from "../../features/processing/deriveLayer";
 ```
 
 2. The whole `Write to` field is replaced. Find it by this code:
@@ -17911,7 +21327,7 @@ inside `submitRun({ … })` and add under it:
       newLayerName: f.draft.destination === "new" ? f.newLayerName : null,
 ```
 
-5. Suppress the echoed name error under Run, beside the two that are already suppressed. Find:
+5. Suppress the echoed OUTPUT reasons under Run, beside the two that are already suppressed — the rule being that a reason already shown against the field it is about is not repeated under the button. The name error is printed by the Name field's own `role="alert"`; the destination reason is printed by the note under the radios, so it would otherwise appear TWICE on screen for a retargeted draft. Find:
 
 ```tsx
 const footerReason =
@@ -17928,7 +21344,8 @@ const footerReason =
   f.runReason !== null &&
   (f.runReason === f.prefixError ||
     f.runReason === f.paramsError ||
-    f.runReason === f.nameError)
+    f.runReason === f.nameError ||
+    f.runReason === f.destinationReason)
     ? null
     : f.runReason;
 ```
@@ -17945,23 +21362,24 @@ In `src/features/processing/runQueue.ts`:
   readonly newLayerName: string | null;
 ```
 
-and widen the type import (`ToolDestination` from `./types`).
+and widen the type import (`ToolDestination` from `./types`), plus `STREAMING_NO_NEW_LAYER` from `./deriveLayer`.
 
-2. The head's own re-validation, between the tool lookup and the extension phase. Find:
+2. The head's own re-validation, in TWO guards. §6.1's "a queued run re-validates these" is the reason both exist: a destination can be unreachable from the form and still arrive in a request — from a draft frozen before a retarget, from `retryRun` replaying a frozen request, or from a caller that builds one by hand.
+
+The first guard goes at the TOP of the pre-flight block, directly under Task 11's tool lookup and its source refusal. Find (Task 11 moved this lookup to the top of the block and deleted the later one):
 
 ```ts
-    const tool = toolById(request.toolId);
-    if (tool.extension !== null && !isExtensionLoaded(tool.extension)) {
+const tool = toolById(request.toolId);
+// §5's own reason, at the head: a vector-target tool with no source has no
 ```
 
-and insert between the two lines:
+and insert BETWEEN those two lines:
 
 ```ts
-// §6.1: "a queued run re-validates these". A destination the tool does not
-// offer cannot be reached from the form (the radio is disabled), so this is
-// the guard against a stale draft and against a caller that builds a
-// request by hand — and it reads with the same sentence an unimplemented
-// tool gets, because it is the same fact: that path has not shipped.
+// A destination the tool does not offer has not shipped yet, which is the
+// same fact an unimplemented tool reports and so reads with the same
+// sentence. It is checked before anything is resolved, because it depends
+// on nothing but the request.
 if (request.destination === "new" && !tool.destinations.includes("new")) {
   patch(id, {
     status: "failed",
@@ -17971,6 +21389,86 @@ if (request.destination === "new" && !tool.destinations.includes("new")) {
   return;
 }
 ```
+
+The second guard needs the TARGET, so it goes directly after Task 11's `target` resolution. Find:
+
+```ts
+// A CITY source IS the compute layer — `submitRun` made it so — and a
+// VECTOR source is built in the "source" phase (Task 13).
+```
+
+and insert ABOVE that comment:
+
+```ts
+// §6's A2 refusal, the head's copy of it. The form disables the radio, but
+// the DRAFT keeps `destination: "new"` across a retarget onto a streaming
+// layer, and `retryRun` replays a request frozen before one. Only a CITY
+// destination can be streaming: a vector copy is a GeoJSON document, and
+// `target.kind === "vector"` means the parent is the vector layer.
+if (
+  request.destination === "new" &&
+  target.kind === "city" &&
+  target.layer.isStreaming
+) {
+  patch(id, {
+    status: "failed",
+    error: STREAMING_NO_NEW_LAYER,
+    elapsedMs: elapsed(),
+  });
+  return;
+}
+```
+
+3. One case for each guard, in `tests/unit/features/processing/runQueue.test.ts` (its `layer()` fixture already takes overrides, and `request()` is a `submitRun` input — `snapshot` and `tableName` are `submitRun`'s own work, so neither case adds a field):
+
+```ts
+/** Give ONE registry entry the `"new"` destination for the length of one
+ *  case — `destinations` is a data property on an object literal, so
+ *  `vi.spyOn(tool, "destinations", "get")` cannot be used. The same trick
+ *  `outputDestination.test.tsx` uses, copied rather than shared: a fixture
+ *  module between two suites is a third thing to keep in step. */
+function withNewLayer(
+  toolId: string,
+  value: ReadonlyArray<string>,
+): () => void {
+  const tool = TOOLS.find((t) => t.id === toolId);
+  if (!tool) throw new Error(`no tool ${toolId}`);
+  const before = tool.destinations;
+  const set = (next: ReadonlyArray<string>) =>
+    Object.defineProperty(tool, "destinations", {
+      value: next,
+      configurable: true,
+      writable: true,
+    });
+  set(value);
+  return () => set(before);
+}
+
+it("refuses a New-layer request for a tool that does not offer it", async () => {
+  const id = submitRun(request({ destination: "new", newLayerName: "X" }));
+  await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
+  expect(runById(id)?.error).toBe("Not available yet");
+});
+
+it("refuses a New-layer request on a STREAMING target, with A2's reason", async () => {
+  // The form's radio is disabled for this case, so the request can only
+  // arrive from a draft frozen before a retarget (or from `retryRun`
+  // replaying one) — which is exactly what this guard is for.
+  const restore = withNewLayer("height-from-extent", ["layer", "new"]);
+  try {
+    useLayerStore.setState({ layers: [{ ...layer(), isStreaming: true }] });
+    const id = submitRun(request({ destination: "new", newLayerName: "X" }));
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
+    expect(runById(id)?.error).toBe(
+      "New layer is not available for a streaming layer: its loaded buildings carry no geometry to copy.",
+    );
+  } finally {
+    restore();
+  }
+});
+```
+
+with `TOOLS` added to the suite's imports from `src/features/processing/toolRegistry`. The FIRST case is deleted by Task 22, which gives the six city tools `"new"` for real; the second survives it and drops the helper along with the `["layer"]` it was working around.
 
 - [ ] **Step 13: Run the two new suites and the ones this touches**
 
@@ -18218,14 +21716,16 @@ export function adoptLayerTable(layerId: string, info: LayerTable): void {
 }
 ```
 
-- [ ] **Step 4: Run it and watch it pass, then sweep the six `layerTables` mock factories**
+- [ ] **Step 4: Run it and watch it pass, then sweep the SEVEN `layerTables` mock factories**
 
 ```bash
 export PATH="$HOME/.local/share/mise/shims:$PATH"
 npx vitest run tests/unit/insights/layerTablesBuild.test.ts
 ```
 
-Expected: PASS. Then add both names to each of the six `vi.mock(".../insights/layerTables", …)` factories — the module under test imports them once `deriveLayer.ts` does, and a factory without them throws `No "nextTableName" export is defined on the mock`:
+Expected: PASS. Then add both names to each `vi.mock(".../insights/layerTables", …)` factory — the module under test imports them once `deriveLayer.ts` does (and `runQueue.ts` imports `deriveLayer.ts`), and a factory without them throws `No "nextTableName" export is defined on the mock`.
+
+**There are SEVEN, not the six the Global Constraints counted on `develop`**: Task 11 authored an eighth-of-its-own — `tests/unit/features/processing/crossLayerRun.test.ts` — which mocks this module for the queue's own suite, and Task 22 wires the New-layer branch into the same `execute` that suite drives. `grep -rln 'vi.mock(.*insights/layerTables' tests/` before starting is the check; the number the Global Constraints quote is the `develop` baseline and this milestone moved it by one.
 
 ```ts
     nextTableName: vi.fn(() => `layer_${++mockTableCounter}`),
@@ -18242,9 +21742,9 @@ const adopted = new Map<string, unknown>();
 let mockTableCounter = 100;
 ```
 
-and reset both in `beforeEach`. The other four factories may use the same two lines with a throwaway map.
+and reset both in `beforeEach`. The remaining five (`crossLayerRun.test.ts` included) may use the same two lines with a throwaway map.
 
-Also add `sourceFeatureIds: null` (and, from Task 5, `extension: null` / `sourceBytes: null`) to every `LayerTable` literal in `tests/` — `tsc` names them; the list is `runQueue.test.ts`, `roofMetricsRun.test.ts`, `scope.test.ts`, `mapFilterSync.test.ts`, `layerTablesBuild.test.ts`, `StatsTabDuckdb.test.tsx`, `CatalogueView.test.tsx`, `engineStopped.test.tsx`, `extensionChip.test.tsx`, `roofLayerFixture.tsx`, `ToolView.test.tsx`, `useToolForm.test.tsx`, `ExportDialog.test.tsx`, `TablePanel.test.tsx`, `useLayerCounts.test.tsx`, `useLayerQuery.test.tsx`.
+Also add `sourceFeatureIds: null` (and, from Task 5, `extension: null` / `sourceBytes: null`) to every `LayerTable` literal in `tests/` — `tsc` names them; the list is `runQueue.test.ts`, `roofMetricsRun.test.ts`, `scope.test.ts`, `mapFilterSync.test.ts`, `layerTablesBuild.test.ts`, `StatsTabDuckdb.test.tsx`, `CatalogueView.test.tsx`, `engineStopped.test.tsx`, `extensionChip.test.tsx`, `roofLayerFixture.tsx`, `ToolView.test.tsx`, `useToolForm.test.tsx`, `styleByResult.test.tsx` (Task 9's `addLayer` helper builds one), `ExportDialog.test.tsx`, `TablePanel.test.tsx`, `useLayerCounts.test.tsx`, `useLayerQuery.test.tsx`.
 
 - [ ] **Step 5: Write the failing test for `Layer.derivedFrom` and `insertAfterId`**
 
@@ -18476,10 +21976,16 @@ npx tsc -b --noEmit
 `tsc` names each of the 12 files listed above; add `derivedFrom: null` to each fixture. Then:
 
 ```bash
-npx vitest run
+# The full suite in the BACKGROUND with its output to a file, per the M2
+# process rule — and WAITED on, because the commit below must not be made on
+# an unknown result.
+npx vitest run > /tmp/m3-task21-sweep.log 2>&1 &
+wait $!; echo "suite: $?"
 git add src/features/layers/layerStore.ts tests/
 git commit -m "chore: every layer records whether it was derived"
 ```
+
+Expected: `suite: 0`. A non-zero status is a failing sweep, not a flake: `tsc` named every fixture and one of them was missed.
 
 This is the sweep the plan's Design decision (g) budgets as its own commit, so the feature commit below is reviewable without 12 one-line fixture edits in it.
 
@@ -18615,7 +22121,7 @@ if (where === null) {
 }
 ```
 
-and, in `src/features/processing/runQueue.ts`, one line so the provenance tooltip does not start reading "312 of 312 buildings in this run" on every derived layer. Find:
+and, in `src/features/processing/runQueue.ts`, one line so the provenance tooltip does not start reading "312 of 312 buildings in this run" on every derived layer. After Task 18 this `partial` lives inside the shared `publishProvenance` helper rather than inline in `execute` — same expression, one indent level out, with `scope` its parameter. Find:
 
 ```ts
         partial:
@@ -18695,10 +22201,24 @@ vi.mock("../../../../src/insights/layerTables", async () => {
     tables: {},
   }));
   let n = 100;
+  // ONE chain, exactly like the real queue — that is what makes the "takes no
+  // slot of its own" case below a real regression: a nested enqueue would wait
+  // for a slot the preparation is holding, and the case would time out.
+  let chain: Promise<unknown> = Promise.resolve();
   return {
     useLayerTableStore: store,
     getLayerTable: vi.fn(() => null),
-    runOnTableQueue: vi.fn(<T>(task: () => Promise<T>) => task()),
+    runOnTableQueue: vi.fn(<T>(task: () => Promise<T>): Promise<T> => {
+      const next = chain.then(task, task);
+      chain = next.then(
+        () => {},
+        () => {},
+      );
+      return next;
+    }),
+    // Present so the case below can assert it was never called; the real one
+    // would deadlock here.
+    enqueueLayerTable: vi.fn(async () => {}),
     refreshLayerTableColumns: vi.fn(async () => {}),
     nextTableName: vi.fn(() => `layer_${++n}`),
     adoptLayerTable: vi.fn((layerId: string, info: unknown) => {
@@ -18726,19 +22246,22 @@ function parentLayer(): Layer {
 }
 
 function seedParent(): string {
+  // The bboxes are REAL and SEPARATED: `b` sits 100 m away from `a`, so a copy
+  // that kept the parent's envelope is visibly different from one that
+  // computed its own (the "Zoom to layer" case below).
   return useLayerStore.getState().addLayer({
     name: "Delft",
     model: {
       sourceEncoding: "cityjson",
       metadata: {},
-      bbox: null,
+      bbox: [0, 0, 0, 110, 110, 9],
       objects: {
         a: {
           id: "a",
           objectType: "Building",
           attributes: { height: 9 },
           surfaces: [],
-          bbox: null,
+          bbox: [0, 0, 0, 10, 10, 9],
           children: ["a-1"],
           parents: [],
           lod: null,
@@ -18748,7 +22271,7 @@ function seedParent(): string {
           objectType: "BuildingPart",
           attributes: {},
           surfaces: [],
-          bbox: null,
+          bbox: [0, 0, 0, 10, 10, 9],
           children: [],
           parents: ["a"],
           lod: null,
@@ -18758,7 +22281,7 @@ function seedParent(): string {
           objectType: "Building",
           attributes: {},
           surfaces: [],
-          bbox: null,
+          bbox: [100, 100, 0, 110, 110, 6],
           children: [],
           parents: [],
           lod: null,
@@ -18952,26 +22475,68 @@ describe("prepareDerivedCityLayer", () => {
     ).toBe(true);
   });
 
-  it("never enqueues a table build — the run is already on the FIFO", async () => {
+  it("gives the copy its OWN envelope, not the parent's", async () => {
+    // `CityModelMesh.getBoundsGeodetic()` reads `model.bbox`
+    // (`cityModelMesh.ts:675-687`), and that is what `fitLayer` — §6.2's "Zoom
+    // to layer" — frames. A copy that kept `{ ...parent.model }`'s bbox would
+    // fly the camera to the PARENT's extent: for a subset of one building in a
+    // city, a view of the whole city with the layer somewhere in it.
+    const plan = await prepare(["a", "a-1"]);
+    plan.publish();
+    expect(useLayerStore.getState().layers[1]!.model.bbox).toEqual([
+      0, 0, 0, 10, 10, 9,
+    ]);
+    // Scope "all" copies every object, so the parent's own envelope IS the
+    // copy's and no walk is needed.
+    const whole = await prepare(null);
+    whole.publish();
+    expect(useLayerStore.getState().layers[2]!.model.bbox).toEqual([
+      0, 0, 0, 110, 110, 9,
+    ]);
+  });
+
+  it("copies a MANUAL LoD choice, mode included (§6.2)", async () => {
+    // `addLayer` derives `selectedLod` from the model and hard-codes
+    // `lodMode: "auto"`, and `setLayerLod` does not touch the mode
+    // (`layerStore.ts:432-437`) — so a copy that set only the LoD would sit in
+    // auto mode and re-derive it on the next model change. §6.2 asks for "an
+    // independent COPY of the target's LoD choice".
+    const parentId = parentLayer().id;
+    useLayerStore.getState().setLayerLod(parentId, "1.2");
+    useLayerStore.getState().setLodMode(parentId, "manual");
+    const plan = await prepare(["a", "a-1"]);
+    const id = plan.publish();
+    const copy = useLayerStore.getState().layers.find((l) => l.id === id);
+    expect(copy?.selectedLod).toBe("1.2");
+    expect(copy?.lodMode).toBe("manual");
+  });
+
+  it("takes no table-queue slot of its own — the run already holds one", async () => {
     // The deadlock Design decision (f) calls a hard fact: `enqueueLayerTable`
-    // goes through the same `enqueue` this run is inside. A SOURCE assertion
-    // rather than a behavioural one, and that is the point — the failure it
-    // guards against has no runtime symptom short of a frozen page.
-    const source = await readFile(
-      fileURLToPath(
-        new URL(
-          "../../../../src/features/processing/deriveLayer.ts",
-          import.meta.url,
-        ),
-      ),
-      "utf8",
-    );
-    expect(source).not.toContain("enqueueLayerTable");
+    // goes through the same `enqueue` the run is already inside, so a build
+    // started here would wait for a slot this run is holding and the page
+    // would freeze with no other symptom. Asserted BEHAVIOURALLY — the
+    // preparation is run INSIDE a slot of the mocked queue (one chain, like
+    // the real one) and must ask for neither a build nor a second slot. A
+    // source-text assertion cannot be used: the module's own doc comment
+    // contains the word `enqueueLayerTable`, which is where the rule is
+    // written down.
+    const tables = await import("../../../../src/insights/layerTables");
+    const plan = await tables.runOnTableQueue(() => prepare(["a", "a-1"]));
+    expect(tables.enqueueLayerTable).not.toHaveBeenCalled();
+    expect(vi.mocked(tables.runOnTableQueue)).toHaveBeenCalledTimes(1);
+    // And the publication takes none either: it is one synchronous step.
+    plan.publish();
+    expect(tables.enqueueLayerTable).not.toHaveBeenCalled();
+    expect(vi.mocked(tables.runOnTableQueue)).toHaveBeenCalledTimes(1);
+    // The slot really was given back — a second one is reachable.
+    await tables.runOnTableQueue(async () => undefined);
   });
 });
 ```
 
-with `import { readFile } from "node:fs/promises";` and `import { fileURLToPath } from "node:url";` at the top of the file.
+(No `node:fs` import: the file reads no source text. `vi.clearAllMocks()` in
+the suite's `afterEach` resets the two call counts the last case asserts on.)
 
 - [ ] **Step 14: Run it and watch it fail**
 
@@ -19001,8 +22566,15 @@ import {
 } from "../../insights/layerTables";
 import { quoteIdent, quoteLiteral } from "../../insights/sql";
 import { activateLayer } from "../workspace/layerCoordination";
+import { selectedObjectBounds } from "../../scene/selectedObjectBounds";
 import type { CityModel, CityObject } from "../../domain/citymodel/types";
 ```
+
+(`selectedObjectBounds` is pure and engine-free — one type import from
+`@cityjson/navara-core` — and `features/` already imports from `scene/`
+(`geoLayers/categorize.ts:26-29`). It is the app's one "envelope of these
+objects and their parts" walk, and a second copy here would be the second
+answer to the question `fitLayer` asks.)
 
 and Task 20's two type-only imports become value imports of the same modules — ONE import line each, or `vp check`'s no-duplicate-imports rule fails:
 
@@ -19158,7 +22730,27 @@ export async function prepareDerivedCityLayer(input: {
         ? object
         : { ...object, attributes: { ...object.attributes, ...values } };
   }
-  const model: CityModel = { ...input.parent.model, objects };
+  const model: CityModel = {
+    ...input.parent.model,
+    objects,
+    // THE COPY'S OWN ENVELOPE. `CityModelMesh.getBoundsGeodetic()` reads
+    // `model.bbox` (`cityModelMesh.ts:675-687`) and that is what `fitLayer` —
+    // §6.2's "Zoom to layer" — frames, so a copy that inherited the parent's
+    // bbox would fly the camera to the PARENT's extent: for 312 buildings cut
+    // out of 1,115, a view of the whole city with the layer somewhere inside
+    // it. `selectedObjectBounds` walks the kept objects and their parts, which
+    // is exactly the set the copy holds.
+    //
+    // Scope "all" keeps every object, so the parent's own envelope IS the
+    // copy's and the walk is skipped; a subset whose objects carry no bbox at
+    // all (nothing to union) falls back to the parent's rather than to the
+    // null island `[0,0,0,0,0,0]` the mesh would otherwise frame.
+    bbox:
+      input.rowIds === null
+        ? input.parent.model.bbox
+        : (selectedObjectBounds({ objects }, Object.keys(objects)) ??
+          input.parent.model.bbox),
+  };
 
   // Minted HERE, not by `addLayer`, so the table can be adopted BEFORE the row
   // exists: a layer row that is visible for even one render without its table
@@ -19253,10 +22845,16 @@ export async function prepareDerivedCityLayer(input: {
           runId: input.runId,
         },
       });
-      // `addLayer` derives `selectedLod` from the model; §6.2 wants the
-      // TARGET's choice copied, and this is the store's own setter for it.
+      // `addLayer` derives `selectedLod` from the model and hard-codes
+      // `lodMode: "auto"`; §6.2 wants "an independent COPY of the target's LoD
+      // choice", and a choice is the LoD AND the mode. `setLayerLod` does not
+      // touch the mode (`layerStore.ts:432-437`), so both setters are needed
+      // or a manually chosen LoD comes back as an auto-derived one.
       if (parent.selectedLod !== null) {
         store.setLayerLod(layerId, parent.selectedLod);
+      }
+      if (parent.lodMode !== "auto") {
+        store.setLodMode(layerId, parent.lodMode);
       }
       // §6.2: "it becomes the active layer through the ordinary activate rule
       // (which clears a selection belonging to another layer)".
@@ -19268,7 +22866,7 @@ export async function prepareDerivedCityLayer(input: {
 }
 ```
 
-**The provenance the run's OWN columns get is a placeholder here on purpose.** `toolName` and `summary` are the run's, and only `execute` knows them; Task 22 replaces this loop with the same `setProvenance` call the This-layer branch already makes, from inside `execute`, where `tool.name` and `scopeLabel(…)` are in scope. Leaving the loop out entirely would ship a derived layer whose new columns have no badge at all, which is a worse intermediate state than a badge with an empty tool name — and Task 22's test is what pins the final text.
+**`publish()` copies the INHERITED provenance and writes none of its own, deliberately.** `toolName` and `summary` are the RUN's, and only `execute` knows them — so Task 22 publishes them from there, through the same `publishProvenance` helper both This-layer paths use (Task 18), rather than a second copy of the rule inside this module. Until Task 22 lands, a derived layer's new columns carry no badge; that is visible only to this task's own tests, because nothing reachable creates a derived layer until Task 22 turns the destination on. Guessing the tool name here would be the worse intermediate state: a badge whose text no test pins.
 
 - [ ] **Step 16: Run it and watch it pass**
 
@@ -19366,11 +22964,14 @@ npx tsc -b --noEmit
 npx vp check
 ```
 
-Expected: PASS; `tsc` clean; `vp check` at 0 errors / 56 warnings. Then the whole suite, in the background to a file as the Global Constraints require:
+Expected: PASS; `tsc` clean; `vp check` at 0 errors / 56 warnings. Then the whole suite, in the background to a file as the Global Constraints require — and waited on, so the commit is made on a known result:
 
 ```bash
 npx vitest run > /tmp/m3-task21.log 2>&1 &
+wait $!; echo "suite: $?"
 ```
+
+Expected: `suite: 0`.
 
 - [ ] **Step 19: Commit**
 
@@ -19405,12 +23006,15 @@ git commit -m "feat: prepare a derived city layer's model, table and row as one 
   // src/features/processing/runQueue.ts
   /** §6.2's block on undoing a New-layer run, or null when Undo is available. */
   export function newLayerUndoBlock(run: RunRecord): string | null;
-  /** §6.2's New-layer card line: "Created Delft · solids · 312 buildings · … · 2.4 s". */
+  /** §6.2's New-layer card line: "Created Delft · solids · 312 buildings · … · 2.4 s".
+   *  `features` is the count the COPY holds, or `null` for a copy whose own
+   *  head segment already names what it holds (§7.6's "6 areas aggregated over
+   *  1,204 buildings" — the buildings there are the SOURCE's). */
   export function summariseCreated(
     result: ToolResult,
     elapsedMs: number,
     layerName: string,
-    features: number,
+    features: number | null,
     options: { readonly streaming: boolean },
   ): RunSummary;
 
@@ -19757,6 +23361,24 @@ describe("destination: New layer", () => {
     expect(runById(id)?.undoable).toBe(false);
   });
 
+  it("offers Undo IMMEDIATELY after publication", async () => {
+    // The regression this is written against: `newLayerUndoBlock` compares the
+    // copy's provenance against the run ids it carried AT publication, and
+    // that set is built from `useComputedColumnStore.getState()`. Read as a
+    // snapshot taken BEFORE the provenance was published, the set is empty —
+    // so every column of the copy looks like one it grew afterwards and Undo
+    // is disabled before the user has seen the card.
+    fakeExecutor();
+    const id = submitRun(newLayerRequest());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    expect(newLayerUndoBlock(runById(id) as RunRecord)).toBeNull();
+    expect(runById(id)?.undoable).toBe(true);
+    // And it really undoes: the block is not the only thing between the user
+    // and their layer.
+    await undoRun(id);
+    expect(useLayerStore.getState().layers).toHaveLength(1);
+  });
+
   it("blocks Undo once a later run has used the derived layer", async () => {
     fakeExecutor();
     const id = submitRun(newLayerRequest());
@@ -19960,10 +23582,16 @@ if (request.destination === "new") {
       parent: layer,
       parentTable: table,
       // The frozen name (§6.1), with the prefill as the fallback for a
-      // request built without one.
+      // request built without one. The source's name comes off the RECORD
+      // (`runById`), which is where Task 11 put it — `execute` holds the
+      // source's id, not its name.
       name:
         request.newLayerName ??
-        derivedLayerName(layer.name, request.toolId, record.sourceName),
+        derivedLayerName(
+          layer.name,
+          request.toolId,
+          runById(id)?.sourceName ?? null,
+        ),
       rowIds: scope.featureIds,
       columns: result.columns,
       rows: result.rows,
@@ -19975,40 +23603,46 @@ if (request.destination === "new") {
     // nothing changed". This is the LAST moment that is true.
     if (signal.aborted) throw new CancelledError();
     const newLayerId = plan.publish();
-    const published = useLayerStore
-      .getState()
-      .layers.find((l) => l.id === newLayerId);
-    const name = published?.name ?? plan.name;
+    // BOTH stores. A derived CITY layer's row is in `layerStore`; a derived
+    // VECTOR layer's (Task 23) is in `geoLayerStore`, and reading only the
+    // city one gave `undefined` — so a name that publication had to
+    // disambiguate never reached the card or A15's note, and §10 scenario
+    // 12 failed silently on exactly the case it is about.
+    const name =
+      useLayerStore.getState().layers.find((l) => l.id === newLayerId)?.name ??
+      useGeoLayerStore.getState().layers.find((l) => l.id === newLayerId)
+        ?.name ??
+      plan.name;
 
-    // The copy's own new columns, with the run's real provenance. The
-    // INHERITED entries were copied inside `publish()`; these are the ones
-    // only `execute` knows the tool name and scope sentence for.
-    const registry = useComputedColumnStore.getState();
-    for (const col of result.columns) {
-      registry.setProvenance(newLayerId, col.name, {
-        runId: id,
-        toolName: tool.name,
-        summary: `${request.lod ? `LoD ${request.lod} · ` : ""}${scopeLabel(
-          request.scope,
-          scope.count,
-        )}`,
-        at: Date.now(),
-        // The copy holds exactly the scoped features, so the run covered
-        // ALL of it — "312 of 312" would be noise.
-        partial: null,
-        previous: null,
-      });
-    }
+    // The copy's own new columns, with the run's real provenance — through
+    // the SAME publisher both This-layer paths use (Task 18's
+    // `publishProvenance`), so there is one rule for what a badge says. The
+    // INHERITED entries were copied inside `publish()`.
+    //
+    // The scope is handed over with `total: scope.count`: the copy holds
+    // exactly the scoped features, so the run covered ALL of it and the
+    // tooltip must not read "312 of 1,115" about a layer of 312.
+    publishProvenance(id, newLayerId, result, tool.name, request, {
+      featureIds: scope.featureIds,
+      count: scope.count,
+      total: scope.count,
+    });
 
+    // RE-READ, and this is the bug it is written against: `getState()`
+    // returns a SNAPSHOT, and every `setProvenance` above replaced
+    // `byLayer` with a new object. A set built from a snapshot taken
+    // BEFORE them holds none of this run's entries, so `newLayerUndoBlock`
+    // would see every column of the copy as one it "grew afterwards" and
+    // disable Undo the instant the card appeared.
+    const carried = useComputedColumnStore.getState().byLayer[newLayerId] ?? {};
     undoState.set(id, {
       kind: "layer",
       layerId: newLayerId,
       table: table.table,
-      // Everything the copy carried the moment it was published. Anything
-      // that appears later is a column of its OWN, and blocks the Undo.
-      runIds: new Set(
-        Object.values(registry.byLayer[newLayerId] ?? {}).map((p) => p.runId),
-      ),
+      // Everything the copy carried the moment it was published — the
+      // inherited runs plus this one. Anything that appears later is a
+      // column of its OWN, and blocks the Undo.
+      runIds: new Set(Object.values(carried).map((p) => p.runId)),
     });
 
     const summary = summariseCreated(result, elapsed(), name, scope.count, {
@@ -20065,28 +23699,39 @@ if (request.destination === "new") {
  * tool that adds one gets it on both destinations for free. The count is the
  * FEATURES the copy holds (the frozen scope), not the measured count — the
  * sentence is about the layer that now exists.
+ *
+ * `features === null` keeps the tool's own head segment instead, for a copy
+ * whose head already names what it holds: §7.6's card is "6 areas aggregated
+ * over 1,204 buildings", where the 6 are the target AREAS the copy holds and
+ * the 1,204 are the SOURCE's buildings. Replacing that with a building count
+ * would put the source's number on the created layer — the one number on the
+ * card that would be about another layer. Both branches are spec-verbatim
+ * fragments: §6.2's "Created <name>" and, for the second, §7.6's own line.
  */
 export function summariseCreated(
   result: ToolResult,
   elapsedMs: number,
   layerName: string,
-  features: number,
+  features: number | null,
   options: { readonly streaming: boolean },
 ): RunSummary {
   const base = summarise(result, elapsedMs, options);
-  const rest = base.line.split(" · ").slice(1);
+  const segments = base.line.split(" · ");
   return {
     ...base,
-    line: [
-      `Created ${layerName}`,
-      plural(features, "building", "buildings"),
-      ...rest,
-    ].join(" · "),
+    line:
+      features === null
+        ? [`Created ${layerName}`, ...segments].join(" · ")
+        : [
+            `Created ${layerName}`,
+            plural(features, "building", "buildings"),
+            ...segments.slice(1),
+          ].join(" · "),
   };
 }
 ```
 
-2. The Undo state becomes a union. Find:
+2. The Undo state becomes a union — a NESTED one. Find:
 
 ```ts
 const undoState = new Map<string, UndoState>();
@@ -20096,15 +23741,23 @@ and replace with:
 
 ```ts
 /**
- * What Undo MEANS for a run, which is a question about its destination (§6.2).
+ * What Undo MEANS for a run, which is a question about its DESTINATION (§6.2).
  *
  * "This layer": columns the run created are dropped and columns it replaced
- * get their previous values back, from the backup table.
+ * get their previous values back — from a backup table for a city target, from
+ * the captured `preparedData` for a vector one. That is {@link UndoState},
+ * which Task 18 already discriminates on `kind: "city" | "vector"`.
  * "New layer": the whole Undo is removing the layer — nothing was written to
  * the target, so there is no backup and nothing to restore.
+ *
+ * NESTED, not intersected: `{ kind: "columns" } & UndoState` is `never`,
+ * because `UndoState`'s own `kind` is already `"city" | "vector"` and no value
+ * can carry both. So the destination's discriminant wraps the target's, and
+ * the two questions stay separable — "what does Undo mean here" and "what kind
+ * of thing does it put back".
  */
 type RunUndo =
-  | ({ readonly kind: "columns" } & UndoState)
+  | { readonly kind: "columns"; readonly state: UndoState }
   | {
       readonly kind: "layer";
       readonly layerId: string;
@@ -20121,10 +23774,11 @@ type RunUndo =
 const undoState = new Map<string, RunUndo>();
 ```
 
-and give the existing `undoState.set(id, { … })` in the This-layer path its discriminant:
+and wrap BOTH existing `undoState.set(id, { … })` calls — Task 18 left one in the city path and one in the vector path, and each keeps its literal unchanged inside `state`:
 
 ```ts
     undoState.set(id, {
+      kind: "city",
       table: table.table,
 ```
 
@@ -20133,21 +23787,46 @@ becomes
 ```ts
     undoState.set(id, {
       kind: "columns",
-      table: table.table,
+      state: {
+        kind: "city",
+        table: table.table,
 ```
 
-3. `discardUndo` learns the union. Find:
+(closing one brace more at the end of the literal), and identically for the vector one:
+
+```ts
+  undoState.set(id, {
+    kind: "vector",
+    layerId: target.layer.id,
+```
+
+becomes
+
+```ts
+  undoState.set(id, {
+    kind: "columns",
+    state: {
+      kind: "vector",
+      layerId: target.layer.id,
+```
+
+`tsc` is the check that neither was missed: `RunUndo` has no member that accepts a bare `UndoState`.
+
+3. `discardUndo` learns the outer union. After Task 18 it reads:
 
 ```ts
 function discardUndo(id: string): void {
   const state = undoState.get(id);
   if (!state) return;
   undoState.delete(id);
+  // A VECTOR run's Undo holds no database resource at all — its copy is one
+  // JavaScript object, which the Map delete above has already released.
+  if (state.kind !== "city") return;
   const backup = state.backupTable;
   if (!backup) return;
 ```
 
-and replace the last two lines with:
+and becomes:
 
 ```ts
 function discardUndo(id: string): void {
@@ -20158,7 +23837,10 @@ function discardUndo(id: string): void {
   // the layer, and the layer's own table goes with it through
   // `layerTableLifecycle`'s removal branch. There is nothing to drop here.
   if (state.kind === "layer") return;
-  const backup = state.backupTable;
+  // A VECTOR run's Undo holds no database resource at all — its copy is one
+  // JavaScript object, which the Map delete above has already released.
+  if (state.state.kind !== "city") return;
+  const backup = state.state.backupTable;
   if (!backup) return;
 ```
 
@@ -20191,7 +23873,8 @@ export function newLayerUndoBlock(run: RunRecord): string | null {
   if (used) return USED_BY_LATER_RUN;
   const state = undoState.get(run.id);
   // No recorded state (an engine restart, an eviction): the card's `undoable`
-  // is the authority and this adds no reason of its own.
+  // is the authority and this adds no reason of its own. `kind !== "layer"` is
+  // the same silence for a This-layer run, whose Undo has its own rules.
   if (state === undefined || state.kind !== "layer") return null;
   const grown = Object.values(
     useComputedColumnStore.getState().byLayer[layerId] ?? {},
@@ -20200,16 +23883,17 @@ export function newLayerUndoBlock(run: RunRecord): string | null {
 }
 ```
 
-5. `undoRun` branches first. Find:
+5. `undoRun` branches on the DESTINATION first, and the rest of its body reads the inner state. After Task 18 it opens:
 
 ```ts
 export async function undoRun(id: string): Promise<void> {
   const run = runById(id);
   const state = undoState.get(id);
   if (!run || !run.undoable || !state) return;
+  if (state.kind === "vector") {
 ```
 
-and replace with:
+and becomes:
 
 ```ts
 export async function undoRun(id: string): Promise<void> {
@@ -20236,54 +23920,57 @@ export async function undoRun(id: string): Promise<void> {
     patch(id, { undoable: false, note: "Undone" });
     return;
   }
+  // Everything below is Task 18's body, unchanged except that the state it
+  // reads is now one level in. ONE new binding rather than a rename at every
+  // site, so the diff is the wrapper and not the Undo.
+  const undo = state.state;
+  if (undo.kind === "vector") {
 ```
 
-6. **The Undo-steal loop must skip a New-layer run.** `execute`'s publication takes Undo away from any earlier done run over the same layer that shares a column — but a New-layer run's `targetLayerId` is the PARENT, which it never wrote to, so a later This-layer run on the parent would steal an Undo whose whole meaning is "remove the copy". Find:
+and every remaining `state.` in the function body becomes `undo.` — `undo.layerId`, `undo.previousPreparedData`, `undo.created`, `undo.replaced`, `undo.table`, `undo.backupTable`, `undo.ids`, `undo.previousModelValues`. `tsc` names each one: `RunUndo`'s `"columns"` member has none of those fields.
+
+6. **The Undo-steal rule must skip a New-layer run.** A publication takes Undo away from any earlier done run over the same layer that shares a column — but a New-layer run's `targetLayerId` is the PARENT, which it never wrote to, so a later This-layer run on the parent would steal an Undo whose whole meaning is "remove the copy". After Task 18 the rule lives in ONE helper, `stealUndo`. Find:
 
 ```ts
-      if (
-        other.id !== id &&
-        other.targetLayerId === layer.id &&
-        other.undoable &&
-```
-
-and replace with:
-
-```ts
-      if (
-        other.id !== id &&
-        other.targetLayerId === layer.id &&
-        // A NEW-LAYER run wrote nothing to this layer — its `targetLayerId` is
-        // the parent it copied FROM. Its Undo removes the copy, and no write
-        // here can make that stale (§6.2's own block is the run-history scan
-        // in `newLayerUndoBlock`).
-        other.newLayerId === null &&
-        other.undoable &&
-```
-
-7. **`installStaleWatcher` must skip one too.** §6: "A derived layer is independent of its parent from publication on: a parent table rebuild, filter, edit or removal never marks it stale." Find:
-
-```ts
-        if (
-          run.targetLayerId === layerId &&
-          run.status === "done" &&
-          !run.stale
-        ) {
+    if (
+      other.id !== runId &&
+      other.targetLayerId === layerId &&
+      other.undoable &&
 ```
 
 and replace with:
 
 ```ts
-        if (
-          run.targetLayerId === layerId &&
-          // §6: a rebuild of the PARENT says nothing about the copy — "a
-          // derived layer is independent of its parent from publication on".
-          // The copy's own table is adopted, never rebuilt, so no rebuild of
-          // it can reach here either.
-          run.newLayerId === null &&
-          run.status === "done" &&
-          !run.stale
-        ) {
+    if (
+      other.id !== runId &&
+      other.targetLayerId === layerId &&
+      // A NEW-LAYER run wrote nothing to this layer — its `targetLayerId` is
+      // the parent it copied FROM. Its Undo removes the copy, and no write
+      // here can make that stale (§6.2's own block is the run-history scan
+      // in `newLayerUndoBlock`).
+      other.newLayerId === null &&
+      other.undoable &&
+```
+
+7. **`installStaleWatcher` must skip one too.** §6: "A derived layer is independent of its parent from publication on: a parent table rebuild, filter, edit or removal never marks it stale." After Task 11 the match reads the COMPUTE layer. Find:
+
+```ts
+  if (computeLayerId === layerId && run.status === "done" && !run.stale) {
+```
+
+and replace with:
+
+```ts
+  if (
+    computeLayerId === layerId &&
+    // §6: a rebuild of the PARENT says nothing about the copy — "a derived
+    // layer is independent of its parent from publication on". The copy's
+    // own table is adopted, never rebuilt, so no rebuild of it can reach
+    // here either.
+    run.newLayerId === null &&
+    run.status === "done" &&
+    !run.stale
+  ) {
 ```
 
 - [ ] **Step 6: Run it and watch it pass**
@@ -20309,7 +23996,13 @@ Create `tests/unit/ui/processing/derivedCard.test.tsx`:
  * eligibility of a tool it is not about.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import type { RunRecord } from "../../../../src/features/processing/types";
 
 vi.mock("../../../../src/insights/duckdb", () => ({
@@ -20365,6 +24058,8 @@ const { useLayerTableStore } =
   await import("../../../../src/insights/layerTables");
 const { undoRun } =
   await import("../../../../src/features/processing/runQueue");
+const { useRuleDraftStore } =
+  await import("../../../../src/features/rules/ruleDraftStore");
 
 /** A done New-layer run whose copy is the layer "NEW". */
 function createdRun(patch: Partial<RunRecord> = {}): RunRecord {
@@ -20393,7 +24088,9 @@ function createdRun(patch: Partial<RunRecord> = {}): RunRecord {
       detail: null,
       measured: 2,
       skipped: [],
-      firstColumnNonNull: 2,
+      // Task 9 replaced `firstColumnNonNull` with a per-column map; Style by
+      // result reads it to decide whether the chosen column is all-NULL.
+      nonNullByColumn: { extent_height_m: 2 },
     },
     error: null,
     log: [],
@@ -20443,6 +24140,7 @@ afterEach(() => {
   useLayerTableStore.setState({ tables: {} });
   useWorkspaceStore.getState().setActiveLayerId(null);
   useQueryStore.setState({ queries: {} });
+  useRuleDraftStore.setState({ drafts: {} });
   useShellStore.getState().requestZoom(null);
 });
 
@@ -20483,6 +24181,27 @@ describe("the New-layer result card", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Open table" }));
     expect(useWorkspaceStore.getState().activeLayerId).toBe("NEW");
+  });
+
+  it("opens the Style-by-result draft on the COPY, not on the target", async () => {
+    // The THIRD of the card's three copy-pointing actions (Open table and Zoom
+    // are above). It is also the only one that goes through the click handler's
+    // `runById` guard — §7's "a run that went stale or was undone while the
+    // read was in flight" — so the record must be in the STORE and not only in
+    // the prop, or the draft is silently never written and this case would pass
+    // against an empty draft store.
+    addLayers();
+    const run = createdRun();
+    useProcessingStore.getState().upsertRun(run);
+    render(<RunFooter run={run} canRun reason={null} onRunAgain={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    await waitFor(() => {
+      expect(
+        useRuleDraftStore.getState().drafts["NEW"]?.form?.conditions?.[0]
+          ?.field,
+      ).toBe("extent_height_m");
+    });
+    expect(useRuleDraftStore.getState().drafts["L"]).toBeUndefined();
   });
 
   it("asks the shell to zoom to the COPY", () => {
@@ -20888,9 +24607,10 @@ npx vitest run tests/unit/features/processing tests/unit/ui/processing
 npx tsc -b --noEmit
 npx vp check
 npx vitest run > /tmp/m3-task22.log 2>&1 &
+wait $!; echo "suite: $?"
 ```
 
-Expected: PASS; `tsc` clean; `vp check` 0 errors / 56 warnings. Every `RunRecord` fixture in `tests/` needs `destination: "layer", newLayerId: null` — `tsc` names them (`ToolView.test.tsx`, `RecentRuns.test.tsx`, `LogView.test.tsx`, `engineStopped.test.tsx`, `runQueue.test.ts`, `roofMetricsRun.test.ts`).
+Expected: PASS; `tsc` clean; `vp check` 0 errors / 56 warnings; `suite: 0`. Every `RunRecord` fixture in `tests/` needs `destination: "layer", newLayerId: null` — `tsc` names them (`ToolView.test.tsx`, `RecentRuns.test.tsx`, `LogView.test.tsx`, `engineStopped.test.tsx`, `runQueue.test.ts`, `roofMetricsRun.test.ts`).
 
 - [ ] **Step 13: Commit**
 
@@ -21352,7 +25072,10 @@ function seedAggregate(): string {
   return zones;
 }
 
-function aggregateRequest(zones: string) {
+function aggregateRequest(
+  zones: string,
+  overrides: Record<string, unknown> = {},
+) {
   return newLayerRequest({
     toolId: "aggregate-per-area" as const,
     targetLayerId: zones,
@@ -21360,6 +25083,7 @@ function aggregateRequest(zones: string) {
     prefix: "bld_",
     newLayerName: "Zones · buildings",
     columns: [{ name: "bld_buildings_n", type: "DOUBLE" as const }],
+    ...overrides,
   });
 }
 
@@ -21381,10 +25105,43 @@ describe("destination: New layer, with a VECTOR target", () => {
     expect(doc.features[0]?.properties).not.toHaveProperty("bld_buildings_n");
   });
 
-  it("Undo removes the derived VECTOR layer", async () => {
+  it("names the copy on the card and keeps §7.6's own line whole", async () => {
+    // NOT "Created Zones · buildings · 1 building · …": that count is the
+    // SOURCE's scoped buildings and the copy holds AREAS. §7.6's head segment
+    // already says both ("6 areas aggregated over 1,204 buildings"), so it
+    // survives intact — asserted against the SAME tool's This-layer card
+    // rather than against a copy of Task 19's wording.
+    const zones = seedAggregate();
+    const created = submitRun(aggregateRequest(zones));
+    await vi.waitFor(() => expect(runById(created)?.status).toBe("done"));
+    const onLayer = submitRun(
+      aggregateRequest(zones, { destination: "layer", newLayerName: null }),
+    );
+    await vi.waitFor(() => expect(runById(onLayer)?.status).toBe("done"));
+
+    const prefix = "Created Zones · buildings · ";
+    const line = runById(created)?.summary?.line ?? "";
+    expect(line.startsWith(prefix)).toBe(true);
+    expect(line.slice(prefix.length)).toBe(runById(onLayer)?.summary?.line);
+  });
+
+  it("reads the name publication actually gave the copy", async () => {
+    // The same " (2)" re-check a city copy gets (§10.12) — and the card's name
+    // is read back from the GEO store, which is where a vector copy's row is.
+    const zones = seedAggregate();
+    const id = submitRun(aggregateRequest(zones, { newLayerName: "Zones" }));
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    expect(runById(id)?.summary?.line).toContain("Created Zones (2)");
+    expect(runById(id)?.note).toBe(
+      'Renamed to "Zones (2)": a layer already had that name',
+    );
+  });
+
+  it("offers Undo immediately, and Undo removes the derived VECTOR layer", async () => {
     const zones = seedAggregate();
     const id = submitRun(aggregateRequest(zones));
     await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    expect(newLayerUndoBlock(runById(id) as RunRecord)).toBeNull();
     await undoRun(id);
     expect(useGeoLayerStore.getState().layers.map((l) => l.name)).toEqual([
       "Zones",
@@ -21393,7 +25150,7 @@ describe("destination: New layer, with a VECTOR target", () => {
 });
 ```
 
-(`GEO_RECORD_ID` comes from `src/features/geoLayers/geoRecords.ts`; `useGeoLayerStore` and `useGeoLayerStore.setState({ layers: [] })` join the suite's imports and its `beforeEach`.)
+(`GEO_RECORD_ID` comes from `src/features/geoLayers/geoRecords.ts`; `useGeoLayerStore` and `useGeoLayerStore.setState({ layers: [] })` join the suite's imports and its `beforeEach`, and `newLayerUndoBlock` is already imported there by Task 22.)
 
 - [ ] **Step 7: Branch on the target kind in `execute`**
 
@@ -21404,22 +25161,22 @@ In `src/features/processing/runQueue.ts`, inside Task 22's `destination === "new
         plan = await prepareDerivedCityLayer({
 ```
 
-and replace with:
+and replace with (`target` is `execute`'s own binding from Task 11 — the same object `ctx.target` wraps, and the one that is certainly in scope here):
 
 ```ts
       try {
         plan =
-          ctx.target.kind === "vector"
+          target.kind === "vector"
             ? // §7.6's reversed direction: the TARGET is the vector layer and
               // its copy holds every one of its areas, whatever the scope
               // selected on the SOURCE city layer (§6, §10.11).
               await prepareDerivedVectorLayer({
                 runId: id,
-                parent: ctx.target.layer,
+                parent: target.layer,
                 name:
                   request.newLayerName ??
                   derivedLayerName(
-                    ctx.target.layer.name,
+                    target.layer.name,
                     request.toolId,
                     layer.name,
                   ),
@@ -21429,7 +25186,34 @@ and replace with:
             : await prepareDerivedCityLayer({
 ```
 
-and close the ternary after the city call's argument object. Extend the import:
+and close the ternary after the city call's argument object.
+
+**The card's count follows the same branch.** Task 22's call passes the scoped BUILDING count, which for a vector copy would put the SOURCE's number on the created layer. Find:
+
+```ts
+const summary = summariseCreated(result, elapsed(), name, scope.count, {
+  streaming: layer.isStreaming,
+});
+```
+
+and replace with:
+
+```ts
+const summary = summariseCreated(
+  result,
+  elapsed(),
+  name,
+  // §7.6's own head segment already names what the copy holds — "6 areas
+  // aggregated over 1,204 buildings", where the 6 are the target's areas
+  // and the 1,204 are the source's buildings. `null` keeps it; a count
+  // here would replace it with the SOURCE's number (§6.2's "312
+  // buildings" is a CITY copy's, and a city copy holds the scope).
+  target.kind === "vector" ? null : scope.count,
+  { streaming: layer.isStreaming },
+);
+```
+
+Extend the import:
 
 ```ts
 import {
@@ -21440,7 +25224,7 @@ import {
 } from "./deriveLayer";
 ```
 
-**`undoRun` needs no change at all**, and that is worth checking rather than assuming: its `kind: "layer"` branch calls `useLayerStore.getState().removeLayer(state.layerId)`, which does nothing for a geo id. Add the geo removal beside it — find:
+**`undoRun`'s `kind: "layer"` branch needs ONE line**, and that is worth checking rather than assuming: it calls `useLayerStore.getState().removeLayer(state.layerId)`, which does nothing for a geo id. Add the geo removal beside it — find:
 
 ```ts
 useLayerStore.getState().removeLayer(state.layerId);
@@ -21457,7 +25241,7 @@ useGeoLayerStore.getState().removeGeoLayer(state.layerId);
 useComputedColumnStore.getState().clearLayer(state.layerId);
 ```
 
-with `import { useGeoLayerStore } from "../geoLayers/geoLayerStore";` added to `runQueue.ts`.
+`useGeoLayerStore` needs no import line here: Task 11 already brought it into `runQueue.ts` (for the vector target lookup) and Task 22 uses it for the published-name lookup. A second import fails `vp check`'s no-duplicate-imports rule.
 
 - [ ] **Step 8: Turn Aggregate's destination on**
 
@@ -21483,7 +25267,10 @@ npx vitest run tests/unit/features/processing tests/unit/features/geoLayers test
 npx tsc -b --noEmit
 npx vp check
 npx vitest run > /tmp/m3-task23.log 2>&1 &
+wait $!; echo "suite: $?"
 ```
+
+Expected: PASS throughout; `suite: 0`.
 
 ```bash
 git add src/features/processing/deriveLayer.ts \
@@ -21575,25 +25362,72 @@ describe("cityStateLine", () => {
 });
 ```
 
-and, for the row, a second file-level `describe` that renders `LayerRow` with the two new props:
+and, for the row, a second file-level `describe` that renders `LayerRow` with the two new props. `LayerRow.test.tsx` has no `baseProps` — its helpers are `cityItem`, `handlers`, `renderRow` and `openMenu` (`LayerRow.test.tsx:28-83`), and the shape below is the same one, copied rather than imported (a fixture module shared between two suites is a third thing to keep in step):
 
 ```tsx
+import { LayerRow } from "../../../../src/ui/layers/LayerRow";
+import type { ActiveLayer } from "../../../../src/features/workspace/activeLayer";
+import type { Layer } from "../../../../src/features/layers/layerStore";
+
+/** The city row this file's cases are all about. Cast, because `LayerRow` is
+ *  store-free and reads four fields of it. */
+function cityItem(overrides: Partial<Layer> = {}): ActiveLayer {
+  return {
+    kind: "city",
+    layer: {
+      id: "l1",
+      name: "Delft · solids",
+      visible: true,
+      isStreaming: false,
+      derivedFrom: null,
+      ...overrides,
+    } as unknown as Layer,
+  };
+}
+
+const handlers = () => ({
+  onActivate: vi.fn(),
+  onToggleVisible: vi.fn(),
+  onRename: vi.fn(),
+  onZoom: vi.fn(),
+  onRemove: vi.fn(),
+});
+
+function renderRow(
+  props: Partial<Parameters<typeof LayerRow>[0]> = {},
+): ReturnType<typeof handlers> {
+  const cbs = handlers();
+  render(
+    <LayerRow
+      item={cityItem()}
+      active={false}
+      stateLine="312 buildings · LoD 2.2 · Derived from Delft"
+      kind="city"
+      filterChip={null}
+      onOpenTable={null}
+      {...cbs}
+      {...props}
+    />,
+  );
+  return cbs;
+}
+
+const openMenu = (): void => {
+  fireEvent.click(screen.getByRole("button", { name: /^Layer actions/ }));
+};
+
+afterEach(cleanup);
+
 describe("a derived layer's row", () => {
-  it("marks itself '§6/§8: Derived · not saved in workspaces'", () => {
-    render(
-      <LayerRow
-        {...baseProps()}
-        stateLine="312 buildings · LoD 2.2 · Derived from Delft"
-        derived
-      />,
-    );
+  it("marks itself 'Derived · not saved in workspaces' (§6, §8)", () => {
+    renderRow({ derived: true });
     expect(screen.getByText("Derived · not saved in workspaces")).toBeTruthy();
   });
 
   it("offers 'Show run log' and calls it", () => {
     const onShowRunLog = vi.fn();
-    render(<LayerRow {...baseProps()} derived onShowRunLog={onShowRunLog} />);
-    fireEvent.click(screen.getByRole("button", { name: /Layer actions/ }));
+    renderRow({ derived: true, onShowRunLog });
+    openMenu();
     fireEvent.click(screen.getByRole("button", { name: "Show run log" }));
     expect(onShowRunLog).toHaveBeenCalledTimes(1);
   });
@@ -21602,21 +25436,22 @@ describe("a derived layer's row", () => {
     // §6.2's own caveat: the history keeps 20 runs and a layer outlives its
     // run, so the item is disabled rather than absent — a layer that HAS a run
     // log and one whose log has aged out must not look the same.
-    render(<LayerRow {...baseProps()} derived onShowRunLog={null} />);
-    fireEvent.click(screen.getByRole("button", { name: /Layer actions/ }));
+    renderRow({ derived: true, onShowRunLog: null });
+    openMenu();
     expect(screen.getByRole("button", { name: "Show run log" })).toBeDisabled();
   });
 
   it("shows neither on an ordinary layer", () => {
-    render(<LayerRow {...baseProps()} />);
+    // `onShowRunLog` is left UNDEFINED, which is what `LayerList` passes for a
+    // layer with no `derivedFrom` — and the regression that matters: passing
+    // `null` here instead would give every ordinary layer a disabled item.
+    renderRow();
     expect(screen.queryByText("Derived · not saved in workspaces")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Layer actions/ }));
+    openMenu();
     expect(screen.queryByRole("button", { name: "Show run log" })).toBeNull();
   });
 });
 ```
-
-`baseProps()` is a copy of `tests/unit/ui/layers/LayerRow.test.tsx`'s own props helper (it already builds an `item`, `kind`, `stateLine` and the six callbacks); read that file and reuse its exact shape rather than inventing a second one.
 
 - [ ] **Step 2: Run it and watch it fail**
 
@@ -21726,13 +25561,13 @@ the marker, beside the state line. Find:
 }
 ```
 
-and pass the callback through to the menu. Find:
+and pass the callback through to the menu. Find, on the `<LayerRowMenu …>` element (`LayerRow.tsx:246-252`):
 
 ```tsx
 onZoom = { onZoom };
 ```
 
-and add `onShowRunLog={onShowRunLog ?? null}` beside it — plus, in `src/ui/layers/LayerRowMenu.tsx`, the prop and the item. The prop, beside `onOpenTable`'s declaration:
+and add `onShowRunLog={onShowRunLog}` beside it — **verbatim, with no `?? null`**. The prop is a three-state one and the coalesce would destroy the distinction it exists for: `undefined` means "this layer has no run log at all" and the item is ABSENT, `null` means "it had one and the history dropped it" and the item is DISABLED. `onShowRunLog ?? null` turns every ordinary layer's `undefined` into the disabled value, so every row in the list grows a greyed "Show run log". Plus, in `src/ui/layers/LayerRowMenu.tsx`, the prop and the item. The prop, beside `onOpenTable`'s declaration:
 
 ```ts
   /** §6.2's derived-layer item. `undefined` omits it (an ordinary layer has no
@@ -21848,19 +25683,31 @@ Create `tests/unit/app/derivedSnapshot.test.tsx`:
  * without recomputing the index silently activates the wrong layer on restore.
  */
 import { describe, expect, it } from "vitest";
+import type { DerivedFrom } from "../../../src/features/layers/layerStore";
 import {
   derivedNotSavedNote,
   snapshotLayers,
 } from "../../../src/app/snapshotLayers";
 
-const city = (name: string, derived: boolean) =>
-  ({
-    id: name,
-    name,
-    derivedFrom: derived
-      ? { layerId: "p", layerName: "Delft", runId: "run_1" }
-      : null,
-  }) as never;
+/**
+ * `snapshotLayers` is STRUCTURALLY typed over `{ id, derivedFrom }`, so the
+ * fixture is a real record of that shape and not a cast: `as never` would make
+ * `L` infer as `never`, and every `out.layers.map((l) => l.name)` below would
+ * then be reading a property off it.
+ */
+interface Row {
+  readonly id: string;
+  readonly name: string;
+  readonly derivedFrom: DerivedFrom | null;
+}
+
+const city = (name: string, derived: boolean): Row => ({
+  id: name,
+  name,
+  derivedFrom: derived
+    ? { layerId: "p", layerName: "Delft", runId: "run_1" }
+    : null,
+});
 
 describe("snapshotLayers", () => {
   it("omits every derived layer from both arrays", () => {
@@ -21904,10 +25751,23 @@ describe("snapshotLayers", () => {
     const out = snapshotLayers({
       layers: [city("Delft", false)],
       geoLayers: [],
-      activeLayerId: null,
+      activeLayerId: "Delft",
     });
     expect(out.derivedCount).toBe(0);
     expect(out.activeLayer).toEqual({ kind: "city", index: 0 });
+  });
+
+  it("omits the reference when NOTHING is active", () => {
+    // `activeLayerId: null` is not "the first layer": the snapshot simply
+    // carries no reference, which restores the existing first-layer fallback.
+    // This is the shape the implementation returns, and the assertion is here
+    // so a future `?? 0` cannot slip in unnoticed.
+    const out = snapshotLayers({
+      layers: [city("Delft", false)],
+      geoLayers: [],
+      activeLayerId: null,
+    });
+    expect(out.activeLayer).toBeUndefined();
   });
 });
 
@@ -22187,7 +26047,10 @@ npx vitest run tests/unit/insights tests/unit/ui/table tests/unit/ui/layers test
 npx tsc -b --noEmit
 npx vp check
 npx vitest run > /tmp/m3-task24.log 2>&1 &
+wait $!; echo "suite: $?"
 ```
+
+Expected: PASS throughout; `suite: 0`.
 
 ```bash
 git add src/features/layers/layerPresentation.ts \
@@ -22207,7 +26070,7 @@ git commit -m "feat: a derived layer is marked, omitted from snapshots and expor
 - Test: create `tests/unit/features/processing/engineDeath.test.ts`; add to `tests/unit/insights/duckdbEngine.test.ts` (its `bootEngine()` harness gains a `hangWhen` hook) and to `tests/unit/insights/layerTablesBuild.test.ts` (which already owns `retryEngine`).
 - **The index lists `tests/unit/features/processing/runQueue.test.ts` here** for "its `onEngineDeath` stub becomes a real listener set". Verified on `develop` @ `55e4e00`: that factory ALREADY registers into a real `deathListeners` set (`runQueue.test.ts`'s `const deathListeners = new Set<() => void>();` and the `onEngineDeath: vi.fn((listener) => { deathListeners.add(listener); … })` beside it), so the ledger's concern is already met and this task changes nothing there. Confirm with `grep -rn "onEngineDeath: vi.fn(() => () => {})" tests/` — any suite that still has the inert stub AND drives a death gets the same set in this commit.
 
-**Interfaces:** No new exports and no mock sweep. `runQuery`, `ddl`, `queryDuckDB`, `registerBuffer`, `readFile` and `dropBuffer` race their in-flight await against the module-local death and return their ordinary failure value. `retryEngine` captures `getEngineGeneration()` before `bootEngine()`. `undoRun`'s post-commit `EngineDeadError` catch short-circuits before the model publication, the provenance rollback and the `"Undone"` card.
+**Interfaces:** No new exports and no mock sweep. `runQuery`, `ddl`, `queryDuckDB`, `registerBuffer`, `readFile` and `dropBuffer` race their in-flight await against the module-local death and return their ordinary failure value. `retryEngine` captures `getEngineGeneration()` **after `bootEngine()` has started** — a boot bumps the generation itself (`duckdb.ts:405`, `doInit`'s `const gen = ++generation`, which runs synchronously before its first await), so a number taken BEFORE the call would differ from the live one after every successful boot and the retry would abandon the rebuild it exists for. `undoRun`'s post-commit `EngineDeadError` catch short-circuits before the model publication, the provenance rollback and the `"Undone"` card.
 
 **Intent:** Closes the M2 roadmap's "runQuery callers outside the queue never settle", its "retryEngine carries no generation check", and the parked `undoRun` residual — with one change in the primitive rather than three copies of `layerTables`' shadowing. `dropBuffer` is on the list because both `release()` paths await it from a `finally` inside a FIFO slot. The regression a reviewer must see: a never-settling request, killed by a death, leaves the export dialog, the layer counts and the median with a MESSAGE, and the run queue still reads `"Analytics engine stopped"` by the `EngineDeadError` path — because the inner listener resolves a microtask while `raced`'s rejects synchronously. **The `undoRun` test needs a controllable death.** `runQueue.test.ts` mocks `insights/duckdb`, and its `onEngineDeath` stub is inert (`() => () => {}`), so nothing can drive the post-commit path; the factory's `onEngineDeath` must become a real listener set the test fires, in this task's commit. A reviewer rejects it for changing a run's failure text, for adding a fourth copy of the race, or for a test that resolves the blocked request itself.
 
@@ -22509,7 +26372,51 @@ export async function queryDuckDB(sql: string): Promise<QueryResult | null> {
 }
 ```
 
-`registerBuffer`'s body becomes `settleOnDeath(<the existing try/catch>, false)`, `readFile`'s becomes `settleOnDeath(<the existing try/catch>, null)`, and `dropBuffer`:
+`registerBuffer` (`duckdb.ts:724-739`) becomes — the `const live = db` for the reason `runQuery` has its `const live = conn`, and its doc comment kept verbatim:
+
+```ts
+export async function registerBuffer(
+  name: string,
+  bytes: Uint8Array,
+): Promise<boolean> {
+  if (!db || status.state !== "ready") return false;
+  const live = db;
+  return await settleOnDeath(
+    (async (): Promise<boolean> => {
+      try {
+        await live.registerFileBuffer(name, bytes);
+        return true;
+      } catch (error) {
+        console.warn(`DuckDB could not register "${name}":`, error);
+        return false;
+      }
+    })(),
+    false,
+  );
+}
+```
+
+`readFile` (`:746-756`) becomes:
+
+```ts
+export async function readFile(name: string): Promise<Uint8Array | null> {
+  if (!db || status.state !== "ready") return null;
+  const live = db;
+  return await settleOnDeath(
+    (async (): Promise<Uint8Array | null> => {
+      try {
+        return await live.copyFileToBuffer(name);
+      } catch (error) {
+        console.warn(`DuckDB could not read "${name}":`, error);
+        return null;
+      }
+    })(),
+    null,
+  );
+}
+```
+
+and `dropBuffer`:
 
 ```ts
 export async function dropBuffer(name: string): Promise<void> {
@@ -22547,18 +26454,35 @@ Expected: PASS, and every existing `duckdb` suite unchanged — the wrappers onl
 `tests/unit/insights/layerTablesBuild.test.ts` already owns `retryEngine` (four cases) AND already mocks the engine's generation (`engineGeneration`, `getEngineGeneration: vi.fn(() => engineGeneration)`), so the new case goes there. Add, beside `"retryEngine does nothing while the engine is STILL down"`:
 
 ```ts
-it("retryEngine ABANDONS its rebuilds when the engine moved under the boot", async () => {
+it("retryEngine REBUILDS across an ordinary boot — a boot is not a death", async () => {
+  // THE REGRESSION THIS PAIR EXISTS FOR. A real boot bumps the generation
+  // itself, synchronously, before its first await (`doInit`'s
+  // `const gen = ++generation`, `duckdb.ts:405`) — so a check that captured
+  // the number BEFORE `bootEngine()` would see it move on every successful
+  // Retry and skip every parked rebuild, leaving those layers table-less for
+  // the session with no error anywhere.
+  engineReady = false;
+  await enqueueLayerTable("L1", readerSource());
+  expect(stateOf("L1")).toMatchObject({ state: "failed" });
+  sql.length = 0;
+
+  engineReady = true;
+  await retryEngine();
+
+  expect(getLayerTable("L1")).toMatchObject({ table: "layer_1" });
+});
+
+it("…and ABANDONS them when a DEATH moved the engine under the boot", async () => {
   // `bootEngine` takes ~5 s for a 36 MB wasm module, and a worker can die
   // inside that window. Rebuilding into an engine that has already gone
   // writes `ready` entries over the invalidation — the exact state the
   // catalogue would then offer tools against.
   engineReady = false;
   await enqueueLayerTable("L1", readerSource());
-  expect(stateOf("L1")).toMatchObject({ state: "failed" });
   sql.length = 0;
 
-  // The boot succeeds, and the engine it produced is a DIFFERENT one from the
-  // one this retry started for.
+  // The boot runs (and bumps the generation, as a boot does); a death lands
+  // DURING it and bumps it again. Only that second move is a reason to stop.
   engineReady = true;
   bootAlso = () => {
     engineGeneration += 1;
@@ -22588,21 +26512,38 @@ it("still re-parks the source when it abandons, so the NEXT Retry works", async 
 });
 ```
 
-with one hook on the existing `initDuckDB` mock, so a case can make the boot change the generation. Find:
+with the existing `initDuckDB` mock made to behave like a real boot, so the first case is a real test of the check rather than of a stub that stands still. Find:
 
 ```ts
     initDuckDB: vi.fn(async () => {
 ```
 
-and add `bootAlso();` as the first statement of its body, with the fixture beside `engineGeneration`:
+and make its body begin:
+
+```ts
+    initDuckDB: vi.fn(async () => {
+      // A REAL boot bumps the generation SYNCHRONOUSLY, before its first await
+      // (`doInit`, `duckdb.ts:405`) — so it has already happened by the time
+      // `retryEngine` reads the number. That ordering is exactly what the
+      // check is written against, so the mock reproduces it.
+      engineGeneration += 1;
+      // The boot's first await. Everything after it happens DURING the boot,
+      // which is where a worker death would land — `bootAlso` is how a case
+      // puts one there, and a bump before this line would be part of the boot
+      // rather than a death inside it.
+      await Promise.resolve();
+      bootAlso();
+```
+
+with the fixture beside `engineGeneration`:
 
 ```ts
 /** What a case wants the BOOT itself to do — used to move the engine
- *  generation under `retryEngine`'s await. */
+ *  generation a SECOND time, under `retryEngine`'s await. */
 let bootAlso: () => void = () => {};
 ```
 
-reset to `() => {}` in the suite's `beforeEach`.
+reset to `() => {}` in the suite's `beforeEach`. The suite's four existing `retryEngine` cases are the regression guard for the bump: they rebuild across a boot and must stay green. They should be — a build captures its engine at ENQUEUE and RE-captures it after its own `initDuckDB()` await (`layerTables.ts:954`, `:1084`), so a bump inside the boot is never compared against a number taken before it. If one of them does go red, the mock is too eager and not the code: bump only on the `not ready → ready` transition, which is what the real memo does (`initDuckDB` re-runs `doInit` only when `initPromise` is null, `duckdb.ts:526-531`).
 
 - [ ] **Step 6: Write the failing test for `undoRun`'s post-commit death**
 
@@ -22920,19 +26861,29 @@ and replace with:
 
 ```ts
 export async function retryEngine(): Promise<void> {
-  // The engine this retry is FOR, captured before the await. A worker can die
-  // during a boot — `bootEngine` takes ~5 s — and rebuilding into an engine
-  // that has already gone writes `ready` entries over the invalidation, which
-  // is the exact state the catalogue would then offer tools against. The
-  // builds below each check `engineGone()` for themselves, but the retry's own
-  // `pendingSources.clear()` above them is not undone by that.
-  const engine = getEngineGeneration();
   // `bootEngine`, NOT this module's raced `initDuckDB`: both callers are
   // `void retryEngine()` (`App.tsx`), so a rejection here would be an unhandled
   // one — and there is nothing for a death to release anyway. Every build this
   // function starts is raced on its own, inside the queue, where a release
   // actually frees something.
-  await bootEngine();
+  //
+  // STARTED FIRST, AND THE GENERATION READ AFTER. A boot bumps the counter
+  // itself — `doInit` opens with `const gen = ++generation` (`duckdb.ts:405`),
+  // which runs synchronously, before its first await and therefore before this
+  // line — so the number below is the engine this retry is FOR, whether
+  // `bootEngine()` started a new one or handed back the memo of a live one. A
+  // number captured BEFORE the call would differ after every real boot, and
+  // the retry would skip the rebuilds it exists for, leaving those layers
+  // table-less for the session with no error anywhere.
+  const booting = bootEngine();
+  const engine = getEngineGeneration();
+  await booting;
+  // Only a LATER move — a worker that died inside the ~5 s boot window, or an
+  // engine replaced under it — is a reason to stop. Rebuilding into an engine
+  // that has already gone writes `ready` entries over the invalidation, which
+  // is the exact state the catalogue would then offer tools against. The
+  // builds below each check `engineGone()` for themselves, but the retry's own
+  // `pendingSources.clear()` below them is not undone by that.
   if (getEngineGeneration() !== engine) return;
   if (getDuckDBStatus().state !== "ready") return;
 ```
@@ -22947,9 +26898,10 @@ npx vitest run tests/unit/insights tests/unit/features/processing
 npx tsc -b --noEmit
 npx vp check
 npx vitest run > /tmp/m3-task25.log 2>&1 &
+wait $!; echo "suite: $?"
 ```
 
-Expected: PASS throughout, and **no run's failure text changes** — `engineStopped.test.tsx` and `runQueue.test.ts`'s death cases are the regression to watch.
+Expected: PASS throughout (`suite: 0`), and **no run's failure text changes** — `engineStopped.test.tsx` and `runQueue.test.ts`'s death cases are the regression to watch.
 
 ```bash
 git add src/insights/duckdb.ts src/insights/layerTables.ts \
@@ -23185,19 +27137,49 @@ Expected: PASS. A failing collision case means the proposed hex is wrong, not th
 
 - [ ] **Step 6: Write the failing test for the two `RunFooter` fixes**
 
-Add to `tests/unit/ui/processing/styleByResult.test.tsx` (Task 9's file):
+Add to `tests/unit/ui/processing/styleByResult.test.tsx` (Task 9's file). Its helpers are `addLayer()` (which returns the id and seeds a ready table) and `doneRun(over)` (a `measure-solids` record whose Style by result picks `solid_volume_m3` at the median), and its cases render `<RunFooter>` inline — there is no `cardFor`, so these do the same. One new local helper, because two cases need to hold the median query open:
 
 ```tsx
+/**
+ * Hold the median query until the case releases it.
+ *
+ * `runQuery` is this suite's own module-level mock, so the gate replaces its
+ * implementation for the length of one case; the `afterEach` above already
+ * puts the default back.
+ */
+function deferMedian(): { release: () => void } {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  runQuery.mockImplementation(async () => {
+    await gate;
+    return {
+      ok: true as const,
+      columns: ["m"],
+      rows: [{ m: 4.2 } as Record<string, unknown>],
+    };
+  });
+  return { release };
+}
+
 it("does NOT set Color by = Rules when it opens the draft (§6.2)", async () => {
   // "The map does NOT change until the user presses Save in the editor, as
   // with any rule." The eager `updateLayer(layerId, { colorBy: "rules" })`
   // repainted a layer on Surface type to the UNMATCHED colour before the user
   // had seen the draft. `ensureRulesMode()` at Save is the one writer.
-  const id = addCityLayer();
+  const id = addLayer();
   useLayerStore.getState().updateLayer(id, { colorBy: "surface" });
-  render(cardFor(doneRun(id)));
+  render(
+    <RunFooter
+      run={seed(doneRun({ targetLayerId: id }))}
+      canRun
+      reason={null}
+      onRunAgain={() => {}}
+    />,
+  );
   fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
-  await vi.waitFor(() =>
+  await waitFor(() =>
     expect(useRuleDraftStore.getState().drafts[id]?.open).toBe(true),
   );
   expect(
@@ -23206,7 +27188,7 @@ it("does NOT set Color by = Rules when it opens the draft (§6.2)", async () => 
 });
 
 it("gives the draft the NEXT palette colour, not always the first", async () => {
-  const id = addCityLayer();
+  const id = addLayer();
   useLayerStore.getState().addRule(id, {
     id: "r0",
     name: "existing",
@@ -23214,50 +27196,57 @@ it("gives the draft the NEXT palette colour, not always the first", async () => 
     logic: "AND",
     conditions: [],
     enabled: true,
-  } as never);
-  render(cardFor(doneRun(id)));
-  fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
-  await vi.waitFor(() =>
-    expect(useRuleDraftStore.getState().drafts[id]?.open).toBe(true),
+  } as unknown as Rule);
+  render(
+    <RunFooter
+      run={seed(doneRun({ targetLayerId: id }))}
+      canRun
+      reason={null}
+      onRunAgain={() => {}}
+    />,
   );
-  expect(useRuleDraftStore.getState().drafts[id]?.form.color).toBe(
-    RULE_PALETTE_HEX[1],
+  fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+  await waitFor(() =>
+    expect(useRuleDraftStore.getState().drafts[id]?.form.color).toBe(
+      RULE_PALETTE_HEX[1],
+    ),
   );
 });
 
 it("opens NOTHING for a run that went stale while the median was in flight", async () => {
   // The existing guards check the token and the layer; the RUN could still
   // be retired under them (a streaming rebuild, or an Undo).
-  const id = addCityLayer();
-  const run = doneRun(id);
+  const id = addLayer();
+  const run = doneRun({ targetLayerId: id });
   useProcessingStore.getState().upsertRun(run);
-  const pending = deferredQuery();
-  render(cardFor(run));
+  const median = deferMedian();
+  render(<RunFooter run={run} canRun reason={null} onRunAgain={() => {}} />);
   fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
   useProcessingStore.getState().patchRun(run.id, { stale: true });
-  pending.resolve({ ok: true, columns: ["m"], rows: [{ m: 7 }] });
-  await vi.waitFor(() => expect(true).toBe(true));
+  median.release();
+  // One turn for the query's continuation and the render it would cause.
+  await act(async () => {});
   expect(useRuleDraftStore.getState().drafts[id]).toBeUndefined();
 });
 
 it("opens NOTHING for a run that was undone while the median was in flight", async () => {
-  const id = addCityLayer();
-  const run = doneRun(id, { undoable: true });
+  const id = addLayer();
+  const run = doneRun({ targetLayerId: id });
   useProcessingStore.getState().upsertRun(run);
-  const pending = deferredQuery();
-  render(cardFor(run));
+  const median = deferMedian();
+  render(<RunFooter run={run} canRun reason={null} onRunAgain={() => {}} />);
   fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
   useProcessingStore.getState().patchRun(run.id, {
     undoable: false,
     note: "Undone",
   });
-  pending.resolve({ ok: true, columns: ["m"], rows: [{ m: 7 }] });
-  await vi.waitFor(() => expect(true).toBe(true));
+  median.release();
+  await act(async () => {});
   expect(useRuleDraftStore.getState().drafts[id]).toBeUndefined();
 });
 ```
 
-(`cardFor(run)` is Task 9's helper that renders `RunFooter` around one run; `deferredQuery()` is `ToolView.test.tsx`'s.)
+The suite's imports gain `act` from `@testing-library/react`, `RULE_PALETTE_HEX` from `src/scene/cityColors`, the `Rule` type from `src/features/rules/types`, and `useProcessingStore` from `src/features/processing/processingStore` (a dynamic `await import`, like its other store imports, so it resolves after the `vi.mock` factories). Its `afterEach` gains `useProcessingStore.getState().resetForTest();` — a run left in the history would leak into the two retirement cases.
 
 - [ ] **Step 7: Run it and watch it fail**
 
@@ -23375,7 +27364,55 @@ function defaultRuleFormValues(rules: ReadonlyArray<Rule>): RuleFormValues {
 }
 ```
 
-and its one call site (`:245`, `form: defaultRuleFormValues(),`) becomes `form: defaultRuleFormValues(layer.rules),` — the component already holds the layer. Replace the now-unused `NEW_RULE_COLOR_HEX` import with `nextRuleColor`.
+and its one call site is `openAddForm`, whose `useCallback` deps are `[layerId, setDraft]` (`RulesEditor.tsx:241-247`). It must NOT close over `layer.rules`: the callback is memoised on those two deps, so a Save followed by "+ Add rule" would hand the rotation the rule list as it was when the callback was made — and the second manual rule would take the first one's colour, which is the bug this task is fixing. Read the CURRENT rules at click time instead, exactly as `handleReorder` two callbacks above already does (`:229-239`). Find:
+
+```ts
+const openAddForm = useCallback(() => {
+  setDraft(layerId, {
+    editingId: null,
+    open: true,
+    form: defaultRuleFormValues(),
+  });
+}, [layerId, setDraft]);
+```
+
+and replace with:
+
+```ts
+const openAddForm = useCallback(() => {
+  // The store, not `layer.rules`: this callback is memoised on
+  // `[layerId, setDraft]`, and a captured rule list would be the list as it
+  // was when the callback was built — so the rule added right after a Save
+  // would rotate from a palette that has not heard about the saved one. The
+  // same read `handleReorder` makes, for the same reason.
+  const rules =
+    useLayerStore.getState().layers.find((l) => l.id === layerId)?.rules ?? [];
+  setDraft(layerId, {
+    editingId: null,
+    open: true,
+    form: defaultRuleFormValues(rules),
+  });
+}, [layerId, setDraft]);
+```
+
+Replace the now-unused `NEW_RULE_COLOR_HEX` import with `nextRuleColor`; `useLayerStore` is already imported in this file.
+
+Add the regression to `tests/unit/ui/layers/RulesEditor.test.tsx`, beside its existing "+ Add rule" cases:
+
+```tsx
+it("rotates the palette across consecutive Save → Add rule", () => {
+  // The memoised-callback bug: the second draft must not reuse the colour the
+  // rule just saved is wearing.
+  renderEditor();
+  fireEvent.click(screen.getByRole("button", { name: "+ Add rule" }));
+  expect(colorInput().value).toBe(RULE_PALETTE_HEX[0]);
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  fireEvent.click(screen.getByRole("button", { name: "+ Add rule" }));
+  expect(colorInput().value).toBe(RULE_PALETTE_HEX[1]);
+});
+```
+
+using that suite's own render helper and its colour-input accessor (read the file for their names; it already drives the add form end to end).
 
 - [ ] **Step 10: Run everything and commit**
 
@@ -23385,7 +27422,10 @@ npx vitest run tests/unit/ui/processing tests/unit/ui/layers tests/unit/features
 npx tsc -b --noEmit
 npx vp check
 npx vitest run > /tmp/m3-task26.log 2>&1 &
+wait $!; echo "suite: $?"
 ```
+
+Expected: PASS throughout; `suite: 0`.
 
 ```bash
 git add src/features/rules/nextRuleColor.ts src/scene/cityColors.ts \
@@ -23398,10 +27438,10 @@ git commit -m "fix: rule drafts rotate the palette and no longer repaint before 
 **Files:**
 
 - Create: `src/ui/table/revealColumns.ts`.
-- Modify: `src/insights/computedColumns.ts`, `src/features/processing/runQueue.ts`, `src/ui/processing/RunFooter.tsx`, `src/ui/table/DataGrid.tsx`, `src/ui/drawer/columnPolicy.ts`, `src/features/layers/layerTableLifecycle.ts`.
-- Test: `tests/unit/ui/table/revealColumns.test.tsx`, additions to `tests/unit/insights/computedColumns.test.ts`, `tests/unit/ui/drawer/columnPolicy.test.ts` and `tests/unit/features/layers/layerTableLifecycle.test.ts`.
+- Modify: `src/insights/computedColumns.ts`, `src/features/processing/runQueue.ts`, **`src/features/processing/deriveLayer.ts`** (the derived write's statements reach the same log), `src/ui/processing/RunFooter.tsx`, `src/ui/table/DataGrid.tsx`, `src/ui/drawer/columnPolicy.ts`, `src/features/layers/layerTableLifecycle.ts`.
+- Test: `tests/unit/ui/table/revealColumns.test.tsx`, additions to `tests/unit/insights/computedColumns.test.ts`, `tests/unit/features/processing/derivedRun.test.ts`, `tests/unit/ui/drawer/columnPolicy.test.ts` and `tests/unit/features/layers/layerTableLifecycle.test.ts`.
 
-**Interfaces:** Produces `WriteOutcome`'s `statements: ReadonlyArray<string>` (**[adapted copy A10]** labels), `requestColumnReveal`/`subscribeColumnReveal`, the synthetic roof column's header explanation (**[adapted copy A8]**), and `layerTableLifecycle`'s `enqueuedVersions` map.
+**Interfaces:** Produces `WriteOutcome`'s `statements: ReadonlyArray<string>` (**[adapted copy A10]** labels), `requestColumnReveal`/`subscribeColumnReveal`/`drainColumnReveals`/`clearColumnReveals`, `prepareDerivedCityLayer`'s optional `recordWrite` input, the synthetic roof column's header explanation (**[adapted copy A8]**), and `layerTableLifecycle`'s `enqueuedVersions` map.
 
 **Intent:** Four independent small fixes, folded together because each is a handful of lines with its own test and none needs a reviewer's separate gate: §6.4's write-step SQL reaching the log so a planner can repeat the UPDATE by hand; §6.2's "scrolled into view" beside the existing column append; §7's contributor rule explained where the two roof-area numbers disagree; and Design decision (j)'s version-aware sweep, so reopening the toolbox stops retiring a finished card as stale. A reviewer rejects it for a sweep that skips a layer whose version DID move, or for a log that prints a value literal.
 
@@ -23453,10 +27493,16 @@ describe("WriteOutcome.statements", () => {
   });
 
   it("reports the statements it got through on a FAILURE too", async () => {
-    // §6.3 shows the error; §6.4 still has to say what was attempted. The
-    // suite's own fake is what makes a statement fail — use the hook it
-    // already has (read the top of the file for its name).
-    failStatement("UPDATE");
+    // §6.3 shows the error; §6.4 still has to say what was attempted. This
+    // suite has no fail HELPER — its cases re-implement the two primitives per
+    // case (`vi.mocked(duck.runQuery).mockImplementation`, e.g.
+    // `computedColumns.test.ts:85-95`), so this one does the same.
+    const fail = async (sql: string) =>
+      sql.startsWith("UPDATE")
+        ? { ok: false as const, message: "boom" }
+        : { ok: true as const, columns: [], rows: [] };
+    vi.mocked(duck.runQuery).mockImplementation(fail);
+    vi.mocked(duck.ddl).mockImplementation(fail);
     const out = await oneWrite();
     expect(out.ok).toBe(false);
     // Everything up to and including the failed UPDATE, then the ROLLBACK that
@@ -23468,8 +27514,9 @@ describe("WriteOutcome.statements", () => {
   });
 
   it("reports an empty list when the rows never reached the engine", async () => {
-    // `registerBuffer` failing is the one exit before any statement is sent.
-    failRegister();
+    // `registerBuffer` failing is the one exit before any statement is sent
+    // (`computedColumns.ts:161-166`).
+    vi.mocked(duck.registerBuffer).mockResolvedValueOnce(false);
     const out = await oneWrite();
     expect(out.ok).toBe(false);
     expect(out.statements).toEqual([]);
@@ -23477,7 +27524,7 @@ describe("WriteOutcome.statements", () => {
 });
 ```
 
-`failStatement(...)` and `failRegister()` stand for whatever this suite's existing `duckdb` fake already offers for those two cases — read the top of `computedColumns.test.ts` and use its own names rather than adding a second mechanism.
+(`duck` is the suite's own `await import("../../../src/insights/duckdb")`; `vi.clearAllMocks()` is not in its `afterEach`, so the first case's `mockImplementation` is restored by the next case setting its own — which is the pattern every other case in the file already follows.)
 
 - [ ] **Step 2: Run it and watch it fail**
 
@@ -23584,34 +27631,118 @@ and replace with:
 
 ```ts
 const written = await raced(writing, null);
-// §6.4's "SQL statements issued in order", finally including the write's.
-// ONE entry per statement, labelled `Writing results (1/6)` …
-// **[adapted copy A10]** — so the log reads as the transaction it was and a
-// planner can repeat the UPDATE by hand. The TIMING is the whole write's
-// and is carried by the last entry only: `writeComputedColumns` measures
-// the transaction, not each statement, and repeating one number six times
-// would read as six slow statements.
-const writeMs = Math.round(performance.now() - t0);
-const issued = written.statements;
-if (issued.length === 0) {
-  log.push({
-    label: "Writing results",
-    sql: null,
-    ms: writeMs,
-    rows: result.rows.size,
-  });
-} else {
-  issued.forEach((sql, i) => {
-    const last = i === issued.length - 1;
+logWriteStatements(
+  log,
+  written.statements,
+  Math.round(performance.now() - t0),
+  result.rows.size,
+);
+patch(id, { log: [...log] });
+```
+
+with the recorder itself beside `execute`, because BOTH destinations write and §6.4 does not have two answers:
+
+```ts
+/**
+ * §6.4's "the SQL statements issued in order", for a write step.
+ *
+ * ONE entry per statement, labelled `Writing results (1/6)` …
+ * **[adapted copy A10]**, so the log reads as the transaction it was and a
+ * planner can repeat the UPDATE by hand. The TIMING is the whole write's and
+ * is carried by the LAST entry only: `writeComputedColumns` measures the
+ * transaction, not each statement, and repeating one number six times would
+ * read as six slow statements.
+ *
+ * Shared, because a New-layer run writes its columns into the COPY through the
+ * same `writeComputedColumns` — from inside `prepareDerivedCityLayer` — and a
+ * derived run whose log stopped at `CREATE TABLE` would be the one run §6.4's
+ * promise is not true for. Called on FAILURE too: the statements a failed
+ * write got through are exactly what a bug report needs.
+ */
+function logWriteStatements(
+  log: LogEntry[],
+  statements: ReadonlyArray<string>,
+  ms: number,
+  rows: number,
+): void {
+  if (statements.length === 0) {
+    log.push({ label: "Writing results", sql: null, ms, rows });
+    return;
+  }
+  statements.forEach((sql, i) => {
+    const last = i === statements.length - 1;
     log.push({
-      label: `Writing results (${i + 1}/${issued.length})`,
+      label: `Writing results (${i + 1}/${statements.length})`,
       sql,
-      ms: last ? writeMs : 0,
-      rows: last ? result.rows.size : null,
+      ms: last ? ms : 0,
+      rows: last ? rows : null,
     });
   });
 }
-patch(id, { log: [...log] });
+```
+
+and the New-layer branch handing it to the preparation. In `execute`'s `destination === "new"` block (Task 22), the `prepareDerivedCityLayer({ … })` argument gains one field:
+
+```ts
+      // §6.4 again: the copy's ALTER/UPDATE/COMMIT belong in the log beside
+      // its CREATE TABLE, and only the preparation knows them — the write
+      // happens inside it. Same recorder, so the two destinations cannot
+      // drift.
+      recordWrite: (statements, ms, rows) => {
+        logWriteStatements(log, statements, ms, rows);
+        patch(id, { log: [...log] });
+      },
+```
+
+and in `src/features/processing/deriveLayer.ts`, `prepareDerivedCityLayer`'s input gains the callback and its write reports through it:
+
+```ts
+  /**
+   * Hand the run's log the statements this preparation's WRITE issued (§6.4).
+   *
+   * Optional, because the preparation is testable without a log; supplied by
+   * `execute`, which is its only production caller. Called on failure as well
+   * as on success — the statements a failed write got through are what §6.4's
+   * record is for.
+   */
+  readonly recordWrite?: (
+    statements: ReadonlyArray<string>,
+    ms: number,
+    rows: number,
+  ) => void;
+```
+
+```ts
+    if (input.rows.size > 0) {
+      const t0 = performance.now();
+      const written = await raced(
+        writeComputedColumns({ … }),
+        null,
+      );
+      input.recordWrite?.(
+        written.statements,
+        Math.round(performance.now() - t0),
+        input.rows.size,
+      );
+      if (!written.ok) throw new Error(written.message);
+    }
+```
+
+and one case in `tests/unit/features/processing/derivedRun.test.ts`:
+
+```ts
+it("logs the COPY's write statement by statement (§6.4)", async () => {
+  fakeExecutor();
+  const id = submitRun(newLayerRequest());
+  await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+  const labels = (runById(id)?.log ?? []).map((e) => e.label);
+  expect(labels.some((l) => l.startsWith("Writing results ("))).toBe(true);
+  const statements = (runById(id)?.log ?? [])
+    .filter((e) => e.label.startsWith("Writing results ("))
+    .map((e) => e.sql);
+  expect(statements).toContain("BEGIN TRANSACTION");
+  expect(statements).toContain("COMMIT");
+});
 ```
 
 - [ ] **Step 5: Write the failing test for the reveal channel**
@@ -23628,19 +27759,28 @@ Create `tests/unit/ui/table/revealColumns.test.tsx`:
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  clearColumnReveals,
+  drainColumnReveals,
   requestColumnReveal,
   subscribeColumnReveal,
 } from "../../../../src/ui/table/revealColumns";
 
+/** A listener that ACKNOWLEDGES — the grid's answer when it found a header. */
+const took = () => vi.fn(() => true);
+/** A listener that declines — the grid's answer for another layer, or for a
+ *  layer whose headers are not on screen yet. */
+const declined = () => vi.fn(() => false);
+
 afterEach(() => {
-  // The channel is module state; a leaked listener would hear the next case.
-  requestColumnReveal("", []);
+  // The channel is module state, and an outstanding request is RETAINED — so
+  // it would be delivered to the next case's first listener.
+  clearColumnReveals();
 });
 
 describe("the column-reveal channel", () => {
-  it("delivers a request to every live listener", () => {
-    const a = vi.fn();
-    const b = vi.fn();
+  it("offers a request to live listeners until one takes it", () => {
+    const a = declined();
+    const b = took();
     const stopA = subscribeColumnReveal(a);
     const stopB = subscribeColumnReveal(b);
     requestColumnReveal("L1", ["solid_volume_m3", "solid_valid"]);
@@ -23655,10 +27795,9 @@ describe("the column-reveal channel", () => {
 
   it("delivers to a listener that subscribes AFTER the request", () => {
     // The grid mounts when the drawer opens, which is AFTER the card's click.
-    // A pure event bus would drop the request on the floor; the last one is
-    // replayed once, to the first listener that arrives.
+    // A pure event bus would drop the request on the floor.
     requestColumnReveal("L1", ["solid_valid"]);
-    const late = vi.fn();
+    const late = took();
     const stop = subscribeColumnReveal(late);
     expect(late).toHaveBeenCalledWith({
       layerId: "L1",
@@ -23667,25 +27806,79 @@ describe("the column-reveal channel", () => {
     stop();
   });
 
-  it("replays a request ONCE", () => {
+  it("RETAINS a request no listener acknowledged", () => {
+    // The regression this channel was rewritten for. A grid mounted on
+    // ANOTHER layer, or on this one before its columns have arrived, cannot
+    // scroll to anything — and consuming the request there loses it for good:
+    // the drawer opens on the right layer a moment later and never scrolls.
+    const other = declined();
+    const stopOther = subscribeColumnReveal(other);
     requestColumnReveal("L1", ["solid_valid"]);
-    const first = vi.fn();
+    expect(other).toHaveBeenCalledTimes(1);
+    stopOther();
+
+    const right = took();
+    const stop = subscribeColumnReveal(right);
+    expect(right).toHaveBeenCalledWith({
+      layerId: "L1",
+      columns: ["solid_valid"],
+    });
+    stop();
+  });
+
+  it("re-offers outstanding requests on DRAIN, for columns that arrive late", () => {
+    // The grid is mounted on L1 the whole time; its headers appear when the
+    // query answers. `drainColumnReveals` is what the grid calls then.
+    const grid = vi.fn(() => false);
+    const stop = subscribeColumnReveal(grid);
+    requestColumnReveal("L1", ["solid_valid"]);
+    expect(grid).toHaveBeenCalledTimes(1);
+
+    grid.mockReturnValue(true);
+    drainColumnReveals(grid);
+    expect(grid).toHaveBeenCalledTimes(2);
+
+    // Taken: a later drain has nothing to re-offer.
+    drainColumnReveals(grid);
+    expect(grid).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it("is consumed ONCE, whoever takes it", () => {
+    requestColumnReveal("L1", ["solid_valid"]);
+    const first = took();
     subscribeColumnReveal(first)();
-    const second = vi.fn();
+    expect(first).toHaveBeenCalledTimes(1);
+    const second = took();
     const stop = subscribeColumnReveal(second);
     expect(second).not.toHaveBeenCalled();
     stop();
   });
 
+  it("keeps ONE outstanding request per layer, the latest", () => {
+    // Two runs on two layers, both waiting for their grid; and a second run on
+    // L1 supersedes the first — the user is looking at the newest card.
+    requestColumnReveal("L1", ["a"]);
+    requestColumnReveal("L2", ["b"]);
+    requestColumnReveal("L1", ["c"]);
+    const seen: Array<ReadonlyArray<string>> = [];
+    const stop = subscribeColumnReveal((reveal) => {
+      seen.push(reveal.columns);
+      return true;
+    });
+    expect(seen).toEqual([["c"], ["b"]]);
+    stop();
+  });
+
   it("stops delivering to an unsubscribed listener", () => {
-    const listener = vi.fn();
+    const listener = took();
     subscribeColumnReveal(listener)();
     requestColumnReveal("L1", ["x"]);
     expect(listener).not.toHaveBeenCalled();
   });
 
   it("ignores an EMPTY column list — there is nothing to scroll to", () => {
-    const listener = vi.fn();
+    const listener = took();
     const stop = subscribeColumnReveal(listener);
     requestColumnReveal("L1", []);
     expect(listener).not.toHaveBeenCalled();
@@ -23707,8 +27900,8 @@ Create `src/ui/table/revealColumns.ts`:
 
 ```ts
 /**
- * "Scroll these columns into view" — the one-shot channel between a run's
- * result card and the grid (spec §6.2).
+ * "Scroll these columns into view" — the channel between a run's result card
+ * and the grid (spec §6.2).
  *
  * A module channel rather than a store, and rather than a prop: the card is in
  * the RIGHT panel and the grid is in the drawer, with `appendColumns` already
@@ -23716,51 +27909,77 @@ Create `src/ui/table/revealColumns.ts`:
  * carry is a MOMENT — a column list that is "visible" is state, but "scroll to
  * it now" happens once and must not fire again on the next render.
  *
- * The last request is REPLAYED once, to the first listener that arrives, for
- * the reason that decided the design: Open table opens the drawer, so the grid
- * mounts AFTER the click. A pure event bus would drop every request.
+ * A REQUEST IS RETAINED UNTIL A LISTENER ACKNOWLEDGES IT, which is why the
+ * listener returns a boolean. Three things happen between the click and the
+ * headers, and each of them delivers a request to something that cannot scroll
+ * yet: Open table opens the drawer, so the grid may not be mounted at all; a
+ * grid that IS mounted may be showing another layer; and a mounted grid on the
+ * right layer renders no `<th>` until its query answers (it returns the empty
+ * placeholder while `rows` is empty). Consuming the request at any of those
+ * loses it for good, and the scroll the user asked for never happens. So the
+ * channel keeps the latest outstanding request PER LAYER and offers it to
+ * every new listener and to every {@link drainColumnReveals} — which the grid
+ * calls whenever its own headers change.
  */
 export interface ColumnReveal {
   readonly layerId: string;
   readonly columns: ReadonlyArray<string>;
 }
 
-type Listener = (reveal: ColumnReveal) => void;
+/** Returns true when the reveal was HONOURED — a matching header was found and
+ *  scrolled to. False means "not mine, or not yet", and the request stays. */
+type Listener = (reveal: ColumnReveal) => boolean;
 
 const listeners = new Set<Listener>();
-let pending: ColumnReveal | null = null;
+/** Outstanding requests, by layer id: the latest per layer, because a second
+ *  run on the same layer supersedes the first — the user is looking at the
+ *  newest card. Insertion-ordered, so the oldest LAYER is offered first. */
+const pending = new Map<string, ReadonlyArray<string>>();
 
 export function requestColumnReveal(
   layerId: string,
   columns: ReadonlyArray<string>,
 ): void {
-  // Nothing to scroll to. Also the reset the tests use, which is why it is not
-  // an error: an empty list is a no-op by definition.
+  // Nothing to scroll to: an empty list is a no-op by definition, and it
+  // clears any outstanding request for that layer rather than leaving a stale
+  // one behind.
   if (columns.length === 0) {
-    pending = null;
+    pending.delete(layerId);
     return;
   }
   const reveal: ColumnReveal = { layerId, columns: [...columns] };
-  if (listeners.size === 0) {
-    pending = reveal;
-    return;
+  for (const listener of Array.from(listeners)) {
+    if (listener(reveal)) return;
   }
-  pending = null;
-  for (const listener of Array.from(listeners)) listener(reveal);
+  pending.set(layerId, reveal.columns);
 }
 
 export function subscribeColumnReveal(listener: Listener): () => void {
   listeners.add(listener);
-  // ONCE: the request is consumed by whoever arrives first, so a second grid
-  // (or a remount) does not scroll for a click that already happened.
-  if (pending !== null) {
-    const reveal = pending;
-    pending = null;
-    listener(reveal);
-  }
+  drainColumnReveals(listener);
   return () => {
     listeners.delete(listener);
   };
+}
+
+/**
+ * Re-offer every outstanding request to one listener, dropping the ones it
+ * takes.
+ *
+ * The grid calls this when its layer or its rendered headers change: the
+ * request may have arrived while it was showing another layer, or before its
+ * query answered and it had any `<th>` to scroll to.
+ */
+export function drainColumnReveals(listener: Listener): void {
+  for (const [layerId, columns] of Array.from(pending)) {
+    if (listener({ layerId, columns })) pending.delete(layerId);
+  }
+}
+
+/** Drop every outstanding request. For tests: the channel is module state, and
+ *  a retained request would be delivered to the next case's first listener. */
+export function clearColumnReveals(): void {
+  pending.clear();
 }
 ```
 
@@ -23784,30 +28003,46 @@ gains, under it:
 requestColumnReveal(cardLayerId, run.columns);
 ```
 
-In `src/ui/table/DataGrid.tsx`, honour it. Add refs and one effect:
+In `src/ui/table/DataGrid.tsx`, honour it. Add the refs, ONE handler and TWO effects — the hooks go above the `if (rows.length === 0) return …` early exit (`DataGrid.tsx:95-97`), like every other hook in the component:
 
 ```tsx
 const headerRefs = useRef(new Map<string, HTMLTableCellElement>());
-useEffect(
-  () =>
-    subscribeColumnReveal(({ layerId: id, columns: names }) => {
-      if (layerId === null || id !== layerId) return;
-      // The FIRST of the requested columns that this grid is actually
-      // showing: scrolling to the last would leave the others off-screen to
-      // its left, and a column the chooser has hidden has no cell to scroll
-      // to at all.
-      for (const name of names) {
-        const cell = headerRefs.current.get(name);
-        if (cell === undefined) continue;
-        cell.scrollIntoView({ inline: "nearest", block: "nearest" });
-        return;
-      }
-    }),
+/**
+ * Scroll to the first requested column this grid is SHOWING, and say whether
+ * it did.
+ *
+ * The first and not the last: scrolling to the last would leave the others
+ * off-screen to its left. `false` for another layer's request, and for one
+ * whose columns this grid has no header for — hidden by the chooser, or not
+ * rendered at all because the query has not answered yet (the empty
+ * placeholder has no `<th>`). The channel then KEEPS the request.
+ */
+const reveal = useCallback(
+  ({ layerId: id, columns: names }: ColumnReveal): boolean => {
+    if (layerId === null || id !== layerId) return false;
+    for (const name of names) {
+      const cell = headerRefs.current.get(name);
+      if (cell === undefined) continue;
+      cell.scrollIntoView({ inline: "nearest", block: "nearest" });
+      return true;
+    }
+    return false;
+  },
   [layerId],
 );
+useEffect(() => subscribeColumnReveal(reveal), [reveal]);
+// Re-offer whatever is outstanding whenever this grid's HEADERS change: the
+// request routinely lands before the columns do, and `rows` is in the deps
+// because an empty grid renders no `<th>` at all — the first page arriving is
+// exactly when the headers appear.
+useEffect(() => {
+  drainColumnReveals(reveal);
+}, [reveal, columns, rows]);
 ```
 
-and on the header `<th>` element:
+(`useCallback` and `useEffect` join the React import; `ColumnReveal`,
+`subscribeColumnReveal` and `drainColumnReveals` come from
+`./revealColumns`.) And on the header `<th>` element:
 
 ```tsx
                 ref={(el) => {
@@ -23970,10 +28205,14 @@ npx vitest run tests/unit/insights tests/unit/features/layers tests/unit/feature
 npx tsc -b --noEmit
 npx vp check
 npx vitest run > /tmp/m3-task27.log 2>&1 &
+wait $!; echo "suite: $?"
 ```
+
+Expected: PASS throughout; `suite: 0`.
 
 ```bash
 git add src/insights/computedColumns.ts src/features/processing/runQueue.ts \
+  src/features/processing/deriveLayer.ts \
   src/ui/processing/RunFooter.tsx src/ui/table/revealColumns.ts \
   src/ui/table/DataGrid.tsx src/ui/drawer/columnPolicy.ts \
   src/features/layers/layerTableLifecycle.ts tests/
@@ -23984,7 +28223,7 @@ git commit -m "fix: the write step's SQL, scroll-into-view, the roof-area explan
 
 **Files:**
 
-- Modify: `docs/roadmap.md` (Milestone 13: the 13.3 entry, and the "Carried to 13.3 / M3" list emptied of everything this milestone closed), `docs/architecture-notes.md` (an M13.3 section), `fixtures/README.md` (Task 1's `composite-solid.city.json`), `CLAUDE.md` (**only** if a hard rule changed — none is expected).
+- Modify: `docs/roadmap.md` (Milestone 13: the 13.3 entry, and the "Carried to 13.3 / M3" list emptied of everything this milestone closed), `docs/architecture-notes.md` (an M13.3 section), `fixtures/README.md` (Task 1's TWO new fixtures), `CLAUDE.md` (**only** if a hard rule changed — none is expected).
 - Test: none. `npx vp check` formats the tables.
 
 **Interfaces:** None.
@@ -24146,7 +28385,10 @@ wins.
 git -C . log --oneline develop --not main -- fixtures/ | head
 ```
 
-Task 1 adds `fixtures/composite-solid.city.json` (Decisions recorded item 4). Add its row to `fixtures/README.md` in the table's existing shape: name, what it is (a minimal CityJSON 2.0 Building whose LoD 2.2 geometry is a CompositeSolid of two unit cubes sharing a face), what it is FOR (the `three_d` CompositeSolid probe and Task 7's roll-up test), and its size — plus its provenance line: hand-authored for this repo, no third-party source.
+Task 1 adds TWO fixtures. Add a row for each to `fixtures/README.md`, in the table's existing shape — name, what it is, what it is FOR, size — plus the provenance line both share: hand-authored for this repo, no third-party source.
+
+- `fixtures/composite-solid.city.json` (Decisions recorded item 4): a minimal CityJSON 2.0 Building whose LoD 2.2 geometry is a CompositeSolid of two unit cubes sharing a face. FOR: the `three_d` CompositeSolid probe and Task 7's roll-up test.
+- `fixtures/invalid-solid.city.json`: one Building, no parts, whose LoD 2.2 Solid is NOT closed (two open edges). FOR: every "invalid solid" expectation — Task 7's tests and scenario 2 of the browser smoke. It exists because `two-buildings.city.json` cannot serve: its `NL.IMBAG.Pand.0001` has a MultiSurface PART at LoD 2.2, so by §7's contributor rule the PART is the contributor and the whole FEATURE is skipped "not a solid" — its root's invalid Solid is never measured.
 
 Re-read `CLAUDE.md`'s Hard Rules against this milestone's diff. **No edit is expected**: every M3 constraint is a plan-level rule, and the two that look like candidates are already covered — "`src/insights/duckdb.ts` is the ONLY module that may import `@duckdb/duckdb-wasm`" is unchanged by Task 25 (the race is INSIDE that module), and "Nothing walks a whole layer's geometry synchronously" is unchanged by Task 3 (the tag is read, not the geometry). If a rule genuinely changed, the edit needs its story in `architecture-notes.md` first — that is the file's own rule.
 
@@ -24170,7 +28412,7 @@ git commit -m "docs: record milestone 13.3's seams and what it leaves open"
 
 **Interfaces:** None.
 
-**Intent:** The evidence, not the claim. `npx vp check` at 0 errors / 56 warnings; `npx tsc -b --noEmit` clean; the full app suite and the plugin suite green; `DUCKDB_INTEGRATION=1 npx vitest run tests/integration/duckdb` green. Then the browser smoke on a hand-launched Chromium via `agent-browser connect`, dev server on a free port through `npm run dev`, never 5173, never `agent-browser set viewport`: scenario 2 (Measure solids at LoD 2.2 on `two-buildings`, the invalid solid's NULL volume and `solid_valid = false`, the skipped count, the draft rule and the map unchanged until Save), scenario 3 (a GeoJSON polygon over one building: Join copies its properties and leaves the other NULL with "1 outside every area"; Aggregate writes `buildings_n = 1` and it shows in the records panel), scenario 5's second half (two runs with the same prefix: the second's Undo restores the first's values and the first loses its Undo), scenario 8 (the remote `https://storage.googleapis.com/cityjson/delft.city.jsonl`: volume summed from parts, height as the combined extent, a selected part running on its whole building, the building count unchanged, and Aggregate counting each Building once), and scenarios 10, 11, 12 (the derived city layer, the derived vector layer, and the `" (2)"` rename at publication). Every deviation is recorded in the file, not smoothed over. Finally the Codex `gpt-6-astra` milestone review over the whole branch diff, with its critical findings addressed before the merge.
+**Intent:** The evidence, not the claim. `npx vp check` at 0 errors / 56 warnings; `npx tsc -b --noEmit` clean; the full app suite and the plugin suite green; `DUCKDB_INTEGRATION=1 npx vitest run tests/integration/duckdb` green. Then the browser smoke on a hand-launched Chromium via `agent-browser connect`, dev server on a free port through `npm run dev`, never 5173, never `agent-browser set viewport`: scenario 2 (Measure solids at LoD 2.2 on `two-buildings` — one feature measured, one skipped "not a solid" by §7's contributor rule — then on `invalid-solid` for the NULL volume and `solid_valid = false`, plus the draft rule and the map unchanged until Save), scenario 3 (a GeoJSON polygon over one building: Join copies its properties and leaves the other NULL with "1 outside every area"; Aggregate writes `buildings_n = 1` and it shows in the records panel), scenario 5's second half (two runs with the same prefix: the second's Undo restores the first's values and the first loses its Undo), scenario 8 (the remote `https://storage.googleapis.com/cityjson/delft.city.jsonl`: volume summed from parts, height as the combined extent, a selected part running on its whole building, the building count unchanged, and Aggregate counting each Building once), and scenarios 10, 11, 12 (the derived city layer, the derived vector layer, and the `" (2)"` rename at publication). Every deviation is recorded in the file, not smoothed over. Finally the Codex `gpt-6-astra` milestone review over the whole branch diff, with its critical findings addressed before the merge.
 
 - [ ] **Step 1: The four automated gates, in order, with their output kept**
 
@@ -24178,9 +28420,16 @@ git commit -m "docs: record milestone 13.3's seams and what it leaves open"
 export PATH="$HOME/.local/share/mise/shims:$PATH"
 npx vp check                       # expect: 0 errors, 56 warnings
 npx tsc -b --noEmit                # expect: silent
-npx vitest run > /tmp/m3-gate-app.log 2>&1   # BACKGROUND it if it is slow
-DUCKDB_INTEGRATION=1 npx vitest run tests/integration/duckdb > /tmp/m3-gate-duckdb.log 2>&1
+# Both suites in the BACKGROUND with their output to a file, per the M2
+# process rule, each waited on so its exit status is the recorded result.
+npx vitest run > /tmp/m3-gate-app.log 2>&1 &
+wait $!; echo "app suite: $?"
+DUCKDB_INTEGRATION=1 npx vitest run tests/integration/duckdb \
+  > /tmp/m3-gate-duckdb.log 2>&1 &
+wait $!; echo "duckdb suite: $?"
 ```
+
+Expected: `app suite: 0` and `duckdb suite: 0`. Both numbers go into the smoke file's "Last run" table; a non-zero one is a gate failure and stops the milestone here.
 
 and the submodule's own two, which the parent's hooks do NOT run:
 
@@ -24207,17 +28456,25 @@ agent-browser connect 9333
 
 Read `scripts/smoke/processing-m2.md`'s "Last run" table first: it records the exact binary, flags and port that worked on this host on 2026-09-12, and the two console lines every run of this recipe produces (the dotenvx `.env` warning and THREE's multiple-instances warning) which are NOT the toolbox's business.
 
-- [ ] **Step 3: Scenario 2 — Measure solids on `two-buildings`**
+- [ ] **Step 3: Scenario 2 — Measure solids, on `two-buildings` and on `invalid-solid`**
 
-Load `fixtures/two-buildings.city.json`, open Tools → Measure solids. Check, and record each answer:
+§10.2 asks for both halves of §7.2 — a measured solid and an invalid one — and `two-buildings` can only show the first. `NL.IMBAG.Pand.0001` has a MultiSurface PART at LoD 2.2, so by §7's contributor rule the PART is the contributor and the whole FEATURE is skipped "not a solid": its root's invalid Solid is never measured, and there is no "invalid solid shows NULL volume" to see on that layer. That is why Task 1 authors `fixtures/invalid-solid.city.json`, and why this step is two loads.
 
-1. The LoD select offers `2.2` with the solids noun (**[adapted copy A1]**) and a count of 2.
+**First, `fixtures/two-buildings.city.json`.** Open Tools → Measure solids. Check, and record each answer:
+
+1. The LoD select offers `2.2` with the solids noun (**[adapted copy A1]**) and a count of **1** — `0002` qualifies, `0001` does not (its contributor is the MultiSurface part).
 2. All four primary measures are ticked, the two elevations are not.
-3. Run. The card reads `2 buildings measured · …`, and the detail line carries the caveat for the invalid solid.
-4. Open table: `NL.IMBAG.Pand.0001` has `solid_volume_m3` **NULL** and `solid_valid` **false**; `NL.IMBAG.Pand.0002` has volume **2178** and `solid_valid` **true**. The envelope, footprint and height columns have values on BOTH (§7.2's caveat rule: an invalid solid is still measured for everything but volume).
-5. `NL.IMBAG.Pand.0001-part1` is a MultiSurface, so it is SKIPPED with cause `not a solid`, and the skipped counts add up.
+3. Run. The card reads `1 building measured · 1 skipped · …`.
+4. Open table: `NL.IMBAG.Pand.0002` has volume **2178** and `solid_valid` **true**, with envelope, footprint and height alongside. `NL.IMBAG.Pand.0001` has NO values at all — it was skipped, not measured with a caveat.
+5. The skip's cause is `not a solid`, and the skipped counts add up. `NL.IMBAG.Pand.0001-part1` does not appear as a row of its own: §7 counts FEATURES, and the part is its building's contributor.
 6. Style by result: the rule editor opens on a DRAFT on `solid_volume_m3`, and **the map does not change**. Screenshot before and after Save.
 7. Save: the map recolours.
+
+**Then `fixtures/invalid-solid.city.json`**, which is §10.2's other half — one Building, no parts, an unclosed Solid at LoD 2.2:
+
+8. The LoD select offers `2.2` with a count of 1.
+9. Run. `solid_volume_m3` is **NULL** and `solid_valid` is **false**, while `solid_envelope_m2` (**388**), `solid_footprint_m2` (**80**) and `solid_height_m` (**8.4**, from zmin 0 / zmax 8.4) all have values — §7.2's caveat rule: an invalid solid is still measured for everything but volume.
+10. The card carries the caveat segment for it (`1 invalid solid (no volume)`), NOT a skipped count: a caveat and a skip are different states and this is the case that tells them apart.
 
 - [ ] **Step 4: Scenario 3 — the two cross-layer directions**
 
@@ -24228,7 +28485,7 @@ Drop a GeoJSON polygon covering ONE of the two buildings (write it to the scratc
 
 - [ ] **Step 5: Scenario 5's second half — two runs, one prefix**
 
-Run Measure solids on **All**, then again on **Selected** with the SAME prefix. Check: the second run's card offers Undo and the FIRST card's Undo is gone; pressing the second's Undo restores the first run's values for the selected buildings (not NULL, and not the second run's values).
+Run Measure solids on **All**, then again on **Selected** with the SAME prefix, with `NL.IMBAG.Pand.0002` selected — it is the layer's one qualifying feature (step 3), so a run scoped to `0001` would measure nothing and the case would pass for the wrong reason. Check: the second run's card offers Undo and the FIRST card's Undo is gone; pressing the second's Undo restores the first run's values for the selected building (not NULL, and not the second run's values).
 
 - [ ] **Step 6: Scenario 8 — the Delft CityJSONSeq, by URL**
 
@@ -24273,7 +28530,7 @@ The repo owner answered the plan's questions at the plan gate, before Task 1. Ea
 2. **[adapted copy] A1–A10 — all accepted as proposed** (A1 turned out to be spec-verbatim: §6 already reads "2.2 (1,115 buildings with a solid)").
 3. **A distinct rule palette — accepted** (**[adapted copy A9]**), under `cityColors.ts`'s collision rule: `#7cb518` (unchanged first), then `#2563eb`, `#c2410c`, `#7e22ce`, `#0f766e`, `#be185d`, `#b45309`, `#15803d`. Task 26 pins them and extends the collision test; a hex that fails the collision case is replaced and the swap noted at review.
 4. **Aggregate's scope radios stay under TARGET** with the muted line (A12 below); **a derived reader-backed layer's Export includes CityParquet** (Task 24's `where` clause); **a small CompositeSolid fixture IS added** — `fixtures/composite-solid.city.json`, authored in Task 1 with its provenance row in `fixtures/README.md` (Task 28), and Task 1 probes the parse, the validity report and `ST_3DVolume` on it. Task 7's roll-up rests on that probed fact and its own unit tests stay app-side.
-5. **Further [adapted copy] the expansion raised — all ACCEPTED as proposed**, and all six are now rows in the front matter's copy table: **A11** `A distance limit must be a positive number` (§6 states the rule, no sentence); **A12** `Scope applies to the source layer's buildings.` (the muted line under Aggregate's radios); **A13** `Name the new layer` (an empty Name at Run); **A14** `A layer is already called that` (a duplicate Name at Run); **A15** `Renamed to "<name>": a layer already had that name` (the card line for the " (2)" rule, §10.12 says only "the card says so"); **A16** the plural Save toast `2 derived layers are not saved; export them to keep them` (§8 gives the singular only). `Pick at least one measure` is REUSED verbatim for Join's "nothing to write" and Aggregate's empty aggregate list.
+5. **Further [adapted copy] the expansion raised — all ACCEPTED as proposed**, and all seven are now rows in the front matter's copy table: **A11** `A distance limit must be a positive number` (§6 states the rule, no sentence); **A12** `Scope applies to the source layer's buildings.` (the muted line under Aggregate's radios); **A13** `Name the new layer` (an empty Name at Run); **A14** `A layer is already called that` (a duplicate Name at Run); **A15** `Renamed to "<name>": a layer already had that name` (the card line for the " (2)" rule, §10.12 says only "the card says so"); **A16** the plural Save toast `2 derived layers are not saved; export them to keep them` (§8 gives the singular only); **A17** `Choose a column to summarise` (Aggregate's blocking error beside a row whose operator needs a column and has none, and that row's own placeholder option — §7.6 requires the select and words no message for an unfilled one, and §7.7's accepted `Choose the property to copy` is the same sentence about a property). `Pick at least one measure` is REUSED verbatim for Join's "nothing to write" and Aggregate's empty aggregate list.
 6. **Rulings the commander made where two expansion planners diverged** (recorded here so no task re-litigates them): (i) `ToolResult` gains ONE optional caveat channel, declared in Task 7 (the first task that needs it) as `line?: string` and `caveats?: ReadonlyArray<SkipCount>`; `summarise` renders each caveat in the `"<count> <cause>"` form, BETWEEN the measured count and the skipped count — §6.2's own card order (`312 buildings · 37 invalid solids (no volume) · 2.4 s`), which is why a cause carries no number of its own. Tasks 10, 16, 17 and 19 use the same fields and Task 11 declares nothing new on `ToolResult`. (ii) `StyleByResult.operator` and `.value` are declared in Task 9 as `T | ((picked: OutputColumn) => T)` with `resolveStyleOperator`/`resolveStyleValueSource` beside the type; Task 16 only supplies a descriptor. (iii) `ToolDefinition.outputColumns(prefix, params)` stays TWO-argument; a cross-layer tool's copied-field TYPES travel INSIDE the frozen `params` as `fieldTypes` (Task 15's `resolveCrossLayerParams` embeds the source's property types, and `normaliseParams` freezes them), so `RunFooter`'s `tool.outputColumns(run.prefix, run.params)` is exact for every tool and `joinColumns(prefix, params)` loses the third argument. (iv) Task 18 exports the pure document-level merge helper — `mergeGeoDocumentProperties(document, byStableId)`, which the store action `mergeGeoFeatureProperties` wraps — and Task 23 imports and calls it; there is no second copy of the merge. (v) Aggregate's count column is `${prefix}buildings_n` (`bld_buildings_n` with the default prefix); scenario 11's bare `buildings_n` is read as shorthand — cost if wrong: one string. (vi) `Surface.geometryType` is OPTIONAL (`geometryType?: CityJSONGeometryType | null`): absent and `null` both read "unknown", and 21 files of hand-built `Surface` literals stay untouched.
 
 ## Self-review
@@ -24324,7 +28581,7 @@ The repo owner answered the plan's questions at the plan gate, before Task 1. Ea
 
 This document is COMPLETE and executable. It carries the header, Global Constraints, the verified facts, the type ledger (both blocks), the copy table, the file map, the design decisions, the recorded owner decisions — and **all 29 task bodies, each with Files, Interfaces, Intent, numbered checkbox steps with the actual code and commands, and its commit**. Three expansion planners wrote those bodies in parallel from the Interfaces blocks and this pass reconciled the seams where they diverged; the rulings are recorded in "Decisions recorded" item 6 and applied everywhere they bite. An executor reading only their own task has everything that task needs.
 
-Scanned across the whole document: no "TBD", no "TODO", no "similar to Task N", no "add appropriate error handling", no "…rest of", no type or function named in one place and left undefined in another, and no commit command carrying an attribution trailer (`Co-Authored-By`, `Claude-Session`) — the Global Constraints forbid them. Every copy string is either verbatim with its spec section or tagged **[adapted copy]** with an ACCEPTED row (A1-A16) behind it, and no task body still describes a string as an open owner question. Every engine fact is either probed (and pinned by Task 1) or cited with file:line.
+Scanned across the whole document: no "TBD", no "TODO", no "similar to Task N", no "add appropriate error handling", no "…rest of", no type or function named in one place and left undefined in another, and no commit command carrying an attribution trailer (`Co-Authored-By`, `Claude-Session`) — the Global Constraints forbid them. Every copy string is either verbatim with its spec section or tagged **[adapted copy]** with an ACCEPTED row (A1-A17) behind it, and no task body still describes a string as an open owner question. Every engine fact is either probed (and pinned by Task 1) or cited with file:line.
 
 ### 3. Type consistency
 
@@ -24332,7 +28589,7 @@ Checked end to end against the ledger:
 
 - `OutputColumn` / `ColumnType` — declared in `computedColumns.ts` (existing); Task 4 makes `outputColumns` return it, and Tasks 6, 15, 16, 17, 19 produce it. `ToolView`'s hard-coded `"DOUBLE"` has exactly one remover (Task 4) and no reintroducer.
 - `StyleByResult` — Task 9 declares the WHOLE type, including `operator` and `value` as `T | ((picked: OutputColumn) => T)` and the two resolvers `resolveStyleOperator` / `resolveStyleValueSource` beside it (Decisions item 6 (ii)). `pick(written: ReadonlyArray<OutputColumn>) => OutputColumn | null`: Tasks 8, 10, 16, 17, 19 supply one descriptor each; Task 16 is the only one that passes functions, and it changes neither the type nor `RunFooter`. `RunFooter` is the resolvers' only caller.
-- `ToolResult.line?: string` / `ToolResult.caveats?: ReadonlyArray<SkipCount>` — Task 7 declares BOTH and makes the ONE `summarise` edit (Decisions item 6 (i)); Tasks 10, 16, 17 and 19 set them with those exact names and types; Task 11 declares nothing and re-edits nothing. A caveat is `{ cause, count }`, never a pre-rendered string: `summarise` prints `"<count> <cause>"`, so a cause carries no number and the singular/plural noun is picked by the same count.
+- `ToolResult.line?: string` / `ToolResult.caveats?: ReadonlyArray<SkipCount>` — Task 7 declares BOTH and makes the ONE `summarise` edit (Decisions item 6 (i)); Task 11 declares nothing and re-edits nothing. `line` is set by Tasks 10, 16 and 19 and by nobody else — it is the tool's OWN first phrase where "N buildings measured" is wrong, never an extra count in front of it, which is why Task 17 deliberately sets none (§7.7's card line IS the default). `caveats` is set by Tasks 10, 16, 17 and 19. A caveat is `{ cause, count }`, never a pre-rendered string: `summarise` prints `"<count> <cause>"`, so a cause carries no number and the singular/plural noun is picked by the same count.
 - `ToolDefinition.outputColumns(prefix, params)` — exactly TWO arguments, for all seven tools (Decisions item 6 (iii)). Join's copied-field types reach it through `params.fieldTypes`, embedded by Task 15's `resolveCrossLayerParams` and frozen with the bag; `joinColumns(prefix, params)` reads them back, Task 16's executor types its columns from the SAME place, and `RunFooter`'s `tool.outputColumns(run.prefix, run.params)` is exact with no live store read.
 - `Surface.geometryType?: CityJSONGeometryType | null` — OPTIONAL as well as nullable (Decisions item 6 (vi)). Task 2 declares; Task 3 is the one consumer; the 21 files of hand-built `Surface` literals are untouched; `decodeTable.ts` still writes `null` explicitly.
 - `derivedLayerName(targetName, toolId, sourceName)` — THREE parameters everywhere (the ledger, Task 20's implementation, and every caller in Tasks 20-23 and the two UI sites), because §6's `"Delft + Zones"` and `"Delft · nearest Roads"` carry the source's name.
@@ -24344,8 +28601,18 @@ Checked end to end against the ledger:
 - `BuildingProxy` / `buildProxySql` — Task 14 declares; Tasks 15, 16, 17, 19 consume; the log label has one producer.
 - `DerivedPlan` / `prepareDerivedCityLayer` / `prepareDerivedVectorLayer` — Tasks 21 and 23 declare; Task 22 is the only caller of `publish()`/`discard()`. `derivedLayerName(targetName, toolId, sourceName)` — THREE parameters, the source name included, because §6's `"Delft + Zones"` and `"Delft · nearest Roads"` carry it — plus `nameTaken` and `disambiguate` are declared in `deriveLayer.ts` by **Task 20**, which is the task that CREATES the module; Tasks 21 and 23 MODIFY it. There is no forward reference and exactly one creator.
 - `Layer.derivedFrom` — Task 21 declares as REQUIRED and budgets the test sweep; Tasks 22, 23, 24 read it; `App.tsx:1061-1078` never writes it.
-- `mergeGeoFeatureProperties` / `replaceGeoPreparedData` / `mergeGeoDocumentProperties` — Task 18 declares all three; Task 19 calls the store action, Task 23 calls the exported pure `mergeGeoDocumentProperties`. There is exactly ONE merge implementation (Decisions item 6 (iv)).
+- `mergeGeoFeatureProperties` / `replaceGeoPreparedData` / `mergeGeoDocumentProperties` / `restoreGeoDocumentProperties` — Task 18 declares all four; Task 19 calls the store action, Task 23 calls the exported pure `mergeGeoDocumentProperties`, and `undoRun` is `restoreGeoDocumentProperties`' only caller. There is exactly ONE merge implementation (Decisions item 6 (iv)). `UndoState`'s vector arm carries `previousValues: GeoPreviousValues` — per feature, per COLUMN, with `GEO_PROPERTY_ABSENT` for a property that was not there — and NOT a `preparedData` document snapshot, because §6.2 steals a run's Undo only where two runs share a column.
+- `GeoJsonLayer = Extract<GeoLayer, { kind: "geojson" }>` — Task 11 declares it in `geoLayerStore.ts` and both `ToolTarget`'s and `ToolSource`'s vector arms are that type, because every consumer reads `layer.config.preparedData`, which only the geojson arm has. `execute` narrows once, where `target` is resolved, so nothing downstream casts; `useToolForm`'s local alias is deleted in Task 15. `prepareDerivedVectorLayer` keeps the wider `parent: GeoLayer` on purpose and narrows in its body (`parent.kind === "geojson" ? parent.config.preparedData : undefined`), which is what lets Task 23's tests hand it a bare layer.
+- `classifySourceFailure` / `assertSourceIds` / `readerQuery` — Task 5 declares all three in `sourceRead.ts` beside the three §6.1 sentences, so the id-join THRESHOLD (every requested id, never "no match at all") and the source-failure classification exist once. Tasks 7 and 10 consume all three; Tasks 16 and 17 consume `readerQuery` and `assertSourceIds` on the footprint path; Task 19 consumes `readerQuery` only, because its rows are AREAS and there is no returned building-id set to join. No executor re-decides either rule. `sourceRead.ts`'s two extra imports are TYPE-ONLY (`QueryOutcome`, `ToolContext`) and therefore erased; its one new VALUE import is `getDuckDBStatus`, which is what tells a dead engine apart from a refused allocation on `registerBuffer`'s single `false` — the same distinction `vectorTable.ts` makes.
+- `YieldControl` / `reprojectGeoLayer` / `encodeProjectedFeatures` — Task 12 declares the first two and Task 13 the third; both walks are ASYNC and yield in bounded batches, calling `control.checkpoint()` (the run's `ctx.throwIfCancelled`) before each yield, and every call site awaits them. `createVectorTable`'s input carries the same optional `control`.
+- `RunUndo` — Task 22 declares it as a NESTED union (`{ kind: "columns"; state: UndoState } | { kind: "layer"; … }`), never an intersection: `{ kind: "columns" } & UndoState` is `never` once `UndoState` discriminates on its own `kind`. Task 18 tags the existing city literal `kind: "city"` and adds the vector one; Task 22 wraps BOTH `undoState.set` sites and `discardUndo` checks the outer kind before the inner.
+- `publishProvenance` / `stealUndo` — module-private in `runQueue.ts`, lifted out of the city path by Task 18 and called by Task 22's New-layer branch, so the provenance rule and the Undo-steal rule each have one copy.
+- `subscribeColumnReveal` / `drainColumnReveals` / `clearColumnReveals` — Task 27 declares all three; the listener returns a BOOLEAN (true = honoured), and the channel retains the latest request per layer until one is acknowledged, because `DataGrid` renders no `<th>` until its first page lands.
+- `STREAMING_NO_NEW_LAYER` — [adapted copy A2], declared ONCE in `deriveLayer.ts` by Task 20 and imported by `ToolView.tsx`, `useToolForm.ts` and the queue's head guard, so the disabled radio, the form's `runReason` and the run's refusal cannot drift.
+- `newLayerUndoBlock` / `summariseCreated` — Task 22 declares both in `runQueue.ts`; `summariseCreated`'s `features` is `number | null`, and a vector copy passes `null` so §7.6's own head segment survives.
 - `nextRuleColor` / `RULE_PALETTE_HEX` — Task 26 declares; `RulesEditor` and `RunFooter` are the two callers.
+- `RunSummary.nonNullByColumn: Readonly<Record<string, number>>` — Task 9 replaces `firstColumnNonNull` with it and sweeps the `tests/` fixtures in its own commit, because the styled column is `pick(written)` and for Validate solids that is the LAST one. Tasks 16, 17, 19 and 22 write summary fixtures in the map form. `buildMedianSql` keeps its name and signature and gains the CAST to DOUBLE in the same task; `sqlQuery.test.ts`'s two expectations move with it.
+- `LayerTable` literals — Task 5's `extension` / `sourceBytes` land first (Task 9's `addLayer` helper already carries them), and Task 21's `sourceFeatureIds` is swept across the 17 files its Step 4 names, `styleByResult.test.tsx` included. No literal carries a field before the task that adds it.
 
 ### 4. What I could not verify, and an expansion planner should check first
 
@@ -24354,4 +28621,7 @@ Checked end to end against the ledger:
 - **Whether `installStaleWatcher` fires on a DERIVED layer's first table entry.** It keys on a table-name change or `building → ready` (`runQueue.ts:1153-1176`); `adoptLayerTable` writes a `ready` entry with no prior `building` state, which should not trip it — Task 21 asserts that rather than assuming it.
 - **How many `tests/` files carry a hand-built `Layer` literal.** Task 21 greps before it starts; the number decides whether `derivedFrom` lands in one commit or two.
 - **The browser's behaviour for a BOOLEAN `=` rule in the editor's value input.** The schema, the evaluator and the input's coercion all check out by reading (`dist/index.js:1194-1196`, `RulesEditor.tsx:755-774`); Task 9 pins it with a test and Task 29 sees it on screen.
+- **The footprint path's id join on scope "all".** Tasks 16 and 17 call `assertSourceIds(ctx.featureIds ?? [], …)`, and `ctx.featureIds` is `null` for a whole-layer run — so a source that lost objects is caught for a Selected or Matching run and NOT for an "All buildings" one. That is `assertSourceIds`' own documented vacuous case and the same limit §6.1 already states (a source whose content moved under the same ids is undetectable), but it is a real hole and it is written down rather than papered over. Closing it would cost a second statement to list the table's row ids.
+- **Whether `readerQuery` should also wrap the AGGREGATE statement's id accounting.** Task 19 uses `readerQuery` but calls no `assertSourceIds`: its rows are the TARGET's areas, so there is no returned building-id set to join the requested one against. A building the file lost is simply absent from the counts. Flagged rather than invented — detecting it needs the proxy relation to distinguish "the reader had no row" from "the row had no LoD 0 geometry", which is a change to `buildFeatureProxySql`'s shape.
 - **Line numbers drift.** Every citation was read on `develop` @ `55e4e00`. Treat one that does not match as a cue to re-read.
+- **What the second reconciliation changed, for the reviewer's eye.** The front matter now carries every name the three amendment strands added; Tasks 16, 17 and 19 were rewired onto Task 5's source doors (a real code change, not a note); Task 5's `registerBuffer === false` now tells a dead engine from a refused allocation; Task 15's `workloadNote` keeps Task 5's `needsReader` guard, widened to the footprint proxy (new logic, so it lands with its own case in `useToolForm.test.tsx` — footprint shows §6's note, extent rectangle does not); Task 18 tags the city `undoState` literal so Task 22's wrapping edit has something to quote; Task 9's `runQuery` mock records its statements so Task 16's new footer case can read them. Each is small, each is named here, and each is the kind of thing a reviewer should look at first.
