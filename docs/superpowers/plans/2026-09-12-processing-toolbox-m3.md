@@ -28789,3 +28789,12 @@ The binding streaming restriction contradicts §6’s promised static streaming 
 Citation spot-checks matched `layerTables.ts:80–98`, `:420–436`, `:767–857`; `duckdb.ts:150–187`, `:681–697`, `:724–745`; and `layerStore.ts:327`. The previously incorrect optional-ID fact is corrected. The incorrect test-file reference and nonexistent helper references are reported in finding 7.
 
 Fix first
+
+### Task 1's engine findings (2026-09-12) — pre-flight requirements for Tasks 3, 6, 7, 10
+
+- **D1.** `ST_3DValidationReport(s)` on a runtime-NULL `s` (a `ST_3DTryFromWKB` that returned NULL) returns UNINITIALISED memory, not NULL: `is_valid` flipped between runs for the same row, the counts were garbage, and reading `message` once crashed the wasm instance. Every report field is therefore read as `CASE WHEN s IS NOT NULL THEN r.<field> END`, and `r.code` / `r.message` are never selected. The one-statement shape in "Facts" is amended accordingly; `MEASURE_SQL` in Task 1's probe is the verified form.
+- **D2.** `ST_3DValidationReport` and `ST_GeomFromGeoJSON` each have two overloads, so a bare `NULL` literal is a Binder error — tests cast (`NULL::SOLID_3D`, `NULL::VARCHAR`).
+- **D3.** The report struct has a 13th field, `orientation_error_count` (1 on `NL.IMBAG.Pand.0001`).
+- **D4.** A CompositeSolid's WKB type name is `"GeometryCollection Z"`, not `"PolyhedralSurface Z"`; `ST_3DTryFromWKB` parses it (valid, 2 shells, 12 faces, volume 2). Solid detection keys on the CityJSON geometry type (`Surface.geometryType` in the model, `geometry_properties_lod*.type` in the reader), never on `cityjson_wkb_geometry_type`.
+- **D5.** `ST_NDims` does not exist in this `spatial` build; `ST_HasZ` does.
+- **D6.** `ST_Within` is interior-only; `ST_CoveredBy` is boundary-inclusive (pinned with a boundary point).
