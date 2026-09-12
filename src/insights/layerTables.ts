@@ -765,7 +765,12 @@ async function discardHalfBuilt(
  * failed on its merits and re-running it would just fail again.
  */
 export async function retryEngine(): Promise<void> {
-  await initDuckDB();
+  // `bootEngine`, NOT this module's raced `initDuckDB`: both callers are
+  // `void retryEngine()` (`App.tsx`), so a rejection here would be an unhandled
+  // one — and there is nothing for a death to release anyway. Every build this
+  // function starts is raced on its own, inside the queue, where a release
+  // actually frees something.
+  await bootEngine();
   if (getDuckDBStatus().state !== "ready") return;
   // Snapshot and CLEAR first: each `enqueueLayerTable` below can put its layer
   // straight back in (a second failure), and iterating a map being written to
