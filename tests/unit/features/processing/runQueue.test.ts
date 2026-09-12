@@ -1796,6 +1796,116 @@ describe("the engine watcher (spec §6.1)", () => {
   });
 });
 
+/**
+ * Does the shared FIFO take another task and finish it?
+ *
+ * The one question the death race exists to answer: duckdb-wasm drops the
+ * promise of a request that was in flight when its worker died, so an unraced
+ * await occupies the queue every later run and every later table build sits
+ * behind — for the life of the page. A short real timer rather than a `waitFor`
+ * so a stranded queue fails in 50 ms instead of timing out.
+ */
+async function fifoAccepts(): Promise<boolean> {
+  const probe = tables.runOnTableQueue(async () => "ran" as const);
+  const outcome = await Promise.race([
+    probe,
+    new Promise<"blocked">((resolve) => {
+      setTimeout(() => resolve("blocked"), 50);
+    }),
+  ]);
+  return outcome === "ran";
+}
+
+describe("the death race over the cleanup and the Undo", () => {
+  /** An executor that writes `extent_height_m` on object "a". */
+  function writeHeight() {
+    registerExecutor("height-from-extent", async () => ({
+      columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+  }
+
+  it("frees the FIFO when the engine dies under a discarded backup's DROP", async () => {
+    // `discardUndo` posts its DROP on the shared queue and does not await it —
+    // housekeeping, never something a card waits on. Unraced, the DROP caught
+    // by the death holds the FIFO, and every later run and table build queues
+    // behind a statement that can never answer.
+    const stop = installEngineWatcher();
+    liveColumns = ["id", "feature_id", "extent_height_m"];
+    computedAlready("extent_height_m");
+    tableInfo = {
+      ...freshTable(),
+      columns: liveColumns.map((name) => ({
+        name,
+        type: "VARCHAR",
+        kind: "scalar" as const,
+      })),
+    };
+    writeHeight();
+    const first = submitRun(request());
+    await vi.waitFor(() => expect(runById(first)?.status).toBe("done"));
+
+    // The second run overwrites the column, so §6.2 takes the first run's Undo
+    // away and discards its backup — and that DROP is the statement the death
+    // catches.
+    const never = deferred<void>();
+    gate = { needle: "DROP TABLE IF EXISTS", promise: never.promise };
+    const second = submitRun(request());
+    await vi.waitFor(() => expect(runById(second)?.status).toBe("done"));
+    await vi.waitFor(() =>
+      expect(sql).toContain(`DROP TABLE IF EXISTS "__undo_${first}"`),
+    );
+
+    killEngine();
+    gate = null;
+
+    expect(await fifoAccepts()).toBe(true);
+    stop();
+  });
+
+  it("settles undoRun, publishes nothing and frees the FIFO when the engine dies under it", async () => {
+    const stop = installEngineWatcher();
+    writeHeight();
+    const id = submitRun(request());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    expect(attributesOf("a").extent_height_m).toBe(4);
+
+    sql.length = 0;
+    const never = deferred<void>();
+    gate = { needle: "DROP COLUMN", promise: never.promise };
+    const undoing = undoRun(id);
+    await vi.waitFor(() =>
+      expect(sql).toContain(
+        'ALTER TABLE "layer_1" DROP COLUMN IF EXISTS "extent_height_m"',
+      ),
+    );
+    sql.length = 0;
+
+    killEngine();
+    // Settles at all: an unraced `undoComputedColumns` leaves this await — and
+    // the queued task holding the FIFO — pending for the life of the page.
+    await undoing;
+
+    // Nothing was committed, so nothing is published: not the model, not the
+    // provenance, not the card's "Undone". And nothing is posted at the corpse.
+    expect(attributesOf("a").extent_height_m).toBe(4);
+    expect(computedColumnsOf("L1").has("extent_height_m")).toBe(true);
+    expect(runById(id)?.note).toBeNull();
+    expect(sql).toEqual([]);
+    // The card reads what the DEATH WATCHER set: the run itself succeeded, and
+    // Undo is taken from the whole session because every backup table died with
+    // the database.
+    expect(runById(id)?.status).toBe("done");
+    expect(useProcessingStore.getState().engineStopped).toBe(true);
+
+    gate = null;
+    expect(await fifoAccepts()).toBe(true);
+    stop();
+  });
+});
+
 describe("summarise", () => {
   const result = (
     rows: Array<[string, Record<string, unknown>]>,

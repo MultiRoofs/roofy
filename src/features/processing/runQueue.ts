@@ -423,8 +423,15 @@ function discardUndo(id: string): void {
   if (!backup) return;
   // On the queue, like every other statement about a layer table, and NOT
   // awaited: dropping a backup is housekeeping, never something a card waits on.
+  //
+  // RACED all the same, and that is the point of racing it: nothing here waits
+  // for the DROP, but the QUEUE does. A drop caught by the engine's death never
+  // answers (duckdb-wasm drops the promises of the requests that were in flight),
+  // and an unraced one would hold the shared FIFO — every later run and every
+  // later table build behind it — for the life of the page. The rejection is
+  // swallowed because there is nothing to say: the table died with the database.
   void runOnTableQueue(() =>
-    runQuery(`DROP TABLE IF EXISTS ${quoteIdent(backup)}`),
+    raced(runQuery(`DROP TABLE IF EXISTS ${quoteIdent(backup)}`), null),
   ).catch(() => {});
 }
 
@@ -934,14 +941,42 @@ export async function undoRun(id: string): Promise<void> {
     // card, which already reads `undoable: false`, is left as it is.
     const current = runById(id);
     if (!current?.undoable || !undoState.has(id)) return null;
-    const undone = await undoComputedColumns({
-      table: state.table,
-      backupTable: state.backupTable,
-      created: state.created,
-      replaced: state.replaced,
-      ids: state.ids,
-    });
-    if (undone.ok) await refreshLayerTableColumns(run.targetLayerId);
+    // RACED against the engine's death, the same way `execute`'s write is: an
+    // Undo is a transaction over a layer table, and a statement of it caught by
+    // the death never answers — which would leave this task holding the shared
+    // FIFO for the life of the page. No abort signal: an Undo is not something
+    // the user can cancel, so only the death may take it.
+    let undone: QueryOutcome;
+    try {
+      undone = await raced(
+        undoComputedColumns({
+          table: state.table,
+          backupTable: state.backupTable,
+          created: state.created,
+          replaced: state.replaced,
+          ids: state.ids,
+        }),
+        null,
+      );
+    } catch (error) {
+      if (!(error instanceof EngineDeadError)) throw error;
+      // Nothing was committed and there is nothing left to roll back — the
+      // transaction, the backup table and the database went together. So nothing
+      // is published either: the model keeps the run's values, and the card is
+      // left as the death watcher wrote it (the session's Undo is gone with the
+      // flag, because every backup table died too).
+      return null;
+    }
+    if (undone.ok) {
+      try {
+        await raced(refreshLayerTableColumns(run.targetLayerId), null);
+      } catch (error) {
+        // Past the COMMIT, exactly as in `execute`: the Undo went through, so a
+        // DESCRIBE that will never answer is abandoned rather than allowed to
+        // withhold the restore below.
+        if (!(error instanceof EngineDeadError)) throw error;
+      }
+    }
     return undone;
   });
   if (out === null) return;
