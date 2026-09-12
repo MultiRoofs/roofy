@@ -1505,6 +1505,71 @@ describe("the Loading extension phase (spec §6.1)", () => {
 });
 
 describe("the Reading source phase (spec §6.1)", () => {
+  it("opens Reading source BEFORE the scope query, not after it", async () => {
+    // §6.1's phases are discrete and IN ORDER, and the order is what a user
+    // reads off the card: "Loading extension, Reading source, Computing".
+    // `resolveScope` issues a statement of its own, and a reader-backed run that
+    // entered the phase only on the far side of it would sit at "queued" (its
+    // extension already loaded) for the whole scope resolution — the card saying
+    // nothing is happening while the run holds the shared queue.
+    //
+    // Asserting the phase at the EXECUTOR's entry cannot see this: by then the
+    // scope query has long since returned. The only way to catch the ordering is
+    // to hold the scope query pending and read the record while it is.
+    vi.mocked(isExtensionLoaded).mockReturnValue(true);
+    const held = deferred<void>();
+    gate = { needle: "COUNT(DISTINCT", promise: held.promise };
+    registerExecutor("measure-solids", async () => ({
+      columns: [],
+      rows: new Map(),
+      measured: 0,
+      skipped: [],
+    }));
+    const id = submitRun(request({ toolId: "measure-solids" }));
+    await vi.waitFor(() =>
+      expect(sql.some((s) => s.includes("COUNT(DISTINCT"))).toBe(true),
+    );
+
+    // The scope query is STILL PENDING at this point — the gate holds it.
+    expect(runById(id)?.phase).toBe("source");
+    expect(runById(id)?.status).toBe("running");
+
+    held.resolve();
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+  });
+
+  it("never opens the source phase for a tool that needs no source", async () => {
+    // The other half of the ordering: `height-from-extent` computes from the
+    // table, so §6.1 skips the phase for it outright — not even for the one
+    // patch that used to set it. While its scope query is pending it is still
+    // waiting to start, and it goes straight to Computing afterwards.
+    const held = deferred<void>();
+    gate = { needle: "COUNT(DISTINCT", promise: held.promise };
+    const phases: Array<string | null> = [];
+    const stop = useProcessingStore.subscribe((s) => {
+      const run = s.runs[0];
+      if (run && phases[phases.length - 1] !== run.phase)
+        phases.push(run.phase);
+    });
+    registerExecutor("height-from-extent", async () => ({
+      columns: [],
+      rows: new Map(),
+      measured: 0,
+      skipped: [],
+    }));
+    const id = submitRun(request());
+    await vi.waitFor(() =>
+      expect(sql.some((s) => s.includes("COUNT(DISTINCT"))).toBe(true),
+    );
+    expect(runById(id)?.phase).toBeNull();
+
+    held.resolve();
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    stop();
+    expect(phases).toContain("compute");
+    expect(phases).not.toContain("source");
+  });
+
   it("hands a reader-backed executor the Reading source phase, not Computing", async () => {
     // §6.1: the phases are discrete and in order — "Loading extension (skipped
     // once loaded), Reading source (registering bytes; skipped for tools that

@@ -610,6 +610,20 @@ async function execute(
       }
     }
 
+    // §6.1's phases are discrete and IN ORDER: "Loading extension (skipped once
+    // loaded), Reading source (registering bytes; skipped for tools that need
+    // none), Computing". A reader-backed run therefore enters Reading source
+    // HERE, on the far side of the pre-flight refusals and the extension load
+    // and BEFORE the scope query — `resolveScope` issues a statement of its own,
+    // and a run that waited for it in the phase it was already in would read
+    // "queued" (or still "Loading extension") for the length of it, which is the
+    // card saying nothing is happening while the run holds the queue.
+    //
+    // This is the PHASE only. The bytes are registered by the executor, through
+    // `readSource`, which needs the scope's ids; the phase is what the user
+    // reads, and it has to open before the first thing done under it.
+    if (tool.needsReader) patch(id, { status: "running", phase: "source" });
+
     const scope = await raced(
       resolveScope({
         table,
@@ -636,14 +650,12 @@ async function execute(
     }
     patch(id, {
       status: "running",
-      // §6.1's phases are discrete and in order: "Reading source (registering
-      // bytes; skipped for tools that need none), Computing". A tool that
-      // re-reads its source starts there and calls `ctx.phase("compute")` once
-      // its handle is open; a tool that needs no source never shows the phase
-      // at all (`roofMetrics.ts` and `heightFromExtent.ts` go straight to
-      // Computing). Deciding it here rather than inside the executor is what
-      // stops the progress block flashing "Computing" for one frame before a
-      // 300 MB read.
+      // A reader-backed run STAYS in Reading source, which it entered above:
+      // its executor calls `ctx.phase("compute")` once its handle is open. A
+      // tool that needs no source never shows the phase at all
+      // (`roofMetrics.ts` and `heightFromExtent.ts` go straight to Computing).
+      // Deciding it here rather than inside the executor is what stops the
+      // progress block flashing "Computing" for one frame before a 300 MB read.
       phase: tool.needsReader ? "source" : "compute",
       featureIds: scope.featureIds,
       scopeCount: scope.count,
