@@ -25,7 +25,8 @@ import {
 import { toolById } from "../../features/processing/toolRegistry";
 import { toolEligibility } from "../../features/processing/eligibility";
 import { sourceWorkloadNote } from "../../features/processing/sourceRead";
-import type { ToolId } from "../../features/processing/types";
+import type { ToolDefinition, ToolId } from "../../features/processing/types";
+import type { LayerTable } from "../../insights/layerTables";
 import {
   eligibilityContextFor,
   useEligibilityInputs,
@@ -38,6 +39,27 @@ import { layerQuery, useQueryStore } from "../../features/query/queryStore";
  *  asked for, and the collision check below is what refuses it when they are
  *  already the source's. */
 const PREFIX_RE = /^(?:[a-z][a-z0-9_]*)?$/i;
+
+/**
+ * Spec §6: "a workload note when the target's source is large".
+ *
+ * Only for a tool that RE-READS the source — a tool computing from the table or
+ * the model pays none of this cost, and a warning about a read that will not
+ * happen is a false alarm — and only for an IMPLEMENTED one: §6's rule is that
+ * a tool whose executor has not shipped claims no fact about the user's data,
+ * and "this can take a minute" is a fact about a read the app cannot perform.
+ *
+ * A function of a tool DEFINITION rather than an expression inside the hook, so
+ * both conjuncts can be stated on a definition that declares itself: the rule
+ * outlives whichever registry entry has not shipped yet.
+ */
+export function toolWorkloadNote(
+  tool: ToolDefinition,
+  table: LayerTable | null,
+): string | null {
+  if (!tool.implemented || !tool.needsReader || table === null) return null;
+  return sourceWorkloadNote(table);
+}
 
 export function useToolForm(toolId: ToolId) {
   const tool = toolById(toolId);
@@ -164,19 +186,16 @@ export function useToolForm(toolId: ToolId) {
     ext !== null && targetCtx.extensionState[ext] !== "loaded"
       ? `Loads the ${ext} extension on first run (about ${ext === "spatial" ? "24 MB" : "1 MB"}, once per session).`
       : null;
-  // §6: "a workload note when the target's source is large". Only for a tool
-  // that RE-READS the source — a tool computing from the table or the model
-  // pays none of this cost, and a warning about a read that will not happen is
-  // a false alarm.
+  // §6's workload note, decided by `toolWorkloadNote` above.
   //
   // `tableInfo?.state`, not `tableInfo !== null`: `tableInfo` is
   // `tables[target.id]` under an indexed lookup, so its type carries
   // `undefined` as well as `null` and the line above it uses the same truthy
   // shape.
-  const workloadNote =
-    tool.needsReader && tableInfo?.state === "ready"
-      ? sourceWorkloadNote(tableInfo.info)
-      : null;
+  const workloadNote = toolWorkloadNote(
+    tool,
+    tableInfo?.state === "ready" ? tableInfo.info : null,
+  );
   const scopeCount =
     draft.scope === "all"
       ? counts.all

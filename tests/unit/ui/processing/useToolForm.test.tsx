@@ -93,6 +93,10 @@ const { useProcessingStore } =
   await import("../../../../src/features/processing/processingStore");
 const { useComputedColumnStore } =
   await import("../../../../src/insights/computedColumns");
+const { toolWorkloadNote } =
+  await import("../../../../src/ui/processing/useToolForm");
+const { toolById } =
+  await import("../../../../src/features/processing/toolRegistry");
 
 type LayerInput = Parameters<LayerStoreActions["addLayer"]>[0];
 
@@ -257,5 +261,41 @@ describe("the OUTPUT column list, typed (spec §7)", () => {
         "'EXTENT_height_m' belongs to the source data; choose another prefix",
       ),
     ).toBeInTheDocument();
+  });
+});
+
+/**
+ * Spec §6's workload note, on a tool DEFINITION rather than on the form: the
+ * two conjuncts are §6's rules, and stating them on definitions that declare
+ * themselves keeps the invariant true of every registry entry, shipped or not.
+ */
+describe("§6's workload note", () => {
+  const heavy: LayerTable = {
+    ...readyTableInfo(true),
+    sourceBytes: 180_000_000,
+  };
+
+  it("warns about a large source for a tool that re-reads it", () => {
+    const tool = { ...toolById("measure-solids"), implemented: true };
+    expect(toolWorkloadNote(tool, heavy)).toBe(
+      "Re-reads a 180 MB source; this can take a minute and needs memory",
+    );
+  });
+
+  it("says nothing for an UNIMPLEMENTED tool, whatever the source weighs", () => {
+    // §6: a tool whose executor has not shipped claims no fact about the
+    // user's data — and "this can take a minute" is a fact about a read the
+    // app cannot perform.
+    const tool = { ...toolById("measure-solids"), implemented: false };
+    expect(toolWorkloadNote(tool, heavy)).toBeNull();
+  });
+
+  it("says nothing for a tool that never re-reads the source", () => {
+    expect(toolWorkloadNote(toolById("height-from-extent"), heavy)).toBeNull();
+  });
+
+  it("says nothing without a ready table to read the size off", () => {
+    const tool = { ...toolById("measure-solids"), implemented: true };
+    expect(toolWorkloadNote(tool, null)).toBeNull();
   });
 });
