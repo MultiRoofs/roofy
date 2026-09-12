@@ -71,11 +71,12 @@ Five things this run wanted and the obvious spelling does not give:
 - **The Add-layer dialog has TWO `.fcb-url-btn` buttons** (Detect and Add
   layer), so `querySelector('.fcb-url-btn')` hits the disabled Detect one; match
   on text.
-- **Do not click "Zoom to layer" on a streaming layer that has no resident
-  features** — see the defect note at the end. Fly with the address search
-  (magnifier → type → click the suggestion with `agent-browser find text …
-click`) and zoom with the viewport's own **Zoom in / Zoom out** buttons.
-  `agent-browser mouse wheel` over the canvas moves nothing.
+- **Fly with the address search** (magnifier → type → click the suggestion with
+  `agent-browser find text … click`) and zoom with the viewport's own **Zoom in
+  / Zoom out** buttons. `agent-browser mouse wheel` over the canvas moves
+  nothing, and "Zoom to layer" moved the camera in neither session that tried it
+  on a stream with no resident features (no new terrain requests, scale bar
+  unchanged) — see the closing note.
 - **Synthetic clicks on the canvas cannot pick a building** under SwiftShader
   (unchanged from M1). Select through a table row cell.
 
@@ -84,10 +85,10 @@ click`) and zoom with the viewport's own **Zoom in / Zoom out** buttons.
 `fixtures/delft.fcb` covers **4.3607–4.3775 °E, 51.9961–52.0069 °N** (EPSG:7415
 extent `[84501.55, 445805.03] … [85675.23, 446983.47]`, 1115 features) — the
 SOUTH of Delft, not the city centre. Searching "Delft, South Holland" lands you
-~1.5 km north of it and nothing loads. Search **"Delft Campus"** instead, then
-press **Zoom in** three or four times: the status bar goes to `2.2K loaded
-objects · 16 resident cells · Settled` and the layer row to `Streaming · 2,231
-currently loaded`.
+~1.5 km north of it and nothing loads. Search **"Delft Campus"** instead: that
+one fly, straight from the fresh whole-globe camera, was enough — the status bar
+went to `2.2K loaded objects · 16 resident cells · Settled` and the layer row to
+`Streaming · 2,231 currently loaded`, with no zoom-in pressed afterwards.
 
 The layer's DuckDB table is a separate step: it is only (re)built on a commit
 **while the table panel is open** (`layerTableLifecycle.ts`). Open the table
@@ -264,18 +265,26 @@ meaningful cancel is not worth the timing games; it stays covered by
 
 ---
 
-## One suspected defect this run turned up (not a toolbox defect)
+## One unexplained session this run turned up (not a toolbox behaviour)
 
-**"Zoom to layer" on a streaming layer with nothing resident does nothing, and
-the session then never streams again.** Clicked on `delft.fcb` while the layer
-read `Zoom in to load features`, the button moved the camera not at all (no new
-terrain requests, the scale bar unchanged), and from that point on NO camera
-move in that session — the address search, the zoom buttons, a real mouse wheel
-— ever produced a streaming commit: the status stayed `Settled` / `Zoom in to
-load` with 0 resident cells, across two separate sessions and a workspace reset.
-A session that never touched the button streamed normally on the first
-address-search fly. The shape fits a `flyTo` promise that never resolves leaving
-`withSettleSuppressed` latched, which would gate every later commit — but that
-was not proven here, and the button is layer-panel code, not processing code.
-Worth a look before the next streaming milestone; recorded here so the next
-runner of this recipe does not lose an hour to it.
+**One session's stream never planned at all, from the moment the layer was
+added.** `delft.fcb` was added into an EMPTY workspace; the status bar read
+`0 resident cells · Settled` immediately, at a whole-globe (1000 km) camera —
+`idle`, where the planner should have said `too-far`, which is what it did say
+at a comparable camera in another session. From then on nothing unstuck it: not
+"Zoom to layer" (which moved the camera not at all), not the address search
+(which did fly, to inside the file's extent), not the zoom buttons, not a real
+mouse wheel. 0 resident cells throughout. An identical add-by-URL into an empty
+workspace in the very next session streamed on its first address-search fly.
+
+**n = 1, and the cause is not attributed.** "Zoom to layer" was clicked into an
+already-silent stream, so it cannot be the trigger. Candidates that cannot be
+told apart from outside: the first-stream auto-fit (`fitFirstStream` →
+`setFitToken`) issuing a `flyTo` that evidently did not move the camera off the
+globe and leaving `withSettleSuppressed` latched, which would gate every later
+commit (CLAUDE.md's rule about returning the `flyTo` promise); or the driver
+never subscribing at all. Not reproduced on demand. Recorded here — it is
+viewport/layer-panel territory, not the toolbox's — so the next runner of this
+recipe recognises it instead of losing an hour to it: if the first status after
+adding a stream is `Settled` rather than `Zoom in to load`, reload and add
+again.
