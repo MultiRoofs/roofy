@@ -644,14 +644,16 @@ Carried to 13.3 / M3 — things a user can notice today:
   Retry in the status bar reboots the engine and rebuilds only the sources
   parked while it was coming up, so the tables that were `ready` when the worker
   died stay `failed` and every tool stays disabled until the page is reloaded.
-- **Three known gaps in that death path**: a table build whose statement is in
-  flight at the death still holds the table FIFO; `runQuery` callers outside the
-  run queue (the export dialog, the layer counts) await a promise that never
-  settles; `refreshLayerTableColumns` and `retryEngine` carry no engine-
-  generation check.
-- **Style by result's median is over table ROWS, not features**, so part rows
-  bias the draft threshold towards the small members (fixture: 20 / 20 / 180
-  gives `> 20` where the two features' median is 100).
+- **Two known gaps left in that death path** (the table FIFO is no longer one:
+  every engine await in `layerTables` now races the death through
+  `insights/engineAwait.ts`, so a build releases the queue and abandons its
+  entry): `runQuery` callers outside the run queue and the builds (the export
+  dialog, the layer counts) still await a promise that never settles, and
+  `retryEngine` carries no engine-generation check.
+- ~~Style by result's median is over table ROWS, not features~~ — fixed at the
+  M2 gate: `buildMedianSql` restricts to the feature roots
+  (`"feature_id" IS NULL OR "feature_id" = "id"`), pinned by an exact-string test
+  and by a real-DuckDB probe where the row median is 10 and the root median 6.
 - **No rule-colour palette rotation**: every Style by result draft takes the
   editor's one default new-rule colour, so successive drafts share it.
 - **Style by result sets `Color by = Rules` eagerly**, so a layer that was on
@@ -665,9 +667,12 @@ Carried to 13.3 / M3 — things a user can notice today:
 - The five remaining tools are registered but `implemented: false`, and that
   reason outranks every other one — so a cross-layer row reads "Not available
   yet" rather than "Add a vector layer to join with" until it is implemented.
-  No tool needs an extension yet, so the muted chip, its Retry link and the
-  extension-failure run copy are covered by unit tests and unreachable through
-  the UI until a `three_d` or `spatial` tool ships.
+  No tool needs an extension yet, so what is unreachable through the UI is the
+  extension-failure RUN copy: nothing loads `spatial` or `three_d` to fail on.
+  The muted chip and its Retry link ARE reachable — an offline boot publishes
+  both lazy extensions as failed (spec §5's boot-time check), which is scenario
+  6 — they simply disable no row of their own while every extension tool still
+  reads "Not available yet".
 - **`useLodOptions` answers only for `roof-metrics`** while `ToolView` renders
   the LoD field on `needsLod && implemented`: M3's solids tool must extend the
   hook in the same commit that flips `implemented`.
