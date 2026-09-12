@@ -266,10 +266,11 @@ describe("ToolView", () => {
     );
   });
 
-  it("prints the column NAMES and freezes the typed columns", () => {
+  it("prints the column NAMES and SUBMITS the typed columns", () => {
     // The two halves of the same list: the mono line is names (§6's "column
-    // list in mono"), and what `submitRun` freezes is the typed columns the
-    // write path needs (`buildAddColumnSql` interpolates `col.type`).
+    // list in mono"), and what the form hands the QUEUE is the typed columns
+    // the write path needs (`buildAddColumnSql` interpolates `col.type`).
+    // What `submitRun` then freezes is `runQueue`'s own test.
     //
     // The ROOF layer, because Roof metrics needs a qualifying LoD before Run is
     // enabled at all — `addCityLayer`'s model has no surfaces.

@@ -35,6 +35,7 @@ import {
 } from "../../../domain/roofMetrics/roofRollUp";
 import {
   ROOF_MEASURES,
+  roofColumnNames,
   roofParams,
   type RoofMeasure,
   type RoofMetricsParams,
@@ -148,10 +149,11 @@ export async function computeRoofRows(
   const ticked = ROOF_MEASURES.filter((m) =>
     input.params.measures.includes(m.key),
   );
-  const columns: OutputColumn[] = ticked.map((m) => ({
-    name: `${input.prefix}${m.suffix}`,
-    type: "DOUBLE",
-  }));
+  // The registry's own answer, not a second list: `roofColumnNames` is what
+  // the definition promises the form and what the write path reads `col.type`
+  // out of, so restating it here is how a promised column comes to be written
+  // with another name or another type (§7).
+  const columns = roofColumnNames(input.prefix, input.params);
 
   const values = (rollUp: RoofRollUp | null): Record<string, number | null> => {
     const out: Record<string, number | null> = {};

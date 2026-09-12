@@ -11,7 +11,12 @@ import {
   computeRoofRows,
 } from "../../../../src/features/processing/tools/roofMetrics";
 import type { RoofSurfaceMetric } from "../../../../src/domain/roofMetrics/roofRollUp";
+import {
+  DEFAULT_ROOF_PARAMS,
+  type RoofMeasure,
+} from "../../../../src/features/processing/roofMetricsParams";
 import type { RoofGeometrySource } from "../../../../src/features/processing/roofGeometrySource";
+import { toolById } from "../../../../src/features/processing/toolRegistry";
 
 const s = (
   lod: string,
@@ -277,6 +282,46 @@ describe("computeRoofRows", () => {
       { name: "roof_area_m2", type: "DOUBLE" },
       { name: "roof_slope_deg", type: "DOUBLE" },
       { name: "roof_surfaces_n", type: "DOUBLE" },
+    ]);
+  });
+
+  it("declares exactly what the tool DEFINITION promised the form", async () => {
+    // ONE deciding site for a column's NAME and its TYPE (§7). The form prints
+    // the registry's answer before any run exists and the write path
+    // interpolates `col.type`; an executor that restates the list is how the
+    // two come apart — a BOOLEAN promised and a DOUBLE written, or a column
+    // promised and never written.
+    const promises = async (params: {
+      measures: RoofMeasure[];
+      flatThresholdDeg: number;
+    }) => {
+      const out = await computeRoofRows({
+        rows,
+        source: source({}, {}),
+        params,
+        prefix: "dak_",
+        lod: "2.2",
+      });
+      return out.columns;
+    };
+    const registry = (params: Record<string, unknown>) =>
+      toolById("roof-metrics").outputColumns!("dak_", params);
+
+    const all = {
+      measures: [...DEFAULT_ROOF_PARAMS.measures],
+      flatThresholdDeg: 5,
+    };
+    expect(await promises(all)).toEqual(registry(all));
+    // A SUBSET, because the list is params-dependent: the two sites agreeing on
+    // all six proves nothing about the tick the user actually made.
+    const subset = {
+      measures: ["area", "slope"] as RoofMeasure[],
+      flatThresholdDeg: 5,
+    };
+    expect(await promises(subset)).toEqual(registry(subset));
+    expect(await promises(subset)).toEqual([
+      { name: "dak_area_m2", type: "DOUBLE" },
+      { name: "dak_slope_deg", type: "DOUBLE" },
     ]);
   });
 
