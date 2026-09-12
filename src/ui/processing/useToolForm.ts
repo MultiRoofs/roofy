@@ -30,6 +30,7 @@ import {
   useEligibilityInputs,
 } from "./useEligibilityContext";
 import { useActiveLayer } from "../../features/workspace/activeLayer";
+import { useLodOptions } from "./useLodOptions";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 
 /** An EMPTY prefix is a legal prefix — it is how the bare column names are
@@ -78,7 +79,7 @@ export function useToolForm(toolId: ToolId) {
       : (preferred[0]?.id ?? null);
   const storedTargetExists =
     stored !== undefined && layers.some((l) => l.id === stored.targetLayerId);
-  const draft: ToolDraft =
+  const base: ToolDraft =
     stored === undefined
       ? {
           targetLayerId: defaultTarget,
@@ -90,7 +91,22 @@ export function useToolForm(toolId: ToolId) {
       : storedTargetExists
         ? stored
         : { ...stored, targetLayerId: defaultTarget };
-  const target = layers.find((l) => l.id === draft.targetLayerId) ?? null;
+  const target = layers.find((l) => l.id === base.targetLayerId) ?? null;
+  const lods = useLodOptions(tool, target);
+  // Spec §6: "Default: the layer's selected LoD when it qualifies, else the
+  // highest qualifying one." Computed, never written: a `setDraft` from a
+  // render is a side effect, and the stored draft is the USER's choice — one
+  // that stops qualifying (they switched target) must not be overwritten in
+  // the store, only overridden here.
+  const qualifies = (lod: string | null): boolean =>
+    lod !== null && lods.options.some((o) => o.lod === lod);
+  const defaultLod = qualifies(target?.selectedLod ?? null)
+    ? (target?.selectedLod ?? null)
+    : (lods.options[0]?.lod ?? null);
+  const lod = qualifies(stored?.lod ?? null)
+    ? (stored?.lod ?? null)
+    : defaultLod;
+  const draft: ToolDraft = { ...base, lod };
   const counts = useLayerCounts(target?.id ?? null);
   // `useLayerCounts` answers the ALL count for `matching` when nothing is
   // filtered (its SQL has no WHERE), so "no filter applied" has to come from
@@ -147,9 +163,12 @@ export function useToolForm(toolId: ToolId) {
         : scopeCount === 0
           ? "Nothing to run on (0 buildings)"
           : null;
+  // Precedence, top to bottom: what the TOOL cannot do here (eligibility),
+  // what the TARGET cannot offer (no qualifying LoD), then the things the user
+  // can fix in the form — the prefix, the parameters (Task 12), the scope.
   const runReason = !eligibility.ok
     ? eligibility.reason
-    : (prefixError ?? scopeReason);
+    : (lods.emptyReason ?? prefixError ?? scopeReason);
   const latestRun =
     runs.find((r) => r.toolId === toolId && r.targetLayerId === target?.id) ??
     null;
@@ -167,6 +186,9 @@ export function useToolForm(toolId: ToolId) {
     draft,
     eligibleTargets,
     target,
+    lodOptions: lods.options,
+    lodNoun: lods.noun,
+    lodReason: lods.emptyReason,
     counts,
     noFilter,
     columns,

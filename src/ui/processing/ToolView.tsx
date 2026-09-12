@@ -124,6 +124,32 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
             ))}
           </select>
         </label>
+        {f.tool.needsLod && f.tool.implemented && (
+          <label className="processing-field">
+            <span>LoD</span>
+            {f.lodOptions.length === 0 ? (
+              // §6: "When no LoD qualifies the select shows [the empty text]
+              // and Run is disabled with that reason." A disabled select with
+              // one unselectable option, not a hidden field: the user has to
+              // see WHICH requirement this layer fails.
+              <select aria-label="LoD" disabled value="">
+                <option value="">{f.lodReason}</option>
+              </select>
+            ) : (
+              <select
+                aria-label="LoD"
+                value={f.draft.lod ?? ""}
+                onChange={(e) => f.setDraft({ lod: e.target.value })}
+              >
+                {f.lodOptions.map((option) => (
+                  <option key={option.lod} value={option.lod}>
+                    {`${option.lod} (${plural(option.features, "building", "buildings")} ${f.lodNoun})`}
+                  </option>
+                ))}
+              </select>
+            )}
+          </label>
+        )}
         <div className="processing-field">
           <span>Scope</span>
           <div
