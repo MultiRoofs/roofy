@@ -1307,3 +1307,35 @@ describe("a build enqueued before the engine came up", () => {
     });
   });
 });
+
+describe("a build the removal and the death both overtook", () => {
+  it("lets the REMOVAL own the entry when the engine dies during the cleanup", async () => {
+    // Abandonment and removal both want the entry, and removal wins: the layer
+    // is gone from the app, so a `failed` card written after its drop is a card
+    // for a layer nobody can see. The drop's own queued task clears it again a
+    // moment later, which is exactly why the FINAL state cannot show this —
+    // every value the entry took after the removal has to be watched.
+    await enqueueLayerTable("L1", readerSource());
+    failures = { "CREATE OR REPLACE TABLE": "boom" };
+    const held = deferred();
+    holdStatement = { needle: "DROP TABLE", promise: held.promise };
+    const building = enqueueLayerTable("L1", readerSource());
+    await vi.waitFor(() =>
+      expect(sql.some((q) => q.startsWith("DROP TABLE"))).toBe(true),
+    );
+
+    const removed = dropLayerTable("L1");
+    const seen: Array<LayerTableState | null> = [];
+    const stop = useLayerTableStore.subscribe((s) => {
+      seen.push(s.tables["L1"] ?? null);
+    });
+    killEngine();
+    held.resolve();
+    await Promise.all([building, removed]);
+    stop();
+
+    expect(seen.filter((entry) => entry !== null)).toEqual([]);
+    expect(stateOf("L1")).toBeUndefined();
+    expect(getLayerTable("L1")).toBeNull();
+  });
+});
