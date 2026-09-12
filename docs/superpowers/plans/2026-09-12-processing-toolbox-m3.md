@@ -28625,3 +28625,167 @@ Checked end to end against the ledger:
 - **Whether `readerQuery` should also wrap the AGGREGATE statement's id accounting.** Task 19 uses `readerQuery` but calls no `assertSourceIds`: its rows are the TARGET's areas, so there is no returned building-id set to join the requested one against. A building the file lost is simply absent from the counts. Flagged rather than invented — detecting it needs the proxy relation to distinguish "the reader had no row" from "the row had no LoD 0 geometry", which is a change to `buildFeatureProxySql`'s shape.
 - **Line numbers drift.** Every citation was read on `develop` @ `55e4e00`. Treat one that does not match as a cue to re-read.
 - **What the second reconciliation changed, for the reviewer's eye.** The front matter now carries every name the three amendment strands added; Tasks 16, 17 and 19 were rewired onto Task 5's source doors (a real code change, not a note); Task 5's `registerBuffer === false` now tells a dead engine from a refused allocation; Task 15's `workloadNote` keeps Task 5's `needsReader` guard, widened to the footprint proxy (new logic, so it lands with its own case in `useToolForm.test.tsx` — footprint shows §6's note, extent rectangle does not); Task 18 tags the city `undoState` literal so Task 22's wrapping edit has something to quote; Task 9's `runQuery` mock records its statements so Task 16's new footer case can read them. Each is small, each is named here, and each is the kind of thing a reviewer should look at first.
+
+## Review residuals (resolve at pre-flight, before each affected task)
+
+The Codex `gpt-6-astra` plan review ran as three strand passes, twice (round 1: 48 findings, all addressed in amendment round 1; round 2: the findings below). The loop is capped at two amendment rounds, so these are carried HERE and resolved at pre-flight: before each affected task is dispatched, the commander either makes the targeted plan edit or carries the finding verbatim into the implementer's dispatch as a requirement, and the task reviewer checks it. Each resolution is a ledger line. Round-1 findings that the round-2 pass marked "Resolved" are closed; the tables in each strand file record that disposition.
+
+Commander's rulings on the residuals that needed a call (recorded in the ledger with their cost):
+
+- **Scope-wide source identity (A1, B1).** The executors compare the reader's returned ids against the ids their own scope-rows read returned — every scoped row, roots and non-contributors included, before the roll-up — never against `ctx.featureIds` (null on "all"). Aggregate validates its source-city read the same way. Self-review §4's "unchanged-id limitation" sentence is corrected: a changed id set is DETECTED, not tolerated.
+- **Style-by-result Save from `Color by = Single colour` (C6).** A Style-by-result draft's Save switches the layer to `Color by = Rules` from ANY mode (that is what the user asked to see); a manual rule's Save keeps the existing `ensureRulesMode` behaviour (only `"surface"` flips). Recorded as an M3 decision, not a deviation. Cost if wrong: one flag on the draft.
+- **Mixed GeometryCollections (B10).** Implemented, not skipped: the reviewer probed DuckDB 1.5.5 parsing a mixed point/line collection with the expected distance; Task 12 converts every collection and Task 17's engine test pins it.
+- **The New-layer branch precedes every This-layer publication (C1, CRITICAL).** Task 22's destination dispatch is inserted BEFORE Task 18's vector publication and the city write path alike; Task 23 tests that Aggregate → New layer leaves the original document unchanged. This is a targeted plan edit made before Task 20 is dispatched.
+- **Everything else** is applied as written by the reviewer unless the code contradicts it at pre-flight.
+
+### Strand A (Tasks 1–10) — round 2
+
+Four remaining findings in the [plan](/data2/hideba/multiroof-viewer/docs/superpowers/plans/2026-09-12-processing-toolbox-m3.md):
+
+1. **MAJOR — Tasks 7/10, lines 5918–5939 and 8558–8577:** Identity checks still cover only contributors. A missing root or non-contributing scoped object escapes detection, contrary to the final ruling in `progress.md:28`. Validate every ID returned by the scope-row query against source IDs, while retaining contributor-only measurement. Add missing-root and missing-non-contributor tests.
+
+2. **MAJOR — Task 5, lines 3267–3289:** The new static `engineAwait` import loads the DuckDB mock before `registerBuffer`, `dropBuffer` and `getDuckDBStatus` initialize. The suite fails during collection. Confirmed with the installed Vitest mock transformer. Dynamically import the exception classes after mock-variable initialization, or initialize those variables through `vi.hoisted`.
+
+3. **MAJOR — Task 8, lines 6421–6427:** `getByText("No solid geometry in this layer")` matches both the disabled option and the footer reason. The test fails with multiple matches. Assert the option separately and use `{ selector: "p" }` for the reason, matching the existing roof-LoD test.
+
+4. **MAJOR — Task 9, lines 6855–6873 and 7568–7581:** The SQL test migration is incomplete. The appended tests never import `buildMostFrequentSql`; additionally, checkout `ToolView.test.tsx:555–557` still expects the uncast median statement. Add the import and update that expectation in Task 9’s commit.
+
+Round-1 reconciliation; numbers below refer to the original findings:
+
+| #   | Status                 | Current plan evidence                                                                                               |
+| --- | ---------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Partly**             | 5939, 8577: partial contributor loss detected; scope-wide ruling still missing.                                     |
+| 2   | **Resolved**           | 3961–3968: `instanceof`, preserving exception identity. New test regression above.                                  |
+| 3   | **Resolved**           | 4075–4089: raced registration and late-success cleanup.                                                             |
+| 4   | **Resolved**           | 4007–4026, 5922, 8562: shared reader classification and logged detail.                                              |
+| 5   | **Resolved**           | 4249, 4261–4267, 6661–6673, 8721–8735: narrowed lookup and valid JSX.                                               |
+| 6   | **Resolved**           | 7690–7702, 7739–7750: resolved value type and resolver imports.                                                     |
+| 7   | **Resolved**           | 1275–1489, 1985, 2030–2035: complete fixtures, corrected property lookup, staging.                                  |
+| 8   | **Resolved**           | 2927–2945: roof-bearing fixture.                                                                                    |
+| 9   | **Resolved**           | 3387–3388, 4153, 4203–4223, 6094–6100: corrected fixtures and waits.                                                |
+| 10  | **Resolved**           | 5281–5293, 8090–8100, 8284–8287: captured SQL and meaningful assertions.                                            |
+| 11  | **Resolved**           | 6676–6723: explicit unimplemented definitions.                                                                      |
+| 12  | **Resolved**           | 7092–7095, 7381–7382, 16838–16935: seeded runs, evaluator arguments, editor Save and deferred Join coverage.        |
+| 13  | **Partly**             | 7580: CAST implemented; existing expectation migration remains incomplete.                                          |
+| 14  | **Resolved**           | 8649–8650, 8336–8355: valid count uses `line`; complete summary asserted.                                           |
+| 15  | **Resolved by ruling** | Labels retained at 5924/8564; `progress.md:22` accepts them. No spec sentence requires particular statement labels. |
+
+Citation spot-checks matched: plugin `types.ts:105–118`, `parseHelpers.ts:177–189`, `decodeTable.ts:725–733`; app `layerTables.ts:166–182`, `420–436`, `591–628`; `duckdb.ts:724–743`; `columnKind.ts:90–120`; `export.ts:558–578`. The previously incorrect fixture citation now correctly specifies 16 bytes.
+
+The binding no-recovery ruling still deviates from §6.1’s table-rebuild promise; streaming-copy and FCB write-back rulings likewise remain accepted deviations. These decisions are not reopened.
+
+Fix first
+
+### Strand B (Tasks 11–19) — round 2
+
+**Fixes remain before execution.** Line numbers below refer to the [reviewed plan](/data2/hideba/multiroof-viewer/docs/superpowers/plans/2026-09-12-processing-toolbox-m3.md).
+
+1. **MAJOR — Tasks 16–19, lines 16705–16718, 17547–17554, 20024–20030:** Source-ID validation still contradicts the latest ruling. Join/Distance compare against `ctx.featureIds ?? []`, making All unchecked; Aggregate omits validation. Moreover, the final join restores browsing-table IDs, masking a missing part when another contributor survives. Compare raw reader IDs against independently read scoped table IDs, before feature roll-up. Test missing roots and parts under All, Selected and Matching. Correct Self-review 28624–28625: changed IDs are **not** §6.1’s unchanged-ID limitation.
+
+2. **MAJOR — Task 18, lines 18473–18509:** Queued vector Undo rechecks only layer existence/kind. While it waits, another run can overwrite the same column and revoke its Undo; the captured callback nevertheless erases that newer result. Recheck current `undoable`, retained Undo state and source-document identity inside the FIFO callback. Test overlapping publication while Undo waits, plus relinking.
+
+3. **MAJOR — Task 18, lines 18275–18370:** Publication validates/captures `target.records` before asynchronous computation, then merges into the live document without checking identity. Relinking during computation can overwrite newly introduced source properties and record incorrect previous values. Verify the captured source identity immediately before publication; refuse changed sources and capture rollback values from the verified document.
+
+4. **MAJOR — Tasks 15/18, lines 14289–14307, 13457–13465, 17813–17816, 17953–17964:** Compilation/test defects remain:
+   - Registry uses `CrossLayerContext` without importing it.
+   - `joinParams` equality expectation omits the newly required `fieldTypes: {}`.
+   - Repeated `getState().layers[0]` expressions neither preserve union narrowing nor establish indexed-element existence.
+
+   Add the import, update the expectation, and narrow a captured layer variable before accessing `preparedData`.
+
+5. **MAJOR — Tasks 11/18, lines 9230–9247, 9338–9360, 9797–9810, 18308:** Task 11’s unconditional vector refusal makes its own empty-result “done” test fail. Task 18 removes that refusal but leaves the earlier refusal test expecting failure. Specify both test transitions explicitly so each task’s verification gate passes.
+
+6. **MAJOR — Task 15, lines 15351–15356, 15505–15507, 15594:** When every SOURCE option is disabled, the default source becomes null and its reason disappears. Distance can expose Run with no source; Join shows unrelated parameter errors. Preserve a disabled fallback for explanation and require a non-null source before enabling Run. Test first opening with only loading, failed or empty sources.
+
+7. **MAJOR — Tasks 12/16/17, lines 11187–11202, 16635–16639, 17494:** Frozen-field validation uses keys from **kept geometries only**. An unchanged document with the requested field present solely on a skipped feature incorrectly fails “Layer changed while running”. Validate field existence against all live source records; keep geometry filtering separate. Test this legitimate skipped-feature case.
+
+8. **MAJOR — Tasks 12/13, lines 11135–11141, 11757–11792:** Batching remains unbounded within one large feature: WKT assembly, `JSON.stringify`, encoding and final chunk copying can block Cancel. The final allocation also retains all encoded chunks while copying them, contrary to the memory commentary. Bound work by coordinates/bytes, including serialization and copying; test timer-delivered cancellation on one very large feature.
+
+9. **MAJOR — Task 16, lines 16013, 16480–16481, 16941–16952:** The new engine test has a false expectation. Against this checkout’s **DuckDB 1.5.5**, the specified polygon pair returns `within: true, covered: true`. Keep the accepted `ST_CoveredBy` choice; correct the expectation and explanation. Use a boundary point to demonstrate the predicate distinction.
+
+10. **MAJOR — Task 12, lines 10258, 11094–11121:** Mixed GeometryCollections remain skipped despite §7.7’s “any geometry type”. The limitation is disclosed, but “not probed” does not implement the requirement. Add mixed-collection WKT and an engine test. A local DuckDB 1.5.5 probe successfully parsed a mixed point/line collection and returned the expected distance, 5.
+
+11. **MINOR — Task 15, lines 15024–15087:** Aggregate validation now blocks incomplete rows, but errors remain detached from the offending row. Duplicate output names are also not flagged on the second row as §6 requires. Render row-specific errors, associate them with their controls, and test mixed-validity and duplicate rows.
+
+12. **MINOR — Task 13, line 11317:** `getDuckDBStatus` is cited at `duckdb.ts:196`, which is commentary for engine-death subscriptions. Its declaration is at **240**. Correct the citation.
+
+Round-1 finding disposition:
+
+| Finding | Status   | Current fix / remaining issue                                                                                  |
+| ------- | -------- | -------------------------------------------------------------------------------------------------------------- |
+| 1       | Resolved | 14021–14037 preserves the explicit proxy without table context.                                                |
+| 2       | Resolved | 12783–12786 applies footprint scope IDs.                                                                       |
+| 3       | Resolved | 12833 selects part contributors before root fallback.                                                          |
+| 4       | Resolved | Boundary-inclusive predicate supplied; new test defect is finding 9 above.                                     |
+| 5       | Partly   | 10964–10982 validates structure; 11118 still rejects mixed collections.                                        |
+| 6       | Partly   | 10933–10940 yields during coordinates; serialization remains unbounded.                                        |
+| 7       | Partly   | 16635 and 18275 add checks; findings 3 and 7 remain.                                                           |
+| 8       | Resolved | 18225–18235, 18346–18366 retain per-column previous values.                                                    |
+| 9       | Partly   | 18484 adds FIFO serialization; ownership/document revalidation remains missing.                                |
+| 10      | Resolved | 18721–18773 refreshes selection properties by stable ID.                                                       |
+| 11      | Resolved | 18647–18680 updates prepared-data category generation too.                                                     |
+| 12      | Resolved | 20038–20056 initializes every target feature before overlaying results.                                        |
+| 13      | Partly   | 14178 blocks incomplete aggregates; row-local errors remain absent.                                            |
+| 14      | Partly   | 15182–15194 orders readiness reasons correctly; default-source handling loses them.                            |
+| 15      | Resolved | 9386–9401 introduces the narrowed alias; 15588–15592 retains workload notes.                                   |
+| 16      | Partly   | Original fixture/import repairs landed; finding 4 identifies remaining executable-test defects.                |
+| 17      | Resolved | 11842–11852 distinguishes confirmed engine failure from registration failure.                                  |
+| 18      | Resolved | Log-label ruling accepted; 11960–11974 fixes Distance’s empty-source copy. A17 is expressly accepted at 28533. |
+
+Citation spot-checks also verified [CRS conversion](/data2/hideba/multiroof-viewer/src/scene/cursorCrsReadout.ts:35), [CRS loading](/data2/hideba/multiroof-viewer/src/features/layers/ensureCrs.ts:32), [buffer registration](/data2/hideba/multiroof-viewer/src/insights/duckdb.ts:724), [death racing](/data2/hideba/multiroof-viewer/src/insights/engineAwait.ts:104), [SQL quoting](/data2/hideba/multiroof-viewer/src/insights/sql.ts:28), [stable-ID highlighting](/data2/hideba/multiroof-viewer/src/scene/geoLayerSync.ts:236), and [prepared-document rendering](/data2/hideba/multiroof-viewer/src/scene/geoLayerDescriptions.ts:55). Those references match; the earlier incorrect renderer citation is repaired.
+
+The reconciled result, styling, two-argument column-builder and shared-merge interfaces agree. Accepted copy and predicate rulings are not reopened. The inherited M2 no-recovery ruling differs from §6.1’s recovery sentence; that remains an accepted deviation, not a new request for approval.
+
+Fix first
+
+### Strand C (Tasks 20–29) — round 2
+
+Plan references below are to [the amended plan](/data2/hideba/multiroof-viewer/docs/superpowers/plans/2026-09-12-processing-toolbox-m3.md). This was a static review; no implementation tests were run.
+
+| Round-1 finding                 | Status             | Amended-plan evidence                                                                                                        |
+| ------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| 1. Retry generation             | Partly             | Correct implementation at 26878; front matter 1140 and documentation 28302 still prescribe pre-boot capture.                 |
+| 2. Impossible Undo intersection | Resolved           | Nested union at 23760; both publication sites wrapped at 23789, 23807.                                                       |
+| 3. Stale provenance snapshot    | Resolved           | Fresh store read at 23637 before collecting run IDs.                                                                         |
+| 4. Streaming retarget           | Resolved           | Form refusal at 21123–21128 and Task 20 execution preflight.                                                                 |
+| 5. Bounds and LoD               | Partly             | Bounds at 22751 and complete LoD state at 22857; amended bounds test is incorrect at 22493.                                  |
+| 6. Vector name/count            | Partly             | Both-store lookup at 23611 and count correction in Task 23, 25200 onward; destination remains unreachable.                   |
+| 7. Ordinary-layer log menu      | Resolved           | Explicit preservation of `undefined` at 25570.                                                                               |
+| 8. Retained column reveal       | Partly             | Acknowledgement protocol at 27939–27975; stale pending-request regression remains.                                           |
+| 9. Derived write logging        | Partly             | Recorder wired at 27691–27722; failed COMMIT logging remains incomplete.                                                     |
+| 10. Stale palette callback      | Resolved           | Click-time store read at 27387–27395. Its regression test still needs repair.                                                |
+| 11. Incomplete tests/hooks      | Partly             | Several repairs landed, but missing helpers/imports and an incorrect test path remain below.                                 |
+| 12. Source-string FIFO test     | Resolved           | Behavioral queue test at 22514 onward.                                                                                       |
+| 13. Invalid-solid fixture       | Resolved           | Task 29, 28415 onward, separates the skipped-part case from the invalid-solid fixture.                                       |
+| 14. Log-label copy              | Resolved by ruling | Labels remain at 22648 and 22684; M3 ledger ruling 22 explicitly permits descriptive log labels. No §6.4 sentence is broken. |
+| 15. Background suites           | Partly             | App suites backgrounded; Task 29’s full plugin suite remains foreground at 28439.                                            |
+
+1. **CRITICAL — Tasks 22–23, 23561–23580, 25156–25200:** The New-layer branch is inserted into the **city write path**, after Task 18’s vector publication and unconditional return (18311–18410). Aggregate therefore modifies the original vector layer and never reaches `prepareDerivedVectorLayer`; the later vector discrimination also contradicts the narrowed target type. Move destination dispatch before either This-layer publication. Test that Aggregate/New layer leaves the original document unchanged.
+
+2. **MAJOR — Task 20, 21106–21107, 21147–21154:** Cross-strand form integration uses an obsolete city-only contract. Task 15 deliberately makes `target === null` for vector targets (15285), so Aggregate receives an empty suggested name. The replacement `runReason` also drops Task 15’s `targetReason` and `sourceReason` (15529–15530). Use `targetName` and preserve both validation gates.
+
+3. **MAJOR — Task 22, 24451–24462:** The prescribed replacement restores `start(run, column: string)`, but Task 9 defines `start(run, column: OutputColumn, descriptor: StyleByResult)` at 7761. The replacement either cannot match or breaks the revised callers/body. Change only the layer-ID expression within Task 9’s actual signature.
+
+4. **MAJOR — Task 24, 25886–25904:** Only workspace-save serialization filters derived layers. Existing `App.tsx:1498` share serialization includes every URL-backed city layer; derived cities inherit the parent’s `modelRef`. Sharing consequently restores the full parent under the derived name, violating §8’s exclusion from share links. Filter derived layers in the share path and test the decoded share payload.
+
+5. **MAJOR — Task 27, 28173–28194:** `enqueuedVersions` records success before the build succeeds. A failed rebuild can retain the previous ready table (`layerTables.ts:1178–1193`), but subsequent consumer openings now skip that version indefinitely. Track successful versions separately from pending builds; clear pending state on failure. Test failed rebuild → reopen consumer → successful retry without another stream commit.
+
+6. **MAJOR — Task 26, 26922, 27274:** Save delegates entirely to `ensureRulesMode`, which changes only `"surface"`. A Style-by-result draft saved while `"single"` remains visually inactive, contrary to §6.2’s Rules behavior. Switch mode when saving a result draft while preserving manual-rule semantics. Otherwise explicitly record this additional spec deviation; it is absent from the listed M3 rulings.
+
+7. **MAJOR — Tasks 24, 26–27, 25931, 27406–27416, 28009–28046:** The executable-test claim remains false. `tests/unit/insights/sql.test.ts` does not exist—Task 9 explicitly identifies the correct suite. `renderEditor()` and `colorInput()` are undefined, and the palette test presses Save without naming the rule. DataGrid uses `useRef` but the import instructions add only `useCallback` and `useEffect`. Supply complete test code, the real test path, required form input, and all imports.
+
+8. **MAJOR — Task 21, 22484–22494:** The amended bounds test checks the wrong layer. Each publication inserts immediately after the parent, so publishing `whole` puts it at index 1 and moves the subset to index 2. The assertion expects whole-parent bounds from the subset. Locate each copy using the ID returned by `publish()`.
+
+9. **MAJOR — Task 25, 26774–26779:** The post-COMMIT death regression does not establish its claimed timing. `sql.some(DESCRIBE)` can match the forward run’s earlier refresh, so death may occur before Undo reaches its post-COMMIT refresh. Clear the trace before Undo and wait for a dedicated refresh gate after observing Undo’s COMMIT.
+
+10. **MAJOR — Task 27, 27614:** Failed COMMIT returns omit the attempted COMMIT and subsequent rollback: COMMIT is outside the statement loop, and the instructions append it only on success. Record it immediately before invocation; record rollback only when actually issued. Add failure-path assertions, including derived writes.
+
+11. **MINOR — Task 27, 27950–27954:** A newly acknowledged reveal returns without deleting an older pending request for that layer. A later drain can scroll back to the previous run’s columns. Replace pending state before delivery and delete it on acknowledgement; test pending A → immediately honoured B → drain.
+
+12. **MINOR — Tasks 28–29/front matter, 1140, 28302, 28439, 28578:** Documentation contradicts the corrected Retry implementation, the plugin suite still violates the background-only rule, and “Nothing else … is unaccounted for” omits the accepted no-recovery deviation. Correct the boot-order description, background the plugin suite with exit-status collection, and list the deviation accurately.
+
+The binding streaming restriction contradicts §6’s promised static streaming snapshot; the binding M2 no-recovery ruling contradicts §6.1’s promise that Retry rebuilds tables. Those decisions remain accepted, not reopened; the latter needs inclusion in the final coverage accounting.
+
+Citation spot-checks matched `layerTables.ts:80–98`, `:420–436`, `:767–857`; `duckdb.ts:150–187`, `:681–697`, `:724–745`; and `layerStore.ts:327`. The previously incorrect optional-ID fact is corrected. The incorrect test-file reference and nonexistent helper references are reported in finding 7.
+
+Fix first
