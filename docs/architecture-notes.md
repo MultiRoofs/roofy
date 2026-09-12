@@ -366,4 +366,14 @@ detail line, "Over the resident set: the buildings loaded when the run started."
 camera settle can change which those are. The values themselves still live only
 in the table — see the roadmap's carried list.
 
-Browser acceptance procedure: `scripts/smoke/processing-m1.md`.
+**`median()` over a DECIMAL column does not come back as a number.** Measured
+against real DuckDB 1.5.5 through the node bindings: an uncast decimal literal
+(`10.0` in a `VALUES` list) infers DECIMAL, and `median()` over that column
+arrives as a raw `Uint32Array` rather than a JS number
+(`tests/integration/duckdb/computedColumns.test.ts:555-559`). Style by result
+reads its threshold straight out of that cell, so the probe — and
+`writeComputedColumns` — pin the column to DOUBLE; a future query that medians a
+column of unknown type must CAST first rather than trust the binding.
+
+Browser acceptance procedure: `scripts/smoke/processing-m1.md` (M13.1) and
+`scripts/smoke/processing-m2.md` (M13.2).
