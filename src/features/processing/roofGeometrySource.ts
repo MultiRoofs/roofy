@@ -131,19 +131,48 @@ export function featureIdsByObject(layer: Layer): ReadonlyMap<string, string> {
 /** One row of the LoD select (spec §6). */
 export interface LodOption {
   readonly lod: string;
-  /** FEATURES with at least one ROOF surface at this LoD, parts folded in. */
+  /**
+   * FEATURES with geometry of the kind the tool needs at this LoD, parts folded
+   * in — a ROOF surface for `roofLodOptions`, a SOLID for `solidLodOptions`.
+   */
   readonly features: number;
 }
 
-/** Per object: the LoDs it has ANY geometry at, and the LoDs it has a ROOF at. */
-interface LodTags {
-  readonly geometry: ReadonlySet<string>;
-  readonly roof: ReadonlySet<string>;
+/**
+ * TAGS ONLY: every LoD each object has ANY geometry at.
+ *
+ * §7's contributor rule is about geometry of ANY semantic type and ANY
+ * geometry type, which is why this is the one map {@link lodOptionsBy} reads.
+ * A static layer's answer is `surface.lod`; a streaming layer's is the
+ * record's `geometryLods`, which the worker filled when the cell landed.
+ */
+export function geometryLodsByObject(
+  layer: Layer,
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const out = new Map<string, ReadonlySet<string>>();
+  if (layer.isStreaming) {
+    const objects: Readonly<Record<string, ResidentObjectRecord>> =
+      getResidentModel(layer.id, 0).objects;
+    for (const [id, record] of Object.entries(objects)) {
+      out.set(id, new Set(record.geometryLods));
+    }
+    return out;
+  }
+  for (const [id, object] of Object.entries(layer.model.objects)) {
+    const lods = new Set<string>();
+    for (const s of object.surfaces) {
+      if (s.lod !== null) lods.add(s.lod);
+    }
+    out.set(id, lods);
+  }
+  return out;
 }
 
-/** TAGS ONLY: `Surface.type`/`Surface.lod`, or the record's two LoD lists. */
-function lodTagsByObject(layer: Layer): ReadonlyMap<string, LodTags> {
-  const out = new Map<string, LodTags>();
+/** TAGS ONLY: the LoDs each object has a ROOF surface at. */
+function roofLodsByObject(
+  layer: Layer,
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const out = new Map<string, ReadonlySet<string>>();
   if (layer.isStreaming) {
     const objects: Readonly<Record<string, ResidentObjectRecord>> =
       getResidentModel(layer.id, 0).objects;
@@ -152,19 +181,16 @@ function lodTagsByObject(layer: Layer): ReadonlyMap<string, LodTags> {
       for (const metric of record.roofMetrics) {
         if (metric.lod !== null) roof.add(metric.lod);
       }
-      out.set(id, { geometry: new Set(record.geometryLods), roof });
+      out.set(id, roof);
     }
     return out;
   }
   for (const [id, object] of Object.entries(layer.model.objects)) {
-    const geometry = new Set<string>();
     const roof = new Set<string>();
     for (const s of object.surfaces) {
-      if (s.lod === null) continue;
-      geometry.add(s.lod);
-      if (s.type === "RoofSurface") roof.add(s.lod);
+      if (s.lod !== null && s.type === "RoofSurface") roof.add(s.lod);
     }
-    out.set(id, { geometry, roof });
+    out.set(id, roof);
   }
   return out;
 }
@@ -174,31 +200,38 @@ function lodTagsByObject(layer: Layer): ReadonlyMap<string, LodTags> {
  * the tool needs, each with the count of FEATURES that have it, parts folded
  * into their building".
  *
- * TAGS ONLY. A static layer's answer is `surface.type` and `surface.lod`; a
- * streaming layer's is `geometryLods` plus the LoD already on each pre-computed
- * roof metric. No geometry is measured, because this fills a dropdown.
+ * TAGS ONLY. No geometry is measured, because this fills a dropdown.
  *
  * THE SAME CONTRIBUTOR RULE AS THE RUN (§7). At each LoD, a feature whose PART
- * has geometry there is answered from its parts alone — a root roof displaced
- * by a wall-only part does not make the feature count, exactly as it will not
- * make it measurable. A select that promised "2 buildings with roof surfaces"
- * over a run that then measured one would be the same bug printed twice, in the
- * two places the user compares.
+ * has GEOMETRY there is answered from its parts alone — a root roof (or a root
+ * solid) displaced by a wall-only part does not make the feature count, exactly
+ * as it will not make it measurable. A select that promised "2 buildings with a
+ * solid" over a run that then measured one would be the same bug printed twice,
+ * in the two places the user compares.
  *
  * Sorted highest detail first, matching `computeAvailableLods` and the
  * streaming ladder so no two LoD lists in the app read in opposite directions.
  * A surface with a null LoD contributes to no option: there is no rung to
  * offer the user for it.
+ *
+ * @param qualifies The per-CONTRIBUTOR test, applied AFTER §7's contributor
+ * rule has already chosen the contributors by ANY geometry at the LoD. It is
+ * NOT the contributor selector. Writing `hasSolidAt` into contributor
+ * SELECTION makes a wall-only part fall back to the root's solid, which is the
+ * 3D BAG double-count §7's rule exists to prevent.
  */
-export function roofLodOptions(layer: Layer): ReadonlyArray<LodOption> {
-  const tags = lodTagsByObject(layer);
+export function lodOptionsBy(
+  layer: Layer,
+  qualifies: (objectId: string, lod: string) => boolean,
+): ReadonlyArray<LodOption> {
+  const geometry = geometryLodsByObject(layer);
   const featureOf = featureIdsByObject(layer);
 
   // Every rung anyone mentions, and the members of every feature.
   const rungs = new Set<string>();
   const members = new Map<string, string[]>();
-  for (const [id, tag] of tags) {
-    for (const lod of tag.geometry) rungs.add(lod);
+  for (const [id, lods] of geometry) {
+    for (const lod of lods) rungs.add(lod);
     const feature = featureOf.get(id) ?? id;
     const list = members.get(feature);
     if (list) list.push(id);
@@ -210,16 +243,12 @@ export function roofLodOptions(layer: Layer): ReadonlyArray<LodOption> {
     let count = 0;
     for (const [featureId, ids] of members) {
       const parts = ids.filter((id) => id !== featureId);
-      const partContributors = parts.filter((id) =>
-        tags.get(id)?.geometry.has(lod),
-      );
+      const partContributors = parts.filter((id) => geometry.get(id)?.has(lod));
       const contributors =
         partContributors.length > 0
           ? partContributors
-          : ids.filter(
-              (id) => id === featureId && tags.get(id)?.geometry.has(lod),
-            );
-      if (contributors.some((id) => tags.get(id)?.roof.has(lod))) count += 1;
+          : ids.filter((id) => id === featureId && geometry.get(id)?.has(lod));
+      if (contributors.some((id) => qualifies(id, lod))) count += 1;
     }
     if (count > 0) options.push({ lod, features: count });
   }
@@ -227,4 +256,17 @@ export function roofLodOptions(layer: Layer): ReadonlyArray<LodOption> {
   return options.sort(
     (a, b) => Number.parseFloat(b.lod) - Number.parseFloat(a.lod),
   );
+}
+
+/**
+ * The LoDs at which the layer has ROOF surfaces (spec §7.1), with the count of
+ * FEATURES that have them.
+ *
+ * A one-line wrapper over {@link lodOptionsBy}: the contributor rule, the
+ * ordering and the counting are shared with the solids answer, and the only
+ * thing roof-specific is the qualifier.
+ */
+export function roofLodOptions(layer: Layer): ReadonlyArray<LodOption> {
+  const roof = roofLodsByObject(layer);
+  return lodOptionsBy(layer, (id, lod) => roof.get(id)?.has(lod) ?? false);
 }

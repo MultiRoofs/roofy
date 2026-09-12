@@ -34,7 +34,7 @@ vi.mock("@cityjson/navara-core", async () => {
   };
 });
 
-const { featureIdsByObject, roofGeometrySource, roofLodOptions } =
+const { featureIdsByObject, lodOptionsBy, roofGeometrySource, roofLodOptions } =
   await import("../../../../src/features/processing/roofGeometrySource");
 
 /** A unit square of `type` at `lod`; area 1, inclination 0. */
@@ -274,6 +274,27 @@ describe("roofGeometrySource", () => {
       { lod: "2", areaSqM: 12, inclinationDeg: 30, azimuthDeg: 180 },
     ]);
     expect(source.hasGeometryAt("r1", "1.2")).toBe(true);
+    expect(measured).toEqual([]);
+  });
+});
+
+describe("lodOptionsBy", () => {
+  it("applies `qualifies` AFTER the contributor rule, never as the selector", () => {
+    // The rule the doc comment states, as an executable fact. B1's part has
+    // geometry at 2.2 but does not QUALIFY; B1 must therefore not count at
+    // 2.2 — a qualifier used as the contributor SELECTOR would pick the root
+    // instead and count it, which is the 3D BAG double count.
+    const qualifying = new Set(["B1", "B4"]);
+    expect(
+      lodOptionsBy(
+        staticLayer(),
+        (id, lod) => lod === "2.2" && qualifying.has(id),
+      ),
+    ).toEqual([{ lod: "2.2", features: 1 }]); // B4 only
+  });
+
+  it("measures nothing", () => {
+    lodOptionsBy(staticLayer(), () => true);
     expect(measured).toEqual([]);
   });
 });
