@@ -157,8 +157,8 @@ export function rollUpSolids(
   let footprint = 0;
   let ground = Number.POSITIVE_INFINITY;
   let ridge = Number.NEGATIVE_INFINITY;
-  let valid: boolean | null = true;
   let hasInvalid = false;
+  let hasUnknown = false;
   for (const row of rows) {
     if (row.volume_m3 === null) volume = null;
     else if (volume !== null) volume += row.volume_m3;
@@ -169,13 +169,14 @@ export function rollUpSolids(
     // READ, never re-derived (finding D1): the statement already guards every
     // report field on `s IS NOT NULL`, so a NULL here means "no report" and a
     // `false` means the engine checked this solid and rejected it.
-    if (row.is_valid === false) {
-      valid = false;
-      hasInvalid = true;
-    } else if (row.is_valid === null) {
-      valid = null;
-    }
+    if (row.is_valid === false) hasInvalid = true;
+    else if (row.is_valid === null) hasUnknown = true;
   }
+  // Three-valued AND, decided AFTER the loop so the reader's row ORDER cannot
+  // decide it: one contributor the engine checked and REJECTED makes the feature
+  // invalid whatever a sibling with no report says; only in the absence of a
+  // rejection does an unknown withhold the verdict.
+  const valid: boolean | null = hasInvalid ? false : hasUnknown ? null : true;
   const groundOut = Number.isFinite(ground) ? ground : null;
   const ridgeOut = Number.isFinite(ridge) ? ridge : null;
   return {

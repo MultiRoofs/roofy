@@ -153,6 +153,19 @@ describe("rollUpSolids", () => {
     expect(rollUpSolids([solidRow("p1", "B")])?.valid).toBe(true);
   });
 
+  it("lets FALSE dominate an unknown, in either order", () => {
+    // Three-valued AND: one contributor the engine checked and REJECTED makes
+    // the feature invalid whatever a sibling with no report says. Order must
+    // not decide it — a `valid` that depended on the reader's row order would
+    // flip between two runs of the same scope.
+    const rejected = solidRow("p1", "B", { is_valid: false });
+    const unknown = solidRow("p2", "B", { is_valid: null });
+    expect(rollUpSolids([rejected, unknown])?.valid).toBe(false);
+    expect(rollUpSolids([unknown, rejected])?.valid).toBe(false);
+    // With no rejection, an unknown still withholds the verdict.
+    expect(rollUpSolids([solidRow("p1", "B"), unknown])?.valid).toBeNull();
+  });
+
   it("is null for no contributors at all", () => {
     expect(rollUpSolids([])).toBeNull();
   });
@@ -762,6 +775,26 @@ describe("measureSolids", () => {
         ["B2", "B2"],
       ]),
       sourceIds(["B1"]),
+    ]);
+    await expect(measureSolids(run(), ctx as never)).rejects.toThrow(
+      SOURCE_IDS_DIFFER,
+    );
+    expect(release).toHaveBeenCalled();
+  });
+
+  it("fails when the MEASURE answer drops a contributor the id check saw", async () => {
+    // The second threshold, over the rows that are actually measured: the id
+    // check answered for both, and then the measure statement came back without
+    // B2. Rolling that up would publish B2 as "not a solid" — a verdict on
+    // geometry nobody looked at — beside a real measurement of B1.
+    const layer = layerWith({ B1: ["2.2"], B2: ["2.2"] });
+    const { ctx } = context(layer, [
+      scopeRows([
+        ["B1", "B1"],
+        ["B2", "B2"],
+      ]),
+      sourceIds(["B1", "B2"]),
+      measured([solidRow("B1", "B1")]),
     ]);
     await expect(measureSolids(run(), ctx as never)).rejects.toThrow(
       SOURCE_IDS_DIFFER,
