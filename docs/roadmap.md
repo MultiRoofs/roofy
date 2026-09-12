@@ -612,29 +612,68 @@ Acceptance scenario 1 was smoked in a real browser: `scripts/smoke/processing-m1
 The seam and the DuckDB probe results are in `docs/architecture-notes.md`
 ("Processing toolbox seam (M13.1, 2026-09-11)").
 
-Carried to 13.2 / M2 — things a user can notice today:
+**Milestone 13.2 implemented 2026-09-12** — **Roof metrics to attributes** as
+the second tool: an LoD select with per-LoD feature counts, six measure
+checkboxes (all ticked by default), a flat-threshold slider (0–15°, default 5°,
+strict `<`), §7's geometry-keyed contributor rule and roll-ups, skip accounting
+by LoD, and Style by result on `roof_area_m2` — computed app-side in JS, on
+every city layer kind including streaming. With it: the "Loading extension" run
+phase (`ensureExtension` inside the table FIFO, with the spec's failure copy),
+and a PUBLISHED DuckDB status (`useDuckDBStatus()`), so the catalogue's
+capability chips track an extension's state and offer Retry. A dead DuckDB
+worker is now DETECTED (its own `error`/`messageerror` event, published as
+`failed`): every queued and running run fails with §6.1's "Analytics engine
+stopped", every layer table is invalidated with the same message, every Undo is
+disabled, and the tool rows go dark with the existing "Not available while
+DuckDB is unavailable". §6.1's RECOVERY is deliberately not built — see the
+carried list. Verified in a real browser on the `two-buildings` fixture and on a
+Delft FCB layer (1,115 buildings, 9.2 s) in light and dark at 1000 px width. The
+M13.2 seams are in `docs/architecture-notes.md` ("Processing toolbox seam …
+M13.2 (2026-09-12)").
 
-- **Streaming (FCB) layers get the table badge but no Details or rules
-  entries.** A run merges its results into `layer.model.objects`, which is
-  empty for a streaming layer, so the values exist only in its table. The
-  streaming attribute path lives in the FCB plugin and worker and is its own
-  change.
-- The six remaining tools are registered but `implemented: false`, and that
-  reason outranks every other one — so a cross-layer row reads "Not available
-  yet" rather than "Add a vector layer to join with" until it is implemented.
+Carried to 13.3 / M3 — things a user can notice today:
+
+- **Streaming (FCB) runs write to the table only, and that is now a DEFERRAL
+  with a design.** A streaming layer's `model.objects` is empty, so a run's
+  values show in the grid, the filter and exports but not in Details, the rule
+  editor or a colour rule, which §7.1 and §8 do ask for. Closing it means an
+  attribute-overlay seam in the FCB plugin and worker plus an Undo path; the
+  repo owner has ruled it a future consideration (M2 plan, Design decision (b)
+  and its "Future consideration" section).
+- **A dead DuckDB worker is detected and contained, but not recovered from.**
+  Retry in the status bar reboots the engine and rebuilds only the sources
+  parked while it was coming up, so the tables that were `ready` when the worker
+  died stay `failed` and every tool stays disabled until the page is reloaded.
+- **Three known gaps in that death path**: a table build whose statement is in
+  flight at the death still holds the table FIFO; `runQuery` callers outside the
+  run queue (the export dialog, the layer counts) await a promise that never
+  settles; `refreshLayerTableColumns` and `retryEngine` carry no engine-
+  generation check.
+- **Style by result's median is over table ROWS, not features**, so part rows
+  bias the draft threshold towards the small members (fixture: 20 / 20 / 180
+  gives `> 20` where the two features' median is 100).
+- **No rule-colour palette rotation**: every Style by result draft takes the
+  editor's one default new-rule colour, so successive drafts share it.
 - **Style by result sets `Color by = Rules` eagerly**, so a layer that was on
   Surface type or Single colour repaints to the unmatched colour before the
   draft rule is saved. The draft rule's own colour still waits for Save.
-- **No rule-colour palette rotation**: every Style by result draft takes the
-  editor's one default new-rule colour, so successive drafts share it.
-- **Runtime engine-death recovery is not implemented** (§6.1 "Analytics engine
-  stopped": failing the running and queued runs, rebuilding every layer table
-  from the in-memory models, invalidating every Undo). Deferred to M2 as a
-  design task — the reviewer ruled it too large for a fix wave.
-- A run that goes stale or is undone while a Style by result median is in
-  flight still opens the draft the median produced.
-- Cancel is best-effort at statement granularity: it is seen between
-  statements, so a long one runs to completion before the run gives up.
+- A run that goes stale or is undone while a Style by result median is in flight
+  still opens the draft the median produced.
+- **The drawer's synthetic "Roof area" and the computed `roof_area_m2` disagree**
+  where a feature has both its own roof and parts (correct per §7's contributor
+  rule — see the architecture note), and nothing in the UI says why.
+- The five remaining tools are registered but `implemented: false`, and that
+  reason outranks every other one — so a cross-layer row reads "Not available
+  yet" rather than "Add a vector layer to join with" until it is implemented.
+  No tool needs an extension yet, so the muted chip, its Retry link and the
+  extension-failure run copy are covered by unit tests and unreachable through
+  the UI until a `three_d` or `spatial` tool ships.
+- **`useLodOptions` answers only for `roof-metrics`** while `ToolView` renders
+  the LoD field on `needsLod && implemented`: M3's solids tool must extend the
+  hook in the same commit that flips `implemented`.
+- Cancel is best-effort at statement granularity for SQL — it is seen between
+  statements, so a long one runs to completion — and at a 500-feature batch
+  boundary inside Roof metrics' compute.
 - The write step is logged as a step with its timing, but its SQL is not in the
   log view — a planner cannot read the UPDATE back and repeat it by hand.
 - "Open table" appends the run's columns to a customised column list but does
@@ -642,10 +681,11 @@ Carried to 13.2 / M2 — things a user can notice today:
 - A queued run's "Matching" ids are resolved at the HEAD of the queue, from the
   filter frozen at Run. Ruled correct; recorded because the log header shows
   `scopeCount 0` until then.
-- The run's live elapsed timer starts at submit but is measured from execute,
-  so it can jump back once.
 - A corrupt bbox with `zmin > zmax` writes a negative height and reports it
   honestly rather than guarding.
+- **The app shell overflows horizontally below ~1024px** (`body.scrollWidth`
+  1024 at `innerWidth` 1000), clipping the right edge of the right panel with
+  the panel collapsed too. Pre-existing and unrelated to the toolbox.
 
 ## Cross-Cutting Workstreams
 

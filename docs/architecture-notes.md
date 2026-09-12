@@ -197,6 +197,8 @@ face here would be the single element outside the brand's family, and CLAUDE.md
 makes the brand tokens the only source. If this is ever revisited it is one
 token change in `brand.css`, not a per-component override.
 
+### M13.2 (2026-09-12)
+
 **The engine status is published, not polled (M13.2).** `duckdb.ts` keeps a
 listener set and a version counter; `setStatus` is the one writer and every
 transition — `initializing`, `ready`, `failed`, and each lazy extension's
@@ -211,5 +213,157 @@ rejects as uncached; a counter cannot be written that way by accident.
 that is already `ready` does not re-run `doInit`, so App's optimistic
 `setDuckdbStatus({ state: "initializing" })` made a healthy engine read
 "Loading" whenever the user retried a failed TABLE.
+
+**Listeners are isolated, and every engine has a number.** Both dispatches —
+`setStatus` and the death notification inside `markEngineDead`
+(`src/insights/duckdb.ts:113-134`, `:150-186`) — iterate a COPY of their
+listener set and call each listener inside its own `try`/`catch`. The copy
+freezes the membership of the dispatch in flight, so a listener that subscribes
+or unsubscribes from inside its own notification changes who hears the NEXT
+transition and never the one in flight. The per-listener catch is because a
+subscriber is an OBSERVER of engine work: `setStatus` is called from inside
+`doInit` (the `initializing` publish sits before its `try`), so an escaping
+exception would abort the boot with the status stranded at `initializing`, and
+one thrown from the `failed` publish would jump over the Worker terminate and
+the memo reset in the catch and strand a wasm heap no Retry could reach — and
+either way every listener queued behind the thrower would be skipped. Beside
+the status there is one `generation` counter (`duckdb.ts:109`), bumped by every
+boot AND every death and exported as `getEngineGeneration()`. Async work that
+can outlive the engine it was started for compares it before it writes module
+state or publishes a status, so the corpse's news is never mistaken for the
+live engine's; `onEngineDeath` is the separate signal for the same problem, and
+it drops each listener AS it fires (one notification per engine — `layerTables`
+re-arms from inside the dispatch, `layerTables.ts:453-465`).
+
+**A tool's extension loads inside the run, in its own phase.** A run whose tool
+declares an `extension` calls `ensureExtension` under `phase: "extension"`
+(`src/features/processing/runQueue.ts:608-640`) before its scope is resolved
+(`resolveScope` at `:652`), and a failed load fails the run before the executor
+sees it. Two placement decisions: the phase sits AFTER the cheap pre-flight
+refusals — a missing layer, a rebuilt table, a column that has come to belong
+to the file, an unimplemented tool — so a run that cannot succeed never
+triggers a 24 MB download; and it sits INSIDE `runOnTableQueue`, so that
+download blocks table builds for its duration. The second is the deliberate
+trade: loading outside the queue would take the phase out of §6.1's sequence
+and would let the run start against a table being rebuilt underneath it.
+`ensureExtension` cannot be aborted (one memoised INSTALL/LOAD per extension),
+so a Cancel pressed during the download is honoured on the far side of it. No
+tool in M13.2 declares an extension; the seam exists so M13.3's `three_d` and
+`spatial` tools are a registry entry and an executor, nothing more.
+
+**A dead worker is detected, announced and contained — and not recovered
+from.** `doInit` creates the Worker itself, so `duckdb.ts` attaches its own
+`error`/`messageerror` listeners beside the ones `AsyncDuckDB.attach`
+registers (`duckdb.ts:410-414`). Those listeners call `markEngineDead` — which
+drops the connection, clears the boot memo and the extension memos and publishes
+`failed` through the same `setStatus` writer — and then terminate the worker
+themselves (`:402-409`), in that order and outside `markEngineDead`, because once
+the connection is dropped the handler's closure is the last hand on a Worker
+holding a 36 MB wasm heap and the cleared boot memo means a Retry builds a
+second one. A failed QUERY is not
+the signal: duckdb-wasm's own worker error handler clears its pending-request
+map WITHOUT rejecting the promises, so a query in flight when the worker dies
+never settles, and `postTask` on a detached worker logs and returns `undefined`
+rather than rejecting. That is also why every engine await in `execute` is
+`raced` against the death signal as well as against the run's `AbortSignal`
+(`runQueue.ts:156-199`): a signal fires once, so a run cancelled while the
+engine was alive has already spent its abort and the death a moment later still
+has to release the await. Containment then falls out of code that already
+exists: `runQuery` refuses on a non-`ready` status, and `eligibility.ts` already
+disables every tool row with "Not available while DuckDB is unavailable". Every
+layer table that was not already `failed` is invalidated to `failed` with the
+message "Analytics engine stopped" (`layerTables.ts:422-430`), keyed on the
+DEATH signal rather than on a status value or a `ready` → `failed` transition —
+a boot that never came up publishes the same `failed` and must not condemn
+tables a working engine built, and a worker that dies while the status is
+`initializing` publishes `failed` from there, which no transition watcher would
+see. Builds are loyal to an engine generation: a build captures
+`getEngineGeneration()` and abandons (leaving the engine-stopped failure)
+rather than writing state about a database that is gone. Undo is taken away
+session-wide through one `engineStopped` flag on the processing store rather
+than per run, because every backup table died with the database. What is
+deliberately NOT built is §6.1's recovery: the status bar's Retry reboots the
+engine but `retryEngine` revives only what it parked in `pendingSources`
+(sources refused while the engine was coming UP), so the invalidated tables
+stay `failed` and every tool stays disabled — with the honest table reason —
+until the page is reloaded.
+
+**The death path's known gaps, recorded rather than fixed.** A table build whose
+statement is in flight at the moment of death still holds the table FIFO: the
+build's guards are checked around its awaits, not inside the never-settling one
+(`onEngineDeath` exists; wiring it into `layerTables`' build steps is future
+work). `runQuery` callers OUTSIDE `execute` — the export dialog, the layer
+counts — have the same shape and await a promise that never settles after a
+death, because only the run queue races the death signal.
+`refreshLayerTableColumns` (`layerTables.ts:348-372`) and `retryEngine`
+(`:725-`) carry no generation check: the first re-reads the registry after its
+round trip (`:360-365`) and the second guards on a DROP landing since it began
+(`droppedSince`, `:748-749`), which covers a rebuild or a removal but not a
+reboot.
+
+**Roof metrics is computed app-side, in JS, and measures only what it writes.**
+Roof area, inclination and azimuth are derived from ring geometry and exist
+nowhere in DuckDB, so the tool issues exactly ONE statement — "which rows are
+in scope, and which feature does each belong to" — and does everything else in
+memory (`src/features/processing/tools/roofMetrics.ts`). The table is the
+authority on rows; `roofGeometrySource.ts` is the authority on geometry, and it
+has two halves on purpose: `roofLodOptions` fills the LoD select from surface
+TAGS alone (`type`, `lod`, and a streaming record's `geometryLods` plus the LoD
+on each pre-computed roof metric) and never calls `computeRoofMetrics`, while
+`RoofGeometrySource.roofSurfacesAt` measures on demand, memoised per (object,
+LoD), so a run touches only its scoped features' contributors at the one LoD it
+was given. Features roll up in batches of `ROOF_BATCH_FEATURES` (500) that
+yield a MACROTASK and then check the run's `AbortSignal` through
+`ToolContext.throwIfCancelled`. That buys responsiveness and an early exit, not
+cancellation correctness — the queue already refuses to publish an aborted run,
+so a Cancel during a long compute was always honoured; it just had to wait for
+the whole computation first.
+
+**§7's contributor rule is about GEOMETRY, not about roofs.** "If any part of
+the feature has geometry [at the chosen LoD], the PARTS are the contributors" —
+so a Building with a roof at 2.2 whose BuildingPart has only WALLS at 2.2
+selects the part and is then skipped for having no roof. Using the root's roof
+instead would report exactly the 3D BAG double-storage the rule exists to
+avoid. `hasGeometryAt` is therefore a question about surfaces of EVERY semantic
+type, and the FCB resident records carry `geometryLods` beside their LoD-tagged
+`roofMetrics` for this reason alone. The same rule fills the LoD select's
+per-LoD feature counts, so the select cannot promise a building the run then
+skips. Rows are written twice over, by role
+(`tools/roofMetrics.ts:170-206`): the ROOT row of a feature gets the feature's
+roll-up over its contributors — which may be the parts' surfaces and not the
+root's own — while each PART row gets the roll-up of its own surfaces alone.
+
+**The drawer's "Roof area" and the computed `roof_area_m2` can disagree, and
+both are right.** A feature that has its own roof geometry AND a part with
+geometry reads one number in the inspector's Summary (the drawer's synthetic
+`Roof area` / `Mean slope` / `Parts`, unchanged by this milestone) and another
+in the COMPUTED group, because the contributor rule above ignores the root's
+own geometry as soon as a part has any. On the `two-buildings` fixture the
+inspector says 112.0 m² / 30.0° for `NL.IMBAG.Pand.0001` where the computed
+columns say 20 m² / 0°. Nothing in the UI explains that yet; it is on the
+roadmap's carried list rather than papered over here.
+
+**Two roof aggregations, on purpose.** `domain/roofMetrics/aggregate.ts` keeps
+the Details panel's area-weighted CIRCULAR mean azimuth with its hard-coded 1°
+flat threshold, and its area-weighted mean slope and surface count agree with
+§7. What it cannot give the toolbox is §7's azimuth (the largest non-flat
+surface), the user's own threshold, or NULL where a measure could not be
+evaluated — so `domain/roofMetrics/roofRollUp.ts` exists beside it rather than
+replacing it.
+
+**Style by result gates on values, not on a count.** `RunSummary` carries
+`firstColumnNonNull`, computed centrally in `summarise` (`runQueue.ts:265-281`)
+from the run's FIRST output column — the one §6.2's button offers. The button
+is disabled with "All values are empty" on `firstColumnNonNull === 0`, which is
+NOT `measured === 0`: a Roof metrics run with only Dominant azimuth ticked over
+flat roofs measures every building and writes NULL to all of them. A stale run
+is disabled too, and outranks empty, because its table was rebuilt underneath
+it and no median can be trusted at all.
+
+**A streaming run's card says what it ran over.** A run on an FCB layer adds one
+detail line, "Over the resident set: the buildings loaded when the run started."
+(`runQueue.ts:237-255`), because the scope was the resident features and a
+camera settle can change which those are. The values themselves still live only
+in the table — see the roadmap's carried list.
 
 Browser acceptance procedure: `scripts/smoke/processing-m1.md`.
