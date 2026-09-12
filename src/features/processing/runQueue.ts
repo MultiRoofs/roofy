@@ -31,12 +31,16 @@
 import {
   ensureExtension,
   getDuckDBStatus,
-  onEngineDeath,
   subscribeDuckDBStatus,
   isExtensionLoaded,
   runQuery,
   type QueryOutcome,
 } from "../../insights/duckdb";
+import {
+  CancelledError,
+  EngineDeadError,
+  raced,
+} from "../../insights/engineAwait";
 import { quoteIdent } from "../../insights/sql";
 import {
   computedColumnsOf,
@@ -109,9 +113,10 @@ export interface ToolContext {
    * during a long compute was always honoured. What a query-free executor lacks
    * is the early EXIT: without this it computes to the end first. `ctx.query`
    * already does the same check, which is enough for a tool whose work IS
-   * queries. `CancelledError` is private to this module on purpose: it is what
-   * makes `execute`'s catch read "cancelled" rather than "failed", and an
-   * executor must not be able to fake either.
+   * queries. `CancelledError` is not reachable from an executor on purpose: it is
+   * what makes `execute`'s catch read "cancelled" rather than "failed", and an
+   * executor must not be able to fake either — it throws through this method or
+   * not at all.
    */
   throwIfCancelled(): void;
 }
@@ -133,70 +138,20 @@ export type ToolExecutor = (
 /** Spec §6.1's sentence for a run the engine's death took. */
 const ENGINE_STOPPED = "Analytics engine stopped";
 
-/** Thrown by the context when the user cancelled; never surfaced as an error. */
-class CancelledError extends Error {}
-
 /**
- * Race an ENGINE await against the run's abort signal.
+ * The abort+death race, and the two error classes it rejects with, live in
+ * `insights/engineAwait.ts`: the TABLE BUILDS need exactly the same protection
+ * — duckdb-wasm strands the requests that were in flight when its worker died,
+ * and a build sitting on one holds the shared FIFO for the life of the page —
+ * and two copies of that race would be two answers to one hazard.
  *
- * Aborting a controller does not release an await. duckdb-wasm drops the
- * promises of requests that were in flight when its worker died — its own
- * `onError` clears the pending map WITHOUT rejecting them — so a query, an
- * extension load or a write caught by the death never settles, and an
- * `execute` sitting on one would hold the shared table FIFO for the life of
- * the page: the card would read "failed" while every later run and every table
- * build queued behind a task that can never finish.
- *
- * The listener is removed on settle; a run that is never cancelled would
- * otherwise leave one on its controller for as long as the signal lives.
+ * `signal` is null for the awaits at and past this module's point of no return.
+ * A user's Cancel during the write is decided INSIDE the write — its pre-COMMIT
+ * check, and §6.1's "finished before the cancel arrived" when the COMMIT won
+ * the race — and the DESCRIBE that follows it is past the COMMIT, where the
+ * columns are on the table whatever the signal says. Only the death may take
+ * those two.
  */
-/** Thrown when the engine died under an await that can never settle. */
-class EngineDeadError extends Error {}
-
-/**
- * Race an ENGINE await against the engine's DEATH, and optionally against the
- * run's own abort.
- *
- * The death is an independent signal (`onEngineDeath`) and not a reading of
- * the abort, because an `AbortSignal` fires ONCE: a run cancelled while the
- * engine was alive has already spent its abort, and the crash that catches its
- * write a moment later would have nothing left to fire. Racing the death
- * separately covers every cancel state, which is the whole point.
- *
- * `signal` is null for the awaits at and past the point of no return. A user's
- * Cancel during the write is decided INSIDE the write — its pre-COMMIT check,
- * and §6.1's "finished before the cancel arrived" when the COMMIT won the race
- * — and the DESCRIBE that follows it is past the COMMIT, where the columns are
- * on the table whatever the signal says. Only the death may take those two.
- */
-function raced<T>(promise: Promise<T>, signal: AbortSignal | null): Promise<T> {
-  if (signal?.aborted) return Promise.reject(new CancelledError());
-  return new Promise<T>((resolve, reject) => {
-    const stopListening = () => {
-      signal?.removeEventListener("abort", onAbort);
-      stopDeath();
-    };
-    const onAbort = () => {
-      stopListening();
-      reject(new CancelledError());
-    };
-    const stopDeath = onEngineDeath(() => {
-      stopListening();
-      reject(new EngineDeadError());
-    });
-    signal?.addEventListener("abort", onAbort, { once: true });
-    promise.then(
-      (value) => {
-        stopListening();
-        resolve(value);
-      },
-      (error: unknown) => {
-        stopListening();
-        reject(error instanceof Error ? error : new Error(String(error)));
-      },
-    );
-  });
-}
 
 const controllers = new Map<string, AbortController>();
 
