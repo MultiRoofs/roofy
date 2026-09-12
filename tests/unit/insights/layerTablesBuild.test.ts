@@ -1143,10 +1143,15 @@ describe("a build whose engine went while it ran", () => {
     // writes the failed entry itself rather than assuming someone else did.
     await enqueueLayerTable("L1", readerSource());
     const held = deferred();
-    holdStatement = { needle: "DESCRIBE", promise: held.promise };
+    // THIS build's DESCRIBE, by the table name in it: a bare "DESCRIBE" is
+    // already in `sql` from the L1 build above, so waiting on that would let
+    // the test run on while L2 was still at the head of the queue — and prove
+    // the head guard instead of the mid-build one this case is about.
+    const describeL2 = "DESCRIBE SELECT * FROM read_cityjson('layer_2";
+    holdStatement = { needle: describeL2, promise: held.promise };
     const building = enqueueLayerTable("L2", readerSource());
     await vi.waitFor(() =>
-      expect(sql.some((q) => q.includes("DESCRIBE"))).toBe(true),
+      expect(sql.some((q) => q.startsWith(describeL2))).toBe(true),
     );
 
     publishStatus("initializing");
