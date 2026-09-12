@@ -11,6 +11,8 @@
  * Everything here is pure.
  */
 
+import type { OutputColumn } from "../../insights/computedColumns";
+
 export type RoofMeasure =
   | "area"
   | "flatArea"
@@ -133,13 +135,21 @@ export function roofParams(
   return { measures, flatThresholdDeg };
 }
 
-/** The columns this run will write, prefix applied, in the spec's order. */
+/**
+ * The columns this run will write, prefix applied, in the spec's order.
+ *
+ * Every roof measure is a number, so every column is DOUBLE — but the type is
+ * stated here rather than assumed downstream, because the registry is the one
+ * place a tool declares what it writes (§7: "Output columns are DOUBLE,
+ * BOOLEAN or VARCHAR").
+ */
 export function roofColumnNames(
   prefix: string,
   params: RoofMetricsParams,
-): string[] {
+): ReadonlyArray<OutputColumn> {
   const ticked = new Set(params.measures);
-  return ROOF_MEASURES.filter((m) => ticked.has(m.key)).map(
-    (m) => `${prefix}${m.suffix}`,
-  );
+  return ROOF_MEASURES.filter((m) => ticked.has(m.key)).map((m) => ({
+    name: `${prefix}${m.suffix}`,
+    type: "DOUBLE",
+  }));
 }

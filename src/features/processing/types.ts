@@ -1,7 +1,10 @@
 /**
  * Processing toolbox vocabulary (spec §3). Engine-free: nothing here imports
- * DuckDB, Navara or React.
+ * DuckDB, Navara or React — the one import below is TYPE-ONLY, so it is erased
+ * at compile time and this module still pulls nothing in at runtime.
  */
+import type { OutputColumn } from "../../insights/computedColumns";
+
 export type ToolGroup = "roof" | "3d" | "cross-layer";
 
 export type ToolId =
@@ -49,11 +52,17 @@ export interface ToolDefinition {
    * same answer at different times: the form prints it before any run exists,
    * and the executor writes it. Absent for a tool whose columns are not
    * settled yet — the form then promises nothing.
+   *
+   * The TYPE travels with the name because it is decided here and nowhere
+   * else: `buildAddColumnSql` interpolates `col.type` into the `ALTER TABLE`,
+   * Validate solids writes BOOLEAN and Join copies VARCHAR/BOOLEAN/DOUBLE by
+   * inference. The UI used to hard-code DOUBLE for every column; there is now
+   * exactly one place a column's type is stated.
    */
   readonly outputColumns?: (
     prefix: string,
     params: Readonly<Record<string, unknown>>,
-  ) => string[];
+  ) => ReadonlyArray<OutputColumn>;
 
   /**
    * Spec §6: "Validation is inline and blocks Run". The message, or null when

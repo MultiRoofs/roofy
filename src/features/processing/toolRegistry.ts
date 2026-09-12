@@ -68,7 +68,11 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     needsVectorSource: false,
     needsLod: false,
     defaultPrefix: "extent_",
-    outputColumns: (p) => [`${p}height_m`, `${p}zmin_m`, `${p}zmax_m`],
+    outputColumns: (p) => [
+      { name: `${p}height_m`, type: "DOUBLE" },
+      { name: `${p}zmin_m`, type: "DOUBLE" },
+      { name: `${p}zmax_m`, type: "DOUBLE" },
+    ],
     implemented: true,
   },
   {

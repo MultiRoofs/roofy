@@ -46,15 +46,22 @@ export interface RollUp {
 }
 
 /**
- * The names this run writes, read from the tool's own DEFINITION.
+ * The columns this run writes, read from the tool's own DEFINITION.
  *
- * The ONE answer: the roll-up keys its rows with it, the executor declares it,
- * and the form promises it before any run exists. Three literal lists is how
- * the form comes to promise a name the run never writes. The registry is pure
- * data, so reading it here adds no edge back to the queue or to the UI.
+ * The ONE answer: the roll-up keys its rows with their names, the executor
+ * declares them WITH THEIR TYPES (the registry is the only place a type is
+ * stated), and the form promises them before any run exists. Three literal
+ * lists is how the form comes to promise a name the run never writes. The
+ * registry is pure data, so reading it here adds no edge back to the queue or
+ * to the UI.
  */
-function columnNames(prefix: string): ReadonlyArray<string> {
+function outputColumns(prefix: string): ReadonlyArray<OutputColumn> {
   return toolById("height-from-extent").outputColumns?.(prefix, {}) ?? [];
+}
+
+/** The same list as bare names, for the row keys. */
+function columnNames(prefix: string): ReadonlyArray<string> {
+  return outputColumns(prefix).map((c) => c.name);
 }
 
 /**
@@ -177,10 +184,7 @@ export const heightFromExtent: ToolExecutor = async (run, ctx) => {
     })),
     run.prefix,
   );
-  const columns: OutputColumn[] = columnNames(run.prefix).map((name) => ({
-    name,
-    type: "DOUBLE",
-  }));
+  const columns = outputColumns(run.prefix);
   return {
     columns,
     rows: rolled.rows,

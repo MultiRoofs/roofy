@@ -89,7 +89,10 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
       // that used six measures and a 5° threshold records nothing.
       params: f.tool.normaliseParams?.(f.draft.params) ?? f.draft.params,
       prefix: f.draft.prefix,
-      columns: f.columns.map((name) => ({ name, type: "DOUBLE" as const })),
+      // The registry's own answer, types and all — §7 puts a column's type
+      // beside its name, and the write path reads `col.type` straight out of
+      // this list. There is no second place that decides a type.
+      columns: f.columns,
     });
   };
   return (
@@ -269,7 +272,9 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
           </p>
         )}
         <p className="processing-note">Columns:</p>
-        <p className="processing-columns">{f.columns.join(", ")}</p>
+        <p className="processing-columns">
+          {f.columns.map((c) => c.name).join(", ")}
+        </p>
         {f.existing.length > 0 && f.prefixError === null && (
           <p className="processing-warning">
             <span aria-hidden="true">⚠ </span>

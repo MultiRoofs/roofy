@@ -265,14 +265,18 @@ describe("heightFromExtent executor", () => {
       run.params,
     );
     expect(promised).toEqual([
-      "extent_height_m",
-      "extent_zmin_m",
-      "extent_zmax_m",
+      { name: "extent_height_m", type: "DOUBLE" },
+      { name: "extent_zmin_m", type: "DOUBLE" },
+      { name: "extent_zmax_m", type: "DOUBLE" },
     ]);
     const fake = fakeContext([{ id: "B", f: "B", zmin: 0, zmax: 2 }], null);
     const result = await heightFromExtent(run, fake.ctx);
-    expect(result.columns.map((c) => c.name)).toEqual(promised);
-    expect(Object.keys(result.rows.get("B")!)).toEqual(promised);
+    // The DEFINITION's answer whole, type and all: the executor declares what
+    // the registry promised rather than restating a type of its own.
+    expect(result.columns).toEqual(promised);
+    expect(Object.keys(result.rows.get("B")!)).toEqual(
+      promised.map((c) => c.name),
+    );
   });
 
   it("reads every row when the scope is 'all'", async () => {

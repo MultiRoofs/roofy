@@ -16,6 +16,9 @@ import type { CityModel } from "../../../../src/domain/citymodel/types";
 import type { LayerStoreActions } from "../../../../src/features/layers/layerStore";
 import type { RunRecord } from "../../../../src/features/processing/types";
 import type { ColumnInfo } from "../../../../src/insights/columnKind";
+// A static import beside the other test-local ones: the fixture touches only
+// stores, never the engine.
+import { addRoofLayer } from "./roofLayerFixture";
 
 vi.mock("../../../../src/insights/duckdb", async () => ({
   // The ONE export taken from the real module: `formatDuckDBError` is pure,
@@ -256,6 +259,35 @@ describe("ToolView", () => {
           { name: "extent_height_m", type: "DOUBLE" },
           { name: "extent_zmin_m", type: "DOUBLE" },
           { name: "extent_zmax_m", type: "DOUBLE" },
+        ],
+      }),
+    );
+  });
+
+  it("prints the column NAMES and freezes the typed columns", () => {
+    // The two halves of the same list: the mono line is names (§6's "column
+    // list in mono"), and what `submitRun` freezes is the typed columns the
+    // write path needs (`buildAddColumnSql` interpolates `col.type`).
+    //
+    // The ROOF layer, because Roof metrics needs a qualifying LoD before Run is
+    // enabled at all — `addCityLayer`'s model has no surfaces.
+    addRoofLayer();
+    render(<ToolView toolId="roof-metrics" />);
+    expect(
+      screen.getByText(
+        "roof_area_m2, roof_flat_m2, roof_flat_share, roof_slope_deg, roof_azimuth_deg, roof_surfaces_n",
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(submitRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        columns: [
+          { name: "roof_area_m2", type: "DOUBLE" },
+          { name: "roof_flat_m2", type: "DOUBLE" },
+          { name: "roof_flat_share", type: "DOUBLE" },
+          { name: "roof_slope_deg", type: "DOUBLE" },
+          { name: "roof_azimuth_deg", type: "DOUBLE" },
+          { name: "roof_surfaces_n", type: "DOUBLE" },
         ],
       }),
     );

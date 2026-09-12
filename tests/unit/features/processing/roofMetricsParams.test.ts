@@ -56,14 +56,14 @@ describe("roofParams", () => {
 });
 
 describe("roofColumnNames", () => {
-  it("is spec §7.1's list, in spec §7.1's order", () => {
+  it("is spec §7.1's list, in spec §7.1's order, every column DOUBLE", () => {
     expect(roofColumnNames("roof_", DEFAULT_ROOF_PARAMS)).toEqual([
-      "roof_area_m2",
-      "roof_flat_m2",
-      "roof_flat_share",
-      "roof_slope_deg",
-      "roof_azimuth_deg",
-      "roof_surfaces_n",
+      { name: "roof_area_m2", type: "DOUBLE" },
+      { name: "roof_flat_m2", type: "DOUBLE" },
+      { name: "roof_flat_share", type: "DOUBLE" },
+      { name: "roof_slope_deg", type: "DOUBLE" },
+      { name: "roof_azimuth_deg", type: "DOUBLE" },
+      { name: "roof_surfaces_n", type: "DOUBLE" },
     ]);
   });
 
@@ -73,13 +73,16 @@ describe("roofColumnNames", () => {
         measures: ["surfaces", "area"],
         flatThresholdDeg: 5,
       }),
-    ).toEqual(["roof_area_m2", "roof_surfaces_n"]);
+    ).toEqual([
+      { name: "roof_area_m2", type: "DOUBLE" },
+      { name: "roof_surfaces_n", type: "DOUBLE" },
+    ]);
   });
 
   it("honours a different prefix", () => {
     expect(
       roofColumnNames("dak_", { measures: ["area"], flatThresholdDeg: 5 }),
-    ).toEqual(["dak_area_m2"]);
+    ).toEqual([{ name: "dak_area_m2", type: "DOUBLE" }]);
   });
 
   it("has one spec entry per measure, and no duplicate suffix or label", () => {
@@ -103,12 +106,12 @@ describe("the roof-metrics registry entry", () => {
 
   it("promises §7.1's columns for a draft nobody has touched", () => {
     expect(roof.outputColumns!("roof_", {})).toEqual([
-      "roof_area_m2",
-      "roof_flat_m2",
-      "roof_flat_share",
-      "roof_slope_deg",
-      "roof_azimuth_deg",
-      "roof_surfaces_n",
+      { name: "roof_area_m2", type: "DOUBLE" },
+      { name: "roof_flat_m2", type: "DOUBLE" },
+      { name: "roof_flat_share", type: "DOUBLE" },
+      { name: "roof_slope_deg", type: "DOUBLE" },
+      { name: "roof_azimuth_deg", type: "DOUBLE" },
+      { name: "roof_surfaces_n", type: "DOUBLE" },
     ]);
   });
 

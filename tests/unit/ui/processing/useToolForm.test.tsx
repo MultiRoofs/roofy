@@ -8,7 +8,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 import type { LayerStoreActions } from "../../../../src/features/layers/layerStore";
-import type { LayerTableState } from "../../../../src/insights/layerTables";
+import type {
+  LayerTable,
+  LayerTableState,
+} from "../../../../src/insights/layerTables";
 
 vi.mock("../../../../src/insights/duckdb", () => ({
   subscribeDuckDBStatus: vi.fn(() => () => {}),
@@ -88,24 +91,40 @@ const { useLayerTableStore } =
   await import("../../../../src/insights/layerTables");
 const { useProcessingStore } =
   await import("../../../../src/features/processing/processingStore");
+const { useComputedColumnStore } =
+  await import("../../../../src/insights/computedColumns");
 
 type LayerInput = Parameters<LayerStoreActions["addLayer"]>[0];
 
-/** A ready table, with or without the reader Measure solids needs. */
-function readyTable(withReader: boolean): LayerTableState {
+/** A ready table's INFO, with or without the reader Measure solids needs.
+ *  Split out so a case can stand the same table up with its own `columns`. */
+function readyTableInfo(withReader: boolean): LayerTable {
   return {
-    state: "ready",
-    info: {
-      table: "layer_1",
-      sourceName: withReader ? "delft.city.json" : null,
-      source: withReader ? ({} as never) : null,
-      reader: withReader ? "read_cityjson" : null,
-      columns: [],
-      lods: [],
-      rowCount: 2,
-    },
+    table: "layer_1",
+    sourceName: withReader ? "delft.city.json" : null,
+    source: withReader ? ({} as never) : null,
+    reader: withReader ? "read_cityjson" : null,
+    columns: [],
+    lods: [],
+    rowCount: 2,
   };
 }
+
+/** A ready table, with or without the reader Measure solids needs. */
+function readyTable(withReader: boolean): LayerTableState {
+  return { state: "ready", info: readyTableInfo(withReader) };
+}
+
+/** One run's provenance, so a colliding column reads as REPLACEABLE (this
+ *  app wrote it) rather than as the source data's own. */
+const PROVENANCE = {
+  runId: "run_0",
+  toolName: "Roof metrics to attributes",
+  summary: "All 2 buildings",
+  at: 0,
+  partial: null,
+  previous: null,
+};
 
 function addCityLayer(name: string, withReader: boolean): string {
   const model = {
@@ -141,6 +160,7 @@ afterEach(() => {
   useLayerStore.getState().removeAllLayers();
   useWorkspaceStore.getState().setActiveLayerId(null);
   useLayerTableStore.setState({ tables: {} });
+  useComputedColumnStore.setState({ byLayer: {} });
 });
 
 describe("the Layer select (spec §6 TARGET)", () => {
@@ -178,5 +198,62 @@ describe("the Layer select (spec §6 TARGET)", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+  });
+});
+
+describe("the OUTPUT column list, typed (spec §7)", () => {
+  it("still counts the columns that exist, over typed columns", () => {
+    // `existing` is `columns.filter(c => onTable.has(c.name.toLowerCase()))`
+    // after this task. A filter left on the OBJECT would match nothing and the
+    // replace warning would silently stop appearing.
+    const id = addCityLayer("Delft", true);
+    useWorkspaceStore.getState().setActiveLayerId(id);
+    useLayerTableStore.setState({
+      tables: {
+        ...useLayerTableStore.getState().tables,
+        [id]: {
+          state: "ready",
+          info: {
+            ...readyTableInfo(true),
+            columns: [{ name: "roof_area_m2", type: "DOUBLE", kind: "scalar" }],
+          },
+        },
+      },
+    });
+    useComputedColumnStore
+      .getState()
+      .setProvenance(id, "roof_area_m2", PROVENANCE);
+    render(<ToolView toolId="roof-metrics" />);
+    expect(
+      screen.getByText("1 of these columns exist; they will be replaced."),
+    ).toBeInTheDocument();
+  });
+
+  it("names the TABLE's spelling when a typed column collides with the file", () => {
+    // §6, verbatim: "'height' belongs to the source data; choose another
+    // prefix" — and the spelling in the message is the table's, which is now
+    // reached through `onTable.get(c.name.toLowerCase())`.
+    const id = addCityLayer("Delft", true);
+    useWorkspaceStore.getState().setActiveLayerId(id);
+    useLayerTableStore.setState({
+      tables: {
+        ...useLayerTableStore.getState().tables,
+        [id]: {
+          state: "ready",
+          info: {
+            ...readyTableInfo(true),
+            columns: [
+              { name: "EXTENT_height_m", type: "DOUBLE", kind: "scalar" },
+            ],
+          },
+        },
+      },
+    });
+    render(<ToolView toolId="height-from-extent" />);
+    expect(
+      screen.getByText(
+        "'EXTENT_height_m' belongs to the source data; choose another prefix",
+      ),
+    ).toBeInTheDocument();
   });
 });

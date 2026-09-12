@@ -145,10 +145,10 @@ export function useToolForm(toolId: ToolId) {
     tableColumns.map((name) => [name.toLowerCase(), name]),
   );
   const computedLower = new Set([...computed].map((c) => c.toLowerCase()));
-  const existing = columns.filter((c) => onTable.has(c.toLowerCase()));
+  const existing = columns.filter((c) => onTable.has(c.name.toLowerCase()));
   const sourceCollisions = existing
-    .filter((c) => !computedLower.has(c.toLowerCase()))
-    .map((c) => onTable.get(c.toLowerCase()) ?? c);
+    .filter((c) => !computedLower.has(c.name.toLowerCase()))
+    .map((c) => onTable.get(c.name.toLowerCase()) ?? c.name);
   const prefixError = !PREFIX_RE.test(draft.prefix)
     ? "Use letters, digits and underscores, starting with a letter"
     : sourceCollisions.length > 0
