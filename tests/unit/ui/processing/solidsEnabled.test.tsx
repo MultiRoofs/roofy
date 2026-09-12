@@ -88,8 +88,16 @@ const surface = (lod: string, geometryType: string | null) => ({
 });
 
 /** B1 (+part B1P) and B2 both carry a Solid at 2.2; B3 has only a MultiSurface. */
-function solidModel(options: { solids?: boolean } = {}): CityModel {
-  const kind = options.solids === false ? "MultiSurface" : "Solid";
+function solidModel(options: LayerOptions = {}): CityModel {
+  // `untagged` is CityParquet's shape (design decision (a)): the parser there
+  // builds surfaces from a flat face list and genuinely has no geometry type,
+  // so every tag is null and `hasSolidAt` reads the layer as solid-less.
+  const kind =
+    options.untagged === true
+      ? null
+      : options.solids === false
+        ? "MultiSurface"
+        : "Solid";
   const object = (
     id: string,
     objectType: string,
@@ -107,7 +115,7 @@ function solidModel(options: { solids?: boolean } = {}): CityModel {
     lod: null,
   });
   return {
-    sourceEncoding: "cityjson",
+    sourceEncoding: options.encoding ?? "cityjson",
     metadata: {},
     bbox: null,
     vertexCount: 0,
@@ -122,9 +130,20 @@ function solidModel(options: { solids?: boolean } = {}): CityModel {
 
 type LayerInput = Parameters<LayerStoreActions["addLayer"]>[0];
 
-function addSolidLayer(
-  options: { solids?: boolean; selectedLod?: string | null } = {},
-): string {
+interface LayerOptions {
+  readonly solids?: boolean;
+  readonly selectedLod?: string | null;
+  /** CityParquet's untagged surfaces (`geometryType: null`). */
+  readonly untagged?: boolean;
+  /** The model's own encoding, which is what §5's reader sentence names. */
+  readonly encoding?: string;
+  /** False for a layer whose table was built without a CityJSON reader. */
+  readonly reader?: boolean;
+  readonly isStreaming?: boolean;
+}
+
+function addSolidLayer(options: LayerOptions = {}): string {
+  const hasReader = options.reader !== false;
   const input: LayerInput = {
     name: "Delft",
     model: solidModel(options),
@@ -132,7 +151,7 @@ function addSolidLayer(
     visible: true,
     rules: [],
     colorBy: "surface",
-    isStreaming: false,
+    isStreaming: options.isStreaming ?? false,
   };
   const id = useLayerStore.getState().addLayer(input);
   if (options.selectedLod !== undefined) {
@@ -153,9 +172,9 @@ function addSolidLayer(
           sourceName: "layer_1.city.json",
           // A READER and an available SOURCE: without both, eligibility
           // refuses the tool before the LoD select is ever rendered.
-          source: async () => new Uint8Array(),
-          reader: "read_cityjson",
-          extension: "city.json",
+          source: hasReader ? async () => new Uint8Array() : null,
+          reader: hasReader ? "read_cityjson" : null,
+          extension: hasReader ? "city.json" : null,
           sourceBytes: 1024,
           columns: [
             { name: "id", type: "VARCHAR", kind: "scalar" },
@@ -239,6 +258,44 @@ describe("Measure solids, switched on", () => {
     addSolidLayer({ selectedLod: "0" });
     render(<ToolView toolId="measure-solids" />);
     expect(screen.getByRole("combobox", { name: "LoD" })).toHaveValue("2.2");
+  });
+
+  it("claims NOTHING about a streaming target's geometry", () => {
+    // §5 refuses the tool on a streaming FlatCityBuf (no reader), and
+    // `hasSolidAt` answers `false` for such a layer BY CONSTRUCTION — the
+    // resident record carries no geometry type. So a select reading "No solid
+    // geometry in this layer" would be a verdict on data the app never
+    // inspected, next to a footer saying the source cannot be read at all.
+    addSolidLayer({
+      isStreaming: true,
+      reader: false,
+      encoding: "flatcitybuf",
+    });
+    render(<ToolView toolId="measure-solids" />);
+    expect(screen.queryByRole("combobox", { name: "LoD" })).toBeNull();
+    expect(screen.queryByText(/No solid geometry/)).toBeNull();
+    expect(
+      screen.getByText(
+        "Needs a CityJSON or CityJSONSeq source; this layer was loaded from a streaming FlatCityBuf",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+  });
+
+  it("claims NOTHING about a CityParquet target's geometry", () => {
+    // The same gate for the other refused kind: CityParquet's surfaces carry
+    // `geometryType: null` (decision (a)), so tags cannot tell a solid from a
+    // MultiSurface there either.
+    addSolidLayer({ untagged: true, reader: false, encoding: "cityparquet" });
+    render(<ToolView toolId="measure-solids" />);
+    expect(screen.queryByRole("combobox", { name: "LoD" })).toBeNull();
+    expect(screen.queryByText(/No solid geometry/)).toBeNull();
+    expect(
+      screen.getByText(
+        "Needs a CityJSON or CityJSONSeq source; this layer was loaded from CityParquet",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
 
   it("renders the PARAMETERS section and lists the promised columns", () => {

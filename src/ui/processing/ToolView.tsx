@@ -137,7 +137,12 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
             ))}
           </select>
         </label>
-        {f.tool.needsLod && f.tool.implemented && (
+        {/* §6's LoD select — and `f.eligibility.ok`, because a tool this layer
+            refuses states nothing about the layer's geometry: the empty select
+            would read "No solid geometry in this layer" beside a footer saying
+            the source cannot be read at all. `useToolForm` empties the answer
+            for the same reason; this is what keeps the CONTROL off the form. */}
+        {f.tool.needsLod && f.tool.implemented && f.eligibility.ok && (
           <label className="processing-field">
             <span>LoD</span>
             {f.lodOptions.length === 0 ? (

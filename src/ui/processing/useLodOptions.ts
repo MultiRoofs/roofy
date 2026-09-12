@@ -32,7 +32,14 @@ export interface LodChoices {
   readonly emptyReason: string | null;
 }
 
-const NO_LOD: LodChoices = { options: [], noun: "", emptyReason: null };
+/**
+ * No answer at all — not "no LoD qualifies", which is a verdict.
+ *
+ * Exported because `useToolForm` substitutes it for a target the tool is
+ * REFUSED on (§5's reasons): the hook cannot see eligibility, and a form that
+ * cannot run here has nothing true to say about the layer's geometry.
+ */
+export const NO_LOD: LodChoices = { options: [], noun: "", emptyReason: null };
 
 export function useLodOptions(
   tool: ToolDefinition,

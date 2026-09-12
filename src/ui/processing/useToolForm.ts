@@ -32,7 +32,7 @@ import {
   useEligibilityInputs,
 } from "./useEligibilityContext";
 import { useActiveLayer } from "../../features/workspace/activeLayer";
-import { useLodOptions } from "./useLodOptions";
+import { NO_LOD, useLodOptions } from "./useLodOptions";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 
 /** An EMPTY prefix is a legal prefix — it is how the bare column names are
@@ -118,7 +118,27 @@ export function useToolForm(toolId: ToolId) {
           // the same reason `setDraft` drops it on an explicit target change.
           { ...stored, targetLayerId: defaultTarget, lod: null };
   const target = layers.find((l) => l.id === base.targetLayerId) ?? null;
-  const lods = useLodOptions(tool, target);
+  const targetCtx = eligibilityContextFor(
+    target ? { kind: "city", layer: target } : null,
+    tables,
+    hasVectorLayer,
+    status,
+  );
+  const eligibility = toolEligibility(tool, targetCtx);
+  // §6, the same rule that keeps an UNIMPLEMENTED tool silent: a tool that is
+  // refused on this target (no reader, a streaming or CityParquet source, a
+  // failed engine) has no source of truthful counts either, and a select
+  // reading "No solid geometry in this layer" beside "this layer was loaded
+  // from a streaming FlatCityBuf" is a verdict on data the app never inspected
+  // — `hasSolidAt` answers `false` for a streaming layer BY CONSTRUCTION and a
+  // CityParquet surface carries no geometry type at all. §5's row reason is
+  // the only true sentence there is, so the form shows no LoD control at all.
+  //
+  // The hook is called unconditionally, as a hook must be, and its answer is
+  // dropped here rather than inside it: eligibility is the FORM's question, not
+  // the geometry source's.
+  const lodAnswer = useLodOptions(tool, target);
+  const lods = eligibility.ok ? lodAnswer : NO_LOD;
   // Spec §6: "Default: the layer's selected LoD when it qualifies, else the
   // highest qualifying one." Computed, never written: a `setDraft` from a
   // render is a side effect, and the stored draft is the USER's choice — one
@@ -142,13 +162,6 @@ export function useToolForm(toolId: ToolId) {
   const noFilter = useQueryStore((s) =>
     target === null ? true : layerQuery(s, target.id).applied === null,
   );
-  const targetCtx = eligibilityContextFor(
-    target ? { kind: "city", layer: target } : null,
-    tables,
-    hasVectorLayer,
-    status,
-  );
-  const eligibility = toolEligibility(tool, targetCtx);
   // The registry's own builder (spec §6 prints the resolved column list before
   // Run); a tool whose executor has not shipped promises nothing.
   const columns = tool.outputColumns?.(draft.prefix, draft.params) ?? [];

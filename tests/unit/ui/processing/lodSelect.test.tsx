@@ -109,12 +109,27 @@ const { useLodOptions } =
 const { toolById } =
   await import("../../../../src/features/processing/toolRegistry");
 const { addRoofLayer } = await import("./roofLayerFixture");
+const duckdb = await import("../../../../src/insights/duckdb");
+
+/** The status every case but the refused-target one runs against. Re-set in
+ *  `beforeEach` because `mockReturnValue` outlives `vi.clearAllMocks()`. */
+const READY_STATUS = {
+  state: "ready",
+  extensions: {
+    cityjson: { state: "loaded" },
+    spatial: { state: "unloaded" },
+    three_d: { state: "unloaded" },
+  },
+  loadedExtensions: [],
+  platform: "wasm_eh",
+} as const;
 
 beforeEach(() => {
   counts.all = 4;
   counts.matching = null;
   counts.selected = 0;
   residents.objects = {};
+  vi.mocked(duckdb.getDuckDBStatus).mockReturnValue(READY_STATUS);
 });
 
 afterEach(() => {
@@ -169,6 +184,25 @@ describe("the LoD select (spec §6)", () => {
     ]);
     expect(
       screen.getByText("No roof surfaces in this layer", { selector: "p" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+  });
+
+  it("drops the LoD control entirely when the tool is REFUSED on this target", () => {
+    // The gate is shared by every `needsLod` tool, so it is pinned on Roof
+    // metrics too: a form whose tool cannot run here states nothing about the
+    // layer's geometry, and §5's row reason is the only true sentence. A failed
+    // engine is the reason that reaches Roof metrics (it needs no reader).
+    vi.mocked(duckdb.getDuckDBStatus).mockReturnValue({
+      state: "failed",
+      error: "boom",
+    });
+    addRoofLayer();
+    render(<ToolView toolId="roof-metrics" />);
+    expect(screen.queryByRole("combobox", { name: "LoD" })).toBeNull();
+    expect(screen.queryByText(/No roof surfaces/)).toBeNull();
+    expect(
+      screen.getByText("Not available while DuckDB is unavailable"),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
