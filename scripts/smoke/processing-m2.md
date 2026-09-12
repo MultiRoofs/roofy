@@ -32,6 +32,38 @@ toolbox's business: the dev server prints `☠ [MISSING_ENV_FILE] missing file
 unset and the page logs `[googleTiles] … Tiles disabled`), and the page logs
 `THREE.WARNING: Multiple instances of Three.js being imported`.
 
+### Fix-wave re-run — 2026-09-12, `develop` @ `552d0cc`
+
+Only the two steps the final review wave changed, same host and same recipe
+(dev server on 5210, hand-launched Playwright Chromium 151 headless on CDP 9333,
+`agent-browser connect 9333`). Both PASS.
+
+1. **Scenario 4 with the table panel NEVER OPENED (finding I1).** `delft.fcb` by
+   URL, one fly to "Delft Campus" → `2.2K loaded objects · 16 resident cells ·
+Settled`, layer row `Streaming · 2,231 currently loaded`. Then straight to
+   **Tools** with no drawer ever opened (`document.querySelectorAll('[class*=drawer]').length === 0`):
+   the Roof metrics form read **`All 1,115 buildings`**, the three LoD rungs with
+   `(1,115 buildings with roof surfaces)` each, **`Runs over the 1,115 currently
+loaded buildings, not the whole dataset.`**, and Run **enabled** (`disabled:
+false`). Run → `✓ 1,115 buildings measured · 11.4 s`, the resident-set line,
+   `Wrote 6 columns to delft.fcb.` Four **Zoom out** clicks then rebuilt the
+   table with the panel still closed and the card turned **`stale: layer
+reloaded`** with its Undo gone. Before the fix all of that needed the grid open:
+   the form read `All 0 buildings` with Run disabled, and no rebuild happened at
+   all with the panel shut.
+2. **The failure reason is keyboard-visible (finding m1).** Cold boot with
+   `navigator.onLine === false` (the CDP recipe below), one
+   `two-buildings.city.json` layer, Tools open: five `failed` chips and five
+   Retry links as before. The description element measured **1×1,
+   `position: absolute`, `clip-path: inset(50%)`** while nothing was focused, and
+   **301×35 (then 316×35 at the panel's own width), `position: static`,
+   `clip-path: none`** with either the ROW or the Retry link focused — text `"The
+three_d extension could not be downloaded; check the connection and retry"` — and
+   back to 1×1 on blur. The row and the link do not move when it appears (row
+   `269×68` at the same origin, Retry at the same `x`, both before and after);
+   the revealed sentence takes the wrapper's second line, which grows from 68 px
+   to 107 px. Screenshot in the run's scratch directory.
+
 ---
 
 ## Running it
@@ -53,8 +85,16 @@ agent-browser connect 9333
 agent-browser open "http://127.0.0.1:5210"
 ```
 
-Five things this run wanted and the obvious spelling does not give:
+Six things this run wanted and the obvious spelling does not give:
 
+- **The landing page's "Add layer" needs a DOM click, not a pointer click.**
+  `agent-browser find text "Add layer" click` and `agent-browser click
+'.fcb-url-btn:not([disabled])'` both reported success and did nothing, three
+  times across two page loads; `agent-browser eval "(()=>{const
+t=[...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Add
+layer'); t.click();})()"` worked every time. Everything else on the page (the
+  address-search suggestion, which needs a REAL click to fly) takes the ordinary
+  commands. Cost 20 minutes of the 2026-09-12 re-run.
 - **Never call `agent-browser set viewport`.** It resizes the emulated viewport
   through `Emulation.setDeviceMetricsOverride`, and Navara's canvas does NOT
   follow: the canvas stayed at 960×600 inside a 1600×1000 page, the globe
@@ -90,12 +130,17 @@ one fly, straight from the fresh whole-globe camera, was enough — the status b
 went to `2.2K loaded objects · 16 resident cells · Settled` and the layer row to
 `Streaming · 2,231 currently loaded`, with no zoom-in pressed afterwards.
 
-The layer's DuckDB table is a separate step: it is only (re)built on a commit
-**while the table panel is open** (`layerTableLifecycle.ts`). Open the table
-first, then nudge the camera once; the drawer then reads `All 1,115 · Matching
-1,115 · currently loaded` and the tool form's scope follows. Until that happens
-the form honestly reads `All 0 buildings` / `Runs over the 0 currently loaded
-buildings` with Run disabled — that is the table count, not a bug.
+The layer's DuckDB table is (re)built on a commit while **any consumer of it is
+looking** — the table panel, the processing toolbox, or a run of that layer still
+in flight (`layerTableLifecycle.ts`'s `rebuildWanted`). So you no longer have to
+open the grid first: opening **Tools** sweeps every streaming layer's table and a
+later commit rebuilds it. Re-verified 2026-09-12 with the table panel never
+opened at all — the form read `All 1,115 buildings` and ran.
+
+Until 2026-09-12 the gate was `tablePanelOpen` alone, and this recipe told you to
+open the table before Tools because the form otherwise read `All 0 buildings` /
+`Runs over the 0 currently loaded buildings` with Run disabled. That was the
+Important finding I1 of the final review wave, not a prerequisite: fixed.
 
 ### Prerequisites for the two offline steps
 
@@ -277,7 +322,18 @@ at a comparable camera in another session. From then on nothing unstuck it: not
 mouse wheel. 0 resident cells throughout. An identical add-by-URL into an empty
 workspace in the very next session streamed on its first address-search fly.
 
-**n = 1, and the cause is not attributed.** "Zoom to layer" was clicked into an
+**Reproduced on 2026-09-12 (n = 2), and the recovery works.** Exactly the same
+shape on the first add of the fix-wave re-run: `delft.fcb` by URL into an empty
+workspace, status `0 resident cells · Settled` immediately at the 1000 km camera
+(never `Zoom in to load`), and the address search then DID fly — scale bar 1000 km
+→ 200 m — with the stream still at `0 resident cells · Settled` 40 s later. A
+page **reload plus a re-add** gave `Zoom in to load` at the same whole-globe
+camera, and the very next address-search fly streamed normally (`Loading…` →
+`2.2K loaded objects · 16 resident cells · Settled`). So the tell in the note
+below is right and the recovery is right: if the first status after adding a
+stream reads `Settled`, reload and add again rather than trying to unstick it.
+
+**The cause is still not attributed.** "Zoom to layer" was clicked into an
 already-silent stream, so it cannot be the trigger. Candidates that cannot be
 told apart from outside: the first-stream auto-fit (`fitFirstStream` →
 `setFitToken`) issuing a `flyTo` that evidently did not move the camera off the
