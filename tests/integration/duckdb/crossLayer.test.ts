@@ -59,6 +59,62 @@ const VECTOR_NDJSON = [
   .join("\n");
 
 /**
+ * The FACT, spelled literally: `read_json` with an explicit `columns=` (never
+ * `read_json_auto`, which reads `props` back as a STRUCT), and WKT into
+ * GEOMETRY with `ST_GeomFromText`. Task 13 appends a case running
+ * `buildVectorTableSql`'s own output against this engine; the TEXT is that
+ * task's to pin, not this one's.
+ */
+const VECTOR_TABLE_SQL = `CREATE OR REPLACE TABLE "${VECTOR_TABLE}" AS SELECT "idx", "sid", "fid", "props", ST_GeomFromText("wkt") AS "geom" FROM read_json('${VECTOR_FILE}', format = 'newline_delimited', columns = {idx: 'BIGINT', sid: 'VARCHAR', fid: 'VARCHAR', props: 'JSON', wkt: 'VARCHAR'})`;
+
+/** A GeoJSON FeatureCollection, as a geo layer's own document hands it over. */
+const FC_FILE = "__src_run_probe_fc.json";
+const FEATURE_COLLECTION = JSON.stringify({
+  type: "FeatureCollection",
+  features: [
+    {
+      type: "Feature",
+      id: "a",
+      properties: { name: "A", n: 3 },
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [
+            [0, 0],
+            [100, 0],
+            [100, 100],
+            [0, 100],
+            [0, 0],
+          ],
+        ],
+      },
+    },
+    {
+      type: "Feature",
+      id: "b",
+      properties: { name: "B", n: 7 },
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [
+            [50, 0],
+            [150, 0],
+            [150, 100],
+            [50, 100],
+            [50, 0],
+          ],
+        ],
+      },
+    },
+  ],
+});
+
+/** A Z polygon with a centre, an area and a height that are all exact. */
+const Z_SQUARE = "POLYGON Z ((0 0 5, 10 0 5, 10 10 5, 0 10 5, 0 0 5))";
+/** Its neighbour, overlapping it from x = 5 to x = 10. */
+const Z_SQUARE_EAST = "POLYGON Z ((5 0 5, 15 0 5, 15 10 5, 5 10 5, 5 0 5))";
+
+/**
  * Tasks 13, 14, 16 and 19 APPEND their own cases INSIDE this `describe`, at the
  * bottom, beside the ones below — `db` is the block's own binding and there is
  * ONE harness for the file, opened once here. An appended case that opens its
@@ -75,10 +131,16 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
     harness.installExtension(db, "spatial");
     db.register(SOURCE, "two-buildings.city.json");
     db.registerBytes(VECTOR_FILE, new TextEncoder().encode(VECTOR_NDJSON));
+    db.registerBytes(FC_FILE, new TextEncoder().encode(FEATURE_COLLECTION));
+    // The per-run table is built HERE, not inside the case that reads it back:
+    // the predicate, overlap, distance and join cases all query it, and every
+    // one of them must run alone under `vitest -t`.
+    db.query(VECTOR_TABLE_SQL);
   }, 180_000);
 
   afterAll(() => {
     db?.dropFile(VECTOR_FILE);
+    db?.dropFile(FC_FILE);
     db?.close();
   });
 
@@ -99,10 +161,82 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
     const rows = db.query(
       `SELECT ST_Area(g) AS area, ST_HasZ(g) AS has_z, ST_Dimension(g) AS dim FROM (SELECT ST_GeomFromWKB("geometry_lod2_2") AS g FROM read_cityjson('${SOURCE}', lod => '${LOD}') WHERE "id" = '${NOT_A_SOLID}')`,
     );
-    // ST_Area is the 2-D area even on a Z geometry.
-    expect(Number(rows[0]?.["area"])).toBeGreaterThan(0);
+    // ST_Area is the 2-D area even on a Z geometry: the part is a 4 m × 5 m
+    // box's ground and roof, so 40 m² of 2-D area over a 3.2 m tall shape.
+    expect(rows[0]?.["area"]).toBe(40);
     expect(rows[0]?.["has_z"]).toBe(true);
-    expect(Number(rows[0]?.["dim"])).toBe(2);
+    expect(rows[0]?.["dim"]).toBe(2);
+    // The absence is the fact: a task reaching for the PostGIS spelling gets a
+    // Catalog Error at run time, not a NULL.
+    expect(() => db.query("SELECT ST_NDims(ST_Point(1, 2)) AS n")).toThrow(
+      /st_ndims does not exist/,
+    );
+  });
+
+  it("accepts a Z geometry in every predicate and measure the design uses", () => {
+    // The plan lists ST_Intersects / ST_Within / ST_Distance / ST_Intersection
+    // / ST_Area as Z-tolerant. Each is applied here to the reader's OWN
+    // MultiPolygon Z against a 2-D probe, which is exactly the mix a
+    // cross-layer run makes (city geometry Z, reprojected source geometry 2-D).
+    const rows = db.query(
+      `SELECT ST_Intersects(g, box) AS hit, ST_Within(box, g) AS inside, ST_Distance(g, ST_Point(85100, 446000)) AS far, ST_Area(ST_Intersection(g, box)) AS overlap, ST_Area(g) AS whole FROM (SELECT ST_GeomFromWKB("geometry_lod2_2") AS g, ST_MakeEnvelope(85012, 446000, 85016, 446005) AS box FROM read_cityjson('${SOURCE}', lod => '${LOD}') WHERE "id" = '${NOT_A_SOLID}')`,
+    );
+    // The envelope is the part's own footprint, so it covers it exactly.
+    expect(rows[0]?.["hit"]).toBe(true);
+    expect(rows[0]?.["inside"]).toBe(true);
+    expect(rows[0]?.["overlap"]).toBe(20);
+    expect(rows[0]?.["whole"]).toBe(40);
+    expect(rows[0]?.["far"]).toBeCloseTo(84, 6);
+  });
+
+  it("centres and flattens a Z geometry with ST_Centroid and ST_Force2D", () => {
+    const rows = db.query(
+      `SELECT ST_X(ST_Centroid(g)) AS cx, ST_Y(ST_Centroid(g)) AS cy, ST_AsText(ST_Centroid(g)) AS centre, ST_HasZ(ST_Centroid(g)) AS centre_has_z, ST_HasZ(ST_Force2D(g)) AS flat_has_z, ST_Area(ST_Force2D(g)) AS flat_area FROM (SELECT ST_GeomFromText('${Z_SQUARE}') AS g)`,
+    );
+    expect(rows[0]?.["cx"]).toBe(5);
+    expect(rows[0]?.["cy"]).toBe(5);
+    // The centroid of a Z polygon KEEPS its Z (`POINT Z (5 5 5)`) — only
+    // `ST_Force2D` drops it, and it does so without touching the 2-D area. A
+    // proxy point built with ST_Centroid is therefore still a 3-D geometry,
+    // which matters for anything that compares it with a 2-D source.
+    expect(rows[0]?.["centre"]).toBe("POINT Z (5 5 5)");
+    expect(rows[0]?.["centre_has_z"]).toBe(true);
+    expect(rows[0]?.["flat_has_z"]).toBe(false);
+    expect(rows[0]?.["flat_area"]).toBe(100);
+  });
+
+  it("dissolves Z geometries with ST_Union_Agg", () => {
+    // Two 10 × 10 squares overlapping by 5 in x: the union is 150, not 200,
+    // and it too keeps Z.
+    const rows = db.query(
+      `SELECT ST_Area(ST_Union_Agg(g)) AS area, ST_HasZ(ST_Union_Agg(g)) AS has_z FROM (SELECT UNNEST([ST_GeomFromText('${Z_SQUARE}'), ST_GeomFromText('${Z_SQUARE_EAST}')]) AS g)`,
+    );
+    expect(rows[0]?.["area"]).toBe(150);
+    expect(rows[0]?.["has_z"]).toBe(true);
+  });
+
+  it("reads a GeoJSON FeatureCollection through the stated columns= shape", () => {
+    // The plan's reader shape, verbatim: `read_json` with the FeatureCollection
+    // typed explicitly, then `unnest(features)`. `properties` and `geometry`
+    // both stay JSON, so the property lookups and `ST_GeomFromGeoJSON`'s JSON
+    // overload work straight off the struct.
+    const rows = db.query(
+      `SELECT f.properties->>'name' AS name, (f.properties->>'n')::DOUBLE AS n, ST_Area(ST_GeomFromGeoJSON(f.geometry)) AS area FROM (SELECT unnest(features) AS f FROM read_json('${FC_FILE}', columns = {type: 'VARCHAR', features: 'STRUCT(type VARCHAR, properties JSON, geometry JSON)[]'})) ORDER BY name`,
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ name: "A", n: 3 });
+    expect(rows[0]?.["area"]).toBe(10000);
+    expect(rows[1]).toMatchObject({ name: "B", n: 7 });
+  });
+
+  it("has ST_Transform, which the design deliberately does not use", () => {
+    // The plan states the function exists; reprojection is app-side, through
+    // the app's single proj4 door (design decision (d)). Pinned so a task that
+    // reached for the engine instead cannot claim it was unavailable.
+    const rows = db.query(
+      "SELECT ST_AsText(ST_Transform(ST_Point(85000, 446000), 'EPSG:28992', 'EPSG:4326')) AS p",
+    );
+    expect(String(rows[0]?.["p"])).toMatch(/^POINT \(/);
   });
 
   it("returns an EMPTY geometry, not NULL, for a polygon with [] coordinates", () => {
@@ -118,10 +252,44 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
     });
   });
 
-  it("refuses a bare NULL in ST_GeomFromGeoJSON — VARCHAR and JSON overloads", () => {
-    expect(() =>
-      db.query("SELECT ST_GeomFromGeoJSON(NULL) IS NULL AS n"),
-    ).toThrow(/Could not choose a best candidate function/);
+  it("refuses a bare NULL in ST_GeomFromGeoJSON until `json` is loaded", () => {
+    // TWO overloads, `(VARCHAR)` and `(JSON)`, so a bare NULL is ambiguous —
+    // but ONLY while the `json` extension is unloaded. `json` autoloads on the
+    // first `read_json` (or any JSON-typed expression), and from then on the
+    // JSON overload wins and the same call returns NULL instead of raising.
+    // That is why this case tests the state first: whether the pre-load branch
+    // is reachable depends on which other case in this file ran before it, and
+    // a run filtered with `-t` reaches it while a whole-file run does not.
+    const sigs = db
+      .query(
+        "SELECT parameter_types FROM duckdb_functions() WHERE function_name = 'ST_GeomFromGeoJSON'",
+      )
+      .map((r) => String(r["parameter_types"]))
+      .sort();
+    expect(sigs).toEqual(["[JSON]", "[VARCHAR]"]);
+
+    const jsonLoaded = () =>
+      db.query(
+        "SELECT loaded FROM duckdb_extensions() WHERE extension_name = 'json'",
+      )[0]?.["loaded"] === true;
+    if (!jsonLoaded()) {
+      expect(() =>
+        db.query("SELECT ST_GeomFromGeoJSON(NULL) IS NULL AS n"),
+      ).toThrow(/Could not choose a best candidate function/);
+    }
+
+    db.query("LOAD json;");
+    expect(jsonLoaded()).toBe(true);
+    expect(
+      db.query("SELECT ST_GeomFromGeoJSON(NULL) IS NULL AS n")[0]?.["n"],
+    ).toBe(true);
+    // The cast is the spelling that works in BOTH states, so every statement
+    // the app emits uses it.
+    expect(
+      db.query("SELECT ST_GeomFromGeoJSON(NULL::VARCHAR) IS NULL AS n")[0]?.[
+        "n"
+      ],
+    ).toBe(true);
   });
 
   it("builds the two bbox proxies from an extent struct", () => {
@@ -133,14 +301,7 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
   });
 
   it("round-trips the per-run vector table from NDJSON, stable id included", () => {
-    // The FACT, spelled literally: `read_json` with an explicit `columns=`
-    // (never `read_json_auto`, which reads `props` back as a STRUCT), and WKT
-    // into GEOMETRY with `ST_GeomFromText`. Task 13 appends a case to this file
-    // running `buildVectorTableSql`'s own output against this engine; the TEXT
-    // is that task's to pin, not this one's.
-    db.query(
-      `CREATE OR REPLACE TABLE "${VECTOR_TABLE}" AS SELECT "idx", "sid", "fid", "props", ST_GeomFromText("wkt") AS "geom" FROM read_json('${VECTOR_FILE}', format = 'newline_delimited', columns = {idx: 'BIGINT', sid: 'VARCHAR', fid: 'VARCHAR', props: 'JSON', wkt: 'VARCHAR'})`,
-    );
+    // `VECTOR_TABLE_SQL` ran in `beforeAll`; this case reads back what it made.
     const rows = db.query(
       `SELECT "idx", "sid", "fid", "props"->>'name' AS name, ("props"->>'n')::DOUBLE AS n, json_keys("props") AS keys, ST_IsEmpty("geom") AS empty FROM "${VECTOR_TABLE}" ORDER BY "idx"`,
     );
@@ -189,14 +350,29 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
   });
 
   it("ranks overlapping areas by ST_Area(ST_Intersection(…)), ties to source order", () => {
-    // The "largest overlap" tie rule (§7.5): a footprint from x=40 to x=120
-    // overlaps A by 10 and B by 70, so B wins; `arg_min(idx, …)` on equal
-    // areas would keep the lower idx, which is source order.
-    const rows = db.query(
+    // The "largest overlap" rule (§7.5). A spans x 0–100 and B x 50–150, so a
+    // footprint from x=40 to x=120, 10 tall, overlaps A over 60 (area 600) and
+    // B over 70 (area 700): B wins.
+    const ranked = db.query(
       `SELECT s.idx, ST_Area(ST_Intersection(ST_MakeEnvelope(40, 10, 120, 20), s.geom)) AS ov FROM "${VECTOR_TABLE}" s ORDER BY ov DESC, s.idx ASC`,
     );
-    expect(Number(rows[0]?.["idx"])).toBe(1);
-    expect(Number(rows[0]?.["ov"])).toBeCloseTo(700, 6);
+    expect(ranked.map((r) => r["ov"])).toEqual([700, 600]);
+    expect(ranked[0]?.["idx"]).toBe(1);
+
+    // The TIE, which is the half that needed a real case: x=40 to x=110
+    // overlaps BOTH by 60, so the ordering alone decides and `idx ASC` makes
+    // that decision SOURCE ORDER.
+    const tied = db.query(
+      `SELECT s.idx, ST_Area(ST_Intersection(ST_MakeEnvelope(40, 10, 110, 20), s.geom)) AS ov FROM "${VECTOR_TABLE}" s ORDER BY ov DESC, s.idx ASC`,
+    );
+    expect(tied.map((r) => r["ov"])).toEqual([600, 600]);
+    expect(tied[0]?.["idx"]).toBe(0);
+    // `arg_max(idx, ov)` is NOT the tie rule: it picks either row. The pair
+    // above is why §7.5 spells the ORDER BY out.
+    const argMax = db.query(
+      `SELECT arg_max(s.idx, ST_Area(ST_Intersection(ST_MakeEnvelope(40, 10, 110, 20), s.geom))) AS picked FROM "${VECTOR_TABLE}" s`,
+    );
+    expect([0, 1]).toContain(argMax[0]?.["picked"]);
   });
 
   it("finds the nearest source feature with MIN(ST_Distance) and arg_min", () => {

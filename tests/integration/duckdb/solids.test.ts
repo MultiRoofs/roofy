@@ -45,19 +45,70 @@ const VALID = "NL.IMBAG.Pand.0002";
  * outer select. Every other measure is applied unguarded, which is the fact
  * the assertions below exist to pin.
  *
- * DEVIATES from the plan's §7.2 text in ONE clause, forced by the engine and
- * verified here 2026-09-12: the plan reads `r.is_valid AS is_valid` and rests
- * on "`ST_3DValidationReport(NULL)` is NULL, so `r.is_valid` is NULL rather
- * than false". That holds for a CONSTANT NULL only. Over a row vector,
- * `three_d` v0.2.0 leaves the report's CHILD vectors untouched for a NULL
- * solid: `ST_3DValidationReport(s) IS NULL` is true, yet `r.is_valid` reads
+ * DEVIATES from the plan's §7.2 text, forced by the engine and verified here
+ * 2026-09-12: the plan reads `r.is_valid AS is_valid` and rests on
+ * "`ST_3DValidationReport(NULL)` is NULL, so `r.is_valid` is NULL rather than
+ * false". That holds for a CONSTANT NULL only. Over a row vector, `three_d`
+ * v0.2.0 leaves the report's CHILD vectors untouched for a NULL solid:
+ * `ST_3DValidationReport(s) IS NULL` is true, yet `r.is_valid` reads
  * uninitialised memory — observed both `false` and `true` for the SAME row on
- * two runs, with garbage BIGINT counts beside it. So every read of a report
- * field is wrapped in `CASE WHEN s IS NOT NULL THEN … END`, which restores
- * exactly the §7.2 output (`valid` NULL for a row that is not a solid).
- * See the "tells a NULL solid's report apart" case below for the pin.
+ * two runs, with garbage BIGINT counts beside it. So EVERY read of a report
+ * field carries `s IS NOT NULL`, the volume's condition included, which
+ * restores exactly the §7.2 output (`valid` NULL for a row that is not a
+ * solid). See the "tells a NULL solid's report apart" case below for the pin.
  */
-const MEASURE_SQL = `SELECT "id", COALESCE("feature_id", "id") AS f, s IS NOT NULL AS parsed, CASE WHEN s IS NOT NULL THEN r.is_valid END AS is_valid, CASE WHEN r.is_valid THEN ST_3DVolume(s) END AS volume_m3, ST_3DSurfaceArea(s) AS envelope_m2, ST_3DFootprintArea(s) AS footprint_m2, ST_3DZMin(s) AS ground_m, ST_3DZMax(s) AS ridge_m FROM (SELECT "id", "feature_id", ST_3DTryFromWKB("geometry_lod2_2") AS s, ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r FROM read_cityjson('two.city.json', lod => '2.2'))`;
+const MEASURE_SQL = `SELECT "id", COALESCE("feature_id", "id") AS f, s IS NOT NULL AS parsed, CASE WHEN s IS NOT NULL THEN r.is_valid END AS is_valid, CASE WHEN s IS NOT NULL AND r.is_valid THEN ST_3DVolume(s) END AS volume_m3, ST_3DSurfaceArea(s) AS envelope_m2, ST_3DFootprintArea(s) AS footprint_m2, ST_3DZMin(s) AS ground_m, ST_3DZMax(s) AS ridge_m FROM (SELECT "id", "feature_id", ST_3DTryFromWKB("geometry_lod2_2") AS s, ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r FROM read_cityjson('two.city.json', lod => '2.2'))`;
+
+/**
+ * §7.3's statement, the same way: all EIGHT report fields a validation run
+ * reads, each under the `s IS NOT NULL` guard.
+ *
+ * `orientation_error_count` is here because the report struct HAS it —
+ * `STRUCT(is_valid, is_closed, is_manifold, is_oriented, solid_count,
+ * shell_count, face_count, open_edge_count, non_manifold_edge_count,
+ * degenerate_face_count, orientation_error_count, code, message)` — and the
+ * plan's field list omits it. `code` and `message` are deliberately NOT
+ * selected: see the garbage case below.
+ *
+ * Task 10's `buildSolidValidationSql` must emit this shape. Like MEASURE_SQL,
+ * the TEXT is that task's to pin; this constant is the ENGINE fact until then.
+ */
+const VALIDATE_SQL = `SELECT "id", COALESCE("feature_id", "id") AS f, s IS NOT NULL AS parsed, CASE WHEN s IS NOT NULL THEN r.is_valid END AS is_valid, CASE WHEN s IS NOT NULL THEN r.is_closed END AS is_closed, CASE WHEN s IS NOT NULL THEN r.is_manifold END AS is_manifold, CASE WHEN s IS NOT NULL THEN r.is_oriented END AS is_oriented, CASE WHEN s IS NOT NULL THEN r.open_edge_count END AS open_n, CASE WHEN s IS NOT NULL THEN r.non_manifold_edge_count END AS nm_n, CASE WHEN s IS NOT NULL THEN r.degenerate_face_count END AS deg_n, CASE WHEN s IS NOT NULL THEN r.orientation_error_count END AS ori_n FROM (SELECT "id", "feature_id", ST_3DTryFromWKB("geometry_lod2_2") AS s, ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r FROM read_cityjson('two.city.json', lod => '2.2'))`;
+
+/**
+ * The same statement against the CityJSONSeq reader, by swapping ONLY the
+ * reader call — so the two runs cannot drift apart in any other character and
+ * "behaves identically" means what it says.
+ */
+function throughSeq(sql: string): string {
+  return sql.replace(
+    "read_cityjson('two.city.json', lod => '2.2')",
+    "read_cityjsonseq('two.city.jsonl', lod => '2.2')",
+  );
+}
+
+/** What one row of MEASURE_SQL / VALIDATE_SQL must contain, column by column. */
+type ExpectedRow = Record<string, string | number | boolean | null>;
+
+/**
+ * Asserts EVERY named column, with no `Number(…)` coercion that a NULL could
+ * slip through: a `null` expectation is asserted as NULL, an integer (0
+ * included) by identity, and only a non-integral measure is compared with a
+ * tolerance.
+ */
+function expectRow(
+  row: Record<string, unknown> | undefined,
+  expected: ExpectedRow,
+): void {
+  expect(row).toBeDefined();
+  for (const [column, want] of Object.entries(expected)) {
+    const got = row?.[column];
+    if (want === null) expect(got, column).toBeNull();
+    else if (typeof want === "number" && !Number.isInteger(want))
+      expect(got as number, column).toBeCloseTo(want, 6);
+    else expect(got, column).toBe(want);
+  }
+}
 
 describe.skipIf(!enabled)("three_d against real DuckDB 1.5.5", () => {
   let db: Harness;
@@ -226,80 +277,233 @@ describe.skipIf(!enabled)("three_d against real DuckDB 1.5.5", () => {
     const rows = db.query(
       `SELECT ST_3DSurfaceArea(s) AS a, ST_3DFootprintArea(s) AS f, ST_3DZMin(s) AS lo, ST_3DZMax(s) AS hi, ST_3DIsClosed(s) AS closed, ST_3DIsManifold(s) AS man, ST_3DIsOriented(s) AS ori, ST_3DNumShells(s) AS shells, ST_3DNumFaces(s) AS faces FROM (SELECT ST_3DTryFromWKB("geometry_lod2_2") AS s FROM read_cityjson('${SOURCE}', lod => '${LOD}') WHERE "id" = '${INVALID}')`,
     );
-    const row = rows[0];
-    expect(row).toBeDefined();
-    expect(Number(row?.["a"])).toBeCloseTo(388, 0);
-    expect(Number(row?.["f"])).toBeCloseTo(80, 0);
-    expect(Number(row?.["lo"])).toBeCloseTo(0, 3);
-    expect(Number(row?.["hi"])).toBeCloseTo(8.4, 1);
-    expect(row?.["closed"]).toBe(false);
-    expect(Number(row?.["shells"])).toBeGreaterThan(0);
-    expect(Number(row?.["faces"])).toBeGreaterThan(0);
+    expectRow(rows[0], {
+      a: 388,
+      f: 80,
+      lo: 0,
+      hi: 8.4,
+      closed: false,
+      man: false,
+      ori: false,
+      shells: 1,
+      faces: 7,
+    });
   });
 
-  it("runs §7.2's one statement over all three rows and measures each correctly", () => {
-    const rows = db.query(MEASURE_SQL);
-    const byId = new Map(rows.map((r) => [String(r["id"]), r]));
+  it("runs §7.2's one statement over all three rows and measures EVERY column", () => {
+    const byId = new Map(
+      db.query(MEASURE_SQL).map((r) => [String(r["id"]), r]),
+    );
 
-    const invalid = byId.get(INVALID);
-    expect(invalid?.["parsed"]).toBe(true);
-    expect(invalid?.["is_valid"]).toBe(false);
     // Volume is NULL because the guard refused it — not because the solid has
     // none. §7.2: "volume NULL, valid false; envelope, footprint, height,
     // ground and ridge still computed".
-    expect(invalid?.["volume_m3"]).toBeNull();
-    expect(Number(invalid?.["envelope_m2"])).toBeCloseTo(388, 0);
-    expect(Number(invalid?.["footprint_m2"])).toBeCloseTo(80, 0);
-    expect(Number(invalid?.["ridge_m"])).toBeCloseTo(8.4, 1);
-
-    const notASolid = byId.get(NOT_A_SOLID);
-    expect(notASolid?.["parsed"]).toBe(false);
-    expect(notASolid?.["is_valid"]).toBeNull();
-    expect(notASolid?.["envelope_m2"]).toBeNull();
-
-    const valid = byId.get(VALID);
-    expect(valid?.["is_valid"]).toBe(true);
-    expect(Number(valid?.["volume_m3"])).toBeCloseTo(2178, 0);
-    expect(Number(valid?.["envelope_m2"])).toBeCloseTo(1013.4, 0);
-    expect(Number(valid?.["footprint_m2"])).toBeCloseTo(180, 0);
-    expect(Number(valid?.["ground_m"])).toBeCloseTo(0, 3);
-    expect(Number(valid?.["ridge_m"])).toBeCloseTo(12.1, 1);
-
-    // §7's roll-up ground: the part belongs to the same FEATURE as the root,
-    // so a run must group on `f` and not on `id`.
-    expect(String(byId.get(NOT_A_SOLID)?.["f"])).toBe(INVALID);
+    expectRow(byId.get(INVALID), {
+      // §7's roll-up ground: the part below belongs to the same FEATURE as this
+      // root, so a run must group on `f` and not on `id`.
+      f: INVALID,
+      parsed: true,
+      is_valid: false,
+      volume_m3: null,
+      envelope_m2: 388,
+      footprint_m2: 80,
+      ground_m: 0,
+      ridge_m: 8.4,
+    });
+    expectRow(byId.get(NOT_A_SOLID), {
+      f: INVALID,
+      parsed: false,
+      is_valid: null,
+      volume_m3: null,
+      envelope_m2: null,
+      footprint_m2: null,
+      ground_m: null,
+      ridge_m: null,
+    });
+    expectRow(byId.get(VALID), {
+      f: VALID,
+      parsed: true,
+      is_valid: true,
+      volume_m3: 2178,
+      envelope_m2: 1013.4,
+      footprint_m2: 180,
+      ground_m: 0,
+      ridge_m: 12.1,
+    });
   });
 
-  it("reports the seven §7.3 fields on a parsed solid, valid or not", () => {
+  it("reports the EIGHT §7.3 report fields on a parsed solid, valid or not", () => {
     // Every field read carries the `s IS NOT NULL` guard, for the reason the
     // case above pins. Task 10's `buildSolidValidationSql` must do the same on
-    // all seven, or an unparsed row gets garbage counts instead of NULL.
-    const rows = db.query(
-      `SELECT "id", CASE WHEN s IS NOT NULL THEN r.is_closed END AS closed, CASE WHEN s IS NOT NULL THEN r.is_manifold END AS man, CASE WHEN s IS NOT NULL THEN r.is_oriented END AS ori, CASE WHEN s IS NOT NULL THEN r.is_valid END AS valid, CASE WHEN s IS NOT NULL THEN r.open_edge_count END AS open_n, CASE WHEN s IS NOT NULL THEN r.non_manifold_edge_count END AS nm_n, CASE WHEN s IS NOT NULL THEN r.degenerate_face_count END AS deg_n FROM (SELECT "id", ST_3DTryFromWKB("geometry_lod2_2") AS s, ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r FROM read_cityjson('${SOURCE}', lod => '${LOD}')) ORDER BY "id"`,
+    // all eight, or an unparsed row gets garbage counts instead of NULL.
+    const byId = new Map(
+      db.query(VALIDATE_SQL).map((r) => [String(r["id"]), r]),
     );
-    const byId = new Map(rows.map((r) => [String(r["id"]), r]));
-    expect(byId.get(INVALID)).toMatchObject({ closed: false, valid: false });
-    expect(Number(byId.get(INVALID)?.["open_n"])).toBe(2);
-    expect(Number(byId.get(INVALID)?.["nm_n"])).toBe(1);
-    expect(byId.get(VALID)).toMatchObject({
-      closed: true,
-      man: true,
-      ori: true,
-      valid: true,
+    expectRow(byId.get(INVALID), {
+      f: INVALID,
+      parsed: true,
+      is_valid: false,
+      is_closed: false,
+      is_manifold: false,
+      is_oriented: false,
+      open_n: 2,
+      nm_n: 1,
+      deg_n: 0,
+      // The plan's field list omits `orientation_error_count`; the struct has
+      // it, and it counts the faces this solid winds the wrong way.
+      ori_n: 1,
     });
-    // The unparsed row gets NULL in all seven — never a zero count, which
-    // would read as "checked and found nothing wrong".
-    expect(byId.get(NOT_A_SOLID)?.["valid"]).toBeNull();
-    expect(byId.get(NOT_A_SOLID)?.["open_n"]).toBeNull();
+    // The unparsed row gets NULL in all eight — never a zero count, which would
+    // read as "checked and found nothing wrong".
+    expectRow(byId.get(NOT_A_SOLID), {
+      f: INVALID,
+      parsed: false,
+      is_valid: null,
+      is_closed: null,
+      is_manifold: null,
+      is_oriented: null,
+      open_n: null,
+      nm_n: null,
+      deg_n: null,
+      ori_n: null,
+    });
+    expectRow(byId.get(VALID), {
+      f: VALID,
+      parsed: true,
+      is_valid: true,
+      is_closed: true,
+      is_manifold: true,
+      is_oriented: true,
+      open_n: 0,
+      nm_n: 0,
+      deg_n: 0,
+      ori_n: 0,
+    });
   });
 
-  it("behaves identically through read_cityjsonseq", () => {
-    db.register("two.city.jsonl", "two-buildings.city.jsonl");
-    const rows = db.query(
-      `SELECT "id", ST_3DTryFromWKB("geometry_lod2_2") IS NOT NULL AS parsed FROM read_cityjsonseq('two.city.jsonl', lod => '${LOD}') ORDER BY "id"`,
+  it("answers ST_3DArea and ST_3DBounds, on the valid solid and the invalid one", () => {
+    // The plan states `ST_3DArea` is the same value as `ST_3DSurfaceArea` on
+    // these fixtures and that `ST_3DBounds` is a
+    // `STRUCT(min_x, min_y, min_z, max_x, max_y, max_z)`. Both unprobed until
+    // now, and both answer on an INVALID solid as well as a valid one — which
+    // is the property that lets a measure run report a bad building's extent.
+    const byId = new Map(
+      db
+        .query(
+          `SELECT "id", ST_3DArea(s) AS area, ST_3DSurfaceArea(s) AS surface, ST_3DBounds(s) AS b FROM (SELECT "id", ST_3DTryFromWKB("geometry_lod2_2") AS s FROM read_cityjson('${SOURCE}', lod => '${LOD}'))`,
+        )
+        .map((r) => [String(r["id"]), r]),
     );
-    expect(rows.length).toBeGreaterThan(0);
-    expect(rows.some((r) => r["parsed"] === true)).toBe(true);
+
+    for (const id of [INVALID, VALID]) {
+      const row = byId.get(id);
+      expect(row?.["area"], id).toBe(row?.["surface"]);
+    }
+    expect(byId.get(INVALID)?.["area"]).toBe(388);
+    expect(byId.get(VALID)?.["area"]).toBeCloseTo(1013.4, 6);
+    // A NULL solid gives a NULL area, not a zero.
+    expect(byId.get(NOT_A_SOLID)?.["area"]).toBeNull();
+    expect(byId.get(NOT_A_SOLID)?.["b"]).toBeNull();
+
+    // The translate is [85000, 446000, 0] and the scale 0.001, so the bounds
+    // come back in the file's own CRS, not in local vertex units.
+    expect(byId.get(VALID)?.["b"]).toMatchObject({
+      min_x: 85020,
+      min_y: 446000,
+      min_z: 0,
+      max_x: 85035,
+      max_y: 446012,
+      max_z: 12.1,
+    });
+    expect(byId.get(INVALID)?.["b"]).toMatchObject({
+      min_x: 85000,
+      min_y: 446000,
+      min_z: 0,
+      max_x: 85010,
+      max_y: 446008,
+      max_z: 8.4,
+    });
+  });
+
+  it("behaves identically through read_cityjsonseq — every row, every column", () => {
+    // Not "some solid parses": the SAME two statements, with only the reader
+    // call swapped, must return the SAME rows. `two-buildings.city.jsonl`
+    // carries the same three objects across two CityJSONFeature lines, so a
+    // reader that lost a part, renamed a feature id or measured differently
+    // shows up here.
+    db.register("two.city.jsonl", "two-buildings.city.jsonl");
+    const byIdAsc = (rows: Record<string, unknown>[]) =>
+      [...rows].sort((a, b) => String(a["id"]).localeCompare(String(b["id"])));
+
+    const measured = byIdAsc(db.query(throughSeq(MEASURE_SQL)));
+    expect(measured.map((r) => r["id"])).toEqual([INVALID, NOT_A_SOLID, VALID]);
+    expect(measured).toEqual(byIdAsc(db.query(MEASURE_SQL)));
+    // Spelled out on the seq side too, so the parity assertions cannot pass by
+    // both readers being wrong in the same way.
+    expectRow(measured[2], {
+      id: VALID,
+      f: VALID,
+      parsed: true,
+      is_valid: true,
+      volume_m3: 2178,
+      envelope_m2: 1013.4,
+      footprint_m2: 180,
+      ground_m: 0,
+      ridge_m: 12.1,
+    });
+    expectRow(measured[1], {
+      id: NOT_A_SOLID,
+      f: INVALID,
+      parsed: false,
+      is_valid: null,
+      volume_m3: null,
+      envelope_m2: null,
+      footprint_m2: null,
+      ground_m: null,
+      ridge_m: null,
+    });
+
+    const validated = byIdAsc(db.query(throughSeq(VALIDATE_SQL)));
+    expect(validated).toEqual(byIdAsc(db.query(VALIDATE_SQL)));
+    expectRow(validated[0], {
+      id: INVALID,
+      f: INVALID,
+      parsed: true,
+      is_valid: false,
+      is_closed: false,
+      is_manifold: false,
+      is_oriented: false,
+      open_n: 2,
+      nm_n: 1,
+      deg_n: 0,
+      ori_n: 1,
+    });
+    expectRow(validated[2], {
+      id: VALID,
+      f: VALID,
+      parsed: true,
+      is_valid: true,
+      is_closed: true,
+      is_manifold: true,
+      is_oriented: true,
+      open_n: 0,
+      nm_n: 0,
+      deg_n: 0,
+      ori_n: 0,
+    });
+    expectRow(validated[1], {
+      id: NOT_A_SOLID,
+      f: INVALID,
+      parsed: false,
+      is_valid: null,
+      is_closed: null,
+      is_manifold: null,
+      is_oriented: null,
+      open_n: null,
+      nm_n: null,
+      deg_n: null,
+      ori_n: null,
+    });
   });
 
   // The repo carried no CompositeSolid; Decisions recorded item 4 settled that
@@ -313,8 +517,12 @@ describe.skipIf(!enabled)("three_d against real DuckDB 1.5.5", () => {
       `SELECT cityjson_wkb_geometry_type("geometry_lod2_2") AS wkb,
               "geometry_properties_lod2_2".type AS ptype,
               CASE WHEN s IS NOT NULL THEN r.is_valid END AS valid,
-              CASE WHEN r.is_valid THEN ST_3DVolume(s) END AS volume,
-              ST_3DNumShells(s) AS shells
+              CASE WHEN s IS NOT NULL AND r.is_valid THEN ST_3DVolume(s) END AS volume,
+              ST_3DNumShells(s) AS shells, ST_3DNumFaces(s) AS faces,
+              CASE WHEN s IS NOT NULL THEN r.solid_count END AS solid_n,
+              CASE WHEN s IS NOT NULL THEN r.open_edge_count END AS open_n,
+              CASE WHEN s IS NOT NULL THEN r.orientation_error_count END AS ori_n,
+              ST_3DSurfaceArea(s) AS envelope, ST_3DFootprintArea(s) AS footprint
        FROM (SELECT "geometry_lod2_2", "geometry_properties_lod2_2",
                     ST_3DTryFromWKB("geometry_lod2_2") AS s,
                     ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r
@@ -326,9 +534,21 @@ describe.skipIf(!enabled)("three_d against real DuckDB 1.5.5", () => {
     // CityJSON type in the properties struct is the reliable answer.
     expect(rows[0]?.["wkb"]).toBe("GeometryCollection Z");
     expect(rows[0]?.["ptype"]).toBe("CompositeSolid");
-    expect(rows[0]?.["valid"]).toBe(true);
-    expect(Number(rows[0]?.["volume"])).toBeCloseTo(2, 6);
-    expect(Number(rows[0]?.["shells"])).toBe(2);
+    // Both members counted: two shells, twelve faces (six each), and the
+    // SUMMED volume — the fact Task 7's §7 roll-up rests on. The two unit
+    // cubes share the face x = 1, so the envelope is the 12 outer unit squares
+    // and the footprint the 2 × 1 ground rectangle.
+    expectRow(rows[0], {
+      valid: true,
+      volume: 2,
+      shells: 2,
+      faces: 12,
+      solid_n: 2,
+      open_n: 0,
+      ori_n: 0,
+      envelope: 12,
+      footprint: 2,
+    });
   });
 
   // The FEATURE-level invalid solid. `two-buildings.city.json` cannot express
@@ -340,9 +560,16 @@ describe.skipIf(!enabled)("three_d against real DuckDB 1.5.5", () => {
   it("measures the invalid-solid fixture: every measure but the volume", () => {
     db.register("invalid.city.json", "invalid-solid.city.json");
     const rows = db.query(
-      `SELECT "id", s IS NOT NULL AS parsed, r.is_valid AS valid, r.is_closed AS closed,
-              r.open_edge_count AS open_n, r.non_manifold_edge_count AS nm_n,
-              CASE WHEN r.is_valid THEN ST_3DVolume(s) END AS volume,
+      `SELECT "id", s IS NOT NULL AS parsed,
+              CASE WHEN s IS NOT NULL THEN r.is_valid END AS valid,
+              CASE WHEN s IS NOT NULL THEN r.is_closed END AS closed,
+              CASE WHEN s IS NOT NULL THEN r.is_manifold END AS man,
+              CASE WHEN s IS NOT NULL THEN r.is_oriented END AS ori,
+              CASE WHEN s IS NOT NULL THEN r.open_edge_count END AS open_n,
+              CASE WHEN s IS NOT NULL THEN r.non_manifold_edge_count END AS nm_n,
+              CASE WHEN s IS NOT NULL THEN r.degenerate_face_count END AS deg_n,
+              CASE WHEN s IS NOT NULL THEN r.orientation_error_count END AS ori_n,
+              CASE WHEN s IS NOT NULL AND r.is_valid THEN ST_3DVolume(s) END AS volume,
               ST_3DSurfaceArea(s) AS envelope, ST_3DFootprintArea(s) AS footprint,
               ST_3DZMin(s) AS ground, ST_3DZMax(s) AS ridge
        FROM (SELECT "id", ST_3DTryFromWKB("geometry_lod2_2") AS s,
@@ -350,14 +577,24 @@ describe.skipIf(!enabled)("three_d against real DuckDB 1.5.5", () => {
              FROM read_cityjson('invalid.city.json', lod => '2.2'))`,
     );
     expect(rows).toHaveLength(1);
-    const row = rows[0];
-    expect(row).toMatchObject({ parsed: true, valid: false, closed: false });
-    expect(Number(row?.["open_n"])).toBe(2);
-    expect(Number(row?.["nm_n"])).toBe(1);
-    expect(row?.["volume"]).toBeNull();
-    expect(Number(row?.["envelope"])).toBeCloseTo(388, 0);
-    expect(Number(row?.["footprint"])).toBeCloseTo(80, 0);
-    expect(Number(row?.["ground"])).toBeCloseTo(0, 3);
-    expect(Number(row?.["ridge"])).toBeCloseTo(8.4, 1);
+    // The same numbers `NL.IMBAG.Pand.0001` gives in `two-buildings.city.json`
+    // — the fixture is that solid lifted out, so the two files must agree.
+    expectRow(rows[0], {
+      id: INVALID,
+      parsed: true,
+      valid: false,
+      closed: false,
+      man: false,
+      ori: false,
+      open_n: 2,
+      nm_n: 1,
+      deg_n: 0,
+      ori_n: 1,
+      volume: null,
+      envelope: 388,
+      footprint: 80,
+      ground: 0,
+      ridge: 8.4,
+    });
   });
 });
