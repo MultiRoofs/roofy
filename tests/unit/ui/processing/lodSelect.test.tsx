@@ -1,9 +1,44 @@
 /**
  * Spec §6's LoD select for Roof metrics: the options, their FEATURE counts,
- * the default, the empty state, and the tools that get no select at all.
+ * the default, the empty state, the tools that get no select at all, and the
+ * two ways the answer has to be recomputed — a new target, and a new commit on
+ * a streaming one.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
+
+/**
+ * A streaming layer's options come from the RESIDENT set, so the suite owns it:
+ * `residents.objects` is rewritten in place and the stream's version bumped, the
+ * way a commit reaches the form.
+ */
+const residents: {
+  objects: Record<string, unknown>;
+  cellCount: number;
+  featureCount: number;
+  surfaceAttrKeys: string[];
+} = { objects: {}, cellCount: 0, featureCount: 0, surfaceAttrKeys: [] };
+vi.mock("../../../../src/features/streaming/residentModel", () => ({
+  getResidentModel: vi.fn(() => residents),
+}));
+
+/** A resident record reduced to the two LoD lists `roofLodOptions` reads. */
+const resident = (geometryLods: string[], roofLods: string[]) => ({
+  parents: [],
+  geometryLods,
+  roofMetrics: roofLods.map((lod) => ({
+    lod,
+    areaSqM: 1,
+    inclinationDeg: 0,
+    azimuthDeg: 0,
+  })),
+});
 
 vi.mock("../../../../src/insights/duckdb", () => ({
   getDuckDBStatus: vi.fn(() => ({
@@ -91,12 +126,15 @@ const { useComputedColumnStore } =
   await import("../../../../src/insights/computedColumns");
 const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
+const { useStreamStore } =
+  await import("../../../../src/features/streaming/streamStore");
 const { addRoofLayer } = await import("./roofLayerFixture");
 
 beforeEach(() => {
   counts.all = 4;
   counts.matching = null;
   counts.selected = 0;
+  residents.objects = {};
 });
 
 afterEach(() => {
@@ -108,6 +146,7 @@ afterEach(() => {
   useLayerTableStore.setState({ tables: {} });
   useComputedColumnStore.setState({ byLayer: {} });
   useQueryStore.setState({ queries: {} });
+  useStreamStore.setState({ streams: {} });
 });
 
 describe("the LoD select (spec §6)", () => {
@@ -180,6 +219,105 @@ describe("the LoD select (spec §6)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
     expect(submitRun).toHaveBeenCalledWith(
       expect.objectContaining({ toolId: "roof-metrics", lod: "1.2" }),
+    );
+  });
+
+  it("applies the NEW target's default when the target changes", () => {
+    // The LoD belongs to the layer it was read off: a choice (or a default)
+    // carried across a target change is a claim about the new layer that
+    // nobody made. Both layers offer 2.2 and 1.2, so the old value would
+    // still "qualify" — which is exactly how it used to survive.
+    const other = addRoofLayer({ name: "B", selectedLod: "1.2" });
+    addRoofLayer({ name: "A", selectedLod: "2.2" });
+    render(<ToolView toolId="roof-metrics" />);
+    expect(screen.getByRole("combobox", { name: "LoD" })).toHaveValue("2.2");
+    fireEvent.change(screen.getByRole("combobox", { name: "Layer" }), {
+      target: { value: other },
+    });
+    expect(screen.getByRole("combobox", { name: "LoD" })).toHaveValue("1.2");
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(submitRun).toHaveBeenCalledWith(
+      expect.objectContaining({ targetLayerId: other, lod: "1.2" }),
+    );
+  });
+
+  it("applies the new target's default when the stored target is GONE", () => {
+    // The same reset on the automatic replacement path: the stored draft names
+    // a layer that has since been removed, so the form retargets itself — and
+    // the LoD it carried was about that removed layer.
+    const layerId = addRoofLayer({ selectedLod: "1.2" });
+    useProcessingStore.getState().setDraft("roof-metrics", {
+      targetLayerId: "gone",
+      scope: "all",
+      lod: "2.2",
+      prefix: "roof_",
+      params: {},
+    });
+    render(<ToolView toolId="roof-metrics" />);
+    expect(screen.getByRole("combobox", { name: "LoD" })).toHaveValue("1.2");
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(submitRun).toHaveBeenCalledWith(
+      expect.objectContaining({ targetLayerId: layerId, lod: "1.2" }),
+    );
+  });
+
+  it("keeps an explicit LoD across an edit that is not a target change", () => {
+    // The other side of the reset: only a NEW target drops the choice.
+    addRoofLayer();
+    render(<ToolView toolId="roof-metrics" />);
+    fireEvent.change(screen.getByRole("combobox", { name: "LoD" }), {
+      target: { value: "1.2" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Prefix" }), {
+      target: { value: "r_" },
+    });
+    expect(screen.getByRole("combobox", { name: "LoD" })).toHaveValue("1.2");
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(submitRun).toHaveBeenCalledWith(
+      expect.objectContaining({ prefix: "r_", lod: "1.2" }),
+    );
+  });
+
+  it("follows a streaming target's commits, and drops a LoD they take away", () => {
+    // §6's counts come from the resident set on a streaming layer, so a commit
+    // can both change them and remove the rung the user picked.
+    residents.objects = {
+      A: resident(["2.2", "1.2"], ["2.2", "1.2"]),
+      B: resident(["1.2"], ["1.2"]),
+    };
+    const layerId = addRoofLayer({ isStreaming: true, selectedLod: "2.2" });
+    useStreamStore.setState({
+      streams: { [layerId]: { version: 0 } as never },
+    });
+    render(<ToolView toolId="roof-metrics" />);
+    const select = () =>
+      screen.getByRole("combobox", { name: "LoD" }) as HTMLSelectElement;
+    expect([...select().options].map((o) => o.textContent)).toEqual([
+      "2.2 (1 building with roof surfaces)",
+      "1.2 (2 buildings with roof surfaces)",
+    ]);
+    fireEvent.change(select(), { target: { value: "1.2" } });
+    expect(select()).toHaveValue("1.2");
+
+    // A commit in which every resident roof is at 2.2: the counts move and 1.2
+    // stops existing, so the form falls back to the default rather than
+    // submitting a rung the layer no longer has.
+    act(() => {
+      residents.objects = {
+        A: resident(["2.2"], ["2.2"]),
+        B: resident(["2.2"], ["2.2"]),
+      };
+      useStreamStore.setState({
+        streams: { [layerId]: { version: 1 } as never },
+      });
+    });
+    expect([...select().options].map((o) => o.textContent)).toEqual([
+      "2.2 (2 buildings with roof surfaces)",
+    ]);
+    expect(select()).toHaveValue("2.2");
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(submitRun).toHaveBeenCalledWith(
+      expect.objectContaining({ targetLayerId: layerId, lod: "2.2" }),
     );
   });
 });

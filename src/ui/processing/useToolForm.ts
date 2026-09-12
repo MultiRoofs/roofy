@@ -90,22 +90,27 @@ export function useToolForm(toolId: ToolId) {
         }
       : storedTargetExists
         ? stored
-        : { ...stored, targetLayerId: defaultTarget };
+        : // The stored target is gone, so the form retargets itself — and the
+          // LoD it carried was a statement about THAT layer. Dropped here for
+          // the same reason `setDraft` drops it on an explicit target change.
+          { ...stored, targetLayerId: defaultTarget, lod: null };
   const target = layers.find((l) => l.id === base.targetLayerId) ?? null;
   const lods = useLodOptions(tool, target);
   // Spec §6: "Default: the layer's selected LoD when it qualifies, else the
   // highest qualifying one." Computed, never written: a `setDraft` from a
   // render is a side effect, and the stored draft is the USER's choice — one
-  // that stops qualifying (they switched target) must not be overwritten in
-  // the store, only overridden here.
+  // that stops qualifying (a streaming commit took the rung away) must not be
+  // overwritten in the store, only overridden here.
+  //
+  // `base.lod`, not `stored.lod`: the draft whose target was just replaced has
+  // already dropped its LoD above, and reading the raw stored value here would
+  // hand it straight back.
   const qualifies = (lod: string | null): boolean =>
     lod !== null && lods.options.some((o) => o.lod === lod);
   const defaultLod = qualifies(target?.selectedLod ?? null)
     ? (target?.selectedLod ?? null)
     : (lods.options[0]?.lod ?? null);
-  const lod = qualifies(stored?.lod ?? null)
-    ? (stored?.lod ?? null)
-    : defaultLod;
+  const lod = qualifies(base.lod) ? base.lod : defaultLod;
   const draft: ToolDraft = { ...base, lod };
   const counts = useLayerCounts(target?.id ?? null);
   // `useLayerCounts` answers the ALL count for `matching` when nothing is
@@ -210,7 +215,19 @@ export function useToolForm(toolId: ToolId) {
     runReason,
     latestRun,
     queuedBehind,
-    setDraft: (patch: Partial<ToolDraft>) =>
-      useProcessingStore.getState().setDraft(toolId, { ...draft, ...patch }),
+    setDraft: (patch: Partial<ToolDraft>) => {
+      // A LoD is a statement about ONE layer (§6's default is read off the
+      // target), so changing the target drops it and the default rule above
+      // re-applies on the next render. The patch is spread LAST, so a caller
+      // that changes both at once still gets the LoD it asked for.
+      const retarget =
+        patch.targetLayerId !== undefined &&
+        patch.targetLayerId !== draft.targetLayerId;
+      useProcessingStore.getState().setDraft(toolId, {
+        ...draft,
+        ...(retarget ? { lod: null } : {}),
+        ...patch,
+      });
+    },
   };
 }

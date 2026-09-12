@@ -84,16 +84,22 @@ function column(name: string): ColumnInfo {
 
 type LayerInput = Parameters<LayerStoreActions["addLayer"]>[0];
 
-/** Adds the layer, makes it active, and gives it a READY table. */
+/**
+ * Adds the layer, makes it active, and gives it a READY table.
+ *
+ * The table entry is MERGED, and the name is an option, so a suite can stand up
+ * two roof layers and switch the form's target between them.
+ */
 export function addRoofLayer(
   options: {
+    name?: string;
     selectedLod?: string | null;
     roofs?: boolean;
     isStreaming?: boolean;
   } = {},
 ): string {
   const input: LayerInput = {
-    name: "roofs",
+    name: options.name ?? "roofs",
     model: roofModel(options),
     modelRef: { type: "url", url: "https://x/roofs.city.json" },
     visible: true,
@@ -110,8 +116,9 @@ export function addRoofLayer(
     }));
   }
   useWorkspaceStore.getState().setActiveLayerId(id);
-  useLayerTableStore.setState({
+  useLayerTableStore.setState((state) => ({
     tables: {
+      ...state.tables,
       [id]: {
         state: "ready",
         info: {
@@ -125,6 +132,6 @@ export function addRoofLayer(
         },
       },
     },
-  });
+  }));
   return id;
 }
