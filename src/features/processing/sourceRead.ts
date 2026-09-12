@@ -270,13 +270,18 @@ export async function readSource(input: {
     throw classifySourceFailure(error) ?? new Error(SOURCE_READ_FAILED);
   }
   if (!registered) {
-    // The hand-off was REFUSED (not lost), and `false` means two different
-    // things: `registerBuffer` returns it for a DEAD engine as well as for a
+    // The hand-off RETURNED and was refused, and `false` means two different
+    // things: `registerBuffer` answers it for a DEAD engine as well as for a
     // refused allocation (`duckdb.ts` — `if (!db || status.state !== "ready")
-    // return false;`, and its `catch` returns the same `false`), and
-    // `raced(…, signal)` above races the ABORT signal only, so a death does not
-    // reject it. Telling the user the source was too large when the engine had
-    // stopped is the wrong sentence, so the status decides.
+    // return false;`, and its `catch` returns the same `false`).
+    //
+    // The race above does not separate them, even though it covers the death as
+    // well as the abort: `onEngineDeath` fires ONCE per engine and drops its
+    // waiters as it fires, so a hand-off STARTED after the engine had already
+    // gone hears nothing and simply RESOLVES `false` (`engineAwait.ts`'s "ONE
+    // LIMIT, by construction"). Telling the user their source was too large
+    // when the database had stopped existing is the wrong sentence, so the
+    // status is what decides.
     if (getDuckDBStatus().state !== "ready") throw new EngineDeadError();
     throw new Error(SOURCE_OUT_OF_MEMORY);
   }
