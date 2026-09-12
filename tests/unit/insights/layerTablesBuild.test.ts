@@ -20,6 +20,12 @@ let engineDead = false;
  *  death, which is what tells a build the tables it knew are gone. */
 let engineGeneration = 1;
 const statusListeners = new Set<() => void>();
+/** `onEngineDeath`'s waiters. ONE-SHOT, as in `duckdb.ts`: `markEngineDead`
+ *  drops each listener as it fires, so a watcher that wants the next engine's
+ *  death has to re-arm. */
+const deathListeners = new Set<() => void>();
+/** How many times `initDuckDB` was asked for an engine. */
+let initCalls = 0;
 /** Holds every statement containing `needle` until `promise` settles, so a
  *  death can be timed INSIDE one the module is awaiting. */
 let holdStatement: { needle: string; promise: Promise<void> } | null = null;
@@ -71,7 +77,12 @@ vi.mock("../../../src/insights/duckdb", () => {
   };
   return {
     initDuckDB: vi.fn(async () => {
+      initCalls += 1;
       if (initGate) await initGate;
+    }),
+    onEngineDeath: vi.fn((listener: () => void) => {
+      deathListeners.add(listener);
+      return () => deathListeners.delete(listener);
     }),
     getDuckDBStatusVersion: vi.fn(() => 0),
     getEngineGeneration: vi.fn(() => engineGeneration),
@@ -127,7 +138,10 @@ const {
   retryEngine,
   useLayerTableStore,
 } = await import("../../../src/insights/layerTables");
-import type { SourceProvider } from "../../../src/insights/layerTables";
+import type {
+  LayerTableState,
+  SourceProvider,
+} from "../../../src/insights/layerTables";
 import { FLAT_PREFIX_COLUMNS } from "../../../src/insights/layerRows";
 import type { CityModel } from "../../../src/domain/citymodel/types";
 
@@ -233,6 +247,8 @@ beforeEach(() => {
   engineReady = true;
   engineDead = false;
   engineGeneration = 1;
+  deathListeners.clear();
+  initCalls = 0;
   holdStatement = null;
   initGate = null;
   registerAccepts = true;
@@ -1000,10 +1016,19 @@ describe("flat-fallback layer table", () => {
   });
 });
 
-/** The worker died: `markEngineDead` bumps the generation and publishes. */
+/**
+ * The worker died, in `markEngineDead`'s own order: the generation moves
+ * FIRST, then the death is announced to the waiters — each dropped as it
+ * fires, and while the status still reads `ready` — and only then is `failed`
+ * published to the status subscribers.
+ */
 function killEngine(): void {
-  engineDead = true;
   engineGeneration += 1;
+  for (const listener of Array.from(deathListeners)) {
+    deathListeners.delete(listener);
+    listener();
+  }
+  engineDead = true;
   for (const listener of Array.from(statusListeners)) listener();
 }
 
@@ -1185,6 +1210,97 @@ describe("a build whose engine went while it ran", () => {
     held.resolve();
     await building;
 
+    expect(stateOf("L1")).toEqual({
+      state: "failed",
+      message: "Analytics engine stopped",
+    });
+  });
+});
+
+describe("a build enqueued before the engine came up", () => {
+  /** Every value `L2`'s entry took, in order, so an intermediate write the
+   *  final state hides can be asserted against. */
+  function recordEntries(layerId: string): {
+    seen: Array<LayerTableState | null>;
+    stop: () => void;
+  } {
+    const seen: Array<LayerTableState | null> = [];
+    const stop = useLayerTableStore.subscribe((s) => {
+      seen.push(s.tables[layerId] ?? null);
+    });
+    return { seen, stop };
+  }
+
+  it("abandons a build the death caught while it was still QUEUED, without asking for an engine", async () => {
+    // Both builds are enqueued before the boot, so neither has a generation to
+    // be loyal to; the first adopts the engine `initDuckDB` brings up and the
+    // second is still on the queue when that engine dies. Its own generation
+    // check cannot see the death — it never bound one — so the INVALIDATION is
+    // what the head guard has to read, or the build writes `building` over it,
+    // asks for an engine and adopts the replacement.
+    publishStatus("initializing");
+    const open = holdEngine();
+    const describeL1 = "DESCRIBE SELECT * FROM read_cityjson('layer_1";
+    const held = deferred();
+    holdStatement = { needle: describeL1, promise: held.promise };
+    const first = enqueueLayerTable("L1", readerSource());
+    const second = enqueueLayerTable("L2", readerSource());
+    await tick();
+
+    // The boot lands, and the first build starts against it.
+    engineReady = true;
+    open();
+    await vi.waitFor(() =>
+      expect(sql.some((q) => q.startsWith(describeL1))).toBe(true),
+    );
+    const { seen, stop } = recordEntries("L2");
+    initCalls = 0;
+
+    killEngine();
+    held.resolve();
+    await Promise.all([first, second]);
+    stop();
+
+    expect(stateOf("L2")).toEqual({
+      state: "failed",
+      message: "Analytics engine stopped",
+    });
+    expect(getLayerTable("L2")).toBeNull();
+    // Never `building`, and it never asked for an engine it has no business
+    // using — nor made a table of its own.
+    expect(seen.map((entry) => entry?.state ?? null)).not.toContain("building");
+    expect(initCalls).toBe(0);
+    expect(sql.some((q) => q.includes("layer_"))).toBe(true);
+    expect(sql.some((q) => q.includes("layer_2"))).toBe(false);
+  });
+
+  it("abandons a build whose engine died DURING the initialization it was awaiting, and parks nothing", async () => {
+    // The death is published from `initializing`, which is not the
+    // `ready` → `failed` transition — so the invalidation has to key on the
+    // DEATH itself, and the build, which has no generation yet, has to read
+    // the not-ready status below as a death rather than as "not up YET".
+    // Parking it would hand the source to `retryEngine`, which is the rebuild
+    // this milestone deliberately does not do.
+    publishStatus("initializing");
+    const open = holdEngine();
+    const building = enqueueLayerTable("L1", readerSource());
+    await tick();
+
+    killEngine();
+    open();
+    await building;
+
+    expect(stateOf("L1")).toEqual({
+      state: "failed",
+      message: "Analytics engine stopped",
+    });
+    expect(getLayerTable("L1")).toBeNull();
+    expect(sql).toEqual([]);
+
+    // A Retry reboots the engine and must find nothing parked to revive.
+    engineDead = false;
+    engineReady = true;
+    await retryEngine();
     expect(stateOf("L1")).toEqual({
       state: "failed",
       message: "Analytics engine stopped",

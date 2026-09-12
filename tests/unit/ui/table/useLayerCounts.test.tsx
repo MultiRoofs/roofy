@@ -11,6 +11,7 @@ vi.mock("../../../../src/insights/duckdb", () => ({
   subscribeDuckDBStatus: () => () => {},
   getDuckDBStatusVersion: () => 0,
   getEngineGeneration: () => 1,
+  onEngineDeath: () => () => {},
   // `layerTables` reads the status at MODULE LOAD now (spec §6.1 invalidates
   // every table when the engine's worker dies), so this import chain needs it
   // even though nothing here asks about the engine.

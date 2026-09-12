@@ -60,6 +60,7 @@ vi.mock("../../../src/insights/duckdb", () => {
     subscribeDuckDBStatus: () => () => {},
     getDuckDBStatusVersion: () => 0,
     getEngineGeneration: () => 1,
+    onEngineDeath: () => () => {},
     getDuckDBStatus: unreachable,
     isExtensionLoaded: unreachable,
     ensureExtension: unreachable,

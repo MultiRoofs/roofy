@@ -37,9 +37,9 @@ import {
   getDuckDBStatus,
   getEngineGeneration,
   initDuckDB,
+  onEngineDeath,
   registerBuffer,
   runQuery,
-  subscribeDuckDBStatus,
 } from "./duckdb";
 import {
   encodeRowsAsJson,
@@ -411,9 +411,13 @@ export function runOnTableQueue<T>(task: () => Promise<T>): Promise<T> {
  * deliberately does not do, and the entries stay `failed` until the page is
  * reloaded.
  *
- * A TRANSITION, `ready` → `failed`, and not the value: a boot that never came
- * up publishes the same `failed`, and it must not condemn tables that were
- * built by an engine that worked.
+ * Keyed on the DEATH, {@link onEngineDeath}, and not on a status value or a
+ * status transition. The value is no use — a boot that never came up publishes
+ * the same `failed`, and it must not condemn tables an engine that worked
+ * built. The `ready` → `failed` TRANSITION is no use either: a worker that dies
+ * while the status is `initializing` publishes `failed` from there, so the
+ * transition misses it, and every entry — including the `building` one of the
+ * build that is awaiting that very boot — would be left looking alive.
  */
 function invalidateTablesOnEngineDeath(): void {
   for (const [layerId, entry] of Object.entries(
@@ -426,25 +430,40 @@ function invalidateTablesOnEngineDeath(): void {
 }
 
 let disposeEngineDeathWatch: (() => void) | null = null;
+/**
+ * How many engines have DIED under this module, as announced by
+ * {@link onEngineDeath}.
+ *
+ * Not {@link getEngineGeneration}, which a plain boot moves too: the question
+ * a build enqueued before any engine existed has to ask is "has a database
+ * been lost since I was enqueued", and the ordinary first build of a session
+ * sees the generation move simply because the engine came up. Deaths only.
+ */
+let engineDeaths = 0;
 
 /**
  * Installed at module load, deliberately: the invalidation is a fact about the
  * DATABASE, and must not depend on any feature having installed a watcher.
  *
  * A single live installer, the same shape as the run queue's watchers: a hot
- * reload must not leave the previous subscription behind, still invalidating
- * from a stale tracker.
+ * reload must not leave the previous subscription behind.
  */
 export function installEngineDeathWatch(): () => void {
   disposeEngineDeathWatch?.();
-  let previousEngineState = getDuckDBStatus().state;
-  const unsubscribe = subscribeDuckDBStatus(() => {
-    const state = getDuckDBStatus().state;
-    const died = previousEngineState === "ready" && state === "failed";
-    previousEngineState = state;
-    if (!died) return;
-    invalidateTablesOnEngineDeath();
-  });
+  let unsubscribe = (): void => {};
+  const arm = () => {
+    unsubscribe = onEngineDeath(() => {
+      // `onEngineDeath` drops each listener AS it fires — one notification per
+      // engine — so the next engine's death has to be subscribed to again.
+      // Re-armed first, and from inside the dispatch, which is safe: the
+      // dispatch iterates a copy, so this listener hears the NEXT death and
+      // never the one in flight.
+      arm();
+      engineDeaths += 1;
+      invalidateTablesOnEngineDeath();
+    });
+  };
+  arm();
   const dispose = () => {
     unsubscribe();
     if (disposeEngineDeathWatch === dispose) disposeEngineDeathWatch = null;
@@ -465,10 +484,12 @@ import.meta.hot?.dispose(() => {
 });
 
 export function resetLayerTablesForTest(): void {
-  // Re-installed, not merely reset: the previous-state tracker is a closure
-  // variable, and a test that left it on `failed` would make the next test's
-  // death unrecognisable.
+  // Re-installed, not merely reset: the subscription is a closure over a
+  // listener a test's fake engine has already forgotten (a death drops every
+  // waiter as it fires), so without this the next test's death is heard by
+  // nobody.
   installEngineDeathWatch();
+  engineDeaths = 0;
   registry.clear();
   cancelBefore.clear();
   lastEnqueueSeq.clear();
@@ -895,6 +916,29 @@ export function enqueueLayerTable(
    */
   const engineGone = () => engine !== null && getEngineGeneration() !== engine;
   /**
+   * Has an engine DIED since this build was enqueued?
+   *
+   * The question {@link engineGone} cannot answer while `engine` is null — a
+   * build enqueued before the boot has nothing to compare — and the one that
+   * decides what the not-ready branch below means: a death is "the database is
+   * gone", which is §6.1's failure, while no death is "not up YET", which is
+   * what the park and the Retry exist for.
+   */
+  const deathsAtEnqueue = engineDeaths;
+  const diedSinceEnqueue = () => engineDeaths !== deathsAtEnqueue;
+  /**
+   * Has the INVALIDATION already condemned this entry?
+   *
+   * The source of truth for a build that is still QUEUED: it has no generation
+   * of its own to compare, and the death that emptied the database wrote this
+   * entry on the way past. A fresh enqueue always writes `queued`/`ready` over
+   * the entry first (above), so this can only be the invalidation's own work.
+   */
+  const invalidated = () => {
+    const current = useLayerTableStore.getState().tables[layerId];
+    return current?.state === "failed" && current.message === ENGINE_STOPPED;
+  };
+  /**
    * Give the entry up with §6.1's sentence, and touch no engine doing it: a
    * dead worker answers no DROP, and the table is gone either way.
    *
@@ -905,6 +949,14 @@ export function enqueueLayerTable(
    */
   const abandon = (): LayerTableOutcome => {
     registry.delete(layerId);
+    // REMOVAL OWNS THE ENTRY. A layer dropped while this build was failing has
+    // no entry to fail: writing one here would put a `failed` card back on the
+    // very object React subscribes to, for a layer that is no longer in the
+    // app, until the drop's own queued task clears it again. The registry is
+    // still given up — the table went with the database either way — and the
+    // engine is not touched, which is also why the catch's first abandonment
+    // can skip its cleanup: a DROP for a corpse is nothing to hold on for.
+    if (superseded()) return SUPERSEDED;
     const current = useLayerTableStore.getState().tables[layerId];
     if (current?.state !== "failed" || current.message !== ENGINE_STOPPED) {
       setState(layerId, { state: "failed", message: ENGINE_STOPPED });
@@ -920,7 +972,13 @@ export function enqueueLayerTable(
     // `setState` below, which would otherwise put `building` over the
     // invalidation, and before `initDuckDB`, which it has no business asking
     // for on a table that is gone whatever the answer.
-    if (engineGone()) return abandon();
+    //
+    // THREE questions, because a queued build can have been condemned in three
+    // ways: its adopted engine was replaced (`engineGone`), an engine died
+    // while it had none to adopt (`diedSinceEnqueue` — the pre-boot build), or
+    // the invalidation reached its entry (`invalidated`, which is the fact
+    // itself rather than an inference from a counter).
+    if (engineGone() || diedSinceEnqueue() || invalidated()) return abandon();
     // Re-read at RUN time, not at enqueue time: a drop or an earlier rebuild
     // may have landed in between, so a build that was queued over nothing can
     // turn out to be a rebuild by the time it runs (and vice versa).
@@ -942,11 +1000,15 @@ export function enqueueLayerTable(
     // first build and free for every one after.
     await initDuckDB();
     if (superseded()) return SUPERSEDED;
-    // A death during that await. NOT the park below: parking would hand this
-    // source to `retryEngine`, which is the rebuild this milestone deliberately
-    // does not do, and `ENGINE_NOT_RUNNING` would overwrite §6.1's sentence
-    // with the one that means "not up YET".
-    if (engineGone()) return abandon();
+    // A death during that await — including one that struck the very boot this
+    // build was waiting for, which is why `diedSinceEnqueue` is asked here and
+    // not only `engineGone`: a build with no adopted engine cannot see a
+    // generation move. NOT the park below: parking would hand this source to
+    // `retryEngine`, which is the rebuild this milestone deliberately does not
+    // do, and `ENGINE_NOT_RUNNING` would overwrite §6.1's sentence with the one
+    // that means "not up YET". That park is for a boot that never came up, with
+    // no death in it.
+    if (engineGone() || diedSinceEnqueue() || invalidated()) return abandon();
     if (getDuckDBStatus().state !== "ready") {
       // PARK the source: nothing has been handed to DuckDB, so a `bytes`
       // array is still intact — but a provider is preferred over it anyway,
