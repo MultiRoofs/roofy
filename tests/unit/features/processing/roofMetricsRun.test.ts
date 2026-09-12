@@ -26,6 +26,14 @@ import {
 const sql: string[] = [];
 /** VFS registrations `writeComputedColumns` made. */
 const registered: string[] = [];
+/**
+ * The ROWS of the last values file the write registered, decoded.
+ *
+ * The one place a STREAMING layer's results can be read back: its model is a
+ * stub with no objects, so `mergeAttributes` has nothing to merge into and
+ * `attributesOf` answers for nobody. The table is where the run published.
+ */
+let writtenRows: Array<Record<string, unknown>> = [];
 /** What the mocked registry hands back for "L1". */
 let tableInfo: {
   table: string;
@@ -72,15 +80,20 @@ const statusListeners = new Set<() => void>();
 const deathListeners = new Set<() => void>();
 
 /**
- * The static layer's geometry is the parsed model, so the resident set is not
- * consulted — but `roofGeometrySource` imports it, and a stub keeps the
- * streaming store out of a test that is about a static layer.
+ * The resident set, as `getResidentModel` reports it.
+ *
+ * EMPTY for the static cases: their geometry is the parsed model, and the stub
+ * keeps the streaming store out of a test that is not about it. The streaming
+ * case fills this in — that is the whole of a streaming layer's geometry, since
+ * its `model.objects` is `{}` (`openStreamingLayer.ts`).
  */
+let residentObjects: Record<string, unknown> = {};
+
 vi.mock("../../../../src/features/streaming/residentModel", () => ({
   getResidentModel: vi.fn(() => ({
-    objects: {},
+    objects: residentObjects,
     cellCount: 0,
-    featureCount: 0,
+    featureCount: Object.keys(residentObjects).length,
     surfaceAttrKeys: [],
   })),
 }));
@@ -149,8 +162,11 @@ vi.mock("../../../../src/insights/duckdb", () => {
   return {
     runQuery: vi.fn(run),
     ddl: vi.fn(run),
-    registerBuffer: vi.fn(async (name: string) => {
+    registerBuffer: vi.fn(async (name: string, bytes: Uint8Array) => {
       registered.push(name);
+      writtenRows = JSON.parse(new TextDecoder().decode(bytes)) as Array<
+        Record<string, unknown>
+      >;
       return true;
     }),
     dropBuffer: vi.fn(async () => {}),
@@ -329,6 +345,55 @@ function wideModel(count: number): CityModel {
   return cityModel(objects);
 }
 
+/**
+ * One resident object, as the FCB worker sends it (`ResidentObjectRecord`): the
+ * roof metrics are already COMPUTED and LoD-tagged, and `geometryLods` carries
+ * the LoDs of every surface whatever its semantic type — which is what §7's
+ * contributor question is asked of.
+ */
+function residentRecord(
+  id: string,
+  objectType: string,
+  roofs: ReadonlyArray<{ lod: string; areaSqM: number; slopeDeg?: number }>,
+  parents: string[] = [],
+  children: string[] = [],
+  geometryLods: string[] = ["2.2"],
+) {
+  return {
+    id,
+    objectType,
+    attributes: {},
+    bbox: [0, 0, 0, 1, 1, 1],
+    lod: "2.2",
+    surfaceCount: roofs.length,
+    roofMetrics: roofs.map((r) => ({
+      lod: r.lod,
+      areaSqM: r.areaSqM,
+      inclinationDeg: r.slopeDeg ?? 0,
+      azimuthDeg: 180,
+    })),
+    geometryLods,
+    footprintAreaSqM: 0,
+    volumeCuM: null,
+    parents,
+    children,
+  };
+}
+
+/**
+ * A STREAMING layer: `isStreaming`, and a model stub with NO objects — exactly
+ * what `openStreamingLayer.ts` builds. Every question about its geometry has to
+ * go to the resident set.
+ */
+function streamingLayer(): Layer {
+  return {
+    ...layer(),
+    model: cityModel({}),
+    isStreaming: true,
+    modelRef: { type: "url", url: "https://x/delft.fcb" },
+  };
+}
+
 function layer(): Layer {
   return {
     id: "L1",
@@ -397,6 +462,8 @@ beforeEach(() => {
   failing = null;
   liveColumns = ["id", "feature_id"];
   columnsAtBegin = null;
+  residentObjects = {};
+  writtenRows = [];
   statusListeners.clear();
   deathListeners.clear();
   tableInfo = freshTable();
@@ -581,6 +648,38 @@ describe("a Roof metrics run", () => {
     expect(sql).not.toContain("BEGIN TRANSACTION");
   });
 
+  it("stops at the next batch when the Cancel lands in the batch's own yield", async () => {
+    // THE REAL CLICK'S TIMING. The batch boundary yields with a MACROTASK — a
+    // `setTimeout(0)`, so the event loop actually turns and a click can land —
+    // and only then re-checks. A Cancel scheduled the same way therefore lands
+    // INSIDE that yield, which is where a user's click lands; the case above
+    // calls `cancelRun` synchronously from the measurement, before the yield
+    // exists, and so cannot tell a check placed before the yield from one
+    // placed after it.
+    const features = ROOF_BATCH_FEATURES * 2;
+    useLayerStore.setState({
+      layers: [{ ...layer(), model: wideModel(features) }],
+    });
+    featureTotal = features;
+    scopeRows = Array.from({ length: features }, (_, i) => ({
+      id: `F${i}`,
+      f: `F${i}`,
+    }));
+    let id = "";
+    onMeasured = (count) => {
+      if (count !== ROOF_BATCH_FEATURES) return;
+      setTimeout(() => cancelRun(id), 0);
+    };
+    id = submitRun(roofRequest({ scope: "all" }));
+
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("cancelled"));
+    // The second batch never started.
+    expect(measuredSurfaces).toBe(ROOF_BATCH_FEATURES);
+    expect(attributesOf("F0").roof_area_m2).toBeUndefined();
+    expect(computedColumnsOf("L1").has("roof_area_m2")).toBe(false);
+    expect(sql).not.toContain("BEGIN TRANSACTION");
+  });
+
   it("fails a queued run whose table was rebuilt while the first one ran", async () => {
     // The re-validation at the HEAD of the queue is the boundary the code
     // supports: run 1 is held inside the real executor's read, and a streaming
@@ -602,6 +701,130 @@ describe("a Roof metrics run", () => {
     expect(runById(first)?.status).toBe("done");
     // The second run never got as far as its own read.
     expect(sql.filter((q) => q.includes("AS f FROM"))).toHaveLength(1);
+  });
+
+  it("measures a STREAMING layer from its resident set, root and parts", async () => {
+    // THE REAL STREAMING PATH. The layer's `model.objects` is `{}` — a streaming
+    // layer's geometry is the resident set, whose records carry roof metrics the
+    // worker already computed (LoD-tagged) plus `geometryLods` for §7's
+    // contributor question. Nothing here is measured on the main thread, which
+    // is asserted below: `computeRoofMetrics` is never called.
+    //
+    // SB1 has a 99 m² roof of its own and two parts (30 m² at 10°, 10 m² flat),
+    // so §7's rule — parts displace the root when they have geometry — is
+    // visible over this path too: the building's values come from the PARTS.
+    residentObjects = {
+      SB1: residentRecord(
+        "SB1",
+        "Building",
+        [{ lod: "2.2", areaSqM: 99 }],
+        [],
+        ["SP1", "SP2"],
+      ),
+      SP1: residentRecord(
+        "SP1",
+        "BuildingPart",
+        [{ lod: "2.2", areaSqM: 30, slopeDeg: 10 }],
+        ["SB1"],
+      ),
+      SP2: residentRecord(
+        "SP2",
+        "BuildingPart",
+        [{ lod: "2.2", areaSqM: 10 }],
+        ["SB1"],
+      ),
+    };
+    useLayerStore.setState({ layers: [streamingLayer()] });
+    featureTotal = 1;
+    scopeRows = [
+      { id: "SB1", f: "SB1" },
+      { id: "SP1", f: "SB1" },
+      { id: "SP2", f: "SB1" },
+    ];
+
+    const id = submitRun(roofRequest({ scope: "all" }));
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+
+    // THE TABLE is where a streaming run publishes: the model stub has no
+    // object to merge an attribute onto, so these rows are the whole result.
+    const byId = new Map(writtenRows.map((row) => [String(row.id), row]));
+    expect([...byId.keys()].sort((a, b) => a.localeCompare(b))).toEqual([
+      "SB1",
+      "SP1",
+      "SP2",
+    ]);
+    // The building: its parts' sum, NOT its own 99 m² roof.
+    expect(byId.get("SB1")).toEqual({
+      id: "SB1",
+      roof_area_m2: 40,
+      roof_flat_m2: 10,
+      roof_surfaces_n: 2,
+    });
+    // …and each part keeps its own, with the 10° roof outside the 5° threshold.
+    expect(byId.get("SP1")).toEqual({
+      id: "SP1",
+      roof_area_m2: 30,
+      roof_flat_m2: 0,
+      roof_surfaces_n: 1,
+    });
+    expect(byId.get("SP2")).toEqual({
+      id: "SP2",
+      roof_area_m2: 10,
+      roof_flat_m2: 10,
+      roof_surfaces_n: 1,
+    });
+    // One FEATURE measured — three rows, one building.
+    expect(runById(id)?.summary?.measured).toBe(1);
+    expect(runById(id)?.summary?.line).toMatch(/^1 building measured · /);
+    // §6.2's card line for a streaming target, which is the only honest thing to
+    // say about a result read off whatever had streamed in.
+    expect(runById(id)?.summary?.detail).toBe(
+      "Over the resident set: the buildings loaded when the run started.",
+    );
+    // The worker's numbers, straight through: no main-thread triangulation.
+    expect(measuredSurfaces).toBe(0);
+  });
+
+  it("marks a STREAMING run stale when the next settle rebuilds the table", async () => {
+    // A streaming layer rebuilds its table on every commit, so this is not a
+    // corner case for it — it is what happens as the user pans. The card must
+    // stop offering Undo (its columns are not on the new table) and start
+    // saying "stale: layer reloaded" (`RecentRuns.tsx`).
+    residentObjects = {
+      SB1: residentRecord("SB1", "Building", [{ lod: "2.2", areaSqM: 12 }]),
+    };
+    useLayerStore.setState({ layers: [streamingLayer()] });
+    featureTotal = 1;
+    scopeRows = [{ id: "SB1", f: "SB1" }];
+    // The watcher fires on a TRANSITION, so the store needs the table it is
+    // transitioning FROM before the run starts.
+    tables.useLayerTableStore.setState({
+      tables: { L1: { state: "ready", info: tableInfo } },
+    } as never);
+    const stop = installStaleWatcher();
+    try {
+      const id = submitRun(roofRequest({ scope: "all" }));
+      await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+      expect(runById(id)?.undoable).toBe(true);
+      expect(runById(id)?.stale).toBe(false);
+
+      // The next settle: a REBUILT table under a new name.
+      tables.useLayerTableStore.setState({
+        tables: {
+          L1: { state: "ready", info: { ...tableInfo, table: "layer_2" } },
+        },
+      } as never);
+
+      await vi.waitFor(() => expect(runById(id)?.stale).toBe(true));
+      expect(runById(id)?.undoable).toBe(false);
+      // `stale` IS the card's "stale: layer reloaded": `RecentRuns.secondLine`
+      // and `RunFooter` render that sentence from this flag and nothing else,
+      // and both suites pin the copy (`RecentRuns.test.tsx`, `ToolView.test.tsx`).
+      // Asserted here as the flag, because reaching into a React module from a
+      // feature test would import the panel to read a string constant.
+    } finally {
+      stop();
+    }
   });
 
   it("marks a finished run stale when the layer's table is rebuilt after it", async () => {

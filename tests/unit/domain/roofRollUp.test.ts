@@ -31,6 +31,29 @@ describe("rollUpRoofSurfaces", () => {
     const out = rollUpRoofSurfaces([s(10, 4.9, 0), s(6, 5, 90)], 5)!;
     expect(out.flatM2).toBe(10);
     expect(out.flatShare).toBeCloseTo(10 / 16, 10);
+    // The surface AT the threshold is not merely excluded from the flat area:
+    // being non-flat makes it a CANDIDATE for the dominant azimuth, which is
+    // the other half of the strict comparison and the half a flat-area
+    // assertion cannot see.
+    expect(out.azimuthDeg).toBe(90);
+  });
+
+  it("leaves a horizontal roof non-flat at threshold 0, azimuth and all", () => {
+    // The slider's bottom stop. "Slope under 0 degrees" is satisfied by
+    // nothing, so a perfectly horizontal roof is NOT flat there: the flat area
+    // is 0, the share is 0, and — the part the flat area does not show — that
+    // roof is the largest non-flat surface, so ITS azimuth is the dominant one.
+    // A non-strict `<=` would read 0 as "exactly horizontal counts", flip the
+    // flat area to the whole roof and leave the feature with no azimuth at all.
+    const out = rollUpRoofSurfaces([s(12, 0, 135), s(4, 0, 315)], 0)!;
+    expect(out.flatM2).toBe(0);
+    expect(out.flatShare).toBe(0);
+    expect(out.azimuthDeg).toBe(135);
+    // And the default threshold puts the same roof entirely in the flat area,
+    // with no dominant surface to take an azimuth from.
+    const atFive = rollUpRoofSurfaces([s(12, 0, 135), s(4, 0, 315)], 5)!;
+    expect(atFive.flatM2).toBe(16);
+    expect(atFive.azimuthDeg).toBeNull();
   });
 
   it("weights the mean slope by area, over ALL surfaces", () => {
