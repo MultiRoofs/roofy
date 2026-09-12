@@ -23,7 +23,7 @@ import { useLayerStore } from "../../features/layers/layerStore";
 import { useRuleDraftStore } from "../../features/rules/ruleDraftStore";
 import { useLayerTableStore } from "../../insights/layerTables";
 import { runQuery, type QueryOutcome } from "../../insights/duckdb";
-import { quoteIdent } from "../../insights/sql";
+import { buildMedianSql } from "../../insights/sql";
 import { NEW_RULE_COLOR_HEX } from "../../scene/cityColors";
 
 /** §6.2's reason for a Style-by-result button with nothing to style. */
@@ -49,9 +49,7 @@ async function readMedian(
 ): Promise<QueryOutcome | null> {
   const entry = useLayerTableStore.getState().tables[layerId];
   if (entry?.state !== "ready") return null;
-  return await runQuery(
-    `SELECT median(${quoteIdent(column)}) AS m FROM ${quoteIdent(entry.info.table)}`,
-  );
+  return await runQuery(buildMedianSql(entry.info.table, column));
 }
 
 /**

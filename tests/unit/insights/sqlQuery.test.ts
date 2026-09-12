@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildCountSql,
+  buildMedianSql,
   buildFeatureIdsSql,
   buildFeatureRowsSql,
   buildFeatureScopeWhere,
@@ -176,6 +177,25 @@ describe("buildCountSql", () => {
   it("counts the filtered rows", () => {
     expect(buildCountSql("layer_1", `"object_type" = 'Building'`)).toBe(
       'SELECT COUNT(*) AS "n" FROM "layer_1" WHERE "object_type" = \'Building\'',
+    );
+  });
+});
+
+describe("buildMedianSql", () => {
+  it("takes the median over the ROOT rows only", () => {
+    // §6.2's Style-by-result threshold. A run copies its value onto the root
+    // AND its parts (spec §7.3), so a median over every row weights each
+    // building by how many parts it happens to have modelled — a 3-part
+    // building counts four times, and the threshold the user is offered is not
+    // the median of the buildings they measured.
+    expect(buildMedianSql("layer_1", "extent_height_m")).toBe(
+      'SELECT median("extent_height_m") AS m FROM "layer_1" WHERE "feature_id" IS NULL OR "feature_id" = "id"',
+    );
+  });
+
+  it("quotes a column whose name would otherwise end the identifier", () => {
+    expect(buildMedianSql("layer_1", 'roof"area')).toBe(
+      'SELECT median("roof""area") AS m FROM "layer_1" WHERE "feature_id" IS NULL OR "feature_id" = "id"',
     );
   });
 });

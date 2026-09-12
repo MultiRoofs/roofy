@@ -38,6 +38,7 @@ import {
 } from "../../../src/insights/computedColumns";
 import {
   buildCountSql,
+  buildMedianSql,
   buildPageSql,
   quoteIdent,
 } from "../../../src/insights/sql";
@@ -535,6 +536,47 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
         { extent_height_m: 3.5 },
       ]);
       db.dropFile(file);
+    });
+  });
+
+  describe("probe 4: the Style-by-result median over root rows", () => {
+    const TABLE = "layer_cc4";
+
+    it("is the median of the FEATURES, not of the rows a part count weights", () => {
+      // §7.3: a run copies a feature's value onto its root AND its parts. Two
+      // buildings measured, 10 and 2 — but the first has three parts, so the
+      // rows read 10, 10, 10, 10, 2 and the row median is 10: the value of the
+      // bigger building, offered as the threshold that is supposed to split
+      // them. The root-only median is 6, which is the median of what the user
+      // measured and what §6.2's draft rule needs.
+      //
+      // `feature_id` as the reader writes it (a part carries its root's id, a
+      // root its own), and the NULL a fallback table may carry for a root —
+      // both branches of the predicate, in one table.
+      // CAST to DOUBLE because that is what `writeComputedColumns` declares the
+      // column as — and because an uncast `10.0` literal infers DECIMAL, whose
+      // `median()` comes back from the bindings as a raw Uint32Array rather than
+      // a number (measured here, DuckDB 1.5.5).
+      db.query(
+        `CREATE OR REPLACE TABLE ${quoteIdent(TABLE)} AS
+           SELECT "id", "feature_id", CAST("h" AS DOUBLE) AS "extent_height_m"
+           FROM (VALUES
+             ('b1', 'b1', 10.0),
+             ('b1-1', 'b1', 10.0),
+             ('b1-2', 'b1', 10.0),
+             ('b1-3', 'b1', 10.0),
+             ('b2', NULL, 2.0)
+           ) AS t("id", "feature_id", "h")`,
+      );
+
+      expect(
+        db.query(
+          `SELECT median("extent_height_m") AS m FROM ${quoteIdent(TABLE)}`,
+        ),
+      ).toEqual([{ m: 10 }]);
+      expect(db.query(buildMedianSql(TABLE, "extent_height_m"))).toEqual([
+        { m: 6 },
+      ]);
     });
   });
 });

@@ -418,6 +418,28 @@ export function buildCountSql(table: string, where: string | null): string {
 }
 
 /**
+ * The median of one COMPUTED COLUMN, over the feature ROOTS only — §6.2's
+ * "Style by result" threshold.
+ *
+ * ROOT-ONLY IS THE WHOLE POINT. A run writes its value onto the root row AND
+ * onto each of the feature's parts (spec §7.3, "then copied to root and parts
+ * alike"), so a median over every row weights each building by how many parts it
+ * happens to have modelled: one 3-part building counts four times against a
+ * neighbour with none, and the threshold offered to the user is not the median of
+ * the buildings they measured. On 3D BAG, where every Building has exactly one
+ * BuildingPart carrying the geometry, it is not even a value from the data.
+ *
+ * The root is the row whose id IS its feature id — the same test the tools use
+ * to decide which row carries the roll-up (`rollUpExtents`, which reads
+ * `COALESCE("feature_id", "id")`, so a root answers with itself). Spelled with
+ * the explicit NULL branch because a fallback table's `feature_id` is nullable
+ * and `NULL = "id"` is NULL, which would drop the row.
+ */
+export function buildMedianSql(table: string, column: string): string {
+  return `SELECT median(${quoteIdent(column)}) AS m FROM ${quoteIdent(table)} WHERE "feature_id" IS NULL OR "feature_id" = "id"`;
+}
+
+/**
  * The scope predicate every FEATURE-wise operation shares.
  *
  * Always the POSITIVE `IN` form, and `COALESCE` on BOTH sides: a single NULL

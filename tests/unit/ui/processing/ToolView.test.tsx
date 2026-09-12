@@ -549,8 +549,11 @@ describe("ToolView", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
     });
+    // ROOT ROWS ONLY: the run copied its value onto the root and its parts, so
+    // a median over every row would weight each building by its part count
+    // (`buildMedianSql`).
     expect(runQuery).toHaveBeenCalledWith(
-      'SELECT median("extent_height_m") AS m FROM "layer_1"',
+      'SELECT median("extent_height_m") AS m FROM "layer_1" WHERE "feature_id" IS NULL OR "feature_id" = "id"',
     );
     expect(
       useLayerStore.getState().layers.find((l) => l.id === layerId)?.colorBy,
