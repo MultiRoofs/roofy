@@ -312,6 +312,48 @@ async function loadExtension(
   }
 }
 
+/**
+ * Spec §5's sentence for an extension that could not be fetched — the SAME one
+ * the catalogue's chip tooltip and its disabled rows spell for a `failed`
+ * extension (`CatalogueView.chipTitle`, `eligibility.ts`). Repeated rather than
+ * imported because this module knows nothing about the UI, but it must READ the
+ * same: the status tooltip and the panel would otherwise give two reasons for
+ * one cause.
+ */
+function downloadFailure(name: ExtensionName): string {
+  return `The ${name} extension could not be downloaded; check the connection and retry`;
+}
+
+/**
+ * Spec §5's BOOT-TIME CHECK: an engine that came up with no network has two
+ * extensions it will never be able to fetch, and says so.
+ *
+ * WITHOUT THIS the lazy pair stays `unloaded` after an offline reload, which is
+ * the state that means "not fetched YET": the chips offer the download COST,
+ * the rows that need them carry no reason, and Retry — which the panel only
+ * renders for `failed` — is nowhere to be found. The user is left with tools
+ * that cannot work and nothing on screen about why (spec §9's scenario 6).
+ *
+ * `navigator.onLine` is ADVISORY and only trustworthy in one direction: `false`
+ * means there is no network, while `true` says nothing. So only `false` acts,
+ * and the recovery is the user's Retry (`ensureExtension`) rather than an
+ * `online` event — the browser fires that for a captive portal too, and a chip
+ * that silently went back to "unloaded" would have thrown the reason away.
+ *
+ * `cityjson` is not in here: the boot has already tried to load it for real,
+ * and whatever happened to it is recorded.
+ */
+function failLazyExtensionsIfOffline(): void {
+  if (typeof navigator === "undefined" || navigator.onLine !== false) return;
+  const offline: Partial<Record<ExtensionName, ExtensionStatus>> = {};
+  for (const name of ["spatial", "three_d"] as const) {
+    if (extensions[name].state === "unloaded") {
+      offline[name] = { state: "failed", error: downloadFailure(name) };
+    }
+  }
+  extensions = { ...extensions, ...offline };
+}
+
 /** `PRAGMA platform` — "wasm_eh" or "wasm_mvp". Which one a session got
  *  decides WHICH extension artefacts the community repo served it, so a
  *  schema-drift report is unactionable without it. Best effort. */
@@ -448,6 +490,9 @@ async function doInit(): Promise<void> {
     if (stale()) return;
     platform = detectedPlatform;
     loadedExtensions = detectedExtensions;
+    // BEFORE the publish, so the `ready` status the panel first renders already
+    // carries the reason rather than a download cost that cannot be paid.
+    failLazyExtensionsIfOffline();
     publishReady();
   } catch (err) {
     // The death that interrupted this boot has already published the reason

@@ -164,6 +164,15 @@ const retries = (ext: "spatial" | "three_d") =>
  *  the row's accessible description. */
 const FAILED_REASON =
   "The spatial extension could not be downloaded; check the connection and retry";
+/** The same sentence for the other lazy extension. */
+const FAILED_REASON_3D =
+  "The three_d extension could not be downloaded; check the connection and retry";
+
+/** An OFFLINE browser, as `navigator.onLine` reports it. Restored by the
+ *  `restoreAllMocks` in `afterEach`. */
+function goOffline(): void {
+  vi.spyOn(Navigator.prototype, "onLine", "get").mockReturnValue(false);
+}
 
 beforeEach(async () => {
   refuse.clear();
@@ -223,6 +232,82 @@ describe("the capability chips (spec §5)", () => {
       "title",
       "Loads the three_d extension on first run (about 1 MB, once per session)",
     );
+  });
+
+  it("mutes BOTH lazy chips when the engine boots OFFLINE (spec §5, scenario 6)", async () => {
+    // §5: "When the extension cannot be fetched (THE BOOT-TIME CHECK FAILED, or
+    // a load attempt failed) the chip turns muted…". Without that check an
+    // offline reload leaves both lazy extensions `unloaded`, which reads as
+    // "not fetched YET" and offers the download COST — so the user is told
+    // nothing about why the spatial tools will not work, and Retry (which is
+    // `failed`-only) is nowhere on the panel.
+    goOffline();
+    await act(async () => {
+      await duckdb.initDuckDB();
+    });
+    render(<CatalogueView />);
+
+    expect(chip("Spatial")).toHaveAttribute("data-state", "failed");
+    expect(chip("Spatial")).toHaveAttribute("title", FAILED_REASON);
+    expect(chip("3D")).toHaveAttribute("data-state", "failed");
+    expect(chip("3D")).toHaveAttribute("title", FAILED_REASON_3D);
+    // One Retry per spatial tool (three) and per 3D tool (two).
+    expect(retries("spatial")).toHaveLength(3);
+    expect(retries("three_d")).toHaveLength(2);
+    // The engine RECORDED a reason of its own, so the status tooltip and the
+    // run queue's warning have something true to say about the failure.
+    const status = duckdb.getDuckDBStatus();
+    expect(status.state === "ready" && status.extensions.spatial).toEqual({
+      state: "failed",
+      error: FAILED_REASON,
+    });
+    expect(status.state === "ready" && status.extensions.three_d).toEqual({
+      state: "failed",
+      error: FAILED_REASON_3D,
+    });
+    // §5: "Height from extent and Roof metrics need no extension and stay
+    // enabled offline." The engine itself is up — only the two downloads are
+    // out of reach.
+    for (const name of [/Roof metrics to attributes/, /Height from extent/]) {
+      expect(screen.getByRole("button", { name })).toHaveAttribute(
+        "aria-disabled",
+        "false",
+      );
+    }
+  });
+
+  it("recovers an offline boot's extension only when Retry asks", async () => {
+    // No `online`-event auto-clear: Retry is the door. The chip stays muted
+    // while the network comes back, and `ensureExtension` — not a reboot — is
+    // what loads the extension and publishes `loaded`.
+    goOffline();
+    await act(async () => {
+      await duckdb.initDuckDB();
+    });
+    render(<CatalogueView />);
+    expect(retries("spatial")).toHaveLength(3);
+
+    // The network is back. Nothing has asked the engine for anything, so
+    // nothing has changed on the panel.
+    vi.restoreAllMocks();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(chip("Spatial")).toHaveAttribute("data-state", "failed");
+    expect(retries("spatial")).toHaveLength(3);
+
+    fireEvent.click(retries("spatial")[0]!);
+    await waitFor(() => {
+      expect(chip("Spatial")).toHaveAttribute(
+        "title",
+        "The spatial extension is loaded",
+      );
+    });
+    expect(duckdb.isExtensionLoaded("spatial")).toBe(true);
+    expect(retries("spatial")).toHaveLength(0);
+    // The OTHER one is untouched: one extension's Retry is not the other's.
+    expect(chip("3D")).toHaveAttribute("data-state", "failed");
+    expect(retries("three_d")).toHaveLength(2);
   });
 
   it("says so once the extension is loaded, and does so on a REAL load", async () => {
