@@ -519,8 +519,15 @@ describe.skipIf(!enabled)("three_d against real DuckDB 1.5.5", () => {
               CASE WHEN s IS NOT NULL THEN r.is_valid END AS valid,
               CASE WHEN s IS NOT NULL AND r.is_valid THEN ST_3DVolume(s) END AS volume,
               ST_3DNumShells(s) AS shells, ST_3DNumFaces(s) AS faces,
+              CASE WHEN s IS NOT NULL THEN r.is_closed END AS closed,
+              CASE WHEN s IS NOT NULL THEN r.is_manifold END AS man,
+              CASE WHEN s IS NOT NULL THEN r.is_oriented END AS ori,
               CASE WHEN s IS NOT NULL THEN r.solid_count END AS solid_n,
+              CASE WHEN s IS NOT NULL THEN r.shell_count END AS shell_n,
+              CASE WHEN s IS NOT NULL THEN r.face_count END AS face_n,
               CASE WHEN s IS NOT NULL THEN r.open_edge_count END AS open_n,
+              CASE WHEN s IS NOT NULL THEN r.non_manifold_edge_count END AS nm_n,
+              CASE WHEN s IS NOT NULL THEN r.degenerate_face_count END AS deg_n,
               CASE WHEN s IS NOT NULL THEN r.orientation_error_count END AS ori_n,
               ST_3DSurfaceArea(s) AS envelope, ST_3DFootprintArea(s) AS footprint
        FROM (SELECT "geometry_lod2_2", "geometry_properties_lod2_2",
@@ -540,11 +547,22 @@ describe.skipIf(!enabled)("three_d against real DuckDB 1.5.5", () => {
     // and the footprint the 2 × 1 ground rectangle.
     expectRow(rows[0], {
       valid: true,
+      // The shared face x = 1 belongs to both members, and the report still
+      // reads the composite as closed, manifold and correctly oriented.
+      closed: true,
+      man: true,
+      ori: true,
       volume: 2,
+      // The two ways of counting agree: the standalone measures and the
+      // report's own `shell_count` / `face_count`.
       shells: 2,
       faces: 12,
       solid_n: 2,
+      shell_n: 2,
+      face_n: 12,
       open_n: 0,
+      nm_n: 0,
+      deg_n: 0,
       ori_n: 0,
       envelope: 12,
       footprint: 2,

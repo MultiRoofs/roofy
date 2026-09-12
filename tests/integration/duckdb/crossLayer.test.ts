@@ -109,10 +109,82 @@ const FEATURE_COLLECTION = JSON.stringify({
   ],
 });
 
+/** Whether THIS connection has the `json` extension loaded. */
+function jsonLoaded(db: Harness): boolean {
+  return (
+    db.query(
+      "SELECT loaded FROM duckdb_extensions() WHERE extension_name = 'json'",
+    )[0]?.["loaded"] === true
+  );
+}
+
 /** A Z polygon with a centre, an area and a height that are all exact. */
 const Z_SQUARE = "POLYGON Z ((0 0 5, 10 0 5, 10 10 5, 0 10 5, 0 0 5))";
 /** Its neighbour, overlapping it from x = 5 to x = 10. */
 const Z_SQUARE_EAST = "POLYGON Z ((5 0 5, 15 0 5, 15 10 5, 5 10 5, 5 0 5))";
+
+/**
+ * Whether `ST_GeomFromGeoJSON(NULL)` binds at all depends on whether the `json`
+ * extension is LOADED, and the FIRST `read_json` in a session loads it — which
+ * the suite below does in its own `beforeAll`. So the unloaded state gets its
+ * OWN describe, with its OWN engine: a connection no JSON expression has
+ * touched. It runs first, it runs under `-t` filtering, and it needs no
+ * conditional in the case body because the state is established by
+ * construction rather than inherited.
+ */
+describe.skipIf(!enabled)("spatial BEFORE the json extension loads", () => {
+  let db: Harness;
+
+  beforeAll(async () => {
+    const harness = await import("./harness");
+    // A SECOND connection, deliberately: `openDuckDB` boots its own module
+    // instance, so this one's extension state is independent of the suite
+    // below's. The extension binaries are already downloaded by then, so the
+    // extra boot costs about a second.
+    db = await harness.openDuckDB();
+    harness.installExtension(db, "spatial");
+    db.registerBytes(VECTOR_FILE, new TextEncoder().encode(VECTOR_NDJSON));
+  }, 180_000);
+
+  afterAll(() => {
+    db?.dropFile(VECTOR_FILE);
+    db?.close();
+  });
+
+  it("refuses a bare NULL until the first read_json, and takes the cast either way", () => {
+    expect(jsonLoaded(db)).toBe(false);
+    // UNLOADED: two overloads, `(VARCHAR)` and `(JSON)`, and nothing to
+    // choose between them.
+    expect(() =>
+      db.query("SELECT ST_GeomFromGeoJSON(NULL) IS NULL AS n"),
+    ).toThrow(/Could not choose a best candidate function/);
+    // The cast works in this state — it is the spelling every statement the
+    // app emits uses, and the only one that is safe in BOTH states.
+    expect(
+      db.query("SELECT ST_GeomFromGeoJSON(NULL::VARCHAR) IS NULL AS n")[0]?.[
+        "n"
+      ],
+    ).toBe(true);
+
+    // The transition, by the very statement the suite below runs in setup:
+    // `read_json` autoloads `json`.
+    db.query(VECTOR_TABLE_SQL);
+    expect(jsonLoaded(db)).toBe(true);
+
+    // LOADED: the JSON overload wins and the SAME call now returns NULL
+    // instead of raising. A builder that relied on the raise would be pinned
+    // to session state; a builder that relied on the NULL would break in a
+    // session that had not read JSON yet.
+    expect(
+      db.query("SELECT ST_GeomFromGeoJSON(NULL) IS NULL AS n")[0]?.["n"],
+    ).toBe(true);
+    expect(
+      db.query("SELECT ST_GeomFromGeoJSON(NULL::VARCHAR) IS NULL AS n")[0]?.[
+        "n"
+      ],
+    ).toBe(true);
+  });
+});
 
 /**
  * Tasks 13, 14, 16 and 19 APPEND their own cases INSIDE this `describe`, at the
@@ -252,14 +324,11 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
     });
   });
 
-  it("refuses a bare NULL in ST_GeomFromGeoJSON until `json` is loaded", () => {
-    // TWO overloads, `(VARCHAR)` and `(JSON)`, so a bare NULL is ambiguous —
-    // but ONLY while the `json` extension is unloaded. `json` autoloads on the
-    // first `read_json` (or any JSON-typed expression), and from then on the
-    // JSON overload wins and the same call returns NULL instead of raising.
-    // That is why this case tests the state first: whether the pre-load branch
-    // is reachable depends on which other case in this file ran before it, and
-    // a run filtered with `-t` reaches it while a whole-file run does not.
+  it("publishes both ST_GeomFromGeoJSON overloads, and resolves a bare NULL once json is loaded", () => {
+    // The state this suite's `beforeAll` always establishes: its
+    // `VECTOR_TABLE_SQL` read `json` into being. The UNLOADED half of the fact
+    // is the describe above, on its own connection.
+    expect(jsonLoaded(db)).toBe(true);
     const sigs = db
       .query(
         "SELECT parameter_types FROM duckdb_functions() WHERE function_name = 'ST_GeomFromGeoJSON'",
@@ -267,24 +336,9 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
       .map((r) => String(r["parameter_types"]))
       .sort();
     expect(sigs).toEqual(["[JSON]", "[VARCHAR]"]);
-
-    const jsonLoaded = () =>
-      db.query(
-        "SELECT loaded FROM duckdb_extensions() WHERE extension_name = 'json'",
-      )[0]?.["loaded"] === true;
-    if (!jsonLoaded()) {
-      expect(() =>
-        db.query("SELECT ST_GeomFromGeoJSON(NULL) IS NULL AS n"),
-      ).toThrow(/Could not choose a best candidate function/);
-    }
-
-    db.query("LOAD json;");
-    expect(jsonLoaded()).toBe(true);
     expect(
       db.query("SELECT ST_GeomFromGeoJSON(NULL) IS NULL AS n")[0]?.["n"],
     ).toBe(true);
-    // The cast is the spelling that works in BOTH states, so every statement
-    // the app emits uses it.
     expect(
       db.query("SELECT ST_GeomFromGeoJSON(NULL::VARCHAR) IS NULL AS n")[0]?.[
         "n"
