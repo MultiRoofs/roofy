@@ -246,14 +246,17 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
     // reaches — in the same muted note Run's own reason gets.
     //
     // §6.2: "disabled with 'All values are empty' when the chosen column is
-    // NULL for every object in the run". A STALE run is disabled too, and
-    // OUTRANKS empty: its table was rebuilt under it, which is why no median
-    // can be trusted at all, so "All values are empty" would be a claim about
-    // data this run no longer describes. The card already prints the stale
-    // reason above the actions, so that one is not repeated below them.
+    // NULL for every object in the run". The RUN knows that — `summarise`
+    // counted it — and `measured === 0` does not: a run with only Dominant
+    // azimuth ticked over flat roofs measures every building and writes NULL
+    // to all of them. A STALE run is disabled too, and OUTRANKS empty: its
+    // table was rebuilt under it, which is why no median can be trusted at
+    // all, so "All values are empty" would be a claim about data this run no
+    // longer describes. The card already prints the stale reason above the
+    // actions, so that one is not repeated below them.
     const styleReason = run.stale
       ? STALE_LAYER_RELOADED
-      : run.summary?.measured === 0
+      : run.summary === null || run.summary.firstColumnNonNull === 0
         ? ALL_VALUES_EMPTY
         : null;
     return (

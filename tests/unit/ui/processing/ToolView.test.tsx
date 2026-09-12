@@ -181,6 +181,9 @@ function doneRun(layerId: string, patch: Partial<RunRecord> = {}): RunRecord {
       detail: null,
       measured: 2,
       skipped: [],
+      // Both buildings got a height: this is the summary of a run that CAN be
+      // styled, which is what every case built on `doneRun` assumes.
+      firstColumnNonNull: 2,
     },
     ...patch,
   });
@@ -413,6 +416,7 @@ describe("ToolView", () => {
           detail: null,
           measured: 2,
           skipped: [],
+          firstColumnNonNull: 2,
         },
         undoable: true,
       }),
@@ -492,6 +496,7 @@ describe("ToolView", () => {
             detail: null,
             measured: 2,
             skipped: [],
+            firstColumnNonNull: 2,
           },
         }),
       ),
@@ -531,6 +536,7 @@ describe("ToolView", () => {
             detail: null,
             measured: 2,
             skipped: [],
+            firstColumnNonNull: 2,
           },
         }),
       ),
@@ -564,19 +570,21 @@ describe("ToolView", () => {
     });
   });
 
-  it("disables Style by result when the run measured nothing", async () => {
+  it("disables Style by result when the first column is NULL everywhere", () => {
     const layerId = addCityLayer();
     render(<ToolView toolId="height-from-extent" />);
     act(() =>
       useProcessingStore.getState().upsertRun(
-        runFixture({
-          status: "done",
-          targetLayerId: layerId,
+        doneRun(layerId, {
           summary: {
-            line: "0 buildings measured · 0.1 s",
+            line: "2 buildings measured · 0.1 s",
             detail: null,
-            measured: 0,
+            // MEASURED, and still nothing to style: §6.2's condition is about
+            // the COLUMN, not the count. A Roof metrics run with only Dominant
+            // azimuth ticked over flat roofs lands exactly here.
+            measured: 2,
             skipped: [],
+            firstColumnNonNull: 0,
           },
         }),
       ),
@@ -590,6 +598,27 @@ describe("ToolView", () => {
     expect(
       screen.getByText("All values are empty", { selector: "p" }),
     ).toBeInTheDocument();
+  });
+
+  it("keeps Style by result enabled when only SOME values are null", () => {
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() =>
+      useProcessingStore.getState().upsertRun(
+        doneRun(layerId, {
+          summary: {
+            line: "2 buildings measured · 0.1 s",
+            detail: null,
+            measured: 2,
+            skipped: [],
+            firstColumnNonNull: 1,
+          },
+        }),
+      ),
+    );
+    expect(
+      screen.getByRole("button", { name: "Style by result" }),
+    ).toBeEnabled();
   });
 
   it("says why when the median query fails, and opens no draft", async () => {
@@ -643,6 +672,7 @@ describe("ToolView", () => {
             detail: null,
             measured: 0,
             skipped: [],
+            firstColumnNonNull: 0,
           },
         }),
       ),
@@ -968,6 +998,7 @@ describe("ToolView", () => {
           detail: null,
           measured: 2,
           skipped: [],
+          firstColumnNonNull: 2,
         },
       }),
     );
@@ -1025,6 +1056,7 @@ describe("ToolView", () => {
           detail: null,
           measured: 2,
           skipped: [],
+          firstColumnNonNull: 2,
         },
       }),
     );

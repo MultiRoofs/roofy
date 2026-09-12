@@ -38,6 +38,7 @@ function runFixture(patch: Partial<RunRecord> = {}): RunRecord {
       detail: null,
       measured: 1115,
       skipped: [],
+      firstColumnNonNull: 1115,
     },
     error: null,
     log: [

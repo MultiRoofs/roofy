@@ -188,6 +188,7 @@ const {
   installStaleWatcher,
   installTargetRemovalWatcher,
   installEngineWatcher,
+  summarise,
 } = await import("../../../../src/features/processing/runQueue");
 const { registerExecutor, EXECUTORS } =
   await import("../../../../src/features/processing/tools");
@@ -1792,5 +1793,81 @@ describe("the engine watcher (spec §6.1)", () => {
     first();
     second();
     expect(statusListeners.size).toBe(0);
+  });
+});
+
+describe("summarise", () => {
+  const result = (
+    rows: Array<[string, Record<string, unknown>]>,
+    columns: string[],
+  ) => ({
+    columns: columns.map((name) => ({ name, type: "DOUBLE" as const })),
+    rows: new Map(rows),
+    measured: rows.length,
+    skipped: [],
+  });
+
+  it("counts the rows whose FIRST output column has a value", () => {
+    const summary = summarise(
+      result(
+        [
+          ["a", { roof_azimuth_deg: 180 }],
+          ["b", { roof_azimuth_deg: null }],
+        ],
+        ["roof_azimuth_deg"],
+      ),
+      1000,
+      { streaming: false },
+    );
+    expect(summary.firstColumnNonNull).toBe(1);
+  });
+
+  it("is 0 when every object got NULL, even though features were measured", () => {
+    // Azimuth-only over perfectly flat roofs: §7 gives NULL for the measure,
+    // and §6.2's Style by result must read "All values are empty".
+    const summary = summarise(
+      result(
+        [
+          ["a", { roof_azimuth_deg: null }],
+          ["b", { roof_azimuth_deg: null }],
+        ],
+        ["roof_azimuth_deg"],
+      ),
+      1000,
+      { streaming: false },
+    );
+    expect(summary.measured).toBe(2);
+    expect(summary.firstColumnNonNull).toBe(0);
+  });
+
+  it("is 0 for a run that wrote no column at all", () => {
+    const summary = summarise(result([], []), 1000, { streaming: false });
+    expect(summary.firstColumnNonNull).toBe(0);
+  });
+
+  it("says the run was over the resident set, for a streaming target", () => {
+    const summary = summarise(
+      result([["a", { roof_area_m2: 5 }]], ["roof_area_m2"]),
+      2400,
+      { streaming: true },
+    );
+    expect(summary.detail).toBe(
+      "Over the resident set: the buildings loaded when the run started.",
+    );
+  });
+
+  it("keeps the skip breakdown beside the resident-set note", () => {
+    const summary = summarise(
+      {
+        ...result([["a", { roof_area_m2: 5 }]], ["roof_area_m2"]),
+        skipped: [{ cause: "no roof surfaces at LoD 2", count: 3 }],
+      },
+      2400,
+      { streaming: true },
+    );
+    expect(summary.detail).toBe(
+      "Over the resident set: the buildings loaded when the run started. · " +
+        "3 skipped: 3 no roof surfaces at LoD 2",
+    );
   });
 });

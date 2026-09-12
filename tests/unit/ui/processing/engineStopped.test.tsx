@@ -131,6 +131,7 @@ function doneRun(layerId: string, patch: Partial<RunRecord> = {}): RunRecord {
       detail: null,
       measured: 2,
       skipped: [],
+      firstColumnNonNull: 2,
     },
     error: null,
     log: [],

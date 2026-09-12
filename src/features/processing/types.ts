@@ -110,6 +110,16 @@ export interface RunSummary {
   readonly detail: string | null;
   readonly measured: number;
   readonly skipped: ReadonlyArray<SkipCount>;
+  /**
+   * How many written rows have a value in the run's FIRST output column.
+   *
+   * Spec §6.2 disables Style by result "when the chosen column is NULL for
+   * every object in the run", and the chosen column is `columns[0]`. It is not
+   * the same as `measured === 0`: a run with only Dominant azimuth ticked over
+   * flat roofs measures every building and writes NULL to all of them (§7,
+   * "a feature with no remaining contributor for a measure gets NULL for it").
+   */
+  readonly firstColumnNonNull: number;
 }
 
 export interface RunRecord {

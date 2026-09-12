@@ -234,25 +234,50 @@ function plural(n: number, one: string, many: string): string {
   return `${fmt(n)} ${n === 1 ? one : many}`;
 }
 
+/** Spec §10 scenario 4: a streaming run's card says what it ran over. */
+const RESIDENT_SET_NOTE =
+  "Over the resident set: the buildings loaded when the run started.";
+
 /** Spec §6.1: "2 buildings measured · 14 skipped · 2.4 s". */
-export function summarise(result: ToolResult, elapsedMs: number): RunSummary {
+export function summarise(
+  result: ToolResult,
+  elapsedMs: number,
+  options: { readonly streaming: boolean },
+): RunSummary {
   const skippedTotal = result.skipped.reduce((a, s) => a + s.count, 0);
   const parts = [
     plural(result.measured, "building measured", "buildings measured"),
   ];
   if (skippedTotal > 0) parts.push(`${fmt(skippedTotal)} skipped`);
   parts.push(`${(elapsedMs / 1000).toFixed(1)} s`);
-  const detail =
-    skippedTotal > 0
-      ? `${fmt(skippedTotal)} skipped: ${result.skipped
-          .map((s) => `${fmt(s.count)} ${s.cause}`)
-          .join(" · ")}`
-      : null;
+
+  const detailParts: string[] = [];
+  if (options.streaming) detailParts.push(RESIDENT_SET_NOTE);
+  if (skippedTotal > 0) {
+    detailParts.push(
+      `${fmt(skippedTotal)} skipped: ${result.skipped
+        .map((s) => `${fmt(s.count)} ${s.cause}`)
+        .join(" · ")}`,
+    );
+  }
+
+  // The FIRST written column is the one §6.2's Style by result offers; a run
+  // that wrote none has nothing to style either way.
+  const first = result.columns[0]?.name ?? null;
+  let firstColumnNonNull = 0;
+  if (first !== null) {
+    for (const values of result.rows.values()) {
+      const value = values[first];
+      if (value !== null && value !== undefined) firstColumnNonNull += 1;
+    }
+  }
+
   return {
     line: parts.join(" · "),
-    detail,
+    detail: detailParts.length > 0 ? detailParts.join(" · ") : null,
     measured: result.measured,
     skipped: result.skipped,
+    firstColumnNonNull,
   };
 }
 
@@ -696,7 +721,9 @@ async function execute(
       // Nothing to write. The write's `UPDATE … WHERE "id" IN ()` is a SYNTAX
       // error, and a run that measured nothing has no columns to own — so it is
       // a DONE run with a summary and no Undo, not a failure.
-      const summary = summarise(result, elapsed());
+      const summary = summarise(result, elapsed(), {
+        streaming: layer.isStreaming,
+      });
       patch(id, {
         status: "done",
         phase: null,
@@ -839,7 +866,9 @@ async function execute(
       if (!(error instanceof EngineDeadError)) throw error;
     }
 
-    const summary = summarise(result, elapsed());
+    const summary = summarise(result, elapsed(), {
+      streaming: layer.isStreaming,
+    });
     patch(id, {
       status: "done",
       phase: null,
