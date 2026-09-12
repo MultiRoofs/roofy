@@ -122,7 +122,9 @@ function solidModel(options: { solids?: boolean } = {}): CityModel {
 
 type LayerInput = Parameters<LayerStoreActions["addLayer"]>[0];
 
-function addSolidLayer(options: { solids?: boolean } = {}): string {
+function addSolidLayer(
+  options: { solids?: boolean; selectedLod?: string | null } = {},
+): string {
   const input: LayerInput = {
     name: "Delft",
     model: solidModel(options),
@@ -133,6 +135,13 @@ function addSolidLayer(options: { solids?: boolean } = {}): string {
     isStreaming: false,
   };
   const id = useLayerStore.getState().addLayer(input);
+  if (options.selectedLod !== undefined) {
+    useLayerStore.setState((state) => ({
+      layers: state.layers.map((l) =>
+        l.id === id ? { ...l, selectedLod: options.selectedLod ?? null } : l,
+      ),
+    }));
+  }
   useWorkspaceStore.getState().setActiveLayerId(id);
   useLayerTableStore.setState((state) => ({
     tables: {
@@ -208,6 +217,28 @@ describe("Measure solids, switched on", () => {
       screen.getByText("No solid geometry in this layer", { selector: "p" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+  });
+
+  it("defaults to the layer's SELECTED LoD when that one qualifies", () => {
+    // §6's default has two halves and the frozen-request case below pins only
+    // the second ("else the highest qualifying one" — 2.2, with no selected LoD
+    // on the layer). 1.2 qualifies through B2's solid and is NOT the highest,
+    // so this is the case that separates the two rules.
+    addSolidLayer({ selectedLod: "1.2" });
+    render(<ToolView toolId="measure-solids" />);
+    expect(screen.getByRole("combobox", { name: "LoD" })).toHaveValue("1.2");
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(submitRun).toHaveBeenCalledWith(
+      expect.objectContaining({ toolId: "measure-solids", lod: "1.2" }),
+    );
+  });
+
+  it("falls back to the highest qualifying LoD when the layer's does not", () => {
+    // The other side of the same rule: 0 is not a rung this layer offers, so
+    // the selected LoD is overridden rather than submitted.
+    addSolidLayer({ selectedLod: "0" });
+    render(<ToolView toolId="measure-solids" />);
+    expect(screen.getByRole("combobox", { name: "LoD" })).toHaveValue("2.2");
   });
 
   it("renders the PARAMETERS section and lists the promised columns", () => {
