@@ -1,0 +1,8 @@
+1. MAJOR — `tests/unit/insights/layerTablesBuild.test.ts:1141`: Death tests resolve the blocked request themselves, masking the FIFO hang already ruled for fixing; leave build/cleanup promises unresolved and assert a subsequent queued task completes.
+2. MAJOR — `tests/unit/ui/processing/extensionChip.test.tsx:248`: Failure coverage requires an explicit load after boot, missing scenario 6’s offline reload; boot with `navigator.onLine=false`, assert both failed chips/Retry, extension-free eligibility, and recovery only after Retry.
+3. MAJOR — `tests/unit/features/processing/roofMetricsRun.test.ts:607`: The “streaming” lifecycle test uses a static model and manually replaces table state; add an empty-model FCB resident-set run verifying published values, feature counts, resident copy and staleness after rebuild.
+4. MINOR — `tests/unit/features/processing/roofMetricsRun.test.ts:557`: Synchronous cancellation from the measurement spy passes without a macrotask yield; schedule Cancel as a macrotask and assert the second batch never starts.
+5. MINOR — `tests/unit/domain/roofRollUp.test.ts:30`: Threshold equality checks flat area but not dominant azimuth or the binding 0° case; assert a horizontal roof at threshold 0 is non-flat, contributes zero flat area and supplies its azimuth.
+6. MINOR — `docs/roadmap.md:668`: The claim that muted chips and Retry are unreachable contradicts the catalogue tests and offline-boot ruling; distinguish reachable chip controls from unimplemented tool execution.
+
+Not yet — this pass leaves offline boot, streaming lifecycle and never-settling build containment insufficiently tested.
