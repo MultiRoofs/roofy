@@ -38,7 +38,9 @@ const {
    *  `registerBuffer` means "too large" only while the engine is still ready. */
   const ready = { state: "ready", extensions: {} } as const;
   return {
-    registerBuffer: vi.fn(async () => true),
+    // The parameters are declared so a case can replace the implementation
+    // with one that reads the array it is handed — the detaching mock below.
+    registerBuffer: vi.fn(async (_name: string, _bytes: Uint8Array) => true),
     dropBuffer: vi.fn(async () => {}),
     getDuckDBStatus: vi.fn(
       (): { state: string; extensions: Record<string, unknown> } => ready,
@@ -146,6 +148,54 @@ describe("readSource", () => {
     );
     expect(handle.from).toBe(
       "read_cityjson('layer_3_run_7.city.json', lod => '2.2')",
+    );
+  });
+
+  it("calls the provider on EVERY read, against a hand-off that DETACHES", async () => {
+    // The `SourceProvider` contract is the whole reason this matters:
+    // `registerBuffer` hands the array to the worker in the TRANSFER list, which
+    // DETACHES the caller's `ArrayBuffer` — after one hand-off the view has
+    // length 0 and "must never be read, re-registered or handed to a second
+    // consumer" (`duckdb.ts`'s own words). Two runs over one layer is the
+    // ordinary case, so a `readSource` that cached the first array would hand
+    // the second run an EMPTY file and the run would fail on a parse error.
+    //
+    // This mock detaches the way the real one does, so the second read's byte
+    // count is the assertion: a live array or a dead one.
+    const handed: number[] = [];
+    registerBuffer.mockImplementation(async (_name, bytes) => {
+      handed.push(bytes.byteLength);
+      // The transfer's observable effect, for real: `structuredClone` with a
+      // `transfer` list detaches the buffer exactly as `postTask` does.
+      structuredClone(bytes.buffer, { transfer: [bytes.buffer] });
+      return true;
+    });
+    let calls = 0;
+    const source = async () => {
+      calls += 1;
+      return new Uint8Array([1, 2, 3, 4]);
+    };
+
+    const first = await readSource({
+      runId: "run_a",
+      table: table({ source }),
+      lod: "2.2",
+      signal: new AbortController().signal,
+    });
+    await first.release();
+    const second = await readSource({
+      runId: "run_b",
+      table: table({ source }),
+      lod: "2.2",
+      signal: new AbortController().signal,
+    });
+
+    expect(calls).toBe(2);
+    // The SECOND 4 is the point: the second read handed over a LIVE array.
+    expect(handed).toEqual([4, 4]);
+    // And under its own name, so it cannot read the one the first read dropped.
+    expect(second.from).toBe(
+      "read_cityjson('layer_3_run_b.city.json', lod => '2.2')",
     );
   });
 
@@ -257,11 +307,14 @@ describe("readSource", () => {
   });
 
   it("tells a DEAD engine apart from a refused allocation on the same `false`", async () => {
-    // `registerBuffer` answers `false` for both (`duckdb.ts:728`), and the
-    // hand-off races the ABORT signal only — so a death never rejects it. The
-    // status is the only thing that separates §6.1's memory sentence from
-    // "Analytics engine stopped", and reading it the other way round tells the
-    // user their file is too large when the engine has simply gone.
+    // `registerBuffer` answers `false` for both — no database, or a refused
+    // allocation. The race the hand-off sits in covers the engine's DEATH as
+    // well as the abort, but it cannot help here: `onEngineDeath` fires once and
+    // drops its waiters, so a hand-off that STARTS after the engine has already
+    // gone hears nothing and resolves `false` like any other refusal. The status
+    // is the only thing that separates §6.1's memory sentence from "Analytics
+    // engine stopped", and reading it the other way round tells the user their
+    // file is too large when the engine has simply gone.
     registerBuffer.mockImplementation(async () => false);
     getDuckDBStatus.mockImplementation(() => ({
       state: "failed",
