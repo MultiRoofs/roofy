@@ -50,12 +50,21 @@ describe("SolidParams", () => {
   });
 
   it("carries §7.2's explanations as the labels' tooltips", () => {
+    // Asserted ON the box each hover belongs to: two `getByTitle`s alone would
+    // pass just as well with the two hints swapped.
     render(<SolidParams params={{}} onChange={() => {}} />);
+    for (const [label, hint] of [
+      ["Volume (m³)", "Only for a closed, valid solid"],
+      ["Height (m)", "Ridge minus ground at this LoD"],
+    ] as const) {
+      const box = screen.getByRole("checkbox", { name: label });
+      expect(box.closest("label")).toHaveAttribute("title", hint);
+    }
+    // And the measures §7.2 explains nothing about carry no tooltip at all.
     expect(
-      screen.getByTitle("Only for a closed, valid solid"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByTitle("Ridge minus ground at this LoD"),
-    ).toBeInTheDocument();
+      screen
+        .getByRole("checkbox", { name: "Envelope area (m²)" })
+        .closest("label"),
+    ).not.toHaveAttribute("title");
   });
 });
