@@ -485,11 +485,19 @@ describe("joinByLocation", () => {
   });
 
   it("forces the match count on and writes no fields for 'count only'", async () => {
+    // §7.5: "count only" "writes no fields and FORCES the match count on" — so
+    // the bag starts with the checkbox OFF and both fields ticked, and the run
+    // still writes the count column and nothing else.
     const { ctx, sql } = context({
       join: [row("B1", "B1", 2, { zones_matches_n: 2 })],
     });
-    const out = await joinByLocation(run({ ...params, tie: "countOnly" }), ctx);
+    const out = await joinByLocation(
+      run({ ...params, tie: "countOnly", writeMatchCount: false }),
+      ctx,
+    );
     expect(out.columns).toEqual([{ name: "zones_matches_n", type: "DOUBLE" }]);
+    expect(out.rows.get("B1")).toEqual({ zones_matches_n: 2 });
+    expect(joinStatement(sql)).toContain('AS "zones_matches_n"');
     expect(joinStatement(sql)).not.toContain("zones_zone");
   });
 
