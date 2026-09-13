@@ -232,6 +232,42 @@ afterEach(() => {
   useShellStore.getState().requestSection(null);
 });
 
+/**
+ * The global constraint, against the REAL registry: a tool whose executor has
+ * not shipped claims nothing about the user's data. Task 15 gave the three
+ * cross-layer entries their column builders so Tasks 16/17/19 would have
+ * nothing to wire — which is exactly why the form has to keep its own guard.
+ * `distance-to-nearest` is still `implemented: false` here; Join shipped in
+ * Task 16 and is the control.
+ */
+describe("an unimplemented tool promises nothing (global constraint)", () => {
+  it("prints no column list and no geometry verdict", () => {
+    addCityLayer();
+    render(<ToolView toolId="distance-to-nearest" />);
+    // The table has no LoD 0 rung and no reader, so the proxy radio would say
+    // so — a verdict on geometry for a run that cannot happen.
+    expect(
+      screen.queryByText(/LoD 0 footprints are not in this layer/),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("radiogroup", { name: "Building geometry" }),
+    ).toBeNull();
+    expect(document.querySelector(".processing-columns")).toHaveTextContent("");
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+  });
+
+  it("prints both for the cross-layer tool that HAS shipped", () => {
+    addCityLayer();
+    render(<ToolView toolId="join-by-location" />);
+    expect(
+      screen.getByRole("radiogroup", { name: "Building geometry" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/LoD 0 footprints are not in this layer/),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("ToolView", () => {
   it("renders TARGET, scope counts, OUTPUT columns and runs with the draft", () => {
     const layerId = addCityLayer();

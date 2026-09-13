@@ -434,10 +434,16 @@ export function useToolForm(toolId: ToolId) {
     ? resolveCrossLayerParams(toolId, draft.params, crossCtx)
     : draft.params;
   // The registry's own builder (spec §6 prints the resolved column list before
-  // Run); a tool whose executor has not shipped promises nothing. TWO arguments
-  // (Decisions item 6 (iii)): for Join the copied fields' types are already
-  // inside `params`, put there by `resolveCrossLayerParams`.
-  const columns = tool.outputColumns?.(draft.prefix, params) ?? [];
+  // Run); a tool whose executor has not shipped promises NOTHING — the global
+  // constraint, and the reason the guard is here rather than on the definition:
+  // the three cross-layer entries carry their column builders from Task 15 so
+  // Tasks 16/17/19 have nothing to wire, and an unshipped one must not print a
+  // list of columns no run can write. TWO arguments (Decisions item 6 (iii)):
+  // for Join the copied fields' types are already inside `params`, put there by
+  // `resolveCrossLayerParams`.
+  const columns = tool.implemented
+    ? (tool.outputColumns?.(draft.prefix, params) ?? [])
+    : [];
 
   // §6's "belongs to the source data" is about the TARGET's own attributes: a
   // city layer's table columns, a vector layer's public property keys.

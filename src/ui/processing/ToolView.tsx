@@ -288,7 +288,12 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
           )}
         </fieldset>
       )}
-      {f.tool.group === "cross-layer" && (
+      {/* `f.tool.implemented`, for the reason the LoD select carries the same
+          guard: the proxy radio is a VERDICT on the target's geometry ("LoD 0
+          footprints are not in this layer"), and a tool whose executor has not
+          shipped states nothing about the user's data. The column list above is
+          empty for the same reason — `useToolForm` returns none. */}
+      {f.tool.group === "cross-layer" && f.tool.implemented && (
         <fieldset className="processing-section" disabled={locked}>
           <legend className="processing-group__label">PARAMETERS</legend>
           {/* The section renders §6's inline validation itself: §7.6's
