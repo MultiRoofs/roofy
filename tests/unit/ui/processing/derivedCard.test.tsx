@@ -79,6 +79,7 @@ function createdRun(patch: Partial<RunRecord> = {}): RunRecord {
     toolId: "height-from-extent",
     targetLayerId: "L",
     targetName: "Delft",
+    targetDerivedFrom: null,
     sourceLayerId: null,
     sourceName: null,
     scope: "all",

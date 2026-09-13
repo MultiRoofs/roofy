@@ -193,6 +193,7 @@ function run(
     toolId: "aggregate-per-area",
     targetLayerId: "GEO",
     targetName: "Zones",
+    targetDerivedFrom: null,
     sourceLayerId: "L1",
     sourceName: "Delft",
     scope: "all",

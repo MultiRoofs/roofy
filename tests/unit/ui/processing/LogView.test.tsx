@@ -24,6 +24,7 @@ function runFixture(patch: Partial<RunRecord> = {}): RunRecord {
     toolId: "height-from-extent",
     targetLayerId: "L1",
     targetName: "Delft",
+    targetDerivedFrom: null,
     sourceLayerId: null,
     sourceName: null,
     scope: "all",
@@ -114,7 +115,7 @@ describe("LogView", () => {
     });
     render(<LogView runId="r1" />);
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
-    expect(writeText).toHaveBeenCalledWith(formatRunLog(runFixture(), null));
+    expect(writeText).toHaveBeenCalledWith(formatRunLog(runFixture()));
   });
 
   it("goes back to the view that opened it", () => {
@@ -133,24 +134,23 @@ describe("LogView", () => {
     // §6.4's header is "the reproducible record of the run: a planner can read
     // it back and rerun by hand", and a derived layer's own name says nothing
     // about where its rows came from.
-    useLayerStore.setState({
-      layers: [
-        {
-          id: "L1",
-          name: "Delft · solids",
-          derivedFrom: {
-            layerId: "L0",
-            layerName: "Delft",
-            runId: "run_0",
-          },
-        } as never,
-      ],
-    });
-    useProcessingStore
-      .getState()
-      .upsertRun(
-        runFixture({ targetLayerId: "L1", targetName: "Delft · solids" }),
-      );
+    //
+    // The ancestry comes off the RECORD, and NO layer is seeded here on
+    // purpose: §6.4 is a historical document, and a header that read the live
+    // store would lose the segment the moment the target was removed — for a
+    // run the history deliberately keeps.
+    useProcessingStore.getState().upsertRun(
+      runFixture({
+        targetLayerId: "L1",
+        targetName: "Delft · solids",
+        targetDerivedFrom: {
+          layerId: "L0",
+          layerName: "Delft",
+          runId: "run_0",
+        },
+      }),
+    );
+    expect(useLayerStore.getState().layers).toHaveLength(0);
     render(<LogView runId="r1" />);
     expect(
       screen.getByText("Delft · solids · Derived from Delft"),
@@ -159,28 +159,19 @@ describe("LogView", () => {
 
   it("names the parent of a derived VECTOR target too — [adapted copy A7]", () => {
     // A derived layer is a derived layer: §6.2's sentence does not distinguish
-    // the two kinds, and a vector copy's row is in the OTHER store — so a
-    // lookup in the city store alone would drop the segment for exactly the
-    // runs Aggregate produces.
-    useGeoLayerStore.setState({
-      layers: [
-        {
-          id: "L1",
-          name: "Zones · buildings",
-          kind: "geojson",
-          derivedFrom: {
-            layerId: "L0",
-            layerName: "Zones",
-            runId: "run_0",
-          },
-        } as never,
-      ],
-    });
-    useProcessingStore
-      .getState()
-      .upsertRun(
-        runFixture({ targetLayerId: "L1", targetName: "Zones · buildings" }),
-      );
+    // the two kinds, and one capture at Run covers both stores — so Aggregate's
+    // copies are not a second code path here.
+    useProcessingStore.getState().upsertRun(
+      runFixture({
+        targetLayerId: "L1",
+        targetName: "Zones · buildings",
+        targetDerivedFrom: {
+          layerId: "L0",
+          layerName: "Zones",
+          runId: "run_0",
+        },
+      }),
+    );
     render(<LogView runId="r1" />);
     expect(
       screen.getByText("Zones · buildings · Derived from Zones"),
@@ -209,7 +200,7 @@ describe("LogView", () => {
 
 describe("formatRunLog", () => {
   it("is the header, the statements and the warnings as plain text", () => {
-    const text = formatRunLog(runFixture(), null);
+    const text = formatRunLog(runFixture());
     expect(text).toContain("Target layer: Delft");
     expect(text).toContain("Source layer: —");
     expect(text).toContain(
@@ -226,20 +217,21 @@ describe("formatRunLog", () => {
 
   it("carries [adapted copy A7]'s parent into the Copy text too", () => {
     expect(
-      formatRunLog(runFixture(), {
-        layerId: "L0",
-        layerName: "Delft",
-        runId: "run_0",
-      }),
+      formatRunLog(
+        runFixture({
+          targetDerivedFrom: {
+            layerId: "L0",
+            layerName: "Delft",
+            runId: "run_0",
+          },
+        }),
+      ),
     ).toContain("Target layer: Delft · Derived from Delft");
   });
 
   it("names the error of a failed run", () => {
     expect(
-      formatRunLog(
-        runFixture({ status: "failed", error: "Binder Error: x" }),
-        null,
-      ),
+      formatRunLog(runFixture({ status: "failed", error: "Binder Error: x" })),
     ).toContain("Error: Binder Error: x");
   });
 });
@@ -254,9 +246,9 @@ describe("§6.4's building-geometry row", () => {
     );
     render(<LogView runId="r1" />);
     expect(screen.getByText("Extent rectangle")).toBeInTheDocument();
-    expect(
-      formatRunLog(runFixture({ params: { proxy: "centre" } }), null),
-    ).toContain("Building geometry: Extent centre");
+    expect(formatRunLog(runFixture({ params: { proxy: "centre" } }))).toContain(
+      "Building geometry: Extent centre",
+    );
   });
 
   it("keeps the em dash for a tool that has no proxy", () => {
@@ -271,7 +263,7 @@ describe("§6.4's building-geometry row", () => {
     // The row reads the FROZEN parameters, which a future tool may spell
     // differently; an unknown value is "no proxy", never a crash.
     expect(
-      formatRunLog(runFixture({ params: { proxy: "something-else" } }), null),
+      formatRunLog(runFixture({ params: { proxy: "something-else" } })),
     ).toContain("Building geometry: —");
   });
 
@@ -281,7 +273,6 @@ describe("§6.4's building-geometry row", () => {
     expect(
       formatRunLog(
         runFixture({ params: { rows: [{ op: "count", column: null }] } }),
-        null,
       ),
     ).toContain('rows = [{"op":"count","column":null}]');
     useProcessingStore

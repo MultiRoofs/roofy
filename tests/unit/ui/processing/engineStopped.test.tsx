@@ -125,6 +125,7 @@ function doneRun(layerId: string, patch: Partial<RunRecord> = {}): RunRecord {
     toolId: "height-from-extent",
     targetLayerId: layerId,
     targetName: "Delft",
+    targetDerivedFrom: null,
     sourceLayerId: null,
     sourceName: null,
     scope: "all",

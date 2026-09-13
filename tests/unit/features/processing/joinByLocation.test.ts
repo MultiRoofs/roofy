@@ -139,6 +139,7 @@ function run(
     toolId: "join-by-location",
     targetLayerId: "L1",
     targetName: "Delft",
+    targetDerivedFrom: null,
     sourceLayerId: "GEO",
     sourceName: "Zones",
     scope: "all",

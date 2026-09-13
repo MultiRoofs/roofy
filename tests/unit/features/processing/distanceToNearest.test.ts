@@ -133,6 +133,7 @@ function run(
     toolId: "distance-to-nearest",
     targetLayerId: "L1",
     targetName: "Delft",
+    targetDerivedFrom: null,
     sourceLayerId: "GEO",
     sourceName: "Roads",
     scope: "all",

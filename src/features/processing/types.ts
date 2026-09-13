@@ -6,6 +6,7 @@
  * three lines of `typeof` each.
  */
 import type { OutputColumn } from "../../insights/computedColumns";
+import type { DerivedFrom } from "../layers/layerStore";
 import type { ConditionOperator } from "../rules/types";
 
 export type ToolGroup = "roof" | "3d" | "cross-layer";
@@ -241,6 +242,17 @@ export interface RunRecord {
   readonly toolId: ToolId;
   readonly targetLayerId: string;
   readonly targetName: string;
+  /**
+   * The target's own ancestry, captured at Run — null unless the target is
+   * itself a derived layer (§6.2's `derivedFrom`).
+   *
+   * On the RECORD rather than looked up when the log is opened: §6.4 is "the
+   * reproducible record of the run", and a header that read the live store
+   * would lose [adapted copy A7]'s `Derived from <parent>` the moment the
+   * target was removed — for a run the history deliberately keeps. Captured
+   * from BOTH stores, because a derived VECTOR layer is just as derived.
+   */
+  readonly targetDerivedFrom: DerivedFrom | null;
   readonly sourceLayerId: string | null;
   readonly sourceName: string | null;
   readonly scope: Scope;

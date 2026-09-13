@@ -69,6 +69,7 @@ describe("ToolsButton", () => {
           toolId: "height-from-extent",
           targetLayerId: "L1",
           targetName: "Delft",
+          targetDerivedFrom: null,
           sourceLayerId: null,
           sourceName: null,
           scope: "all",

@@ -57,7 +57,11 @@ import {
   useLayerTableStore,
   type LayerTable,
 } from "../../insights/layerTables";
-import { useLayerStore, type Layer } from "../layers/layerStore";
+import {
+  useLayerStore,
+  type DerivedFrom,
+  type Layer,
+} from "../layers/layerStore";
 import {
   GEO_PROPERTY_ABSENT,
   restoreGeoDocumentProperties,
@@ -635,6 +639,23 @@ function layerNameOf(layerId: string | null): string | null {
   );
 }
 
+/**
+ * A layer's OWN ancestry, whichever store it lives in — §6.2's `derivedFrom`.
+ *
+ * Read once, at Run, and frozen onto the record: [adapted copy A7]'s log row
+ * has to survive the target being removed, and a derived layer is a derived
+ * layer whether its row is a `Layer` or a `GeoLayer`.
+ */
+function derivedFromOf(layerId: string): DerivedFrom | null {
+  return (
+    useLayerStore.getState().layers.find((l) => l.id === layerId)
+      ?.derivedFrom ??
+    useGeoLayerStore.getState().layers.find((l) => l.id === layerId)
+      ?.derivedFrom ??
+    null
+  );
+}
+
 /** Does either store still hold this id? §6.1's removal pre-flight. */
 function layerExists(layerId: string): boolean {
   return (
@@ -651,6 +672,7 @@ function queueRun(frozen: FrozenRequest): string {
     toolId: request.toolId,
     targetLayerId: request.targetLayerId,
     targetName: layerNameOf(request.targetLayerId) ?? "?",
+    targetDerivedFrom: derivedFromOf(request.targetLayerId),
     sourceLayerId: request.sourceLayerId,
     sourceName: layerNameOf(request.sourceLayerId),
     scope: request.scope,

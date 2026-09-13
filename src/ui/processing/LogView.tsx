@@ -6,8 +6,6 @@
  * The text Copy puts on the clipboard comes from the pure `formatRunLog`, not
  * from the DOM, so it can be asserted without rendering.
  */
-import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
-import { useLayerStore } from "../../features/layers/layerStore";
 import { useProcessingStore } from "../../features/processing/processingStore";
 import { toolById } from "../../features/processing/toolRegistry";
 import {
@@ -44,21 +42,13 @@ export function LogView({ runId }: { readonly runId: string }) {
     );
   }
   const params = Object.entries(run.params);
-  // ONE lookup, handed to both the row and the Copy text so they cannot drift.
   // A New-layer run's target is the untouched PARENT and carries no
-  // `derivedFrom`; it is a run ON a derived layer that gets A7's row.
-  //
-  // BOTH stores: a derived VECTOR layer (Aggregate's copy) is a row in the geo
-  // store, and §6.2's sentence does not distinguish the two kinds.
-  const derivedFrom =
-    useLayerStore.getState().layers.find((l) => l.id === run.targetLayerId)
-      ?.derivedFrom ??
-    useGeoLayerStore.getState().layers.find((l) => l.id === run.targetLayerId)
-      ?.derivedFrom ??
-    null;
+  // `derivedFrom`; it is a run ON a derived layer that gets A7's row — and the
+  // ancestry travels ON THE RECORD, frozen at Run from whichever store held
+  // the target, so the header keeps it after the layer is removed.
   const rows: ReadonlyArray<readonly [string, string]> = [
     ["Tool", toolById(run.toolId).name],
-    ["Target layer", targetLayerLine(run, derivedFrom)],
+    ["Target layer", targetLayerLine(run)],
     ["Source layer", run.sourceName ?? "—"],
     [
       "Scope",
@@ -92,9 +82,7 @@ export function LogView({ runId }: { readonly runId: string }) {
         <button
           type="button"
           className="processing-log__copy"
-          onClick={() =>
-            void navigator.clipboard?.writeText(formatRunLog(run, derivedFrom))
-          }
+          onClick={() => void navigator.clipboard?.writeText(formatRunLog(run))}
         >
           Copy
         </button>
