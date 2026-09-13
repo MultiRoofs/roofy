@@ -141,10 +141,18 @@ async function pause(control: YieldControl | undefined): Promise<void> {
  * reason `reprojectGeoLayer` is: a source is not "many small features" or "few
  * large ones", it is whatever the user loaded. The feature count bounds the
  * first kind, {@link ENCODE_BYTES} bounds the second, and {@link TEXT_SLICE}
- * bounds the case both miss — the source whose ONE feature is a five-megabyte
- * ring, where a whole-line `stringify` or `encode` would run to the end before
- * any budget was read. Every piece is encoded as it is produced, so the byte
- * count is exact rather than estimated and no batch is ever held twice.
+ * bounds the case both miss — the ONE feature that is a five-megabyte ring, or
+ * whose PROPERTY is five megabytes of text, where a whole-line `encode` or
+ * `set` would run to the end before any budget was read. Head and geometry go
+ * through the same sliced writer and every piece is encoded as it is produced,
+ * so the byte count is exact rather than estimated and no batch is ever held
+ * twice.
+ *
+ * THE ACCEPTED BOUND, stated rather than hidden: the `JSON.stringify` of one
+ * feature's `{idx, sid, fid, props}` is a single synchronous call that nothing
+ * can interrupt, and there is no streaming JSON writer to reach for. Task 12's
+ * rope flatten makes the same trade. Everything AFTER it — the escaping, the
+ * UTF-8 encoding and the copy into the final buffer — is sliced.
  *
  * THE FINAL BUFFER IS ONE EXACT ALLOCATION, filled chunk by chunk with each
  * chunk RELEASED as it is copied. The total is already known (it was counted
@@ -175,9 +183,43 @@ export async function encodeProjectedFeatures(
     inBatch = 0;
     await pause(control);
   };
+  /**
+   * Append `text` in {@link TEXT_SLICE} pieces, yielding at the byte budget.
+   *
+   * The ONE writer for both halves of a line. `escape` is false for the head,
+   * which `JSON.stringify` has already escaped, and true for the geometry,
+   * whose characters are being written INTO a JSON string here — and the
+   * escape is per character, so a piece escapes exactly as the whole would.
+   * The surrogate guard applies to both: `TextEncoder` turns a lone half into
+   * U+FFFD, which would corrupt an emoji in a property value as surely as one
+   * in a geometry.
+   */
+  const writeSliced = async (text: string, escape: boolean): Promise<void> => {
+    let from = 0;
+    while (from < text.length) {
+      let end = Math.min(from + TEXT_SLICE, text.length);
+      const last = text.charCodeAt(end - 1);
+      if (
+        end < text.length &&
+        end - 1 > from &&
+        last >= 0xd800 &&
+        last <= 0xdbff
+      ) {
+        end -= 1;
+      }
+      const piece = text.slice(from, end);
+      write(escape ? JSON.stringify(piece).slice(1, -1) : piece);
+      from = end;
+      if (from < text.length && spent()) await rest();
+    }
+  };
   for (const [index, f] of features.entries()) {
-    // The head is everything but the geometry: four keys of scalars, which is
-    // one small `stringify` however large the feature is.
+    // The ONE synchronous step left, and the accepted bound (Task 12's rope
+    // flatten is the same shape): `JSON.stringify` of the property bag cannot
+    // be interrupted from outside and there is no streaming JSON writer to
+    // reach for. What it produces is then WRITTEN in pieces like everything
+    // else, so the encode and the copy of a multi-megabyte property are both
+    // bounded even though its serialisation is not.
     const head = JSON.stringify(
       { idx: f.idx, sid: f.stableId, fid: f.featureId, props: f.properties },
       // A BIGINT that came from an upstream table arrives as a `BigInt`, which
@@ -188,28 +230,8 @@ export async function encodeProjectedFeatures(
     );
     // `head` ends in the object's own `}`; the geometry is appended as the
     // fifth member and the object is closed after it.
-    write(`${head.slice(0, -1)},"wkt":"`);
-    const wkt = f.wkt;
-    let from = 0;
-    while (from < wkt.length) {
-      let end = Math.min(from + TEXT_SLICE, wkt.length);
-      // Never split a surrogate PAIR: JSON escaping is per code unit, so a
-      // lone half would be written as one and the value would not read back.
-      const last = wkt.charCodeAt(end - 1);
-      if (
-        end < wkt.length &&
-        end - 1 > from &&
-        last >= 0xd800 &&
-        last <= 0xdbff
-      ) {
-        end -= 1;
-      }
-      // `JSON.stringify` of the piece, minus its quotes, IS the escape rule —
-      // it is per character, so a piece escapes exactly as the whole would.
-      write(JSON.stringify(wkt.slice(from, end)).slice(1, -1));
-      from = end;
-      if (from < wkt.length && spent()) await rest();
-    }
+    await writeSliced(`${head.slice(0, -1)},"wkt":"`, false);
+    await writeSliced(f.wkt, true);
     write('"}\n');
     inBatch += 1;
     // Nothing left to stop before: a yield after the last feature would only

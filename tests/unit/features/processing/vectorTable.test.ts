@@ -306,6 +306,44 @@ describe("encodeProjectedFeatures", () => {
     expect(outcome).toBe("cancelled");
   });
 
+  it("cancels mid-encode when the PROPERTIES are the large part", async () => {
+    // §7.5 copies a source's fields, and nothing bounds what a GeoJSON
+    // property holds — a description, a WKT someone stored as text, a blob of
+    // metadata. The head is written in the same pieces the geometry is, so the
+    // cancel lands before the feature's GEOMETRY is ever read.
+    const big = "x".repeat(9_000_000);
+    let reachedGeometry = false;
+    const feature: Projected = {
+      idx: 0,
+      stableId: "id:string:z0",
+      featureId: "z0",
+      properties: { note: big },
+      get wkt() {
+        reachedGeometry = true;
+        return "POINT (1 1)";
+      },
+    };
+    let cancelled = false;
+    setTimeout(() => {
+      cancelled = true;
+    }, 0);
+    let outcome = "";
+    try {
+      await encodeProjectedFeatures([feature], {
+        checkpoint: () => {
+          if (cancelled) throw new Error("cancelled");
+        },
+      });
+      outcome = "encoded the whole feature";
+    } catch (error) {
+      outcome = error instanceof Error ? error.message : String(error);
+    }
+    expect(outcome).toBe("cancelled");
+    // Stopping only in the final assembly would be too late: by then every
+    // byte has already been serialised and encoded.
+    expect(reachedGeometry).toBe(false);
+  });
+
   it("escapes a value that spans slice boundaries exactly as one piece would", async () => {
     // The geometry is written into the line in slices, so the JSON escape has
     // to be per character (it is) and a slice must never split a surrogate
