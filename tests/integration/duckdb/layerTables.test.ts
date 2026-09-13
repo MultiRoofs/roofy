@@ -103,7 +103,11 @@ const EXPORT_BASE = "exp_t33";
 
 /** Files this suite writes to DISK (see the harness's note on NODE_RUNTIME).
  *  Dropped through DuckDB where it can, removed here as the safety net. */
-const WRITTEN_DIRS = [EXPORT_BASE, `${EXPORT_BASE}_joined`];
+const WRITTEN_DIRS = [
+  EXPORT_BASE,
+  `${EXPORT_BASE}_joined`,
+  `${EXPORT_BASE}_cutpkg`,
+];
 const WRITTEN_FILES = [
   `${ATTRIBUTE_BASE}.parquet`,
   `${ATTRIBUTE_BASE}.csv`,
@@ -796,6 +800,112 @@ describe.skipIf(!enabled)("layer tables over real fixtures", () => {
     // `afterAll` is what keeps the working tree clean. In the browser the VFS
     // entry IS the file, so the two coincide.)
     expect(db.query("SELECT file FROM glob('exp_*')")).toEqual([]);
+  });
+
+  it("cuts a DERIVED layer's package to its own features, PARTS included", () => {
+    // §6, "What a derived layer is": the copy's table is reader-backed, and
+    // "the reader re-reads the parent source filtered to those ids". The
+    // filter is over feature ROOTS (`COALESCE("feature_id", "id")`), which is
+    // what this case is for: `NL.IMBAG.Pand.0001` has a BuildingPart, so a
+    // row-level `"id" IN (…)` would keep the Building and lose its geometry —
+    // the failure no SQL-text assertion can see. The parent holds three rows
+    // (two roots, one of them with a part); the copy names ONE root and must
+    // come back with TWO rows and no trace of the sibling.
+    const DERIVED_ROOT = "NL.IMBAG.Pand.0001";
+    const SIBLING_ROOT = "NL.IMBAG.Pand.0002";
+    const derivedTable = `${TABLE}_derived`;
+    const scratchSchema = `${EXPORT_BASE}_cut`;
+    const schema = `${EXPORT_BASE}_cutpkg`;
+    const outDir = schema;
+    const sourceName = `${EXPORT_BASE}_cut.city.json`;
+
+    // The copy's table, exactly as `prepareDerivedCityLayer` builds it: a CTAS
+    // from the PARENT's table cut by feature root, plus the run's own column
+    // written into the copy.
+    db.query(
+      `CREATE OR REPLACE TABLE ${quoteIdent(derivedTable)} AS SELECT * FROM ${quoteIdent(TABLE)} WHERE COALESCE("feature_id", "id") IN (${quoteLiteral(DERIVED_ROOT)})`,
+    );
+    db.query(
+      `ALTER TABLE ${quoteIdent(derivedTable)} ADD COLUMN IF NOT EXISTS "solid_volume_m3" DOUBLE`,
+    );
+    db.query(
+      `UPDATE ${quoteIdent(derivedTable)} SET "solid_volume_m3" = 7.5 * length("id")`,
+    );
+    // The CTAS itself already proves the root rule on the parent's table: the
+    // Building AND its part crossed, the sibling did not.
+    expect(
+      db
+        .query(`SELECT "id" FROM ${quoteIdent(derivedTable)} ORDER BY "id"`)
+        .map((r) => String(r.id)),
+    ).toEqual([DERIVED_ROOT, `${DERIVED_ROOT}-part1`]);
+
+    db.query(`CREATE SCHEMA ${quoteIdent(scratchSchema)}`);
+    db.query(`CREATE SCHEMA ${quoteIdent(schema)}`);
+    db.register(sourceName, "two-buildings.city.json");
+
+    // The whole point of the task: ONE read of the PARENT's file, cut by the
+    // copy's `sourceFeatureIds`, with the copy's computed column joined in.
+    db.query(
+      buildCityParquetSourceSql({
+        scratchSchema,
+        reader: "read_cityjson",
+        sourceFile: sourceName,
+        table: derivedTable,
+        lodSuffix: "2_2",
+        attributes: ["yearOfConstruction"],
+        computedAttributes: ["solid_volume_m3"],
+        where: null,
+        sourceFeatureIds: [DERIVED_ROOT],
+      }),
+    );
+    const scratch = db.query(
+      `SELECT "id", "feature_id", "solid_volume_m3" FROM ${quoteIdent(scratchSchema)}."src" ORDER BY "id"`,
+    );
+    // The root AND its part, from the reader's own rows...
+    expect(scratch.map((r) => String(r.id))).toEqual([
+      DERIVED_ROOT,
+      `${DERIVED_ROOT}-part1`,
+    ]);
+    // ...the sibling nowhere...
+    expect(scratch.map((r) => String(r.id))).not.toContain(SIBLING_ROOT);
+    // ...and the copy's OWN values on every row of the feature.
+    for (const row of scratch) {
+      expect(row.solid_volume_m3).toBe(7.5 * String(row.id).length);
+    }
+
+    // And the WRITER keeps both: a package of the copy is a package of two
+    // rows, not of the parent's three.
+    db.query(
+      buildCityParquetModuleSql({
+        schema,
+        module: "building",
+        scratchSchema,
+        table: derivedTable,
+        moduleTypes: ["Building"],
+      }),
+    );
+    db.query(`PRAGMA cityparquet_init(${quoteLiteral(schema)})`);
+    expect(
+      db.query(
+        `SELECT * FROM cityparquet_write(${quoteLiteral(schema)}, ${quoteLiteral(outDir)}, crs => ${quoteLiteral("EPSG:7415")})`,
+      ).length,
+    ).toBeGreaterThan(0);
+    const parquet = `${outDir}/building.parquet`;
+    expect(
+      db
+        .query(
+          `SELECT "id", "solid_volume_m3" FROM read_parquet(${quoteLiteral(parquet)}) ORDER BY "id"`,
+        )
+        .map((r) => ({ id: String(r.id), v: r.solid_volume_m3 })),
+    ).toEqual(scratch.map((r) => ({ id: String(r.id), v: r.solid_volume_m3 })));
+
+    db.query("DROP TABLE IF EXISTS cityparquet_validation");
+    db.query(`DROP SCHEMA IF EXISTS ${quoteIdent(schema)} CASCADE`);
+    db.query(`DROP SCHEMA IF EXISTS ${quoteIdent(scratchSchema)} CASCADE`);
+    db.query(`DROP TABLE IF EXISTS ${quoteIdent(derivedTable)}`);
+    db.dropFile(parquet);
+    db.dropFile(`${outDir}/metadata.json`);
+    db.dropFile(sourceName);
   });
 
   it("joins a computed column into the CityParquet source read", () => {
