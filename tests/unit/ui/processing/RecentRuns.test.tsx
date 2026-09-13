@@ -7,11 +7,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { RunRecord } from "../../../../src/features/processing/types";
 
-vi.mock("../../../../src/features/processing/runQueue", () => ({
-  retryRun: vi.fn(() => "run_2"),
-  cancelRun: vi.fn(),
-  undoRun: vi.fn(async () => {}),
-}));
+vi.mock("../../../../src/features/processing/runQueue", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../../../src/features/processing/runQueue")
+  >("../../../../src/features/processing/runQueue");
+  return {
+    // §6.2's block is REAL here, as it is in the card's own suite: the row is
+    // asserting the RULE, and a stub would let it claim any reason it liked.
+    newLayerUndoBlock: actual.newLayerUndoBlock,
+    retryRun: vi.fn(() => "run_2"),
+    cancelRun: vi.fn(),
+    undoRun: vi.fn(async () => {}),
+  };
+});
 
 const { RecentRuns } = await import("../../../../src/ui/processing/RecentRuns");
 const { retryRun, cancelRun, undoRun } =
@@ -93,6 +101,43 @@ describe("RecentRuns", () => {
       runId: "r1",
       from: { kind: "catalogue" },
     });
+  });
+
+  it("refuses a New-layer Undo the queue would refuse, and says why", () => {
+    // §5 ties the row's Undo to §6.2's rule, and the QUEUE refuses this one
+    // silently (it patches `error`, which a DONE row does not render) — so a
+    // row that offered a live button would be a button that does nothing.
+    useProcessingStore
+      .getState()
+      .upsertRun(runFixture({ destination: "new", newLayerId: "NEW" }));
+    useProcessingStore.getState().upsertRun(
+      runFixture({
+        id: "run_later",
+        targetLayerId: "NEW",
+        status: "queued",
+        summary: null,
+        undoable: false,
+      }),
+    );
+    render(<RecentRuns />);
+    const undo = screen.getAllByRole("button", { name: "Undo" })[0]!;
+    expect(undo).toBeDisabled();
+    expect(undo.getAttribute("title")).toBe(
+      "Used by a later run; remove the layer from the layer list instead",
+    );
+    fireEvent.click(undo);
+    expect(undoRun).not.toHaveBeenCalled();
+  });
+
+  it("leaves a New-layer Undo alone while nothing has used the copy", () => {
+    useProcessingStore
+      .getState()
+      .upsertRun(runFixture({ destination: "new", newLayerId: "NEW" }));
+    render(<RecentRuns />);
+    const undo = screen.getByRole("button", { name: "Undo" });
+    expect(undo).toBeEnabled();
+    fireEvent.click(undo);
+    expect(undoRun).toHaveBeenCalledWith("r1");
   });
 
   it("names the source layer of a cross-layer run", () => {

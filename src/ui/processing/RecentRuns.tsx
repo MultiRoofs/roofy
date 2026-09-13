@@ -8,6 +8,7 @@
 import { useProcessingStore } from "../../features/processing/processingStore";
 import {
   cancelRun,
+  newLayerUndoBlock,
   retryRun,
   undoRun,
 } from "../../features/processing/runQueue";
@@ -47,6 +48,11 @@ function RunRow({ run }: { readonly run: RunRecord }) {
   // §6.1: the backup table this Undo would restore from lived in the database
   // that died. The row keeps the button and explains itself, as the card does.
   const engineStopped = useProcessingStore((s) => s.engineStopped);
+  // §5 ties this Undo to §6.2's rule, and §6.2's New-layer block is the one
+  // reason the QUEUE refuses silently — `undoRun` patches `error`, which a DONE
+  // row does not render. Without this the row would offer a button that does
+  // nothing and says nothing. Null for every This-layer run.
+  const undoBlock = newLayerUndoBlock(run);
   const target =
     run.sourceName === null
       ? run.targetName
@@ -78,8 +84,10 @@ function RunRow({ run }: { readonly run: RunRecord }) {
         {run.status === "done" && run.undoable && !run.stale && (
           <button
             type="button"
-            disabled={engineStopped}
-            title={engineStopped ? UNDO_ENGINE_STOPPED : undefined}
+            disabled={engineStopped || undoBlock !== null}
+            title={
+              engineStopped ? UNDO_ENGINE_STOPPED : (undoBlock ?? undefined)
+            }
             onClick={() => void undoRun(run.id)}
           >
             Undo
