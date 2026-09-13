@@ -612,9 +612,16 @@ export function documentHasFeatureIds(document: unknown): boolean {
  * Does the document carry a feature at all?
  *
  * §7.5 and §7.7's "The source layer has no features" is about the SOURCE
- * select, which is drawn per keystroke over every candidate layer — so it is
- * one array length per layer, not a walk of anyone's geometry.
+ * select, which is drawn per keystroke over every candidate layer — so it stops
+ * at the FIRST feature object it sees and never copies the feature array the
+ * way `featuresOf` does, let alone walks anyone's geometry.
  */
 export function documentHasFeatures(document: unknown): boolean {
-  return featuresOf(document).length > 0;
+  if (!isRecord(document)) return false;
+  if (document.type === "Feature") return true;
+  return (
+    document.type === "FeatureCollection" &&
+    Array.isArray(document.features) &&
+    document.features.some(isRecord)
+  );
 }

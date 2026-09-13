@@ -832,5 +832,13 @@ describe("the two questions the FORM asks before any run", () => {
     );
     expect(documentHasFeatures(collection())).toBe(false);
     expect(documentHasFeatures({ hello: "world" })).toBe(false);
+    expect(documentHasFeatures(null)).toBe(false);
+    // A bare Feature is a document of one, and a collection of junk is none.
+    expect(
+      documentHasFeatures({ type: "Feature", properties: {}, geometry: null }),
+    ).toBe(true);
+    expect(
+      documentHasFeatures({ type: "FeatureCollection", features: [null, 7] }),
+    ).toBe(false);
   });
 });
