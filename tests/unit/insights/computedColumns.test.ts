@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../src/insights/duckdb", () => ({
   runQuery: vi.fn(async () => ({ ok: true, columns: [], rows: [] })),
@@ -122,7 +122,14 @@ describe("writeComputedColumns", () => {
       ]),
       existing: new Set(["a"]),
     });
-    expect(result).toEqual({ ok: true, backupTable: "__undo_r1" });
+    // `calls` is what the fake database was SENT; `statements` is what the
+    // write says it sent (§6.4). On a clean run they are the same list, and
+    // saying so here is what stops the record drifting from the transaction.
+    expect(result).toEqual({
+      ok: true,
+      backupTable: "__undo_r1",
+      statements: calls,
+    });
     expect(calls[0]).toBe("BEGIN TRANSACTION");
     expect(calls).toContain(
       `CREATE TABLE "__undo_r1" AS SELECT "id", "a" FROM "layer_1" WHERE "id" IN ('x', 'y')`,
@@ -159,7 +166,11 @@ describe("writeComputedColumns", () => {
       rows: new Map([["x", { a: 1 }]]),
       existing: new Set(),
     });
-    expect(result).toEqual({ ok: false, message: "Binder Error: x" });
+    expect(result).toEqual({
+      ok: false,
+      message: "Binder Error: x",
+      statements: calls,
+    });
     expect(calls).toContain("ROLLBACK");
   });
 
@@ -192,8 +203,12 @@ describe("writeComputedColumns", () => {
     expect(result).toEqual({
       ok: false,
       message: "The analytics engine is not running.",
+      statements: calls,
     });
     expect(calls).not.toContain("ROLLBACK");
+    // The record says what was SENT, so a ROLLBACK that was skipped is not in
+    // it — a log claiming a rollback nobody issued would be worse than none.
+    expect(result.statements).not.toContain("ROLLBACK");
   });
 
   it("rolls back instead of committing when the run was cancelled", async () => {
@@ -224,6 +239,7 @@ describe("writeComputedColumns", () => {
       ok: false,
       cancelled: true,
       message: "Cancelled",
+      statements: calls,
     });
     expect(calls).toContain("ROLLBACK");
     expect(calls).not.toContain("COMMIT");
@@ -256,9 +272,107 @@ describe("writeComputedColumns", () => {
       existing: new Set(),
       signal: controller.signal,
     });
-    expect(result).toEqual({ ok: true, backupTable: null });
+    expect(result).toEqual({
+      ok: true,
+      backupTable: null,
+      statements: calls,
+    });
     expect(calls.at(-1)).toBe("COMMIT");
     expect(calls).not.toContain("ROLLBACK");
+  });
+});
+
+describe("WriteOutcome.statements", () => {
+  /**
+   * A plain, succeeding database. Each case below changes ONE thing about it,
+   * and inheriting whatever `mockImplementation` the previous describe left
+   * behind would hide which — this suite has no `vi.clearAllMocks()`.
+   */
+  beforeEach(() => {
+    const ok = async () => ({ ok: true as const, columns: [], rows: [] });
+    vi.mocked(duck.runQuery).mockImplementation(ok);
+    vi.mocked(duck.ddl).mockImplementation(ok);
+    vi.mocked(duck.registerBuffer).mockImplementation(async () => true);
+  });
+
+  /** One write of two columns, one of which the table already has. */
+  const oneWrite = () =>
+    cc.writeComputedColumns({
+      runId: "run_1",
+      table: "layer_1",
+      columns: [
+        { name: "a", type: "DOUBLE" as const },
+        { name: "b", type: "BOOLEAN" as const },
+      ],
+      rows: new Map([["x", { a: 1, b: true }]]),
+      existing: new Set(["a"]),
+    });
+
+  it("reports every statement the transaction issued, in order", async () => {
+    const out = await oneWrite();
+    expect(out.ok).toBe(true);
+    // §6.4: "the SQL statements issued in order". BEGIN and COMMIT are part of
+    // the record — a planner reading the log back has to know the write was one
+    // transaction — and the backup CREATE is what makes the Undo legible.
+    expect(out.statements).toEqual([
+      "BEGIN TRANSACTION",
+      expect.stringContaining('CREATE TABLE "__undo_run_1"'),
+      expect.stringContaining('ADD COLUMN IF NOT EXISTS "a"'),
+      expect.stringContaining('ADD COLUMN IF NOT EXISTS "b"'),
+      expect.stringContaining("UPDATE"),
+      "COMMIT",
+    ]);
+  });
+
+  it("never prints a VALUE — the rows go through a registered buffer", async () => {
+    // The UPDATE reads `read_json('__vals_run_1.json', …)`, so the log holds
+    // the statement and not a thousand literals. A log that inlined the values
+    // would be unusable and would leak the data into a bug report.
+    const out = await oneWrite();
+    const text = out.statements.join("\n");
+    expect(text).toContain("__vals_run_1.json");
+    expect(text).not.toContain("VALUES");
+    expect(text).not.toContain("true");
+  });
+
+  it("reports the statements it got through on a FAILURE too", async () => {
+    // §6.3 shows the error; §6.4 still has to say what was attempted.
+    const fail = async (sql: string) =>
+      sql.startsWith("UPDATE")
+        ? { ok: false as const, message: "boom" }
+        : { ok: true as const, columns: [], rows: [] };
+    vi.mocked(duck.runQuery).mockImplementation(fail);
+    vi.mocked(duck.ddl).mockImplementation(fail);
+    const out = await oneWrite();
+    expect(out.ok).toBe(false);
+    // Everything up to and including the failed UPDATE, then the ROLLBACK that
+    // undid it — which is the whole point of recording what was SENT rather
+    // than the plan.
+    expect(out.statements[0]).toBe("BEGIN TRANSACTION");
+    expect(out.statements).toContain("ROLLBACK");
+    expect(out.statements).not.toContain("COMMIT");
+  });
+
+  it("records a COMMIT that FAILED, and the rollback after it", async () => {
+    // The COMMIT is sent outside the statement loop, so it is the one that a
+    // record built from the loop alone would lose — and a write that failed
+    // AT the commit is exactly the one a planner needs the record for.
+    const fail = async (sql: string) =>
+      sql === "COMMIT"
+        ? { ok: false as const, message: "TransactionContext Error: x" }
+        : { ok: true as const, columns: [], rows: [] };
+    vi.mocked(duck.runQuery).mockImplementation(fail);
+    const out = await oneWrite();
+    expect(out.ok).toBe(false);
+    expect(out.statements.slice(-2)).toEqual(["COMMIT", "ROLLBACK"]);
+  });
+
+  it("reports an empty list when the rows never reached the engine", async () => {
+    // `registerBuffer` failing is the one exit before any statement is sent.
+    vi.mocked(duck.registerBuffer).mockResolvedValueOnce(false);
+    const out = await oneWrite();
+    expect(out.ok).toBe(false);
+    expect(out.statements).toEqual([]);
   });
 });
 

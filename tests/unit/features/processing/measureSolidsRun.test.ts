@@ -377,13 +377,18 @@ describe("a Measure solids run", () => {
       solid_valid: true,
     });
     expect(runById(id)!.summary!.line).toMatch(/^2 buildings measured · /);
-    // §6.4: the reproducible record names all three statements.
-    expect(runById(id)!.log.map((entry) => entry.label)).toEqual([
+    // §6.4: the reproducible record names all three statements, and then the
+    // write's own — ONE entry per statement it issued, each carrying its SQL.
+    const labels = runById(id)!.log.map((entry) => entry.label);
+    expect(labels.slice(0, 3)).toEqual([
       "Reading features",
       "Checking source ids",
       "Measuring solids",
-      "Writing results",
     ]);
+    expect(labels.slice(3).length).toBeGreaterThan(0);
+    expect(
+      labels.slice(3).every((l) => l.startsWith("Writing results (")),
+    ).toBe(true);
   });
 
   it("releases the source and publishes NOTHING when cancelled mid-read", async () => {

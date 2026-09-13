@@ -140,12 +140,29 @@ export interface WriteInput {
 }
 
 export type WriteOutcome =
-  | { readonly ok: true; readonly backupTable: string | null }
+  | {
+      readonly ok: true;
+      readonly backupTable: string | null;
+      /**
+       * Every statement the transaction issued, in order (spec §6.4: "the SQL
+       * statements issued in order"). The run's log prints them so a planner
+       * can read it back and repeat the UPDATE by hand — which the one
+       * `sql: null` entry M1 shipped could not support.
+       *
+       * They are the statements, never the values: the rows travel through a
+       * registered buffer and the UPDATE reads `read_json(…)`, so the log
+       * stays a page long whatever the run measured.
+       */
+      readonly statements: ReadonlyArray<string>;
+    }
   /** `cancelled` is the user's own Cancel, never an error to report. */
   | {
       readonly ok: false;
       readonly message: string;
       readonly cancelled?: true;
+      /** What it got through before it failed — §6.3 shows the error, §6.4
+       *  still has to say what was attempted. */
+      readonly statements: ReadonlyArray<string>;
     };
 
 async function step(
@@ -162,10 +179,15 @@ async function step(
  * that the engine's worker died under it. There is nothing to roll back then —
  * the transaction, the backup table and the database all went together — and a
  * dead worker never answers, so the statement is skipped rather than sent.
+ *
+ * RETURNS WHETHER IT SENT ANYTHING, because §6.4's record is of what was
+ * issued: a log that claimed a ROLLBACK nobody posted would be worse than one
+ * that said nothing.
  */
-async function cleanup(sql: string): Promise<void> {
-  if (getDuckDBStatus().state !== "ready") return;
+async function cleanup(sql: string): Promise<boolean> {
+  if (getDuckDBStatus().state !== "ready") return false;
   await step(sql);
+  return true;
 }
 
 /** Spec §6.1: results land in ONE transaction; a failure leaves the layer as it was. */
@@ -190,6 +212,8 @@ export async function writeComputedColumns(
     return {
       ok: false,
       message: "Could not hand the results to the analytics engine",
+      // Nothing was sent: this is the one exit before the transaction opens.
+      statements: [],
     };
   }
   const statements: Array<[string, "ddl" | "query"]> = [
@@ -209,12 +233,20 @@ export async function writeComputedColumns(
     buildUpdateFromValuesSql(input.table, valuesFile, input.columns),
     "query",
   ]);
+  // What was actually SENT, in order — not the plan above, which may not have
+  // been reached in full (§6.4).
+  const issued: string[] = [];
+  /** Roll back, and record it only if the statement really went out. */
+  const rollback = async (): Promise<void> => {
+    if (await cleanup("ROLLBACK")) issued.push("ROLLBACK");
+  };
   try {
     for (const [sql, use] of statements) {
+      issued.push(sql);
       const out = await step(sql, use);
       if (!out.ok) {
-        await cleanup("ROLLBACK");
-        return { ok: false, message: out.message };
+        await rollback();
+        return { ok: false, message: out.message, statements: issued };
       }
     }
     // The COMMIT is OUTSIDE the loop because this check has to sit right
@@ -222,15 +254,23 @@ export async function writeComputedColumns(
     // table included, DuckDB's DDL being transactional — and after the COMMIT
     // nothing can be.
     if (input.signal?.aborted) {
-      await cleanup("ROLLBACK");
-      return { ok: false, cancelled: true, message: "Cancelled" };
+      await rollback();
+      return {
+        ok: false,
+        cancelled: true,
+        message: "Cancelled",
+        statements: issued,
+      };
     }
+    // Recorded BEFORE it is sent, like every statement in the loop: a COMMIT
+    // that FAILED is the one a planner most needs to see in the log.
+    issued.push("COMMIT");
     const committed = await step("COMMIT");
     if (!committed.ok) {
-      await cleanup("ROLLBACK");
-      return { ok: false, message: committed.message };
+      await rollback();
+      return { ok: false, message: committed.message, statements: issued };
     }
-    return { ok: true, backupTable };
+    return { ok: true, backupTable, statements: issued };
   } finally {
     // The VFS name is dead either way: a registration that outlived its
     // statement is a name a later run would read stale bytes from.

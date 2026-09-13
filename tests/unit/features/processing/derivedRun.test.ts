@@ -280,6 +280,46 @@ describe("destination: New layer", () => {
     expect(runById(id)?.newLayerId).toBe(layers[1]?.id);
   });
 
+  it("logs the COPY's write statement by statement (§6.4)", async () => {
+    // The write happens INSIDE `prepareDerivedCityLayer`, so only the
+    // preparation knows its statements. Without the shared recorder a
+    // New-layer run's log would stop at `CREATE TABLE` — the one run §6.4's
+    // "the SQL statements issued in order" was not true for.
+    fakeExecutor();
+    const id = submitRun(newLayerRequest());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    const write = (runById(id)?.log ?? []).filter((e) =>
+      e.label.startsWith("Writing results ("),
+    );
+    expect(write.length).toBeGreaterThan(0);
+    const statements = write.map((e) => e.sql);
+    expect(statements[0]).toBe("BEGIN TRANSACTION");
+    expect(statements).toContain("COMMIT");
+    expect(
+      statements.some((s) => s?.includes("ADD COLUMN IF NOT EXISTS")),
+    ).toBe(true);
+    // The copy's own CREATE is still there, and BEFORE the write.
+    const labels = (runById(id)?.log ?? []).map((e) => e.label);
+    expect(labels.indexOf("Creating the new layer's table")).toBeLessThan(
+      labels.findIndex((l) => l.startsWith("Writing results (")),
+    );
+  });
+
+  it("logs the statements a FAILED write got through, rollback included", async () => {
+    // §6.3 shows the error; §6.4 still has to say what was attempted — and a
+    // COMMIT that failed is exactly what a bug report needs to carry.
+    fakeExecutor();
+    failing = "COMMIT";
+    const id = submitRun(newLayerRequest());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
+    const statements = (runById(id)?.log ?? [])
+      .filter((e) => e.label.startsWith("Writing results ("))
+      .map((e) => e.sql);
+    expect(statements).toContain("COMMIT");
+    expect(statements.at(-1)).toBe("ROLLBACK");
+    expect(useLayerStore.getState().layers).toHaveLength(1);
+  });
+
   it("inserts the copy under its parent, with its provenance inherited", async () => {
     // §6: "inherited computed columns keep their provenance", and §6.2's row
     // sits directly under the layer it was cut from.

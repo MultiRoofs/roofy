@@ -943,6 +943,46 @@ function extensionFailure(name: "spatial" | "three_d"): string {
     : `The ${name} extension could not be loaded: ${reason}`;
 }
 
+/**
+ * §6.4's "the SQL statements issued in order", for a write step.
+ *
+ * ONE entry per statement, labelled `Writing results (1/6)` … so the log reads
+ * as the transaction it was and a planner can repeat the UPDATE by hand. The
+ * TIMING is the whole write's and is carried by the LAST entry only:
+ * `writeComputedColumns` measures the transaction, not each statement, and
+ * repeating one number six times would read as six slow statements.
+ *
+ * Shared, because a New-layer run writes its columns into the COPY through the
+ * same `writeComputedColumns` — from inside `prepareDerivedCityLayer` — and a
+ * derived run whose log stopped at `CREATE TABLE` would be the one run §6.4's
+ * promise is not true for. Called on FAILURE too: the statements a failed
+ * write got through are exactly what a bug report needs.
+ *
+ * An EMPTY list is the write that never reached the engine (its buffer
+ * registration failed), and it keeps M1's single entry — there is no statement
+ * to name, and a missing step would read as a write that never happened.
+ */
+function logWriteStatements(
+  log: LogEntry[],
+  statements: ReadonlyArray<string>,
+  ms: number,
+  rows: number,
+): void {
+  if (statements.length === 0) {
+    log.push({ label: "Writing results", sql: null, ms, rows });
+    return;
+  }
+  statements.forEach((sql, i) => {
+    const last = i === statements.length - 1;
+    log.push({
+      label: `Writing results (${i + 1}/${statements.length})`,
+      sql,
+      ms: last ? ms : 0,
+      rows: last ? rows : null,
+    });
+  });
+}
+
 async function execute(
   id: string,
   request: FrozenRequest,
@@ -1513,6 +1553,14 @@ async function execute(
               // reading it off the context declares a METHOD reference, which
               // the lint baseline refuses (`unbound-method`).
               query,
+              // §6.4 again: the copy's ALTER/UPDATE/COMMIT belong in the log
+              // beside its CREATE TABLE, and only the preparation knows them —
+              // the write happens inside it. The SAME recorder the This-layer
+              // write uses, so the two destinations cannot drift.
+              recordWrite: (statements, ms, rows) => {
+                logWriteStatements(log, statements, ms, rows);
+                patch(id, { log: [...log] });
+              },
             })
           : // §7.6's reversed direction: the TARGET is the vector layer and
             // its copy holds every one of its areas, whatever the scope
@@ -1779,12 +1827,13 @@ async function execute(
       signal,
     });
     const written = await raced(writing, null);
-    log.push({
-      label: "Writing results",
-      sql: null,
-      ms: Math.round(performance.now() - t0),
-      rows: result.rows.size,
-    });
+    logWriteStatements(
+      log,
+      written.statements,
+      Math.round(performance.now() - t0),
+      result.rows.size,
+    );
+    patch(id, { log: [...log] });
     // A cancelled write is the user's Cancel arriving during the transaction,
     // not a failure: nothing was committed, so the card reads cancelled and
     // says nothing about an error.

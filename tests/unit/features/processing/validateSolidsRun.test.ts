@@ -391,13 +391,18 @@ describe("a Validate solids run", () => {
     // and "N buildings measured" never appears.
     expect(runById(id)!.summary!.line).toMatch(/^2 valid · /);
     expect(runById(id)!.summary!.line).not.toContain("measured");
-    // §6.4: the reproducible record names all three statements.
-    expect(runById(id)!.log.map((entry) => entry.label)).toEqual([
+    // §6.4: the reproducible record names all three statements, and then the
+    // write's own — ONE entry per statement it issued, each carrying its SQL.
+    const labels = runById(id)!.log.map((entry) => entry.label);
+    expect(labels.slice(0, 3)).toEqual([
       "Reading features",
       "Checking source ids",
       "Validating solids",
-      "Writing results",
     ]);
+    expect(labels.slice(3).length).toBeGreaterThan(0);
+    expect(
+      labels.slice(3).every((l) => l.startsWith("Writing results (")),
+    ).toBe(true);
   });
 
   it("prints §7.3's two-count card when a building has issues", async () => {

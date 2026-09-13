@@ -199,6 +199,20 @@ export async function prepareDerivedCityLayer(input: {
   readonly signal: AbortSignal;
   /** The run's own `ctx.query`, so the copy's statements reach §6.4's log. */
   readonly query: (label: string, sql: string) => Promise<QueryOutcome>;
+  /**
+   * Hand the run's log the statements this preparation's WRITE issued (§6.4).
+   *
+   * Optional, because the preparation is testable without a log; supplied by
+   * `execute`, which is its only production caller and which passes the SAME
+   * recorder its own This-layer write uses — so the two destinations cannot
+   * drift. Called on failure as well as on success: the statements a failed
+   * write got through are what §6.4's record is for.
+   */
+  readonly recordWrite?: (
+    statements: ReadonlyArray<string>,
+    ms: number,
+    rows: number,
+  ) => void;
 }): Promise<DerivedPlan> {
   const parentTableName = input.parentTable.table;
   const table = nextTableName();
@@ -258,6 +272,7 @@ export async function prepareDerivedCityLayer(input: {
     // (`runQueue.ts`'s `raced(writing, null)`): a transaction caught by the
     // death never answers, and this await is inside the shared FIFO slot.
     if (input.rows.size > 0) {
+      const t0 = performance.now();
       const written = await raced(
         writeComputedColumns({
           runId: input.runId,
@@ -268,6 +283,15 @@ export async function prepareDerivedCityLayer(input: {
           signal: input.signal,
         }),
         null,
+      );
+      // BEFORE the throw below: §6.4's record is of what was ATTEMPTED, so a
+      // failed or cancelled write reports its statements exactly as a
+      // successful one does. (The engine's DEATH is the one path with nothing
+      // to report — `raced` rejects before `written` exists.)
+      input.recordWrite?.(
+        written.statements,
+        Math.round(performance.now() - t0),
+        input.rows.size,
       );
       // A cancelled write is the user's Cancel arriving during the
       // transaction, not a failure — the same translation `execute`'s own

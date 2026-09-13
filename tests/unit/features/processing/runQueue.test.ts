@@ -400,6 +400,28 @@ describe("submitRun", () => {
     );
     expect(sql).toContain("COMMIT");
     expect(registered).toEqual([`__vals_${id}.json`]);
+    // §6.4: the write is ONE log entry per statement it issued, each carrying
+    // the real SQL — a planner reads the log back and repeats the UPDATE by
+    // hand. The single `sql: null` "Writing results" entry M1 shipped could
+    // not support that.
+    const write = run.log.filter((l) => l.label.startsWith("Writing results"));
+    expect(write.map((l) => l.label)).toEqual([
+      "Writing results (1/4)",
+      "Writing results (2/4)",
+      "Writing results (3/4)",
+      "Writing results (4/4)",
+    ]);
+    expect(write.map((l) => l.sql)).toEqual([
+      "BEGIN TRANSACTION",
+      'ALTER TABLE "layer_1" ADD COLUMN IF NOT EXISTS "extent_height_m" DOUBLE',
+      expect.stringContaining('UPDATE "layer_1" SET "extent_height_m"'),
+      "COMMIT",
+    ]);
+    // The TIMING is the whole write's and rides on the LAST entry only:
+    // `writeComputedColumns` measures the transaction, not each statement, and
+    // repeating one number four times would read as four slow statements.
+    expect(write.slice(0, -1).map((l) => l.rows)).toEqual([null, null, null]);
+    expect(write.at(-1)?.rows).toBe(1);
     // The registry's column list is re-read, so the next run sees the column.
     expect(tables.refreshLayerTableColumns).toHaveBeenCalledWith("L1");
     expect(useProcessingStore.getState().notice).toBe(run.summary?.line);
