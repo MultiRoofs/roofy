@@ -21,6 +21,7 @@ import {
   encodeProjectedFeatures,
   vectorTableName,
 } from "../../../src/features/processing/vectorTable";
+import { quoteIdent } from "../../../src/insights/sql";
 
 /**
  * The engine seam, stubbed out entirely — the same reason
@@ -552,7 +553,7 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
     const rows = db.query(
       `SELECT "idx", "sid", "fid", "props"->>'name' AS name,
               ("props"->>'n')::DOUBLE AS n, ST_GeometryType("geom") AS kind
-       FROM ${JSON.stringify(table)} ORDER BY "idx"`,
+       FROM ${quoteIdent(table)} ORDER BY "idx"`,
     );
     // The harness narrows a BigInt to a Number on the way out, so `idx` is a
     // plain 0 here.

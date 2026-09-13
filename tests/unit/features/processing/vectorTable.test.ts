@@ -264,21 +264,31 @@ describe("encodeProjectedFeatures", () => {
   it("checkpoints during the final assembly, not only during the walk", async () => {
     // The copy of ten megabytes of chunks into one buffer is work of its own,
     // and a Cancel delivered while it runs must be honoured there too.
+    //
+    // The outcome is read through a try/catch rather than `rejects.toThrow`:
+    // without the assembly's checkpoint this RESOLVES with a ten-megabyte
+    // array, and vitest would spend half a minute serialising it into the
+    // failure message before saying so.
     const seen = { reads: 0, onRead: () => {} };
     let walked = false;
     seen.onRead = () => {
       if (seen.reads === 2) walked = true;
     };
-    await expect(
-      encodeProjectedFeatures(
+    let outcome = "";
+    try {
+      await encodeProjectedFeatures(
         [counted(0, hugeWkt(), seen), counted(1, hugeWkt(), seen)],
         {
           checkpoint: () => {
             if (walked) throw new Error("cancelled in assembly");
           },
         },
-      ),
-    ).rejects.toThrow("cancelled in assembly");
+      );
+      outcome = "resolved with the whole document";
+    } catch (error) {
+      outcome = error instanceof Error ? error.message : String(error);
+    }
+    expect(outcome).toBe("cancelled in assembly");
   });
 });
 
