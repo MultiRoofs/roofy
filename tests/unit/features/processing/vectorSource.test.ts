@@ -392,6 +392,44 @@ describe("the structure §7.5 calls unparseable", () => {
     expect(out.features).toHaveLength(0);
   });
 
+  it("accepts a ring that closes only after rounding, shell AND hole", async () => {
+    // Closure is decided on the PROJECTED, ROUNDED text — the ordinates
+    // `ST_GeomFromText` will actually read — so two source positions a tenth of
+    // a millimetre apart close a ring. The rule has to be the same for a hole
+    // as for a shell, or a polygon would be skipped for a difference its own
+    // WKT does not contain.
+    const closesWhenRounded = 4.000_000_01;
+    const out = await reprojectGeoLayer(
+      collection({
+        type: "Feature",
+        properties: {},
+        geometry: {
+          type: "Polygon",
+          coordinates: [
+            [
+              [4, 52],
+              [5, 52],
+              [5, 53],
+              [closesWhenRounded, 52],
+            ],
+            [
+              [4.2, 52.2],
+              [4.4, 52.2],
+              [4.4, 52.4],
+              [4.200_000_01, 52.2],
+            ],
+          ],
+        },
+      }),
+      28992,
+    );
+    expect(out.skipped).toBe(0);
+    expect(out.features[0]?.wkt).toBe(
+      "POLYGON ((4000 52000, 5000 52000, 5000 53000, 4000 52000), " +
+        "(4200 52200, 4400 52200, 4400 52400, 4200 52200))",
+    );
+  });
+
   it("skips a polygon whose HOLE is malformed, not just its shell", async () => {
     const out = await reprojectGeoLayer(
       collection({
