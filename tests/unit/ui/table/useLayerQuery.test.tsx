@@ -9,12 +9,34 @@ import {
 } from "@testing-library/react";
 
 const runQuery = vi.fn();
+/** Whoever asked to hear about the engine dying, as a real set: a case drives a
+ *  death through it, and the inert stub would leave the grid's page query
+ *  hanging for ever — which is the thing it is asserting against. */
+const deathListeners = new Set<() => void>();
+/** What a primitive answers when the engine's death takes it (`duckdb.ts`'s
+ *  `settleOnDeath`), and the promise that never answers until then. */
+const ENGINE_STOPPED = "Analytics engine stopped";
+const diesWithEngine = () =>
+  new Promise<{ ok: false; message: string }>((resolve) => {
+    deathListeners.add(() => {
+      resolve({ ok: false, message: ENGINE_STOPPED });
+    });
+  });
+function killEngine(): void {
+  for (const listener of Array.from(deathListeners)) {
+    deathListeners.delete(listener);
+    listener();
+  }
+}
 vi.mock("../../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   subscribeDuckDBStatus: vi.fn(() => () => {}),
   getDuckDBStatusVersion: vi.fn(() => 0),
   getEngineGeneration: vi.fn(() => 1),
-  onEngineDeath: vi.fn(() => () => {}),
+  onEngineDeath: vi.fn((listener: () => void) => {
+    deathListeners.add(listener);
+    return () => deathListeners.delete(listener);
+  }),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
   isExtensionLoaded: vi.fn(() => false),
   ensureExtension: vi.fn(async () => false),
@@ -75,6 +97,7 @@ function Probe({ layerId }: { readonly layerId: string | null }) {
 }
 
 beforeEach(() => {
+  deathListeners.clear();
   runQuery.mockReset();
   runQuery.mockResolvedValue({ ok: true, columns: [], rows: [] });
   useLayerTableStore.setState({ tables: {}, tablePanelOpen: false });
@@ -219,6 +242,31 @@ describe("useLayerQuery", () => {
         "Conversion Error: bad",
       ),
     );
+  });
+
+  it("releases its loading state with §6.1's sentence when the engine dies", async () => {
+    // THE OFF-QUEUE HAZARD, at the grid: the page and the count are awaited
+    // OUTSIDE the table FIFO, and `duckdb.ts` used to leave a request its
+    // worker died under unsettled for ever — so the grid stayed on its spinner
+    // for the life of the page with nothing on screen to explain it. Every
+    // primitive now settles with its ordinary failure value, which this fake
+    // reproduces: the request answers only when the death does.
+    runQuery.mockImplementation(diesWithEngine);
+    useLayerTableStore.setState({
+      tables: { L: { state: "ready", info: TABLE } },
+    });
+    render(<Probe layerId="L" />);
+    await waitFor(() => {
+      expect(screen.getByTestId("loading").textContent).toBe("true");
+      expect(deathListeners.size).toBeGreaterThan(0);
+    });
+
+    killEngine();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("message").textContent).toBe(ENGINE_STOPPED);
+      expect(screen.getByTestId("loading").textContent).toBe("false");
+    });
   });
 
   it("pages with the store's page and page size", async () => {

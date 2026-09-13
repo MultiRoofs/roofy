@@ -8,12 +8,32 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const runQuery = vi.fn();
+/** Whoever asked to hear about the engine dying, as a real set: a case drives a
+ *  death through it, and the inert stub would leave the id query hanging. */
+const deathListeners = new Set<() => void>();
+/** What a primitive answers when the engine's death takes it (`duckdb.ts`'s
+ *  `settleOnDeath`), and the promise that never answers until then. */
+const diesWithEngine = () =>
+  new Promise<{ ok: false; message: string }>((resolve) => {
+    deathListeners.add(() => {
+      resolve({ ok: false, message: "Analytics engine stopped" });
+    });
+  });
+function killEngine(): void {
+  for (const listener of Array.from(deathListeners)) {
+    deathListeners.delete(listener);
+    listener();
+  }
+}
 vi.mock("../../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   subscribeDuckDBStatus: vi.fn(() => () => {}),
   getDuckDBStatusVersion: vi.fn(() => 0),
   getEngineGeneration: vi.fn(() => 1),
-  onEngineDeath: vi.fn(() => () => {}),
+  onEngineDeath: vi.fn((listener: () => void) => {
+    deathListeners.add(listener);
+    return () => deathListeners.delete(listener);
+  }),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
   isExtensionLoaded: vi.fn(() => false),
   ensureExtension: vi.fn(async () => false),
@@ -91,6 +111,7 @@ function visibleIds(layerId: string): ReadonlySet<string> | null {
 }
 
 beforeEach(() => {
+  deathListeners.clear();
   runQuery.mockReset();
   useLayerStore.setState({ layers: [] });
   useWorkspaceStore.setState({ activeLayerId: null });
@@ -185,6 +206,31 @@ describe("syncFilterToMap", () => {
     useQueryStore.getState().applyFilter(id);
 
     await syncFilterToMap(id);
+    expect(visibleIds(id)).toBeNull();
+  });
+
+  it("SETTLES, and clears the filter, when the engine dies under the query", async () => {
+    // THE OFF-QUEUE HAZARD, at the map: this sync is awaited OUTSIDE the table
+    // FIFO, and `duckdb.ts` used to leave a request its worker died under
+    // unsettled for ever — so this call never returned and the map kept
+    // whatever set was drawn before, for the life of the page. The primitive
+    // now answers `ok: false`, which this module already treats as "clear the
+    // filter rather than leave a stale set".
+    runQuery.mockImplementation(diesWithEngine);
+    const id = addLayer();
+    useLayerStore.getState().setVisibleObjectIds(id, new Set(["OLD"]));
+    useLayerTableStore.setState({
+      tables: { [id]: { state: "ready", info: TABLE } },
+    });
+    useQueryStore.getState().setFilter(id, FILTER);
+    useQueryStore.getState().applyFilter(id);
+
+    const syncing = syncFilterToMap(id);
+    await vi.waitFor(() => expect(deathListeners.size).toBeGreaterThan(0));
+    killEngine();
+    // The await itself is the assertion: an unsettled request never gets here.
+    await syncing;
+
     expect(visibleIds(id)).toBeNull();
   });
 

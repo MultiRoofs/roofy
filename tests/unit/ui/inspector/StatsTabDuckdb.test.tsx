@@ -3,12 +3,26 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 
 const runQuery = vi.fn();
+/** Whoever asked to hear about the engine dying, as a real set: a case drives a
+ *  death through it, and the inert stub would leave the breakdown read hanging. */
+const deathListeners = new Set<() => void>();
+/** What a primitive answers when the engine's death takes it (`duckdb.ts`'s
+ *  `settleOnDeath`), and the promise that never answers until then. */
+const diesWithEngine = () =>
+  new Promise<{ ok: false; message: string }>((resolve) => {
+    deathListeners.add(() => {
+      resolve({ ok: false, message: "Analytics engine stopped" });
+    });
+  });
 vi.mock("../../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   subscribeDuckDBStatus: vi.fn(() => () => {}),
   getDuckDBStatusVersion: vi.fn(() => 0),
   getEngineGeneration: vi.fn(() => 1),
-  onEngineDeath: vi.fn(() => () => {}),
+  onEngineDeath: vi.fn((listener: () => void) => {
+    deathListeners.add(listener);
+    return () => deathListeners.delete(listener);
+  }),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
   isExtensionLoaded: vi.fn(() => false),
   ensureExtension: vi.fn(async () => false),
@@ -54,6 +68,7 @@ const READY = {
 };
 
 beforeEach(() => {
+  deathListeners.clear();
   runQuery.mockReset();
   useLayerTableStore.setState({ tables: {}, tablePanelOpen: false });
 });
@@ -96,6 +111,35 @@ describe("StatsTab's DuckDB section", () => {
     expect(await screen.findByText("DuckDB Analytics")).toBeTruthy();
     // Not "0", which would read as an empty table, and not "null".
     expect(screen.getByText("unknown")).toBeTruthy();
+  });
+
+  it("STOPS WAITING when the engine dies under the type breakdown", async () => {
+    // THE OFF-QUEUE HAZARD, at the Stats tab: this read is awaited OUTSIDE the
+    // table FIFO, and `duckdb.ts` used to leave a request its worker died under
+    // unsettled for ever — so the section below never appeared at all, for the
+    // life of the page. The primitive now answers `ok: false`, and this tab's
+    // existing handling renders the section with the count it already had and
+    // no breakdown.
+    //
+    // NOTE what this component does NOT have: a spinner and a failure message.
+    // `duckdbStats` is null until the read answers, so "the section is absent"
+    // IS the waiting state, and its appearance is the release.
+    runQuery.mockImplementation(diesWithEngine);
+    useLayerTableStore.setState({ tables: { L1: READY } });
+
+    render(<StatsTab model={model} selection={null} layerId="L1" />);
+    await vi.waitFor(() => expect(deathListeners.size).toBeGreaterThan(0));
+    expect(screen.queryByText("DuckDB Analytics")).toBeNull();
+
+    for (const listener of Array.from(deathListeners)) {
+      deathListeners.delete(listener);
+      listener();
+    }
+
+    expect(await screen.findByText("DuckDB Analytics")).toBeTruthy();
+    expect(screen.getByText("Rows loaded")).toBeTruthy();
+    // The breakdown is empty rather than invented: nothing was read.
+    expect(screen.queryByText("Building")).toBeNull();
   });
 
   it("shows nothing DuckDB-ish while the table is still building", () => {
