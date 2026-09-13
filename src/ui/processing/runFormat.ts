@@ -6,6 +6,7 @@ import {
   proxyLogLabel,
   type BuildingProxy,
 } from "../../features/processing/buildingProxy";
+import type { DerivedFrom } from "../../features/layers/layerStore";
 import { toolById } from "../../features/processing/toolRegistry";
 import type { RunPhase, RunRecord } from "../../features/processing/types";
 
@@ -109,11 +110,34 @@ export function paramValue(value: unknown): string {
     : String(value);
 }
 
+/**
+ * §6.4's `Target layer` row.
+ *
+ * A DERIVED layer's name says nothing about where its rows came from, and
+ * §6.4's header is "the reproducible record of the run: a planner can read it
+ * back and rerun by hand" — so the parent travels with it. [adapted copy A7].
+ *
+ * `derivedFrom` is passed IN rather than read from the layer store: this
+ * module is pure, and the record it carries is the copy made at publication,
+ * so the line stays right after the parent is renamed or removed.
+ */
+export function targetLayerLine(
+  run: RunRecord,
+  derivedFrom: DerivedFrom | null,
+): string {
+  return derivedFrom === null
+    ? run.targetName
+    : `${run.targetName} · Derived from ${derivedFrom.layerName}`;
+}
+
 /** Spec §6.4's Copy: the whole log as plain text. */
-export function formatRunLog(run: RunRecord): string {
+export function formatRunLog(
+  run: RunRecord,
+  derivedFrom: DerivedFrom | null,
+): string {
   const lines: string[] = [];
   lines.push(`Tool: ${toolById(run.toolId).name}`);
-  lines.push(`Target layer: ${run.targetName}`);
+  lines.push(`Target layer: ${targetLayerLine(run, derivedFrom)}`);
   lines.push(`Source layer: ${run.sourceName ?? "—"}`);
   lines.push(
     `Scope: ${SCOPE_WORD[run.scope]} · ${plural(run.scopeCount, "building", "buildings")} (frozen at ${clockTime(run.startedAt)})`,

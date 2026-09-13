@@ -6,6 +6,7 @@
  * The text Copy puts on the clipboard comes from the pure `formatRunLog`, not
  * from the DOM, so it can be asserted without rendering.
  */
+import { useLayerStore } from "../../features/layers/layerStore";
 import { useProcessingStore } from "../../features/processing/processingStore";
 import { toolById } from "../../features/processing/toolRegistry";
 import {
@@ -17,6 +18,7 @@ import {
   paramValue,
   plural,
   seconds,
+  targetLayerLine,
 } from "./runFormat";
 
 export function LogView({ runId }: { readonly runId: string }) {
@@ -41,9 +43,15 @@ export function LogView({ runId }: { readonly runId: string }) {
     );
   }
   const params = Object.entries(run.params);
+  // ONE lookup, handed to both the row and the Copy text so they cannot drift.
+  // A New-layer run's target is the untouched PARENT and carries no
+  // `derivedFrom`; it is a run ON a derived layer that gets A7's row.
+  const derivedFrom =
+    useLayerStore.getState().layers.find((l) => l.id === run.targetLayerId)
+      ?.derivedFrom ?? null;
   const rows: ReadonlyArray<readonly [string, string]> = [
     ["Tool", toolById(run.toolId).name],
-    ["Target layer", run.targetName],
+    ["Target layer", targetLayerLine(run, derivedFrom)],
     ["Source layer", run.sourceName ?? "—"],
     [
       "Scope",
@@ -77,7 +85,9 @@ export function LogView({ runId }: { readonly runId: string }) {
         <button
           type="button"
           className="processing-log__copy"
-          onClick={() => void navigator.clipboard?.writeText(formatRunLog(run))}
+          onClick={() =>
+            void navigator.clipboard?.writeText(formatRunLog(run, derivedFrom))
+          }
         >
           Copy
         </button>
