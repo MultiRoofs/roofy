@@ -58,7 +58,7 @@ import type {
 } from "../../features/layers/useLayerFileLoader";
 import { LayerRow, PlaceholderRow } from "./LayerRow";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
-import { runById } from "../../features/processing/processingStore";
+import { useProcessingStore } from "../../features/processing/processingStore";
 import { openRunLog } from "../processing/revealTools";
 
 /**
@@ -185,6 +185,17 @@ function StoreLayerRow({
   // union needs no branch — which is the point of giving them the same shape.
   // Bound ONCE so the two props below narrow off the same reference.
   const derivedFrom = item.layer.derivedFrom;
+  // SUBSCRIBED, not a one-shot `runById` read: the history keeps 20 runs, so a
+  // long session evicts this row's run while the row is still mounted, and an
+  // unsubscribed read would leave "Show run log" enabled and open the
+  // missing-history view. The selector answers a BOOLEAN — "is this id still
+  // in the history" — so every other row's render is skipped on a run update
+  // that does not change its own answer.
+  const hasRunLog = useProcessingStore((s) =>
+    derivedFrom === null
+      ? false
+      : s.runs.some((r) => r.id === derivedFrom.runId),
+  );
   const appliedFilter = useQueryStore((state) =>
     item.kind === "city" ||
     (item.kind === "geo" && item.layer.kind === "geojson")
@@ -273,9 +284,9 @@ function StoreLayerRow({
       onShowRunLog={
         derivedFrom === null
           ? undefined
-          : runById(derivedFrom.runId) === null
-            ? null
-            : () => openRunLog(derivedFrom.runId)
+          : hasRunLog
+            ? () => openRunLog(derivedFrom.runId)
+            : null
       }
       filterChip={
         appliedFilter !== null && appliedFilter.conditions.length > 0 ? (

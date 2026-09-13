@@ -16,6 +16,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -29,6 +30,8 @@ import { useGeoLayerStore } from "../../../../src/features/geoLayers/geoLayerSto
 import { useWorkspaceStore } from "../../../../src/features/workspace/workspaceStore";
 import { useQueryStore } from "../../../../src/features/query/queryStore";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
+import { useProcessingStore } from "../../../../src/features/processing/processingStore";
+import type { RunRecord } from "../../../../src/features/processing/types";
 import type { StreamState } from "../../../../src/features/streaming/streamStore";
 import type {
   CityModel,
@@ -186,6 +189,75 @@ function menuOf(name: string): void {
   const trigger = row.querySelector('[aria-label^="Layer actions"]');
   fireEvent.click(trigger as Element);
 }
+
+/** A run, as far as a layer ROW is concerned: the row asks the history one
+ *  question — "is this id still in it?" — so the cast carries the id and
+ *  nothing else rather than a fourth copy of the full record. */
+const runWithId = (id: string): RunRecord => ({ id }) as RunRecord;
+
+describe("a derived row's Show run log follows the run history", () => {
+  beforeEach(() => {
+    useProcessingStore.setState({ runs: [] });
+  });
+  afterEach(() => {
+    useProcessingStore.setState({ runs: [] });
+  });
+
+  /** Delft with a copy under it, and the copy's run in the history. */
+  function seedDerived(): void {
+    seedCity(
+      layer({ id: "l1", name: "Delft" }),
+      layer({
+        id: "l2",
+        name: "Delft · solids",
+        derivedFrom: { layerId: "l1", layerName: "Delft", runId: "run_1" },
+      }),
+    );
+    useProcessingStore.setState({ runs: [runWithId("run_1")] });
+  }
+
+  const showRunLog = (): HTMLButtonElement =>
+    screen.getByRole("button", { name: "Show run log" }) as HTMLButtonElement;
+
+  it("offers it while the run is still there", () => {
+    seedDerived();
+    renderList();
+    menuOf("Delft · solids");
+    expect(showRunLog()).toBeEnabled();
+  });
+
+  it("DISABLES it when the run is evicted under a mounted row", () => {
+    // §6.2's caveat, as it actually happens: the history keeps 20 runs, so a
+    // long session pushes the copy's run off the end while its row is still on
+    // screen. An unsubscribed `runById` read leaves the item enabled and the
+    // click opens the missing-history view.
+    seedDerived();
+    renderList();
+    menuOf("Delft · solids");
+    expect(showRunLog()).toBeEnabled();
+
+    act(() => {
+      // MAX_RUNS is 20 and `upsertRun` keeps the newest 20, so twenty later
+      // runs push `run_1` off the end — the store's own eviction path.
+      for (let i = 0; i < 20; i += 1) {
+        useProcessingStore.getState().upsertRun(runWithId(`later_${i}`));
+      }
+    });
+
+    expect(
+      useProcessingStore.getState().runs.some((r) => r.id === "run_1"),
+    ).toBe(false);
+    expect(showRunLog()).toBeDisabled();
+  });
+
+  it("gives an ordinary row no item at all, whatever the history holds", () => {
+    seedCity(layer({ id: "l1", name: "Delft" }));
+    useProcessingStore.setState({ runs: [runWithId("run_1")] });
+    renderList();
+    menuOf("Delft");
+    expect(screen.queryByRole("button", { name: "Show run log" })).toBeNull();
+  });
+});
 
 describe("LayerList — the rows", () => {
   it("is one list, in the unified order: city rows, then geo rows", () => {
