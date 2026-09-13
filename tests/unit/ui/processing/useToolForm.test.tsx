@@ -54,20 +54,19 @@ vi.mock("../../../../src/features/processing/runQueue", () => ({
 }));
 
 /**
- * The three cross-layer tools, switched ON.
+ * The cross-layer tools that have not shipped yet, switched ON.
  *
- * Task 15 builds their FORM and leaves `implemented: false` for Tasks 16/17/19
- * to flip — and `toolEligibility` refuses an unimplemented tool outright with
- * "Not available yet", which sits above every other reason. Driving the form
- * through the real registry would therefore assert nothing about the source
- * select, the proxy or the frozen request. `toolById` is re-implemented over
- * the patched list because the real one closes over the module's own array.
+ * Task 15 built their FORM while they were all `implemented: false` — and
+ * `toolEligibility` refuses an unimplemented tool outright with "Not available
+ * yet", which sits above every other reason, so driving the form through the
+ * real registry would assert nothing about the source select, the proxy or the
+ * frozen request. `toolById` is re-implemented over the patched list because
+ * the real one closes over the module's own array.
+ *
+ * JOIN IS NOT IN THE SET: it ships in this milestone, so every Join case below
+ * runs against the REAL registry entry — its readiness reasons included.
  */
-const CROSS_LAYER = new Set([
-  "join-by-location",
-  "aggregate-per-area",
-  "distance-to-nearest",
-]);
+const CROSS_LAYER = new Set(["aggregate-per-area", "distance-to-nearest"]);
 vi.mock("../../../../src/features/processing/toolRegistry", async () => {
   const actual = await vi.importActual<
     typeof import("../../../../src/features/processing/toolRegistry")
