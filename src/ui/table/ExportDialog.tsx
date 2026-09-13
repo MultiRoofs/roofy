@@ -403,6 +403,10 @@ export function ExportDialog({
           attributes,
           computedAttributes,
           where,
+          // §6's "the reader re-reads the parent source filtered to those
+          // ids": null for an ordinary layer, the copy's own roots for a
+          // derived one.
+          sourceFeatureIds: table.sourceFeatureIds,
           rootTypes: chosenTypes,
           epsg,
           fileName: exportFileName(layerName, EXTENSIONS.cityparquet),

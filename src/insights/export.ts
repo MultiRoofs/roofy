@@ -397,6 +397,10 @@ export interface CityParquetExportRequest {
    *  the layer's table, never in the reader, so they are joined in by id. */
   readonly computedAttributes: ReadonlyArray<string>;
   readonly where: string | null;
+  /** A DERIVED layer's own feature ids (`LayerTable.sourceFeatureIds`), or
+   *  null for an ordinary layer. The one source read is of the PARENT's file,
+   *  so without it the copy's package holds every building of its parent. */
+  readonly sourceFeatureIds: ReadonlyArray<string> | null;
   readonly rootTypes: ReadonlyArray<string>;
   readonly epsg: number;
   readonly fileName: string;
@@ -571,6 +575,7 @@ async function exportCityParquet(
         attributes: request.attributes,
         computedAttributes: request.computedAttributes,
         where: request.where,
+        sourceFeatureIds: request.sourceFeatureIds,
       }),
     );
     if (!sourceRead.ok) throw new Error(sourceRead.message);

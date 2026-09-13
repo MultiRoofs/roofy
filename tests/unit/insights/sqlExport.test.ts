@@ -175,6 +175,7 @@ describe("buildCityParquetSourceSql", () => {
         attributes: ["b3_h_dak_max", "bouwjaar"],
         computedAttributes: [],
         where: `"b3_h_dak_max" > 10`,
+        sourceFeatureIds: null,
       }),
     ).toBe(
       'CREATE TABLE "exp_src_1"."src" AS SELECT "id", "feature_id", "object_type", "parents", "children", "children_roles", "bbox", "geometry_lod2_2", "geometry_properties_lod2_2", "b3_h_dak_max", "bouwjaar" FROM read_cityjson(\'exp_1_src.city.json\') WHERE COALESCE("feature_id", "id") IN (SELECT COALESCE("feature_id", "id") FROM "layer_1" WHERE "b3_h_dak_max" > 10)',
@@ -192,6 +193,7 @@ describe("buildCityParquetSourceSql", () => {
         attributes: [],
         computedAttributes: [],
         where: null,
+        sourceFeatureIds: null,
       }),
     ).toBe(
       'CREATE TABLE "exp_src_2"."src" AS SELECT "id", "feature_id", "object_type", "parents", "children", "children_roles", "bbox", "geometry_lod1_2", "geometry_properties_lod1_2" FROM read_cityjsonseq(\'exp_2_src.city.jsonl\')',
@@ -209,6 +211,7 @@ describe("buildCityParquetSourceSql", () => {
         attributes: [],
         computedAttributes: [],
         where: null,
+        sourceFeatureIds: null,
       }),
     ).toContain('"geometry_lod0_0", "geometry_properties_lod0_0"');
   });
@@ -227,6 +230,7 @@ describe("buildCityParquetSourceSql", () => {
         attributes: ["bouwjaar"],
         computedAttributes: ["extent_height_m"],
         where: null,
+        sourceFeatureIds: null,
       }),
     ).toBe(
       'CREATE TABLE "exp_src_4"."src" AS SELECT "id", "feature_id", "object_type", "parents", "children", "children_roles", "bbox", "geometry_lod2_2", "geometry_properties_lod2_2", "bouwjaar", "extent_height_m" FROM read_cityjson(\'exp_4_src.city.json\') LEFT JOIN (SELECT "id", "extent_height_m" FROM "layer_1") AS "computed" USING ("id")',
@@ -247,6 +251,7 @@ describe("buildCityParquetSourceSql", () => {
         attributes: [],
         computedAttributes: ["extent_height_m", "extent_zmin_m"],
         where: `"bouwjaar" > 1900`,
+        sourceFeatureIds: null,
       }),
     ).toContain(
       'LEFT JOIN (SELECT "id", "extent_height_m", "extent_zmin_m" FROM "layer_1") AS "computed" USING ("id") WHERE COALESCE("feature_id", "id") IN (SELECT COALESCE("feature_id", "id") FROM "layer_1" WHERE "bouwjaar" > 1900)',
@@ -267,6 +272,7 @@ describe("buildCityParquetSourceSql", () => {
         attributes: ["extent_height_m", "bouwjaar"],
         computedAttributes: ["extent_height_m"],
         where: null,
+        sourceFeatureIds: null,
       }),
     ).toBe(
       'CREATE TABLE "e"."src" AS SELECT "id", "feature_id", "object_type", "parents", "children", "children_roles", "bbox", "geometry_lod2_2", "geometry_properties_lod2_2", "bouwjaar", "extent_height_m" FROM read_cityjson(\'s.json\') LEFT JOIN (SELECT "id", "extent_height_m" FROM "t") AS "computed" USING ("id")',
@@ -290,10 +296,95 @@ describe("buildCityParquetSourceSql", () => {
         ],
         computedAttributes: [],
         where: null,
+        sourceFeatureIds: null,
       }),
     ).toBe(
       'CREATE TABLE "e"."src" AS SELECT "id", "feature_id", "object_type", "parents", "children", "children_roles", "bbox", "geometry_lod2_2", "geometry_properties_lod2_2", "bouwjaar" FROM read_cityjson(\'s.json\')',
     );
+  });
+});
+
+describe("buildCityParquetSourceSql on a DERIVED layer", () => {
+  it("ANDs the layer's own feature ids into the where clause", () => {
+    // Without it the reader re-reads the PARENT source whole and the export
+    // holds every building of Delft under the derived layer's name.
+    const sql = buildCityParquetSourceSql({
+      scratchSchema: "x",
+      reader: "read_cityjson",
+      sourceFile: "layer_2.city.json",
+      table: "layer_2",
+      lodSuffix: "2_2",
+      attributes: [],
+      computedAttributes: [],
+      where: null,
+      sourceFeatureIds: ["a", "b"],
+    });
+    expect(sql).toContain(`WHERE COALESCE("feature_id", "id") IN ('a', 'b')`);
+  });
+
+  it("combines it with a user filter rather than replacing it", () => {
+    const sql = buildCityParquetSourceSql({
+      scratchSchema: "x",
+      reader: "read_cityjson",
+      sourceFile: "layer_2.city.json",
+      table: "layer_2",
+      lodSuffix: "2_2",
+      attributes: [],
+      computedAttributes: [],
+      where: `"status" = 'ok'`,
+      sourceFeatureIds: ["a"],
+    });
+    expect(sql).toMatch(/WHERE .*"status" = 'ok'.* AND COALESCE/s);
+  });
+
+  it("quotes an id that carries a quote, rather than breaking the statement", () => {
+    // The ids are the parent's own feature ids — file data, not app data.
+    const sql = buildCityParquetSourceSql({
+      scratchSchema: "x",
+      reader: "read_cityjson",
+      sourceFile: "s.json",
+      table: "t",
+      lodSuffix: "2_2",
+      attributes: [],
+      computedAttributes: [],
+      where: null,
+      sourceFeatureIds: ["o'brien"],
+    });
+    expect(sql).toContain(`IN ('o''brien')`);
+  });
+
+  it("spells an EMPTY list FALSE, because `IN ()` is a syntax error", () => {
+    // Unreachable through `prepareDerivedCityLayer` (it refuses a cut with no
+    // roots), and spelled rather than left to take a whole export down —
+    // exactly as `buildCityParquetModuleSql` spells an empty module.
+    const sql = buildCityParquetSourceSql({
+      scratchSchema: "x",
+      reader: "read_cityjson",
+      sourceFile: "s.json",
+      table: "t",
+      lodSuffix: "2_2",
+      attributes: [],
+      computedAttributes: [],
+      where: null,
+      sourceFeatureIds: [],
+    });
+    expect(sql).toContain("WHERE FALSE");
+    expect(sql).not.toContain("IN ()");
+  });
+
+  it("is unchanged for an ordinary layer", () => {
+    const sql = buildCityParquetSourceSql({
+      scratchSchema: "x",
+      reader: "read_cityjson",
+      sourceFile: "layer_1.city.json",
+      table: "layer_1",
+      lodSuffix: "2_2",
+      attributes: [],
+      computedAttributes: [],
+      where: null,
+      sourceFeatureIds: null,
+    });
+    expect(sql).not.toContain("WHERE");
   });
 });
 

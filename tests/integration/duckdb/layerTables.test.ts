@@ -705,6 +705,7 @@ describe.skipIf(!enabled)("layer tables over real fixtures", () => {
         attributes: ["yearOfConstruction"],
         computedAttributes: [],
         where: null,
+        sourceFeatureIds: null,
       }),
     );
     for (const { module, types } of modules) {
@@ -829,6 +830,7 @@ describe.skipIf(!enabled)("layer tables over real fixtures", () => {
         attributes: ["yearOfConstruction"],
         computedAttributes: ["extent_height_m"],
         where: `"id" IS NOT NULL`,
+        sourceFeatureIds: null,
       }),
     );
     const rows = db.query(

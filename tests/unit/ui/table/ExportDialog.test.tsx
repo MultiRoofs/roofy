@@ -626,6 +626,40 @@ describe("ExportDialog", () => {
     expect(request.fileName).toBe("delft.cityparquet.zip");
   });
 
+  it("carries a DERIVED layer's own feature ids into the CityParquet request", async () => {
+    // Decisions recorded item 4: a derived reader-backed layer's Export
+    // INCLUDES CityParquet — which is only true if the request tells the
+    // writer which of the parent's features the copy holds.
+    open({ table: { ...READER_TABLE, sourceFeatureIds: ["a", "b"] } });
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    fireEvent.click(screen.getByLabelText("CityParquet package (.zip)"));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => expect(runExport).toHaveBeenCalled());
+    const request = runExport.mock.calls[0]![0] as {
+      kind: string;
+      sourceFeatureIds: ReadonlyArray<string> | null;
+    };
+    expect(request.kind).toBe("cityparquet");
+    expect(request.sourceFeatureIds).toEqual(["a", "b"]);
+  });
+
+  it("sends null for an ordinary layer, so the export reads the whole source", async () => {
+    open();
+    await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());
+    fireEvent.click(screen.getByLabelText("CityParquet package (.zip)"));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => expect(runExport).toHaveBeenCalled());
+    expect(
+      (
+        runExport.mock.calls[0]![0] as {
+          sourceFeatureIds: ReadonlyArray<string> | null;
+        }
+      ).sourceFeatureIds,
+    ).toBeNull();
+  });
+
   it("refuses CityParquet without an EPSG code, with a sentence", async () => {
     open({ epsg: null });
     await waitFor(() => expect(screen.getByLabelText("Building")).toBeTruthy());

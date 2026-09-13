@@ -104,6 +104,7 @@ function request(over: Record<string, unknown> = {}) {
     attributes: ["b3_h_dak_max"],
     computedAttributes: [] as ReadonlyArray<string>,
     where: null,
+    sourceFeatureIds: null as ReadonlyArray<string> | null,
     rootTypes: ["Building"],
     epsg: 7415,
     fileName: "delft.cityparquet.zip",
@@ -163,6 +164,16 @@ describe("CityParquet package export", () => {
     );
     expect(sql[2]).toContain(
       'LEFT JOIN (SELECT "id", "extent_height_m" FROM "layer_1") AS "computed" USING ("id")',
+    );
+  });
+
+  it("carries a DERIVED layer's own feature ids into the one source read", async () => {
+    // The reader re-reads the PARENT's file (§6, "What a derived layer is"),
+    // so the request's `sourceFeatureIds` is the only thing keeping the copy's
+    // package from holding every building of its parent.
+    await runExport(request({ sourceFeatureIds: ["a", "b"] }));
+    expect(sql[2]).toContain(
+      `WHERE COALESCE("feature_id", "id") IN ('a', 'b')`,
     );
   });
 

@@ -761,6 +761,22 @@ export function buildCityParquetSourceSql(input: {
    */
   readonly computedAttributes: ReadonlyArray<string>;
   readonly where: string | null;
+  /**
+   * A DERIVED layer's feature ROOT ids (`LayerTable.sourceFeatureIds`), or null
+   * for an ordinary layer.
+   *
+   * One of the readers of a parent's source on a derived layer's behalf (with
+   * `resolveScope`'s "all"), and every one of them has to AND this in: the
+   * reader here re-reads the PARENT file, so without the clause a derived
+   * layer's export holds every building of its parent.
+   *
+   * An EMPTY array is unreachable today — `prepareDerivedCityLayer` refuses a
+   * cut with no roots ("Layer changed while running; run again") rather than
+   * publishing a layer with an empty list — but `IN ()` is a SYNTAX error, so
+   * it is spelled `FALSE` here rather than left to take a whole export down,
+   * exactly as {@link buildCityParquetModuleSql} spells an empty module.
+   */
+  readonly sourceFeatureIds: ReadonlyArray<string> | null;
 }): string {
   const computed = [...new Set(input.computedAttributes)];
   const fromTable = new Set(computed.map((c) => c.toLowerCase()));
@@ -788,7 +804,18 @@ export function buildCityParquetSourceSql(input: {
           CITYPARQUET_COMPUTED_ALIAS,
         )} USING (${quoteIdent("id")})`;
   const scope = buildFeatureScopeWhere(input.table, input.where);
-  const whereClause = scope === null ? "" : ` WHERE ${scope}`;
+  // The derived filter is over the READER's own rows, so it is a plain
+  // `COALESCE(...) IN (...)` and not another `buildFeatureScopeWhere` (which
+  // subqueries the layer TABLE — correct for the user's filter, circular here).
+  const ids = input.sourceFeatureIds;
+  const cut =
+    ids === null
+      ? null
+      : ids.length === 0
+        ? "FALSE"
+        : `COALESCE("feature_id", "id") IN (${ids.map((id) => quoteLiteral(id)).join(", ")})`;
+  const both = [scope, cut].filter((c): c is string => c !== null);
+  const whereClause = both.length === 0 ? "" : ` WHERE ${both.join(" AND ")}`;
   return `CREATE TABLE ${quoteIdent(input.scratchSchema)}.${quoteIdent(CITYPARQUET_SOURCE_TABLE)} AS SELECT ${select} FROM ${input.reader}(${quoteLiteral(input.sourceFile)})${join}${whereClause}`;
 }
 
