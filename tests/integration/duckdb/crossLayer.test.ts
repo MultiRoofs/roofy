@@ -25,6 +25,7 @@ import {
   buildFeatureProxySql,
   buildProxySql,
 } from "../../../src/features/processing/buildingProxy";
+import { buildJoinSql } from "../../../src/features/processing/tools/joinByLocation";
 import { quoteIdent } from "../../../src/insights/sql";
 
 /**
@@ -862,5 +863,348 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
         })})`,
       ),
     ).toThrow(/Unsupported geometry type in WKB/);
+  });
+  it("runs buildJoinSql's OWN statement, per FEATURE, over the vector table", () => {
+    // §7.5 end to end against the engine: the rectangle proxy, the copied
+    // fields with their types, the match count's three values (a match, a real
+    // 0, and NULL for a building with no proxy at all) and §7's rule that the
+    // answer is the FEATURE's and is copied to root and parts alike.
+    //
+    // A spans x 0-100, B x 50-150 (the fixture at the top of this file). The
+    // root's box is 0-10 and its part's 0-4, so the FEATURE's combined extent
+    // is 0-10 — inside A only. `B4` is DEGENERATE (min = max), which is what a
+    // one-coordinate building's bbox is.
+    db.query(
+      `CREATE OR REPLACE TABLE probe_join AS SELECT * FROM (VALUES
+         ('B1', NULL, {'xmin': 0.0, 'ymin': 0.0, 'zmin': 0.0, 'xmax': 10.0, 'ymax': 10.0, 'zmax': 3.0}),
+         ('B1P', 'B1', {'xmin': 0.0, 'ymin': 0.0, 'zmin': 0.0, 'xmax': 4.0, 'ymax': 4.0, 'zmax': 3.0}),
+         ('B2', NULL, {'xmin': 200.0, 'ymin': 0.0, 'zmin': 0.0, 'xmax': 210.0, 'ymax': 10.0, 'zmax': 3.0}),
+         ('B3', NULL, NULL),
+         ('B4', NULL, {'xmin': 5.0, 'ymin': 5.0, 'zmin': 0.0, 'xmax': 5.0, 'ymax': 5.0, 'zmax': 0.0})
+       ) AS t("id", "feature_id", "bbox")`,
+    );
+    const rows = db.query(
+      `SELECT * FROM (${buildJoinSql({
+        table: "probe_join",
+        source: VECTOR_TABLE,
+        proxy: "rectangle",
+        from: null,
+        geometryColumn: null,
+        ids: null,
+        predicate: "intersects",
+        tie: "first",
+        prefix: "zones_",
+        fields: [
+          { field: "name", column: "zones_name", type: "VARCHAR" },
+          { field: "n", column: "zones_n", type: "DOUBLE" },
+        ],
+        writeMatchCount: true,
+      })}) ORDER BY "id"`,
+    );
+    expect(rows).toEqual([
+      // The FEATURE's own answer…
+      {
+        id: "B1",
+        f: "B1",
+        no_proxy: false,
+        matches_n_feature: 1,
+        zones_name: "A",
+        zones_n: 3,
+        zones_matches_n: 1,
+      },
+      // …on the PART's row too (§7), and not the part's own.
+      {
+        id: "B1P",
+        f: "B1",
+        no_proxy: false,
+        matches_n_feature: 1,
+        zones_name: "A",
+        zones_n: 3,
+        zones_matches_n: 1,
+      },
+      // Outside every area: §6.2's real 0, and NULL in every copied field.
+      {
+        id: "B2",
+        f: "B2",
+        no_proxy: false,
+        matches_n_feature: 0,
+        zones_name: null,
+        zones_n: null,
+        zones_matches_n: 0,
+      },
+      // No proxy at all: §6.2's NULL, which is not the same answer as 0.
+      {
+        id: "B3",
+        f: "B3",
+        no_proxy: true,
+        matches_n_feature: 0,
+        zones_name: null,
+        zones_n: null,
+        zones_matches_n: null,
+      },
+      // The degenerate extent answers the predicate rather than raising.
+      {
+        id: "B4",
+        f: "B4",
+        no_proxy: false,
+        matches_n_feature: 1,
+        zones_name: "A",
+        zones_n: 3,
+        zones_matches_n: 1,
+      },
+    ]);
+    db.query("DROP TABLE IF EXISTS probe_join");
+  });
+
+  it("copies a NESTED object as JSON text, and a bad number as NULL", () => {
+    // §7.5: "nested objects are JSON text"; §6.2: a value that could not be
+    // read is NULL, which is why the numeric read is TRY_CAST and not `::`.
+    db.query(
+      `CREATE OR REPLACE TABLE probe_nested_src AS SELECT 0 AS "idx", 'f-n' AS "sid", 'n' AS "fid",
+         '{"meta":{"k":1},"n":"twelve"}'::JSON AS "props",
+         ST_GeomFromText('POLYGON ((0 0, 100 0, 100 100, 0 100, 0 0))') AS "geom"`,
+    );
+    db.query(
+      `CREATE OR REPLACE TABLE probe_nested AS SELECT * FROM (VALUES
+         ('B1', NULL::VARCHAR, {'xmin': 0.0, 'ymin': 0.0, 'zmin': 0.0, 'xmax': 10.0, 'ymax': 10.0, 'zmax': 3.0})
+       ) AS t("id", "feature_id", "bbox")`,
+    );
+    const rows = db.query(
+      buildJoinSql({
+        table: "probe_nested",
+        source: "probe_nested_src",
+        proxy: "rectangle",
+        from: null,
+        geometryColumn: null,
+        ids: null,
+        predicate: "intersects",
+        tie: "first",
+        prefix: "zones_",
+        fields: [
+          { field: "meta", column: "zones_meta", type: "VARCHAR" },
+          { field: "n", column: "zones_n", type: "DOUBLE" },
+        ],
+        writeMatchCount: false,
+      }),
+    );
+    expect(rows).toEqual([
+      {
+        id: "B1",
+        f: "B1",
+        no_proxy: false,
+        matches_n_feature: 1,
+        zones_meta: '{"k":1}',
+        // `'twelve'::DOUBLE` would fail the whole statement for every building.
+        zones_n: null,
+      },
+    ]);
+    db.query("DROP TABLE IF EXISTS probe_nested");
+    db.query("DROP TABLE IF EXISTS probe_nested_src");
+  });
+
+  it("picks the largest overlap through the builder, ties to source order", () => {
+    // §7.5's tie rule, as the statement states it. A spans x 0-100 and B
+    // x 50-150: a proxy over 40-120 overlaps B more (700 vs 600), and one over
+    // 40-110 overlaps both by 600 — so only the second ORDER BY key decides,
+    // and it is `idx`, the SOURCE order.
+    db.query(
+      `CREATE OR REPLACE TABLE probe_tie AS SELECT * FROM (VALUES
+         ('WIDE', NULL::VARCHAR, {'xmin': 40.0, 'ymin': 10.0, 'zmin': 0.0, 'xmax': 120.0, 'ymax': 20.0, 'zmax': 3.0}),
+         ('TIED', NULL::VARCHAR, {'xmin': 40.0, 'ymin': 10.0, 'zmin': 0.0, 'xmax': 110.0, 'ymax': 20.0, 'zmax': 3.0})
+       ) AS t("id", "feature_id", "bbox")`,
+    );
+    const rows = db.query(
+      `SELECT * FROM (${buildJoinSql({
+        table: "probe_tie",
+        source: VECTOR_TABLE,
+        proxy: "rectangle",
+        from: null,
+        geometryColumn: null,
+        ids: null,
+        predicate: "intersects",
+        tie: "largestOverlap",
+        prefix: "zones_",
+        fields: [{ field: "name", column: "zones_name", type: "VARCHAR" }],
+        writeMatchCount: true,
+      })}) ORDER BY "id"`,
+    );
+    expect(rows).toEqual([
+      {
+        id: "TIED",
+        f: "TIED",
+        no_proxy: false,
+        matches_n_feature: 2,
+        zones_name: "A",
+        zones_matches_n: 2,
+      },
+      {
+        id: "WIDE",
+        f: "WIDE",
+        no_proxy: false,
+        matches_n_feature: 2,
+        zones_name: "B",
+        zones_matches_n: 2,
+      },
+    ]);
+    db.query("DROP TABLE IF EXISTS probe_tie");
+  });
+
+  it("is boundary-inclusive for `within`, which ST_Within is not", () => {
+    // §7.5's `within` is "the whole proxy inside the area, BOUNDARY INCLUDED",
+    // and the case that tells the two predicates apart is a BOUNDARY POINT:
+    // the centre (50, 50) is interior to A and sits exactly on B's x = 50 edge,
+    // so `ST_CoveredBy` counts it in BOTH and `ST_Within` counts it in one.
+    // (A polygon PAIR does not show the difference: `ST_Within` is true for a
+    // polygon that shares an edge with the area, on this engine.)
+    db.query(
+      `CREATE OR REPLACE TABLE probe_boundary AS SELECT * FROM (VALUES
+         ('B1', NULL::VARCHAR, {'xmin': 40.0, 'ymin': 40.0, 'zmin': 0.0, 'xmax': 60.0, 'ymax': 60.0, 'zmax': 3.0})
+       ) AS t("id", "feature_id", "bbox")`,
+    );
+    const covered = db.query(
+      buildJoinSql({
+        table: "probe_boundary",
+        source: VECTOR_TABLE,
+        proxy: "centre",
+        from: null,
+        geometryColumn: null,
+        ids: null,
+        predicate: "within",
+        tie: "first",
+        prefix: "zones_",
+        fields: [{ field: "name", column: "zones_name", type: "VARCHAR" }],
+        writeMatchCount: true,
+      }),
+    );
+    // BOTH areas, and the tie rule — source order — picks A.
+    expect(covered).toEqual([
+      {
+        id: "B1",
+        f: "B1",
+        no_proxy: false,
+        matches_n_feature: 2,
+        zones_name: "A",
+        zones_matches_n: 2,
+      },
+    ]);
+    // What `ST_Within` would have answered for the same point: one area, so
+    // every building on a shared boundary would silently lose a match.
+    expect(
+      db.query(
+        `SELECT COUNT(*) FILTER (WHERE ST_Within(ST_Point(50, 50), s."geom")) AS within_n FROM "${VECTOR_TABLE}" s`,
+      ),
+      // ONE, where the builder's `ST_CoveredBy` found two.
+    ).toEqual([{ within_n: 1 }]);
+
+    // §7.5: "centre within" FORCES the centre proxy — the footprint asked for
+    // here is not read at all, and the answer is the centre's.
+    const forced = buildJoinSql({
+      table: "probe_boundary",
+      source: VECTOR_TABLE,
+      proxy: "footprint",
+      from: `read_cityjson('${LOD0_FILE}', lod => '0.0')`,
+      geometryColumn: "geometry_lod0_0",
+      ids: null,
+      predicate: "centreWithin",
+      tie: "first",
+      prefix: "zones_",
+      fields: [{ field: "name", column: "zones_name", type: "VARCHAR" }],
+      writeMatchCount: true,
+    });
+    expect(forced).not.toContain("read_cityjson(");
+    expect(db.query(forced)).toEqual(covered);
+    db.query("DROP TABLE IF EXISTS probe_boundary");
+  });
+
+  it("joins FOOTPRINTS read from the reader, and tells the predicates apart", () => {
+    // The one proxy that re-reads the parent source, through `read_cityjson`
+    // itself. P1's footprint is its PART's 4 x 4 (§7's contributor rule), P2
+    // has no LoD 0 geometry at all, and P3 spans x 100-110 — which TOUCHES A's
+    // eastern edge at x = 100 and lies wholly inside B.
+    db.query(
+      `CREATE OR REPLACE TABLE probe_fp AS SELECT * FROM (VALUES
+         ('P1', NULL::VARCHAR), ('P1-0', 'P1'), ('P2', NULL), ('P3', NULL)
+       ) AS t("id", "feature_id")`,
+    );
+    const join = (predicate: "intersects" | "within") =>
+      db.query(
+        `SELECT * FROM (${buildJoinSql({
+          table: "probe_fp",
+          source: VECTOR_TABLE,
+          proxy: "footprint",
+          from: `read_cityjson('${LOD0_FILE}', lod => '0.0')`,
+          geometryColumn: "geometry_lod0_0",
+          ids: null,
+          predicate,
+          tie: "first",
+          prefix: "zones_",
+          fields: [{ field: "name", column: "zones_name", type: "VARCHAR" }],
+          writeMatchCount: true,
+        })}) ORDER BY "id"`,
+      );
+    expect(join("intersects")).toEqual([
+      {
+        id: "P1",
+        f: "P1",
+        no_proxy: false,
+        matches_n_feature: 1,
+        zones_name: "A",
+        zones_matches_n: 1,
+      },
+      {
+        id: "P1-0",
+        f: "P1",
+        no_proxy: false,
+        matches_n_feature: 1,
+        zones_name: "A",
+        zones_matches_n: 1,
+      },
+      // No LoD 0 WKB: §6.2's NULL, not a 0.
+      {
+        id: "P2",
+        f: "P2",
+        no_proxy: true,
+        matches_n_feature: 0,
+        zones_name: null,
+        zones_matches_n: null,
+      },
+      // Touching A's boundary counts (§7.5's default predicate), so BOTH.
+      {
+        id: "P3",
+        f: "P3",
+        no_proxy: false,
+        matches_n_feature: 2,
+        zones_name: "A",
+        zones_matches_n: 2,
+      },
+    ]);
+    // `within` is the whole proxy inside the area: P3 is covered by B alone.
+    expect(
+      join("within").map((r) => [
+        r["id"],
+        r["zones_name"],
+        r["zones_matches_n"],
+      ]),
+    ).toEqual([
+      ["P1", "A", 1],
+      ["P1-0", "A", 1],
+      ["P2", null, null],
+      ["P3", "B", 1],
+    ]);
+    db.query("DROP TABLE IF EXISTS probe_fp");
+  });
+
+  it("answers the predicates on a DEGENERATE extent, which a one-point building has", () => {
+    // `ST_MakeEnvelope` over a bbox whose min and max are equal: a building
+    // with a single coordinate, or a flat one. `buildProxySql`'s rectangle arm
+    // builds exactly this, and it must PARSE and answer rather than raise —
+    // one raise fails the whole join statement for every other building too.
+    const rows = db.query(
+      `SELECT ST_Area(b) AS area, ST_CoveredBy(b, a) AS covered,
+              ST_Intersects(b, a) AS intersects
+       FROM (SELECT ST_MakeEnvelope(5.0, 5.0, 5.0, 5.0) AS b,
+                    ST_GeomFromText('POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))') AS a)`,
+    );
+    expect(rows).toEqual([{ area: 0, covered: true, intersects: true }]);
   });
 });
