@@ -31,6 +31,8 @@ import { appendColumns } from "../drawer/columnPolicy";
 import { openRunLog } from "./revealTools";
 import { UNDO_ENGINE_STOPPED, phaseLine, plural, seconds } from "./runFormat";
 import { useLayerStore } from "../../features/layers/layerStore";
+import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
+import { categoriesFor } from "../../features/geoLayers/categorize";
 import { useRuleDraftStore } from "../../features/rules/ruleDraftStore";
 import { useLayerTableStore } from "../../insights/layerTables";
 import { runQuery, type QueryOutcome } from "../../insights/duckdb";
@@ -98,6 +100,57 @@ async function readStyleValue(
 }
 
 /**
+ * §7.6's Style by result: "opens the vector layer's STYLE section with Color by
+ * attribute set to the first output column (categories prefilled from its
+ * values)".
+ *
+ * The VECTOR answer to §6.2's button, and the reason it is a branch of its own
+ * rather than a rule: a geo layer has no rules (the editor reads CityJSON
+ * attributes and roof metrics) and no table, so there is nothing to read a
+ * median from and nothing to draft. The colouring is written STRAIGHT to the
+ * store — unlike the rule draft, which waits for Save — because that is what
+ * "Color by attribute" is: the same one-step edit the select in the style
+ * section makes, and the same `categoriesFor` over the same document.
+ *
+ * THE DOCUMENT IS `preparedData` FIRST, which is where §7.6's publication put
+ * the run's own column: `config.data` is the FILE, and the categories of a
+ * column the file never had would be empty.
+ *
+ * The layer is re-read from the store at click time and narrowed to a GeoJSON
+ * one: a layer removed while the card was on screen is abandoned silently
+ * (`requestSection` activates whatever id it is handed, which would resurrect
+ * it), exactly as the city path abandons a removed city layer.
+ */
+function styleGeoLayerByAttribute(
+  run: RunRecord,
+  layerId: string,
+  column: OutputColumn,
+): void {
+  // §7: a run that went stale or was undone while the card was on screen no
+  // longer describes the column this colouring would be about.
+  const current = runById(run.id);
+  if (current === null || current.stale || current.status !== "done") return;
+  const layer = useGeoLayerStore
+    .getState()
+    .layers.find((l) => l.id === layerId);
+  if (layer === undefined || layer.kind !== "geojson") return;
+  const document = layer.config.preparedData ?? layer.config.data;
+  if (document === undefined) return;
+  useGeoLayerStore.getState().updateGeoLayer(layerId, {
+    // The WHOLE style, as `GeoLayerPatch.style` requires.
+    style: {
+      ...layer.style,
+      colorByAttribute: {
+        attribute: column.name,
+        categories: categoriesFor(document, column.name),
+      },
+    },
+  });
+  // Last, so the panel opens on a colouring that is already written.
+  useShellStore.getState().requestSection(layerId, "style");
+}
+
+/**
  * §6.2's "Style by result": open the target's STYLE section with Color by =
  * Rules and the rule editor on a DRAFT — never a saved rule, because "the map
  * does NOT change until the user presses Save in the editor".
@@ -153,6 +206,15 @@ function useStyleByResult(runId: string | null): {
       setPending(true);
       void (async () => {
         try {
+          // §7.6's descriptor, decided BEFORE the value read and before the
+          // city-layer lookups below — both of which are about a table and a
+          // rule draft this branch has neither of. Its target is a VECTOR
+          // layer, so `useLayerStore` does not hold it and the "still alive"
+          // test above would abandon every one of these clicks.
+          if (descriptor.kind === "attribute") {
+            styleGeoLayerByAttribute(run, layerId, column);
+            return;
+          }
           const outcome = await readStyleValue(
             layerId,
             column.name,
@@ -199,18 +261,6 @@ function useStyleByResult(runId: string | null): {
               return;
             }
             value = read;
-          }
-
-          if (descriptor.kind === "attribute") {
-            // §7.6: "Style by result opens the vector layer's STYLE section
-            // with Color by attribute set to the first output column". The
-            // section is opened here; the attribute prefill needs the vector
-            // layer's category computation and lands with Aggregate buildings
-            // per area, the only tool with this descriptor — which is
-            // `implemented: false` until then, so this branch is unreachable
-            // in the meantime.
-            useShellStore.getState().requestSection(layerId, "style");
-            return;
           }
 
           useRuleDraftStore.getState().setDraft(layerId, {

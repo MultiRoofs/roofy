@@ -80,8 +80,14 @@ vi.mock("../../../../src/features/processing/runQueue", () => ({
 }));
 
 const { RunFooter } = await import("../../../../src/ui/processing/RunFooter");
+const { StyleSection } = await import("../../../../src/ui/layers/StyleSection");
 const { useLayerStore } =
   await import("../../../../src/features/layers/layerStore");
+const { useGeoLayerStore } =
+  await import("../../../../src/features/geoLayers/geoLayerStore");
+const { useShellStore } = await import("../../../../src/ui/shell/shellStore");
+const { CATEGORY_PALETTE_HEX } =
+  await import("../../../../src/scene/cityColors");
 const { useLayerTableStore } =
   await import("../../../../src/insights/layerTables");
 const { useRuleDraftStore } =
@@ -201,10 +207,75 @@ afterEach(() => {
     return MEDIAN_ROWS();
   });
   useLayerStore.getState().removeAllLayers();
+  useGeoLayerStore.setState({ layers: [] });
   useLayerTableStore.setState({ tables: {} });
   useRuleDraftStore.setState({ drafts: {} });
   useProcessingStore.getState().resetForTest();
+  // `requestedSection` is consumed by the layer panel, which no case here
+  // renders — so without this a case would read the previous one's request.
+  useShellStore.getState().requestSection(null);
 });
+
+/**
+ * A vector layer carrying a finished Aggregate run's results, as §7.6's
+ * publication leaves it: the run's column on every feature's properties.
+ */
+function addZonesWithResults(): string {
+  const id = useGeoLayerStore.getState().addGeoLayer({
+    name: "Zones",
+    kind: "geojson",
+    config: {
+      data: {
+        type: "FeatureCollection",
+        features: [
+          { type: "Feature", properties: { zone: "A" }, geometry: null },
+          { type: "Feature", properties: { zone: "B" }, geometry: null },
+          { type: "Feature", properties: { zone: "C" }, geometry: null },
+        ],
+      },
+    },
+  });
+  useGeoLayerStore.getState().mergeGeoFeatureProperties(
+    id,
+    new Map([
+      ["index:0", { bld_buildings_n: 3, bld_sum_roof_area_m2: 90 }],
+      ["index:1", { bld_buildings_n: 7, bld_sum_roof_area_m2: 40 }],
+      ["index:2", { bld_buildings_n: 3, bld_sum_roof_area_m2: 12 }],
+    ]),
+  );
+  return id;
+}
+
+/** §7.6's own run record: the TARGET is the vector layer. */
+function aggregateRun(layerId: string): RunRecord {
+  return doneRun({
+    targetLayerId: layerId,
+    targetName: "Zones",
+    toolId: "aggregate-per-area",
+    lod: null,
+    prefix: "bld_",
+    params: {
+      proxy: "rectangle",
+      predicate: "intersects",
+      rows: [
+        { op: "count", column: null },
+        { op: "sum", column: "roof_area_m2" },
+      ],
+    },
+    columns: ["bld_buildings_n", "bld_sum_roof_area_m2"],
+    summary: {
+      ...doneRun({}).summary!,
+      line: "3 areas aggregated over 12 buildings · 0.4 s",
+      nonNullByColumn: { bld_buildings_n: 3, bld_sum_roof_area_m2: 3 },
+    },
+  });
+}
+
+/** The real Style section over the real geo layer record. */
+function GeoStyle({ id }: { readonly id: string }) {
+  const layer = useGeoLayerStore((s) => s.layers.find((l) => l.id === id));
+  return layer ? <StyleSection item={{ kind: "geo", layer }} /> : null;
+}
 
 describe("Style by result, from the descriptor", () => {
   it("opens Measure solids' draft on the first WRITTEN column, at the median", async () => {
@@ -533,6 +604,60 @@ describe("Style by result, from the descriptor", () => {
       screen.getByRole("button", { name: "Style by result" }),
     ).toBeDisabled();
     expect(screen.getByText("All values are empty")).toBeInTheDocument();
+  });
+
+  it("opens §7.6's STYLE section on the FIRST output column, categories filled", async () => {
+    // §7.6: "Style by result opens the vector layer's STYLE section with Color
+    // by attribute set to the first output column (categories prefilled from
+    // its values)". The descriptor's `kind: "attribute"` branch, which Task 9
+    // left for the one tool that has it — through the real footer and the real
+    // style section.
+    const id = addZonesWithResults();
+    render(
+      <RunFooter
+        run={seed(aggregateRun(id))}
+        canRun
+        reason={null}
+        onRunAgain={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+
+    await waitFor(() => {
+      expect(useShellStore.getState().requestedSection).toEqual({
+        layerId: id,
+        section: "style",
+      });
+    });
+    // The FIRST output column, with the categories read off the document the
+    // run published into — never an empty list under a named attribute.
+    expect(
+      useGeoLayerStore.getState().layers.find((l) => l.id === id)?.style
+        .colorByAttribute,
+    ).toEqual({
+      attribute: "bld_buildings_n",
+      categories: [
+        { value: "3", color: CATEGORY_PALETTE_HEX[0] },
+        { value: "7", color: CATEGORY_PALETTE_HEX[1] },
+      ],
+    });
+    // No rule draft and no round trip: a vector layer is coloured by attribute,
+    // and §7.6's descriptor reads nothing from the engine.
+    expect(useRuleDraftStore.getState().drafts[id]).toBeUndefined();
+    expect(runQuery).not.toHaveBeenCalled();
+
+    // And the REAL style section shows it: the select on the run's column, one
+    // swatch per category.
+    render(<GeoStyle id={id} />);
+    expect(
+      (
+        screen.getByRole("combobox", {
+          name: "Color by attribute",
+        }) as HTMLSelectElement
+      ).value,
+    ).toBe("bld_buildings_n");
+    expect(screen.getByLabelText('Colour for "3"')).toBeInTheDocument();
+    expect(screen.getByLabelText('Colour for "7"')).toBeInTheDocument();
   });
 
   it("is ABSENT when the descriptor picks nothing", () => {
