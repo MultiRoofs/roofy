@@ -22,6 +22,7 @@ import {
   drainColumnReveals,
   requestColumnReveal,
   subscribeColumnReveal,
+  type ColumnReveal,
 } from "../../../../src/ui/table/revealColumns";
 
 /** A listener that ACKNOWLEDGES — the grid's answer when it found a header. */
@@ -30,7 +31,18 @@ const took = () => vi.fn(() => true);
  *  layer whose headers are not on screen yet. */
 const declined = () => vi.fn(() => false);
 
+/** Live subscriptions, dropped after every case: a case that FAILS never
+ *  reaches its own `stop()`, and a listener left behind would take the next
+ *  case's requests and turn one failure into a cascade. */
+const stops: Array<() => void> = [];
+const listen = (listener: (reveal: ColumnReveal) => boolean): (() => void) => {
+  const stop = subscribeColumnReveal(listener);
+  stops.push(stop);
+  return stop;
+};
+
 afterEach(() => {
+  for (const stop of stops.splice(0)) stop();
   // The channel is module state, and an outstanding request is RETAINED — so
   // it would be delivered to the next case's first listener.
   clearColumnReveals();
@@ -40,8 +52,8 @@ describe("the column-reveal channel", () => {
   it("offers a request to live listeners until one takes it", () => {
     const a = declined();
     const b = took();
-    const stopA = subscribeColumnReveal(a);
-    const stopB = subscribeColumnReveal(b);
+    const stopA = listen(a);
+    const stopB = listen(b);
     requestColumnReveal("L1", ["solid_volume_m3", "solid_valid"]);
     expect(a).toHaveBeenCalledWith({
       layerId: "L1",
@@ -57,7 +69,7 @@ describe("the column-reveal channel", () => {
     // A pure event bus would drop the request on the floor.
     requestColumnReveal("L1", ["solid_valid"]);
     const late = took();
-    const stop = subscribeColumnReveal(late);
+    const stop = listen(late);
     expect(late).toHaveBeenCalledWith({
       layerId: "L1",
       columns: ["solid_valid"],
@@ -71,13 +83,13 @@ describe("the column-reveal channel", () => {
     // scroll to anything — and consuming the request there loses it for good:
     // the drawer opens on the right layer a moment later and never scrolls.
     const other = declined();
-    const stopOther = subscribeColumnReveal(other);
+    const stopOther = listen(other);
     requestColumnReveal("L1", ["solid_valid"]);
     expect(other).toHaveBeenCalledTimes(1);
     stopOther();
 
     const right = took();
-    const stop = subscribeColumnReveal(right);
+    const stop = listen(right);
     expect(right).toHaveBeenCalledWith({
       layerId: "L1",
       columns: ["solid_valid"],
@@ -89,7 +101,7 @@ describe("the column-reveal channel", () => {
     // The grid is mounted on L1 the whole time; its headers appear when the
     // query answers. `drainColumnReveals` is what the grid calls then.
     const grid = vi.fn(() => false);
-    const stop = subscribeColumnReveal(grid);
+    const stop = listen(grid);
     requestColumnReveal("L1", ["solid_valid"]);
     expect(grid).toHaveBeenCalledTimes(1);
 
@@ -106,10 +118,10 @@ describe("the column-reveal channel", () => {
   it("is consumed ONCE, whoever takes it", () => {
     requestColumnReveal("L1", ["solid_valid"]);
     const first = took();
-    subscribeColumnReveal(first)();
+    listen(first)();
     expect(first).toHaveBeenCalledTimes(1);
     const second = took();
-    const stop = subscribeColumnReveal(second);
+    const stop = listen(second);
     expect(second).not.toHaveBeenCalled();
     stop();
   });
@@ -121,7 +133,7 @@ describe("the column-reveal channel", () => {
     requestColumnReveal("L2", ["b"]);
     requestColumnReveal("L1", ["c"]);
     const seen: Array<ReadonlyArray<string>> = [];
-    const stop = subscribeColumnReveal((reveal) => {
+    const stop = listen((reveal) => {
       seen.push(reveal.columns);
       return true;
     });
@@ -130,21 +142,26 @@ describe("the column-reveal channel", () => {
   });
 
   it("forgets a SUPERSEDED request even when the new one is taken at once", () => {
-    // Round-2 residual C11: a pending A for L1, then B for L1 arrives while a
-    // live grid is listening and honours it immediately. If B never replaced A
-    // in the pending map, the grid's next drain — one column-list change later
-    // — would scroll back to the PREVIOUS run's columns.
+    // Round-2 residual C11, and the ONE shape that detects it: A must still be
+    // PENDING when B arrives — so the grid declines A (its columns are not on
+    // screen yet) — and B must be acknowledged IMMEDIATELY, which is the path
+    // that returns early. A request recorded only after every listener declined
+    // would leave A in the map, and the grid's next drain — one column-list
+    // change later — would scroll back to the previous run's columns.
+    const grid = vi.fn(() => false);
+    const stop = listen(grid);
     requestColumnReveal("L1", ["a"]);
-    const grid = took();
-    const stop = subscribeColumnReveal(grid);
-    // The pending A is drained by the subscription itself.
     expect(grid).toHaveBeenCalledTimes(1);
+    expect(grid).toHaveBeenLastCalledWith({ layerId: "L1", columns: ["a"] });
 
+    // The second run's columns ARE on screen, so this one is honoured at once.
+    grid.mockReturnValue(true);
     requestColumnReveal("L1", ["b"]);
     expect(grid).toHaveBeenCalledTimes(2);
     expect(grid).toHaveBeenLastCalledWith({ layerId: "L1", columns: ["b"] });
 
-    // Nothing is outstanding: the drain offers nothing at all.
+    // Nothing is outstanding: the drain offers nothing at all. A retained A
+    // would be delivered here — and taken, since the grid now acknowledges.
     drainColumnReveals(grid);
     expect(grid).toHaveBeenCalledTimes(2);
     stop();
@@ -152,13 +169,13 @@ describe("the column-reveal channel", () => {
 
   it("replaces a pending request that nothing has taken yet", () => {
     const idle = declined();
-    const stopIdle = subscribeColumnReveal(idle);
+    const stopIdle = listen(idle);
     requestColumnReveal("L1", ["a"]);
     requestColumnReveal("L1", ["b"]);
     stopIdle();
 
     const seen: Array<ReadonlyArray<string>> = [];
-    const stop = subscribeColumnReveal((reveal) => {
+    const stop = listen((reveal) => {
       seen.push(reveal.columns);
       return true;
     });
@@ -168,14 +185,14 @@ describe("the column-reveal channel", () => {
 
   it("stops delivering to an unsubscribed listener", () => {
     const listener = took();
-    subscribeColumnReveal(listener)();
+    listen(listener)();
     requestColumnReveal("L1", ["x"]);
     expect(listener).not.toHaveBeenCalled();
   });
 
   it("ignores an EMPTY column list — there is nothing to scroll to", () => {
     const listener = took();
-    const stop = subscribeColumnReveal(listener);
+    const stop = listen(listener);
     requestColumnReveal("L1", []);
     expect(listener).not.toHaveBeenCalled();
     stop();
@@ -268,7 +285,7 @@ describe("DataGrid honouring a reveal", () => {
     requestColumnReveal("L1", ["roof_area_m2"]);
     expect(scrollIntoView).not.toHaveBeenCalled();
     const other = took();
-    const stop = subscribeColumnReveal(other);
+    const stop = listen(other);
     expect(other).toHaveBeenCalledWith({
       layerId: "L1",
       columns: ["roof_area_m2"],
