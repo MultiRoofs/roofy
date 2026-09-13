@@ -840,7 +840,14 @@ async function execute(
     // This is the PHASE only. The bytes are registered by the executor, through
     // `readSource`, which needs the scope's ids; the phase is what the user
     // reads, and it has to open before the first thing done under it.
-    if (tool.needsReader) patch(id, { status: "running", phase: "source" });
+    // A VECTOR source enters it here too, and for the same reason: its
+    // reprojection, its NDJSON and its CREATE all happen under this phase, and
+    // the scope query below is work the run does while already holding the
+    // FIFO. Leaving a vector run in "queued" (or in "Loading extension") for
+    // the length of the scope query is the card saying nothing is happening.
+    if (tool.needsReader || tool.sourceKind === "vector") {
+      patch(id, { status: "running", phase: "source" });
+    }
 
     const scope = await raced(
       resolveScope({
@@ -867,10 +874,10 @@ async function execute(
       return;
     }
     if (tool.sourceKind === "vector") {
-      // §6.1's second phase, for the other kind of source. `runFormat.ts`
-      // already labels it "Reading source"; this is the first tool that enters
-      // it with a vector layer rather than a re-read file.
-      patch(id, { status: "running", phase: "source" });
+      // §6.1's second phase, for the other kind of source — ENTERED ABOVE,
+      // before the scope query, and held open across everything below.
+      // `runFormat.ts` already labels it "Reading source"; this is the first
+      // tool that enters it with a vector layer rather than a re-read file.
       const geo = useGeoLayerStore
         .getState()
         .layers.find((l) => l.id === request.sourceLayerId);
@@ -971,6 +978,8 @@ async function execute(
       // (`roofMetrics.ts` and `heightFromExtent.ts` go straight to Computing).
       // Deciding it here rather than inside the executor is what stops the
       // progress block flashing "Computing" for one frame before a 300 MB read.
+      // A reader-backed run STAYS in Reading source; a vector-source run has
+      // just finished its own, so Computing is next for it.
       phase: tool.needsReader ? "source" : "compute",
       featureIds: scope.featureIds,
       scopeCount: scope.count,

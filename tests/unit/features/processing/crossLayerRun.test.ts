@@ -27,6 +27,17 @@ const sql: string[] = [];
 let tables: Record<string, ReturnType<typeof freshTable>> = {};
 /** The FEATURE count the mocked COUNT(DISTINCT …) answers. */
 let featureTotal = 2;
+/** When set, the scope's COUNT statement waits here — so a test can read the
+ *  card while scope resolution is holding the FIFO. */
+let scopeGate: { promise: Promise<void>; open: () => void } | null = null;
+
+function makeGate(): { promise: Promise<void>; open: () => void } {
+  let open!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { promise, open };
+}
 
 function freshTable(name: string, columns: string[]) {
   return {
@@ -50,6 +61,7 @@ vi.mock("../../../../src/insights/duckdb", () => {
   const run = async (statement: string) => {
     sql.push(statement);
     if (statement.includes("COUNT(DISTINCT")) {
+      if (scopeGate) await scopeGate.promise;
       return { ok: true as const, columns: ["n"], rows: [{ n: featureTotal }] };
     }
     return { ok: true as const, columns: [], rows: [] };
@@ -253,6 +265,7 @@ async function settle(): Promise<void> {
 beforeEach(() => {
   sql.length = 0;
   featureTotal = 2;
+  scopeGate = null;
   tables = {
     CITY: freshTable("layer_1", ["id", "feature_id"]),
   };
@@ -770,6 +783,32 @@ describe("the per-run vector table", () => {
     });
     await settle();
     expect(runById(id)?.warnings).toContain("1 area skipped: invalid geometry");
+  });
+
+  it("shows Reading source while the SCOPE query is still in flight", async () => {
+    // §6.1's phases are discrete and in order, and the scope query is work the
+    // run does under the phase it has already entered — a vector run that
+    // waited for it in "queued" would tell the user nothing was happening
+    // while it held the FIFO. Same rule as the reader branch's.
+    const zones = addZones();
+    capturing();
+    scopeGate = makeGate();
+    const id = submitRun({
+      toolId: "join-by-location",
+      targetLayerId: "CITY",
+      sourceLayerId: zones,
+      scope: "all",
+      lod: null,
+      params: {},
+      prefix: "zones_",
+      columns: [{ name: "zones_n", type: "DOUBLE" }],
+    });
+    await settle();
+    expect(sql.some((s) => s.includes("COUNT(DISTINCT"))).toBe(true);
+    expect(runById(id)).toMatchObject({ status: "running", phase: "source" });
+    scopeGate.open();
+    await settle();
+    expect(runById(id)?.status).toBe("done");
   });
 
   it("cancels inside the source phase, before the executor ever runs", async () => {
