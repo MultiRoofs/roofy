@@ -213,4 +213,19 @@ describe("RecentRuns", () => {
     const rows = container.querySelectorAll(".processing-run-row__head");
     expect(rows[0]?.textContent).toContain("Measure solids");
   });
+
+  it("shows 'target \u2190 source' for a cross-layer run", () => {
+    useProcessingStore.setState({
+      runs: [
+        runFixture({
+          toolId: "join-by-location",
+          targetName: "Delft",
+          sourceLayerId: "GEO",
+          sourceName: "Zones",
+        }),
+      ],
+    });
+    render(<RecentRuns />);
+    expect(screen.getByText(/Delft \u2190 Zones/)).toBeInTheDocument();
+  });
 });

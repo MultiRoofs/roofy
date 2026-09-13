@@ -267,6 +267,7 @@ function solidRequest(overrides: Record<string, unknown> = {}) {
   return {
     toolId: "validate-solids" as const,
     targetLayerId: "L1",
+    sourceLayerId: null,
     scope: "all" as const,
     lod: "2.2",
     params: {},

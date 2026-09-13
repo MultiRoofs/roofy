@@ -47,6 +47,7 @@ import {
   undoComputedColumns,
   useComputedColumnStore,
   writeComputedColumns,
+  type ColumnType,
   type OutputColumn,
 } from "../../insights/computedColumns";
 import {
@@ -57,6 +58,11 @@ import {
   type LayerTable,
 } from "../../insights/layerTables";
 import { useLayerStore, type Layer } from "../layers/layerStore";
+import {
+  useGeoLayerStore,
+  type GeoJsonLayer,
+} from "../geoLayers/geoLayerStore";
+import { geoRecords, type GeoRecord } from "../geoLayers/geoRecords";
 import { runById, useProcessingStore } from "./processingStore";
 import { resolveScope, snapshotScopeInputs, type ScopeSnapshot } from "./scope";
 import { toolById } from "./toolRegistry";
@@ -74,7 +80,10 @@ import type {
 
 export interface RunRequest {
   readonly toolId: ToolId;
+  /** The layer the results are WRITTEN to (spec §3's "target"). */
   readonly targetLayerId: string;
+  /** The second layer the run READS (spec §3's "source"), or null. */
+  readonly sourceLayerId: string | null;
   readonly scope: Scope;
   readonly lod: string | null;
   readonly params: Readonly<Record<string, unknown>>;
@@ -85,9 +94,66 @@ export interface RunRequest {
 /** A {@link RunRequest} plus everything `submitRun` froze for it. */
 interface FrozenRequest extends RunRequest {
   readonly snapshot: ScopeSnapshot;
-  /** The target's table name at Run; a different one at the head is a rebuild. */
+  /**
+   * The layer whose TABLE the run reads and whose FIFO slot it holds.
+   *
+   * `sourceLayerId` for a vector-TARGET tool, else `targetLayerId`. EVERY read
+   * of `targetLayerId` inside the queue is really a read of this — the scope
+   * snapshot, the frozen `tableName`, the "Layer removed" / "Layer changed
+   * while running" pre-flights and the stale watcher — because a vector layer
+   * has no table to compute over (Design decision (c)). The target-removal
+   * watcher is the exception: it checks BOTH ids, since §6.1 cancels a run when
+   * either layer goes away.
+   */
+  readonly computeLayerId: string;
+  /** The COMPUTE layer's table name at Run; a different one at the head is a
+   *  rebuild. */
   readonly tableName: string | null;
 }
+
+/**
+ * Where a run WRITES (spec §3's "target").
+ *
+ * A city target carries its table, because the write is `ALTER TABLE` +
+ * `UPDATE` over it. A vector target carries its RECORDS instead: a geo layer
+ * has no table and no model, and what the app holds is the document — so the
+ * executor is handed the same `GeoRecord` list the records panel builds, keyed
+ * by the stable feature id the results come back under (Design decision (c)).
+ *
+ * The vector arm is `GeoJsonLayer`, not `GeoLayer`: every consumer reads
+ * `layer.config.preparedData`, and the raster and tiles arms have no such field.
+ * `execute` narrows once, at the resolution below, so nothing downstream casts.
+ */
+export type ToolTarget =
+  | { readonly kind: "city"; readonly layer: Layer; readonly table: LayerTable }
+  | {
+      readonly kind: "vector";
+      readonly layer: GeoJsonLayer;
+      readonly records: ReadonlyArray<GeoRecord>;
+    };
+
+/**
+ * The SECOND layer a cross-layer run reads, or null for a one-layer tool.
+ *
+ * A city source is by construction the COMPUTE layer (`submitRun` points
+ * `computeLayerId` at it), so it is the same `layer`/`table` pair `ToolContext`
+ * carries — spelled out because an executor should not have to know that. A
+ * VECTOR source is the per-run `__src_<runId>` table plus what preflight
+ * learned about it, and it is built in the `"source"` phase (Task 13).
+ */
+export type ToolSource =
+  | { readonly kind: "city"; readonly layer: Layer; readonly table: LayerTable }
+  | {
+      readonly kind: "vector";
+      readonly layer: GeoJsonLayer;
+      readonly table: string;
+      readonly propertyKeys: ReadonlyArray<string>;
+      /** The SOURCE's property types, as preflight inferred them — the ONE
+       *  answer the form also used, so the columns the executor declares are
+       *  the columns the frozen request promised (§7.5). */
+      readonly propertyTypes: ReadonlyMap<string, ColumnType>;
+      readonly skipped: number;
+    };
 
 /**
  * What a tool executor is handed. Everything a tool needs and nothing it does
@@ -95,8 +161,16 @@ interface FrozenRequest extends RunRequest {
  * reach the card through these three methods.
  */
 export interface ToolContext {
+  /**
+   * The layer whose TABLE the compute reads. For a vector-TARGET tool this is
+   * the SOURCE city layer; for every other tool it is `target.layer`. The two
+   * M2 executors read only these and are unaffected.
+   */
   readonly table: LayerTable;
   readonly layer: Layer;
+  /** Where the run WRITES. */
+  readonly target: ToolTarget;
+  readonly source: ToolSource | null;
   /** The rows to compute for, or `null` for "every row". */
   readonly featureIds: ReadonlyArray<string> | null;
   readonly signal: AbortSignal;
@@ -349,10 +423,19 @@ const patch = (id: string, p: Partial<RunRecord>) => {
  * cancel from the first frame.
  */
 export function submitRun(request: RunRequest): string {
+  // For a vector-TARGET tool the compute ground is the SOURCE city layer: it
+  // owns the table, the scope and the FIFO slot. `sourceLayerId` may be null
+  // for a malformed request (the form's `canRun` blocks it); the head refuses
+  // it with §5's own reason rather than resolving a table for a vector id.
+  const computeLayerId =
+    toolById(request.toolId).target === "vector"
+      ? (request.sourceLayerId ?? request.targetLayerId)
+      : request.targetLayerId;
   return queueRun({
     ...request,
-    snapshot: snapshotScopeInputs(request.targetLayerId),
-    tableName: getLayerTable(request.targetLayerId)?.table ?? null,
+    computeLayerId,
+    snapshot: snapshotScopeInputs(computeLayerId),
+    tableName: getLayerTable(computeLayerId)?.table ?? null,
   });
 }
 
@@ -374,23 +457,46 @@ export function retryRun(runId: string): string | null {
   if (!frozen) return null;
   return queueRun({
     ...frozen,
-    tableName: getLayerTable(frozen.targetLayerId)?.table ?? null,
+    tableName: getLayerTable(frozen.computeLayerId)?.table ?? null,
   });
+}
+
+/**
+ * A layer's name, whichever store it lives in.
+ *
+ * Two stores and one run: the target of an Aggregate run is a `GeoLayer` and
+ * its source is a `Layer`, and the card, the history's "← source" line and
+ * §6.4's log header all read the NAMES. `null` when the id names neither, which
+ * the head's pre-flights then report as "Layer removed".
+ */
+function layerNameOf(layerId: string | null): string | null {
+  if (layerId === null) return null;
+  const city = useLayerStore.getState().layers.find((l) => l.id === layerId);
+  if (city) return city.name;
+  return (
+    useGeoLayerStore.getState().layers.find((l) => l.id === layerId)?.name ??
+    null
+  );
+}
+
+/** Does either store still hold this id? §6.1's removal pre-flight. */
+function layerExists(layerId: string): boolean {
+  return (
+    useLayerStore.getState().layers.some((l) => l.id === layerId) ||
+    useGeoLayerStore.getState().layers.some((l) => l.id === layerId)
+  );
 }
 
 function queueRun(frozen: FrozenRequest): string {
   const request: RunRequest = frozen;
-  const layer = useLayerStore
-    .getState()
-    .layers.find((l) => l.id === request.targetLayerId);
   const id = `run_${++counter}`;
   const record: RunRecord = {
     id,
     toolId: request.toolId,
     targetLayerId: request.targetLayerId,
-    targetName: layer?.name ?? "?",
-    sourceLayerId: null,
-    sourceName: null,
+    targetName: layerNameOf(request.targetLayerId) ?? "?",
+    sourceLayerId: request.sourceLayerId,
+    sourceName: layerNameOf(request.sourceLayerId),
     scope: request.scope,
     scopeCount: 0,
     featureIds: null,
@@ -528,9 +634,37 @@ async function execute(
     // is the QUEUED stamp, and the ticker is not live for a queued run.
     patch(id, { startedAt: Date.now() });
 
+    const tool = toolById(request.toolId);
+    // §5's own reason, at the head: a vector-target tool with no source has no
+    // compute ground at all, and resolving a city table for a vector layer id
+    // would report "Layer removed" about a layer that is right there.
+    if (tool.sourceKind !== null && request.sourceLayerId === null) {
+      patch(id, {
+        status: "failed",
+        error:
+          tool.sourceKind === "vector"
+            ? "Add a vector layer to join with"
+            : "Add a city model layer to aggregate",
+        elapsedMs: elapsed(),
+      });
+      return;
+    }
+    // §6.1: "Removing the target or the source layer during a run cancels it."
+    // Checked for BOTH ids, in whichever store each lives in.
+    if (
+      !layerExists(request.targetLayerId) ||
+      (request.sourceLayerId !== null && !layerExists(request.sourceLayerId))
+    ) {
+      patch(id, {
+        status: "failed",
+        error: "Layer removed",
+        elapsedMs: elapsed(),
+      });
+      return;
+    }
     const layer = useLayerStore
       .getState()
-      .layers.find((l) => l.id === request.targetLayerId);
+      .layers.find((l) => l.id === request.computeLayerId);
     if (!layer) {
       patch(id, {
         status: "failed",
@@ -539,7 +673,7 @@ async function execute(
       });
       return;
     }
-    const table = getLayerTable(request.targetLayerId);
+    const table = getLayerTable(request.computeLayerId);
     if (!table) {
       patch(id, {
         status: "failed",
@@ -559,29 +693,63 @@ async function execute(
       });
       return;
     }
+    // Where the run WRITES, which for Aggregate is not where it computes.
+    let target: ToolTarget;
+    if (tool.target === "city") {
+      target = { kind: "city", layer, table };
+    } else {
+      const geo = useGeoLayerStore
+        .getState()
+        .layers.find((l) => l.id === request.targetLayerId);
+      if (!geo || geo.kind !== "geojson") {
+        patch(id, {
+          status: "failed",
+          error: "Layer removed",
+          elapsedMs: elapsed(),
+        });
+        return;
+      }
+      target = {
+        kind: "vector",
+        layer: geo,
+        records: geoRecords(geo.config.preparedData),
+      };
+    }
+    // A CITY source IS the compute layer — `submitRun` made it so — and a
+    // VECTOR source is built in the "source" phase (Task 13).
+    const source: ToolSource | null =
+      tool.sourceKind === "city" ? { kind: "city", layer, table } : null;
     // Spec §6.1: "a column that now belongs to the file fails the run with that
     // reason". The form checked when the user typed the prefix; by the head the
     // table may hold a column of the file's own under that name, and DuckDB's
     // identifiers are CASE-INSENSITIVE — "EXTENT_height_m" would overwrite
     // "extent_height_m" without the run ever noticing.
-    const owned = new Set(
-      [...computedColumnsOf(request.targetLayerId)].map((c) => c.toLowerCase()),
-    );
-    const source = table.columns.find(
-      (c) =>
-        !owned.has(c.name.toLowerCase()) &&
-        request.columns.some(
-          (out) => out.name.toLowerCase() === c.name.toLowerCase(),
+    //
+    // About the TARGET's own table, so it does not apply to a vector target,
+    // whose columns land on its feature properties (Task 18) and whose compute
+    // table belongs to another layer entirely.
+    if (target.kind === "city") {
+      const owned = new Set(
+        [...computedColumnsOf(request.targetLayerId)].map((c) =>
+          c.toLowerCase(),
         ),
-    );
-    if (source) {
-      patch(id, {
-        status: "failed",
-        // The TABLE's spelling: that is the column that belongs to the data.
-        error: `'${source.name}' belongs to the source data; choose another prefix`,
-        elapsedMs: elapsed(),
-      });
-      return;
+      );
+      const clash = target.table.columns.find(
+        (c) =>
+          !owned.has(c.name.toLowerCase()) &&
+          request.columns.some(
+            (out) => out.name.toLowerCase() === c.name.toLowerCase(),
+          ),
+      );
+      if (clash) {
+        patch(id, {
+          status: "failed",
+          // The TABLE's spelling: that is the column that belongs to the data.
+          error: `'${clash.name}' belongs to the source data; choose another prefix`,
+          elapsedMs: elapsed(),
+        });
+        return;
+      }
     }
     const executor = EXECUTORS[request.toolId];
     if (!executor) {
@@ -603,7 +771,6 @@ async function execute(
     // its duration, once per session. That is the deliberate trade. Loading
     // outside the queue would take the phase out of §6.1's sequence and would
     // let the run start against a table that is being rebuilt underneath it.
-    const tool = toolById(request.toolId);
     if (tool.extension !== null && !isExtensionLoaded(tool.extension)) {
       patch(id, { status: "running", phase: "extension" });
       const loaded = await raced(ensureExtension(tool.extension), signal);
@@ -689,6 +856,8 @@ async function execute(
     const ctx: ToolContext = {
       table,
       layer,
+      target,
+      source,
       featureIds: scope.featureIds,
       signal,
       async query(label, sql) {
@@ -719,10 +888,26 @@ async function execute(
 
     const record = runById(id);
     if (!record) return;
+    const raw = await executor(record, ctx);
+    if (signal.aborted) throw new CancelledError();
+    if (target.kind !== "city") {
+      // Task 18 publishes a vector target's results into its feature
+      // properties. Until it does, the write must not run: `table` is the
+      // SOURCE city layer's, so `writeComputedColumns` would put the vector
+      // layer's columns on the city layer's table. Aggregate is the only
+      // vector-target tool and is `implemented: false` until Task 19, so this
+      // is a guard on an unreachable path, not a feature.
+      patch(id, {
+        status: "failed",
+        phase: null,
+        error: "Not available yet",
+        elapsedMs: elapsed(),
+      });
+      return;
+    }
     // The table's spelling wins from here on, so the SQL, the rows' keys, the
     // model, the registry, the card and Undo all name the same column.
-    const result = canonicalise(await executor(record, ctx), table.columns);
-    if (signal.aborted) throw new CancelledError();
+    const result = canonicalise(raw, table.columns);
 
     if (result.rows.size === 0) {
       // Nothing to write. The write's `UPDATE … WHERE "id" IN ()` is a SYNTAX
@@ -1074,7 +1259,12 @@ export function installTargetRemovalWatcher(): () => void {
   disposeTargetWatcher?.();
 
   const failRunsWithoutTarget = () => {
-    const layerIds = new Set(useLayerStore.getState().layers.map((l) => l.id));
+    // BOTH stores: §6.1's removal is about the target OR the source, and either
+    // may be a geo layer.
+    const layerIds = new Set([
+      ...useLayerStore.getState().layers.map((l) => l.id),
+      ...useGeoLayerStore.getState().layers.map((l) => l.id),
+    ]);
     for (const run of useProcessingStore.getState().runs) {
       if (
         run.status !== "queued" &&
@@ -1083,7 +1273,12 @@ export function installTargetRemovalWatcher(): () => void {
       ) {
         continue;
       }
-      if (layerIds.has(run.targetLayerId)) continue;
+      if (
+        layerIds.has(run.targetLayerId) &&
+        (run.sourceLayerId === null || layerIds.has(run.sourceLayerId))
+      ) {
+        continue;
+      }
       patch(run.id, {
         status: "failed",
         phase: null,
@@ -1094,16 +1289,21 @@ export function installTargetRemovalWatcher(): () => void {
     }
   };
 
-  const unsubscribe = useLayerStore.subscribe((state, previous) => {
+  const unsubscribeCity = useLayerStore.subscribe((state, previous) => {
     // Only the LIST matters here; the store's other writes (a colour, a filter,
     // a merged attribute) are not removals.
+    if (state.layers === previous.layers) return;
+    failRunsWithoutTarget();
+  });
+  const unsubscribeGeo = useGeoLayerStore.subscribe((state, previous) => {
     if (state.layers === previous.layers) return;
     failRunsWithoutTarget();
   });
   failRunsWithoutTarget();
 
   const dispose = () => {
-    unsubscribe();
+    unsubscribeCity();
+    unsubscribeGeo();
     if (disposeTargetWatcher === dispose) disposeTargetWatcher = null;
   };
   disposeTargetWatcher = dispose;
@@ -1206,11 +1406,14 @@ export function installStaleWatcher(): () => void {
           before?.state === "building");
       if (!rebuilt) continue;
       for (const run of useProcessingStore.getState().runs) {
-        if (
-          run.targetLayerId === layerId &&
-          run.status === "done" &&
-          !run.stale
-        ) {
+        // The layer whose TABLE the run read, which for a vector-target run is
+        // its SOURCE city layer. The record carries only the target's id, so
+        // the compute id comes from what `submitRun` froze; a run whose frozen
+        // request the history has dropped falls back to the target, which is
+        // the compute layer for every one-layer tool.
+        const computeLayerId =
+          frozenById.get(run.id)?.computeLayerId ?? run.targetLayerId;
+        if (computeLayerId === layerId && run.status === "done" && !run.stale) {
           patch(run.id, { stale: true, undoable: false });
           discardUndo(run.id);
         }

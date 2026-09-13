@@ -25,7 +25,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     extension: null,
     needsReader: false,
     target: "city",
-    needsVectorSource: false,
+    sourceKind: null,
     needsLod: true,
     defaultPrefix: "roof_",
     outputColumns: (prefix, params) =>
@@ -53,7 +53,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     extension: "three_d",
     needsReader: true,
     target: "city",
-    needsVectorSource: false,
+    sourceKind: null,
     needsLod: true,
     defaultPrefix: "solid_",
     outputColumns: (prefix, params) =>
@@ -81,7 +81,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     extension: "three_d",
     needsReader: true,
     target: "city",
-    needsVectorSource: false,
+    sourceKind: null,
     needsLod: true,
     defaultPrefix: "solid_",
     // No `validateParams` and no `normaliseParams`: §7.3 has no parameters, so
@@ -109,7 +109,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     extension: null,
     needsReader: false,
     target: "city",
-    needsVectorSource: false,
+    sourceKind: null,
     needsLod: false,
     defaultPrefix: "extent_",
     outputColumns: (p) => [
@@ -135,7 +135,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     extension: "spatial",
     needsReader: false,
     target: "city",
-    needsVectorSource: true,
+    sourceKind: "vector",
     needsLod: false,
     defaultPrefix: "",
     styleByResult: {
@@ -156,7 +156,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     extension: "spatial",
     needsReader: false,
     target: "vector",
-    needsVectorSource: false,
+    sourceKind: "city",
     needsLod: false,
     defaultPrefix: "bld_",
     styleByResult: {
@@ -179,7 +179,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     extension: "spatial",
     needsReader: false,
     target: "city",
-    needsVectorSource: true,
+    sourceKind: "vector",
     needsLod: false,
     defaultPrefix: "",
     styleByResult: {

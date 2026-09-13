@@ -65,7 +65,8 @@ export function useToolForm(toolId: ToolId) {
   const tool = toolById(toolId);
   const active = useActiveLayer();
   const layers = useLayerStore((s) => s.layers);
-  const { tables, hasVectorLayer, status } = useEligibilityInputs();
+  const inputs = useEligibilityInputs();
+  const { tables } = inputs;
   const drafts = useProcessingStore((s) => s.drafts);
   const runs = useProcessingStore((s) => s.runs);
   useComputedColumnStore((s) => s.byLayer); // subscribe: the replace warning depends on it
@@ -84,15 +85,13 @@ export function useToolForm(toolId: ToolId) {
         (l) =>
           toolEligibility(
             tool,
-            eligibilityContextFor(
-              { kind: "city", layer: l },
-              tables,
-              hasVectorLayer,
-              status,
-            ),
+            eligibilityContextFor({ kind: "city", layer: l }, inputs),
           ).ok,
       ),
-    [candidates, tables, hasVectorLayer, status, tool],
+    // `inputs` is a fresh object each render, so the memo recomputes per render
+    // — the filter is a handful of pure calls over at most a few layers, and
+    // the alternative is five dependencies that drift.
+    [candidates, inputs, tool],
   );
   const stored = drafts[toolId];
   const preferred = eligibleTargets.length > 0 ? eligibleTargets : candidates;
@@ -120,9 +119,7 @@ export function useToolForm(toolId: ToolId) {
   const target = layers.find((l) => l.id === base.targetLayerId) ?? null;
   const targetCtx = eligibilityContextFor(
     target ? { kind: "city", layer: target } : null,
-    tables,
-    hasVectorLayer,
-    status,
+    inputs,
   );
   const eligibility = toolEligibility(tool, targetCtx);
   // §6, the same rule that keeps an UNIMPLEMENTED tool silent: a tool that is

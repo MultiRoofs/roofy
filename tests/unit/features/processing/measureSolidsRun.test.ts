@@ -266,6 +266,7 @@ function solidRequest(overrides: Record<string, unknown> = {}) {
   return {
     toolId: "measure-solids" as const,
     targetLayerId: "L1",
+    sourceLayerId: null,
     scope: "all" as const,
     lod: "2.2",
     params: { measures: ["volume", "envelope"] },

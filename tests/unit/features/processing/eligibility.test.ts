@@ -13,6 +13,8 @@ const base: EligibilityContext = {
   tableState: "ready",
   engineState: "ready",
   hasVectorLayer: true,
+  hasCityLayer: true,
+  vectorPreparation: "none",
   extensionState: { spatial: "loaded", three_d: "loaded" },
 };
 
@@ -163,6 +165,8 @@ describe("toolEligibility", () => {
         tableState: "ready",
         engineState: "ready",
         hasVectorLayer: false,
+        hasCityLayer: true,
+        vectorPreparation: "none",
         extensionState: { spatial: "unloaded", three_d: "unloaded" },
       }),
     ).toEqual({ ok: true });
@@ -178,8 +182,74 @@ describe("toolEligibility", () => {
         tableState: "none",
         engineState: "ready",
         hasVectorLayer: true,
+        hasCityLayer: true,
+        vectorPreparation: "none",
         extensionState: { spatial: "unloaded", three_d: "unloaded" },
       }),
     ).toEqual({ ok: false, reason: "Needs a city model layer" });
+  });
+
+  it("asks for a city layer for Aggregate buildings per area", () => {
+    const tool = { ...toolById("aggregate-per-area"), implemented: true };
+    expect(
+      toolEligibility(tool, {
+        ...base,
+        targetKind: "vector",
+        vectorPreparation: "ready",
+        hasCityLayer: false,
+      }),
+    ).toEqual({ ok: false, reason: "Add a city model layer to aggregate" });
+  });
+
+  it("refuses a vector target whose document is still loading, or failed", () => {
+    const tool = { ...toolById("aggregate-per-area"), implemented: true };
+    expect(
+      toolEligibility(tool, {
+        ...base,
+        targetKind: "vector",
+        vectorPreparation: "loading",
+      }),
+    ).toEqual({ ok: false, reason: "This vector layer is still loading" });
+    expect(
+      toolEligibility(tool, {
+        ...base,
+        targetKind: "vector",
+        vectorPreparation: "failed",
+      }),
+    ).toEqual({ ok: false, reason: "This vector layer could not be loaded" });
+  });
+
+  it("says the document is loading before it asks for a city layer", () => {
+    // §5's order: the target's own readiness outranks the workspace question,
+    // so a user with neither is told about the layer in front of them first.
+    const tool = { ...toolById("aggregate-per-area"), implemented: true };
+    expect(
+      toolEligibility(tool, {
+        ...base,
+        targetKind: "vector",
+        vectorPreparation: "loading",
+        hasCityLayer: false,
+      }),
+    ).toEqual({ ok: false, reason: "This vector layer is still loading" });
+  });
+
+  it("still refuses Aggregate on a city layer, with \u00a75's own words", () => {
+    const tool = { ...toolById("aggregate-per-area"), implemented: true };
+    expect(toolEligibility(tool, base)).toEqual({
+      ok: false,
+      reason: "Needs a vector layer",
+    });
+  });
+
+  it("keeps the real Aggregate row at 'Not available yet' until Task 19", () => {
+    // `!implemented` outranks every reason above, on a target that satisfies
+    // all of them.
+    expect(
+      toolEligibility(toolById("aggregate-per-area"), {
+        ...base,
+        targetKind: "vector",
+        vectorPreparation: "ready",
+      }),
+    ).toEqual({ ok: false, reason: "Not available yet" });
   });
 });

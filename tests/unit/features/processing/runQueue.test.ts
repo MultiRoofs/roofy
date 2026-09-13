@@ -293,6 +293,7 @@ function request(overrides: Record<string, unknown> = {}) {
   return {
     toolId: "height-from-extent" as const,
     targetLayerId: "L1",
+    sourceLayerId: null,
     scope: "all" as const,
     lod: null,
     params: {},
@@ -2186,5 +2187,82 @@ describe("a caveat on the card (spec §6.2)", () => {
     expect(runById(id)?.summary?.line).toMatch(
       /^1,115 buildings measured · 37 invalid solids \(no volume\) · 12 skipped · /,
     );
+  });
+});
+
+describe("the context a one-layer tool is handed", () => {
+  it("hands a one-layer tool a city target, no source, and the same table", async () => {
+    // A BOX rather than a `let`: the assignment happens inside the executor's
+    // closure, which control-flow analysis cannot see, so a plain `let` narrows
+    // to `null` at every assertion below.
+    const box: {
+      seen: { target: unknown; source: unknown; table: string } | null;
+    } = { seen: null };
+    registerExecutor("height-from-extent", async (run, ctx) => {
+      box.seen = {
+        target: ctx.target,
+        source: ctx.source,
+        table: ctx.table.table,
+      };
+      return {
+        columns: [{ name: `${run.prefix}height_m`, type: "DOUBLE" as const }],
+        rows: new Map([["a", { [`${run.prefix}height_m`]: 3 }]]),
+        measured: 1,
+        skipped: [],
+      };
+    });
+    submitRun({
+      toolId: "height-from-extent",
+      targetLayerId: "L1",
+      sourceLayerId: null,
+      scope: "all",
+      lod: null,
+      params: {},
+      prefix: "extent_",
+      columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+    });
+    await vi.waitFor(() => expect(box.seen).not.toBeNull());
+    expect(box.seen?.table).toBe("layer_1");
+    expect(box.seen?.source).toBeNull();
+    expect((box.seen?.target as { kind: string } | undefined)?.kind).toBe(
+      "city",
+    );
+  });
+
+  // Task 7 shipped `line`, `caveats` and the `summarise` edit; this case pins
+  // that a cross-layer result (a custom line AND a caveat AND skips) still
+  // renders in §6.2's order. Nothing in this task changes `summarise`.
+  it("puts a tool's own line and its caveats on the card, before the skips", () => {
+    expect(
+      summarise(
+        {
+          columns: [{ name: "zones_matches_n", type: "DOUBLE" }],
+          rows: new Map(),
+          measured: 1143,
+          skipped: [{ cause: "no geometry", count: 4 }],
+          line: "1,143 buildings joined",
+          caveats: [{ cause: "outside every area", count: 61 }],
+        },
+        2900,
+        { streaming: false },
+      ).line,
+    ).toBe(
+      "1,143 buildings joined · 61 outside every area · 4 skipped · 2.9 s",
+    );
+  });
+
+  it("keeps the default line for a result that declares none", () => {
+    expect(
+      summarise(
+        {
+          columns: [],
+          rows: new Map(),
+          measured: 2,
+          skipped: [],
+        },
+        2400,
+        { streaming: false },
+      ).line,
+    ).toBe("2 buildings measured · 2.4 s");
   });
 });

@@ -103,8 +103,16 @@ export interface ToolDefinition {
   readonly needsReader: boolean;
   /** Which kind of layer the run WRITES to. */
   readonly target: "city" | "vector";
-  /** Needs a second, vector layer as the source. */
-  readonly needsVectorSource: boolean;
+  /**
+   * The kind of SECOND layer the run reads (spec §3's "source"), or null.
+   *
+   * `"vector"` for the two city-target cross-layer tools; `"city"` for
+   * Aggregate buildings per area, whose target is the vector layer and whose
+   * buildings come from a city layer. It is ONE field rather than a boolean
+   * plus a kind because every reason, every select and every pre-flight is a
+   * statement about the same fact, and two fields is how they come to disagree.
+   */
+  readonly sourceKind: "city" | "vector" | null;
   /**
    * Does the form offer a LoD select (spec §6)?
    *

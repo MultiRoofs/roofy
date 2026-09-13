@@ -100,6 +100,17 @@ export type GeoLayer =
       readonly config: Tiles3dLayerConfig;
     });
 
+/**
+ * The union's GeoJSON arm.
+ *
+ * Every reader of a vector layer's CONTENT — the cross-layer run, the records
+ * panel, the export, the style controls — reads `config.preparedData`, which
+ * only this arm has; typing such a reader `GeoLayer` does not compile and casting
+ * it would be a lie the compiler cannot check. `Extract` rather than a second
+ * hand-written record, so a change to the arm cannot leave this behind.
+ */
+export type GeoJsonLayer = Extract<GeoLayer, { kind: "geojson" }>;
+
 /** What `addGeoLayer` takes: a {@link GeoLayer} without the id the store
  *  mints, and with the three defaulted fields optional. Distributive on
  *  purpose — `Omit` over a union would collapse the kind/config pairing that

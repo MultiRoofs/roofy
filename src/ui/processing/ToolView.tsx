@@ -82,6 +82,9 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
     submitRun({
       toolId,
       targetLayerId: f.target.id,
+      // Task 15 gives the form its SOURCE select; until then every run this
+      // view submits is a one-layer run.
+      sourceLayerId: null,
       scope: f.draft.scope,
       lod: f.draft.lod,
       // §6.1 freezes "everything the run needs" and §6.4 makes the log the

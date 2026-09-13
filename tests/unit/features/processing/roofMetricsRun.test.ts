@@ -443,6 +443,7 @@ function request(overrides: Record<string, unknown> = {}) {
   return {
     toolId: "height-from-extent" as const,
     targetLayerId: "L1",
+    sourceLayerId: null,
     scope: "all" as const,
     lod: null,
     params: {},

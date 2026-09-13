@@ -16,6 +16,7 @@ import type { LayerTableState } from "../../insights/layerTables";
 import { useDuckDBStatus } from "../../insights/useDuckDBStatus";
 import type { DuckDBStatus } from "../../insights/duckdb";
 import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
+import { useLayerStore } from "../../features/layers/layerStore";
 import { layerKindOf } from "../../features/layers/layerPresentation";
 import type { ActiveLayer } from "../../features/workspace/activeLayer";
 import type { EligibilityContext } from "../../features/processing/eligibility";
@@ -24,6 +25,7 @@ import type { EligibilityContext } from "../../features/processing/eligibility";
 export interface EligibilityInputs {
   readonly tables: Readonly<Record<string, LayerTableState>>;
   readonly hasVectorLayer: boolean;
+  readonly hasCityLayer: boolean;
   readonly status: DuckDBStatus;
 }
 
@@ -32,21 +34,25 @@ export function useEligibilityInputs(): EligibilityInputs {
   const hasVectorLayer = useGeoLayerStore((s) =>
     s.layers.some((l) => l.kind === "geojson"),
   );
-  return { tables, hasVectorLayer, status: useDuckDBStatus() };
+  const hasCityLayer = useLayerStore((s) => s.layers.length > 0);
+  return { tables, hasVectorLayer, hasCityLayer, status: useDuckDBStatus() };
 }
 
 export function eligibilityContextFor(
   target: ActiveLayer | null,
-  tables: Readonly<Record<string, LayerTableState>>,
-  hasVectorLayer: boolean,
-  status: DuckDBStatus,
+  inputs: EligibilityInputs,
 ): EligibilityContext {
+  const { tables, hasVectorLayer, hasCityLayer, status } = inputs;
   const entry = target?.kind === "city" ? tables[target.layer.id] : undefined;
   const ready =
     entry !== undefined && entry.state === "ready" ? entry.info : null;
   const ext = status.state === "ready" ? status.extensions : null;
   const extState = (name: "spatial" | "three_d") =>
     ext ? ext[name].state : "unloaded";
+  const geojson =
+    target?.kind === "geo" && target.layer.kind === "geojson"
+      ? target.layer.config
+      : null;
   return {
     targetKind: target ? layerKindOf(target) : "none",
     sourceEncoding:
@@ -56,6 +62,8 @@ export function eligibilityContextFor(
     tableState: entry?.state ?? "none",
     engineState: status.state,
     hasVectorLayer,
+    hasCityLayer,
+    vectorPreparation: geojson?.preparation ?? "none",
     extensionState: {
       spatial: extState("spatial"),
       three_d: extState("three_d"),
@@ -66,6 +74,5 @@ export function eligibilityContextFor(
 export function useEligibilityContext(
   target: ActiveLayer | null,
 ): EligibilityContext {
-  const { tables, hasVectorLayer, status } = useEligibilityInputs();
-  return eligibilityContextFor(target, tables, hasVectorLayer, status);
+  return eligibilityContextFor(target, useEligibilityInputs());
 }
