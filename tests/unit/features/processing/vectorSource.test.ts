@@ -649,6 +649,41 @@ describe("the batched walk", () => {
     // would have projected every one of its positions first.
     expect(proj.calls).toBeLessThan(positions);
   });
+
+  it("stops during ASSEMBLY, after the feature's last coordinate is projected", async () => {
+    // Projecting the positions is only half the work a 200,000-vertex ring
+    // costs: the ring's text, the shell's parentheses and the POLYGON wrapper
+    // are each a multi-megabyte copy, and a Cancel pressed while the walk is in
+    // THEM must land too. The checkpoint arms the timer the moment every
+    // coordinate of this feature has been projected, so the throw below can
+    // only happen if assembly yields as well — and the cancel that arrives
+    // during that park is what is caught.
+    const ring = bigRing(200_000);
+    const total = ring.length;
+    let cancelled = false;
+    let armed = false;
+    proj.calls = 0;
+    // Caught by hand rather than with `rejects`: a resolved multi-megabyte
+    // preflight printed as a diff is unreadable, and the message is the whole
+    // assertion anyway.
+    let failure: unknown = null;
+    try {
+      await reprojectGeoLayer(collection(polygon("big", {}, ring)), 28992, {
+        checkpoint: () => {
+          if (cancelled) throw new Error("cancelled");
+          if (armed || proj.calls < total) return;
+          armed = true;
+          setTimeout(() => {
+            cancelled = true;
+          }, 0);
+        },
+      });
+    } catch (error) {
+      failure = error;
+    }
+    expect((failure as Error | null)?.message).toBe("cancelled");
+    expect(armed).toBe(true);
+  });
 });
 
 describe("geoPropertyTypes", () => {

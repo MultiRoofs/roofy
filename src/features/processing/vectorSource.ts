@@ -13,9 +13,13 @@
  * geometry synchronously" names. The walk yields a MACROTASK every
  * {@link FEATURE_BATCH} features and every {@link COORDINATE_BUDGET}
  * coordinates, and calls `control.checkpoint()` — the run's
- * `ctx.throwIfCancelled` — immediately before each yield, so a cancelled run
- * stops INSIDE the phase. The budget is spent position by position wherever the
- * walk is, so one enormous ring yields as well as ten thousand small ones.
+ * `ctx.throwIfCancelled` — on BOTH sides of each yield, so a cancelled run
+ * stops INSIDE the phase and sees a Cancel delivered while it was parked. The
+ * budget is spent position by position wherever the walk is, so one enormous
+ * ring yields as well as ten thousand small ones, and every copy the ASSEMBLY
+ * makes of the text built so far is charged to the same budget
+ * ({@link TEXT_PER_COORDINATE}) — there is no `join` of a whole ring left to
+ * block a Cancel once the last coordinate is projected.
  *
  * THE CALLER MUST AWAIT `ensureModelCrsLoadable(targetModel)` FIRST.
  * `crsFromGeodetic`'s `ensureProjDef` guard is synchronous and returns `null`
@@ -125,9 +129,20 @@ const COORDINATE_BUDGET = 20_000;
 /** How many features it converts before it yields, whatever their size. */
 const FEATURE_BATCH = 500;
 
+/**
+ * How many characters of assembled WKT cost one coordinate's worth of budget.
+ *
+ * Assembly is not free once a feature is large: wrapping a 200,000-position
+ * ring in its parentheses and again in `POLYGON (…)` copies several megabytes
+ * per step, and a Cancel pressed during those copies would wait for them. So
+ * every copy is charged to the SAME budget the positions are, in units of about
+ * one position's worth of text ("4000.0001 52000" and its separator).
+ */
+const TEXT_PER_COORDINATE = 20;
+
 export interface YieldControl {
   /**
-   * Called once per batch, immediately BEFORE the yield, and allowed to throw.
+   * Called on BOTH sides of every yield, and allowed to throw.
    *
    * The run passes `ctx.throwIfCancelled`, so a cancelled run stops inside the
    * walk instead of after it. Absent for the form's own uses, which have
@@ -141,22 +156,41 @@ interface Budget {
   left: number;
 }
 
-/** A macrotask, not `Promise.resolve()`: a microtask does not let the browser
- *  paint or a click land, which is the whole point of the batching. */
+/**
+ * A checkpoint, a macrotask, and a checkpoint again.
+ *
+ * A macrotask and not `Promise.resolve()`: a microtask does not let the browser
+ * paint or a click land, which is the whole point of the batching. BOTH
+ * checkpoints, deliberately, and for the same reason `vectorTable.ts`'s `pause`
+ * takes both: a Cancel is delivered by a timer or an event, which can only run
+ * while the walk is parked here, so a checkpoint taken solely before the yield
+ * reads the state as it was one whole batch ago.
+ */
 async function yieldToLoop(control: YieldControl | undefined): Promise<void> {
   control?.checkpoint?.();
   await new Promise((resolve) => setTimeout(resolve, 0));
+  control?.checkpoint?.();
 }
 
-/** Spend one coordinate, and yield when the budget runs out. */
+/** Spend `cost` units of work, and yield when the budget runs out. */
 async function spend(
   budget: Budget,
   control: YieldControl | undefined,
+  cost = 1,
 ): Promise<void> {
-  budget.left -= 1;
+  budget.left -= cost;
   if (budget.left > 0) return;
   await yieldToLoop(control);
   budget.left = COORDINATE_BUDGET;
+}
+
+/** Charge one copy of assembled text to the coordinate budget. */
+async function spendText(
+  text: string,
+  budget: Budget,
+  control: YieldControl | undefined,
+): Promise<void> {
+  await spend(budget, control, Math.ceil(text.length / TEXT_PER_COORDINATE));
 }
 
 /** One position as `"x y"`, or null when it is not a projectable pair. */
@@ -178,7 +212,7 @@ function position(value: unknown, epsg: number): string | null {
 }
 
 /**
- * A list of positions, projected — or null when the STRUCTURE is wrong.
+ * A list of positions as `"x y, x y"` — or null when the STRUCTURE is wrong.
  *
  * `minimum` is the type's own rule (2 positions for a line, 4 for a ring) and
  * `closed` is the ring rule. Both matter: `ST_GeomFromText` RAISES on a
@@ -186,6 +220,16 @@ function position(value: unknown, epsg: number): string | null {
  * statement, so a malformed feature that reached it would fail the whole run
  * instead of being skipped and counted (§7.5). An EMPTY array is §7.5's "empty
  * geometry" — the probed `ST_GeomFromGeoJSON` trap in reverse.
+ *
+ * The text is accumulated POSITION BY POSITION rather than joined at the end:
+ * a `join` over a 200,000-element array is one synchronous multi-megabyte step
+ * that no checkpoint interrupts, and appending to the running text costs
+ * nothing beyond what the walk is already charged for.
+ *
+ * CLOSURE IS COMPARED ON THE PROJECTED, ROUNDED TEXT, so two source positions
+ * a tenth of a millimetre apart close a ring — which is the honest rule: the
+ * WKT this builds is what `ST_GeomFromText` reads, and in THAT text they are
+ * the same position.
  */
 async function positionList(
   value: unknown,
@@ -194,18 +238,23 @@ async function positionList(
   closed: boolean,
   budget: Budget,
   control: YieldControl | undefined,
-): Promise<ReadonlyArray<string> | null> {
+): Promise<string | null> {
   if (!Array.isArray(value) || value.length < minimum) return null;
-  const parts: string[] = [];
+  let text = "";
+  let first: string | null = null;
+  let last: string | null = null;
   for (const entry of value) {
-    const text = position(entry, epsg);
+    const point = position(entry, epsg);
     // Half a ring is not a geometry: §7.5 skips the FEATURE.
-    if (text === null) return null;
-    parts.push(text);
+    if (point === null) return null;
+    text = first === null ? point : `${text}, ${point}`;
+    first ??= point;
+    last = point;
     await spend(budget, control);
   }
-  if (closed && parts[0] !== parts[parts.length - 1]) return null;
-  return parts;
+  if (first === null || last === null) return null;
+  if (closed && first !== last) return null;
+  return text;
 }
 
 /** A polygon's rings as `"(shell), (hole)"`, or null if any ring is not one. */
@@ -216,13 +265,15 @@ async function ringsOf(
   control: YieldControl | undefined,
 ): Promise<string | null> {
   if (!Array.isArray(value) || value.length === 0) return null;
-  const parts: string[] = [];
+  let text: string | null = null;
   for (const ring of value) {
     const positions = await positionList(ring, epsg, 4, true, budget, control);
     if (positions === null) return null;
-    parts.push(`(${positions.join(", ")})`);
+    const wrapped = `(${positions})`;
+    await spendText(wrapped, budget, control);
+    text = text === null ? wrapped : `${text}, ${wrapped}`;
   }
-  return parts.join(", ");
+  return text;
 }
 
 /**
@@ -235,6 +286,25 @@ async function ringsOf(
 interface Shape {
   readonly wkt: string;
   readonly areaOnly: boolean;
+}
+
+/**
+ * `KEYWORD (body)`, charged to the budget.
+ *
+ * The wrap is a copy of everything assembled so far, which on a large feature
+ * is megabytes — so it is spent like the positions that produced it, and the
+ * checkpoint it triggers is what lets a Cancel land during ASSEMBLY rather than
+ * only during projection.
+ */
+async function wrap(
+  keyword: string,
+  body: string,
+  budget: Budget,
+  control: YieldControl | undefined,
+): Promise<string> {
+  const text = `${keyword} (${body})`;
+  await spendText(text, budget, control);
+  return text;
 }
 
 async function shapeOf(
@@ -262,7 +332,10 @@ async function shapeOf(
       );
       return list === null
         ? null
-        : { wkt: `MULTIPOINT (${list.join(", ")})`, areaOnly: false };
+        : {
+            wkt: await wrap("MULTIPOINT", list, budget, control),
+            areaOnly: false,
+          };
     }
     case "LineString": {
       const list = await positionList(
@@ -275,33 +348,53 @@ async function shapeOf(
       );
       return list === null
         ? null
-        : { wkt: `LINESTRING (${list.join(", ")})`, areaOnly: false };
+        : {
+            wkt: await wrap("LINESTRING", list, budget, control),
+            areaOnly: false,
+          };
     }
     case "MultiLineString": {
       if (!Array.isArray(coordinates) || coordinates.length === 0) return null;
-      const parts: string[] = [];
+      let text: string | null = null;
       for (const line of coordinates) {
         const list = await positionList(line, epsg, 2, false, budget, control);
         if (list === null) return null;
-        parts.push(`(${list.join(", ")})`);
+        const part = `(${list})`;
+        await spendText(part, budget, control);
+        text = text === null ? part : `${text}, ${part}`;
       }
-      return { wkt: `MULTILINESTRING (${parts.join(", ")})`, areaOnly: false };
+      return text === null
+        ? null
+        : {
+            wkt: await wrap("MULTILINESTRING", text, budget, control),
+            areaOnly: false,
+          };
     }
     case "Polygon": {
       const rings = await ringsOf(coordinates, epsg, budget, control);
       return rings === null
         ? null
-        : { wkt: `POLYGON (${rings})`, areaOnly: true };
+        : {
+            wkt: await wrap("POLYGON", rings, budget, control),
+            areaOnly: true,
+          };
     }
     case "MultiPolygon": {
       if (!Array.isArray(coordinates) || coordinates.length === 0) return null;
-      const parts: string[] = [];
+      let text: string | null = null;
       for (const polygon of coordinates) {
         const rings = await ringsOf(polygon, epsg, budget, control);
         if (rings === null) return null;
-        parts.push(`(${rings})`);
+        const part = `(${rings})`;
+        await spendText(part, budget, control);
+        text = text === null ? part : `${text}, ${part}`;
       }
-      return { wkt: `MULTIPOLYGON (${parts.join(", ")})`, areaOnly: true };
+      return text === null
+        ? null
+        : {
+            wkt: await wrap("MULTIPOLYGON", text, budget, control),
+            areaOnly: true,
+          };
     }
     case "GeometryCollection":
       return await collectionShape(geometry.geometries, epsg, budget, control);
@@ -333,15 +426,20 @@ async function collectionShape(
   control: YieldControl | undefined,
 ): Promise<Shape | null> {
   if (!Array.isArray(members) || members.length === 0) return null;
-  const parts: string[] = [];
+  let text: string | null = null;
   let areaOnly = true;
   for (const member of members) {
     const shape = await shapeOf(member, epsg, budget, control);
     if (shape === null) return null;
     if (!shape.areaOnly) areaOnly = false;
-    parts.push(shape.wkt);
+    text = text === null ? shape.wkt : `${text}, ${shape.wkt}`;
   }
-  return { wkt: `GEOMETRYCOLLECTION (${parts.join(", ")})`, areaOnly };
+  return text === null
+    ? null
+    : {
+        wkt: await wrap("GEOMETRYCOLLECTION", text, budget, control),
+        areaOnly,
+      };
 }
 
 export async function reprojectGeoLayer(
