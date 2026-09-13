@@ -63,6 +63,10 @@ import {
   type GeoJsonLayer,
 } from "../geoLayers/geoLayerStore";
 import { geoRecords, type GeoRecord } from "../geoLayers/geoRecords";
+import { ensureModelCrsLoadable } from "../layers/ensureCrs";
+import { epsgForLayer } from "../../scene/cursorCrsReadout";
+import { reprojectGeoLayer, type VectorPreflight } from "./vectorSource";
+import { createVectorTable, type VectorTableHandle } from "./vectorTable";
 import { runById, useProcessingStore } from "./processingStore";
 import { resolveScope, snapshotScopeInputs, type ScopeSnapshot } from "./scope";
 import { toolById } from "./toolRegistry";
@@ -617,6 +621,28 @@ async function execute(
   const log: LogEntry[] = [];
   const warnings: string[] = [];
   const elapsed = () => Math.round(performance.now() - started);
+  // The run's own `__src_<id>` table, dropped in the `finally` below on EVERY
+  // exit path — done, failed, cancelled, the engine's death.
+  let vectorSourceHandle: VectorTableHandle | null = null;
+  /**
+   * `ctx.query`, lifted out of the context literal: the `"source"` phase issues
+   * the CREATE before the context exists, and §6.4's log must hold that
+   * statement like any other.
+   */
+  const query = async (label: string, sql: string): Promise<QueryOutcome> => {
+    if (signal.aborted) throw new CancelledError();
+    const t0 = performance.now();
+    const out = await raced(runQuery(sql), signal);
+    log.push({
+      label,
+      sql,
+      ms: Math.round(performance.now() - t0),
+      rows: out.ok ? out.rows.length : null,
+    });
+    patch(id, { log: [...log] });
+    if (!out.ok) throw new Error(out.message);
+    return out;
+  };
   try {
     // Cancelled while it waited its turn. The executor never runs, and the card
     // is already "cancelled" — this only stops the work.
@@ -716,8 +742,8 @@ async function execute(
       };
     }
     // A CITY source IS the compute layer — `submitRun` made it so — and a
-    // VECTOR source is built in the "source" phase (Task 13).
-    const source: ToolSource | null =
+    // VECTOR source is built in the "source" phase below.
+    let source: ToolSource | null =
       tool.sourceKind === "city" ? { kind: "city", layer, table } : null;
     // Spec §6.1: "a column that now belongs to the file fails the run with that
     // reason". The form checked when the user typed the prefix; by the head the
@@ -840,6 +866,103 @@ async function execute(
       }
       return;
     }
+    if (tool.sourceKind === "vector") {
+      // §6.1's second phase, for the other kind of source. `runFormat.ts`
+      // already labels it "Reading source"; this is the first tool that enters
+      // it with a vector layer rather than a re-read file.
+      patch(id, { status: "running", phase: "source" });
+      const geo = useGeoLayerStore
+        .getState()
+        .layers.find((l) => l.id === request.sourceLayerId);
+      if (!geo || geo.kind !== "geojson") {
+        patch(id, {
+          status: "failed",
+          phase: null,
+          error: "Layer removed",
+          elapsedMs: elapsed(),
+        });
+        return;
+      }
+      // §7.5: the areas are reprojected into the TARGET's CRS, and
+      // `crsFromGeodetic`'s `ensureProjDef` guard is SYNCHRONOUS — a definition
+      // proj4 has not fetched yet answers `null` for every coordinate, which is
+      // the difference between "4 areas skipped" and "every area skipped". It
+      // costs nothing when the definition is already loaded, and it throws the
+      // loader's own sentence when the CRS cannot be resolved at all.
+      await raced(ensureModelCrsLoadable(layer.model), signal);
+      if (signal.aborted) {
+        if (!failedAlready(id)) {
+          patch(id, { status: "cancelled", phase: null, elapsedMs: elapsed() });
+        }
+        return;
+      }
+      const epsg = epsgForLayer(layer.model.metadata?.referenceSystem);
+      // The run's own cancel, handed to the batched walk and to the encoder so
+      // a Cancel lands INSIDE the reprojection of a large source rather than
+      // after it.
+      const control = {
+        checkpoint: () => {
+          if (signal.aborted) throw new CancelledError();
+        },
+      };
+      // A city layer always has a recognised metric CRS (§7.5; the loader
+      // refuses the others), so a null here is a layer nothing can be projected
+      // INTO — the same outcome as every area failing to reproject, which §7.5
+      // already has the sentence for.
+      const preflight: VectorPreflight =
+        epsg === null
+          ? {
+              features: [],
+              skipped: geoRecords(geo.config.preparedData).length,
+              propertyKeys: [],
+              propertyTypes: new Map(),
+              polygonOnly: true,
+            }
+          : await reprojectGeoLayer(geo.config.preparedData, epsg, control);
+      if (preflight.features.length === 0) {
+        // §7.5's source must be AREAS, so "No usable areas in Zones" is ITS
+        // sentence; §7.7's source is any geometry type and its only sentence is
+        // "The source layer has no features" (§7.7: "An empty source (no usable
+        // geometry after preflight) disables Run with …"). Task 15's
+        // `SOURCE_NEEDS_AREAS` is the FORM's copy of the same fact and replaces
+        // this literal when it lands.
+        const sourceMustBeAreas = tool.id === "join-by-location";
+        patch(id, {
+          status: "failed",
+          phase: null,
+          error:
+            preflight.skipped > 0 && sourceMustBeAreas
+              ? `No usable areas in ${geo.name}`
+              : "The source layer has no features",
+          elapsedMs: elapsed(),
+        });
+        return;
+      }
+      if (preflight.skipped > 0) {
+        // §7.5's "4 areas skipped: invalid geometry", recorded on the run so
+        // §6.4's log says what the compute never saw.
+        warnings.push(
+          `${plural(preflight.skipped, "area", "areas")} skipped: invalid geometry`,
+        );
+        patch(id, { warnings: [...warnings] });
+      }
+      vectorSourceHandle = await createVectorTable({
+        runId: id,
+        preflight,
+        query,
+        control,
+        signal,
+      });
+      source = {
+        kind: "vector",
+        layer: geo,
+        table: vectorSourceHandle.table,
+        propertyKeys: preflight.propertyKeys,
+        propertyTypes: preflight.propertyTypes,
+        skipped: preflight.skipped,
+      };
+    }
+
     patch(id, {
       status: "running",
       // A reader-backed run STAYS in Reading source, which it entered above:
@@ -860,20 +983,7 @@ async function execute(
       source,
       featureIds: scope.featureIds,
       signal,
-      async query(label, sql) {
-        if (signal.aborted) throw new CancelledError();
-        const t0 = performance.now();
-        const out = await raced(runQuery(sql), signal);
-        log.push({
-          label,
-          sql,
-          ms: Math.round(performance.now() - t0),
-          rows: out.ok ? out.rows.length : null,
-        });
-        patch(id, { log: [...log] });
-        if (!out.ok) throw new Error(out.message);
-        return out;
-      },
+      query,
       throwIfCancelled() {
         if (signal.aborted) throw new CancelledError();
       },
@@ -1121,6 +1231,10 @@ async function execute(
     });
   } finally {
     controllers.delete(id);
+    // EVERY exit path: done, failed, cancelled, the engine's death. The table
+    // is this run's own, so nothing else will ever drop it — and `release`
+    // neither throws nor hangs, because this `await` is inside the FIFO slot.
+    await vectorSourceHandle?.release();
   }
 }
 

@@ -107,8 +107,12 @@ vi.mock("../../../../src/insights/layerTables", async () => {
 });
 
 const layerTables = await import("../../../../src/insights/layerTables");
-const { submitRun, installStaleWatcher, installTargetRemovalWatcher } =
-  await import("../../../../src/features/processing/runQueue");
+const {
+  submitRun,
+  cancelRun,
+  installStaleWatcher,
+  installTargetRemovalWatcher,
+} = await import("../../../../src/features/processing/runQueue");
 type Ctx = import("../../../../src/features/processing/runQueue").ToolContext;
 const { registerExecutor, EXECUTORS } =
   await import("../../../../src/features/processing/tools");
@@ -124,7 +128,11 @@ type Resettable = { __resetQueue: () => void };
 function model(): CityModel {
   return {
     sourceEncoding: "cityjson",
-    metadata: {},
+    // §7.5 reprojects the source INTO this layer's CRS, so the model needs one
+    // for `epsgForLayer` to answer with.
+    metadata: {
+      referenceSystem: "https://www.opengis.net/def/crs/EPSG/0/28992",
+    },
     bbox: null,
     objects: {
       a: {
@@ -580,4 +588,217 @@ describe("the stale watcher", () => {
   it.todo(
     "retires a vector-target run that reached done through the vector write (Task 18)",
   );
+});
+
+describe("the per-run vector table", () => {
+  it("is created in the source phase and dropped when the run is done", async () => {
+    const zones = addZones();
+    const box = capturing();
+    // The table is named after THIS run — the ids are minted per queue, not
+    // per test, so the name is read off the id rather than spelled out.
+    const id = submitRun({
+      toolId: "join-by-location",
+      targetLayerId: "CITY",
+      sourceLayerId: zones,
+      scope: "all",
+      lod: null,
+      params: {},
+      prefix: "zones_",
+      columns: [{ name: "zones_n", type: "DOUBLE" }],
+    });
+    await settle();
+    expect(box.seen?.source).toMatchObject({
+      kind: "vector",
+      table: `__src_${id}`,
+      propertyKeys: ["zone"],
+      skipped: 0,
+    });
+    expect(
+      sql.some((s) =>
+        s.startsWith(`CREATE OR REPLACE TABLE "__src_${id}" AS SELECT`),
+      ),
+    ).toBe(true);
+    expect(sql).toContain(`DROP TABLE IF EXISTS "__src_${id}"`);
+  });
+
+  it("drops the table when the run FAILS, not only when it succeeds", async () => {
+    const zones = addZones();
+    registerExecutor("join-by-location", async () => {
+      throw new Error("Binder Error: no function ST_Intersects");
+    });
+    const id = submitRun({
+      toolId: "join-by-location",
+      targetLayerId: "CITY",
+      sourceLayerId: zones,
+      scope: "all",
+      lod: null,
+      params: {},
+      prefix: "zones_",
+      columns: [{ name: "zones_n", type: "DOUBLE" }],
+    });
+    await settle();
+    expect(runById(id)?.status).toBe("failed");
+    expect(sql).toContain(`DROP TABLE IF EXISTS "__src_${id}"`);
+  });
+
+  it("refuses a source whose every feature is unusable, by name", async () => {
+    const zones = useGeoLayerStore.getState().addGeoLayer({
+      name: "Zones",
+      kind: "geojson",
+      config: {
+        data: {
+          type: "FeatureCollection",
+          features: [
+            { type: "Feature", properties: {}, geometry: null },
+            { type: "Feature", properties: {}, geometry: null },
+          ],
+        },
+      },
+    });
+    capturing();
+    const id = submitRun({
+      toolId: "join-by-location",
+      targetLayerId: "CITY",
+      sourceLayerId: zones,
+      scope: "all",
+      lod: null,
+      params: {},
+      prefix: "zones_",
+      columns: [{ name: "zones_n", type: "DOUBLE" }],
+    });
+    await settle();
+    expect(runById(id)).toMatchObject({
+      status: "failed",
+      error: "No usable areas in Zones",
+    });
+  });
+
+  it("tells §7.7's all-skipped source apart from §7.5's, by tool", async () => {
+    // §7.7's source is any geometry type, so "No usable AREAS" would be a
+    // sentence about a rule that tool does not have.
+    const roads = useGeoLayerStore.getState().addGeoLayer({
+      name: "Roads",
+      kind: "geojson",
+      config: {
+        data: {
+          type: "FeatureCollection",
+          features: [{ type: "Feature", properties: {}, geometry: null }],
+        },
+      },
+    });
+    capturing();
+    registerExecutor("distance-to-nearest", async (run) => ({
+      columns: [{ name: `${run.prefix}distance_m`, type: "DOUBLE" as const }],
+      rows: new Map(),
+      measured: 0,
+      skipped: [],
+    }));
+    const id = submitRun({
+      toolId: "distance-to-nearest",
+      targetLayerId: "CITY",
+      sourceLayerId: roads,
+      scope: "all",
+      lod: null,
+      params: {},
+      prefix: "roads_",
+      columns: [{ name: "roads_distance_m", type: "DOUBLE" }],
+    });
+    await settle();
+    expect(runById(id)?.error).toBe("The source layer has no features");
+  });
+
+  it("refuses an EMPTY source with §7.5's other sentence", async () => {
+    const zones = useGeoLayerStore.getState().addGeoLayer({
+      name: "Zones",
+      kind: "geojson",
+      config: { data: { type: "FeatureCollection", features: [] } },
+    });
+    capturing();
+    const id = submitRun({
+      toolId: "join-by-location",
+      targetLayerId: "CITY",
+      sourceLayerId: zones,
+      scope: "all",
+      lod: null,
+      params: {},
+      prefix: "zones_",
+      columns: [{ name: "zones_n", type: "DOUBLE" }],
+    });
+    await settle();
+    expect(runById(id)?.error).toBe("The source layer has no features");
+  });
+
+  it("records the skipped areas as a warning the log shows", async () => {
+    const zones = useGeoLayerStore.getState().addGeoLayer({
+      name: "Zones",
+      kind: "geojson",
+      config: {
+        data: {
+          type: "FeatureCollection",
+          features: [
+            { type: "Feature", properties: {}, geometry: null },
+            {
+              type: "Feature",
+              id: "z2",
+              properties: { zone: "B" },
+              geometry: {
+                type: "Polygon",
+                coordinates: [
+                  [
+                    [4, 52],
+                    [5, 52],
+                    [5, 53],
+                    [4, 52],
+                  ],
+                ],
+              },
+            },
+          ],
+        },
+      },
+    });
+    capturing();
+    const id = submitRun({
+      toolId: "join-by-location",
+      targetLayerId: "CITY",
+      sourceLayerId: zones,
+      scope: "all",
+      lod: null,
+      params: {},
+      prefix: "zones_",
+      columns: [{ name: "zones_n", type: "DOUBLE" }],
+    });
+    await settle();
+    expect(runById(id)?.warnings).toContain("1 area skipped: invalid geometry");
+  });
+
+  it("cancels inside the source phase, before the executor ever runs", async () => {
+    // §6.1's Cancel during "Reading source". The cancel is delivered the
+    // instant the phase opens — through the store the footer's Cancel button
+    // reads — so it lands INSIDE the phase rather than before the run started.
+    const zones = addZones();
+    const box = capturing();
+    let id = "";
+    const stop = useProcessingStore.subscribe((state) => {
+      const run = state.runs.find((r) => r.id === id);
+      if (run?.phase === "source") cancelRun(id);
+    });
+    id = submitRun({
+      toolId: "join-by-location",
+      targetLayerId: "CITY",
+      sourceLayerId: zones,
+      scope: "all",
+      lod: null,
+      params: {},
+      prefix: "zones_",
+      columns: [{ name: "zones_n", type: "DOUBLE" }],
+    });
+    await settle();
+    stop();
+    expect(runById(id)?.status).toBe("cancelled");
+    expect(box.seen).toBeNull();
+    expect(sql.some((s) => s.startsWith("CREATE OR REPLACE TABLE"))).toBe(
+      false,
+    );
+  });
 });

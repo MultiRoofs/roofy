@@ -13,8 +13,48 @@
  * as `IS NULL`, or an empty area would silently match nothing while being
  * counted as usable).
  */
-import { describe, expect, it, beforeAll, afterAll } from "vitest";
+import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
 import type { Harness } from "./harness";
+import {
+  buildDropVectorTableSql,
+  buildVectorTableSql,
+  encodeProjectedFeatures,
+  vectorTableName,
+} from "../../../src/features/processing/vectorTable";
+
+/**
+ * The engine seam, stubbed out entirely — the same reason
+ * `computedColumns.test.ts` does it. `vectorTable.ts` imports `insights/duckdb`
+ * for `registerBuffer`/`ddl`, and `insights/duckdb` imports the BROWSER bundle
+ * of `@duckdb/duckdb-wasm` at module scope; this file is `node`, and the
+ * default offline run COLLECTS it before skipping it. Nothing here may reach
+ * the seam either — this suite talks to the node bindings through the harness —
+ * so every stub throws, and only the builders and the encoder (which touch
+ * none of it) are used.
+ */
+vi.mock("../../../src/insights/duckdb", () => {
+  const unreachable = () => {
+    throw new Error("this suite talks to the harness, not to insights/duckdb");
+  };
+  return {
+    initDuckDB: unreachable,
+    subscribeDuckDBStatus: () => () => {},
+    getDuckDBStatusVersion: () => 0,
+    getEngineGeneration: () => 1,
+    onEngineDeath: () => () => {},
+    getDuckDBStatus: unreachable,
+    isExtensionLoaded: unreachable,
+    ensureExtension: unreachable,
+    formatDuckDBError: unreachable,
+    queryDuckDB: unreachable,
+    queryParquetBuffer: unreachable,
+    runQuery: unreachable,
+    ddl: unreachable,
+    registerBuffer: unreachable,
+    dropBuffer: unreachable,
+    readFile: unreachable,
+  };
+});
 
 const enabled = process.env.DUCKDB_INTEGRATION === "1";
 
@@ -470,5 +510,72 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
     // would report "All values are empty" over a column full of numbers.
     expect(typeof rows[0]?.["m"]).toBe("number");
     expect(Number(rows[0]?.["m"])).toBeCloseTo(2.5, 6);
+  });
+
+  it("round-trips the app's OWN vector-table statement", async () => {
+    // The fixture above was written BEFORE the builder existed, and a drift
+    // between the two would be a bug in one of them — so this case runs
+    // `buildVectorTableSql`'s own text over `encodeProjectedFeatures`' own
+    // bytes, and reads back the three accessors §7.5-§7.7 use.
+    const table = vectorTableName("run_builder");
+    const file = `${table}.json`;
+    const features = [
+      {
+        idx: 0,
+        stableId: "id:string:z1",
+        featureId: "z1",
+        properties: { name: "A", n: 3 },
+        wkt: "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))",
+      },
+      {
+        // The heterogeneous row is why the column list is explicit: inference
+        // would have made `props` a STRUCT and `->>` would not compile. The
+        // gap in `idx` is §7.5's source order, kept through a skipped feature.
+        idx: 2,
+        stableId: "index:2",
+        featureId: null,
+        properties: { name: "B" },
+        wkt: "POINT (20 5)",
+      },
+      {
+        // What Task 12 emits for a GeoJSON GeometryCollection — §7.7's source
+        // is "any geometry type", so the statement has to parse this line.
+        idx: 3,
+        stableId: "id:string:z3",
+        featureId: "z3",
+        properties: { name: "C", n: 7 },
+        wkt: "GEOMETRYCOLLECTION (POINT (0 0), LINESTRING (0 0, 5 5))",
+      },
+    ];
+    db.registerBytes(file, await encodeProjectedFeatures(features));
+    db.query(buildVectorTableSql(table, file));
+    const rows = db.query(
+      `SELECT "idx", "sid", "fid", "props"->>'name' AS name,
+              ("props"->>'n')::DOUBLE AS n, ST_GeometryType("geom") AS kind
+       FROM ${JSON.stringify(table)} ORDER BY "idx"`,
+    );
+    // The harness narrows a BigInt to a Number on the way out, so `idx` is a
+    // plain 0 here.
+    expect(rows).toEqual([
+      {
+        idx: 0,
+        sid: "id:string:z1",
+        fid: "z1",
+        name: "A",
+        n: 3,
+        kind: "POLYGON",
+      },
+      { idx: 2, sid: "index:2", fid: null, name: "B", n: null, kind: "POINT" },
+      {
+        idx: 3,
+        sid: "id:string:z3",
+        fid: "z3",
+        name: "C",
+        n: 7,
+        kind: "GEOMETRYCOLLECTION",
+      },
+    ]);
+    db.query(buildDropVectorTableSql(table));
+    db.dropFile(file);
   });
 });
