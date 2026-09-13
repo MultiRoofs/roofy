@@ -66,6 +66,7 @@ import {
   useGeoLayerStore,
   type GeoLayer,
 } from "../features/geoLayers/geoLayerStore";
+import { refreshedGeoSelection } from "../features/geoLayers/geoSelectionRefresh";
 import { installGeoJsonPreparation } from "../features/geoLayers/geoJsonPreparation";
 import { resolveGeoLayerBounds } from "../features/geoLayers/geoLayerBounds";
 import { installLayerTableLifecycle } from "../features/layers/layerTableLifecycle";
@@ -777,21 +778,33 @@ export function App({
   }, [geoSelection]);
 
   /**
-   * Drop a geo selection whose subject can no longer be trusted.
+   * Drop a geo selection whose subject can no longer be trusted — and REFRESH
+   * one whose properties have merely changed.
    *
-   * Two ways that happens: the layer is REMOVED, or its `config` identity
-   * changed (a re-link or any source replacement). The second matters because
+   * The layer being REMOVED, or its document replaced, still drops it:
    * `geoLayerSync` rebuilds the engine pair on config identity and batch ids
-   * are minted globally — the retained `batchId` would then name a different
-   * feature entirely, and the panel would show one feature's properties under
-   * another's highlight.
+   * are minted globally, so the retained `batchId` would name a different
+   * feature entirely. But §7.6's run replaces the config over the SAME
+   * document, and §8 says the picked feature then shows its computed values —
+   * so the rule is `refreshedGeoSelection`'s, not this effect's.
    */
   useEffect(() => {
     if (geoSelection === null) return;
     const layer = geoLayers.find((l) => l.id === geoSelection.geoLayerId);
-    if (layer === undefined || layer.config !== geoSelectionConfigRef.current) {
+    const next = refreshedGeoSelection({
+      selection: geoSelection,
+      layer,
+      previousConfig: geoSelectionConfigRef.current,
+    });
+    if (next === null) {
       selectGeoFeature(null);
+      return;
     }
+    if (next === geoSelection) return;
+    // A run's results (or its Undo) landed on the picked feature: same feature,
+    // new properties, and the ref moves with it so this does not re-fire.
+    geoSelectionConfigRef.current = layer?.config ?? null;
+    selectGeoFeature(next);
   }, [geoLayers, geoSelection, selectGeoFeature]);
 
   const geoVisibleIds = useGeoFeatureVisibilityStore((s) => s.visible);
