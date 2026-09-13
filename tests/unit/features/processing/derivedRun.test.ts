@@ -109,8 +109,11 @@ vi.mock("../../../../src/insights/layerTables", async () => {
   let n = 100;
   return {
     useLayerTableStore: store,
+    // The PARENT, plus every copy publication has adopted — a derived layer is
+    // an ordinary target from publication on (§6), and a registry that could
+    // not resolve it made "run a tool on the copy" untestable here.
     getLayerTable: vi.fn((layerId: string) =>
-      layerId === "L1" ? parentTable : null,
+      layerId === "L1" ? parentTable : (adopted.get(layerId) ?? null),
     ),
     runOnTableQueue: vi.fn(<T>(task: () => Promise<T>): Promise<T> => {
       const next = chain.then(task, task);
@@ -398,20 +401,73 @@ describe("destination: New layer", () => {
     // `raced` is what ends the run.
     fakeExecutor();
     const held = deferred<void>();
+    let released = false;
+    void held.promise.then(() => {
+      released = true;
+    });
     gate = { needle: "CREATE TABLE", promise: held.promise };
     const id = submitRun(newLayerRequest());
     await vi.waitFor(() =>
       expect(sql.some((s) => s.startsWith("CREATE TABLE"))).toBe(true),
     );
     killEngine();
+    // NEVER released. duckdb-wasm strands the requests that were in flight
+    // when its worker died, and the whole point of `raced` is that nothing
+    // waits for one: clearing the gate only frees LATER statements, so the
+    // CTAS below is still hanging when the run has already ended.
     gate = null;
-    held.resolve(undefined);
     await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
     expect(runById(id)?.error).toBe("Analytics engine stopped");
     expect(useLayerStore.getState().layers).toHaveLength(1);
     expect(runById(id)?.newLayerId).toBeNull();
     expect(sql.some((s) => /^DROP TABLE IF EXISTS "layer_\d+"$/.test(s))).toBe(
       true,
+    );
+    // The FIFO is free — which is the fact the race exists for. A later run
+    // queued behind a stranded statement would never reach its own head, and
+    // this assertion is what would time out.
+    const after = submitRun(newLayerRequest({ newLayerName: "Delft · after" }));
+    await vi.waitFor(() => expect(runById(after)?.status).toBe("done"));
+    // …and the first statement is STILL hanging while that happened, which is
+    // what makes the line above about the death race and not about a gate
+    // somebody quietly opened.
+    expect(released).toBe(false);
+  });
+
+  it("is an ORDINARY target from publication on: a run computes over ITS table", async () => {
+    // §6: "the copy is a layer like any other". The registry resolves it, so a
+    // follow-up This-layer run reads the COPY's table and writes there — and
+    // the parent, which the first run left untouched, stays untouched.
+    fakeExecutor();
+    const created = submitRun(newLayerRequest());
+    await vi.waitFor(() => expect(runById(created)?.status).toBe("done"));
+    const newId = runById(created)?.newLayerId ?? "";
+    const copyTable = (adopted.get(newId) as { table: string }).table;
+    sql.length = 0;
+
+    const follow = submitRun(
+      newLayerRequest({
+        targetLayerId: newId,
+        destination: "layer",
+        newLayerName: null,
+      }),
+    );
+    await vi.waitFor(() => expect(runById(follow)?.status).toBe("done"));
+    expect(sql.some((q) => q.startsWith(`ALTER TABLE "${copyTable}"`))).toBe(
+      true,
+    );
+    expect(sql.some((q) => q.startsWith('ALTER TABLE "layer_1"'))).toBe(false);
+    // [adapted copy A7]: the follow-up run's own log header names where the
+    // layer it ran on came from, captured at Run off the layer row.
+    expect(runById(follow)?.targetDerivedFrom).toEqual({
+      layerId: "L1",
+      layerName: "Delft",
+      runId: created,
+    });
+    // And §6.2's block is now real rather than seeded: a DONE later run over
+    // the copy is exactly what it counts.
+    expect(newLayerUndoBlock(runById(created) as RunRecord)).toBe(
+      "Used by a later run; remove the layer from the layer list instead",
     );
   });
 
@@ -885,18 +941,26 @@ describe("destination: New layer, with a VECTOR target", () => {
   it("the engine's DEATH before publication publishes nothing", async () => {
     const zones = seedAggregate();
     const held = deferred<void>();
+    let released = false;
+    void held.promise.then(() => {
+      released = true;
+    });
     gate = { needle: "/* aggregate */", promise: held.promise };
     const id = submitRun(aggregateRequest(zones));
     await vi.waitFor(() =>
       expect(sql.some((s) => s.includes("/* aggregate */"))).toBe(true),
     );
     killEngine();
+    // NEVER released, as on the city side: the stranded statement is the
+    // hazard, and the FIFO has to come back without it.
     gate = null;
-    held.resolve(undefined);
     await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
     expect(runById(id)?.error).toBe("Analytics engine stopped");
     expect(useGeoLayerStore.getState().layers).toHaveLength(1);
     expect(runById(id)?.newLayerId).toBeNull();
+    const after = submitRun(aggregateRequest(zones, { newLayerName: "After" }));
+    await vi.waitFor(() => expect(runById(after)?.status).toBe("done"));
+    expect(released).toBe(false);
   });
 
   it("offers Undo immediately, and Undo removes the derived VECTOR layer", async () => {
