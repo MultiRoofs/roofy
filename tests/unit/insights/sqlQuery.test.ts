@@ -208,14 +208,22 @@ describe("buildMedianSql", () => {
 });
 
 describe("buildMostFrequentSql", () => {
-  it("is the modal value over the feature ROOTS only", () => {
-    // The same restriction as `buildMedianSql`, for the same reason: a run
-    // writes its value onto the root AND onto every part, so a mode over every
-    // row weights each building by how many parts it happens to have modelled.
-    // On 3D BAG, where every Building has exactly one geometry-bearing part,
-    // the unrestricted answer is not even a value from the data.
+  it("counts the feature ROOTS only, and breaks a tie on the LOWEST value", () => {
+    // Root-only is the same restriction as `buildMedianSql`, for the same
+    // reason: a run writes its value onto the root AND onto every part, so a
+    // count over every row weights each building by how many parts it happens
+    // to have modelled. On 3D BAG, where every Building has exactly one
+    // geometry-bearing part, the unrestricted answer is not even a value from
+    // the data.
+    //
+    // The GROUP BY is spelled out rather than left to `mode()` because
+    // `mode()` does not say which of two equally frequent values it returns:
+    // the same data re-read after a table rebuild could prefill a different
+    // threshold into the user's rule, with nothing on screen to explain it.
+    // `ORDER BY "n" DESC, "v" ASC` makes the answer a function of the data
+    // alone — most frequent first, lowest value to break a tie.
     expect(buildMostFrequentSql("layer_3", "zones_name")).toBe(
-      'SELECT mode("zones_name") AS m FROM "layer_3" WHERE ("feature_id" IS NULL OR "feature_id" = "id") AND "zones_name" IS NOT NULL',
+      'SELECT "v" AS m FROM (SELECT "zones_name" AS "v", count(*) AS "n" FROM "layer_3" WHERE ("feature_id" IS NULL OR "feature_id" = "id") AND "zones_name" IS NOT NULL GROUP BY "v") ORDER BY "n" DESC, "v" ASC LIMIT 1',
     );
   });
 

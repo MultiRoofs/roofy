@@ -39,6 +39,7 @@ import {
 import {
   buildCountSql,
   buildMedianSql,
+  buildMostFrequentSql,
   buildPageSql,
   quoteIdent,
 } from "../../../src/insights/sql";
@@ -598,6 +599,72 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
       const rows = db.query(buildMedianSql(DECIMAL_TABLE, "zones_rate"));
       expect(typeof rows[0]?.["m"]).toBe("number");
       expect(Number(rows[0]?.["m"])).toBeCloseTo(2.5, 6);
+    });
+  });
+
+  describe("probe 5: the Style-by-result modal value over root rows", () => {
+    /**
+     * The §7.5 fixture, built twice in opposite insertion orders.
+     *
+     * Four ROOTS carry a value — `'A'` once, `'B'` once, and two NULLs — so the
+     * two real values are TIED. Three PARTS of the first feature carry `'Z'`,
+     * which is the most frequent string in the table and must not be the
+     * answer: a building with three parts modelled cannot outvote one with
+     * none (§7, "copied to root and parts alike").
+     */
+    const ROWS = [
+      "('b1', 'b1', 'A')",
+      "('b1-1', 'b1', 'Z')",
+      "('b1-2', 'b1', 'Z')",
+      "('b1-3', 'b1', 'Z')",
+      "('b2', 'b2', 'B')",
+      "('b3', NULL, NULL)",
+      "('b4', 'b4', NULL)",
+    ];
+
+    const create = (table: string, rows: ReadonlyArray<string>): void => {
+      db.query(
+        `CREATE OR REPLACE TABLE ${quoteIdent(table)} AS
+           SELECT "id", "feature_id", CAST("v" AS VARCHAR) AS "zones_name"
+           FROM (VALUES ${rows.join(", ")}) AS t("id", "feature_id", "v")`,
+      );
+    };
+
+    it("breaks a tie on the LOWEST value, ignoring NULLs and non-root rows", () => {
+      // `'Z'` is the most frequent string in the table and loses because it is
+      // only on parts; NULL is the most frequent ROOT value and loses because
+      // a NULL prefilled into a rule is a condition that matches nothing; `'A'`
+      // and `'B'` are tied among the roots and the LOWER one wins, which is
+      // what makes the answer a function of the data rather than of the engine.
+      create("layer_cc6", ROWS);
+      expect(db.query(buildMostFrequentSql("layer_cc6", "zones_name"))).toEqual(
+        [{ m: "A" }],
+      );
+    });
+
+    it("gives the same answer when the same rows are inserted in reverse", () => {
+      // The tie-break is deterministic or it is not a tie-break: an unordered
+      // `mode()` may answer with whichever row it met first, so the same data
+      // re-read after a table rebuild could prefill a different threshold into
+      // the user's rule with nothing on screen to explain it.
+      create("layer_cc7", [...ROWS].reverse());
+      expect(db.query(buildMostFrequentSql("layer_cc7", "zones_name"))).toEqual(
+        [{ m: "A" }],
+      );
+    });
+
+    it("prefers the more FREQUENT value over the alphabetically lower one", () => {
+      // The other half of the ordering: `"n" DESC` comes first, so this is a
+      // modal value with a tie-break and not an alphabetical minimum. Two roots
+      // say `'B'` against one `'A'`, and `'B'` wins.
+      create("layer_cc8", [
+        "('b1', 'b1', 'A')",
+        "('b2', 'b2', 'B')",
+        "('b3', 'b3', 'B')",
+      ]);
+      expect(db.query(buildMostFrequentSql("layer_cc8", "zones_name"))).toEqual(
+        [{ m: "B" }],
+      );
     });
   });
 });

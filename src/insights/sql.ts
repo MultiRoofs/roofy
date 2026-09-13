@@ -451,16 +451,27 @@ export function buildMedianSql(table: string, column: string): string {
  *
  * Root-only for exactly `buildMedianSql`'s reason: a run writes its value onto
  * the root row AND onto each part (§7, "then copied to root and parts alike"),
- * so a mode over every row weights each building by how many parts it happens
+ * so a count over every row weights each building by how many parts it happens
  * to have modelled. A building with six parts must not outvote one with none.
  *
- * NULLs are excluded explicitly rather than left to `mode()`'s own handling, so
- * the answer is a value the user can see in the data — a NULL prefilled into a
- * rule is a condition that matches nothing.
+ * NULLs are excluded explicitly rather than left to the aggregate's own
+ * handling, so the answer is a value the user can see in the data — a NULL
+ * prefilled into a rule is a condition that matches nothing.
+ *
+ * TIES RESOLVE TO THE LOWEST VALUE, and that is why this is a GROUP BY and not
+ * `mode()`. `mode()` does not define which of two equally frequent values it
+ * returns, and on DuckDB 1.5.5 it demonstrably answers with whichever it met
+ * first: the same three rows inserted in the opposite order give the opposite
+ * answer (pinned in `tests/integration/duckdb/computedColumns.test.ts`, probe
+ * 5). A prefilled rule threshold that changes when a table is rebuilt under it
+ * is a value the user cannot account for and the UI cannot explain, so the
+ * order is stated here — most frequent first (`"n" DESC`), lowest value to
+ * break the tie (`"v" ASC`, DuckDB's natural ordering for the column's own
+ * type) — and the answer becomes a function of the data alone.
  */
 export function buildMostFrequentSql(table: string, column: string): string {
   const col = quoteIdent(column);
-  return `SELECT mode(${col}) AS m FROM ${quoteIdent(table)} WHERE ("feature_id" IS NULL OR "feature_id" = "id") AND ${col} IS NOT NULL`;
+  return `SELECT "v" AS m FROM (SELECT ${col} AS "v", count(*) AS "n" FROM ${quoteIdent(table)} WHERE ("feature_id" IS NULL OR "feature_id" = "id") AND ${col} IS NOT NULL GROUP BY "v") ORDER BY "n" DESC, "v" ASC LIMIT 1`;
 }
 
 /**
