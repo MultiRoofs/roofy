@@ -90,6 +90,7 @@ import type {
   LogEntry,
   RunPhase,
   RunRecord,
+  RunStatus,
   RunSummary,
   Scope,
   SkipCount,
@@ -827,6 +828,26 @@ const USED_BY_LATER_RUN =
   "Used by a later run; remove the layer from the layer list instead";
 
 /**
+ * The statuses §6.2 counts as a later run USING the copy: "queued, running or
+ * done".
+ *
+ * A run that FAILED (refused at the head for a bad prefix, a removed source, a
+ * rebuilt table) or was CANCELLED never wrote anything and never will, so it
+ * cannot be the reason a user may no longer remove an otherwise untouched
+ * layer with one press. `cancelling` is on the list although §6.2 does not
+ * name it: it is a RUNNING run that has been asked to stop and may still
+ * commit — §6.1's "finished before the cancel arrived" — so treating it as
+ * already gone would let the Undo remove a layer a live run is mid-publication
+ * over.
+ */
+const USES_THE_COPY: ReadonlySet<RunStatus> = new Set<RunStatus>([
+  "queued",
+  "running",
+  "cancelling",
+  "done",
+]);
+
+/**
  * §6.2: "Undo of a New-layer run is available only while the derived layer is
  * untouched as data: it has not been the target or source of any later run
  * (queued, running or done) and has no computed columns of its own. Renaming
@@ -843,6 +864,7 @@ export function newLayerUndoBlock(run: RunRecord): string | null {
     .runs.some(
       (other) =>
         other.id !== run.id &&
+        USES_THE_COPY.has(other.status) &&
         (other.targetLayerId === layerId || other.sourceLayerId === layerId),
     );
   if (used) return USED_BY_LATER_RUN;

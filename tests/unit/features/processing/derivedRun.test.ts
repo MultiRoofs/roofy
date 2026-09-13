@@ -480,6 +480,78 @@ describe("destination: New layer", () => {
     expect(useLayerStore.getState().layers).toHaveLength(2);
   });
 
+  it("blocks Undo for a later run that reads the copy as its SOURCE", async () => {
+    // §6.2 counts the copy being "the target OR source of any later run": a
+    // Join reading the derived layer is using it just as much as one writing
+    // to it, and removing it underneath would strand that run's provenance.
+    fakeExecutor();
+    const id = submitRun(newLayerRequest());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    const done = runById(id) as RunRecord;
+    const newId = done.newLayerId ?? "";
+    useProcessingStore.getState().upsertRun({
+      ...done,
+      id: "run_later",
+      targetLayerId: "L1",
+      sourceLayerId: newId,
+      status: "running",
+      newLayerId: null,
+    });
+    expect(newLayerUndoBlock(done)).toBe(
+      "Used by a later run; remove the layer from the layer list instead",
+    );
+  });
+
+  it.each([
+    ["failed", "target"],
+    ["failed", "source"],
+    ["cancelled", "target"],
+    ["cancelled", "source"],
+  ] as const)(
+    "keeps Undo when the later run %s before touching the copy (as its %s)",
+    async (status, role) => {
+      // §6.2's condition is "(queued, running or done)", and neither of these
+      // ever wrote anything: a run refused at the head for a bad prefix, or
+      // cancelled while it waited its turn, must not cost the user a layer
+      // they can otherwise still remove with one press.
+      fakeExecutor();
+      const id = submitRun(newLayerRequest());
+      await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+      const done = runById(id) as RunRecord;
+      const newId = done.newLayerId ?? "";
+      useProcessingStore.getState().upsertRun({
+        ...done,
+        id: "run_later",
+        targetLayerId: role === "target" ? newId : "L1",
+        sourceLayerId: role === "source" ? newId : null,
+        status,
+        newLayerId: null,
+      });
+      expect(newLayerUndoBlock(done)).toBeNull();
+      await undoRun(id);
+      expect(useLayerStore.getState().layers).toHaveLength(1);
+    },
+  );
+
+  it("blocks Undo while the later run is still CANCELLING — it may yet publish", async () => {
+    // §6.1's "finished before the cancel arrived": a run in `cancelling` has
+    // been asked to stop and may still commit, so it counts with `running`.
+    fakeExecutor();
+    const id = submitRun(newLayerRequest());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    const done = runById(id) as RunRecord;
+    useProcessingStore.getState().upsertRun({
+      ...done,
+      id: "run_later",
+      targetLayerId: done.newLayerId ?? "",
+      status: "cancelling",
+      newLayerId: null,
+    });
+    expect(newLayerUndoBlock(done)).toBe(
+      "Used by a later run; remove the layer from the layer list instead",
+    );
+  });
+
   it("blocks Undo once the copy has computed columns of its OWN", async () => {
     // §6.2's other half: "and has no computed columns of its own". A column
     // whose provenance names a run the copy did not carry at publication is
@@ -876,6 +948,52 @@ describe("destination: New layer, with a VECTOR target", () => {
     await vi.waitFor(() => expect(runById(later)?.status).toBe("done"));
     // And still blocked once it has finished.
     expect(newLayerUndoBlock(runById(id) as RunRecord)).toBe(
+      "Used by a later run; remove the layer from the layer list instead",
+    );
+  });
+
+  it.each([
+    ["failed", "target"],
+    ["cancelled", "source"],
+  ] as const)(
+    "keeps a VECTOR copy's Undo when the later run %s (as its %s)",
+    async (status, role) => {
+      // The status rule is one rule for both kinds of copy: the scan is over
+      // the run history, which knows nothing about where the layer lives.
+      const zones = seedAggregate();
+      const id = submitRun(aggregateRequest(zones));
+      await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+      const done = runById(id) as RunRecord;
+      const newId = done.newLayerId ?? "";
+      useProcessingStore.getState().upsertRun({
+        ...done,
+        id: "run_later",
+        targetLayerId: role === "target" ? newId : zones,
+        sourceLayerId: role === "source" ? newId : null,
+        status,
+        newLayerId: null,
+      });
+      expect(newLayerUndoBlock(done)).toBeNull();
+      const before = useGeoLayerStore.getState().layers.length;
+      await undoRun(id);
+      expect(useGeoLayerStore.getState().layers).toHaveLength(before - 1);
+    },
+  );
+
+  it("blocks a VECTOR copy's Undo for a later run that READS it", async () => {
+    const zones = seedAggregate();
+    const id = submitRun(aggregateRequest(zones));
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    const done = runById(id) as RunRecord;
+    useProcessingStore.getState().upsertRun({
+      ...done,
+      id: "run_later",
+      targetLayerId: "L1",
+      sourceLayerId: done.newLayerId ?? "",
+      status: "queued",
+      newLayerId: null,
+    });
+    expect(newLayerUndoBlock(done)).toBe(
       "Used by a later run; remove the layer from the layer list instead",
     );
   });
