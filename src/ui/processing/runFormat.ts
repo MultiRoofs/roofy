@@ -2,6 +2,10 @@
  * Pure formatting for a run's card, its row in the history and its log. Kept
  * out of the components so the strings can be asserted without rendering.
  */
+import {
+  proxyLogLabel,
+  type BuildingProxy,
+} from "../../features/processing/buildingProxy";
 import { toolById } from "../../features/processing/toolRegistry";
 import type { RunPhase, RunRecord } from "../../features/processing/types";
 
@@ -76,6 +80,35 @@ export const STATUS_WORD: Readonly<Record<RunRecord["status"], string>> = {
   cancelled: "cancelled",
 };
 
+/**
+ * Spec §6.4's "building geometry proxy actually used".
+ *
+ * Read off the FROZEN parameters, which are exactly what was used: the form
+ * resolves the target's own default into the draft before Run (Task 15), and
+ * the executor reads the same bag. A tool with no proxy — every one-layer tool
+ * — keeps the em dash, and so does a value that is not one of the three.
+ */
+export function buildingGeometryLine(run: RunRecord): string {
+  const proxy = run.params["proxy"];
+  const known: ReadonlyArray<BuildingProxy> = [
+    "footprint",
+    "rectangle",
+    "centre",
+  ];
+  return known.includes(proxy as BuildingProxy)
+    ? proxyLogLabel(proxy as BuildingProxy)
+    : "—";
+}
+
+/** One frozen parameter's value, as §6.4's record. A primitive as itself, a
+ *  list or an object as JSON — `String([{op:"count"}])` is `[object Object]`,
+ *  which records nothing. */
+export function paramValue(value: unknown): string {
+  return value !== null && typeof value === "object"
+    ? JSON.stringify(value)
+    : String(value);
+}
+
 /** Spec §6.4's Copy: the whole log as plain text. */
 export function formatRunLog(run: RunRecord): string {
   const lines: string[] = [];
@@ -86,10 +119,10 @@ export function formatRunLog(run: RunRecord): string {
     `Scope: ${SCOPE_WORD[run.scope]} · ${plural(run.scopeCount, "building", "buildings")} (frozen at ${clockTime(run.startedAt)})`,
   );
   lines.push(`LoD: ${run.lod ?? "—"}`);
-  lines.push("Building geometry: —");
+  lines.push(`Building geometry: ${buildingGeometryLine(run)}`);
   const params = Object.entries(run.params);
   lines.push(
-    `Parameters: ${params.length === 0 ? "—" : params.map(([k, v]) => `${k} = ${String(v)}`).join(", ")}`,
+    `Parameters: ${params.length === 0 ? "—" : params.map(([k, v]) => `${k} = ${paramValue(v)}`).join(", ")}`,
   );
   lines.push(`Output columns: ${run.columns.join(", ") || "—"}`);
   lines.push(`Started: ${clockTime(run.startedAt)}`);

@@ -11,8 +11,10 @@ import { toolById } from "../../features/processing/toolRegistry";
 import {
   SCOPE_WORD,
   STATUS_WORD,
+  buildingGeometryLine,
   clockTime,
   formatRunLog,
+  paramValue,
   plural,
   seconds,
 } from "./runFormat";
@@ -48,12 +50,12 @@ export function LogView({ runId }: { readonly runId: string }) {
       `${SCOPE_WORD[run.scope]} · ${plural(run.scopeCount, "building", "buildings")} (frozen at ${clockTime(run.startedAt)})`,
     ],
     ["LoD", run.lod ?? "—"],
-    ["Building geometry", "—"],
+    ["Building geometry", buildingGeometryLine(run)],
     [
       "Parameters",
       params.length === 0
         ? "—"
-        : params.map(([k, v]) => `${k} = ${String(v)}`).join(", "),
+        : params.map(([k, v]) => `${k} = ${paramValue(v)}`).join(", "),
     ],
     ["Output columns", run.columns.join(", ") || "—"],
     ["Started", clockTime(run.startedAt)],

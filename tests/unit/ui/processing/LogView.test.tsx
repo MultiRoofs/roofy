@@ -151,3 +151,50 @@ describe("formatRunLog", () => {
     ).toContain("Error: Binder Error: x");
   });
 });
+
+describe("§6.4's building-geometry row", () => {
+  it("names the proxy the run used", () => {
+    useProcessingStore.getState().upsertRun(
+      runFixture({
+        toolId: "join-by-location",
+        params: { proxy: "rectangle" },
+      }),
+    );
+    render(<LogView runId="r1" />);
+    expect(screen.getByText("Extent rectangle")).toBeInTheDocument();
+    expect(formatRunLog(runFixture({ params: { proxy: "centre" } }))).toContain(
+      "Building geometry: Extent centre",
+    );
+  });
+
+  it("keeps the em dash for a tool that has no proxy", () => {
+    useProcessingStore.getState().upsertRun(runFixture({ params: {} }));
+    render(<LogView runId="r1" />);
+    expect(
+      screen.getByText("Building geometry").closest("div"),
+    ).toHaveTextContent("—");
+  });
+
+  it("ignores a params value that is not one of the three proxies", () => {
+    // The row reads the FROZEN parameters, which a future tool may spell
+    // differently; an unknown value is "no proxy", never a crash.
+    expect(
+      formatRunLog(runFixture({ params: { proxy: "something-else" } })),
+    ).toContain("Building geometry: —");
+  });
+
+  it("prints a structured parameter as JSON, not as [object Object]", () => {
+    // §6.4 is "the reproducible record of the run: a planner can read it back
+    // and rerun by hand" — and Aggregate's parameters are a list of rows.
+    expect(
+      formatRunLog(
+        runFixture({ params: { rows: [{ op: "count", column: null }] } }),
+      ),
+    ).toContain('rows = [{"op":"count","column":null}]');
+    useProcessingStore
+      .getState()
+      .upsertRun(runFixture({ params: { rows: [{ op: "count" }] } }));
+    render(<LogView runId="r1" />);
+    expect(screen.getByText('rows = [{"op":"count"}]')).toBeInTheDocument();
+  });
+});
