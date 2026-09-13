@@ -26,6 +26,7 @@ import {
   buildProxySql,
 } from "../../../src/features/processing/buildingProxy";
 import { buildJoinSql } from "../../../src/features/processing/tools/joinByLocation";
+import { buildDistanceSql } from "../../../src/features/processing/tools/distanceToNearest";
 import { quoteIdent } from "../../../src/insights/sql";
 
 /**
@@ -540,6 +541,11 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
   });
 
   it("finds the nearest source feature with MIN(ST_Distance) and arg_min", () => {
+    // TRUSTED ONLY BECAUSE THE PROBE IS A POINT. Core `ST_Distance` answers 0
+    // between any two polygons on this build (the case further down pins it),
+    // so the shape below is the plan's ORIGINAL sketch rather than what
+    // `buildDistanceSql` sends: the builder measures with `ST_Distance_GEOS`
+    // and orders with a window instead of `arg_min`.
     const rows = db.query(
       `SELECT MIN(ST_Distance(ST_Point(200, 50), s.geom)) AS d, arg_min(s.idx, ST_Distance(ST_Point(200, 50), s.geom)) AS nearest FROM "${VECTOR_TABLE}" s`,
     );
@@ -1192,6 +1198,298 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
       ["P3", "B", 1],
     ]);
     db.query("DROP TABLE IF EXISTS probe_fp");
+  });
+
+  it("answers 0 from the CORE ST_Distance between two polygons, however far apart", () => {
+    // THE FINDING BEHIND `ST_Distance_GEOS` IN `buildDistanceSql`. On this
+    // build, core `ST_Distance` is 0 for ANY polygon-to-polygon pair — the
+    // degenerate envelope a one-coordinate building produces and a
+    // GeometryCollection carrying a polygon included — while every other
+    // pairing is correct. §7.7's two bbox proxies and its footprint union are
+    // polygons and its source is "any geometry type", so the core function
+    // would report "0 m" for a whole layer against a polygon source, silently.
+    // `ST_Distance_GEOS` is right in every one of these cases.
+    const near = `ST_GeomFromText('POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))')`;
+    const far = `ST_GeomFromText('POLYGON ((50 0, 150 0, 150 100, 50 100, 50 0))')`;
+    const withPolygon = `ST_GeomFromText('GEOMETRYCOLLECTION (POLYGON ((50 0, 150 0, 150 100, 50 100, 50 0)), POINT (200 200))')`;
+    expect(
+      db.query(
+        `SELECT ST_Distance(${near}, ${far}) AS poly_poly,
+                ST_Distance(ST_MakeEnvelope(5, 5, 5, 5), ${far}) AS degenerate,
+                ST_Distance(${near}, ${withPolygon}) AS collection,
+                ST_Distance(${near}, ST_Point(50, 5)) AS point,
+                ST_Intersects(${near}, ${far}) AS intersects`,
+      ),
+    ).toEqual([
+      // Wrong: the two are 40 m apart.
+      {
+        poly_poly: 0,
+        degenerate: 0,
+        collection: 0,
+        point: 40,
+        intersects: false,
+      },
+    ]);
+    expect(
+      db.query(
+        `SELECT ST_Distance_GEOS(${near}, ${far}) AS poly_poly,
+                ST_Distance_GEOS(ST_MakeEnvelope(5, 5, 5, 5), ${far}) AS degenerate,
+                ST_Distance_GEOS(${near}, ${withPolygon}) AS collection,
+                ST_Distance_GEOS(${near}, ST_GeomFromText('POLYGON ((5 5, 6 5, 6 6, 5 6, 5 5))')) AS contained,
+                ST_Distance_GEOS(${near}, ST_GeomFromText('POLYGON ((10 0, 20 0, 20 10, 10 10, 10 0))')) AS touching,
+                ST_Distance_GEOS(NULL::GEOMETRY, ST_Point(0, 0)) IS NULL AS null_left,
+                ST_Distance_GEOS(ST_Point(0, 0), NULL::GEOMETRY) IS NULL AS null_right`,
+      ),
+      // §7.7's "0 when they touch or overlap" is the `contained` and `touching`
+      // pair; the NULL columns are why the builder may put the call in a LEFT
+      // JOIN's `ON` beside `b."g" IS NOT NULL` — a NULL proxy answers NULL
+      // rather than raising, and one raise would fail the whole statement.
+    ).toEqual([
+      {
+        poly_poly: 40,
+        degenerate: 45,
+        collection: 40,
+        contained: 0,
+        touching: 0,
+        null_left: true,
+        null_right: true,
+      },
+    ]);
+    // The same defect in the predicate form, which is therefore NOT used to
+    // bound the search: `ST_DWithin` says two polygons 40 m apart are within
+    // 39 m. `ST_DWithin_GEOS` is correct and could bound the join, but one
+    // function deciding both the limit and the value is what keeps the two
+    // from disagreeing at the boundary.
+    expect(
+      db.query(
+        `SELECT ST_DWithin(${near}, ${far}, 39) AS core_39,
+                ST_DWithin_GEOS(${near}, ${far}, 39) AS geos_39,
+                ST_DWithin_GEOS(${near}, ${far}, 41) AS geos_41`,
+      ),
+    ).toEqual([{ core_39: true, geos_39: false, geos_41: true }]);
+  });
+
+  it("runs buildDistanceSql's OWN statement, per FEATURE, over the vector table", () => {
+    // §7.7 end to end against the engine. A spans x 0-100, B x 50-150 (the
+    // fixture at the top of this file), both y 0-100.
+    //
+    //  B1 (+ its part) overlaps A          → 0, §7.7's "touch or overlap"
+    //  B2 (root x 200-210, part x 205-215) → 50 to B, and the FEATURE's answer
+    //                                        is on the part's row too (§7)
+    //  B3 sits at y -50 under x 70-80      → 50 from BOTH, so only the second
+    //                                        ORDER BY key decides and it is
+    //                                        `idx`: A wins, `fid` 'a'
+    //  B4 has no extent                    → `no_proxy`, distance NULL
+    db.query(
+      `CREATE OR REPLACE TABLE probe_distance AS SELECT * FROM (VALUES
+         ('B1', NULL::VARCHAR, {'xmin': 0.0, 'ymin': 0.0, 'zmin': 0.0, 'xmax': 10.0, 'ymax': 10.0, 'zmax': 3.0}),
+         ('B1P', 'B1', {'xmin': 0.0, 'ymin': 0.0, 'zmin': 0.0, 'xmax': 4.0, 'ymax': 4.0, 'zmax': 3.0}),
+         ('B2', NULL, {'xmin': 200.0, 'ymin': 0.0, 'zmin': 0.0, 'xmax': 210.0, 'ymax': 10.0, 'zmax': 3.0}),
+         ('B2P', 'B2', {'xmin': 205.0, 'ymin': 0.0, 'zmin': 0.0, 'xmax': 215.0, 'ymax': 10.0, 'zmax': 3.0}),
+         ('B3', NULL, {'xmin': 70.0, 'ymin': -60.0, 'zmin': 0.0, 'xmax': 80.0, 'ymax': -50.0, 'zmax': 3.0}),
+         ('B4', NULL, NULL)
+       ) AS t("id", "feature_id", "bbox")`,
+    );
+    const statement = (maxDistanceM: number) =>
+      `SELECT * FROM (${buildDistanceSql({
+        table: "probe_distance",
+        source: VECTOR_TABLE,
+        proxy: "rectangle",
+        from: null,
+        geometryColumn: null,
+        ids: null,
+        maxDistanceM,
+        prefix: "roads_",
+        nearestId: { property: null },
+      })}) ORDER BY "id"`;
+    expect(db.query(statement(500))).toEqual([
+      {
+        id: "B1",
+        f: "B1",
+        no_proxy: false,
+        roads_distance_m: 0,
+        roads_nearest_id: "a",
+      },
+      {
+        id: "B1P",
+        f: "B1",
+        no_proxy: false,
+        roads_distance_m: 0,
+        roads_nearest_id: "a",
+      },
+      {
+        id: "B2",
+        f: "B2",
+        no_proxy: false,
+        roads_distance_m: 50,
+        roads_nearest_id: "b",
+      },
+      // §7: the FEATURE's answer, on the part's row as well.
+      {
+        id: "B2P",
+        f: "B2",
+        no_proxy: false,
+        roads_distance_m: 50,
+        roads_nearest_id: "b",
+      },
+      // §7.7: "ties go to the first source feature in source order".
+      {
+        id: "B3",
+        f: "B3",
+        no_proxy: false,
+        roads_distance_m: 50,
+        roads_nearest_id: "a",
+      },
+      // §6.2: no proxy at all is NULL, and it is not the same answer as
+      // "nothing within the limit" — which is also NULL, but with `no_proxy`
+      // false, and that is the difference the card's two counts rest on.
+      {
+        id: "B4",
+        f: "B4",
+        no_proxy: true,
+        roads_distance_m: null,
+        roads_nearest_id: null,
+      },
+    ]);
+    // §7.7: "beyond it the distance is NULL". The limit is in the JOIN's `ON`,
+    // so B2 and B3 simply have no match at 40 m — while B1, which overlaps, is
+    // still 0.
+    const near = db.query(statement(40)) as Array<Record<string, unknown>>;
+    expect(
+      near.map((r) => [r["id"], r["roads_distance_m"], r["no_proxy"]]),
+    ).toEqual([
+      ["B1", 0, false],
+      ["B1P", 0, false],
+      ["B2", null, false],
+      ["B2P", null, false],
+      ["B3", null, false],
+      ["B4", null, true],
+    ]);
+    db.query("DROP TABLE IF EXISTS probe_distance");
+  });
+
+  it("measures FOOTPRINTS read from the reader against a distant area", () => {
+    // The proxy that re-reads the parent source, and the one the polygon
+    // defect above hit hardest: the footprint is a `ST_Force2D`'d union, i.e. a
+    // POLYGON, and every distance to a polygon source would have been 0.
+    // P1's footprint is its PART's 4 x 4 (§7's contributor rule) and P3's spans
+    // x 100-110, so against an area at x 200-300 they are 196 m and 90 m away;
+    // P2 has no LoD 0 geometry at all and keeps §6.2's NULL.
+    db.query(
+      `CREATE OR REPLACE TABLE probe_far_src AS SELECT 0 AS "idx", 'f-far' AS "sid", 'far' AS "fid",
+         '{"name":"Far"}'::JSON AS "props",
+         ST_GeomFromText('POLYGON ((200 0, 300 0, 300 10, 200 10, 200 0))') AS "geom"`,
+    );
+    db.query(
+      `CREATE OR REPLACE TABLE probe_fp_distance AS SELECT * FROM (VALUES
+         ('P1', NULL::VARCHAR), ('P1-0', 'P1'), ('P2', NULL), ('P3', NULL)
+       ) AS t("id", "feature_id")`,
+    );
+    expect(
+      db.query(
+        `SELECT * FROM (${buildDistanceSql({
+          table: "probe_fp_distance",
+          source: "probe_far_src",
+          proxy: "footprint",
+          from: `read_cityjson('${LOD0_FILE}', lod => '0.0')`,
+          geometryColumn: "geometry_lod0_0",
+          ids: null,
+          maxDistanceM: 500,
+          prefix: "roads_",
+          nearestId: { property: null },
+        })}) ORDER BY "id"`,
+      ),
+    ).toEqual([
+      {
+        id: "P1",
+        f: "P1",
+        no_proxy: false,
+        roads_distance_m: 196,
+        roads_nearest_id: "far",
+      },
+      {
+        id: "P1-0",
+        f: "P1",
+        no_proxy: false,
+        roads_distance_m: 196,
+        roads_nearest_id: "far",
+      },
+      {
+        id: "P2",
+        f: "P2",
+        no_proxy: true,
+        roads_distance_m: null,
+        roads_nearest_id: null,
+      },
+      {
+        id: "P3",
+        f: "P3",
+        no_proxy: false,
+        roads_distance_m: 90,
+        roads_nearest_id: "far",
+      },
+    ]);
+    db.query("DROP TABLE IF EXISTS probe_fp_distance");
+    db.query("DROP TABLE IF EXISTS probe_far_src");
+  });
+
+  it("measures the distance to a MIXED GeometryCollection (§7.7, residual B10)", async () => {
+    // §7.7's source is "a vector layer of ANY geometry type", and Task 12
+    // converts every GeoJSON GeometryCollection — mixed families included — so
+    // the statement has to MEASURE one, not merely parse it. The WKT is the
+    // text `vectorSource.test.ts` pins Task 12 emitting, written through the
+    // real encoder and the real table statement.
+    //
+    // The centre proxy of the bbox below is (0, 0). The collection's POINT is
+    // at (20, 20) — about 28.3 away — and its LINESTRING's nearest vertex is
+    // (3, 4), which is exactly 5. `ST_Distance` over a collection answers the
+    // MINIMUM over its members, so 5 is the expected value.
+    const table = vectorTableName("run_collection");
+    const file = `${table}.json`;
+    db.registerBytes(
+      file,
+      await encodeProjectedFeatures([
+        {
+          idx: 0,
+          stableId: "id:string:c1",
+          featureId: "c1",
+          properties: { name: "Mixed" },
+          wkt: "GEOMETRYCOLLECTION (POINT (20 20), LINESTRING (3 4, 10 10))",
+        },
+      ]),
+    );
+    db.query(buildVectorTableSql(table, file));
+    db.query(
+      `CREATE OR REPLACE TABLE probe_collection AS SELECT * FROM (VALUES
+         ('B1', NULL::VARCHAR, {'xmin': -1.0, 'ymin': -1.0, 'zmin': 0.0, 'xmax': 1.0, 'ymax': 1.0, 'zmax': 3.0})
+       ) AS t("id", "feature_id", "bbox")`,
+    );
+    expect(
+      db.query(
+        buildDistanceSql({
+          table: "probe_collection",
+          source: table,
+          proxy: "centre",
+          from: null,
+          geometryColumn: null,
+          ids: null,
+          maxDistanceM: 500,
+          prefix: "roads_",
+          nearestId: { property: "name" },
+        }),
+      ),
+    ).toEqual([
+      {
+        id: "B1",
+        f: "B1",
+        no_proxy: false,
+        roads_distance_m: 5,
+        roads_nearest_id: "Mixed",
+      },
+    ]);
+    db.query("DROP TABLE IF EXISTS probe_collection");
+    db.query(buildDropVectorTableSql(table));
+    db.dropFile(file);
   });
 
   it("answers the predicates on a DEGENERATE extent, which a one-point building has", () => {

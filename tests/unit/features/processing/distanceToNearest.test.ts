@@ -259,10 +259,17 @@ describe("buildDistanceSql", () => {
     // §7.7: "beyond it the distance is NULL". In the `ON` clause the LEFT JOIN
     // produces no match at all, so `d` is NULL by the join's own semantics
     // rather than by a second CASE — and the engine may stop looking.
-    expect(sql).toContain('ST_Distance(b."g", s."geom") <= 500');
+    expect(sql).toContain('ST_Distance_GEOS(b."g", s."geom") <= 500');
     expect(sql).not.toContain("HAVING");
-    expect(sql).toContain('ST_Distance(b."g", s."geom") AS "d"');
+    expect(sql).toContain('ST_Distance_GEOS(b."g", s."geom") AS "d"');
     expect(sql).toContain('m."d" AS "roads_distance_m"');
+    // NOT the core `ST_Distance`, and not `ST_DWithin` either: on DuckDB 1.5.5
+    // both answer 0 / true for ANY polygon-to-polygon pair however far apart
+    // (pinned in `crossLayer.test.ts`), and two of §7.7's three proxies are
+    // polygons. This negative assertion is what stops a "simplification" back
+    // to a function that measures a whole layer as 0 m without failing.
+    expect(sql).not.toContain("ST_Distance(");
+    expect(sql).not.toContain("ST_DWithin");
     // The FEATURE proxy, and the answer copied back to every row (§7).
     expect(sql).toContain(
       'WITH b AS (SELECT COALESCE("feature_id", "id") AS f',
@@ -385,7 +392,7 @@ describe("distanceToNearest", () => {
     );
     expect(out.caveats).toEqual([{ cause: "none within 250 m", count: 1 }]);
     expect(distanceStatement(sql)).toContain(
-      'ST_Distance(b."g", s."geom") <= 250',
+      'ST_Distance_GEOS(b."g", s."geom") <= 250',
     );
   });
 

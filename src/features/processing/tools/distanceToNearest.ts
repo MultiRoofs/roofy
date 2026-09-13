@@ -15,7 +15,24 @@
  *  - the nearest id is the source feature's OWN GeoJSON id (`fid`) unless a
  *    property was chosen.
  *
- * `ST_Distance` is 0 when the geometries touch or overlap (§7.7), so no special
+ * THE MEASURE IS `ST_Distance_GEOS`, AND `ST_Distance` IS A BUG HERE. On this
+ * checkout's DuckDB 1.5.5 `spatial`, core `ST_Distance` returns **0** for ANY
+ * polygon-to-polygon pair, however far apart they are — a degenerate envelope
+ * (the one-coordinate building's rectangle) and a GeometryCollection carrying a
+ * polygon included — while every other pairing is right. Two of §7.7's three
+ * proxies ARE polygons (the extent rectangle and the LoD 0 footprint union) and
+ * §7.7's source is "any geometry type", so the core function would answer "0 m"
+ * for every building against a polygon source: a whole layer measured wrong,
+ * silently, under a card saying it was measured. `ST_Distance_GEOS` is correct
+ * on every pairing probed, returns NULL rather than raising on a NULL geometry,
+ * and ships in the `wasm_eh` build the app downloads. Pinned in
+ * `crossLayer.test.ts` ("the CORE ST_Distance is 0 between two polygons"), and
+ * the unit suite asserts the core spelling is ABSENT so nobody simplifies back
+ * to it. (`ST_DWithin` has the same defect; `ST_DWithin_GEOS` is correct and
+ * could bound the join, but one function deciding both the limit and the value
+ * is what keeps them from disagreeing at the boundary.)
+ *
+ * The distance is 0 when the geometries touch or overlap (§7.7), so no special
  * case is written for it: 0 sorts first and is written as 0, which §6.2
  * distinguishes from the NULL of "could not be evaluated".
  *
@@ -108,9 +125,9 @@ export function buildDistanceSql(input: DistanceSqlInput): string {
   return (
     `WITH b AS (${b}), ` +
     `j AS (SELECT b."f" AS "f", (b."g" IS NULL) AS "no_proxy", s."idx" AS "idx", ` +
-    `s."fid" AS "fid", s."props" AS "props", ST_Distance(b."g", s."geom") AS "d" ` +
+    `s."fid" AS "fid", s."props" AS "props", ST_Distance_GEOS(b."g", s."geom") AS "d" ` +
     `FROM b LEFT JOIN ${quoteIdent(input.source)} s ` +
-    `ON b."g" IS NOT NULL AND ST_Distance(b."g", s."geom") <= ${limit}), ` +
+    `ON b."g" IS NOT NULL AND ST_Distance_GEOS(b."g", s."geom") <= ${limit}), ` +
     `r AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY "f" ` +
     `ORDER BY "d" ASC NULLS LAST, "idx" ASC NULLS LAST) AS "rn" FROM j), ` +
     `m AS (SELECT * FROM r WHERE "rn" = 1) ` +
