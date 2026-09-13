@@ -379,16 +379,27 @@ describe("the vector table's lifecycle on the real FIFO", () => {
     // queue for the life of the page.
     holdPrefix = `DROP TABLE IF EXISTS "__src_`;
     const id = submitJoin(zones);
-    await until(() =>
-      sql.some((s) => s.startsWith(`DROP TABLE IF EXISTS "__src_`)),
-    );
+    await until(() => sql.includes(`DROP TABLE IF EXISTS "__src_${id}"`));
+
+    // The state this case is actually about, pinned BEFORE the death: the run
+    // is inside its finalizer, the DROP is in flight and will never answer, and
+    // the only buffer drop so far is the one the CREATE's parse earned.
+    expect(sql).toContain(`DROP TABLE IF EXISTS "__src_${id}"`);
+    const droppedBeforeDeath = dropped.filter(
+      (n) => n === `__src_${id}.json`,
+    ).length;
+    expect(droppedBeforeDeath).toBe(1);
+    expect(runById(id)?.status).toBe("done");
 
     die();
     await settle();
 
-    // The buffer is still released afterwards: `release` carries on past the
-    // death of its first half.
-    expect(dropped).toContain(`__src_${id}.json`);
+    // `release` carried on past the death of its first half: the SECOND drop —
+    // the finalizer's own — is the one that could only have happened after the
+    // race was resolved by the death.
+    expect(dropped.filter((n) => n === `__src_${id}.json`)).toHaveLength(
+      droppedBeforeDeath + 1,
+    );
     expect(await queueIsFree()).toBe(true);
   });
 
