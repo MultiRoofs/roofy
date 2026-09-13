@@ -581,3 +581,77 @@ describe("the SOURCE select and the prefix it names (§7.5, §7.7)", () => {
     ).toEqual({});
   });
 });
+
+/**
+ * A LoD is a statement about ONE layer, so a retarget drops it — but the
+ * MEASURES a single-layer tool writes are not: they are a statement about what
+ * the user wants written, and they survived a retarget before Task 15 taught
+ * the form about a second layer. Only a cross-layer bag names the source.
+ */
+describe("what a retarget keeps (§6's per-tool draft)", () => {
+  /** Two city layers with ready tables — `addCityLayer` merges, so both stay
+   *  candidates. */
+  function twoCityLayers(): readonly [string, string] {
+    return [addCityLayer("Delft", true), addCityLayer("Rotterdam", true)];
+  }
+
+  it("keeps Roof metrics' measures and threshold across a layer change", () => {
+    const [first, second] = twoCityLayers();
+    useProcessingStore.getState().setDraft("roof-metrics", {
+      targetLayerId: first,
+      sourceLayerId: null,
+      scope: "all",
+      lod: null,
+      prefix: "roof_",
+      params: { measures: ["roofArea"], flatThresholdDeg: 12 },
+    });
+    render(<ToolView toolId="roof-metrics" />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Layer" }), {
+      target: { value: second },
+    });
+    const draft = useProcessingStore.getState().drafts["roof-metrics"];
+    expect(draft?.targetLayerId).toBe(second);
+    expect(draft?.params).toEqual({
+      measures: ["roofArea"],
+      flatThresholdDeg: 12,
+    });
+    // The LoD is still dropped — it was a statement about the OLD layer.
+    expect(draft?.lod).toBeNull();
+  });
+
+  it("keeps Measure solids' measures across a layer change", () => {
+    const [first, second] = twoCityLayers();
+    useProcessingStore.getState().setDraft("measure-solids", {
+      targetLayerId: first,
+      sourceLayerId: null,
+      scope: "all",
+      lod: null,
+      prefix: "solid_",
+      params: { measures: ["volume"] },
+    });
+    render(<ToolView toolId="measure-solids" />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Layer" }), {
+      target: { value: second },
+    });
+    expect(
+      useProcessingStore.getState().drafts["measure-solids"]?.params,
+    ).toEqual({ measures: ["volume"] });
+  });
+
+  it("still drops a CROSS-LAYER bag, which names the source's own fields", () => {
+    addCityLayer("Delft", true);
+    const other = addCityLayer("Rotterdam", true);
+    addGeoLayer("Zones", "Polygon");
+    render(<ToolView toolId="join-by-location" />);
+    fireEvent.click(screen.getByRole("checkbox", { name: /zone/ }));
+    expect(
+      useProcessingStore.getState().drafts["join-by-location"]?.params,
+    ).toMatchObject({ fields: [] });
+    fireEvent.change(screen.getByRole("combobox", { name: "Layer" }), {
+      target: { value: other },
+    });
+    expect(
+      useProcessingStore.getState().drafts["join-by-location"]?.params,
+    ).toEqual({});
+  });
+});

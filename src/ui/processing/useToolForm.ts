@@ -594,17 +594,22 @@ export function useToolForm(toolId: ToolId) {
     setDraft: (patch: Partial<ToolDraft>) => {
       // A LoD is a statement about ONE layer (§6's default is read off the
       // target), so changing the target drops it and the default rule above
-      // re-applies on the next render. The PARAMETERS are a statement about the
-      // SOURCE (which fields to copy, which property to write) as well as the
-      // target (the proxy), so changing either drops them and the defaults
-      // re-apply. The patch is spread LAST, so a caller that changes both at
-      // once still gets what it asked for.
+      // re-applies on the next render. The patch is spread LAST, so a caller
+      // that changes both at once still gets what it asked for.
+      //
+      // A CROSS-LAYER bag is a statement about the two layers as well — which
+      // of the SOURCE's fields to copy, which of its properties to write, which
+      // proxy the TARGET can offer — so changing either drops it. A one-layer
+      // tool's parameters name neither: Roof metrics' measures and threshold
+      // and Measure solids' measures are what the user wants WRITTEN, and they
+      // survived a retarget before the form learned about a second layer.
       const retarget =
         patch.targetLayerId !== undefined &&
         patch.targetLayerId !== draft.targetLayerId;
       const resource =
         patch.sourceLayerId !== undefined &&
         patch.sourceLayerId !== draft.sourceLayerId;
+      const dropParams = crossLayer && (retarget || resource);
       useProcessingStore.getState().setDraft(toolId, {
         ...draft,
         // The DERIVED prefix is never stored: it is a function of the source,
@@ -613,7 +618,7 @@ export function useToolForm(toolId: ToolId) {
         // one.
         prefix: base.prefix,
         ...(retarget ? { lod: null } : {}),
-        ...(retarget || resource ? { params: {} } : {}),
+        ...(dropParams ? { params: {} } : {}),
         ...patch,
       });
     },
