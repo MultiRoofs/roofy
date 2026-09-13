@@ -205,6 +205,9 @@ function runFixture(patch: Partial<RunRecord>): RunRecord {
     warnings: [],
     undoable: false,
     stale: false,
+    destination: "layer",
+    newLayerName: null,
+    newLayerId: null,
     note: null,
     ...patch,
   };
@@ -379,11 +382,10 @@ describe("ToolView", () => {
     );
   });
 
-  it("opens OUTPUT with Write to on the target, New layer offered but staged off", () => {
+  it("opens OUTPUT with Write to on the target, New layer offered beside it", () => {
     // §6: OUTPUT "starts with the destination, Write to". BOTH radios are
-    // drawn; `New layer` is disabled until a tool's `destinations` include it
-    // (`outputDestination.test.tsx` owns that gate), so the user can see where
-    // the columns are going and what the other destination would be.
+    // drawn and both are live for a city tool; which tools offer `New layer`
+    // at all, and when it is disabled, is `outputDestination.test.tsx`'s gate.
     addCityLayer();
     render(<ToolView toolId="height-from-extent" />);
     const writeTo = screen.getByRole("radio", {
@@ -393,7 +395,7 @@ describe("ToolView", () => {
     expect(writeTo).toBeEnabled();
     const newLayer = screen.getByRole("radio", { name: "New layer" });
     expect(newLayer).not.toBeChecked();
-    expect(newLayer).toBeDisabled();
+    expect(newLayer).toBeEnabled();
   });
 
   it("reads a count that has not arrived as pending, not as zero", () => {

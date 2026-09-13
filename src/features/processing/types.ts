@@ -265,6 +265,22 @@ export interface RunRecord {
   readonly undoable: boolean;
   /** The layer's table was rebuilt after the run (spec §7). */
   readonly stale: boolean;
+  /** Spec §6's OUTPUT destination, frozen at Run. */
+  readonly destination: ToolDestination;
+  /** §6's Name field as the user froze it; null for a This-layer run. Kept so
+   *  §6.3's "Edit & run" reopens the form on the run it is editing. */
+  readonly newLayerName: string | null;
+  /**
+   * The layer this run CREATED, once it has been published; null for every
+   * This-layer run and for a New-layer run that has not reached its
+   * publication step.
+   *
+   * §6.2's card reads `newLayerId ?? targetLayerId` for Open table, Style by
+   * result and Zoom to layer, so the actions point at the COPY rather than at
+   * the untouched target; `undoRun` reads it to know that Undo means "remove
+   * the layer".
+   */
+  readonly newLayerId: string | null;
   /** Set when the run finished before the cancel arrived (spec §6.1). */
   readonly note: string | null;
 }

@@ -73,7 +73,11 @@ import {
 import { ensureModelCrsLoadable } from "../layers/ensureCrs";
 import { epsgForLayer } from "../../scene/cursorCrsReadout";
 import { SOURCE_NEEDS_AREAS } from "./crossLayerParams";
-import { STREAMING_NO_NEW_LAYER } from "./deriveLayer";
+import {
+  derivedLayerName,
+  prepareDerivedCityLayer,
+  STREAMING_NO_NEW_LAYER,
+} from "./deriveLayer";
 import { reprojectGeoLayer, type VectorPreflight } from "./vectorSource";
 import { createVectorTable, type VectorTableHandle } from "./vectorTable";
 import { runById, useProcessingStore } from "./processingStore";
@@ -332,7 +336,38 @@ function sameGeoSource(
   );
 }
 
-const undoState = new Map<string, UndoState>();
+/**
+ * What Undo MEANS for a run, which is a question about its DESTINATION (§6.2).
+ *
+ * "This layer": columns the run created are dropped and columns it replaced
+ * get their previous values back — from a backup table for a city target, from
+ * the captured per-feature values for a vector one. That is {@link UndoState},
+ * which already discriminates on `kind: "city" | "vector"`.
+ * "New layer": the whole Undo is removing the layer — nothing was written to
+ * the target, so there is no backup and nothing to restore.
+ *
+ * NESTED, not intersected: `{ kind: "columns" } & UndoState` is `never`,
+ * because `UndoState`'s own `kind` is already `"city" | "vector"` and no value
+ * can carry both. So the destination's discriminant wraps the target's, and
+ * the two questions stay separable — "what does Undo mean here" and "what kind
+ * of thing does it put back".
+ */
+type RunUndo =
+  | { readonly kind: "columns"; readonly state: UndoState }
+  | {
+      readonly kind: "layer";
+      readonly layerId: string;
+      /** The PARENT's table, for the record — nothing reads it to undo. */
+      readonly table: string;
+      /**
+       * Provenance run ids the copy carried at publication: the inherited ones
+       * plus this run's. A column whose provenance names any OTHER run is one
+       * the derived layer grew afterwards, which §6.2 blocks the Undo on.
+       */
+      readonly runIds: ReadonlySet<string>;
+    };
+
+const undoState = new Map<string, RunUndo>();
 /**
  * What each run froze, kept for as long as its card is in the history.
  *
@@ -411,6 +446,46 @@ export function summarise(
     measured: result.measured,
     skipped: result.skipped,
     nonNullByColumn,
+  };
+}
+
+/**
+ * Spec §6.2's New-layer card: "Created Delft · solids · 312 buildings · 37
+ * invalid solids (no volume) · 2.4 s".
+ *
+ * It DELEGATES to {@link summarise} and replaces the head segment rather than
+ * rebuilding the line, so the caveat and skipped segments stay in one place: a
+ * tool that adds one gets it on both destinations for free. The count is the
+ * FEATURES the copy holds (the frozen scope), not the measured count — the
+ * sentence is about the layer that now exists.
+ *
+ * `features === null` keeps the tool's own head segment instead, for a copy
+ * whose head already names what it holds: §7.6's card is "6 areas aggregated
+ * over 1,204 buildings", where the 6 are the target AREAS the copy holds and
+ * the 1,204 are the SOURCE's buildings. Replacing that with a building count
+ * would put the source's number on the created layer — the one number on the
+ * card that would be about another layer. Both branches are spec-verbatim
+ * fragments: §6.2's "Created <name>" and, for the second, §7.6's own line.
+ */
+export function summariseCreated(
+  result: ToolResult,
+  elapsedMs: number,
+  layerName: string,
+  features: number | null,
+  options: { readonly streaming: boolean },
+): RunSummary {
+  const base = summarise(result, elapsedMs, options);
+  const segments = base.line.split(" · ");
+  return {
+    ...base,
+    line:
+      features === null
+        ? [`Created ${layerName}`, ...segments].join(" · ")
+        : [
+            `Created ${layerName}`,
+            plural(features, "building", "buildings"),
+            ...segments.slice(1),
+          ].join(" · "),
   };
 }
 
@@ -583,6 +658,9 @@ function queueRun(frozen: FrozenRequest): string {
     params: request.params,
     prefix: request.prefix,
     columns: request.columns.map((c) => c.name),
+    destination: request.destination,
+    newLayerName: request.newLayerName,
+    newLayerId: null,
     status: "queued",
     phase: null,
     startedAt: Date.now(),
@@ -629,10 +707,14 @@ function discardUndo(id: string): void {
   const state = undoState.get(id);
   if (!state) return;
   undoState.delete(id);
+  // A New-layer run's Undo holds no backup table — its whole undo is removing
+  // the layer, and the layer's own table goes with it through
+  // `layerTableLifecycle`'s removal branch. There is nothing to drop here.
+  if (state.kind === "layer") return;
   // A VECTOR run's Undo holds no database resource at all — its copy is one
   // JavaScript object, which the Map delete above has already released.
-  if (state.kind !== "city") return;
-  const backup = state.backupTable;
+  if (state.state.kind !== "city") return;
+  const backup = state.state.backupTable;
   if (!backup) return;
   // On the queue, like every other statement about a layer table, and NOT
   // awaited: dropping a backup is housekeeping, never something a card waits on.
@@ -697,6 +779,11 @@ function stealUndo(runId: string, layerId: string, result: ToolResult): void {
     if (
       other.id !== runId &&
       other.targetLayerId === layerId &&
+      // A NEW-LAYER run wrote nothing to this layer — its `targetLayerId` is
+      // the parent it copied FROM. Its Undo removes the copy, and no write
+      // here can make that stale (§6.2's own block is the run-history scan
+      // in `newLayerUndoBlock`).
+      other.newLayerId === null &&
       other.undoable &&
       // Case-insensitively, like every other comparison between column names:
       // an earlier run recorded under a different spelling still owns the
@@ -732,6 +819,41 @@ function rollBackProvenance(
       registry.removeColumns(layerId, [col]);
     }
   }
+}
+
+/** Spec §6.2's reason a finished New-layer run can no longer be undone. */
+const USED_BY_LATER_RUN =
+  "Used by a later run; remove the layer from the layer list instead";
+
+/**
+ * §6.2: "Undo of a New-layer run is available only while the derived layer is
+ * untouched as data: it has not been the target or source of any later run
+ * (queued, running or done) and has no computed columns of its own. Renaming
+ * or restyling it does not block Undo."
+ *
+ * Null for a This-layer run — that Undo has its own rules — and null when the
+ * block does not apply, so the card can use it directly as its disabled reason.
+ */
+export function newLayerUndoBlock(run: RunRecord): string | null {
+  const layerId = run.newLayerId;
+  if (layerId === null) return null;
+  const used = useProcessingStore
+    .getState()
+    .runs.some(
+      (other) =>
+        other.id !== run.id &&
+        (other.targetLayerId === layerId || other.sourceLayerId === layerId),
+    );
+  if (used) return USED_BY_LATER_RUN;
+  const state = undoState.get(run.id);
+  // No recorded state (an engine restart, an eviction): the card's `undoable`
+  // is the authority and this adds no reason of its own. `kind !== "layer"` is
+  // the same silence for a This-layer run, whose Undo has its own rules.
+  if (state === undefined || state.kind !== "layer") return null;
+  const grown = Object.values(
+    useComputedColumnStore.getState().byLayer[layerId] ?? {},
+  ).some((p) => !state.runIds.has(p.runId));
+  return grown ? USED_BY_LATER_RUN : null;
 }
 
 /**
@@ -806,6 +928,29 @@ async function execute(
     patch(id, { log: [...log] });
     if (!out.ok) throw new Error(out.message);
     return out;
+  };
+  /**
+   * A run that matched nothing: §6.2's card with no Undo and nothing written.
+   *
+   * ONE answer for all three publications — the vector one, the city write and
+   * §6.1's New-layer branch — because "nothing matched" is the same fact
+   * whatever the destination: the write's `UPDATE … WHERE "id" IN ()` is a
+   * SYNTAX error, and a run that measured nothing has no column to own. So it
+   * is a DONE run with a summary, not a failure.
+   */
+  const doneWithNothing = (result: ToolResult, streaming: boolean): void => {
+    const summary = summarise(result, elapsed(), { streaming });
+    patch(id, {
+      status: "done",
+      phase: null,
+      elapsedMs: elapsed(),
+      summary,
+      log: [...log],
+      undoable: false,
+    });
+    if (runById(id)?.status === "done") {
+      useProcessingStore.getState().pushNotice(summary.line);
+    }
   };
   try {
     // Cancelled while it waited its turn. The executor never runs, and the card
@@ -1234,6 +1379,150 @@ async function execute(
     if (!record) return;
     const raw = await executor(record, ctx);
     if (signal.aborted) throw new CancelledError();
+
+    // §6.1's OTHER publication, and it is dispatched HERE — before the vector
+    // publication below and before the city write — so that no This-layer
+    // publication can run for a New-layer run. The compute above is identical
+    // for both destinations (same table, same frozen ids, same executor) and
+    // the branch is at the WRITE and nowhere else: a second path through the
+    // executors would be the place the two destinations silently diverge.
+    if (request.destination === "new") {
+      if (target.kind !== "city") {
+        // A derived VECTOR layer is Task 23's; until then no vector-target
+        // tool offers `"new"` and the head's own guard refuses the request
+        // first. Spelled out all the same, because falling through to the
+        // vector publication would write into the layer §6 promises to leave
+        // untouched.
+        patch(id, {
+          status: "failed",
+          phase: null,
+          error: "Not available yet",
+          elapsedMs: elapsed(),
+        });
+        return;
+      }
+      // The PARENT table's spelling wins, exactly as for a This-layer run:
+      // the copy is `SELECT *` of that table, so it has the same columns.
+      const result = canonicalise(raw, table.columns);
+      if (result.rows.size === 0) {
+        // Nothing matched, so there is nothing to publish: a copy whose
+        // declared columns hold no value anywhere would be a layer made of
+        // the run's failure to measure.
+        doneWithNothing(result, layer.isStreaming);
+        return;
+      }
+      patch(id, { phase: "write" });
+      const plan = await prepareDerivedCityLayer({
+        runId: id,
+        parent: layer,
+        parentTable: table,
+        // The frozen name (§6.1), with the prefill as the fallback for a
+        // request built without one. The source's name comes off the RECORD
+        // (`runById`), which is where Task 11 put it — `execute` holds the
+        // source's id, not its name.
+        name:
+          request.newLayerName ??
+          derivedLayerName(
+            layer.name,
+            request.toolId,
+            runById(id)?.sourceName ?? null,
+          ),
+        rowIds: scope.featureIds,
+        columns: result.columns,
+        rows: result.rows,
+        signal,
+        // The closure, not `ctx.query`: it is the same function, and reading
+        // it off the context declares a METHOD reference, which the lint
+        // baseline refuses (`unbound-method`).
+        query,
+      });
+      // §6.1: "a cancel (or a failure) that lands BEFORE publication discards
+      // every partial resource … and the run reads cancelled with nothing
+      // changed". This is the LAST moment that is true, and the ONLY
+      // `discard()` the caller owns: the preparation drops its own table when
+      // it throws, and nothing below this line may reach `discard()` — after
+      // `publish()` the table belongs to a layer the user can see.
+      if (signal.aborted) {
+        await plan.discard();
+        throw new CancelledError();
+      }
+      const newLayerId = plan.publish();
+      // BOTH stores. A derived CITY layer's row is in `layerStore`; a derived
+      // VECTOR layer's (Task 23) is in `geoLayerStore`, and reading only the
+      // city one would give `undefined` — so a name that publication had to
+      // disambiguate would never reach the card or A15's note.
+      const name =
+        useLayerStore.getState().layers.find((l) => l.id === newLayerId)
+          ?.name ??
+        useGeoLayerStore.getState().layers.find((l) => l.id === newLayerId)
+          ?.name ??
+        plan.name;
+
+      // The copy's own new columns, with the run's real provenance — through
+      // the SAME publisher both This-layer paths use, so there is one rule for
+      // what a badge says. The INHERITED entries were copied inside
+      // `publish()`.
+      //
+      // The scope is handed over with `total: scope.count`: the copy holds
+      // exactly the scoped features, so the run covered ALL of it and the
+      // tooltip must not read "312 of 1,115" about a layer of 312.
+      publishProvenance(id, newLayerId, result, tool.name, request, {
+        featureIds: scope.featureIds,
+        count: scope.count,
+        total: scope.count,
+      });
+
+      // RE-READ, and this is the bug it is written against: `getState()`
+      // returns a SNAPSHOT, and every `setProvenance` above replaced
+      // `byLayer` with a new object. A set built from a snapshot taken BEFORE
+      // them holds none of this run's entries, so `newLayerUndoBlock` would
+      // see every column of the copy as one it "grew afterwards" and disable
+      // Undo the instant the card appeared.
+      const carried =
+        useComputedColumnStore.getState().byLayer[newLayerId] ?? {};
+      undoState.set(id, {
+        kind: "layer",
+        layerId: newLayerId,
+        table: table.table,
+        // Everything the copy carried the moment it was published — the
+        // inherited runs plus this one. Anything that appears later is a
+        // column of its OWN, and blocks the Undo.
+        runIds: new Set(Object.values(carried).map((p) => p.runId)),
+      });
+
+      const summary = summariseCreated(result, elapsed(), name, scope.count, {
+        streaming: layer.isStreaming,
+      });
+      const notes = [
+        // [adapted copy A15] — §10 scenario 12's "the card says so".
+        name === plan.name
+          ? null
+          : `Renamed to "${name}": a layer already had that name`,
+        // §6.1: a cancel that lost the race is told, not hidden.
+        signal.aborted ? "finished before the cancel arrived" : null,
+      ].filter((n): n is string => n !== null);
+      patch(id, {
+        status: "done",
+        phase: null,
+        elapsedMs: elapsed(),
+        summary,
+        log: [...log],
+        columns: result.columns.map((c) => c.name),
+        newLayerId,
+        undoable: true,
+        note: notes.length === 0 ? null : notes.join(" · "),
+      });
+      // Read BACK, never assumed, exactly as the city write does: a run
+      // something else has already ended keeps no Undo, and says nothing in
+      // the toast.
+      if (runById(id)?.status !== "done") {
+        discardUndo(id);
+        return;
+      }
+      useProcessingStore.getState().pushNotice(summary.line);
+      return;
+    }
+
     if (target.kind === "vector") {
       // §7.6: the durable copy of a vector layer's results is its FEATURE
       // PROPERTIES. So no table, no transaction and no model — but the same
@@ -1278,22 +1567,8 @@ async function execute(
       ].map((name) => ({ name }));
       const result = canonicalise(raw, existingProperties);
       if (result.rows.size === 0) {
-        // Nothing matched, so there is nothing to merge and no column to own —
-        // a DONE run with a summary and no Undo, exactly as on the city side.
-        const summary = summarise(result, elapsed(), {
-          streaming: layer.isStreaming,
-        });
-        patch(id, {
-          status: "done",
-          phase: null,
-          elapsedMs: elapsed(),
-          summary,
-          log: [...log],
-          undoable: false,
-        });
-        if (runById(id)?.status === "done") {
-          useProcessingStore.getState().pushNotice(summary.line);
-        }
+        // Nothing matched, so there is nothing to merge and no column to own.
+        doneWithNothing(result, layer.isStreaming);
         return;
       }
       patch(id, { phase: "write" });
@@ -1335,16 +1610,19 @@ async function execute(
       publishProvenance(id, verified.id, result, tool.name, request, scope);
       stealUndo(id, verified.id, result);
       undoState.set(id, {
-        kind: "vector",
-        layerId: verified.id,
-        previousValues,
-        source: geoSourceIdentity(verified),
-        created: result.columns
-          .map((c) => c.name)
-          .filter((name) => !existing.has(name)),
-        replaced: result.columns
-          .map((c) => c.name)
-          .filter((name) => existing.has(name)),
+        kind: "columns",
+        state: {
+          kind: "vector",
+          layerId: verified.id,
+          previousValues,
+          source: geoSourceIdentity(verified),
+          created: result.columns
+            .map((c) => c.name)
+            .filter((name) => !existing.has(name)),
+          replaced: result.columns
+            .map((c) => c.name)
+            .filter((name) => existing.has(name)),
+        },
       });
       // Evicted while it ran: no card, so nothing can press Undo.
       if (!runById(id)) discardUndo(id);
@@ -1372,23 +1650,8 @@ async function execute(
     const result = canonicalise(raw, table.columns);
 
     if (result.rows.size === 0) {
-      // Nothing to write. The write's `UPDATE … WHERE "id" IN ()` is a SYNTAX
-      // error, and a run that measured nothing has no columns to own — so it is
-      // a DONE run with a summary and no Undo, not a failure.
-      const summary = summarise(result, elapsed(), {
-        streaming: layer.isStreaming,
-      });
-      patch(id, {
-        status: "done",
-        phase: null,
-        elapsedMs: elapsed(),
-        summary,
-        log: [...log],
-        undoable: false,
-      });
-      if (runById(id)?.status === "done") {
-        useProcessingStore.getState().pushNotice(summary.line);
-      }
+      // Nothing to write.
+      doneWithNothing(result, layer.isStreaming);
       return;
     }
 
@@ -1452,17 +1715,20 @@ async function execute(
     stealUndo(id, layer.id, result);
 
     undoState.set(id, {
-      kind: "city",
-      table: table.table,
-      backupTable: written.backupTable,
-      created: result.columns
-        .map((c) => c.name)
-        .filter((name) => !existing.has(name)),
-      replaced: result.columns
-        .map((c) => c.name)
-        .filter((name) => existing.has(name)),
-      ids: scope.featureIds === null ? null : [...result.rows.keys()],
-      previousModelValues,
+      kind: "columns",
+      state: {
+        kind: "city",
+        table: table.table,
+        backupTable: written.backupTable,
+        created: result.columns
+          .map((c) => c.name)
+          .filter((name) => !existing.has(name)),
+        replaced: result.columns
+          .map((c) => c.name)
+          .filter((name) => existing.has(name)),
+        ids: scope.featureIds === null ? null : [...result.rows.keys()],
+        previousModelValues,
+      },
     });
     // Evicted while it ran: there is no card to press Undo on, so the backup the
     // write just made would never be read. (The eviction diff in `submitRun`
@@ -1590,7 +1856,31 @@ export async function undoRun(id: string): Promise<void> {
   const run = runById(id);
   const state = undoState.get(id);
   if (!run || !run.undoable || !state) return;
-  if (state.kind === "vector") {
+  // §6.2: "Undo (removes the new layer; asks no confirmation)". Nothing was
+  // written to the target, so there is no transaction to reverse — and no
+  // reason to take a FIFO slot for it either.
+  if (state.kind === "layer") {
+    const blocked = newLayerUndoBlock(run);
+    if (blocked !== null) {
+      patch(id, { error: blocked });
+      return;
+    }
+    // OUTSIDE the queue, and that is a hard fact rather than a preference:
+    // `removeLayer` reaches `layerTableLifecycle`'s removal branch, which
+    // calls `dropLayerTable` — and that ENQUEUES. Removing from inside a FIFO
+    // slot would deadlock exactly as `enqueueLayerTable` would (Design
+    // decision (g)).
+    useLayerStore.getState().removeLayer(state.layerId);
+    useComputedColumnStore.getState().clearLayer(state.layerId);
+    undoState.delete(id);
+    patch(id, { undoable: false, note: "Undone" });
+    return;
+  }
+  // Everything below is the This-layer Undo, unchanged except that the state
+  // it reads is now one level in. ONE new binding rather than a rename at
+  // every site, so the diff is the wrapper and not the Undo.
+  const undo = state.state;
+  if (undo.kind === "vector") {
     // ON THE FIFO, like the city Undo, although it writes no table: a
     // cross-layer run holds that queue for its whole life and has CAPTURED this
     // layer's records and built its preflight from them, so replacing the
@@ -1606,7 +1896,7 @@ export async function undoRun(id: string): Promise<void> {
       if (!runById(id)?.undoable || !undoState.has(id)) return;
       const live = useGeoLayerStore
         .getState()
-        .layers.find((l) => l.id === state.layerId);
+        .layers.find((l) => l.id === undo.layerId);
       // Gone, of another kind, or showing a DIFFERENT document than the one
       // this run wrote into (a re-link, a re-prepare): the ids this Undo holds
       // name features of a file the user has replaced, and there is nothing to
@@ -1619,7 +1909,7 @@ export async function undoRun(id: string): Promise<void> {
       }
       // NARROWED once; every read below is off this variable.
       const verified: GeoJsonLayer = live;
-      if (!sameGeoSource(verified, state.source)) {
+      if (!sameGeoSource(verified, undo.source)) {
         undoState.delete(id);
         patch(id, { undoable: false });
         return;
@@ -1628,14 +1918,14 @@ export async function undoRun(id: string): Promise<void> {
       // a stored snapshot, or a later run's disjoint results would go with it.
       const restored = restoreGeoDocumentProperties(
         verified.config.preparedData,
-        state.previousValues,
+        undo.previousValues,
       );
       if (restored !== null) {
         useGeoLayerStore
           .getState()
-          .replaceGeoPreparedData(state.layerId, restored);
+          .replaceGeoPreparedData(undo.layerId, restored);
       }
-      rollBackProvenance(state.layerId, state.created, state.replaced);
+      rollBackProvenance(undo.layerId, undo.created, undo.replaced);
       undoState.delete(id);
       patch(id, { undoable: false, note: "Undone" });
     });
@@ -1658,11 +1948,11 @@ export async function undoRun(id: string): Promise<void> {
     try {
       undone = await raced(
         undoComputedColumns({
-          table: state.table,
-          backupTable: state.backupTable,
-          created: state.created,
-          replaced: state.replaced,
-          ids: state.ids,
+          table: undo.table,
+          backupTable: undo.backupTable,
+          created: undo.created,
+          replaced: undo.replaced,
+          ids: undo.ids,
         }),
         null,
       );
@@ -1696,8 +1986,8 @@ export async function undoRun(id: string): Promise<void> {
   }
   useLayerStore
     .getState()
-    .mergeAttributes(run.targetLayerId, state.previousModelValues);
-  rollBackProvenance(run.targetLayerId, state.created, state.replaced);
+    .mergeAttributes(run.targetLayerId, undo.previousModelValues);
+  rollBackProvenance(run.targetLayerId, undo.created, undo.replaced);
   undoState.delete(id);
   patch(id, { undoable: false, note: "Undone" });
 }
@@ -1880,7 +2170,16 @@ export function installStaleWatcher(): () => void {
         // the compute layer for every one-layer tool.
         const computeLayerId =
           frozenById.get(run.id)?.computeLayerId ?? run.targetLayerId;
-        if (computeLayerId === layerId && run.status === "done" && !run.stale) {
+        if (
+          computeLayerId === layerId &&
+          // §6: a rebuild of the PARENT says nothing about the copy — "a
+          // derived layer is independent of its parent from publication on".
+          // The copy's own table is adopted, never rebuilt, so no rebuild of
+          // it can reach here either.
+          run.newLayerId === null &&
+          run.status === "done" &&
+          !run.stale
+        ) {
           patch(run.id, { stale: true, undoable: false });
           discardUndo(run.id);
         }

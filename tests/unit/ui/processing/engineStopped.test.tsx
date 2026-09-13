@@ -141,6 +141,9 @@ function doneRun(layerId: string, patch: Partial<RunRecord> = {}): RunRecord {
     warnings: [],
     undoable: true,
     stale: false,
+    destination: "layer",
+    newLayerName: null,
+    newLayerId: null,
     note: null,
     ...patch,
   };

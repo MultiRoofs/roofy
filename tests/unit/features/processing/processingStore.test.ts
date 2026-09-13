@@ -30,6 +30,9 @@ function run(id: string, patch: Partial<RunRecord> = {}): RunRecord {
     warnings: [],
     undoable: false,
     stale: false,
+    destination: "layer",
+    newLayerName: null,
+    newLayerId: null,
     note: null,
     ...patch,
   };

@@ -51,6 +51,9 @@ function runFixture(patch: Partial<RunRecord>): RunRecord {
     warnings: [],
     undoable: true,
     stale: false,
+    destination: "layer",
+    newLayerName: null,
+    newLayerId: null,
     note: null,
     ...patch,
   };
@@ -163,8 +166,8 @@ describe("RecentRuns", () => {
       lod: null,
       prefix: "extent_",
       params: {},
-      // The RECORD carries no destination yet, so a reopened run offers the
-      // one every run of this milestone used.
+      // §6.1 froze the destination and the name onto the record, and §6.3's
+      // "the same parameters" includes them.
       destination: "layer",
       newLayerName: null,
     });
@@ -172,6 +175,27 @@ describe("RecentRuns", () => {
     // §5: it opens the form "so parameters can be changed" — so the run's own
     // result card must not be sitting over it, locked.
     expect(useProcessingStore.getState().dismissedRunIds).toContain("r1");
+  });
+
+  it("reopens a New-layer run on New layer, under the name it published", () => {
+    // §6.3's "the same parameters": a destination restored as "This layer"
+    // would silently retarget the reopened run at the layer the original one
+    // deliberately left untouched.
+    useProcessingStore.getState().upsertRun(
+      runFixture({
+        destination: "new",
+        newLayerName: "Delft · extent",
+        newLayerId: "NEW",
+      }),
+    );
+    render(<RecentRuns />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit & run" }));
+    expect(
+      useProcessingStore.getState().drafts["height-from-extent"],
+    ).toMatchObject({
+      destination: "new",
+      newLayerName: "Delft · extent",
+    });
   });
 
   it("clears the LATEST done card of the pair, not only the row clicked", () => {

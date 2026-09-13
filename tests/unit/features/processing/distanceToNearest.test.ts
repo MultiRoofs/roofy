@@ -152,6 +152,9 @@ function run(
     warnings: [],
     undoable: false,
     stale: false,
+    destination: "layer",
+    newLayerName: null,
+    newLayerId: null,
     note: null,
     ...over,
   };

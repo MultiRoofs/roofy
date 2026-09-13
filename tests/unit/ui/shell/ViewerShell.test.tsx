@@ -45,6 +45,9 @@ function runRecord(status: RunRecord["status"]): RunRecord {
     warnings: [],
     undoable: false,
     stale: false,
+    destination: "layer",
+    newLayerName: null,
+    newLayerId: null,
     note: null,
   };
 }

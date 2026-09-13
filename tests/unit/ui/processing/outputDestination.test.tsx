@@ -175,13 +175,13 @@ const thisLayerRadio = () =>
 /**
  * Give ONE tool the `"new"` destination for the length of one case.
  *
- * This task deliberately ships `destinations: ["layer"]` on all seven entries —
- * the alternative, shipping `"new"` early so a test can click the radio, is
- * exactly the "radio reachable before the executor" a reviewer must reject. So
- * the cases that exercise the Name field override the registry entry for their
- * own duration and put it back. `vi.spyOn(tool, "destinations", "get")` cannot
- * be used: `destinations` is a data property on an object literal, not an
- * accessor. The later tasks delete this helper with the last `["layer"]`.
+ * The six CITY tools ship it, so nothing about them is staged here any more.
+ * `aggregate-per-area` is the last `["layer"]` entry — Task 23 publishes a
+ * derived VECTOR layer and flips it — and the two cases that need §7.6's
+ * reversed direction override that entry for their own duration and put it
+ * back. `vi.spyOn(tool, "destinations", "get")` cannot be used:
+ * `destinations` is a data property on an object literal, not an accessor.
+ * Task 23 deletes this helper with the last `["layer"]`.
  */
 function withNewLayer(toolId: string, body: () => void): void {
   const tool = TOOLS.find((t) => t.id === toolId);
@@ -225,25 +225,28 @@ describe("OUTPUT destination", () => {
     render(<ToolView toolId="height-from-extent" />);
     expect(thisLayerRadio().checked).toBe(true);
     expect(newLayerRadio().checked).toBe(false);
+    // Live in the shipped registry now that the six city tools declare
+    // `"new"`: nothing stages it for this case.
+    expect(newLayerRadio().disabled).toBe(false);
   });
 
   it("disables New layer for a tool whose destinations do not include it", () => {
-    // The staging gate: every entry is `["layer"]` until the executor tasks
-    // flip them, so the radio is visible (§6 draws two) and unreachable.
-    addCityLayer();
-    render(<ToolView toolId="height-from-extent" />);
+    // `aggregate-per-area` is the one entry still `["layer"]` (Task 23 flips
+    // it), so the radio is visible (§6 draws two) and unreachable — and this
+    // case now asks a real tool rather than a staged one.
+    addCityLayer("Delft");
+    addZones();
+    render(<ToolView toolId="aggregate-per-area" />);
     expect(newLayerRadio().disabled).toBe(true);
     expect(screen.queryByText("Name")).toBeNull();
   });
 
   it("shows the Name field prefilled once New layer is chosen", () => {
-    withNewLayer("height-from-extent", () => {
-      addCityLayer();
-      render(<ToolView toolId="height-from-extent" />);
-      fireEvent.click(newLayerRadio());
-      const name = screen.getByLabelText("Name") as HTMLInputElement;
-      expect(name.value).toBe("Delft · extent");
-    });
+    addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    fireEvent.click(newLayerRadio());
+    const name = screen.getByLabelText("Name") as HTMLInputElement;
+    expect(name.value).toBe("Delft · extent");
   });
 
   it("prefills a VECTOR target's own name, which `target` does not carry", () => {
@@ -263,80 +266,72 @@ describe("OUTPUT destination", () => {
   });
 
   it("flags an EMPTY name inline at Run and refuses to run", () => {
-    withNewLayer("height-from-extent", () => {
-      addCityLayer();
-      render(<ToolView toolId="height-from-extent" />);
-      fireEvent.click(newLayerRadio());
-      fireEvent.change(screen.getByLabelText("Name"), {
-        target: { value: "   " },
-      });
-      expect(screen.getByRole("alert").textContent).toBe("Name the new layer");
-      expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    fireEvent.click(newLayerRadio());
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "   " },
     });
+    expect(screen.getByRole("alert").textContent).toBe("Name the new layer");
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
 
   it("flags a name an existing layer already has, GEO layers included", () => {
-    withNewLayer("height-from-extent", () => {
-      addCityLayer();
-      useGeoLayerStore.getState().addGeoLayer({
-        kind: "geojson",
-        name: "Zones",
-        config: { data: { type: "FeatureCollection", features: [] } },
-      });
-      render(<ToolView toolId="height-from-extent" />);
-      fireEvent.click(newLayerRadio());
-      fireEvent.change(screen.getByLabelText("Name"), {
-        target: { value: " zones " },
-      });
-      expect(screen.getByRole("alert").textContent).toBe(
-        "A layer is already called that",
-      );
-      expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    addCityLayer();
+    useGeoLayerStore.getState().addGeoLayer({
+      kind: "geojson",
+      name: "Zones",
+      config: { data: { type: "FeatureCollection", features: [] } },
     });
+    render(<ToolView toolId="height-from-extent" />);
+    fireEvent.click(newLayerRadio());
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: " zones " },
+    });
+    expect(screen.getByRole("alert").textContent).toBe(
+      "A layer is already called that",
+    );
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
 
   it("scopes the replace warning to the COPY when writing to a new layer", () => {
-    withNewLayer("height-from-extent", () => {
-      const id = addCityLayer("Delft", [
-        column("id"),
-        column("extent_height_m"),
-        column("extent_zmin_m"),
-      ]);
-      // Both existing columns are INHERITED computed ones; a source column of
-      // the same name is still the prefix error, unchanged.
-      for (const name of ["extent_height_m", "extent_zmin_m"]) {
-        useComputedColumnStore.getState().setProvenance(id, name, {
-          runId: "run_0",
-          toolName: "Height from extent",
-          summary: "All 2 buildings",
-          at: Date.now(),
-          partial: null,
-          previous: null,
-        });
-      }
-      render(<ToolView toolId="height-from-extent" />);
-      fireEvent.click(newLayerRadio());
-      expect(
-        screen.getByText(
-          "2 inherited computed columns will be replaced in the new layer",
-        ),
-      ).toBeTruthy();
-      expect(
-        screen.queryByText(/of these columns exist; they will be replaced/),
-      ).toBeNull();
-    });
+    const id = addCityLayer("Delft", [
+      column("id"),
+      column("extent_height_m"),
+      column("extent_zmin_m"),
+    ]);
+    // Both existing columns are INHERITED computed ones; a source column of
+    // the same name is still the prefix error, unchanged.
+    for (const name of ["extent_height_m", "extent_zmin_m"]) {
+      useComputedColumnStore.getState().setProvenance(id, name, {
+        runId: "run_0",
+        toolName: "Height from extent",
+        summary: "All 2 buildings",
+        at: Date.now(),
+        partial: null,
+        previous: null,
+      });
+    }
+    render(<ToolView toolId="height-from-extent" />);
+    fireEvent.click(newLayerRadio());
+    expect(
+      screen.getByText(
+        "2 inherited computed columns will be replaced in the new layer",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(/of these columns exist; they will be replaced/),
+    ).toBeNull();
   });
 
   it("freezes the destination and the name into the request", () => {
-    withNewLayer("height-from-extent", () => {
-      addCityLayer();
-      render(<ToolView toolId="height-from-extent" />);
-      fireEvent.click(newLayerRadio());
-      fireEvent.submit(screen.getByRole("button", { name: "Run" }));
-      expect(vi.mocked(submitRun).mock.calls[0]?.[0]).toMatchObject({
-        destination: "new",
-        newLayerName: "Delft · extent",
-      });
+    addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    fireEvent.click(newLayerRadio());
+    fireEvent.submit(screen.getByRole("button", { name: "Run" }));
+    expect(vi.mocked(submitRun).mock.calls[0]?.[0]).toMatchObject({
+      destination: "new",
+      newLayerName: "Delft · extent",
     });
   });
 
@@ -351,40 +346,36 @@ describe("OUTPUT destination", () => {
   });
 
   it("refuses New layer on a STREAMING target, with A2's reason", () => {
-    withNewLayer("height-from-extent", () => {
-      addCityLayer("Delft", [], true);
-      render(<ToolView toolId="height-from-extent" />);
-      expect(newLayerRadio().disabled).toBe(true);
-      expect(
-        screen.getByText(
-          "New layer is not available for a streaming layer: its loaded buildings carry no geometry to copy.",
-        ),
-      ).toBeTruthy();
-    });
+    addCityLayer("Delft", [], true);
+    render(<ToolView toolId="height-from-extent" />);
+    expect(newLayerRadio().disabled).toBe(true);
+    expect(
+      screen.getByText(
+        "New layer is not available for a streaming layer: its loaded buildings carry no geometry to copy.",
+      ),
+    ).toBeTruthy();
   });
 
   it("REFUSES RUN when a chosen New layer is retargeted to a streaming layer", () => {
     // The draft outlives the radio. Disabling the control says nothing about
     // the `destination: "new"` already on the draft, and without this the form
     // would offer Run for a destination it has just declared impossible.
-    withNewLayer("height-from-extent", () => {
-      const stat = addCityLayer("Delft", []);
-      render(<ToolView toolId="height-from-extent" />);
-      fireEvent.click(newLayerRadio());
-      expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
+    const stat = addCityLayer("Delft", []);
+    render(<ToolView toolId="height-from-extent" />);
+    fireEvent.click(newLayerRadio());
+    expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
 
-      const streaming = addCityLayer("Delft stream", [], true);
-      expect(stat).not.toBe(streaming);
-      fireEvent.change(screen.getByLabelText("Layer"), {
-        target: { value: streaming },
-      });
-
-      expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
-      expect(
-        screen.getByText(
-          "New layer is not available for a streaming layer: its loaded buildings carry no geometry to copy.",
-        ),
-      ).toBeTruthy();
+    const streaming = addCityLayer("Delft stream", [], true);
+    expect(stat).not.toBe(streaming);
+    fireEvent.change(screen.getByLabelText("Layer"), {
+      target: { value: streaming },
     });
+
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    expect(
+      screen.getByText(
+        "New layer is not available for a streaming layer: its loaded buildings carry no geometry to copy.",
+      ),
+    ).toBeTruthy();
   });
 });

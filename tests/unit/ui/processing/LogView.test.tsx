@@ -52,6 +52,9 @@ function runFixture(patch: Partial<RunRecord> = {}): RunRecord {
     warnings: ["ST_3DVolume skipped 37 invalid solids"],
     undoable: true,
     stale: false,
+    destination: "layer",
+    newLayerName: null,
+    newLayerId: null,
     note: null,
     ...patch,
   };
