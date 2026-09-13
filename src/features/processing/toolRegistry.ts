@@ -247,7 +247,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
         written.find((c) => c.name.toLowerCase().endsWith("distance_m")) ??
         null,
     },
-    implemented: false,
+    implemented: true,
   },
 ];
 

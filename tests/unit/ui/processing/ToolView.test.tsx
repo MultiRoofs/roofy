@@ -84,6 +84,8 @@ const { useLayerStore } =
   await import("../../../../src/features/layers/layerStore");
 const { useWorkspaceStore } =
   await import("../../../../src/features/workspace/workspaceStore");
+const { useGeoLayerStore } =
+  await import("../../../../src/features/geoLayers/geoLayerStore");
 const { useLayerTableStore } =
   await import("../../../../src/insights/layerTables");
 const { useComputedColumnStore } =
@@ -144,6 +146,37 @@ function addCityLayer(
     },
   });
   return id;
+}
+
+/** A polygon vector layer: the TARGET §7.6 needs and the SOURCE §7.5/§7.7 do. */
+function addZonesLayer(): string {
+  return useGeoLayerStore.getState().addGeoLayer({
+    name: "Zones",
+    kind: "geojson",
+    config: {
+      data: {
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            id: "z1",
+            properties: { zone: "A" },
+            geometry: {
+              type: "Polygon",
+              coordinates: [
+                [
+                  [4, 52],
+                  [5, 52],
+                  [5, 53],
+                  [4, 52],
+                ],
+              ],
+            },
+          },
+        ],
+      },
+    },
+  });
 }
 
 function runFixture(patch: Partial<RunRecord>): RunRecord {
@@ -221,6 +254,7 @@ afterEach(() => {
   vi.clearAllMocks();
   useProcessingStore.getState().resetForTest();
   useLayerStore.getState().removeAllLayers();
+  useGeoLayerStore.setState({ layers: [] });
   useWorkspaceStore.getState().setActiveLayerId(null);
   useLayerTableStore.setState({ tables: {} });
   useComputedColumnStore.setState({ byLayer: {} });
@@ -237,13 +271,18 @@ afterEach(() => {
  * not shipped claims nothing about the user's data. Task 15 gave the three
  * cross-layer entries their column builders so Tasks 16/17/19 would have
  * nothing to wire — which is exactly why the form has to keep its own guard.
- * `distance-to-nearest` is still `implemented: false` here; Join shipped in
- * Task 16 and is the control.
+ * `aggregate-per-area` is the last one still `implemented: false`; Join (Task
+ * 16) and Distance (Task 17) ship, and Distance is the control.
+ *
+ * Aggregate's TARGET is the vector layer and its compute table is the CITY
+ * layer's, so both are added: without the vector layer the form would print
+ * nothing for want of a target and the case would pass for the wrong reason.
  */
 describe("an unimplemented tool promises nothing (global constraint)", () => {
   it("prints no column list and no geometry verdict", () => {
     addCityLayer();
-    render(<ToolView toolId="distance-to-nearest" />);
+    addZonesLayer();
+    render(<ToolView toolId="aggregate-per-area" />);
     // The table has no LoD 0 rung and no reader, so the proxy radio would say
     // so — a verdict on geometry for a run that cannot happen.
     expect(
@@ -258,7 +297,8 @@ describe("an unimplemented tool promises nothing (global constraint)", () => {
 
   it("prints both for the cross-layer tool that HAS shipped", () => {
     addCityLayer();
-    render(<ToolView toolId="join-by-location" />);
+    addZonesLayer();
+    render(<ToolView toolId="distance-to-nearest" />);
     expect(
       screen.getByRole("radiogroup", { name: "Building geometry" }),
     ).toBeInTheDocument();

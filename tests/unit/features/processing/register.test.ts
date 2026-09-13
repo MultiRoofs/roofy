@@ -21,6 +21,7 @@ describe("tools/register", () => {
       "measure-solids",
       "validate-solids",
       "join-by-location",
+      "distance-to-nearest",
     ]);
   });
 });

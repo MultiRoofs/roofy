@@ -117,10 +117,19 @@ describe("CatalogueView", () => {
     expect(join).toHaveAttribute("aria-disabled", "true");
     expect(join).toHaveAttribute("title", "Add a vector layer to join with");
     expect(join.textContent).toContain("Add a vector layer to join with");
-    // Aggregate buildings per area and Distance to nearest are still
-    // unimplemented, so that is the reason `toolEligibility` returns for them.
-    // What this asserts is that a disabled row RENDERS its reason as a second
-    // line.
+    // Distance to nearest SHIPS now too, and it takes the same vector source,
+    // so its row carries §5's sentence rather than the release note.
+    const distance = screen.getByRole("button", {
+      name: /Distance to nearest/,
+    });
+    expect(distance).toHaveAttribute("aria-disabled", "true");
+    expect(distance).toHaveAttribute(
+      "title",
+      "Add a vector layer to join with",
+    );
+    // Aggregate buildings per area is the one still unimplemented, so that is
+    // the reason `toolEligibility` returns for it. What this asserts is that a
+    // disabled row RENDERS its reason as a second line.
     expect(screen.getAllByText("Not available yet").length).toBeGreaterThan(0);
   });
 

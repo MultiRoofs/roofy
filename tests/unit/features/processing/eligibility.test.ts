@@ -251,6 +251,18 @@ describe("toolEligibility", () => {
     });
   });
 
+  it("asks the REAL Distance entry for a vector layer, then accepts it", () => {
+    // Distance ships in this commit too, and §5 gives the same sentence for a
+    // missing vector SOURCE — so its row shows that rather than the release
+    // note, and is enabled once a vector layer exists.
+    const tool = toolById("distance-to-nearest");
+    expect(toolEligibility(tool, { ...base, hasVectorLayer: false })).toEqual({
+      ok: false,
+      reason: "Add a vector layer to join with",
+    });
+    expect(toolEligibility(tool, base)).toEqual({ ok: true });
+  });
+
   it("keeps the real Aggregate row at 'Not available yet' until Task 19", () => {
     // `!implemented` outranks every reason above, on a target that satisfies
     // all of them.

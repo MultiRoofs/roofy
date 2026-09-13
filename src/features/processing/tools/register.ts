@@ -12,3 +12,4 @@ import "./roofMetrics";
 import "./measureSolids";
 import "./validateSolids";
 import "./joinByLocation";
+import "./distanceToNearest";

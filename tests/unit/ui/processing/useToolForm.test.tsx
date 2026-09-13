@@ -63,10 +63,11 @@ vi.mock("../../../../src/features/processing/runQueue", () => ({
  * frozen request. `toolById` is re-implemented over the patched list because
  * the real one closes over the module's own array.
  *
- * JOIN IS NOT IN THE SET: it ships in this milestone, so every Join case below
- * runs against the REAL registry entry — its readiness reasons included.
+ * JOIN AND DISTANCE ARE NOT IN THE SET: both ship in this milestone, so every
+ * Join and Distance case below runs against the REAL registry entry — its
+ * readiness reasons included.
  */
-const CROSS_LAYER = new Set(["aggregate-per-area", "distance-to-nearest"]);
+const CROSS_LAYER = new Set(["aggregate-per-area"]);
 vi.mock("../../../../src/features/processing/toolRegistry", async () => {
   const actual = await vi.importActual<
     typeof import("../../../../src/features/processing/toolRegistry")
@@ -667,6 +668,63 @@ describe("the SOURCE select and the prefix it names (§7.5, §7.7)", () => {
       screen.getByText("The source layer has no features", {
         selector: "p",
       }),
+    ).toBeInTheDocument();
+  });
+
+  it("repeats §6's limit sentence on Run for a Distance limit of 0", () => {
+    // **[adapted copy A11]**, through the REAL registry entry: the parameters
+    // section renders it beside the field and `crossLayerParamsError` is what
+    // Run repeats, so the two cannot disagree.
+    addCityLayer("Delft", true);
+    addGeoLayer("Roads", "Polygon");
+    render(<ToolView toolId="distance-to-nearest" />);
+    fireEvent.change(screen.getByLabelText("Max search distance (m)"), {
+      target: { value: "0" },
+    });
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    expect(
+      screen.getByText("A distance limit must be a positive number", {
+        selector: "p",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("repeats §7.7's own sentence on Run for a ticked id with no property", () => {
+    // §7.7: the checkbox is off by default when the source has no feature `id`,
+    // "and ticking it requires choosing a property".
+    addCityLayer("Delft", true);
+    useGeoLayerStore.getState().addGeoLayer({
+      name: "Roads",
+      kind: "geojson",
+      config: {
+        data: {
+          type: "FeatureCollection",
+          features: [
+            {
+              // No `id`: §7.7's "when it has none" branch.
+              type: "Feature",
+              properties: { name: "Oude Delft" },
+              geometry: {
+                type: "LineString",
+                coordinates: [
+                  [4, 52],
+                  [5, 53],
+                ],
+              },
+            },
+          ],
+        },
+      },
+    });
+    render(<ToolView toolId="distance-to-nearest" />);
+    const tick = screen.getByRole("checkbox", {
+      name: "Also write the nearest feature's id",
+    });
+    expect(tick).not.toBeChecked();
+    fireEvent.click(tick);
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    expect(
+      screen.getByText("Choose the property to copy", { selector: "p" }),
     ).toBeInTheDocument();
   });
 
