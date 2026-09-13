@@ -21,6 +21,7 @@ import {
   encodeProjectedFeatures,
   vectorTableName,
 } from "../../../src/features/processing/vectorTable";
+import { buildFeatureProxySql } from "../../../src/features/processing/buildingProxy";
 import { quoteIdent } from "../../../src/insights/sql";
 
 /**
@@ -159,6 +160,68 @@ function jsonLoaded(db: Harness): boolean {
   );
 }
 
+/**
+ * An LoD 0 CityJSON, built HERE because the shipped fixture has none.
+ *
+ * `two-buildings.city.json` carries only LoD 2.2, and that is a Solid — whose
+ * WKB `ST_GeomFromWKB` refuses outright (the first case in this suite). So the
+ * footprint proxy, the one path that reads the READER rather than the table,
+ * needs a file with a real LoD 0 MultiSurface: a root with a 10 × 10 footprint,
+ * its part with a 4 × 4 one INSIDE it (so the contributor rule and a union are
+ * distinguishable — 16 versus 100), a building whose only geometry is at
+ * another LoD, and a fourth outside every scope this suite freezes.
+ */
+const LOD0_FILE = "probe_lod0.city.json";
+const LOD0_DOC = JSON.stringify({
+  type: "CityJSON",
+  version: "2.0",
+  transform: { scale: [1, 1, 1], translate: [0, 0, 0] },
+  CityObjects: {
+    P1: {
+      type: "Building",
+      children: ["P1-0"],
+      geometry: [
+        { type: "MultiSurface", lod: "0", boundaries: [[[0, 1, 2, 3]]] },
+      ],
+    },
+    "P1-0": {
+      type: "BuildingPart",
+      parents: ["P1"],
+      geometry: [
+        { type: "MultiSurface", lod: "0", boundaries: [[[4, 5, 6, 7]]] },
+      ],
+    },
+    P2: {
+      type: "Building",
+      geometry: [
+        { type: "MultiSurface", lod: "2", boundaries: [[[0, 1, 2, 3]]] },
+      ],
+    },
+    P3: {
+      type: "Building",
+      geometry: [
+        { type: "MultiSurface", lod: "0", boundaries: [[[8, 9, 10, 11]]] },
+      ],
+    },
+  },
+  // Z on every vertex, so the WKB is the MultiPolygon Z an LoD 0 column really
+  // carries and `ST_Force2D` has something to drop.
+  vertices: [
+    [0, 0, 5],
+    [10, 0, 5],
+    [10, 10, 5],
+    [0, 10, 5],
+    [0, 0, 5],
+    [4, 0, 5],
+    [4, 4, 5],
+    [0, 4, 5],
+    [100, 0, 5],
+    [110, 0, 5],
+    [110, 10, 5],
+    [100, 10, 5],
+  ],
+});
+
 /** A Z polygon with a centre, an area and a height that are all exact. */
 const Z_SQUARE = "POLYGON Z ((0 0 5, 10 0 5, 10 10 5, 0 10 5, 0 0 5))";
 /** Its neighbour, overlapping it from x = 5 to x = 10. */
@@ -245,6 +308,7 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
     db.register(SOURCE, "two-buildings.city.json");
     db.registerBytes(VECTOR_FILE, new TextEncoder().encode(VECTOR_NDJSON));
     db.registerBytes(FC_FILE, new TextEncoder().encode(FEATURE_COLLECTION));
+    db.registerBytes(LOD0_FILE, new TextEncoder().encode(LOD0_DOC));
     // The per-run table is built HERE, not inside the case that reads it back:
     // the predicate, overlap, distance and join cases all query it, and every
     // one of them must run alone under `vitest -t`.
@@ -254,6 +318,7 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
   afterAll(() => {
     db?.dropFile(VECTOR_FILE);
     db?.dropFile(FC_FILE);
+    db?.dropFile(LOD0_FILE);
     db?.close();
   });
 
@@ -578,5 +643,172 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
     ]);
     db.query(buildDropVectorTableSql(table));
     db.dropFile(file);
+  });
+
+  it("aggregates a feature's proxy the way buildFeatureProxySql does", () => {
+    // The NULL-bbox row is why this case exists beside the fixture one below:
+    // `two-buildings.city.json` has an extent on every object, and the CASE
+    // guard's NULL branch — a feature with no proxy at all, which §6.2 must
+    // tell apart from "no match" — has nowhere else to be exercised.
+    db.query(
+      `CREATE OR REPLACE TABLE probe_rows AS SELECT * FROM (VALUES
+         ('b1', 'b1', {'xmin': 0.0, 'ymin': 0.0, 'zmin': 0.0, 'xmax': 10.0, 'ymax': 10.0, 'zmax': 3.0}),
+         ('b1p', 'b1', {'xmin': 10.0, 'ymin': 0.0, 'zmin': 0.0, 'xmax': 20.0, 'ymax': 10.0, 'zmax': 3.0}),
+         ('b2', 'b2', NULL)
+       ) AS t("id", "feature_id", "bbox")`,
+    );
+    const rect = db.query(
+      `SELECT f, ST_Area(g) AS a FROM (${buildFeatureProxySql({
+        proxy: "rectangle",
+        table: "probe_rows",
+        from: null,
+        geometryColumn: null,
+        ids: null,
+      })}) ORDER BY f`,
+    );
+    // The COMBINED extent of the two rows, and NULL for the feature with none —
+    // which is what `ST_MakeEnvelope` under the CASE guard has to produce.
+    expect(rect).toEqual([
+      { f: "b1", a: 200 },
+      { f: "b2", a: null },
+    ]);
+    const centre = db.query(
+      `SELECT f, ST_X(g) AS x, ST_Y(g) AS y FROM (${buildFeatureProxySql({
+        proxy: "centre",
+        table: "probe_rows",
+        from: null,
+        geometryColumn: null,
+        ids: null,
+      })}) WHERE f = 'b1'`,
+    );
+    expect(centre).toEqual([{ f: "b1", x: 10, y: 5 }]);
+    db.query(`DROP TABLE IF EXISTS probe_rows`);
+  });
+
+  it("builds the two bbox proxies over the two-buildings fixture's own extents", () => {
+    // The REAL layer shape: `id`, `feature_id` and the reader's own `bbox`
+    // struct, straight out of `read_cityjson`, which is what `layerTables`
+    // writes into a layer's browsing table.
+    //
+    // The numbers are the fixture's, observed once and pinned: the root spans
+    // 85000–85010 × 446000–446008 and its part 85012–85016 × 446000–446005, so
+    // the feature's COMBINED extent is 16 × 8 = 128 m² centred on
+    // (85008, 446004) — §7's "combined extent" is deliberately NOT the
+    // contributor rule, so the ROOT's own box counts here as much as the
+    // part's. `NL.IMBAG.Pand.0002` is a lone root, 15 × 12 = 180 m².
+    db.query(
+      `CREATE OR REPLACE TABLE probe_layer AS SELECT "id", "feature_id", "bbox" FROM read_cityjson('${SOURCE}', lod => '${LOD}')`,
+    );
+    expect(
+      db.query(
+        `SELECT f, ST_Area(g) AS a, ST_X(ST_Centroid(g)) AS x, ST_Y(ST_Centroid(g)) AS y FROM (${buildFeatureProxySql(
+          {
+            proxy: "rectangle",
+            table: "probe_layer",
+            from: null,
+            geometryColumn: null,
+            ids: null,
+          },
+        )}) ORDER BY f`,
+      ),
+    ).toEqual([
+      { f: "NL.IMBAG.Pand.0001", a: 128, x: 85008, y: 446004 },
+      { f: VALID, a: 180, x: 85027.5, y: 446006 },
+    ]);
+    expect(
+      db.query(
+        `SELECT f, ST_X(g) AS x, ST_Y(g) AS y FROM (${buildFeatureProxySql({
+          proxy: "centre",
+          table: "probe_layer",
+          from: null,
+          geometryColumn: null,
+          ids: null,
+        })}) ORDER BY f`,
+      ),
+    ).toEqual([
+      { f: "NL.IMBAG.Pand.0001", x: 85008, y: 446004 },
+      { f: VALID, x: 85027.5, y: 446006 },
+    ]);
+    // Scoped: one building selected, and the other is not in the relation at
+    // all — the same frozen-id guard the footprint path needs.
+    expect(
+      db.query(
+        `SELECT f FROM (${buildFeatureProxySql({
+          proxy: "centre",
+          table: "probe_layer",
+          from: null,
+          geometryColumn: null,
+          ids: [VALID],
+        })})`,
+      ),
+    ).toEqual([{ f: VALID }]);
+    db.query(`DROP TABLE IF EXISTS probe_layer`);
+  });
+
+  it("picks the PART footprints and honours the scope, through the real reader", () => {
+    // The footprint path reads the READER, not the table, so it is probed
+    // against `read_cityjson` itself over an LoD 0 file built here — the
+    // shipped fixture has only LoD 2.2, whose PolyhedralSurface Z the case
+    // above shows `ST_GeomFromWKB` refusing.
+    //
+    // The LoD is spelled `'0.0'`, and the column `geometry_lod0_0`, although
+    // the DOCUMENT says `"lod": "0"`: the reader normalises, which is the whole
+    // reason `lodZeroLabel` returns the LABEL off `table.lods` (read back from
+    // the reader's own column names) and nothing re-spells a suffix.
+    const from = `read_cityjson('${LOD0_FILE}', lod => '0.0')`;
+    const rows = db.query(
+      `SELECT f, ST_Area(g) AS a, ST_HasZ(g) AS has_z FROM (${buildFeatureProxySql(
+        {
+          proxy: "footprint",
+          table: "unused",
+          from,
+          geometryColumn: "geometry_lod0_0",
+          ids: ["P1", "P1-0", "P2"],
+        },
+      )}) ORDER BY f`,
+    );
+    expect(rows).toEqual([
+      // §7's contributor rule: the PART's 16 m², never the root's 100 and never
+      // their union (which would be 100, the part being inside the root).
+      { f: "P1", a: 16, has_z: false },
+      // LoD 2 geometry only, so no LoD 0 WKB: the row survives with a NULL
+      // proxy (§6.2's "no proxy" ≠ "no match").
+      { f: "P2", a: null, has_z: null },
+      // `P3` is outside the frozen scope, so it is not here at all.
+    ]);
+    // `P2`'s NULL is the outer `ST_IsEmpty` CASE, and this is the fact that
+    // makes it necessary: an aggregate over an EMPTY filtered set is an EMPTY
+    // GEOMETRY, not NULL — so without it a building with no footprint would
+    // read as a proxy that matches nothing (§6.2's 0) instead of no proxy at
+    // all (§6.2's NULL).
+    expect(
+      db.query(
+        `SELECT ST_Union_Agg(g) FILTER (WHERE FALSE) IS NULL AS n, ST_AsText(ST_Union_Agg(g) FILTER (WHERE FALSE)) AS t FROM (SELECT ST_Point(0, 0) AS g)`,
+      ),
+    ).toEqual([{ n: false, t: "GEOMETRYCOLLECTION EMPTY" }]);
+    // `has_z` above is the `ST_Force2D` wrap, behaviourally: the reader's LoD 0
+    // WKB is a MultiPolygon Z (`ST_HasZ` true without the wrap) and
+    // `ST_Union_Agg` KEEPS Z, so an unwrapped proxy would hand Tasks 16, 17 and
+    // 19 a 3-D geometry.
+    expect(
+      db.query(
+        `SELECT ST_HasZ(ST_GeomFromWKB("geometry_lod0_0")) AS z FROM ${from} WHERE "id" = 'P1'`,
+      ),
+    ).toEqual([{ z: true }]);
+    // And the gate `proxyOptions` enforces, against this builder's own text: a
+    // footprint taken from a solid LoD is not a rougher answer, it is a failed
+    // run. `ST_Area(g)` rather than `f` alone, because DuckDB prunes an
+    // unreferenced projection and the parse then never happens.
+    expect(() =>
+      db.query(
+        `SELECT f, ST_Area(g) AS a FROM (${buildFeatureProxySql({
+          proxy: "footprint",
+          table: "unused",
+          from: `read_cityjson('${SOURCE}', lod => '${LOD}')`,
+          geometryColumn: "geometry_lod2_2",
+          ids: null,
+        })})`,
+      ),
+    ).toThrow(/Unsupported geometry type in WKB/);
   });
 });
