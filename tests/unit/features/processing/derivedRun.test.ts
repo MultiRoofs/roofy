@@ -147,6 +147,8 @@ const { useComputedColumnStore } =
   await import("../../../../src/insights/computedColumns");
 const { useWorkspaceStore } =
   await import("../../../../src/features/workspace/workspaceStore");
+const { installWorkspaceInvariants } =
+  await import("../../../../src/features/workspace/layerCoordination");
 
 /** A tool that writes one column to the two rows the fake table holds. */
 function fakeExecutor() {
@@ -407,15 +409,28 @@ describe("destination: New layer", () => {
   });
 
   it("Undo REMOVES the layer and takes its columns with it (§6.2)", async () => {
-    fakeExecutor();
-    const id = submitRun(newLayerRequest());
-    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
-    const newId = runById(id)?.newLayerId ?? "";
-    await undoRun(id);
-    expect(useLayerStore.getState().layers).toHaveLength(1);
-    expect(useComputedColumnStore.getState().byLayer[newId]).toBeUndefined();
-    expect(runById(id)?.note).toBe("Undone");
-    expect(runById(id)?.undoable).toBe(false);
+    // The workspace invariants are INSTALLED here: publication activated the
+    // copy, and Undo removes it — so the door Undo uses has to be the one the
+    // layer list's own Remove uses (`layerStore.removeLayer`), or the active
+    // layer is left pointing at a row that is gone and nothing corrects it.
+    const dispose = installWorkspaceInvariants();
+    try {
+      fakeExecutor();
+      const id = submitRun(newLayerRequest());
+      await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+      const newId = runById(id)?.newLayerId ?? "";
+      expect(useWorkspaceStore.getState().activeLayerId).toBe(newId);
+      await undoRun(id);
+      expect(useLayerStore.getState().layers).toHaveLength(1);
+      expect(useComputedColumnStore.getState().byLayer[newId]).toBeUndefined();
+      expect(runById(id)?.note).toBe("Undone");
+      expect(runById(id)?.undoable).toBe(false);
+      // Handed back to the parent, by the same invariant a manual Remove goes
+      // through.
+      expect(useWorkspaceStore.getState().activeLayerId).toBe("L1");
+    } finally {
+      dispose();
+    }
   });
 
   it("offers Undo IMMEDIATELY after publication", async () => {

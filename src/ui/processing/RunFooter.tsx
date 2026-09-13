@@ -396,6 +396,21 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
     // §6.2's block on a derived layer that has since been used. Null for a
     // This-layer run, whose Undo has its own rules.
     const undoBlock = newLayerUndoBlock(run);
+    /**
+     * Is the layer the actions point at still there, AT CLICK TIME?
+     *
+     * §6.2's Undo removes the copy and leaves the card standing ("Undone"),
+     * with `newLayerId` still on the frozen record — so Zoom to layer and Open
+     * table would activate an id that is gone, and nothing would correct it:
+     * `setActiveLayerId` does not validate, and the invariant that hands the
+     * active layer over watches the LAYER stores, not this write. The same
+     * guard `useStyleByResult` already makes for its own awaited gap, and a
+     * removed layer is equally the answer to "the user threw it away" — the
+     * click is abandoned silently rather than resurrecting a row.
+     */
+    const cardLayerAlive = (): boolean =>
+      useLayerStore.getState().layers.some((l) => l.id === cardLayerId) ||
+      useGeoLayerStore.getState().layers.some((l) => l.id === cardLayerId);
     const descriptor = toolById(run.toolId).styleByResult;
     const written = writtenColumns(run);
     const styleColumn = descriptor?.pick(written) ?? null;
@@ -450,6 +465,7 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
               <button
                 type="button"
                 onClick={() => {
+                  if (!cardLayerAlive()) return;
                   activateLayer(cardLayerId);
                   useShellStore.getState().requestZoom(cardLayerId);
                 }}
@@ -460,6 +476,7 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
             <button
               type="button"
               onClick={() => {
+                if (!cardLayerAlive()) return;
                 // The run's own target is the frozen truth (§6.1); the form's
                 // select may have moved on since it finished.
                 activateLayer(cardLayerId);

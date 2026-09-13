@@ -154,6 +154,7 @@ afterEach(() => {
   useQueryStore.setState({ queries: {} });
   useRuleDraftStore.setState({ drafts: {} });
   useShellStore.getState().requestZoom(null);
+  useShellStore.getState().closeDrawer();
 });
 
 describe("the New-layer result card", () => {
@@ -217,6 +218,7 @@ describe("the New-layer result card", () => {
   });
 
   it("asks the shell to zoom to the COPY", () => {
+    addLayers();
     render(
       <RunFooter
         run={createdRun()}
@@ -259,6 +261,32 @@ describe("the New-layer result card", () => {
     );
     expect(screen.getByText(/Wrote 1 column to Delft\./)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Zoom to layer" })).toBeNull();
+  });
+
+  it("does nothing once Undo has REMOVED the copy the actions point at", () => {
+    // The card outlives its layer: §6.2's Undo removes the copy and leaves the
+    // card reading "Undone", with `newLayerId` still on the record. Activating
+    // an id that is gone leaves the workspace with a dangling active layer and
+    // an empty left panel — nothing corrects it, because the correction
+    // watches the LAYER stores and this write is to the workspace one.
+    addLayers();
+    useLayerStore.setState((state) => ({
+      layers: state.layers.filter((l) => l.id !== "NEW"),
+    }));
+    render(
+      <RunFooter
+        run={createdRun({ note: "Undone" })}
+        canRun
+        reason={null}
+        onRunAgain={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Zoom to layer" }));
+    expect(useWorkspaceStore.getState().activeLayerId).toBeNull();
+    expect(useShellStore.getState().requestedZoom).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open table" }));
+    expect(useWorkspaceStore.getState().activeLayerId).toBeNull();
+    expect(useShellStore.getState().drawerOpen).toBe(false);
   });
 
   it("shows A15's rename note when publication renamed the layer", () => {
