@@ -21,7 +21,10 @@ import {
   encodeProjectedFeatures,
   vectorTableName,
 } from "../../../src/features/processing/vectorTable";
-import { buildFeatureProxySql } from "../../../src/features/processing/buildingProxy";
+import {
+  buildFeatureProxySql,
+  buildProxySql,
+} from "../../../src/features/processing/buildingProxy";
 import { quoteIdent } from "../../../src/insights/sql";
 
 /**
@@ -728,6 +731,55 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
     ).toEqual([
       { f: "NL.IMBAG.Pand.0001", x: 85008, y: 446004 },
       { f: VALID, x: 85027.5, y: 446006 },
+    ]);
+    // The PER-ROW relation too, `buildProxySql`'s own text: the feature roll-up
+    // composes it only on the footprint path, so these two bbox arms would
+    // otherwise never reach the engine — and Task 16 reaches for the rectangle
+    // one. Each ROW's own box: the root 10 × 8, the part 4 × 5, the lone
+    // building 15 × 12, each beside the feature it belongs to.
+    expect(
+      db.query(
+        `SELECT "id", f, ST_Area(g) AS a, ST_X(ST_Centroid(g)) AS x, ST_Y(ST_Centroid(g)) AS y FROM (${buildProxySql(
+          {
+            proxy: "rectangle",
+            table: "probe_layer",
+            from: null,
+            geometryColumn: null,
+            ids: null,
+          },
+        )}) ORDER BY "id"`,
+      ),
+    ).toEqual([
+      {
+        id: "NL.IMBAG.Pand.0001",
+        f: "NL.IMBAG.Pand.0001",
+        a: 80,
+        x: 85005,
+        y: 446004,
+      },
+      {
+        id: NOT_A_SOLID,
+        f: "NL.IMBAG.Pand.0001",
+        a: 20,
+        x: 85014,
+        y: 446002.5,
+      },
+      { id: VALID, f: VALID, a: 180, x: 85027.5, y: 446006 },
+    ]);
+    expect(
+      db.query(
+        `SELECT "id", ST_X(g) AS x, ST_Y(g) AS y FROM (${buildProxySql({
+          proxy: "centre",
+          table: "probe_layer",
+          from: null,
+          geometryColumn: null,
+          ids: null,
+        })}) ORDER BY "id"`,
+      ),
+    ).toEqual([
+      { id: "NL.IMBAG.Pand.0001", x: 85005, y: 446004 },
+      { id: NOT_A_SOLID, x: 85014, y: 446002.5 },
+      { id: VALID, x: 85027.5, y: 446006 },
     ]);
     // Scoped: one building selected, and the other is not in the relation at
     // all — the same frozen-id guard the footprint path needs.
