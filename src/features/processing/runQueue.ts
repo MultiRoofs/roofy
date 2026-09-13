@@ -2073,10 +2073,16 @@ export async function undoRun(id: string): Promise<void> {
       try {
         await raced(refreshLayerTableColumns(run.targetLayerId), null);
       } catch (error) {
-        // Past the COMMIT, exactly as in `execute`: the Undo went through, so a
-        // DESCRIBE that will never answer is abandoned rather than allowed to
-        // withhold the restore below.
         if (!(error instanceof EngineDeadError)) throw error;
+        // NOT a fall-through. `execute`'s equivalent catch is right to abandon
+        // the DESCRIBE — its COMMIT went through and its columns are on a
+        // table that exists. Here the database itself is gone: the restored
+        // values describe a table nobody can read, and publishing the model,
+        // the provenance rollback and the "Undone" card would tell the user
+        // their layer had been put back when the layer's table no longer
+        // exists. The death watcher's own card is the truth (§6.1's "Analytics
+        // engine stopped"), and the run keeps its `undoable: false` from it.
+        return null;
       }
     }
     return undone;
