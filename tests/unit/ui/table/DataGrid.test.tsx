@@ -134,7 +134,11 @@ describe("DataGrid", () => {
       derivedColumnNames: new Set(["__roofy_roof_area"]),
     });
     const headers = screen.getAllByRole("columnheader");
-    expect(headers[0]?.getAttribute("title")).toBe("Roof area (m²)");
+    // The unit, and then §7.1's explanation of why this number and the
+    // computed `roof_area_m2` can disagree.
+    expect(headers[0]?.getAttribute("title")).toBe(
+      "Roof area (m²) — Roof area here is the drawer's own per-page figure over every roof surface. The computed roof_area_m2 follows the tool's contributor rule, so a building that stores its roof on both itself and its parts counts it once.",
+    );
     expect(headers[1]?.getAttribute("title")).toBe("source_area (DOUBLE)");
   });
 

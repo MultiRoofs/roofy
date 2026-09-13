@@ -89,7 +89,11 @@ export function derivedColumnTitle(name: string): string {
   const key = DERIVED_COLUMNS.find((column) => name.endsWith(column.key))?.key;
   switch (key) {
     case "__roofy_roof_area":
-      return "Roof area (m²)";
+      // §7.1 keeps the synthetic column AND ships a computed `roof_area_m2`,
+      // and the two disagree on any building that stores roof surfaces on both
+      // itself and its parts — so the header says which is which.
+      // **[adapted copy A8]**.
+      return "Roof area (m²) — Roof area here is the drawer's own per-page figure over every roof surface. The computed roof_area_m2 follows the tool's contributor rule, so a building that stores its roof on both itself and its parts counts it once.";
     case "__roofy_mean_slope":
       return "Mean slope (°)";
     case "__roofy_parts":

@@ -20,7 +20,21 @@ describe("record column policy", () => {
       defaultColumns(columns, "buildings").map((column) => column.name),
     ).toContain("__roofy_roof_area");
     expect(columnLabel("__roofy_roof_area")).toBe("Roof area");
-    expect(derivedColumnTitle("__roofy_roof_area")).toBe("Roof area (m²)");
+    expect(derivedColumnTitle("__roofy_mean_slope")).toBe("Mean slope (°)");
+    expect(derivedColumnTitle("__roofy_parts")).toBe("Parts (count)");
+  });
+
+  it("explains how the synthetic roof area differs from the computed one", () => {
+    // §7.1 keeps the synthetic column AND ships a computed `roof_area_m2`, and
+    // the two disagree on any building that stores roof surfaces on both
+    // itself and its parts — so the header says which is which.
+    const title = derivedColumnTitle("__roofy_roof_area");
+    expect(title.startsWith("Roof area (m²)")).toBe(true);
+    expect(title).toContain("the drawer's own per-page figure");
+    expect(title).toContain("counts it once");
+  });
+
+  it("leaves the other two synthetic titles alone", () => {
     expect(derivedColumnTitle("__roofy_mean_slope")).toBe("Mean slope (°)");
     expect(derivedColumnTitle("__roofy_parts")).toBe("Parts (count)");
   });
