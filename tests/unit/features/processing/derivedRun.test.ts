@@ -842,21 +842,40 @@ describe("destination: New layer, with a VECTOR target", () => {
     expect(runById(id)?.undoable).toBe(false);
   });
 
-  it("blocks Undo once a later run has used the derived vector layer", async () => {
+  it("blocks Undo while a later run is still RUNNING against the copy", async () => {
     const zones = seedAggregate();
     const id = submitRun(aggregateRequest(zones));
     await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
     const newId = runById(id)?.newLayerId ?? "";
+    // §6.2 counts a later run "(queued, running or done)", so the later run is
+    // HELD before it writes anything: the copy still carries only this run's
+    // own column, which makes this case about the run-history scan and the
+    // next one about the copy's own columns — two rules, two tests.
+    const held = deferred<void>();
+    gate = { needle: "/* aggregate */", promise: held.promise };
     const later = submitRun(
       aggregateRequest(newId, { destination: "layer", newLayerName: null }),
     );
-    await vi.waitFor(() => expect(runById(later)?.status).toBe("done"));
+    await vi.waitFor(() =>
+      expect(sql.filter((s) => s.includes("/* aggregate */"))).toHaveLength(2),
+    );
+    expect(
+      useComputedColumnStore.getState().byLayer[newId]?.["bld_buildings_n"]
+        ?.runId,
+    ).toBe(id);
     expect(newLayerUndoBlock(runById(id) as RunRecord)).toBe(
       "Used by a later run; remove the layer from the layer list instead",
     );
     await undoRun(id);
     expect(useGeoLayerStore.getState().layers).toHaveLength(2);
     expect(runById(id)?.error).toBe(
+      "Used by a later run; remove the layer from the layer list instead",
+    );
+    gate = null;
+    held.resolve(undefined);
+    await vi.waitFor(() => expect(runById(later)?.status).toBe("done"));
+    // And still blocked once it has finished.
+    expect(newLayerUndoBlock(runById(id) as RunRecord)).toBe(
       "Used by a later run; remove the layer from the layer list instead",
     );
   });
