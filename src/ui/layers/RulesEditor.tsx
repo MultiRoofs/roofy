@@ -41,10 +41,8 @@ import {
   type RuleFormValues,
 } from "../../features/rules/ruleDraftStore";
 import { RULE_PRESETS, type RulePreset } from "../../features/rules/presets";
-import {
-  NEW_RULE_COLOR_HEX,
-  UNMATCHED_COLOR_HEX,
-} from "../../scene/cityColors";
+import { UNMATCHED_COLOR_HEX } from "../../scene/cityColors";
+import { nextRuleColor } from "../../features/rules/nextRuleColor";
 import { downloadText } from "../../platform/download";
 import { useComputedColumnStore } from "../../insights/computedColumns";
 
@@ -239,10 +237,18 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
   );
 
   const openAddForm = useCallback(() => {
+    // The store, not `layer.rules`: this callback is memoised on
+    // `[layerId, setDraft]`, and a captured rule list would be the list as it
+    // was when the callback was built — so the rule added right after a Save
+    // would rotate from a palette that has not heard about the saved one. The
+    // same read `moveRule` above makes, for the same reason.
+    const rules =
+      useLayerStore.getState().layers.find((l) => l.id === layerId)?.rules ??
+      [];
     setDraft(layerId, {
       editingId: null,
       open: true,
-      form: defaultRuleFormValues(),
+      form: defaultRuleFormValues(rules),
     });
   }, [layerId, setDraft]);
 
@@ -286,11 +292,27 @@ export function RulesEditor({ model, layerId }: RulesEditorProps) {
           conditions: [...form.conditions],
           enabled: true,
         });
-        ensureRulesMode();
+        if (draft.origin === "style-by-result") {
+          // M3 ruling C6: the user pressed a button whose whole promise is
+          // "show me this on the map", so a RESULT draft's Save switches the
+          // mode from ANY starting point — `"single"` included, where
+          // `ensureRulesMode` deliberately holds back.
+          updateLayer(layerId, { colorBy: "rules" });
+        } else {
+          ensureRulesMode();
+        }
       }
       clearDraft(layerId);
     },
-    [addRule, clearDraft, draft, ensureRulesMode, layerId, updateRule],
+    [
+      addRule,
+      clearDraft,
+      draft,
+      ensureRulesMode,
+      layerId,
+      updateLayer,
+      updateRule,
+    ],
   );
 
   const handleFormCancel = useCallback(() => {
@@ -805,11 +827,17 @@ function RuleForm({
   );
 }
 
-/** The "+ Add rule" form's starting values. */
-function defaultRuleFormValues(): RuleFormValues {
+/**
+ * The "+ Add rule" form's starting values.
+ *
+ * §6.2's "the next palette colour" is not a result-card rule: a user adding a
+ * third rule by hand has exactly the same problem, and the editor and the card
+ * must not disagree about which colour is next.
+ */
+function defaultRuleFormValues(rules: ReadonlyArray<Rule>): RuleFormValues {
   return {
     name: "",
-    color: NEW_RULE_COLOR_HEX,
+    color: nextRuleColor(rules),
     logic: "AND",
     conditions: [{ field: "inclinationDeg", operator: "<", value: 10 }],
   };

@@ -47,6 +47,19 @@ export interface RuleDraft {
   /** Whether a form is open at all. `false` means the editor shows just the
    *  rule list and the "+ Add Rule" button. */
   readonly open: boolean;
+  /**
+   * WHO opened this draft, when that changes what Save means (M3 ruling C6).
+   *
+   * `"style-by-result"` is the processing card's draft: saving it switches the
+   * layer to `Color by = Rules` from ANY mode, because the user pressed a
+   * button whose whole promise is "show me this on the map". Absent — a rule
+   * the user typed in the editor — keeps `ensureRulesMode`'s surface-only
+   * flip: a layer deliberately set to one colour has not changed its mind
+   * just because a rule was written.
+   *
+   * Session-only, like the rest of this store: never persisted, never shared.
+   */
+  readonly origin?: "style-by-result";
 }
 
 export interface RuleDraftStoreState {

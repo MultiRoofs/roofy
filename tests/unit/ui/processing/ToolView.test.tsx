@@ -694,12 +694,17 @@ describe("ToolView", () => {
     expect(runQuery).toHaveBeenCalledWith(
       'SELECT median(CAST("extent_height_m" AS DOUBLE)) AS m FROM "layer_1" WHERE "feature_id" IS NULL OR "feature_id" = "id"',
     );
+    // The MODE is untouched: §6.2's "the map does NOT change until the user
+    // presses Save in the editor" holds for the layer's colouring too, and the
+    // draft carries the flag that tells the editor's Save to switch it then
+    // (M3 ruling C6).
     expect(
       useLayerStore.getState().layers.find((l) => l.id === layerId)?.colorBy,
-    ).toBe("rules");
+    ).toBe("surface");
     expect(useRuleDraftStore.getState().drafts[layerId]).toEqual({
       editingId: null,
       open: true,
+      origin: "style-by-result",
       form: {
         // The editor refuses to save an unnamed rule, so the draft arrives
         // named after the column it is about; the user renames it if they

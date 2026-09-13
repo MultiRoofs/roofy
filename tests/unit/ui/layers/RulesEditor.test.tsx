@@ -44,6 +44,7 @@ import { useRuleDraftStore } from "../../../../src/features/rules/ruleDraftStore
 import { useComputedColumnStore } from "../../../../src/insights/computedColumns";
 import {
   NEW_RULE_COLOR_HEX,
+  RULE_PALETTE_HEX,
   SINGLE_COLOR_HEX,
   UNMATCHED_COLOR_HEX,
 } from "../../../../src/scene/cityColors";
@@ -978,5 +979,124 @@ describe("RulesEditor — computed attributes", () => {
 
     const select = screen.getByLabelText("Attribute") as HTMLSelectElement;
     expect(select.querySelectorAll("optgroup")).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 26: the palette rotates, and a RESULT draft's Save decides the mode
+// ---------------------------------------------------------------------------
+
+describe("RulesEditor — the rule palette rotates", () => {
+  /** The editor over one layer "L", which every case here seeds itself. */
+  function renderEditor(layerId = "L") {
+    return render(<RulesEditor model={emptyModel()} layerId={layerId} />);
+  }
+
+  /** The open form's colour swatch, by its accessible name. */
+  function colorInput(): HTMLInputElement {
+    return screen.getByLabelText("Rule colour") as HTMLInputElement;
+  }
+
+  /** Fill in the one field the editor refuses to save without. */
+  function nameIt(name: string): void {
+    fireEvent.change(screen.getByPlaceholderText("Rule name"), {
+      target: { value: name },
+    });
+  }
+
+  it("rotates the palette across consecutive Save → Add rule", () => {
+    // The memoised-callback bug: the second draft must not reuse the colour the
+    // rule just saved is wearing. `openAddForm` is memoised on
+    // `[layerId, setDraft]`, so a captured `layer.rules` would still be empty.
+    useLayerStore.setState({ layers: [baseLayer({})] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
+    renderEditor();
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Add rule" }));
+    expect(colorInput().value).toBe(RULE_PALETTE_HEX[0]);
+    nameIt("First");
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Add rule" }));
+    expect(colorInput().value).toBe(RULE_PALETTE_HEX[1]);
+    nameIt("Second");
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(readLayer().rules.map((r) => r.color)).toEqual([
+      RULE_PALETTE_HEX[0],
+      RULE_PALETTE_HEX[1],
+    ]);
+  });
+
+  it("re-offers a DISABLED rule's colour, which paints nothing", () => {
+    useLayerStore.setState({
+      layers: [
+        baseLayer({
+          rules: [
+            makeRule({
+              id: "off",
+              color: RULE_PALETTE_HEX[0]!,
+              enabled: false,
+            }),
+          ],
+        }),
+      ],
+    });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
+    renderEditor();
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Add rule" }));
+    expect(colorInput().value).toBe(RULE_PALETTE_HEX[0]);
+  });
+});
+
+describe("RulesEditor — which Save switches the mode (C6)", () => {
+  /** A draft as `RunFooter` writes one: named, and flagged as a result draft. */
+  function seedResultDraft(layerId = "L"): void {
+    useRuleDraftStore.getState().setDraft(layerId, {
+      editingId: null,
+      open: true,
+      origin: "style-by-result",
+      form: {
+        name: "solid_volume_m3",
+        color: RULE_PALETTE_HEX[0]!,
+        logic: "AND",
+        conditions: [{ field: "inclinationDeg", operator: ">", value: 4.2 }],
+      },
+    });
+  }
+
+  it.each(["surface", "single"] as const)(
+    "flips a %s layer to `rules` when a STYLE-BY-RESULT draft is saved",
+    (mode) => {
+      // The user pressed a button whose whole promise is "show me this on the
+      // map", so the result has to be visible whatever the layer was on.
+      useLayerStore.setState({ layers: [baseLayer({ colorBy: mode })] });
+      useWorkspaceStore.setState({ activeLayerId: "L" });
+      seedResultDraft();
+      render(<RulesEditor model={emptyModel()} layerId="L" />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+      expect(readLayer().colorBy).toBe("rules");
+      expect(readLayer().rules.map((r) => r.name)).toEqual(["solid_volume_m3"]);
+    },
+  );
+
+  it("leaves a single-coloured layer alone when a MANUAL rule is saved", () => {
+    // Unchanged `ensureRulesMode` semantics: only `"surface"`, the undecided
+    // mode, flips for a rule the user typed.
+    useLayerStore.setState({ layers: [baseLayer({ colorBy: "single" })] });
+    useWorkspaceStore.setState({ activeLayerId: "L" });
+    render(<RulesEditor model={emptyModel()} layerId="L" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Add rule" }));
+    fireEvent.change(screen.getByPlaceholderText("Rule name"), {
+      target: { value: "Mine" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(readLayer().colorBy).toBe("single");
+    expect(readLayer().rules.map((r) => r.name)).toEqual(["Mine"]);
   });
 });

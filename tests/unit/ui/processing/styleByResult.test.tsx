@@ -20,6 +20,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -27,6 +28,8 @@ import {
   waitFor,
 } from "@testing-library/react";
 import type { RunRecord } from "../../../../src/features/processing/types";
+import type { Rule } from "../../../../src/features/rules/types";
+import { RULE_PALETTE_HEX } from "../../../../src/scene/cityColors";
 
 /**
  * Every statement the footer's value read issued, in order. The cases read THIS
@@ -749,5 +752,137 @@ describe("Style by result, from the descriptor", () => {
     expect(
       screen.queryByRole("button", { name: "Style by result" }),
     ).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 26: the palette rotates, the map waits for Save, and a retired run
+// opens nothing
+// ---------------------------------------------------------------------------
+
+/**
+ * Hold the median query until the case releases it.
+ *
+ * `runQuery` is this suite's own module-level mock, so the gate replaces its
+ * implementation for the length of one case; the `afterEach` above already
+ * puts the default back.
+ */
+function deferMedian(): { release: () => void } {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  runQuery.mockImplementation(async () => {
+    await gate;
+    return MEDIAN_ROWS();
+  });
+  return { release };
+}
+
+describe("Style by result, at the moment it opens the draft", () => {
+  it.each(["surface", "single"] as const)(
+    "does NOT set Color by = Rules on a %s layer when it opens the draft (§6.2)",
+    async (mode) => {
+      // "The map does NOT change until the user presses Save in the editor, as
+      // with any rule." The eager `updateLayer(layerId, { colorBy: "rules" })`
+      // repainted a layer on Surface type to the UNMATCHED colour before the
+      // user had seen the draft. The editor's Save is the one writer.
+      const id = addLayer();
+      useLayerStore.getState().updateLayer(id, { colorBy: mode });
+      render(
+        <RunFooter
+          run={seed(doneRun({ targetLayerId: id }))}
+          canRun
+          reason={null}
+          onRunAgain={() => {}}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+      await waitFor(() =>
+        expect(useRuleDraftStore.getState().drafts[id]?.open).toBe(true),
+      );
+      expect(
+        useLayerStore.getState().layers.find((l) => l.id === id)?.colorBy,
+      ).toBe(mode);
+    },
+  );
+
+  it("marks the draft as a Style-by-result one, so Save knows to flip the mode", () => {
+    // The flag the editor's Save branches on (C6): a RESULT draft switches the
+    // layer to Rules from any mode, a hand-written rule keeps
+    // `ensureRulesMode`'s surface-only flip.
+    const id = addLayer();
+    render(
+      <RunFooter
+        run={seed(doneRun({ targetLayerId: id }))}
+        canRun
+        reason={null}
+        onRunAgain={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    return waitFor(() =>
+      expect(useRuleDraftStore.getState().drafts[id]?.origin).toBe(
+        "style-by-result",
+      ),
+    );
+  });
+
+  it("gives the draft the NEXT palette colour, not always the first", async () => {
+    const id = addLayer();
+    useLayerStore.getState().addRule(id, {
+      id: "r0",
+      name: "existing",
+      color: RULE_PALETTE_HEX[0]!,
+      logic: "AND",
+      conditions: [],
+      enabled: true,
+    } satisfies Rule);
+    render(
+      <RunFooter
+        run={seed(doneRun({ targetLayerId: id }))}
+        canRun
+        reason={null}
+        onRunAgain={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    await waitFor(() =>
+      expect(useRuleDraftStore.getState().drafts[id]?.form.color).toBe(
+        RULE_PALETTE_HEX[1],
+      ),
+    );
+  });
+
+  it("opens NOTHING for a run that went stale while the median was in flight", async () => {
+    // The existing guards check the token and the layer; the RUN could still
+    // be retired under them (a streaming rebuild, or an Undo).
+    const id = addLayer();
+    const run = seed(doneRun({ targetLayerId: id }));
+    const median = deferMedian();
+    render(<RunFooter run={run} canRun reason={null} onRunAgain={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    useProcessingStore.getState().patchRun(run.id, { stale: true });
+    median.release();
+    // One turn for the query's continuation and the render it would cause.
+    await act(async () => {});
+    expect(useRuleDraftStore.getState().drafts[id]).toBeUndefined();
+  });
+
+  it("opens NOTHING for a run that was undone while the median was in flight", async () => {
+    const id = addLayer();
+    const run = seed(doneRun({ targetLayerId: id }));
+    const median = deferMedian();
+    render(<RunFooter run={run} canRun reason={null} onRunAgain={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    // What `undoRun` leaves behind: the record stays `done`, so only the note
+    // and `undoable` say the values have been taken back.
+    useProcessingStore.getState().patchRun(run.id, {
+      undoable: false,
+      note: "Undone",
+    });
+    median.release();
+    await act(async () => {});
+    expect(useRuleDraftStore.getState().drafts[id]).toBeUndefined();
   });
 });

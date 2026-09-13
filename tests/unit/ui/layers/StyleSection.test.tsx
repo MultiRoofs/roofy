@@ -33,12 +33,14 @@ import type { CityModel } from "../../../../src/domain/citymodel/types";
 import {
   CATEGORY_OTHER_HEX,
   CATEGORY_PALETTE_HEX,
+  NEW_RULE_COLOR_HEX,
   SINGLE_COLOR_HEX,
   SURFACE_COLOR_HEX,
   UNMATCHED_COLOR_HEX,
 } from "../../../../src/scene/cityColors";
 import { DEFAULT_GEO_LAYER_STYLE } from "../../../../src/features/geoLayers/geoLayerStyle";
 import { resetGeoJsonDocumentCache } from "../../../../src/features/geoLayers/geoLayerDocument";
+import { useRuleDraftStore } from "../../../../src/features/rules/ruleDraftStore";
 
 /** jsdom reports an inline `backgroundColor` back as `rgb(r, g, b)`. */
 function rgb(hex: string): string {
@@ -52,6 +54,7 @@ afterEach(() => {
   useGeoLayerStore.setState({ layers: [] });
   useStreamStore.setState({ streams: {} });
   useWorkspaceStore.setState({ activeLayerId: null });
+  useRuleDraftStore.setState({ drafts: {} });
   resetGeoJsonDocumentCache();
 });
 
@@ -596,5 +599,53 @@ describe("StyleSection — a 3D tileset", () => {
     render(<GeoHost id={addGeo("3d-tiles")} />);
     expect(screen.getByText("No style options")).toBeTruthy();
     expect(screen.queryByLabelText("Opacity")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// An OPEN DRAFT is reachable before Save (Task 26)
+// ---------------------------------------------------------------------------
+
+describe("StyleSection — a rule draft opened from outside the editor", () => {
+  /** The draft §6.2's "Style by result" writes: no `colorBy` change, because
+   *  "the map does NOT change until the user presses Save in the editor". */
+  function seedResultDraft(layerId = "L"): void {
+    useRuleDraftStore.getState().setDraft(layerId, {
+      editingId: null,
+      open: true,
+      origin: "style-by-result",
+      form: {
+        name: "solid_volume_m3",
+        color: NEW_RULE_COLOR_HEX,
+        logic: "AND",
+        conditions: [{ field: "solid_volume_m3", operator: ">", value: 4.2 }],
+      },
+    });
+  }
+
+  it.each(["surface", "single"] as const)(
+    "shows the editor over a %s layer, so the draft can be seen and saved",
+    (mode) => {
+      // Without this the result card's button would leave the user on the
+      // mode's own body with an invisible draft: the eager `colorBy` write
+      // that used to make the editor appear is gone (§6.2).
+      useLayerStore.setState({ layers: [cityLayer({ colorBy: mode })] });
+      seedResultDraft();
+      render(<StyleSection item={city(cityLayer({ colorBy: mode }))} />);
+
+      expect(screen.getByPlaceholderText("Rule name")).toHaveProperty(
+        "value",
+        "solid_volume_m3",
+      );
+      // The mode itself is untouched — the select still says what the map is
+      // doing right now.
+      expect(colorBySelect().value).toBe(mode);
+    },
+  );
+
+  it("keeps the editor hidden on a surface layer with NO draft", () => {
+    useLayerStore.setState({ layers: [cityLayer({ colorBy: "surface" })] });
+    render(<StyleSection item={city(cityLayer({ colorBy: "surface" }))} />);
+    expect(screen.queryByText("+ Add rule")).toBeNull();
   });
 });

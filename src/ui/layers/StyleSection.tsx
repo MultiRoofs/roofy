@@ -27,6 +27,7 @@ import { COLOR_BY_MODES, type ColorBy } from "../../features/rules/colorBy";
 import { SINGLE_COLOR_HEX } from "../../scene/cityColors";
 import type { ActiveLayer } from "../../features/workspace/activeLayer";
 import { RulesEditor } from "./RulesEditor";
+import { useRuleDraftStore } from "../../features/rules/ruleDraftStore";
 import { SurfaceTypePalette } from "./SurfaceTypePalette";
 import { GeoOpacityControl, GeoVectorStyleFields } from "./GeoStyleControls";
 
@@ -94,6 +95,10 @@ function CityStyleFields({ layerId }: { readonly layerId: string }) {
   const [copyOpen, setCopyOpen] = useState(false);
   const [sourceId, setSourceId] = useState("");
   const [copied, setCopied] = useState("");
+  // Subscribed, not read once: the draft is written from OUTSIDE this tree
+  // (the processing card's "Style by result"), so nothing else would re-render
+  // the section when it appears.
+  const draftOpen = useRuleDraftStore((s) => s.drafts[layerId]?.open === true);
   if (layer === undefined) return null;
 
   // `?? "surface"` for a record that predates the field: the mode that paints
@@ -180,8 +185,15 @@ function CityStyleFields({ layerId }: { readonly layerId: string }) {
 
       {/* The editor branches on `isStreaming` internally and reads a streaming
           layer's attribute keys from the resident model, because a streaming
-          layer's `model` is a stub (see residentModel.ts). */}
-      {colorBy === "rules" && (
+          layer's `model` is a stub (see residentModel.ts).
+
+          OR an open DRAFT, whatever the mode: §6.2's "Style by result" writes a
+          draft and deliberately does NOT touch `colorBy` ("the map does not
+          change until the user presses Save in the editor"), so on a layer
+          still on Surface type or Single colour this gate is the only thing
+          that puts that draft on screen. Keyed on `open`, so Cancel — which
+          clears the draft — closes it again. */}
+      {(colorBy === "rules" || draftOpen) && (
         <RulesEditor model={layer.model} layerId={layerId} />
       )}
 

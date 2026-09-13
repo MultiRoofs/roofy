@@ -38,7 +38,7 @@ import { useRuleDraftStore } from "../../features/rules/ruleDraftStore";
 import { useLayerTableStore } from "../../insights/layerTables";
 import { runQuery, type QueryOutcome } from "../../insights/duckdb";
 import { buildMedianSql, buildMostFrequentSql } from "../../insights/sql";
-import { NEW_RULE_COLOR_HEX } from "../../scene/cityColors";
+import { nextRuleColor } from "../../features/rules/nextRuleColor";
 
 /** §6.2's reason for a Style-by-result button with nothing to style. */
 const ALL_VALUES_EMPTY = "All values are empty";
@@ -236,9 +236,17 @@ function useStyleByResult(runId: string | null): {
           if (!alive) return;
 
           // §7: a run that went stale or was undone while the read was in
-          // flight no longer describes the column this value came from.
+          // flight no longer describes the column this value came from. An
+          // Undo leaves the record on `done` and says so only in the note
+          // (`runQueue.ts:2104`), so the note is part of the test — without it
+          // a draft would be opened over values that have been taken back.
           const current = runById(run.id);
-          if (current === null || current.stale || current.status !== "done")
+          if (
+            current === null ||
+            current.stale ||
+            current.status !== "done" ||
+            current.note === "Undone"
+          )
             return;
 
           let value: number | string | boolean;
@@ -275,7 +283,14 @@ function useStyleByResult(runId: string | null): {
               // before they can see the result on the map. It is a draft —
               // they rename it in the field it lands in.
               name: column.name,
-              color: NEW_RULE_COLOR_HEX,
+              // §6.2's "the next palette colour": a second Style-by-result
+              // draft on the same layer is invisible against the first if both
+              // take `RULE_PALETTE_HEX[0]`. Read from the STORE at this
+              // moment, never from a value captured when the card rendered.
+              color: nextRuleColor(
+                useLayerStore.getState().layers.find((l) => l.id === layerId)
+                  ?.rules ?? [],
+              ),
               logic: "AND",
               conditions: [
                 {
@@ -285,8 +300,18 @@ function useStyleByResult(runId: string | null): {
                 },
               ],
             },
+            // Which Save this draft gets (M3 ruling C6): a RESULT draft
+            // switches the layer to `Color by = Rules` from ANY mode when the
+            // user saves it — that is what they asked to see — while a rule
+            // typed by hand keeps `ensureRulesMode`'s surface-only flip.
+            origin: "style-by-result",
           });
-          useLayerStore.getState().updateLayer(layerId, { colorBy: "rules" });
+          // §6.2: "The map does NOT change until the user presses Save in the
+          // editor, as with any rule." The editor's Save is the ONE writer of
+          // `colorBy` for a rule, so nothing here touches it. Setting it
+          // eagerly repainted a layer on Surface type to the unmatched colour
+          // before the user had seen the draft.
+          //
           // Last, so the panel opens on a draft that is already written.
           useShellStore.getState().requestSection(layerId, "style");
         } finally {
