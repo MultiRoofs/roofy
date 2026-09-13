@@ -1369,6 +1369,53 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
     db.query("DROP TABLE IF EXISTS probe_distance");
   });
 
+  it("answers the POINT→polygon pair the same through buildDistanceSql as core ST_Distance", () => {
+    // PARITY, explicitly. The case above ("finds the nearest source feature
+    // with MIN(ST_Distance)") measures core `ST_Distance` from the point
+    // (200, 50) to this file's two areas and gets 50, nearest `idx` 1 — the
+    // one pairing the core function is trusted for. `buildDistanceSql` uses
+    // `ST_Distance_GEOS` instead, because core is 0 for ANY polygon pair, so
+    // the builder's answer for the pairing core DOES get right has to be the
+    // same number: a centre proxy IS a point.
+    //
+    // The bbox below is centred on exactly (200, 50), so the two statements
+    // measure the same geometry against the same source.
+    db.query(
+      `CREATE OR REPLACE TABLE probe_point_parity AS SELECT * FROM (VALUES
+         ('B1', NULL::VARCHAR, {'xmin': 199.0, 'ymin': 49.0, 'zmin': 0.0, 'xmax': 201.0, 'ymax': 51.0, 'zmax': 3.0})
+       ) AS t("id", "feature_id", "bbox")`,
+    );
+    const core = db.query(
+      `SELECT MIN(ST_Distance(ST_Point(200, 50), s.geom)) AS d, arg_min(s."fid", ST_Distance(ST_Point(200, 50), s.geom)) AS nearest FROM "${VECTOR_TABLE}" s`,
+    );
+    expect(Number(core[0]?.["d"])).toBeCloseTo(50, 6);
+    expect(core[0]?.["nearest"]).toBe("b");
+    expect(
+      db.query(
+        buildDistanceSql({
+          table: "probe_point_parity",
+          source: VECTOR_TABLE,
+          proxy: "centre",
+          from: null,
+          geometryColumn: null,
+          ids: null,
+          maxDistanceM: 500,
+          prefix: "roads_",
+          nearestId: { property: null },
+        }),
+      ),
+    ).toEqual([
+      {
+        id: "B1",
+        f: "B1",
+        no_proxy: false,
+        roads_distance_m: 50,
+        roads_nearest_id: "b",
+      },
+    ]);
+    db.query("DROP TABLE IF EXISTS probe_point_parity");
+  });
+
   it("measures FOOTPRINTS read from the reader against a distant area", () => {
     // The proxy that re-reads the parent source, and the one the polygon
     // defect above hit hardest: the footprint is a `ST_Force2D`'d union, i.e. a

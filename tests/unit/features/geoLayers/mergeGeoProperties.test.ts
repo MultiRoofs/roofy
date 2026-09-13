@@ -9,6 +9,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   GEO_PROPERTY_ABSENT,
+  mergeGeoDocumentProperties,
   restoreGeoDocumentProperties,
   useGeoLayerStore,
   type GeoJsonLayer,
@@ -52,6 +53,40 @@ function stableIds(id: string): ReadonlyArray<string> {
   return geoRecords(prepared(id)).map(geoRecordId);
 }
 
+/** Every DISTINCT config the layer wore while `run` executed. One entry is
+ *  "replaced exactly once" — `geoLayerSync.ts` rebuilds the engine pair on
+ *  config identity, so a `set` per feature would show up as two. */
+function configTransitions(
+  id: string,
+  run: () => void,
+): ReadonlyArray<unknown> {
+  const read = () => {
+    const layer = useGeoLayerStore.getState().layers.find((l) => l.id === id);
+    return layer?.kind === "geojson" ? layer.config : undefined;
+  };
+  // SEEDED with the config the layer already wears: zustand notifies on every
+  // `set`, including one whose reducer returned the same array, so an empty
+  // start would count a no-op as a transition.
+  let last = read();
+  const seen: unknown[] = [];
+  const unsubscribe = useGeoLayerStore.subscribe(() => {
+    const config = read();
+    if (config !== undefined && config !== last) {
+      seen.push(config);
+      last = config;
+    }
+  });
+  run();
+  unsubscribe();
+  return seen;
+}
+
+/** The record's own STRING keys: `{ x: undefined }` still HAS the key, and the
+ *  grid and the export would both still list it. */
+function keysOf(record: Readonly<Record<string, unknown>> | undefined) {
+  return Object.keys(record ?? {});
+}
+
 beforeEach(() => {
   useGeoLayerStore.setState({ layers: [] });
 });
@@ -78,13 +113,18 @@ describe("mergeGeoFeatureProperties", () => {
     const id = addZones();
     const before = geoLayer(id);
     const ids = stableIds(id);
-    useGeoLayerStore
-      .getState()
-      .mergeGeoFeatureProperties(
-        id,
-        new Map(ids.map((sid, i) => [sid, { bld_buildings_n: i }])),
-      );
+    // BOTH features written, and the store must still publish ONE new config.
+    const transitions = configTransitions(id, () =>
+      useGeoLayerStore
+        .getState()
+        .mergeGeoFeatureProperties(
+          id,
+          new Map(ids.map((sid, i) => [sid, { bld_buildings_n: i }])),
+        ),
+    );
+    expect(transitions).toHaveLength(1);
     const after = geoLayer(id);
+    expect(transitions[0]).toBe(after.config);
     expect(after).not.toBe(before);
     expect(after.config).not.toBe(before.config);
     // The style and the visibility are untouched, so the reconciler takes the
@@ -108,13 +148,39 @@ describe("mergeGeoFeatureProperties", () => {
     expect(features[0]?.properties).toEqual({ zone: "A" });
   });
 
+  it("leaves the PREPARED input it was handed exactly as it was", () => {
+    // Purity over the document the callers actually pass — the prepared clone,
+    // envelope and all. Task 23 hands the PARENT's `preparedData` to the same
+    // function to build a derived layer from, so a mutation here would edit a
+    // layer nobody asked it to touch.
+    const id = addZones();
+    const input = prepared(id);
+    const snapshot = JSON.stringify(input);
+    const merged = mergeGeoDocumentProperties(
+      input,
+      new Map([[stableIds(id)[0]!, { bld_buildings_n: 3 }]]),
+    );
+    expect(JSON.stringify(input)).toBe(snapshot);
+    expect(merged).not.toBe(input);
+    expect(geoRecords(merged)[0]).toMatchObject({ bld_buildings_n: 3 });
+    // The features that did NOT change keep their identity, so the merge is
+    // copy-on-write rather than a clone of the whole document.
+    const source = input as { features: ReadonlyArray<unknown> };
+    const after = merged as { features: ReadonlyArray<unknown> };
+    expect(after.features[1]).toBe(source.features[1]);
+    expect(after.features[0]).not.toBe(source.features[0]);
+  });
+
   it("ignores a stable id the layer does not have", () => {
     const id = addZones();
     const before = geoLayer(id);
-    useGeoLayerStore
-      .getState()
-      .mergeGeoFeatureProperties(id, new Map([["index:99", { x: 1 }]]));
+    const transitions = configTransitions(id, () =>
+      useGeoLayerStore
+        .getState()
+        .mergeGeoFeatureProperties(id, new Map([["index:99", { x: 1 }]])),
+    );
     // No feature changed, so nothing is replaced and the engine is not touched.
+    expect(transitions).toHaveLength(0);
     expect(geoLayer(id)).toBe(before);
   });
 
@@ -151,23 +217,24 @@ describe("restoreGeoDocumentProperties", () => {
     const id = addZones();
     const [first] = stableIds(id);
     const document = afterTwoRuns(id);
+    const snapshot = JSON.stringify(document);
     const undoneA = restoreGeoDocumentProperties(
       document,
       new Map([[first!, { count_n: GEO_PROPERTY_ABSENT }]]),
     );
     expect(geoRecords(undoneA)[0]).toMatchObject({ zone: "A", sum_m2: 90 });
-    expect(geoRecords(undoneA)[0]).toEqual(
-      expect.not.objectContaining({ count_n: 3 }),
-    );
-    // And the other order undoes the sum, leaving the count.
+    // The KEY is gone, not set to `undefined`.
+    expect(keysOf(geoRecords(undoneA)[0])).not.toContain("count_n");
+    // And the other order undoes the sum, leaving the count — from the SAME
+    // document, which is what makes the two Undos independent.
     const undoneB = restoreGeoDocumentProperties(
       document,
       new Map([[first!, { sum_m2: GEO_PROPERTY_ABSENT }]]),
     );
     expect(geoRecords(undoneB)[0]).toMatchObject({ count_n: 3 });
-    expect(geoRecords(undoneB)[0]).toEqual(
-      expect.not.objectContaining({ sum_m2: 90 }),
-    );
+    expect(keysOf(geoRecords(undoneB)[0])).not.toContain("sum_m2");
+    // Neither call touched the input it was handed.
+    expect(JSON.stringify(document)).toBe(snapshot);
   });
 
   it("restores a REPLACED value rather than removing the property", () => {
@@ -202,8 +269,6 @@ describe("replaceGeoPreparedData", () => {
       .getState()
       .mergeGeoFeatureProperties(id, new Map([[stableIds(id)[0]!, { x: 1 }]]));
     useGeoLayerStore.getState().replaceGeoPreparedData(id, original);
-    expect(geoRecords(prepared(id))[0]).toEqual(
-      expect.not.objectContaining({ x: 1 }),
-    );
+    expect(keysOf(geoRecords(prepared(id))[0])).not.toContain("x");
   });
 });

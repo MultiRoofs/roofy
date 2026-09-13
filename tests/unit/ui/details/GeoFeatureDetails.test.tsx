@@ -7,8 +7,8 @@
  * The split is the registry's answer and never a guess from the key's name: a
  * source document may carry a `bld_buildings_n` of its own.
  */
-import { beforeEach, describe, expect, it } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { GeoFeatureDetails } from "../../../../src/ui/details/GeoFeatureDetails";
 import { useComputedColumnStore } from "../../../../src/insights/computedColumns";
 
@@ -23,6 +23,10 @@ beforeEach(() => {
   useComputedColumnStore.setState({ byLayer: {} });
 });
 
+// The setup file does not install RTL's auto-cleanup, so each case would
+// otherwise query the previous case's DOM as well as its own.
+afterEach(cleanup);
+
 describe("GeoFeatureDetails", () => {
   it("puts a run's column in the COMPUTED group with its provenance", () => {
     useComputedColumnStore.getState().setProvenance("GEO", "bld_buildings_n", {
@@ -36,6 +40,8 @@ describe("GeoFeatureDetails", () => {
     render(<GeoFeatureDetails selection={selection} />);
     const group = screen.getByRole("group", { name: "Computed attributes" });
     expect(within(group).getByText("bld_buildings_n")).toBeInTheDocument();
+    // The VALUE is shown beside it, in the computed group and nowhere else.
+    expect(within(group).getByText("3")).toBeInTheDocument();
     expect(within(group).queryByText("zone")).toBeNull();
     expect(
       screen.getByTitle(/Aggregate buildings per area/),

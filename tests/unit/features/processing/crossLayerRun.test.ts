@@ -957,36 +957,84 @@ describe("a vector target's publication", () => {
     expect(runById(id)?.undoable).toBe(false);
   });
 
-  it("undoes one run without taking a later run's disjoint columns", async () => {
-    // §6.2 steals Undo only where two runs share a COLUMN, so both of these are
-    // undoable at once — and undoing either must leave the other's results on
-    // the layer, which a whole-document restore could not do.
-    const zones = addZones();
+  /** Two INDEPENDENT runs over the same vector layer, writing DISJOINT
+   *  columns. §6.2 steals Undo only where two runs share a column, so both are
+   *  done and both undoable, and the document carries BOTH results — which is
+   *  the state each order of Undo has to be tested from. */
+  async function twoDisjointRuns(
+    zones: string,
+  ): Promise<{ a: string; b: string }> {
     registerExecutor("aggregate-per-area", areaWriter("bld_buildings_n", 3));
-    const first = submitRun(aggregate(zones, "bld_buildings_n"));
+    const a = submitRun(aggregate(zones, "bld_buildings_n"));
     await settle();
     registerExecutor("aggregate-per-area", areaWriter("bld_sum_m2", 90));
-    const second = submitRun(aggregate(zones, "bld_sum_m2"));
+    const b = submitRun(aggregate(zones, "bld_sum_m2"));
     await settle();
-    expect(runById(second)?.status).toBe("done");
-    expect(runById(first)?.undoable).toBe(true);
+    expect(runById(a)).toMatchObject({ status: "done", undoable: true });
+    expect(runById(b)).toMatchObject({ status: "done", undoable: true });
+    expect(zoneRecords(zones)[0]).toMatchObject({
+      bld_buildings_n: 3,
+      bld_sum_m2: 90,
+    });
+    expect([...computedColumnsOf(zones)].sort()).toEqual([
+      "bld_buildings_n",
+      "bld_sum_m2",
+    ]);
+    return { a, b };
+  }
 
-    await undoRun(first);
-    await settle();
-    expect(zoneRecords(zones)[0]).toMatchObject({ bld_sum_m2: 90 });
-    expect(zoneRecords(zones)[0]).toEqual(
-      expect.not.objectContaining({ bld_buildings_n: 3 }),
-    );
-    expect(runById(second)?.undoable).toBe(true);
+  /** The record's own STRING keys, so "the property is gone" is asserted as
+   *  absence and not as `{ column: undefined }`, which the grid and the export
+   *  would both still show. */
+  function keysOfFirst(zones: string): ReadonlyArray<string> {
+    return Object.keys(zoneRecords(zones)[0] ?? {});
+  }
 
-    // The OTHER order, from the state the first Undo left: the second run's
-    // Undo puts its own column back and touches nothing else.
-    await undoRun(second);
+  it("undoes A then B, each leaving the other run's column alone", async () => {
+    const zones = addZones();
+    const { a, b } = await twoDisjointRuns(zones);
+
+    await undoRun(a);
     await settle();
-    expect(zoneRecords(zones)[0]).toEqual(
-      expect.not.objectContaining({ bld_sum_m2: 90 }),
-    );
+    expect(zoneRecords(zones)[0]).toMatchObject({ bld_sum_m2: 90, zone: "A" });
+    expect(keysOfFirst(zones)).not.toContain("bld_buildings_n");
+    // Ownership and provenance move with the values, and only for A.
+    expect(runById(a)).toMatchObject({ undoable: false, note: "Undone" });
+    expect(runById(b)?.undoable).toBe(true);
+    expect([...computedColumnsOf(zones)]).toEqual(["bld_sum_m2"]);
+
+    await undoRun(b);
+    await settle();
+    expect(keysOfFirst(zones)).not.toContain("bld_sum_m2");
     expect(zoneRecords(zones)[0]).toMatchObject({ zone: "A" });
+    expect(runById(b)).toMatchObject({ undoable: false, note: "Undone" });
+    expect([...computedColumnsOf(zones)]).toEqual([]);
+  });
+
+  it("undoes B then A, from the SAME document that carries both results", async () => {
+    // The other order, and NOT from the state a previous Undo left: this is
+    // the case a whole-document restore gets wrong, because B's snapshot was
+    // taken before A had written anything.
+    const zones = addZones();
+    const { a, b } = await twoDisjointRuns(zones);
+
+    await undoRun(b);
+    await settle();
+    expect(zoneRecords(zones)[0]).toMatchObject({
+      bld_buildings_n: 3,
+      zone: "A",
+    });
+    expect(keysOfFirst(zones)).not.toContain("bld_sum_m2");
+    expect(runById(b)).toMatchObject({ undoable: false, note: "Undone" });
+    expect(runById(a)?.undoable).toBe(true);
+    expect([...computedColumnsOf(zones)]).toEqual(["bld_buildings_n"]);
+
+    await undoRun(a);
+    await settle();
+    expect(keysOfFirst(zones)).not.toContain("bld_buildings_n");
+    expect(zoneRecords(zones)[0]).toMatchObject({ zone: "A" });
+    expect(runById(a)).toMatchObject({ undoable: false, note: "Undone" });
+    expect([...computedColumnsOf(zones)]).toEqual([]);
   });
 
   it("restores a property the run REPLACED rather than dropping it", async () => {
@@ -1095,13 +1143,23 @@ describe("a vector target's publication", () => {
     expect(runById(first)?.note).not.toBe("Undone");
   });
 
-  it("refuses an Undo whose layer was re-linked while it waited", async () => {
-    // A new document: the ids the Undo holds name features of a file the user
-    // has replaced, and its values belong to none of them.
+  it("refuses an Undo whose layer is re-linked WHILE it waits on the queue", async () => {
+    // The identity check has to happen at the HEAD, inside the queued
+    // callback: the Undo is requested against a document that is still the
+    // one it wrote, and the re-link lands while it waits. A check made when
+    // Undo was PRESSED would pass here and then put this run's values into a
+    // file the user has replaced.
     const zones = addZones();
     registerExecutor("aggregate-per-area", areaWriter("bld_n", 3));
     const id = submitRun(aggregate(zones, "bld_n"));
     await settle();
+    // A predecessor holds the FIFO, so the Undo queues behind it.
+    const gate = makeGate();
+    const holding = layerTables.runOnTableQueue(() => gate.promise);
+    const undoing = undoRun(id);
+    await settle();
+    // Still exactly as the run left it: the Undo has not reached the head.
+    expect(zoneRecords(zones)[0]).toMatchObject({ bld_n: 3 });
     useGeoLayerStore.getState().relinkGeoJsonLayer(zones, {
       type: "FeatureCollection",
       features: [
@@ -1113,12 +1171,14 @@ describe("a vector target's publication", () => {
         },
       ],
     });
-    await undoRun(id);
+    gate.open();
+    await holding;
+    await undoing;
     await settle();
+    // The NEWER document is untouched, and the card refuses in the existing
+    // shape: no Undo left, and nothing claiming it was undone.
     expect(zoneRecords(zones)[0]).toMatchObject({ zone: "C" });
-    expect(zoneRecords(zones)[0]).toEqual(
-      expect.not.objectContaining({ bld_n: 3 }),
-    );
+    expect(Object.keys(zoneRecords(zones)[0] ?? {})).not.toContain("bld_n");
     expect(runById(id)?.undoable).toBe(false);
     expect(runById(id)?.note).not.toBe("Undone");
   });
