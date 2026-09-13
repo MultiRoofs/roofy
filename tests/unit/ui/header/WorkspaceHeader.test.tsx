@@ -388,6 +388,7 @@ function loadedLayer(): Layer {
     availableObjectTypes: ["Building"],
     appearanceThemes: [],
     selectedAppearance: null,
+    derivedFrom: null,
     isStreaming: false,
   };
 }

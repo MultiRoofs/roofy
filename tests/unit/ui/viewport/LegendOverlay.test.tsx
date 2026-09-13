@@ -89,6 +89,7 @@ function baseLayer(overrides: Partial<Layer>): Layer {
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,
+    derivedFrom: null,
     isStreaming: false,
     ...overrides,
   };

@@ -86,6 +86,7 @@ function layer(): Layer {
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,
+    derivedFrom: null,
     isStreaming: false,
   };
 }

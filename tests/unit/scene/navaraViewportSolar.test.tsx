@@ -241,6 +241,7 @@ function makeLayer(id: string): Layer {
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,
+    derivedFrom: null,
     isStreaming: false,
   } as Layer;
 }

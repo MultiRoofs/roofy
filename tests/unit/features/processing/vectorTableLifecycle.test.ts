@@ -182,6 +182,7 @@ function cityLayer(): Layer {
     appearanceThemes: [],
     selectedAppearance: null,
     isStreaming: false,
+    derivedFrom: null,
   };
 }
 

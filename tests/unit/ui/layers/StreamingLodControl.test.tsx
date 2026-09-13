@@ -40,6 +40,7 @@ function makeLayer(id: string, isStreaming: boolean): Layer {
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,
+    derivedFrom: null,
     isStreaming,
   };
 }

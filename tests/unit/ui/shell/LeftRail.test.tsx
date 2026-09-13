@@ -72,6 +72,7 @@ function layer(id: string, name: string): Layer {
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,
+    derivedFrom: null,
     isStreaming: false,
   } as Layer;
 }

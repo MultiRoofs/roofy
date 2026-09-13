@@ -60,6 +60,7 @@ function makeLayer(overrides: Partial<Layer> = {}): Layer {
     availableObjectTypes: ["Building", "Road"],
     appearanceThemes: [],
     selectedAppearance: null,
+    derivedFrom: null,
     isStreaming: false,
     ...overrides,
   };

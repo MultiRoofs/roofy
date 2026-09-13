@@ -65,6 +65,7 @@ function layer(patch: Partial<Layer> & { id: string }): Layer {
     availableObjectTypes: [],
     appearanceThemes: [{ kind: "texture", name: "rgb" }],
     selectedAppearance: { kind: "texture", name: "rgb" },
+    derivedFrom: null,
     ...patch,
   };
 }

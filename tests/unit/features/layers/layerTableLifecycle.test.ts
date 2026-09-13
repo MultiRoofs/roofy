@@ -77,6 +77,7 @@ function layer(over: Partial<Layer>): Layer {
     availableObjectTypes: [],
     appearanceThemes: [],
     selectedAppearance: null,
+    derivedFrom: null,
     isStreaming: false,
     visibleObjectIds: null,
     ...over,

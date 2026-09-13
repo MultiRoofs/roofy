@@ -432,3 +432,72 @@ it("copies style independently without changing the destination data", () => {
     useLayerStore.getState().layers.find((l) => l.id === source)!.rules,
   );
 });
+
+/** `addLayer`'s minimum input, named — every case below differs only in name. */
+function input(name: string) {
+  return {
+    name,
+    model: makeModel(),
+    modelRef: { type: "file" as const, fileName: "a.city.json" },
+    visible: true,
+    rules: [],
+  };
+}
+
+describe("a derived layer's row", () => {
+  beforeEach(() => {
+    useLayerStore.setState({ layers: [] });
+  });
+
+  it("records its parent, and every other layer records none", () => {
+    const parent = useLayerStore.getState().addLayer(input("Delft"));
+    const child = useLayerStore.getState().addLayer({
+      ...input("Delft · extent"),
+      derivedFrom: { layerId: parent, layerName: "Delft", runId: "run_3" },
+    });
+    const layers = useLayerStore.getState().layers;
+    expect(layers.find((l) => l.id === parent)?.derivedFrom).toBeNull();
+    expect(layers.find((l) => l.id === child)?.derivedFrom).toEqual({
+      layerId: parent,
+      layerName: "Delft",
+      runId: "run_3",
+    });
+  });
+
+  it("is INSERTED directly under its target, not appended (§6.2)", () => {
+    const a = useLayerStore.getState().addLayer(input("A"));
+    const b = useLayerStore.getState().addLayer(input("B"));
+    const derived = useLayerStore
+      .getState()
+      .addLayer({ ...input("A · extent"), insertAfterId: a });
+    expect(useLayerStore.getState().layers.map((l) => l.id)).toEqual([
+      a,
+      derived,
+      b,
+    ]);
+  });
+
+  it("appends when `insertAfterId` names a layer that is not there", () => {
+    // The target was removed between Run and publication. Appending is the
+    // honest fallback: the layer still exists and is still findable.
+    const a = useLayerStore.getState().addLayer(input("A"));
+    const derived = useLayerStore
+      .getState()
+      .addLayer({ ...input("A · extent"), insertAfterId: "gone" });
+    expect(useLayerStore.getState().layers.map((l) => l.id)).toEqual([
+      a,
+      derived,
+    ]);
+  });
+
+  it("does not leak `insertAfterId` onto the record", () => {
+    // It is an instruction to the store, not a field of a layer — and the row
+    // is spread from the input, so it would otherwise ride along into the
+    // snapshot's field list and into every `Layer` comparison.
+    const a = useLayerStore.getState().addLayer(input("A"));
+    useLayerStore.getState().addLayer({ ...input("B"), insertAfterId: a });
+    expect(Object.keys(useLayerStore.getState().layers[1]!)).not.toContain(
+      "insertAfterId",
+    );
+  });
+});

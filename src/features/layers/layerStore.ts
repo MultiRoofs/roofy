@@ -25,6 +25,21 @@ import type { CityModelReference } from "../../persistence/types";
 import type { Rule } from "../rules/types";
 import { normalizeColorBy, type ColorBy } from "../rules/colorBy";
 
+/**
+ * Where a DERIVED layer came from (spec §6, "What a derived layer is").
+ *
+ * `layerName` is a COPY of the parent's name at publication, not a live read:
+ * §6.2's state line says "Derived from Delft" and the parent may be renamed or
+ * removed afterwards — "a derived layer is independent of its parent from
+ * publication on". `runId` is what the layer row's "Show run log" opens, and
+ * what §6.2's Undo block scans the history for.
+ */
+export interface DerivedFrom {
+  readonly layerId: string;
+  readonly layerName: string;
+  readonly runId: string;
+}
+
 export interface Layer {
   readonly id: string;
   readonly name: string;
@@ -129,6 +144,15 @@ export interface Layer {
    * plugin's `setAppearance` by `handleSync`; captured in snapshots.
    */
   readonly selectedAppearance: AppearanceTheme | null;
+  /**
+   * Null for every ordinary layer. REQUIRED rather than optional, so the
+   * snapshot filter, the state line and the layer-list marker are all reading
+   * a field the compiler made every fixture answer for. NOT added to
+   * `App.tsx`'s explicit serialisation list — a derived layer is omitted from
+   * the snapshot entirely (§8), so this field is not persisted by
+   * construction.
+   */
+  readonly derivedFrom: DerivedFrom | null;
 }
 
 export interface LayerStoreState {
@@ -144,6 +168,7 @@ export interface LayerStoreActions {
       | "availableLods"
       | "lodMode"
       | "isStreaming"
+      | "derivedFrom"
       | "cameraSync"
       | "hiddenTypes"
       | "visibleObjectIds"
@@ -163,6 +188,16 @@ export interface LayerStoreActions {
        *  streaming (Task 17's `openStreamingLayer`) — its `model` is a stub
        *  (bbox only, empty objects) rather than a fully-parsed model. */
       readonly isStreaming?: boolean;
+      /** Defaults to null. Supplied only by a New-layer run's publication
+       *  (Tasks 21 and 23). */
+      readonly derivedFrom?: DerivedFrom | null;
+      /**
+       * Insert directly AFTER this layer instead of appending (spec §6.2: the
+       * derived layer is "inserted directly under its target in the layer
+       * list"). An id that is not in the list appends, which is what a target
+       * removed between Run and publication leaves behind.
+       */
+      readonly insertAfterId?: string;
       /** Defaults to nothing hidden. Supplied by a RESTORE, where the same
        *  value was seeded into the plugin at add/open time so the layer never
        *  renders one frame of the geometry it was saved without. */
@@ -344,36 +379,55 @@ export const useLayerStore = create<LayerStore>((set) => ({
     // use — so a layer added from a snapshot, a share link or a fresh file all
     // reach the store through one answer.
     const colorBy = normalizeColorBy(input);
-    set((state) => ({
-      layers: [
-        ...state.layers,
-        {
-          ...input,
-          id,
-          selectedLod,
-          availableLods,
-          lodMode: "auto",
-          // Every layer starts following the camera: that is what streaming
-          // has always done, and freezing an extract is a deliberate act.
-          cameraSync: true,
-          isStreaming: input.isStreaming ?? false,
-          hiddenTypes: input.hiddenTypes ?? [],
-          attributeOrders: normalizeAttributeOrders(input.attributeOrders),
-          // Session state, and never an add-time input: a fresh layer is
-          // unfiltered until a query says otherwise.
-          visibleObjectIds: null,
-          // A streaming layer's `model` is a stub (bbox only), so there is
-          // nothing to fold here; `useStreamStore`'s `types` carries its
-          // groups instead.
-          availableObjectTypes: input.isStreaming
-            ? []
-            : computeAvailableObjectTypes(input.model),
-          appearanceThemes,
-          selectedAppearance,
-          ...colorBy,
-        },
-      ],
-    }));
+    // An INSTRUCTION to the store, not a field of a layer — pulled out of the
+    // input so the spread below cannot carry it into the record (and thence
+    // into every `Layer` comparison and the snapshot's field list).
+    const { insertAfterId, ...rest } = input;
+    set((state) => {
+      // Typed `: Layer`, not `as Layer`: this is the one construction site of
+      // the record, and the annotation is what makes a new REQUIRED field
+      // (`derivedFrom`) a compile error here rather than an undefined at
+      // runtime.
+      const record: Layer = {
+        ...rest,
+        id,
+        selectedLod,
+        availableLods,
+        lodMode: "auto",
+        // Every layer starts following the camera: that is what streaming
+        // has always done, and freezing an extract is a deliberate act.
+        cameraSync: true,
+        isStreaming: input.isStreaming ?? false,
+        derivedFrom: input.derivedFrom ?? null,
+        hiddenTypes: input.hiddenTypes ?? [],
+        attributeOrders: normalizeAttributeOrders(input.attributeOrders),
+        // Session state, and never an add-time input: a fresh layer is
+        // unfiltered until a query says otherwise.
+        visibleObjectIds: null,
+        // A streaming layer's `model` is a stub (bbox only), so there is
+        // nothing to fold here; `useStreamStore`'s `types` carries its
+        // groups instead.
+        availableObjectTypes: input.isStreaming
+          ? []
+          : computeAvailableObjectTypes(input.model),
+        appearanceThemes,
+        selectedAppearance,
+        ...colorBy,
+      };
+      // §6.2: a derived layer is "inserted directly under its target in the
+      // layer list". `insertAfterId` is the ONLY way this is not an append, so
+      // every existing caller keeps append semantics and there is exactly one
+      // splice site. An id that is not in the list appends — which is what a
+      // target removed between Run and publication leaves behind.
+      const at =
+        insertAfterId === undefined
+          ? -1
+          : state.layers.findIndex((l) => l.id === insertAfterId);
+      if (at < 0) return { layers: [...state.layers, record] };
+      const next = [...state.layers];
+      next.splice(at + 1, 0, record);
+      return { layers: next };
+    });
     useQueryStore.getState().restorePresentation(id, input.tablePresentation);
     return id;
   },

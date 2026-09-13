@@ -251,6 +251,7 @@ function layer(): Layer {
     appearanceThemes: [],
     selectedAppearance: null,
     isStreaming: false,
+    derivedFrom: null,
   };
 }
 
