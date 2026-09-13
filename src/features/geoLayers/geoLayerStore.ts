@@ -20,7 +20,10 @@ import {
   normalizeGeoLayerStyle,
   type GeoLayerStyle,
 } from "./geoLayerStyle";
-import { normalizeGeoJsonDocument } from "./geoJsonRecords";
+import {
+  normalizeGeoJsonDocument,
+  readGeoStableFeatureId,
+} from "./geoJsonRecords";
 
 export type GeoLayerKind = "geojson" | "raster-xyz" | "3d-tiles";
 
@@ -167,6 +170,128 @@ export function isGeoLayerUnavailable(layer: GeoLayer): boolean {
   );
 }
 
+/**
+ * A prepared document with `byStableId`'s values merged into the matching
+ * features' properties, or `null` when nothing matched.
+ *
+ * Copy-on-write, feature by feature: the features that change are replaced and
+ * the rest keep their identity, so a merge over 6 of 6,000 areas clones 6
+ * objects. `null` rather than an unchanged clone, so the caller can leave the
+ * layer record — and the engine pair — untouched.
+ *
+ * PURE and non-mutating, which is what lets Task 23 hand it the PARENT's
+ * `preparedData` to build a derived layer's document from: §6's "the run leaves
+ * the target untouched" is a property of this function, not of its callers.
+ */
+export function mergeGeoDocumentProperties(
+  document: unknown,
+  byStableId: ReadonlyMap<string, Readonly<Record<string, unknown>>>,
+  // `unknown` and not `unknown | null`: the union collapses to `unknown` and
+  // the linter refuses the redundant constituent. The NULL is the contract —
+  // "nothing matched" — and every caller compares against it.
+): unknown {
+  if (byStableId.size === 0) return null;
+  const source = document as {
+    type?: unknown;
+    features?: unknown[];
+  } | null;
+  const mergeFeature = (feature: unknown): unknown => {
+    const record = feature as { properties?: unknown } | null;
+    const properties =
+      record?.properties && typeof record.properties === "object"
+        ? (record.properties as Record<string, unknown>)
+        : null;
+    if (properties === null) return feature;
+    const stableId = readGeoStableFeatureId(properties);
+    const values = stableId === null ? undefined : byStableId.get(stableId);
+    if (values === undefined) return feature;
+    return { ...record, properties: { ...properties, ...values } };
+  };
+  if (source?.type === "FeatureCollection" && Array.isArray(source.features)) {
+    const features = source.features.map(mergeFeature);
+    const changed = features.some((f, i) => f !== source.features?.[i]);
+    return changed ? { ...source, features } : null;
+  }
+  if (source?.type === "Feature") {
+    const merged = mergeFeature(source);
+    return merged === source ? null : merged;
+  }
+  return null;
+}
+
+/**
+ * What a property was before a run wrote it, when it was not there at all.
+ *
+ * A SENTINEL and not `undefined`: `{ ...properties, bld_buildings_n: undefined }`
+ * leaves the KEY in the bag, and the records grid, Details and the GeoJSON
+ * export would all still list it — an Undo that visibly did not undo.
+ */
+export const GEO_PROPERTY_ABSENT: unique symbol = Symbol("absent");
+
+export type GeoPreviousValues = ReadonlyMap<
+  string,
+  Readonly<Record<string, unknown>>
+>;
+
+/**
+ * §6.2's Undo for a vector run: this run's OWN columns put back, feature by
+ * feature, into the CURRENT document.
+ *
+ * NOT a stored snapshot of the whole document. Two runs can be undoable on one
+ * layer at the same time — Undo is stolen only where two runs share a COLUMN
+ * (`runQueue.ts`'s `stealUndo`) — so restoring a snapshot taken before run A
+ * would also erase run B's results while B still read "undoable". Touching only
+ * the keys the run wrote makes the two Undos independent in either order, which
+ * is what §6.2 promises.
+ *
+ * Copy-on-write like {@link mergeGeoDocumentProperties}, and `null` when
+ * nothing changed so the caller can leave the layer record — and the engine
+ * pair — alone.
+ */
+export function restoreGeoDocumentProperties(
+  document: unknown,
+  previous: GeoPreviousValues,
+  /** `null` when nothing changed; see {@link mergeGeoDocumentProperties}. */
+): unknown {
+  if (previous.size === 0) return null;
+  const source = document as { type?: unknown; features?: unknown[] } | null;
+  const restoreFeature = (feature: unknown): unknown => {
+    const record = feature as { properties?: unknown } | null;
+    const properties =
+      record?.properties && typeof record.properties === "object"
+        ? (record.properties as Record<string, unknown>)
+        : null;
+    if (properties === null) return feature;
+    const stableId = readGeoStableFeatureId(properties);
+    const values = stableId === null ? undefined : previous.get(stableId);
+    if (values === undefined) return feature;
+    const next: Record<string, unknown> = { ...properties };
+    let changed = false;
+    for (const [key, value] of Object.entries(values)) {
+      if (value === GEO_PROPERTY_ABSENT) {
+        if (key in next) {
+          delete next[key];
+          changed = true;
+        }
+        continue;
+      }
+      if (!(key in next) || next[key] !== value) changed = true;
+      next[key] = value;
+    }
+    return changed ? { ...record, properties: next } : feature;
+  };
+  if (source?.type === "FeatureCollection" && Array.isArray(source.features)) {
+    const features = source.features.map(restoreFeature);
+    const changed = features.some((f, i) => f !== source.features?.[i]);
+    return changed ? { ...source, features } : null;
+  }
+  if (source?.type === "Feature") {
+    const restored = restoreFeature(source);
+    return restored === source ? null : restored;
+  }
+  return null;
+}
+
 export interface GeoLayerState {
   readonly layers: readonly GeoLayer[];
 }
@@ -187,6 +312,28 @@ export interface GeoLayerActions {
    * written onto a GeoJSON layer. A layer of another kind is left untouched.
    */
   relinkGeoJsonLayer: (id: string, data: unknown) => void;
+  /**
+   * Spec §7.6: a run's results, merged onto the vector layer's FEATURE
+   * PROPERTIES — which is what the app holds for a vector layer (it has no
+   * DuckDB table and no model).
+   *
+   * Into `preparedData`, never `config.data`: `preparedData` is the document the
+   * engine, the records panel and the GeoJSON export all read, and it is
+   * documented "never persisted" — which is exactly §8's "nothing new is
+   * saved". Writing `data` would put a URL-backed layer's whole fetched
+   * document into the snapshot.
+   *
+   * ONE new config, whatever the number of features: `geoLayerSync.ts` rebuilds
+   * the engine pair on config identity, so a `set` per feature would rebuild it
+   * once per area. A merge that changes nothing leaves the record's identity
+   * alone.
+   */
+  mergeGeoFeatureProperties: (
+    layerId: string,
+    byStableId: ReadonlyMap<string, Readonly<Record<string, unknown>>>,
+  ) => void;
+  /** §6.2's Undo for a vector run: the restored document, put back whole. */
+  replaceGeoPreparedData: (layerId: string, data: unknown) => void;
   setPreparedGeoJson: (id: string, data: unknown) => void;
   setGeoJsonPreparationError: (id: string, message: string) => void;
   retryGeoJsonPreparation: (id: string) => void;
@@ -298,6 +445,29 @@ export const useGeoLayerStore = create<GeoLayerStore>((set) => ({
                 preparation: "ready",
               },
             }
+          : null,
+      ),
+    })),
+
+  mergeGeoFeatureProperties: (layerId, byStableId) =>
+    set((state) => ({
+      layers: replaceLayer(state.layers, layerId, (layer) => {
+        if (layer.kind !== "geojson") return null;
+        const merged = mergeGeoDocumentProperties(
+          layer.config.preparedData,
+          byStableId,
+        );
+        return merged === null
+          ? null
+          : { ...layer, config: { ...layer.config, preparedData: merged } };
+      }),
+    })),
+
+  replaceGeoPreparedData: (layerId, data) =>
+    set((state) => ({
+      layers: replaceLayer(state.layers, layerId, (layer) =>
+        layer.kind === "geojson"
+          ? { ...layer, config: { ...layer.config, preparedData: data } }
           : null,
       ),
     })),

@@ -112,3 +112,32 @@ export function publicGeoProperties(
     publicProperties[GEO_STABLE_FEATURE_KEY] = envelope.originalValue;
   return publicProperties;
 }
+
+/**
+ * The PUBLIC properties of the feature carrying `stableId`, or null.
+ *
+ * A geo selection holds a SNAPSHOT of the properties it was made with
+ * (`domain/selection/types.ts`), so after a run merges its results the Details
+ * panel would still show the values from before the run. This is how `App.tsx`
+ * re-reads them for the same feature without a new pick.
+ */
+export function findGeoFeatureProperties(
+  document: unknown,
+  stableId: string,
+): Readonly<Record<string, unknown>> | null {
+  const source = document as { type?: unknown; features?: unknown[] } | null;
+  const features =
+    source?.type === "FeatureCollection" && Array.isArray(source.features)
+      ? source.features
+      : source?.type === "Feature"
+        ? [source]
+        : [];
+  for (const feature of features) {
+    const properties = (feature as { properties?: unknown } | null)?.properties;
+    if (properties === null || typeof properties !== "object") continue;
+    const bag = properties as Record<string, unknown>;
+    if (readGeoStableFeatureId(bag) === stableId)
+      return publicGeoProperties(bag);
+  }
+  return null;
+}
