@@ -254,6 +254,17 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
           )}
         </fieldset>
       )}
+      {toolId === "validate-solids" && (
+        <fieldset className="processing-section" disabled={locked}>
+          <legend className="processing-group__label">PARAMETERS</legend>
+          {/* §7.3 has no parameters. The section is still here, with the one
+              thing a user would otherwise look for: §6.2's Style by result
+              opens a rule on this column, so its name is worth stating. */}
+          <p className="processing-note">
+            Validity is always written as &lt;prefix&gt;valid.
+          </p>
+        </fieldset>
+      )}
       <fieldset className="processing-section" disabled={locked}>
         <legend className="processing-group__label">OUTPUT</legend>
         {/* §6: OUTPUT "starts with the destination, Write to". Its second

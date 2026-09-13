@@ -19,6 +19,7 @@ describe("tools/register", () => {
       "height-from-extent",
       "roof-metrics",
       "measure-solids",
+      "validate-solids",
     ]);
   });
 });

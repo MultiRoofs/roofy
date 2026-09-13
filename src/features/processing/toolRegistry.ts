@@ -1,6 +1,6 @@
 import type { OutputColumn } from "../../insights/computedColumns";
 import { roofColumnNames, roofParams } from "./roofMetricsParams";
-import { solidColumns, solidParams } from "./solidParams";
+import { solidColumns, solidParams, validationColumns } from "./solidParams";
 import type { ToolDefinition, ToolId } from "./types";
 
 /**
@@ -84,6 +84,9 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     needsVectorSource: false,
     needsLod: true,
     defaultPrefix: "solid_",
+    // No `validateParams` and no `normaliseParams`: §7.3 has no parameters, so
+    // there is nothing to refuse and nothing to fill in.
+    outputColumns: (prefix) => validationColumns(prefix),
     styleByResult: {
       kind: "rule",
       operator: "=",
@@ -94,7 +97,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
       pick: (written) =>
         written.find((c) => c.name.toLowerCase().endsWith("valid")) ?? null,
     },
-    implemented: false,
+    implemented: true,
   },
   {
     id: "height-from-extent",

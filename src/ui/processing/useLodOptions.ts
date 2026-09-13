@@ -62,10 +62,14 @@ export function useLodOptions(
           options.length === 0 ? "No roof surfaces in this layer" : null,
       };
     }
-    if (tool.id === "measure-solids") {
+    if (tool.id === "measure-solids" || tool.id === "validate-solids") {
       // §6, verbatim: the option reads "2.2 (1,115 buildings with a solid)" and
       // the empty select reads "No solid geometry in this layer". TAGS ONLY
       // (`solidLodOptions`) — opening a dropdown measures nothing.
+      //
+      // BOTH solids tools ask the same question of the same tags, so they share
+      // one answer — §7.3's parameters are the LoD alone, and a second copy of
+      // this branch is how the two would come to offer different rungs.
       const options = solidLodOptions(target);
       return {
         options,

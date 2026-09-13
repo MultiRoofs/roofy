@@ -1,9 +1,13 @@
 /**
- * Measure solids, switched on: the LoD select's options and their FEATURE
+ * BOTH solids tools, switched on: the LoD select's options and their FEATURE
  * counts, §6's empty state, the PARAMETERS section, the validation that blocks
  * Run, and the frozen request the Run button produces.
  *
- * A layer of its own rather than `roofLayerFixture`'s: this tool needs a READER
+ * One file for the two because they share one LoD answer (`solidLodOptions`,
+ * the same noun and the same empty reason) and one fixture — so a change that
+ * split them apart fails here rather than in whichever suite was written second.
+ *
+ * A layer of its own rather than `roofLayerFixture`'s: these tools need a READER
  * and an available SOURCE (`eligibility.ts`) and surfaces tagged with their
  * geometry TYPE, none of which the roof fixture has.
  */
@@ -370,5 +374,97 @@ describe("Measure solids, switched on", () => {
         "Re-reads a 180 MB source; this can take a minute and needs memory",
       ),
     ).toBeInTheDocument();
+  });
+});
+
+describe("Validate solids, switched on", () => {
+  it("shares the solids LoD answer and promises §7.3's seven columns", () => {
+    addSolidLayer();
+    render(<ToolView toolId="validate-solids" />);
+    expect(
+      [
+        ...screen
+          .getByRole("combobox", { name: "LoD" })
+          .querySelectorAll("option"),
+      ].map((o) => o.textContent),
+    ).toEqual([
+      "2.2 (1 building with a solid)",
+      "1.2 (1 building with a solid)",
+    ]);
+    expect(
+      screen.getByText(
+        "solid_closed, solid_manifold, solid_oriented, solid_valid, solid_open_edges_n, solid_nonmanifold_edges_n, solid_degenerate_faces_n",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("has a PARAMETERS section that is one note, and Run is enabled", () => {
+    addSolidLayer();
+    render(<ToolView toolId="validate-solids" />);
+    expect(
+      screen.getByText("Validity is always written as <prefix>valid."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
+  });
+
+  it("freezes the LoD and §7.3's typed columns, with no parameters", () => {
+    const id = addSolidLayer();
+    render(<ToolView toolId="validate-solids" />);
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(submitRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolId: "validate-solids",
+        targetLayerId: id,
+        lod: "2.2",
+        prefix: "solid_",
+        params: {},
+        columns: [
+          { name: "solid_closed", type: "BOOLEAN" },
+          { name: "solid_manifold", type: "BOOLEAN" },
+          { name: "solid_oriented", type: "BOOLEAN" },
+          { name: "solid_valid", type: "BOOLEAN" },
+          { name: "solid_open_edges_n", type: "DOUBLE" },
+          { name: "solid_nonmanifold_edges_n", type: "DOUBLE" },
+          { name: "solid_degenerate_faces_n", type: "DOUBLE" },
+        ],
+      }),
+    );
+  });
+
+  it("claims NOTHING about a streaming target's geometry", () => {
+    // The gate `ToolView` applies to every LoD-bearing tool: a target the tool
+    // is REFUSED on gets no LoD control and no verdict about its geometry,
+    // only §5's real reason.
+    addSolidLayer({
+      isStreaming: true,
+      reader: false,
+      encoding: "flatcitybuf",
+    });
+    render(<ToolView toolId="validate-solids" />);
+    expect(screen.queryByRole("combobox", { name: "LoD" })).toBeNull();
+    expect(screen.queryByText(/No solid geometry/)).toBeNull();
+    expect(
+      screen.getByText(
+        "Needs a CityJSON or CityJSONSeq source; this layer was loaded from a streaming FlatCityBuf",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+  });
+
+  it("shows §6's empty state and blocks Run when nothing has a solid", () => {
+    addSolidLayer({ solids: false });
+    render(<ToolView toolId="validate-solids" />);
+    const select = screen.getByRole("combobox", {
+      name: "LoD",
+    }) as HTMLSelectElement;
+    expect(select).toBeDisabled();
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      "No solid geometry in this layer",
+    ]);
+    expect(
+      screen.getByText("No solid geometry in this layer", { selector: "p" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
 });

@@ -2132,6 +2132,27 @@ describe("summarise", () => {
     expect(summary.line).toBe("1,079 valid · 1.0 s");
   });
 
+  it("prints a tool's OWN line in place of the measured count", () => {
+    // §7.3's card, verbatim: "1,079 valid · 125 with issues". TWO counts, not
+    // three — the valid count IS the line, so the default "N buildings
+    // measured" phrase never appears for this tool, even though `measured`
+    // carries both halves for the provenance summary.
+    expect(
+      summarise(
+        {
+          columns: [],
+          rows: new Map(),
+          measured: 1204,
+          skipped: [],
+          line: "1,079 valid",
+          caveats: [{ cause: "with issues", count: 125 }],
+        },
+        2400,
+        { streaming: false },
+      ).line,
+    ).toBe("1,079 valid · 125 with issues · 2.4 s");
+  });
+
   it("keeps the skip breakdown beside the resident-set note", () => {
     const summary = summarise(
       {
