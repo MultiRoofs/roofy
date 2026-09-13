@@ -285,6 +285,16 @@ export async function prepareDerivedCityLayer(input: {
           columns: input.columns,
           rows: input.rows,
           existing: new Set<string>(),
+          // The copy is `SELECT *` off the parent, so it INHERITS every one of
+          // the parent's columns — a run whose output collides with one of them
+          // has to re-type it (S2), even though `existing` is empty because a
+          // New-layer Undo removes the layer rather than restoring values.
+          existingTypes: new Map(
+            input.parentTable.columns.map((c) => [
+              c.name.toLowerCase(),
+              c.type,
+            ]),
+          ),
           onStatement: (sql) => issuedByWrite.push(sql),
           signal: input.signal,
         }),

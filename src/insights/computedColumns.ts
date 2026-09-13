@@ -41,6 +41,48 @@ export function buildAddColumnSql(table: string, col: OutputColumn): string {
   return `ALTER TABLE ${quoteIdent(table)} ADD COLUMN IF NOT EXISTS ${quoteIdent(col.name)} ${col.type}`;
 }
 
+export function buildDropColumnSql(table: string, column: string): string {
+  return `ALTER TABLE ${quoteIdent(table)} DROP COLUMN IF EXISTS ${quoteIdent(column)}`;
+}
+
+/** One column the table already holds, at the type it holds it AT. */
+export interface ExistingColumn {
+  readonly name: string;
+  /** DuckDB's `column_type`, verbatim — "DOUBLE", "VARCHAR", "DECIMAL(18,3)". */
+  readonly type: string;
+}
+
+/**
+ * The columns of a run whose DECLARED type is not the type the table has —
+ * finding S2.
+ *
+ * `ALTER TABLE … ADD COLUMN IF NOT EXISTS` is a NO-OP on a column that already
+ * exists, WHATEVER its type. So a run replacing a DOUBLE Join output with a
+ * BOOLEAN one used to leave the column DOUBLE and store 1/0 in it, while the
+ * MODEL attribute the same run published held `true`/`false`; a text
+ * replacement could fail the UPDATE's conversion outright. The replacement has
+ * to migrate the column, which means dropping and re-adding it — and the
+ * ORIGINAL type, which this returns, is what an Undo needs to put back.
+ *
+ * `existingTypes` is keyed by LOWER-CASED name, because that is how DuckDB
+ * matches an identifier and how `runQueue` already decides what "existing"
+ * means. The returned `name` is the RUN's spelling, so every statement built
+ * from it addresses the same column the rest of the write does.
+ */
+export function typeMigrations(
+  columns: ReadonlyArray<OutputColumn>,
+  existingTypes: ReadonlyMap<string, string>,
+): ReadonlyArray<ExistingColumn> {
+  const out: ExistingColumn[] = [];
+  for (const col of columns) {
+    const current = existingTypes.get(col.name.toLowerCase());
+    if (current === undefined) continue;
+    if (current.trim().toUpperCase() === col.type) continue;
+    out.push({ name: col.name, type: current });
+  }
+  return out;
+}
+
 function idList(ids: ReadonlyArray<string>): string {
   return ids.map((id) => quoteLiteral(id)).join(", ");
 }
@@ -124,6 +166,19 @@ export interface WriteInput {
   readonly rows: ReadonlyMap<string, Readonly<Record<string, unknown>>>;
   /** Column names that already exist on the table (they get backed up). */
   readonly existing: ReadonlySet<string>;
+  /**
+   * Every column the TABLE holds, lower-cased name → DuckDB's own type.
+   *
+   * Wider than `existing` on purpose: a DERIVED layer's copy inherits its
+   * parent's columns through `CREATE TABLE … AS SELECT *`, so a run writing
+   * onto the copy can collide with one of them although `existing` is empty
+   * (a New-layer Undo removes the layer and restores no values). The TYPE
+   * still has to be the run's.
+   *
+   * Absent means "nothing is known", which reads as no migration at all — the
+   * behaviour every caller had before S2.
+   */
+  readonly existingTypes?: ReadonlyMap<string, string>;
   /**
    * The run's cancellation, read ONCE: immediately before COMMIT (spec §6.1).
    *
@@ -228,14 +283,32 @@ export async function writeComputedColumns(
       statements: [],
     };
   }
+  // S2: every column whose declared type is not the one the table holds. The
+  // ADD below cannot change it (`IF NOT EXISTS` is a no-op on an existing
+  // column), so such a column is DROPPED and re-added at the run's type.
+  const migrated = typeMigrations(
+    input.columns,
+    input.existingTypes ?? new Map(),
+  );
   const statements: Array<[string, "ddl" | "query"]> = [
     ["BEGIN TRANSACTION", "query"],
   ];
   if (backupTable) {
+    // A DROP takes the column away from the WHOLE table, not from the scoped
+    // rows — so when one is coming, the backup has to be the whole column or
+    // Undo would restore this run's rows and leave every other row NULL.
+    const backupIds = migrated.some((m) => replaced.includes(m.name))
+      ? null
+      : ids;
     statements.push([
-      buildBackupSql(input.table, backupTable, replaced, ids),
+      buildBackupSql(input.table, backupTable, replaced, backupIds),
       "ddl",
     ]);
+  }
+  // AFTER the backup and BEFORE the adds: the backup is what makes the drop
+  // undoable, and the add is what gives the column its new type.
+  for (const col of migrated) {
+    statements.push([buildDropColumnSql(input.table, col.name), "ddl"]);
   }
   for (const col of input.columns) {
     statements.push([buildAddColumnSql(input.table, col), "ddl"]);
@@ -301,6 +374,15 @@ export interface UndoInput {
   readonly backupTable: string | null;
   readonly created: ReadonlyArray<string>;
   readonly replaced: ReadonlyArray<string>;
+  /**
+   * The columns the write MIGRATED, at the type they had BEFORE it (S2).
+   *
+   * The write dropped and re-added each of them, so the column standing on the
+   * table now has the run's type and the backup holds the original one's
+   * values. Restoring into it without putting the schema back would store a
+   * DOUBLE as a BOOLEAN — or refuse the conversion outright.
+   */
+  readonly migrated?: ReadonlyArray<ExistingColumn>;
   readonly ids: ReadonlyArray<string> | null;
 }
 
@@ -309,6 +391,14 @@ export async function undoComputedColumns(
   input: UndoInput,
 ): Promise<QueryOutcome> {
   const statements: string[] = ["BEGIN TRANSACTION"];
+  // The SCHEMA first, inside the same transaction: the restore below assigns
+  // the backup's values, and they are of this type and not the run's.
+  for (const col of input.migrated ?? []) {
+    statements.push(buildDropColumnSql(input.table, col.name));
+    statements.push(
+      `ALTER TABLE ${quoteIdent(input.table)} ADD COLUMN IF NOT EXISTS ${quoteIdent(col.name)} ${col.type}`,
+    );
+  }
   if (input.backupTable && input.replaced.length > 0) {
     statements.push(
       buildRestoreSql(input.table, input.backupTable, input.replaced),

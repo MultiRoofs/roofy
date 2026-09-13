@@ -31,6 +31,7 @@ import type { Harness } from "./harness";
 import {
   buildAddColumnSql,
   buildBackupSql,
+  buildDropColumnSql,
   buildNullifySql,
   buildRestoreSql,
   buildUpdateFromValuesSql,
@@ -813,6 +814,186 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
           `SELECT ${quoteIdent('odd "name"')} AS v FROM ${quoteIdent(out.table)}`,
         ),
       ).toEqual([{ v: "x" }]);
+    });
+  });
+  /**
+   * Finding S2, against the engine: a REPLACED column whose declared type has
+   * changed is migrated inside the write's transaction, and Undo puts the
+   * original type AND the original values back.
+   *
+   * `ALTER TABLE … ADD COLUMN IF NOT EXISTS` is the reason this is needed at
+   * all — it is a no-op on a column that already exists, TYPE included — and
+   * the first case pins that on the real engine rather than assuming it.
+   */
+  describe("probe 7: a replaced column whose TYPE changed (S2)", () => {
+    /** The migration the write issues, and the state it leaves. */
+    function migrate(
+      table: string,
+      backup: string,
+      columns: ReadonlyArray<OutputColumn>,
+      migrated: ReadonlyArray<{ readonly name: string; readonly type: string }>,
+      rows: ReadonlyArray<Record<string, unknown>>,
+    ): Attempt {
+      const file = `__vals_${backup}.json`;
+      db.registerBytes(file, encodeValues(rows));
+      const out = attemptAll([
+        "BEGIN TRANSACTION",
+        // The WHOLE column, not the scoped rows: a DROP loses every row's value.
+        buildBackupSql(
+          table,
+          backup,
+          columns.map((c) => c.name),
+          null,
+        ),
+        ...migrated.map((c) => buildDropColumnSql(table, c.name)),
+        ...columns.map((c) => buildAddColumnSql(table, c)),
+        buildUpdateFromValuesSql(table, file, columns),
+        "COMMIT",
+      ]);
+      if (!out.ok) attempt("ROLLBACK");
+      db.dropFile(file);
+      return out;
+    }
+
+    it("proves ADD COLUMN IF NOT EXISTS does NOT change an existing type", () => {
+      // The bug, on the engine: without a DROP the column stays DOUBLE, and
+      // `true` lands in it as 1.0 while the model attribute the same run
+      // publishes holds `true`.
+      makeTable("layer_s2a", ["b1"]);
+      db.query(`ALTER TABLE "layer_s2a" ADD COLUMN "solid_valid" DOUBLE`);
+      db.query(
+        buildAddColumnSql("layer_s2a", {
+          name: "solid_valid",
+          type: "BOOLEAN",
+        }),
+      );
+      expect(tableTypes("layer_s2a")["solid_valid"]).toBe("DOUBLE");
+      const file = "__vals_s2a.json";
+      db.registerBytes(file, encodeValues([{ id: "b1", solid_valid: true }]));
+      db.query(
+        buildUpdateFromValuesSql("layer_s2a", file, [
+          { name: "solid_valid", type: "BOOLEAN" },
+        ]),
+      );
+      db.dropFile(file);
+      expect(db.query(`SELECT "solid_valid" AS v FROM "layer_s2a"`)).toEqual([
+        { v: 1 },
+      ]);
+    });
+
+    it("migrates DOUBLE to BOOLEAN, and Undo restores both type and values", () => {
+      makeTable("layer_s2b", ["b1", "b2"]);
+      db.query(`ALTER TABLE "layer_s2b" ADD COLUMN "solid_valid" DOUBLE`);
+      db.query(
+        `UPDATE "layer_s2b" SET "solid_valid" = CASE WHEN "id" = 'b1' THEN 2178.0 ELSE 42.0 END`,
+      );
+      const columns: ReadonlyArray<OutputColumn> = [
+        { name: "solid_valid", type: "BOOLEAN" },
+      ];
+      // Only b1 is in scope; b2's old value is what the whole-column backup is
+      // for.
+      expect(
+        migrate(
+          "layer_s2b",
+          "__undo_s2b",
+          columns,
+          [{ name: "solid_valid", type: "DOUBLE" }],
+          [{ id: "b1", solid_valid: true }],
+        ).ok,
+      ).toBe(true);
+      expect(tableTypes("layer_s2b")["solid_valid"]).toBe("BOOLEAN");
+      expect(
+        db.query(
+          `SELECT "id", "solid_valid" AS v FROM "layer_s2b" ORDER BY "id"`,
+        ),
+      ).toEqual([
+        { id: "b1", v: true },
+        // Out of scope, and the column is a new one: NULL, not 42.
+        { id: "b2", v: null },
+      ]);
+
+      // Undo: the schema back first, THEN the values.
+      expect(
+        attemptAll([
+          "BEGIN TRANSACTION",
+          buildDropColumnSql("layer_s2b", "solid_valid"),
+          buildAddColumnSql("layer_s2b", {
+            name: "solid_valid",
+            type: "DOUBLE" as const,
+          }),
+          buildRestoreSql("layer_s2b", "__undo_s2b", ["solid_valid"]),
+          `DROP TABLE IF EXISTS "__undo_s2b"`,
+          "COMMIT",
+        ]).ok,
+      ).toBe(true);
+      expect(tableTypes("layer_s2b")["solid_valid"]).toBe("DOUBLE");
+      expect(
+        db.query(
+          `SELECT "id", "solid_valid" AS v FROM "layer_s2b" ORDER BY "id"`,
+        ),
+      ).toEqual([
+        { id: "b1", v: 2178 },
+        // The whole-column backup is what gets this one back.
+        { id: "b2", v: 42 },
+      ]);
+    });
+
+    it("migrates the OTHER way too, DOUBLE from BOOLEAN, and back to VARCHAR", () => {
+      // Both directions the review names, on one table: a BOOLEAN column
+      // replaced by a DOUBLE one, then that DOUBLE replaced by VARCHAR text.
+      makeTable("layer_s2c", ["b1"]);
+      db.query(`ALTER TABLE "layer_s2c" ADD COLUMN "zones_name" BOOLEAN`);
+      db.query(`UPDATE "layer_s2c" SET "zones_name" = true`);
+      expect(
+        migrate(
+          "layer_s2c",
+          "__undo_s2c1",
+          [{ name: "zones_name", type: "DOUBLE" }],
+          [{ name: "zones_name", type: "BOOLEAN" }],
+          [{ id: "b1", zones_name: 62.5 }],
+        ).ok,
+      ).toBe(true);
+      expect(tableTypes("layer_s2c")["zones_name"]).toBe("DOUBLE");
+      expect(db.query(`SELECT "zones_name" AS v FROM "layer_s2c"`)).toEqual([
+        { v: 62.5 },
+      ]);
+
+      expect(
+        migrate(
+          "layer_s2c",
+          "__undo_s2c2",
+          [{ name: "zones_name", type: "VARCHAR" }],
+          [{ name: "zones_name", type: "DOUBLE" }],
+          [{ id: "b1", zones_name: "Centrum" }],
+        ).ok,
+      ).toBe(true);
+      expect(tableTypes("layer_s2c")["zones_name"]).toBe("VARCHAR");
+      // Unquoted, which is finding D9's whole point, and typed as text rather
+      // than as the DOUBLE the column used to be.
+      expect(db.query(`SELECT "zones_name" AS v FROM "layer_s2c"`)).toEqual([
+        { v: "Centrum" },
+      ]);
+    });
+
+    it("would REFUSE the text write without the migration", () => {
+      // Why the migration is not cosmetic: assigning 'Centrum' into the DOUBLE
+      // column the ADD left alone is a conversion the engine rejects, and the
+      // whole transaction fails with it.
+      makeTable("layer_s2d", ["b1"]);
+      db.query(`ALTER TABLE "layer_s2d" ADD COLUMN "zones_name" DOUBLE`);
+      const file = "__vals_s2d.json";
+      db.registerBytes(
+        file,
+        encodeValues([{ id: "b1", zones_name: "Centrum" }]),
+      );
+      const out = attempt(
+        buildUpdateFromValuesSql("layer_s2d", file, [
+          { name: "zones_name", type: "VARCHAR" },
+        ]),
+      );
+      db.dropFile(file);
+      expect(out.ok).toBe(false);
+      expect(out.message).toMatch(/Conversion|Could not convert/i);
     });
   });
 });

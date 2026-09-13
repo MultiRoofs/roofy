@@ -44,7 +44,9 @@ import {
 import { quoteIdent } from "../../insights/sql";
 import {
   computedColumnsOf,
+  typeMigrations,
   undoComputedColumns,
+  type ExistingColumn,
   useComputedColumnStore,
   writeComputedColumns,
   type ColumnType,
@@ -286,6 +288,8 @@ type UndoState =
       readonly backupTable: string | null;
       readonly created: ReadonlyArray<string>;
       readonly replaced: ReadonlyArray<string>;
+      /** The columns the write re-typed, at the type they had before (S2). */
+      readonly migrated: ReadonlyArray<ExistingColumn>;
       readonly ids: ReadonlyArray<string> | null;
       /** The model attributes the run overwrote; `undefined` for "was not there". */
       readonly previousModelValues: ReadonlyMap<
@@ -1815,6 +1819,13 @@ async function execute(
         .map((c) => c.name)
         .filter((name) => onTable.has(name.toLowerCase())),
     );
+    // …and at WHICH type it has them (S2). A replacement whose declared type
+    // differs is migrated inside the write's transaction, and the ORIGINAL
+    // types below are what this run's Undo puts back.
+    const existingTypes = new Map(
+      table.columns.map((c) => [c.name.toLowerCase(), c.type]),
+    );
+    const migrated = typeMigrations(result.columns, existingTypes);
     const t0 = performance.now();
     // Mirrored as they are ISSUED, because the death race below can reject with
     // the write still in flight: duckdb-wasm strands the statement its worker
@@ -1828,6 +1839,7 @@ async function execute(
       columns: result.columns,
       rows: result.rows,
       existing,
+      existingTypes,
       onStatement: (sql) => issuedByWrite.push(sql),
       // Spec §6.1: the write is the publication, so the LAST moment a cancel
       // can still mean "nothing changed" is inside it, before its COMMIT.
@@ -1896,6 +1908,7 @@ async function execute(
         replaced: result.columns
           .map((c) => c.name)
           .filter((name) => existing.has(name)),
+        migrated,
         ids: scope.featureIds === null ? null : [...result.rows.keys()],
         previousModelValues,
       },
@@ -2125,6 +2138,7 @@ export async function undoRun(id: string): Promise<void> {
           backupTable: undo.backupTable,
           created: undo.created,
           replaced: undo.replaced,
+          migrated: undo.migrated,
           ids: undo.ids,
         }),
         null,

@@ -98,6 +98,52 @@ describe("computed column SQL", () => {
   });
 });
 
+describe("typeMigrations", () => {
+  // S2: `ADD COLUMN IF NOT EXISTS` is a NO-OP on a column that already exists,
+  // whatever its type — so replacing a DOUBLE output with a BOOLEAN one used to
+  // leave the column DOUBLE and store 1/0 where the model holds true/false.
+  it("names the columns whose DECLARED type differs from the table's", () => {
+    expect(
+      cc.typeMigrations(
+        [
+          { name: "a", type: "BOOLEAN" },
+          { name: "b", type: "DOUBLE" },
+          { name: "c", type: "VARCHAR" },
+        ],
+        new Map([
+          ["a", "DOUBLE"],
+          ["b", "DOUBLE"],
+        ]),
+      ),
+    ).toEqual([{ name: "a", type: "DOUBLE" }]);
+  });
+
+  it("matches the name the way DuckDB does, without regard to case", () => {
+    expect(
+      cc.typeMigrations(
+        [{ name: "Solid_Valid", type: "BOOLEAN" }],
+        new Map([["solid_valid", "DOUBLE"]]),
+      ),
+    ).toEqual([{ name: "Solid_Valid", type: "DOUBLE" }]);
+  });
+
+  it("says nothing about a column the table does not have", () => {
+    // A NEW column is added at its declared type; there is nothing to migrate.
+    expect(
+      cc.typeMigrations([{ name: "a", type: "BOOLEAN" }], new Map()),
+    ).toEqual([]);
+  });
+
+  it("ignores spacing and case in the engine's own type spelling", () => {
+    expect(
+      cc.typeMigrations(
+        [{ name: "a", type: "DOUBLE" }],
+        new Map([["a", " double "]]),
+      ),
+    ).toEqual([]);
+  });
+});
+
 describe("writeComputedColumns", () => {
   it("issues backup, add, update inside one transaction and registers the rows", async () => {
     const calls: string[] = [];
@@ -145,6 +191,89 @@ describe("writeComputedColumns", () => {
       { id: "y", a: null, b: false },
     ]);
     expect(duck.dropBuffer).toHaveBeenCalledWith("__vals_r1.json");
+  });
+
+  it("migrates a replaced column whose declared type differs (S2)", async () => {
+    const calls: string[] = [];
+    const ok = async (sql: string) => {
+      calls.push(sql);
+      return { ok: true as const, columns: [], rows: [] };
+    };
+    vi.mocked(duck.runQuery).mockImplementation(ok);
+    vi.mocked(duck.ddl).mockImplementation(ok);
+    const result = await cc.writeComputedColumns({
+      runId: "m1",
+      table: "layer_1",
+      columns: [{ name: "a", type: "BOOLEAN" }],
+      rows: new Map([["x", { a: true }]]),
+      existing: new Set(["a"]),
+      existingTypes: new Map([["a", "DOUBLE"]]),
+    });
+    expect(result.ok).toBe(true);
+    // The backup comes FIRST and covers EVERY row, not only the scoped ones:
+    // a DROP takes the column away from the whole table, so a scoped backup
+    // would make Undo lose every value outside this run's scope.
+    expect(calls).toEqual([
+      "BEGIN TRANSACTION",
+      `CREATE TABLE "__undo_m1" AS SELECT "id", "a" FROM "layer_1"`,
+      'ALTER TABLE "layer_1" DROP COLUMN IF EXISTS "a"',
+      'ALTER TABLE "layer_1" ADD COLUMN IF NOT EXISTS "a" BOOLEAN',
+      `UPDATE "layer_1" SET "a" = v."a" FROM read_json('__vals_m1.json', columns = {"id": 'VARCHAR', "a": 'BOOLEAN'}) AS v WHERE "layer_1"."id" = v."id"`,
+      "COMMIT",
+    ]);
+  });
+
+  it("leaves a same-typed replacement exactly as it was", async () => {
+    const calls: string[] = [];
+    const ok = async (sql: string) => {
+      calls.push(sql);
+      return { ok: true as const, columns: [], rows: [] };
+    };
+    vi.mocked(duck.runQuery).mockImplementation(ok);
+    vi.mocked(duck.ddl).mockImplementation(ok);
+    await cc.writeComputedColumns({
+      runId: "m2",
+      table: "layer_1",
+      columns: [{ name: "a", type: "DOUBLE" }],
+      rows: new Map([["x", { a: 1 }]]),
+      existing: new Set(["a"]),
+      existingTypes: new Map([["a", "DOUBLE"]]),
+    });
+    expect(calls.some((sql) => sql.includes("DROP COLUMN"))).toBe(false);
+    // And the backup stays SCOPED, which is the cheap common case.
+    expect(calls).toContain(
+      `CREATE TABLE "__undo_m2" AS SELECT "id", "a" FROM "layer_1" WHERE "id" IN ('x')`,
+    );
+  });
+
+  it("migrates an INHERITED derived-layer column with no backup at all", async () => {
+    // The copy inherits its parent's columns through `CREATE TABLE … AS
+    // SELECT *`, so a run writing onto the copy can collide with one of them
+    // even though `existing` is empty (a New-layer Undo removes the layer, it
+    // restores no values). The type still has to be right.
+    const calls: string[] = [];
+    const ok = async (sql: string) => {
+      calls.push(sql);
+      return { ok: true as const, columns: [], rows: [] };
+    };
+    vi.mocked(duck.runQuery).mockImplementation(ok);
+    vi.mocked(duck.ddl).mockImplementation(ok);
+    const result = await cc.writeComputedColumns({
+      runId: "m3",
+      table: "layer_2",
+      columns: [{ name: "a", type: "VARCHAR" }],
+      rows: new Map([["x", { a: "north" }]]),
+      existing: new Set(),
+      existingTypes: new Map([["a", "DOUBLE"]]),
+    });
+    expect(result).toMatchObject({ ok: true, backupTable: null });
+    expect(calls).toEqual([
+      "BEGIN TRANSACTION",
+      'ALTER TABLE "layer_2" DROP COLUMN IF EXISTS "a"',
+      'ALTER TABLE "layer_2" ADD COLUMN IF NOT EXISTS "a" VARCHAR',
+      `UPDATE "layer_2" SET "a" = v."a" FROM read_json('__vals_m3.json', columns = {"id": 'VARCHAR', "a": 'VARCHAR'}) AS v WHERE "layer_2"."id" = v."id"`,
+      "COMMIT",
+    ]);
   });
 
   it("rolls back and reports the first failing statement", async () => {
@@ -396,6 +525,35 @@ describe("undoComputedColumns", () => {
       `UPDATE "layer_1" SET "a" = u."a" FROM "__undo_r1" AS u WHERE "layer_1"."id" = u."id"`,
       'ALTER TABLE "layer_1" DROP COLUMN IF EXISTS "b"',
       'DROP TABLE IF EXISTS "__undo_r1"',
+      "COMMIT",
+    ]);
+  });
+
+  it("puts a migrated column back at its ORIGINAL type before restoring it (S2)", async () => {
+    // The write DROPped the DOUBLE column and added a BOOLEAN one. Restoring
+    // the backup's DOUBLE values into a BOOLEAN column is what Undo must not
+    // do, so the schema goes back first — inside the same transaction, so a
+    // failure leaves the layer as the run left it.
+    const calls: string[] = [];
+    vi.mocked(duck.runQuery).mockImplementation(async (sql) => {
+      calls.push(sql);
+      return { ok: true, columns: [], rows: [] };
+    });
+    const result = await cc.undoComputedColumns({
+      table: "layer_1",
+      backupTable: "__undo_m1",
+      created: [],
+      replaced: ["a"],
+      migrated: [{ name: "a", type: "DOUBLE" }],
+      ids: null,
+    });
+    expect(result).toEqual({ ok: true, columns: [], rows: [] });
+    expect(calls).toEqual([
+      "BEGIN TRANSACTION",
+      'ALTER TABLE "layer_1" DROP COLUMN IF EXISTS "a"',
+      'ALTER TABLE "layer_1" ADD COLUMN IF NOT EXISTS "a" DOUBLE',
+      `UPDATE "layer_1" SET "a" = u."a" FROM "__undo_m1" AS u WHERE "layer_1"."id" = u."id"`,
+      'DROP TABLE IF EXISTS "__undo_m1"',
       "COMMIT",
     ]);
   });

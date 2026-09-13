@@ -62,11 +62,22 @@ let gate: { needle: string; promise: Promise<void> } | null = null;
 let failing: string | null = null;
 /** The columns the fake database holds, tracked from the ALTERs it is sent. */
 let liveColumns: string[] = ["id", "feature_id"];
+/**
+ * And at which TYPE, tracked from the same ALTERs.
+ *
+ * A DESCRIBE reports the type a column was ADDED with, and S2's migration
+ * decides on exactly that: a fake that answered "VARCHAR" for every column
+ * would make every DOUBLE output look like a type change and issue a DROP the
+ * real engine never sees. Absent means VARCHAR, which is what the seed columns
+ * are.
+ */
+let liveColumnTypes = new Map<string, string>();
 /** Tables `adoptLayerTable` was handed, by layer id. */
 const adopted = new Map<string, unknown>();
 let mockTableCounter = 100;
 /** What they were when the open transaction began, for its ROLLBACK. */
 let columnsAtBegin: string[] | null = null;
+let typesAtBegin: Map<string, string> | null = null;
 /** Whoever `subscribeDuckDBStatus` handed a listener to, so a test can publish
  *  a transition the way `duckdb.ts` does. */
 const statusListeners = new Set<() => void>();
@@ -85,22 +96,40 @@ vi.mock("../../../../src/insights/duckdb", () => {
     // that: the ROLLBACK is what takes the added columns (and the backup
     // table) away again. A fake that kept them would let a broken write look
     // clean.
-    if (statement === "BEGIN TRANSACTION") columnsAtBegin = [...liveColumns];
+    if (statement === "BEGIN TRANSACTION") {
+      columnsAtBegin = [...liveColumns];
+      typesAtBegin = new Map(liveColumnTypes);
+    }
     if (statement === "ROLLBACK" && columnsAtBegin !== null) {
       liveColumns = columnsAtBegin;
       columnsAtBegin = null;
+      if (typesAtBegin !== null) liveColumnTypes = typesAtBegin;
+      typesAtBegin = null;
     }
-    if (statement === "COMMIT") columnsAtBegin = null;
+    if (statement === "COMMIT") {
+      columnsAtBegin = null;
+      typesAtBegin = null;
+    }
     // The registry's column list is what decides CREATE vs REPLACE on the next
     // run, so the fake database has to actually change shape.
     const added =
-      /^ALTER TABLE "[^"]+" ADD COLUMN IF NOT EXISTS "([^"]+)"/.exec(statement);
-    if (added?.[1] && !liveColumns.includes(added[1]))
+      /^ALTER TABLE "[^"]+" ADD COLUMN IF NOT EXISTS "([^"]+)" (.+)$/.exec(
+        statement,
+      );
+    if (added?.[1] && !liveColumns.includes(added[1])) {
       liveColumns.push(added[1]);
+      // `IF NOT EXISTS` is a NO-OP on a column that is already there, TYPE
+      // included — which is the whole of S2 — so the type is recorded only when
+      // the column is actually created.
+      if (added[2]) liveColumnTypes.set(added[1], added[2]);
+    }
     const dropped = /^ALTER TABLE "[^"]+" DROP COLUMN IF EXISTS "([^"]+)"/.exec(
       statement,
     );
-    if (dropped?.[1]) liveColumns = liveColumns.filter((c) => c !== dropped[1]);
+    if (dropped?.[1]) {
+      liveColumns = liveColumns.filter((c) => c !== dropped[1]);
+      liveColumnTypes.delete(dropped[1]);
+    }
     if (statement.includes("COUNT(DISTINCT")) {
       return { ok: true as const, columns: ["n"], rows: [{ n: featureTotal }] };
     }
@@ -181,7 +210,7 @@ vi.mock("../../../../src/insights/layerTables", async () => {
         ...tableInfo,
         columns: liveColumns.map((name) => ({
           name,
-          type: "VARCHAR",
+          type: liveColumnTypes.get(name) ?? "VARCHAR",
           kind: "scalar" as const,
         })),
       };
@@ -332,6 +361,8 @@ beforeEach(() => {
   gate = null;
   failing = null;
   liveColumns = ["id", "feature_id"];
+  liveColumnTypes = new Map();
+  typesAtBegin = null;
   adopted.clear();
   mockTableCounter = 100;
   columnsAtBegin = null;
@@ -864,12 +895,16 @@ describe("a run over a column an earlier run wrote", () => {
   it("takes the earlier run's Undo away and drops its backup", async () => {
     // The column is already on the table, so BOTH runs replace it.
     liveColumns = ["id", "feature_id", "extent_height_m"];
+    // `extent_height_m` is DOUBLE here, which is what the run declares: a
+    // SAME-typed replacement, so the write backs the scoped rows up and changes
+    // no schema. S2's differently-typed replacement has its own case below.
+    liveColumnTypes = new Map([["extent_height_m", "DOUBLE"]]);
     computedAlready("extent_height_m");
     tableInfo = {
       ...freshTable(),
       columns: liveColumns.map((name) => ({
         name,
-        type: "VARCHAR",
+        type: liveColumnTypes.get(name) ?? "VARCHAR",
         kind: "scalar" as const,
       })),
     };
@@ -889,6 +924,61 @@ describe("a run over a column an earlier run wrote", () => {
     await vi.waitFor(() =>
       expect(sql).toContain(`DROP TABLE IF EXISTS "__undo_${first}"`),
     );
+  });
+
+  it("re-types a replaced column and gives Undo its type back (S2)", async () => {
+    // The column on the table is VARCHAR (a text Join output, say) and this run
+    // declares DOUBLE. `ADD COLUMN IF NOT EXISTS` cannot change that, so the
+    // write DROPS and re-adds it — and because a DROP takes the column away
+    // from EVERY row, the backup covers the whole table rather than the scope.
+    liveColumns = ["id", "feature_id", "extent_height_m"];
+    liveColumnTypes = new Map([["extent_height_m", "VARCHAR"]]);
+    computedAlready("extent_height_m");
+    tableInfo = {
+      ...freshTable(),
+      columns: liveColumns.map((name) => ({
+        name,
+        type: liveColumnTypes.get(name) ?? "VARCHAR",
+        kind: "scalar" as const,
+      })),
+    };
+    writeHeight();
+    const id = submitRun(request());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    const drop = sql.indexOf(
+      'ALTER TABLE "layer_1" DROP COLUMN IF EXISTS "extent_height_m"',
+    );
+    const add = sql.indexOf(
+      'ALTER TABLE "layer_1" ADD COLUMN IF NOT EXISTS "extent_height_m" DOUBLE',
+    );
+    const backup = sql.indexOf(
+      `CREATE TABLE "__undo_${id}" AS SELECT "id", "extent_height_m" FROM "layer_1"`,
+    );
+    expect(backup).toBeGreaterThan(-1);
+    expect(drop).toBeGreaterThan(backup);
+    expect(add).toBeGreaterThan(drop);
+    // And the column really is DOUBLE now, which is what the registry reports
+    // to the grid and to the next run.
+    expect(
+      tableInfo.columns.find((c) => c.name === "extent_height_m")?.type,
+    ).toBe("DOUBLE");
+
+    sql.length = 0;
+    await undoRun(id);
+    // Undo puts the ORIGINAL type back BEFORE restoring the backup's values:
+    // assigning a VARCHAR into a DOUBLE column is what it must not do.
+    const undoDrop = sql.indexOf(
+      'ALTER TABLE "layer_1" DROP COLUMN IF EXISTS "extent_height_m"',
+    );
+    const undoAdd = sql.indexOf(
+      'ALTER TABLE "layer_1" ADD COLUMN IF NOT EXISTS "extent_height_m" VARCHAR',
+    );
+    const restore = sql.findIndex((statement) =>
+      statement.includes(`FROM "__undo_${id}"`),
+    );
+    expect(undoDrop).toBeGreaterThan(-1);
+    expect(undoAdd).toBeGreaterThan(undoDrop);
+    expect(restore).toBeGreaterThan(undoAdd);
   });
 
   it("writes a differently-cased run under the column's own spelling", async () => {
@@ -940,12 +1030,16 @@ describe("a run over a column an earlier run wrote", () => {
     // and by the time it reaches the head its backup describes the state TWO
     // writes ago — restoring it would delete what run 2 just wrote.
     liveColumns = ["id", "feature_id", "extent_height_m"];
+    // `extent_height_m` is DOUBLE here, which is what the run declares: a
+    // SAME-typed replacement, so the write backs the scoped rows up and changes
+    // no schema. S2's differently-typed replacement has its own case below.
+    liveColumnTypes = new Map([["extent_height_m", "DOUBLE"]]);
     computedAlready("extent_height_m");
     tableInfo = {
       ...freshTable(),
       columns: liveColumns.map((name) => ({
         name,
-        type: "VARCHAR",
+        type: liveColumnTypes.get(name) ?? "VARCHAR",
         kind: "scalar" as const,
       })),
     };
