@@ -1500,9 +1500,10 @@ export function App({
       basemap: captureBasemap(),
       v: 3,
       // §8's exclusion reaches the SHARE link through the same decision the
-      // save uses, and it has to come FIRST: a derived city layer inherits its
-      // parent's `modelRef`, so it passes the URL filter below and the link
-      // would restore the whole parent under the copy's name. A share hash
+      // save uses. The URL filter below does NOT stand in for it: a derived
+      // city layer inherits its parent's `modelRef`, so it passes that filter
+      // and the link would restore the whole parent under the copy's name
+      // (the two filters commute; this one just has to be here). A share hash
       // carries no active reference and no geo layers (`ShareableViewState`
       // is a lightweight subset and stays one), so only `layers` is read.
       layers: snapshotLayers({
