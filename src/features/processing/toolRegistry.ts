@@ -209,7 +209,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     sourceKind: "city",
     needsLod: false,
     defaultPrefix: "bld_",
-    destinations: ["layer"],
+    destinations: ["layer", "new"],
     outputColumns: (prefix, params) =>
       aggregateColumns(prefix, aggregateParams(params)),
     validateParams: (params) =>

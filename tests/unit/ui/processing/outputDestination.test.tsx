@@ -81,8 +81,8 @@ const { useComputedColumnStore } =
   await import("../../../../src/insights/computedColumns");
 const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
-const { TOOLS } =
-  await import("../../../../src/features/processing/toolRegistry");
+const { withDestinations } =
+  await import("../../features/processing/toolDestinations");
 
 type LayerInput = Parameters<LayerStoreActions["addLayer"]>[0];
 
@@ -172,35 +172,6 @@ const newLayerRadio = () =>
 const thisLayerRadio = () =>
   screen.getByRole("radio", { name: /^This layer/ }) as HTMLInputElement;
 
-/**
- * Give ONE tool the `"new"` destination for the length of one case.
- *
- * The six CITY tools ship it, so nothing about them is staged here any more.
- * `aggregate-per-area` is the last `["layer"]` entry — Task 23 publishes a
- * derived VECTOR layer and flips it — and the two cases that need §7.6's
- * reversed direction override that entry for their own duration and put it
- * back. `vi.spyOn(tool, "destinations", "get")` cannot be used:
- * `destinations` is a data property on an object literal, not an accessor.
- * Task 23 deletes this helper with the last `["layer"]`.
- */
-function withNewLayer(toolId: string, body: () => void): void {
-  const tool = TOOLS.find((t) => t.id === toolId);
-  if (!tool) throw new Error(`no tool ${toolId}`);
-  const before = tool.destinations;
-  const set = (value: ReadonlyArray<string>) =>
-    Object.defineProperty(tool, "destinations", {
-      value,
-      configurable: true,
-      writable: true,
-    });
-  set(["layer", "new"]);
-  try {
-    body();
-  } finally {
-    set(before);
-  }
-}
-
 beforeEach(() => {
   counts.all = 2;
   counts.matching = null;
@@ -230,15 +201,18 @@ describe("OUTPUT destination", () => {
     expect(newLayerRadio().disabled).toBe(false);
   });
 
-  it("disables New layer for a tool whose destinations do not include it", () => {
-    // `aggregate-per-area` is the one entry still `["layer"]` (Task 23 flips
-    // it), so the radio is visible (§6 draws two) and unreachable — and this
-    // case now asks a real tool rather than a staged one.
+  it("disables New layer for a tool whose destinations do not include it", async () => {
+    // Every shipped tool offers both destinations now (Task 23 flipped the
+    // last of them), so the definition is STAGED for the length of this case
+    // rather than the rule losing its test — see `toolDestinations.ts`. The
+    // radio is still drawn (§6 draws two) and unreachable.
     addCityLayer("Delft");
     addZones();
-    render(<ToolView toolId="aggregate-per-area" />);
-    expect(newLayerRadio().disabled).toBe(true);
-    expect(screen.queryByText("Name")).toBeNull();
+    await withDestinations("aggregate-per-area", ["layer"], () => {
+      render(<ToolView toolId="aggregate-per-area" />);
+      expect(newLayerRadio().disabled).toBe(true);
+      expect(screen.queryByText("Name")).toBeNull();
+    });
   });
 
   it("shows the Name field prefilled once New layer is chosen", () => {
@@ -254,15 +228,13 @@ describe("OUTPUT destination", () => {
     // layer and the buildings come from a city SOURCE, and the form's `target`
     // is deliberately null for it. A prefill read off `target.name` would be
     // empty here; the one read off `targetName` is §6's "Zones · buildings".
-    withNewLayer("aggregate-per-area", () => {
-      addCityLayer("Delft");
-      addZones();
-      render(<ToolView toolId="aggregate-per-area" />);
-      fireEvent.click(newLayerRadio());
-      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
-        "Zones · buildings",
-      );
-    });
+    addCityLayer("Delft");
+    addZones();
+    render(<ToolView toolId="aggregate-per-area" />);
+    fireEvent.click(newLayerRadio());
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+      "Zones · buildings",
+    );
   });
 
   it("flags an EMPTY name inline at Run and refuses to run", () => {

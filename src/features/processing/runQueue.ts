@@ -76,6 +76,7 @@ import { SOURCE_NEEDS_AREAS } from "./crossLayerParams";
 import {
   derivedLayerName,
   prepareDerivedCityLayer,
+  prepareDerivedVectorLayer,
   STREAMING_NO_NEW_LAYER,
 } from "./deriveLayer";
 import { reprojectGeoLayer, type VectorPreflight } from "./vectorSource";
@@ -1387,23 +1388,54 @@ async function execute(
     // the branch is at the WRITE and nowhere else: a second path through the
     // executors would be the place the two destinations silently diverge.
     if (request.destination === "new") {
-      if (target.kind !== "city") {
-        // A derived VECTOR layer is Task 23's; until then no vector-target
-        // tool offers `"new"` and the head's own guard refuses the request
-        // first. Spelled out all the same, because falling through to the
-        // vector publication would write into the layer §6 promises to leave
-        // untouched.
-        patch(id, {
-          status: "failed",
-          phase: null,
-          error: "Not available yet",
-          elapsedMs: elapsed(),
-        });
-        return;
+      // The parent a VECTOR copy is cut from, narrowed ONCE and verified here
+      // — the same check, in the same place and with the same sentences, that
+      // the This-layer vector publication below makes: `target` was resolved
+      // before the compute, and a re-link in between re-minted every stable id.
+      // Copying the captured document then would publish a layer of a Zones
+      // the user no longer sees, under results keyed by ids it no longer has.
+      let vectorParent: GeoJsonLayer | null = null;
+      if (target.kind === "vector") {
+        const live = useGeoLayerStore
+          .getState()
+          .layers.find((l) => l.id === target.layer.id);
+        if (live === undefined || live.kind !== "geojson") {
+          patch(id, {
+            status: "failed",
+            phase: null,
+            error: "Layer removed",
+            elapsedMs: elapsed(),
+          });
+          return;
+        }
+        if (live.config.preparedData !== target.layer.config.preparedData) {
+          patch(id, {
+            status: "failed",
+            phase: null,
+            error: "Layer changed while running; run again",
+            elapsedMs: elapsed(),
+          });
+          return;
+        }
+        vectorParent = live;
       }
-      // The PARENT table's spelling wins, exactly as for a This-layer run:
-      // the copy is `SELECT *` of that table, so it has the same columns.
-      const result = canonicalise(raw, table.columns);
+      // The PARENT's own spelling wins, exactly as for a This-layer run: the
+      // city copy is `SELECT *` of the parent table, and the vector copy is the
+      // parent's document — so a column an earlier run already wrote keeps the
+      // spelling it has there. The SOURCE city table's columns are deliberately
+      // not the answer for a vector copy: they belong to another layer.
+      const result = canonicalise(
+        raw,
+        vectorParent === null
+          ? table.columns
+          : [
+              ...new Set(
+                geoRecords(vectorParent.config.preparedData).flatMap((record) =>
+                  Object.keys(record),
+                ),
+              ),
+            ].map((name) => ({ name })),
+      );
       if (result.rows.size === 0) {
         // Nothing matched, so there is nothing to publish: a copy whose
         // declared columns hold no value anywhere would be a layer made of
@@ -1412,30 +1444,46 @@ async function execute(
         return;
       }
       patch(id, { phase: "write" });
-      const plan = await prepareDerivedCityLayer({
-        runId: id,
-        parent: layer,
-        parentTable: table,
-        // The frozen name (§6.1), with the prefill as the fallback for a
-        // request built without one. The source's name comes off the RECORD
-        // (`runById`), which is where Task 11 put it — `execute` holds the
-        // source's id, not its name.
-        name:
-          request.newLayerName ??
-          derivedLayerName(
-            layer.name,
-            request.toolId,
-            runById(id)?.sourceName ?? null,
-          ),
-        rowIds: scope.featureIds,
-        columns: result.columns,
-        rows: result.rows,
-        signal,
-        // The closure, not `ctx.query`: it is the same function, and reading
-        // it off the context declares a METHOD reference, which the lint
-        // baseline refuses (`unbound-method`).
-        query,
-      });
+      const plan =
+        vectorParent === null
+          ? await prepareDerivedCityLayer({
+              runId: id,
+              parent: layer,
+              parentTable: table,
+              // The frozen name (§6.1), with the prefill as the fallback for a
+              // request built without one. The source's name comes off the
+              // RECORD (`runById`), which is where Task 11 put it — `execute`
+              // holds the source's id, not its name.
+              name:
+                request.newLayerName ??
+                derivedLayerName(
+                  layer.name,
+                  request.toolId,
+                  runById(id)?.sourceName ?? null,
+                ),
+              rowIds: scope.featureIds,
+              columns: result.columns,
+              rows: result.rows,
+              signal,
+              // The closure, not `ctx.query`: it is the same function, and
+              // reading it off the context declares a METHOD reference, which
+              // the lint baseline refuses (`unbound-method`).
+              query,
+            })
+          : // §7.6's reversed direction: the TARGET is the vector layer and
+            // its copy holds every one of its areas, whatever the scope
+            // selected on the SOURCE city layer (§6, §10.11). The prefill's
+            // source segment is the compute layer's name, which for a
+            // vector-target tool IS the source.
+            await prepareDerivedVectorLayer({
+              runId: id,
+              parent: vectorParent,
+              name:
+                request.newLayerName ??
+                derivedLayerName(vectorParent.name, request.toolId, layer.name),
+              columns: result.columns,
+              rows: result.rows,
+            });
       // §6.1: "a cancel (or a failure) that lands BEFORE publication discards
       // every partial resource … and the run reads cancelled with nothing
       // changed". This is the LAST moment that is true, and the ONLY
@@ -1490,9 +1538,18 @@ async function execute(
         runIds: new Set(Object.values(carried).map((p) => p.runId)),
       });
 
-      const summary = summariseCreated(result, elapsed(), name, scope.count, {
-        streaming: layer.isStreaming,
-      });
+      const summary = summariseCreated(
+        result,
+        elapsed(),
+        name,
+        // §7.6's own head segment already names what the copy holds — "6 areas
+        // aggregated over 1,204 buildings", where the 6 are the target's areas
+        // and the 1,204 are the source's buildings. `null` keeps it; a count
+        // here would replace it with the SOURCE's number (§6.2's "312
+        // buildings" is a CITY copy's, and a city copy holds the scope).
+        vectorParent === null ? scope.count : null,
+        { streaming: layer.isStreaming },
+      );
       const notes = [
         // [adapted copy A15] — §10 scenario 12's "the card says so".
         name === plan.name
@@ -1870,7 +1927,10 @@ export async function undoRun(id: string): Promise<void> {
     // calls `dropLayerTable` — and that ENQUEUES. Removing from inside a FIFO
     // slot would deadlock exactly as `enqueueLayerTable` would (Design
     // decision (g)).
+    // ONE of the two stores holds it; a removal for an id the other store
+    // owns is a no-op, so both are called rather than branched on.
     useLayerStore.getState().removeLayer(state.layerId);
+    useGeoLayerStore.getState().removeGeoLayer(state.layerId);
     useComputedColumnStore.getState().clearLayer(state.layerId);
     undoState.delete(id);
     patch(id, { undoable: false, note: "Undone" });

@@ -8,6 +8,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
+import type { GeoJsonLayer } from "../../../../src/features/geoLayers/geoLayerStore";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { RunRecord } from "../../../../src/features/processing/types";
 import {
@@ -147,6 +148,11 @@ const { useComputedColumnStore } =
   await import("../../../../src/insights/computedColumns");
 const { useWorkspaceStore } =
   await import("../../../../src/features/workspace/workspaceStore");
+const { useGeoLayerStore } =
+  await import("../../../../src/features/geoLayers/geoLayerStore");
+const { geoRecordId } =
+  await import("../../../../src/features/geoLayers/geoRecords");
+const { withDestinations } = await import("./toolDestinations");
 const { installWorkspaceInvariants } =
   await import("../../../../src/features/workspace/layerCoordination");
 
@@ -243,6 +249,7 @@ beforeEach(() => {
   failing = null;
   deathListeners.clear();
   useLayerStore.setState({ layers: [layer()] });
+  useGeoLayerStore.setState({ layers: [] });
   useWorkspaceStore.setState({ activeLayerId: "L1" });
   useComputedColumnStore.setState({ byLayer: {} });
   useProcessingStore.getState().resetForTest();
@@ -574,14 +581,15 @@ describe("destination: New layer", () => {
   });
 
   it("refuses a destination the tool does not offer, at the head", async () => {
-    // Task 20's pre-flight, still standing: `aggregate-per-area` has no
-    // `"new"` until Task 23.
+    // Task 20's pre-flight, still standing — and now with nothing in the
+    // shipped registry that lacks `"new"`, so the definition is STAGED rather
+    // than the rule losing its test (see `toolDestinations.ts`).
     fakeExecutor();
-    const id = submitRun(
-      newLayerRequest({ toolId: "aggregate-per-area" as const }),
-    );
-    await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
-    expect(runById(id)?.error).toBe("Not available yet");
+    await withDestinations("height-from-extent", ["layer"], async () => {
+      const id = submitRun(newLayerRequest());
+      await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
+      expect(runById(id)?.error).toBe("Not available yet");
+    });
   });
 
   it("restores the destination and the name onto the RECORD", async () => {
@@ -592,5 +600,284 @@ describe("destination: New layer", () => {
     await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
     expect(runById(id)?.destination).toBe("new");
     expect(runById(id)?.newLayerName).toBe("Delft · extent");
+  });
+});
+
+/**
+ * §7.6's reversed direction, with §6's New-layer destination: the TARGET is a
+ * vector layer, so the copy is a GeoJSON one and the "target untouched" promise
+ * is about a document rather than a table (§10 scenario 11).
+ */
+function zonesDocument(): unknown {
+  const area = (name: string) => ({
+    type: "Feature",
+    properties: { name },
+    geometry: { type: "Polygon", coordinates: [[]] },
+  });
+  return {
+    type: "FeatureCollection",
+    features: [area("North"), area("South")],
+  };
+}
+
+/** The Zones layer, and an Aggregate executor that writes one value onto its
+ *  FIRST area only — §6's "the copy holds ALL target areas" is the rule the
+ *  second area is here to catch. */
+function seedAggregate(): string {
+  const zones = useGeoLayerStore.getState().addGeoLayer({
+    kind: "geojson",
+    name: "Zones",
+    config: { data: zonesDocument() },
+  });
+  registerExecutor("aggregate-per-area", async (_run, ctx) => {
+    // ONE statement, so a cancel or a death can be landed while the executor
+    // is still in flight (the vector preparation itself awaits nothing).
+    await ctx.query("Aggregating buildings per area", AGGREGATE_SQL);
+    // §7.6's reversed direction: the TARGET is the vector layer, and its
+    // records are keyed by the GeoJSON stable feature id.
+    if (ctx.target.kind !== "vector") throw new Error("wrong target kind");
+    const first = ctx.target.records[0];
+    if (first === undefined) throw new Error("the target has no areas");
+    return {
+      columns: [{ name: "bld_buildings_n", type: "DOUBLE" as const }],
+      rows: new Map([[geoRecordId(first), { bld_buildings_n: 2 }]]),
+      measured: 1,
+      skipped: [],
+      // §7.6's own head segment, which is what §6.2's "Created <name>" line
+      // keeps for a vector copy.
+      line: "1 area aggregated over 1 building",
+    };
+  });
+  return zones;
+}
+
+const AGGREGATE_SQL = "SELECT 1 /* aggregate */";
+
+function aggregateRequest(
+  zones: string,
+  overrides: Record<string, unknown> = {},
+) {
+  return newLayerRequest({
+    toolId: "aggregate-per-area" as const,
+    targetLayerId: zones,
+    sourceLayerId: "L1",
+    prefix: "bld_",
+    newLayerName: "Zones · buildings",
+    columns: [{ name: "bld_buildings_n", type: "DOUBLE" as const }],
+    ...overrides,
+  });
+}
+
+function geoLayerById(id: string): GeoJsonLayer {
+  const layer = useGeoLayerStore.getState().layers.find((l) => l.id === id);
+  if (layer?.kind !== "geojson") throw new Error("not a geojson layer");
+  return layer;
+}
+
+function areasOf(id: string): Array<{ properties: Record<string, unknown> }> {
+  const doc = geoLayerById(id).config.preparedData as {
+    features?: Array<{ properties: Record<string, unknown> }>;
+  };
+  return doc.features ?? [];
+}
+
+describe("destination: New layer, with a VECTOR target", () => {
+  it("creates a GeoJSON copy of the target and leaves it untouched (§10.11)", async () => {
+    const zones = seedAggregate();
+    const before = JSON.stringify(geoLayerById(zones).config);
+    const beforeConfig = geoLayerById(zones).config;
+    const id = submitRun(aggregateRequest(zones));
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    const layers = useGeoLayerStore.getState().layers;
+    expect(layers.map((l) => l.name)).toEqual(["Zones", "Zones · buildings"]);
+    expect(runById(id)?.newLayerId).toBe(layers[1]?.id);
+    // No city layer was created, and the source city layer is untouched.
+    expect(useLayerStore.getState().layers).toHaveLength(1);
+    expect(sql.some((s) => s.startsWith("CREATE TABLE"))).toBe(false);
+    expect(sql.some((s) => s.startsWith('ALTER TABLE "layer_1"'))).toBe(false);
+    // C1: the ORIGINAL's document is byte-identical and its record was never
+    // replaced — §6's "the run creates a derived layer and leaves the target
+    // untouched", which for a vector target is a document, not a table.
+    expect(JSON.stringify(geoLayerById(zones).config)).toBe(before);
+    expect(geoLayerById(zones).config).toBe(beforeConfig);
+    expect(geoLayerById(zones).derivedFrom).toBeNull();
+    expect(Object.keys(areasOf(zones)[0]?.properties ?? {})).not.toContain(
+      "bld_buildings_n",
+    );
+    // The provenance is the COPY's, and none of it is on the parent.
+    const newId = runById(id)?.newLayerId ?? "";
+    expect(
+      useComputedColumnStore.getState().byLayer[newId]?.["bld_buildings_n"]
+        ?.toolName,
+    ).toBe("Aggregate buildings per area");
+    expect(useComputedColumnStore.getState().byLayer[zones]).toBeUndefined();
+    expect(geoLayerById(newId).derivedFrom).toEqual({
+      layerId: zones,
+      layerName: "Zones",
+      runId: id,
+    });
+  });
+
+  it("copies EVERY area, whatever the scope selected on the SOURCE (§6)", async () => {
+    const zones = seedAggregate();
+    const id = submitRun(aggregateRequest(zones));
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    const areas = areasOf(runById(id)?.newLayerId ?? "");
+    expect(areas).toHaveLength(2);
+    expect(areas[0]?.properties["name"]).toBe("North");
+    expect(areas[0]?.properties["bld_buildings_n"]).toBe(2);
+    // The area the run never evaluated is in the copy, without a value.
+    expect(areas[1]?.properties["name"]).toBe("South");
+    expect(Object.keys(areas[1]?.properties ?? {})).not.toContain(
+      "bld_buildings_n",
+    );
+  });
+
+  it("inserts the copy under its parent and activates it (§6.2)", async () => {
+    const zones = seedAggregate();
+    useGeoLayerStore.getState().addGeoLayer({
+      kind: "raster-xyz",
+      name: "Basemap",
+      config: { urlTemplate: "https://x/{z}/{x}/{y}.png" },
+    });
+    const id = submitRun(aggregateRequest(zones));
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    expect(useGeoLayerStore.getState().layers.map((l) => l.name)).toEqual([
+      "Zones",
+      "Zones · buildings",
+      "Basemap",
+    ]);
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(
+      runById(id)?.newLayerId,
+    );
+  });
+
+  it("names the copy on the card and keeps §7.6's own line whole", async () => {
+    // NOT "Created Zones · buildings · 1 building · …": that count is the
+    // SOURCE's scoped buildings and the copy holds AREAS. §7.6's head segment
+    // already says both ("6 areas aggregated over 1,204 buildings"), so it
+    // survives intact — asserted against the SAME tool's This-layer card
+    // rather than against a copy of Task 19's wording.
+    const zones = seedAggregate();
+    const created = submitRun(aggregateRequest(zones));
+    await vi.waitFor(() => expect(runById(created)?.status).toBe("done"));
+    const onLayer = submitRun(
+      aggregateRequest(zones, { destination: "layer", newLayerName: null }),
+    );
+    await vi.waitFor(() => expect(runById(onLayer)?.status).toBe("done"));
+
+    const prefix = "Created Zones · buildings · ";
+    const line = runById(created)?.summary?.line ?? "";
+    expect(line).toMatch(
+      /^Created Zones · buildings · 1 area aggregated over 1 building · \d+\.\d s$/,
+    );
+    // The seconds are real wall clock on both cards, so they are dropped
+    // before the two are compared.
+    const withoutSeconds = (text: string) =>
+      text.split(" · ").slice(0, -1).join(" · ");
+    expect(withoutSeconds(line.slice(prefix.length))).toBe(
+      withoutSeconds(runById(onLayer)?.summary?.line ?? ""),
+    );
+  });
+
+  it("reads the name publication actually gave the copy", async () => {
+    // The same " (2)" re-check a city copy gets (§10.12) — and the card's name
+    // is read back from the GEO store, which is where a vector copy's row is.
+    const zones = seedAggregate();
+    const id = submitRun(aggregateRequest(zones, { newLayerName: "Zones" }));
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    expect(runById(id)?.summary?.line).toContain("Created Zones (2)");
+    expect(runById(id)?.note).toBe(
+      'Renamed to "Zones (2)": a layer already had that name',
+    );
+    expect(geoLayerById(runById(id)?.newLayerId ?? "").name).toBe("Zones (2)");
+  });
+
+  it("a cancel BEFORE publication leaves nothing behind", async () => {
+    const zones = seedAggregate();
+    const held = deferred<void>();
+    gate = { needle: "/* aggregate */", promise: held.promise };
+    const id = submitRun(aggregateRequest(zones));
+    await vi.waitFor(() =>
+      expect(sql.some((s) => s.includes("/* aggregate */"))).toBe(true),
+    );
+    cancelRun(id);
+    gate = null;
+    held.resolve(undefined);
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("cancelled"));
+    expect(useGeoLayerStore.getState().layers).toHaveLength(1);
+    expect(runById(id)?.newLayerId).toBeNull();
+    expect(useComputedColumnStore.getState().byLayer).toEqual({});
+  });
+
+  it("the engine's DEATH before publication publishes nothing", async () => {
+    const zones = seedAggregate();
+    const held = deferred<void>();
+    gate = { needle: "/* aggregate */", promise: held.promise };
+    const id = submitRun(aggregateRequest(zones));
+    await vi.waitFor(() =>
+      expect(sql.some((s) => s.includes("/* aggregate */"))).toBe(true),
+    );
+    killEngine();
+    gate = null;
+    held.resolve(undefined);
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
+    expect(runById(id)?.error).toBe("Analytics engine stopped");
+    expect(useGeoLayerStore.getState().layers).toHaveLength(1);
+    expect(runById(id)?.newLayerId).toBeNull();
+  });
+
+  it("offers Undo immediately, and Undo removes the derived VECTOR layer", async () => {
+    const zones = seedAggregate();
+    const id = submitRun(aggregateRequest(zones));
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    const newId = runById(id)?.newLayerId ?? "";
+    expect(newLayerUndoBlock(runById(id) as RunRecord)).toBeNull();
+    await undoRun(id);
+    expect(useGeoLayerStore.getState().layers.map((l) => l.name)).toEqual([
+      "Zones",
+    ]);
+    expect(useComputedColumnStore.getState().byLayer[newId]).toBeUndefined();
+    expect(runById(id)?.note).toBe("Undone");
+    expect(runById(id)?.undoable).toBe(false);
+  });
+
+  it("blocks Undo once a later run has used the derived vector layer", async () => {
+    const zones = seedAggregate();
+    const id = submitRun(aggregateRequest(zones));
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    const newId = runById(id)?.newLayerId ?? "";
+    const later = submitRun(
+      aggregateRequest(newId, { destination: "layer", newLayerName: null }),
+    );
+    await vi.waitFor(() => expect(runById(later)?.status).toBe("done"));
+    expect(newLayerUndoBlock(runById(id) as RunRecord)).toBe(
+      "Used by a later run; remove the layer from the layer list instead",
+    );
+    await undoRun(id);
+    expect(useGeoLayerStore.getState().layers).toHaveLength(2);
+    expect(runById(id)?.error).toBe(
+      "Used by a later run; remove the layer from the layer list instead",
+    );
+  });
+
+  it("blocks Undo once the copy has computed columns of its OWN", async () => {
+    const zones = seedAggregate();
+    const id = submitRun(aggregateRequest(zones));
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    const newId = runById(id)?.newLayerId ?? "";
+    useComputedColumnStore.getState().setProvenance(newId, "other_n", {
+      runId: "run_elsewhere",
+      toolName: "Aggregate buildings per area",
+      summary: "All 1 building",
+      at: Date.now(),
+      partial: null,
+      previous: null,
+    });
+    expect(newLayerUndoBlock(runById(id) as RunRecord)).toBe(
+      "Used by a later run; remove the layer from the layer list instead",
+    );
+    await undoRun(id);
+    expect(useGeoLayerStore.getState().layers).toHaveLength(2);
   });
 });

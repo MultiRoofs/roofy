@@ -85,6 +85,28 @@ describe("geoLayerSnapshot", () => {
     });
   });
 
+  it("does not choke on a DERIVED layer, and writes nothing about it", () => {
+    // §8: a derived layer is not saved at all, and Task 24 is what drops it
+    // from the snapshot. Until then the only promise this door has to keep is
+    // that the new field does not reach the document — a `derivedFrom` in a
+    // saved workspace would be a dangling reference to a layer that no longer
+    // exists on restore.
+    const layer: GeoLayer = {
+      id: "g2",
+      name: "Zones · buildings",
+      kind: "geojson",
+      visible: true,
+      opacity: 1,
+      style: DEFAULT_GEO_LAYER_STYLE,
+      derivedFrom: { layerId: "g1", layerName: "Zones", runId: "run_9" },
+      config: { data: { type: "FeatureCollection", features: [] } },
+    };
+
+    const snapshot = geoLayerSnapshot(layer);
+    expect(snapshot).not.toHaveProperty("derivedFrom");
+    expect(JSON.stringify(capture([snapshot]))).not.toContain("derivedFrom");
+  });
+
   it("writes the layer's own style, which is a user choice like any other", () => {
     const layer: GeoLayer = {
       derivedFrom: null,

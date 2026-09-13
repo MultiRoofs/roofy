@@ -214,6 +214,7 @@ const { useLayerStore } =
   await import("../../../../src/features/layers/layerStore");
 const { computedColumnsOf, provenanceOf, useComputedColumnStore } =
   await import("../../../../src/insights/computedColumns");
+const { withDestinations } = await import("./toolDestinations");
 const { useSelectionStore } =
   await import("../../../../src/features/selection/selectionStore");
 
@@ -773,19 +774,16 @@ describe("submitRun", () => {
   });
 
   it("refuses a New-layer request for a tool that does not offer it", async () => {
-    // The pre-flight, still standing now that the six city tools ship
-    // `"new"`: `aggregate-per-area` keeps `["layer"]` until Task 23, and this
-    // guard is checked FIRST — before the missing-source refusal its own
-    // request would otherwise get.
-    const id = submitRun(
-      request({
-        toolId: "aggregate-per-area",
-        destination: "new",
-        newLayerName: "X",
-      }),
-    );
-    await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
-    expect(runById(id)?.error).toBe("Not available yet");
+    // The pre-flight, still standing now that all SEVEN tools ship `"new"`
+    // (Task 23 flipped the last of them). Nothing in the shipped registry
+    // lacks the destination any more, so the definition is STAGED for the
+    // length of the run rather than the rule losing its test — see
+    // `toolDestinations.ts`.
+    await withDestinations("height-from-extent", ["layer"], async () => {
+      const id = submitRun(request({ destination: "new", newLayerName: "X" }));
+      await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
+      expect(runById(id)?.error).toBe("Not available yet");
+    });
   });
 
   it("refuses a New-layer request on a STREAMING target, with A2's reason", async () => {
