@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 
 const runQuery = vi.fn();
+/** Whoever asked to hear about the engine dying, as a real set: a case drives a
+ *  death through it, and an inert stub would leave the counts spinning. */
+const deathListeners = new Set<() => void>();
 vi.mock("../../../../src/insights/duckdb", () => ({
   runQuery: (sql: string) => runQuery(sql),
   // Every mock of this module carries the status subscription, whether or not
@@ -11,7 +14,10 @@ vi.mock("../../../../src/insights/duckdb", () => ({
   subscribeDuckDBStatus: () => () => {},
   getDuckDBStatusVersion: () => 0,
   getEngineGeneration: () => 1,
-  onEngineDeath: () => () => {},
+  onEngineDeath: (listener: () => void) => {
+    deathListeners.add(listener);
+    return () => deathListeners.delete(listener);
+  },
   // `layerTables` reads the status at MODULE LOAD now (spec §6.1 invalidates
   // every table when the engine's worker dies), so this import chain needs it
   // even though nothing here asks about the engine.
@@ -54,6 +60,7 @@ function Probe() {
 }
 
 beforeEach(() => {
+  deathListeners.clear();
   runQuery.mockReset();
   useLayerTableStore.setState({
     tables: { L: { state: "ready", info: TABLE } },
@@ -103,6 +110,37 @@ describe("useLayerCounts", () => {
     );
     expect(runQuery.mock.calls.map(([sql]) => sql)).toContain(
       'SELECT COUNT(*) AS "n" FROM "layer_1" WHERE "parents" IS NULL AND "object_type" = \'Building\'',
+    );
+  });
+
+  it("settles with §6.1's sentence when the engine dies under the counts", async () => {
+    // THE OFF-QUEUE HAZARD. These three counts are awaited OUTSIDE the table
+    // FIFO, and `duckdb.ts` used to leave a request its worker died under
+    // unsettled for ever — so the footer kept its spinner for the life of the
+    // page. Every primitive now settles with its ordinary failure value, which
+    // this fake reproduces: the request answers only when the death does.
+    runQuery.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          deathListeners.add(() => {
+            resolve({ ok: false, message: "Analytics engine stopped" });
+          });
+        }),
+    );
+    render(<Probe />);
+    await waitFor(() => expect(deathListeners.size).toBeGreaterThan(0));
+    for (const listener of Array.from(deathListeners)) {
+      deathListeners.delete(listener);
+      listener();
+    }
+    await waitFor(() =>
+      expect(
+        JSON.parse(screen.getByTestId("counts").textContent!),
+      ).toMatchObject({
+        all: null,
+        loading: false,
+        message: "Analytics engine stopped",
+      }),
     );
   });
 

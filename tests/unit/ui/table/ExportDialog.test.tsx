@@ -8,12 +8,19 @@ import {
 } from "@testing-library/react";
 
 const runQuery = vi.fn();
+/** Whoever asked to hear about the engine dying, as a real set: a case drives a
+ *  death through it, so the inert stub would leave the dialog's request hanging
+ *  for ever — which is the very thing it is asserting against. */
+const deathListeners = new Set<() => void>();
 vi.mock("../../../../src/insights/duckdb", () => ({
   initDuckDB: vi.fn(async () => {}),
   subscribeDuckDBStatus: vi.fn(() => () => {}),
   getDuckDBStatusVersion: vi.fn(() => 0),
   getEngineGeneration: vi.fn(() => 1),
-  onEngineDeath: vi.fn(() => () => {}),
+  onEngineDeath: vi.fn((listener: () => void) => {
+    deathListeners.add(listener);
+    return () => deathListeners.delete(listener);
+  }),
   getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
   isExtensionLoaded: vi.fn(() => false),
   ensureExtension: vi.fn(async () => false),
@@ -122,6 +129,7 @@ function open(over: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  deathListeners.clear();
   runQuery.mockReset();
   runQuery.mockResolvedValue({
     ok: true,
@@ -379,6 +387,30 @@ describe("ExportDialog", () => {
       name: "Refreshing table…",
     }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
+  });
+
+  it("shows §6.1's sentence when the engine dies under the type probe", async () => {
+    // THE OFF-QUEUE HAZARD. `duckdb.ts` used to leave a request its worker died
+    // under unsettled for ever, and this dialog awaits one OUTSIDE the table
+    // FIFO — so the type list stayed empty and Export stayed disabled with
+    // nothing on screen to explain it. Every primitive now settles with its
+    // ordinary failure value, which this fake reproduces: the request answers
+    // only when the death does.
+    runQuery.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          deathListeners.add(() => {
+            resolve({ ok: false, message: "Analytics engine stopped" });
+          });
+        }),
+    );
+    open();
+    await waitFor(() => expect(deathListeners.size).toBeGreaterThan(0));
+    for (const listener of Array.from(deathListeners)) {
+      deathListeners.delete(listener);
+      listener();
+    }
+    expect(await screen.findByText("Analytics engine stopped")).toBeTruthy();
   });
 
   it("shows the reason a type probe failed instead of a silently dead button", async () => {

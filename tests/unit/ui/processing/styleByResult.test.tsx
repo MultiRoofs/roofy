@@ -41,10 +41,27 @@ const MEDIAN_ROWS = () => ({
   columns: ["m"],
   rows: [{ m: 4.2 } as Record<string, unknown>],
 });
-const runQuery = vi.fn(async (sql: string) => {
+/** Whoever asked to hear about the engine dying, as a real set: one case drives
+ *  a death through it, and an inert stub would leave the median read hanging. */
+const deathListeners = new Set<() => void>();
+/** When set, the median read NEVER ANSWERS until the death does — duckdb-wasm's
+ *  own behaviour for a request its worker died under, and what `duckdb.ts`'s
+ *  primitives now settle with the ordinary failure value. */
+let medianDiesWithEngine = false;
+/** The fake read, NAMED: `afterEach` re-installs it, and two copies would drift
+ *  the moment one of them grew a branch. */
+const medianRead = async (sql: string) => {
   statements.push(sql);
+  if (medianDiesWithEngine) {
+    return await new Promise<{ ok: false; message: string }>((resolve) => {
+      deathListeners.add(() => {
+        resolve({ ok: false, message: "Analytics engine stopped" });
+      });
+    });
+  }
   return MEDIAN_ROWS();
-});
+};
+const runQuery = vi.fn(medianRead);
 vi.mock("../../../../src/insights/duckdb", () => ({
   runQuery,
   ddl: vi.fn(async () => ({ ok: false, message: "no engine" })),
@@ -64,7 +81,10 @@ vi.mock("../../../../src/insights/duckdb", () => ({
   getDuckDBStatusVersion: vi.fn(() => 0),
   subscribeDuckDBStatus: vi.fn(() => () => {}),
   getEngineGeneration: vi.fn(() => 1),
-  onEngineDeath: vi.fn(() => () => {}),
+  onEngineDeath: vi.fn((listener: () => void) => {
+    deathListeners.add(listener);
+    return () => deathListeners.delete(listener);
+  }),
   isExtensionLoaded: vi.fn(() => true),
   ensureExtension: vi.fn(async () => true),
   formatDuckDBError: (e: unknown) => String(e),
@@ -212,10 +232,9 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   statements.length = 0;
-  runQuery.mockImplementation(async (sql: string) => {
-    statements.push(sql);
-    return MEDIAN_ROWS();
-  });
+  medianDiesWithEngine = false;
+  deathListeners.clear();
+  runQuery.mockImplementation(medianRead);
   useLayerStore.getState().removeAllLayers();
   useGeoLayerStore.setState({ layers: [] });
   useLayerTableStore.setState({ tables: {} });
@@ -312,6 +331,37 @@ describe("Style by result, from the descriptor", () => {
     expect(statements).toEqual([
       'SELECT median(CAST("solid_volume_m3" AS DOUBLE)) AS m FROM "layer_1" WHERE "feature_id" IS NULL OR "feature_id" = "id"',
     ]);
+  });
+
+  it("reports §6.1's sentence when the engine dies under the median read", async () => {
+    // THE OFF-QUEUE HAZARD. The footer's median is awaited OUTSIDE the table
+    // FIFO, and `duckdb.ts` used to leave a request its worker died under
+    // unsettled for ever — so the button did nothing, for ever, with no notice
+    // anywhere. The primitive now answers `ok: false`, which this footer
+    // already knows how to say.
+    medianDiesWithEngine = true;
+    const id = addLayer();
+    render(
+      <RunFooter
+        run={seed(doneRun({ targetLayerId: id }))}
+        canRun
+        reason={null}
+        onRunAgain={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    await waitFor(() => expect(deathListeners.size).toBeGreaterThan(0));
+    for (const listener of Array.from(deathListeners)) {
+      deathListeners.delete(listener);
+      listener();
+    }
+    await waitFor(() =>
+      expect(useProcessingStore.getState().notice).toBe(
+        "Analytics engine stopped",
+      ),
+    );
+    // …and no draft was written from a value nobody could read.
+    expect(useRuleDraftStore.getState().drafts[id]).toBeUndefined();
   });
 
   it("picks the next written column when the first measure was unticked", () => {

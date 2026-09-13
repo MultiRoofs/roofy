@@ -10,6 +10,15 @@ let writeRows: Record<string, unknown>[] = [];
 let validationRows: Record<string, unknown>[] = [];
 let validationReadFails = false;
 let failOn: string | null = null;
+/**
+ * A statement the fake NEVER ANSWERS, the way duckdb-wasm strands a request its
+ * worker died under — the death, and only the death, settles it, with the
+ * ordinary failure value `duckdb.ts`'s primitives now return.
+ */
+let hangOn: string | null = null;
+/** Whoever asked to hear about the engine dying, as a real set: this suite
+ *  drives a death through it. */
+const deathListeners = new Set<() => void>();
 /** Override a single read-back to exercise the validators. */
 let badFile: { name: string; bytes: Uint8Array | null } | null = null;
 /**
@@ -29,6 +38,13 @@ function sampleBytes(path: string): Uint8Array {
 vi.mock("../../../src/insights/duckdb", () => {
   const run = async (statement: string) => {
     sql.push(statement);
+    if (hangOn !== null && statement.includes(hangOn)) {
+      return await new Promise<{ ok: false; message: string }>((resolve) => {
+        deathListeners.add(() => {
+          resolve({ ok: false, message: "Analytics engine stopped" });
+        });
+      });
+    }
     if (failOn !== null && statement.includes(failOn)) {
       return { ok: false as const, message: "Binder Error: bad module" };
     }
@@ -65,7 +81,10 @@ vi.mock("../../../src/insights/duckdb", () => {
     subscribeDuckDBStatus: vi.fn(() => () => {}),
     getDuckDBStatusVersion: vi.fn(() => 0),
     getEngineGeneration: vi.fn(() => 1),
-    onEngineDeath: vi.fn(() => () => {}),
+    onEngineDeath: vi.fn((listener: () => void) => {
+      deathListeners.add(listener);
+      return () => deathListeners.delete(listener);
+    }),
     getDuckDBStatus: vi.fn(() => ({ state: "uninitialized" })),
     isExtensionLoaded: vi.fn(() => true),
     ensureExtension: vi.fn(async () => false),
@@ -120,6 +139,8 @@ beforeEach(() => {
   validationRows = [];
   validationReadFails = false;
   failOn = null;
+  hangOn = null;
+  deathListeners.clear();
   badFile = null;
   globNames = [];
   // Module state; the `exp_<n>` names in the regexes below are per-run.
@@ -294,6 +315,25 @@ describe("CityParquet package export", () => {
       sql.filter((s) => s.startsWith("DROP SCHEMA IF EXISTS")),
     ).toHaveLength(2);
     expect(dropped).toContainEqual(expect.stringMatching(/_src\.city\.json$/));
+  });
+
+  it("settles with §6.1's sentence when the engine dies under the write", async () => {
+    // THE OFF-QUEUE HAZARD. The writer runs OUTSIDE the table FIFO, and
+    // `duckdb.ts` used to leave a request its worker died under unsettled for
+    // ever — so the Export dialog sat on "Exporting…" for the life of the page
+    // with no way out but a reload. The primitive now answers `ok: false`, and
+    // the writer's existing `throw new Error(message)` carries it to the
+    // dialog.
+    hangOn = "cityparquet_write";
+    const exporting = runExport(request());
+    await vi.waitFor(() =>
+      expect(sql.some((s) => s.includes("cityparquet_write"))).toBe(true),
+    );
+    for (const listener of Array.from(deathListeners)) {
+      deathListeners.delete(listener);
+      listener();
+    }
+    await expect(exporting).rejects.toThrow("Analytics engine stopped");
   });
 
   it("removes a PARTIAL package the failed write left behind", async () => {
