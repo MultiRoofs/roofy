@@ -24,6 +24,11 @@ import {
   normalizeGeoJsonDocument,
   readGeoStableFeatureId,
 } from "./geoJsonRecords";
+// TYPE-ONLY, and deliberately so: the two stores share a SHAPE, not a runtime
+// dependency. `import type` is erased at compile time, so this file still
+// imports nothing from `layerStore` when it runs — which is what the header
+// above ("A SEPARATE store from `layerStore`") is protecting.
+import type { DerivedFrom } from "../layers/layerStore";
 
 export type GeoLayerKind = "geojson" | "raster-xyz" | "3d-tiles";
 
@@ -82,6 +87,12 @@ interface GeoLayerBase {
    *  once, here. Replaced wholesale on edit — never mutated — so the reconciler
    *  can memoise on its identity. */
   readonly style: GeoLayerStyle;
+  /**
+   * Null for every ordinary layer; set on a layer a New-layer run created
+   * (§6.2). The SAME shape a city layer's carries, because §6.2's state line
+   * and marker and §8's snapshot filter do not distinguish the two kinds.
+   */
+  readonly derivedFrom: DerivedFrom | null;
 }
 
 /**
@@ -120,10 +131,15 @@ export type GeoJsonLayer = Extract<GeoLayer, { kind: "geojson" }>;
  *  makes the union worth having. */
 export type GeoLayerInput = GeoLayer extends infer L
   ? L extends GeoLayer
-    ? Omit<L, "id" | "visible" | "opacity" | "style"> & {
+    ? Omit<L, "id" | "visible" | "opacity" | "style" | "derivedFrom"> & {
         readonly visible?: boolean;
         readonly opacity?: number;
         readonly style?: GeoLayerStyle;
+        /** Defaults to null. Supplied only by a New-layer run's publication. */
+        readonly derivedFrom?: DerivedFrom | null;
+        /** §6.2: "inserted directly under its target in the layer list". An id
+         *  that is not in the list appends, as it always did. */
+        readonly insertAfterId?: string;
       }
     : never
   : never;
@@ -367,6 +383,7 @@ export const useGeoLayerStore = create<GeoLayerStore>((set) => ({
     const base = {
       id,
       name: input.name,
+      derivedFrom: input.derivedFrom ?? null,
       visible: input.visible ?? true,
       opacity: clampOpacity(input.opacity ?? DEFAULT_GEO_LAYER_OPACITY),
       // Normalized even though the input is TYPED as a style: this store is
@@ -400,7 +417,18 @@ export const useGeoLayerStore = create<GeoLayerStore>((set) => ({
         : input.kind === "raster-xyz"
           ? { ...base, kind: "raster-xyz", config: input.config }
           : { ...base, kind: "3d-tiles", config: input.config };
-    set((state) => ({ layers: [...state.layers, layer] }));
+    set((state) => {
+      // ONE splice site, and `insertAfterId` is the only way this is not an
+      // append — so every existing caller's ordering is unchanged.
+      const at =
+        input.insertAfterId === undefined
+          ? -1
+          : state.layers.findIndex((l) => l.id === input.insertAfterId);
+      if (at < 0) return { layers: [...state.layers, layer] };
+      const next = [...state.layers];
+      next.splice(at + 1, 0, layer);
+      return { layers: next };
+    });
     return id;
   },
 

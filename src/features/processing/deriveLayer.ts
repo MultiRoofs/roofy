@@ -31,7 +31,12 @@ import { quoteIdent, quoteLiteral } from "../../insights/sql";
 import { activateLayer } from "../workspace/layerCoordination";
 import { selectedObjectBounds } from "../../scene/selectedObjectBounds";
 import type { CityModel, CityObject } from "../../domain/citymodel/types";
-import { useGeoLayerStore, type GeoLayer } from "../geoLayers/geoLayerStore";
+import {
+  mergeGeoDocumentProperties,
+  useGeoLayerStore,
+  type GeoLayer,
+} from "../geoLayers/geoLayerStore";
+import { publicGeoDocument } from "../geoLayers/geoJsonRecords";
 import { useLayerStore, type Layer } from "../layers/layerStore";
 import type { ToolId } from "./types";
 
@@ -437,5 +442,123 @@ export async function prepareDerivedCityLayer(input: {
       return layerId;
     },
     discard: drop,
+  };
+}
+
+/**
+ * Build a derived VECTOR layer: a plain GeoJSON layer whose document is the
+ * target's `preparedData` with the run's properties merged in (§6, "A derived
+ * vector layer is a plain GeoJSON layer").
+ *
+ * It holds EVERY area of the target, not only the ones the run wrote to: §6 is
+ * explicit that "for Aggregate buildings per area the copy holds ALL target
+ * areas (the scope selects the source buildings that are counted, §7.6)", and
+ * §10 scenario 11 is exactly that case — 6 areas in, 6 areas out, with
+ * `bld_buildings_n` counting only the 2 selected buildings.
+ *
+ * `async` with nothing to await, matching {@link prepareDerivedCityLayer}: a
+ * vector copy touches no database (a geo layer has no table — §8's "nothing new
+ * is saved" is what makes `preparedData` the right home), and the caller must
+ * not have to know which of the two it is holding.
+ */
+export async function prepareDerivedVectorLayer(input: {
+  readonly runId: string;
+  readonly parent: GeoLayer;
+  readonly name: string;
+  /**
+   * The run's declared output columns. Nothing here reads them — the copy's
+   * document is the merge of {@link input.rows}, and §6.2's value rule gives an
+   * area the run never evaluated no value at all, so there is no column list to
+   * pre-declare on a document. Kept because the caller holds one plan type and
+   * hands both preparations the same shape.
+   */
+  readonly columns: ReadonlyArray<OutputColumn>;
+  readonly rows: ReadonlyMap<string, Readonly<Record<string, unknown>>>;
+}): Promise<DerivedPlan> {
+  const parent = input.parent;
+  // NARROWED here rather than in the signature: `ToolTarget`'s vector arm is
+  // already `GeoJsonLayer`, so a run cannot reach this — but the union is what
+  // a caller holds, and a raster parent would otherwise publish a layer with no
+  // document at all, which the layer list reads as "needs re-link".
+  if (parent.kind !== "geojson") {
+    throw new Error("A derived vector layer's parent must be a GeoJSON layer");
+  }
+  // The ENGINE's document, not `config.data`: `preparedData` is what the
+  // engine, the records panel and the GeoJSON export all read, and it is the
+  // one every feature's stable id has been stamped into.
+  const source = parent.config.preparedData;
+  // ONE merge for both destinations (Decisions item 6 (iv)): Task 18's exported
+  // pure helper, not a second copy of it. `null` means no feature matched, and
+  // the copy is then the parent's document as it stands — safe to share,
+  // because the helper never mutates its input and every writer of
+  // `preparedData` REPLACES the object rather than editing it
+  // (`setPreparedGeoJson` / `replaceGeoPreparedData` in `geoLayerStore.ts`).
+  const merged = mergeGeoDocumentProperties(source, input.rows) ?? source;
+  // Stripped BEFORE it goes back in, and after the merge rather than before it:
+  // the merge matches features on the stable id, which lives in exactly the
+  // envelope this removes. `addGeoLayer` then mints the copy's OWN envelope
+  // from the same feature ids, so the copy's stable ids are the parent's and
+  // nothing private is left in view (see `publicGeoDocument`).
+  const document = publicGeoDocument(merged);
+
+  return {
+    name: input.name,
+    publish(): string {
+      const geo = useGeoLayerStore.getState();
+      // §6: re-checked HERE, synchronously, inside the run's own FIFO slot —
+      // exactly as the city copy does it, so nothing can take the name between
+      // the check and the add.
+      const final = disambiguate(
+        input.name,
+        useLayerStore.getState().layers,
+        geo.layers,
+      );
+      // `addGeoLayer` MINTS the id, so unlike the city path there is nothing to
+      // pre-mint: no table is adopted here, so nothing needs the id before the
+      // row exists. Everything that keys on it therefore comes after.
+      const id = geo.addGeoLayer({
+        kind: "geojson",
+        name: final.name,
+        // `data` and nothing else: the store derives `preparedData` and
+        // `preparation` from it, and a geo layer with neither data nor a URL
+        // reads as "needs re-link" (`isGeoLayerUnavailable`) — the copy is not
+        // waiting for a file. It is never persisted — §8 omits a derived layer
+        // from the snapshot entirely — so nothing reaches disk by carrying it.
+        config: { data: document },
+        // §6.2's "an independent COPY": `addGeoLayer` normalises the style into
+        // a record of its own, so a later restyle of either side leaves the
+        // other alone.
+        style: parent.style,
+        visible: true,
+        opacity: parent.opacity,
+        insertAfterId: parent.id,
+        derivedFrom: {
+          layerId: parent.id,
+          // The parent's name AS IT IS AT PUBLICATION, which is what §6.2's
+          // state line quotes — the same rule the city copy follows.
+          layerName:
+            geo.layers.find((l) => l.id === parent.id)?.name ?? parent.name,
+          runId: input.runId,
+        },
+      });
+      // §6: "inherited computed columns keep their provenance". The values came
+      // across in the document; the registry entries have to be copied, because
+      // it is keyed by layer id. The run's OWN columns are given theirs by
+      // `execute`, which knows the tool name and the scope sentence.
+      const registry = useComputedColumnStore.getState();
+      for (const [column, provenance] of Object.entries(
+        registry.byLayer[parent.id] ?? {},
+      )) {
+        registry.setProvenance(id, column, provenance);
+      }
+      // §6.2: "it becomes the active layer through the ordinary activate rule
+      // (which clears a selection belonging to another layer)".
+      activateLayer(id);
+      return id;
+    },
+    // Nothing was created outside this closure — no table, no store write — so
+    // there is nothing to undo. Present because the caller holds a
+    // `DerivedPlan` and must not have to branch on which kind it is.
+    async discard(): Promise<void> {},
   };
 }

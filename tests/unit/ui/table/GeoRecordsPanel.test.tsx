@@ -17,6 +17,7 @@ const layer = (
     visible: true,
     opacity: 1,
     style: DEFAULT_GEO_LAYER_STYLE,
+    derivedFrom: null,
     config,
   }) as Extract<GeoLayer, { kind: "geojson" }>;
 const data = normalizeGeoJsonDocument({

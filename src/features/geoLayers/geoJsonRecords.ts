@@ -114,6 +114,45 @@ export function publicGeoProperties(
 }
 
 /**
+ * A whole document with every feature's properties made PUBLIC — the inverse
+ * of {@link normalizeGeoJsonDocument}, feature by feature.
+ *
+ * What it is for: a document that is already prepared cannot be handed back to
+ * `addGeoLayer` as a new layer's `data`. `normalizeGeoJsonDocument` would stamp
+ * a SECOND envelope over the first and record the first as the feature's
+ * "original value", which {@link publicGeoProperties} then hands back as a
+ * visible attribute — so the new layer's records grid, its Details, its export
+ * and its "Color by attribute" list would all offer `__roofy_stable_feature_id`.
+ * Stripping first makes the round trip exact: a document the FILE's own
+ * properties came out of goes back in unchanged, and a file that really did
+ * carry the reserved key keeps its value.
+ *
+ * PURE and copy-on-write: a feature with no envelope keeps its identity, and
+ * the geometry objects are shared by reference (nothing in the app mutates a
+ * geometry in place — every writer replaces the document).
+ */
+export function publicGeoDocument(document: unknown): unknown {
+  const source = document as { type?: unknown; features?: unknown[] } | null;
+  const strip = (feature: unknown): unknown => {
+    const record = feature as { properties?: unknown } | null;
+    const properties =
+      record?.properties && typeof record.properties === "object"
+        ? (record.properties as Record<string, unknown>)
+        : null;
+    if (properties === null) return feature;
+    const publicProperties = publicGeoProperties(properties);
+    return publicProperties === properties
+      ? feature
+      : { ...record, properties: publicProperties };
+  };
+  if (source?.type === "FeatureCollection" && Array.isArray(source.features)) {
+    return { ...source, features: source.features.map(strip) };
+  }
+  if (source?.type === "Feature") return strip(source);
+  return document;
+}
+
+/**
  * The PUBLIC properties of the feature carrying `stableId`, or null.
  *
  * A geo selection holds a SNAPSHOT of the properties it was made with

@@ -213,6 +213,7 @@ function geoJsonLayer(config: { data?: unknown; url?: string }): GeoLayer {
     visible: true,
     opacity: 1,
     style: DEFAULT_GEO_LAYER_STYLE,
+    derivedFrom: null,
     config,
   };
 }
@@ -265,6 +266,7 @@ describe("resolveGeoLayerBounds", () => {
       visible: true,
       opacity: 1,
       style: DEFAULT_GEO_LAYER_STYLE,
+      derivedFrom: null,
       config: { url: "https://x/tileset.json" },
     };
     const bounds = await resolveGeoLayerBounds(
@@ -284,6 +286,7 @@ describe("resolveGeoLayerBounds", () => {
       visible: true,
       opacity: 1,
       style: DEFAULT_GEO_LAYER_STYLE,
+      derivedFrom: null,
       config: { urlTemplate: "https://tile/{z}/{x}/{y}.png" },
     };
     expect(
@@ -332,6 +335,7 @@ describe("resolveGeoLayerBounds", () => {
       visible: true,
       opacity: 1,
       style: DEFAULT_GEO_LAYER_STYLE,
+      derivedFrom: null,
       config: { url: "" },
     };
     expect(

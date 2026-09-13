@@ -12,7 +12,10 @@
  * them before those bindings exist.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { GeoLayer } from "../../../../src/features/geoLayers/geoLayerStore";
+import type {
+  GeoJsonLayer,
+  GeoLayer,
+} from "../../../../src/features/geoLayers/geoLayerStore";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 
@@ -102,8 +105,13 @@ vi.mock("../../../../src/insights/layerTables", async () => {
   };
 });
 
-const { derivedLayerName, disambiguate, nameTaken, prepareDerivedCityLayer } =
-  await import("../../../../src/features/processing/deriveLayer");
+const {
+  derivedLayerName,
+  disambiguate,
+  nameTaken,
+  prepareDerivedCityLayer,
+  prepareDerivedVectorLayer,
+} = await import("../../../../src/features/processing/deriveLayer");
 
 const city = (name: string): Layer => ({ name }) as unknown as Layer;
 const geo = (name: string): GeoLayer => ({ name }) as unknown as GeoLayer;
@@ -199,6 +207,12 @@ const { useWorkspaceStore } =
   await import("../../../../src/features/workspace/workspaceStore");
 const { useComputedColumnStore } =
   await import("../../../../src/insights/computedColumns");
+const { useGeoLayerStore } =
+  await import("../../../../src/features/geoLayers/geoLayerStore");
+const { GEO_STABLE_FEATURE_KEY, readGeoStableFeatureId } =
+  await import("../../../../src/features/geoLayers/geoJsonRecords");
+const { geoRecords } =
+  await import("../../../../src/features/geoLayers/geoRecords");
 const { runQuery } = await import("../../../../src/insights/duckdb");
 const tables = await import("../../../../src/insights/layerTables");
 const { CancelledError, EngineDeadError } =
@@ -314,6 +328,7 @@ beforeEach(() => {
   dieOn = null;
   deathListeners.clear();
   useLayerStore.setState({ layers: [] });
+  useGeoLayerStore.setState({ layers: [] });
   useWorkspaceStore.setState({ activeLayerId: null });
   useComputedColumnStore.setState({ byLayer: {} });
   seedParent();
@@ -553,5 +568,255 @@ describe("prepareDerivedCityLayer", () => {
     expect(vi.mocked(tables.runOnTableQueue)).toHaveBeenCalledTimes(1);
     // The slot really was given back — a second one is reachable.
     await tables.runOnTableQueue(async () => undefined);
+  });
+});
+
+/**
+ * §6's OTHER copy: a derived VECTOR layer.
+ *
+ * "A derived vector layer is a plain GeoJSON layer" — no table, no model, no
+ * engine. So none of the mocks above are reached by these cases; what is under
+ * test is the document the copy carries and the row the store gains.
+ */
+function zonesDocument(): unknown {
+  const feature = (name: string) => ({
+    type: "Feature",
+    properties: { name },
+    geometry: { type: "Polygon", coordinates: [[]] },
+  });
+  return {
+    type: "FeatureCollection",
+    features: [feature("North"), feature("South")],
+  };
+}
+
+function zonesLayer(): string {
+  return useGeoLayerStore.getState().addGeoLayer({
+    kind: "geojson",
+    name: "Zones",
+    config: { data: zonesDocument() },
+  });
+}
+
+/** The layer as the store holds it, narrowed once — every read below wants
+ *  `config.preparedData`, which only the GeoJSON arm has. */
+function geoLayer(id: string): GeoJsonLayer {
+  const layer = useGeoLayerStore.getState().layers.find((l) => l.id === id);
+  if (layer?.kind !== "geojson") throw new Error("not a geojson layer");
+  return layer;
+}
+
+function preparedFeatures(
+  layer: GeoJsonLayer,
+): Array<{ properties: Record<string, unknown> }> {
+  const doc = layer.config.preparedData as {
+    features?: Array<{ properties: Record<string, unknown> }>;
+  };
+  return doc.features ?? [];
+}
+
+/** The stable id the store actually stamped on the Nth prepared feature —
+ *  read BACK rather than assumed, because it is the key the run's rows are
+ *  keyed by and the only honest source of it is the document itself. */
+function stableIdOf(layer: GeoJsonLayer, index: number): string {
+  const id = readGeoStableFeatureId(
+    preparedFeatures(layer)[index]?.properties ?? {},
+  );
+  if (id === null) throw new Error("no stable id on the prepared feature");
+  return id;
+}
+
+describe("prepareDerivedVectorLayer", () => {
+  it("copies EVERY target area, not only the ones with a value (§6, §10.11)", async () => {
+    const parentId = zonesLayer();
+    const parent = geoLayer(parentId);
+    const plan = await prepareDerivedVectorLayer({
+      runId: "run_9",
+      parent,
+      name: "Zones · buildings",
+      columns: [{ name: "bld_buildings_n", type: "DOUBLE" as const }],
+      // Only ONE area was counted; the other still belongs in the copy.
+      rows: new Map([[stableIdOf(parent, 0), { bld_buildings_n: 2 }]]),
+    });
+    const id = plan.publish();
+    const features = preparedFeatures(geoLayer(id));
+    expect(features).toHaveLength(2);
+    expect(features[0]?.properties["bld_buildings_n"]).toBe(2);
+    expect(features[0]?.properties["name"]).toBe("North");
+    // §6.2's value rule: an area that was not evaluated gets no value, and a
+    // count that WAS evaluated and found nothing is 0 — which is the
+    // executor's business, not the copy's.
+    expect(Object.keys(features[1]?.properties ?? {})).not.toContain(
+      "bld_buildings_n",
+    );
+    expect(geoLayer(id).derivedFrom).toEqual({
+      layerId: parentId,
+      layerName: "Zones",
+      runId: "run_9",
+    });
+  });
+
+  it("leaves the PARENT's document untouched", async () => {
+    const parentId = zonesLayer();
+    const parent = geoLayer(parentId);
+    const before = JSON.stringify(parent.config);
+    const plan = await prepareDerivedVectorLayer({
+      runId: "run_9",
+      parent,
+      name: "Zones · buildings",
+      columns: [{ name: "bld_buildings_n", type: "DOUBLE" as const }],
+      rows: new Map([[stableIdOf(parent, 0), { bld_buildings_n: 2 }]]),
+    });
+    plan.publish();
+    const original = geoLayer(parentId);
+    expect(
+      Object.keys(preparedFeatures(original)[0]?.properties ?? {}),
+    ).not.toContain("bld_buildings_n");
+    // Byte-identical, config AND preparedData, and the record itself was never
+    // replaced — §6's "the run leaves the target untouched".
+    expect(JSON.stringify(original.config)).toBe(before);
+    expect(original.config).toBe(parent.config);
+    expect(original.derivedFrom).toBeNull();
+  });
+
+  it("gives the copy its OWN stable-id envelope and shows none of it", async () => {
+    // The document handed to `addGeoLayer` is the PREPARED one, which already
+    // carries the renderer's private key. Passed through as it stands, the
+    // store's own normalisation would stamp a SECOND envelope over it and
+    // record the first as the feature's "original value" — which
+    // `publicGeoProperties` then hands back as a visible attribute, so the
+    // copy's records grid, its Details, its export and its "Color by
+    // attribute" list would all offer `__roofy_stable_feature_id`.
+    const parentId = zonesLayer();
+    const parent = geoLayer(parentId);
+    const plan = await prepareDerivedVectorLayer({
+      runId: "run_9",
+      parent,
+      name: "Zones · buildings",
+      columns: [{ name: "bld_buildings_n", type: "DOUBLE" as const }],
+      rows: new Map([[stableIdOf(parent, 0), { bld_buildings_n: 2 }]]),
+    });
+    const records = geoRecords(geoLayer(plan.publish()).config.preparedData);
+    expect(records).toHaveLength(2);
+    expect(Object.keys(records[0] ?? {})).toEqual(["name", "bld_buildings_n"]);
+    expect(Object.keys(records[1] ?? {})).toEqual(["name"]);
+    expect(Object.keys(records[0] ?? {})).not.toContain(GEO_STABLE_FEATURE_KEY);
+  });
+
+  it("publishes nothing before publish(), and inserts under the parent", async () => {
+    const first = zonesLayer();
+    useGeoLayerStore.getState().addGeoLayer({
+      kind: "raster-xyz",
+      name: "Basemap",
+      config: { urlTemplate: "https://x/{z}/{x}/{y}.png" },
+    });
+    const parent = geoLayer(first);
+    const plan = await prepareDerivedVectorLayer({
+      runId: "run_9",
+      parent,
+      name: "Zones · buildings",
+      columns: [],
+      rows: new Map(),
+    });
+    expect(useGeoLayerStore.getState().layers).toHaveLength(2);
+    plan.publish();
+    expect(useGeoLayerStore.getState().layers.map((l) => l.name)).toEqual([
+      "Zones",
+      "Zones · buildings",
+      "Basemap",
+    ]);
+  });
+
+  it("activates the copy and copies the parent's style and opacity", async () => {
+    const parentId = zonesLayer();
+    useGeoLayerStore.getState().updateGeoLayer(parentId, {
+      opacity: 0.5,
+      style: { ...geoLayer(parentId).style, color: "#123456" },
+    });
+    const parent = geoLayer(parentId);
+    const plan = await prepareDerivedVectorLayer({
+      runId: "run_9",
+      parent,
+      name: "Zones · buildings",
+      columns: [],
+      rows: new Map(),
+    });
+    const id = plan.publish();
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(id);
+    expect(geoLayer(id).opacity).toBe(0.5);
+    expect(geoLayer(id).style.color).toBe("#123456");
+    // An independent COPY: a later restyle of the parent leaves it alone.
+    expect(geoLayer(id).style).not.toBe(parent.style);
+  });
+
+  it("carries the parent's computed columns over with their provenance", async () => {
+    const parentId = zonesLayer();
+    useComputedColumnStore.getState().setProvenance(parentId, "old_n", {
+      runId: "run_0",
+      toolName: "Aggregate buildings per area",
+      summary: "All 2 buildings",
+      at: Date.now(),
+      partial: null,
+      previous: null,
+    });
+    const plan = await prepareDerivedVectorLayer({
+      runId: "run_9",
+      parent: geoLayer(parentId),
+      name: "Zones · buildings",
+      columns: [],
+      rows: new Map(),
+    });
+    const id = plan.publish();
+    expect(
+      useComputedColumnStore.getState().byLayer[id]?.["old_n"]?.toolName,
+    ).toBe("Aggregate buildings per area");
+  });
+
+  it("re-checks the name at publication, like a city copy does", async () => {
+    const parentId = zonesLayer();
+    const plan = await prepareDerivedVectorLayer({
+      runId: "run_9",
+      parent: geoLayer(parentId),
+      name: "Zones",
+      columns: [],
+      rows: new Map(),
+    });
+    expect(geoLayer(plan.publish()).name).toBe("Zones (2)");
+  });
+
+  it("discard() is a no-op that publishes nothing", async () => {
+    const parentId = zonesLayer();
+    const plan = await prepareDerivedVectorLayer({
+      runId: "run_9",
+      parent: geoLayer(parentId),
+      name: "Zones · buildings",
+      columns: [],
+      rows: new Map(),
+    });
+    await plan.discard();
+    expect(useGeoLayerStore.getState().layers).toHaveLength(1);
+    // No table was ever cut for it, so nothing was dropped either.
+    expect(sql).toHaveLength(0);
+  });
+
+  it("refuses a parent that is not a GeoJSON layer", async () => {
+    // `ToolTarget`'s vector arm is already `GeoJsonLayer`, so this cannot be
+    // reached from a run — but the signature takes the whole union, and a
+    // raster parent would otherwise publish a layer with no document at all,
+    // which the layer list reads as "needs re-link".
+    const id = useGeoLayerStore.getState().addGeoLayer({
+      kind: "raster-xyz",
+      name: "Basemap",
+      config: { urlTemplate: "https://x/{z}/{x}/{y}.png" },
+    });
+    await expect(
+      prepareDerivedVectorLayer({
+        runId: "run_9",
+        parent: useGeoLayerStore.getState().layers.find((l) => l.id === id)!,
+        name: "Basemap · buildings",
+        columns: [],
+        rows: new Map(),
+      }),
+    ).rejects.toThrow();
   });
 });

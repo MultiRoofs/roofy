@@ -232,6 +232,7 @@ describe("vector legend categories", () => {
       name: "Parcels",
       visible: true,
       opacity: 1,
+      derivedFrom: null,
       kind: "geojson",
       config: { data: null },
       style: {

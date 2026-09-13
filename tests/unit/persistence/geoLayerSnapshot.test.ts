@@ -65,6 +65,7 @@ function capture(geoLayers?: ReadonlyArray<GeoLayerSnapshot>) {
 describe("geoLayerSnapshot", () => {
   it("drops the inline GeoJSON document but keeps every choice around it", () => {
     const layer: GeoLayer = {
+      derivedFrom: null,
       id: "g1",
       name: "parcels",
       kind: "geojson",
@@ -86,6 +87,7 @@ describe("geoLayerSnapshot", () => {
 
   it("writes the layer's own style, which is a user choice like any other", () => {
     const layer: GeoLayer = {
+      derivedFrom: null,
       id: "g1",
       name: "parcels",
       kind: "geojson",
@@ -100,6 +102,7 @@ describe("geoLayerSnapshot", () => {
 
   it("keeps a GeoJSON URL, which costs nothing and restores completely", () => {
     const layer: GeoLayer = {
+      derivedFrom: null,
       id: "g1",
       name: "roads",
       kind: "geojson",
@@ -116,6 +119,7 @@ describe("geoLayerSnapshot", () => {
 
   it("keeps a raster template with its tile bounds", () => {
     const layer: GeoLayer = {
+      derivedFrom: null,
       id: "r1",
       name: "osm",
       kind: "raster-xyz",
@@ -137,6 +141,7 @@ describe("geoLayerSnapshot", () => {
 describe("normalizeGeoLayers", () => {
   it("round-trips a URL-backed layer into an addGeoLayer input", () => {
     const layer: GeoLayer = {
+      derivedFrom: null,
       id: "r1",
       name: "osm",
       kind: "raster-xyz",
@@ -160,6 +165,7 @@ describe("normalizeGeoLayers", () => {
 
   it("carries a custom style all the way back out of the round trip", () => {
     const layer: GeoLayer = {
+      derivedFrom: null,
       id: "g1",
       name: "roads",
       kind: "geojson",
@@ -179,6 +185,7 @@ describe("normalizeGeoLayers", () => {
 
   it("round-trips a colorByAttribute without a schema bump", () => {
     const layer: GeoLayer = {
+      derivedFrom: null,
       id: "g1",
       name: "parcels",
       kind: "geojson",
@@ -260,6 +267,7 @@ describe("normalizeGeoLayers", () => {
 
   it("restores a file-loaded GeoJSON layer as an empty, re-linkable record", () => {
     const layer: GeoLayer = {
+      derivedFrom: null,
       id: "g1",
       name: "parcels",
       kind: "geojson",

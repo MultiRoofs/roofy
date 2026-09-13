@@ -274,6 +274,7 @@ describe("isGeoLayerUnavailable", () => {
     visible: true,
     opacity: 1,
     style: DEFAULT_GEO_LAYER_STYLE,
+    derivedFrom: null,
   } as const;
 
   it("is true only for a GeoJSON layer with neither inline data nor a URL", () => {
