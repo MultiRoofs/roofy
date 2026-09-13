@@ -106,17 +106,30 @@ export function groupContributors(
 }
 
 /**
- * Did this row yield a solid the measures can stand on?
+ * The two columns the D4 solid test reads. BOTH solids statements select them
+ * under these names (`solidSql.ts`'s `ROW_IDENTITY`), so the test below is one
+ * rule over one shape rather than one rule per tool's row type.
+ */
+export interface SolidClassification {
+  /** The CityJSON geometry type from the reader's properties struct. */
+  readonly geometry_type: string | null;
+  /** Did `ST_3DTryFromWKB` return a solid for this row's blob? */
+  readonly parsed: boolean;
+}
+
+/**
+ * Did this row yield a solid the tools can stand on?
  *
  * TWO questions, and both have to be yes. The CityJSON TYPE is §7.2's "not a
  * solid" (D4), and the PARSE is whether `three_d` could read the WKB — a row
  * the file calls a Solid but whose blob `ST_3DTryFromWKB` returned NULL for has
- * nothing to measure either, and every measure on it is NULL by construction.
- * §7.2 gives the two cases one cause between them, "not a solid", because there
- * is no third skip cause to spend and "the file said Solid and nothing solid
- * came out" is the same news to the user.
+ * nothing to measure or report on either, and every value for it is NULL by
+ * construction. §7.2 gives the two cases one cause between them, "not a solid",
+ * because there is no third skip cause to spend and "the file said Solid and
+ * nothing solid came out" is the same news to the user. §7.3 inherits both the
+ * rule and the cause, verbatim ("Outcomes per object follow §7.2").
  */
-export function isMeasurableSolid(row: SolidRow): boolean {
+export function isMeasurableSolid(row: SolidClassification): boolean {
   return row.parsed && SOLID_GEOMETRY_TYPES.has(row.geometry_type ?? "");
 }
 
