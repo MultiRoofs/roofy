@@ -135,6 +135,37 @@ function addCityLayer(
   return id;
 }
 
+/** A prepared GeoJSON polygon layer — §7.6's TARGET needs areas. */
+function addZones(name = "Zones"): string {
+  return useGeoLayerStore.getState().addGeoLayer({
+    kind: "geojson",
+    name,
+    config: {
+      data: {
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            id: `${name}-1`,
+            properties: { zone: "A" },
+            geometry: {
+              type: "Polygon",
+              coordinates: [
+                [
+                  [4, 52],
+                  [5, 52],
+                  [5, 53],
+                  [4, 52],
+                ],
+              ],
+            },
+          },
+        ],
+      },
+    },
+  });
+}
+
 const newLayerRadio = () =>
   screen.getByRole("radio", { name: "New layer" }) as HTMLInputElement;
 const thisLayerRadio = () =>
@@ -211,6 +242,22 @@ describe("OUTPUT destination", () => {
       fireEvent.click(newLayerRadio());
       const name = screen.getByLabelText("Name") as HTMLInputElement;
       expect(name.value).toBe("Delft · extent");
+    });
+  });
+
+  it("prefills a VECTOR target's own name, which `target` does not carry", () => {
+    // Residual C2. §7.6 reverses the two layers: the TARGET is the vector
+    // layer and the buildings come from a city SOURCE, and the form's `target`
+    // is deliberately null for it. A prefill read off `target.name` would be
+    // empty here; the one read off `targetName` is §6's "Zones · buildings".
+    withNewLayer("aggregate-per-area", () => {
+      addCityLayer("Delft");
+      addZones();
+      render(<ToolView toolId="aggregate-per-area" />);
+      fireEvent.click(newLayerRadio());
+      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+        "Zones · buildings",
+      );
     });
   });
 
