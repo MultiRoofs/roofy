@@ -2080,8 +2080,10 @@ export async function undoRun(id: string): Promise<void> {
         // values describe a table nobody can read, and publishing the model,
         // the provenance rollback and the "Undone" card would tell the user
         // their layer had been put back when the layer's table no longer
-        // exists. The death watcher's own card is the truth (§6.1's "Analytics
-        // engine stopped"), and the run keeps its `undoable: false` from it.
+        // exists. The card is left exactly as it is — the engine watcher does
+        // not touch a run that is already `done` — and the session's Undo is
+        // gone with the store's `engineStopped` flag, because every backup
+        // table died with the database.
         return null;
       }
     }
