@@ -195,10 +195,22 @@ export function useToolForm(toolId: ToolId) {
 
   const stored = drafts[toolId];
   const vectorTargeted = tool.target === "vector";
-  const preferred = vectorTargeted
-    ? eligibleVectorTargets.length > 0
-      ? eligibleVectorTargets
-      : vectorCandidates
+  // §7.6's TARGET must be AREAS, so a point layer is not something the form may
+  // OPEN on — its row stays in the select, disabled, for the explanation (§5),
+  // but the default falls through to a layer the tool can actually run on. The
+  // pools are tried in order and the first non-empty one wins, so a workspace
+  // with nothing but point layers still opens on one rather than on a blank
+  // select.
+  const usable = (list: ReadonlyArray<GeoJsonLayer>) =>
+    TARGET_NEEDS_AREAS.has(toolId) ? list.filter(hasAreas) : list;
+  const preferred: ReadonlyArray<{ readonly id: string }> = vectorTargeted
+    ? usable(eligibleVectorTargets).length > 0
+      ? usable(eligibleVectorTargets)
+      : eligibleVectorTargets.length > 0
+        ? eligibleVectorTargets
+        : usable(vectorCandidates).length > 0
+          ? usable(vectorCandidates)
+          : vectorCandidates
     : eligibleTargets.length > 0
       ? eligibleTargets
       : candidates;

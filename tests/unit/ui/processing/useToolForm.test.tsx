@@ -564,6 +564,24 @@ describe("the SOURCE select and the prefix it names (§7.5, §7.7)", () => {
     ).toBeInTheDocument();
   });
 
+  /**
+   * §7.6's TARGET must be AREAS, so the layer the form OPENS on has to be one —
+   * a disabled point layer chosen by default puts "The layer has no areas"
+   * under Run on a workspace that has a perfectly good polygon layer in it.
+   * The point row stays in the select for the explanation (§5).
+   */
+  it("opens Aggregate on a polygon layer, not on a point layer listed first", () => {
+    addCityLayer("Delft", true);
+    addGeoLayer("Points", "Point");
+    const zones = addGeoLayer("Zones", "Polygon");
+    render(<ToolView toolId="aggregate-per-area" />);
+    expect(screen.getByRole("combobox", { name: "Layer" })).toHaveValue(zones);
+    const option = screen.getByRole("option", { name: "Points" });
+    expect(option).toBeDisabled();
+    expect(option).toHaveAttribute("title", "Needs areas (polygons)");
+    expect(screen.queryByText("The layer has no areas")).toBeNull();
+  });
+
   it("drops the parameters when the SOURCE changes, so stale fields cannot freeze", () => {
     addCityLayer("Delft", true);
     addGeoLayer("Zones", "Polygon");
