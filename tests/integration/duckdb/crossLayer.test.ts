@@ -1618,6 +1618,51 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
     dropAggregateFixture();
   });
 
+  it("runs the DEFAULT row — a count alone — with no value relation at all", async () => {
+    // §7.6's "Default row: count", which is the statement most runs will send:
+    // no `v` CTE, and `p.* EXCLUDE ("g")` projecting the feature key alone. A
+    // string test cannot tell that from a binder error.
+    await aggregateFixture();
+    const rows = db.query(
+      buildAggregateSql({
+        table: "agg_rows",
+        source: "__src_agg",
+        proxy: "rectangle",
+        from: null,
+        geometryColumn: null,
+        ids: null,
+        predicate: "within",
+        rows: [{ op: "count", column: null, name: "bld_buildings_n" }],
+      }),
+    );
+    expect(rows).toEqual([
+      // `within` is boundary-inclusive covered-by, and both extents are well
+      // inside their zone.
+      {
+        sid: "id:string:z1",
+        bld_buildings_n: 2,
+        multi_n: 0,
+        buildings_total: 3,
+        no_proxy_n: 1,
+      },
+      {
+        sid: "id:string:z2",
+        bld_buildings_n: 1,
+        multi_n: 0,
+        buildings_total: 3,
+        no_proxy_n: 1,
+      },
+      {
+        sid: "id:string:z3",
+        bld_buildings_n: 0,
+        multi_n: 0,
+        buildings_total: 3,
+        no_proxy_n: 1,
+      },
+    ]);
+    dropAggregateFixture();
+  });
+
   it("counts a building on a shared boundary in BOTH areas, and says so once", async () => {
     // §7.6: "a building counts for every area its proxy satisfies the predicate
     // with (a building on a boundary counts in both areas); the card says so
