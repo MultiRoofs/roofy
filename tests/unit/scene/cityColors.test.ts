@@ -137,6 +137,22 @@ describe("the rule palette", () => {
     }
   });
 
+  it("never collides with Single or Unmatched, the two modes it shares a layer with", () => {
+    // Both are drawn on the SAME layer as a rule: `unmatchedColor` paints every
+    // surface no rule claimed, and Single is what the layer falls back to — so a
+    // rule wearing either one is a rule with nothing to show for itself.
+    for (const hex of RULE_PALETTE_HEX) {
+      expect([hex, lower(hex) === lower(UNMATCHED_COLOR_HEX)]).toEqual([
+        hex,
+        false,
+      ]);
+      expect([hex, lower(hex) === lower(SINGLE_COLOR_HEX)]).toEqual([
+        hex,
+        false,
+      ]);
+    }
+  });
+
   it("never collides with the categorical scale", () => {
     // Design decision (i): a rule wearing a CATEGORY's colour reads as a
     // category.

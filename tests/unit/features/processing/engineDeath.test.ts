@@ -267,6 +267,10 @@ describe("undoRun when the engine dies at the post-commit re-DESCRIBE", () => {
     expect(attributesOf("a")["extent_height_m"]).toBe(9);
     expect(computedColumnsOf("L1").has("extent_height_m")).toBe(true);
     expect(runById(id)?.note).not.toBe("Undone");
+    // …and the record is left exactly as the run finished it. The engine
+    // watcher fails runs that are still queued, running or cancelling; a `done`
+    // one it does not touch, so nothing rewrites this card's status either.
+    expect(runById(id)?.status).toBe("done");
     // The card's own truth is the death watcher's: §6.1 takes every Undo away
     // for the session, because every backup table died with the database.
     expect(useProcessingStore.getState().engineStopped).toBe(true);
