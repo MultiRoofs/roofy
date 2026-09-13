@@ -19,6 +19,7 @@ import {
   CATEGORY_PALETTE_HEX,
   CITY_COLORS,
   NEW_RULE_COLOR_HEX,
+  RULE_PALETTE_HEX,
   SINGLE_COLOR_HEX,
   UNMATCHED_COLOR_HEX,
 } from "../../../src/scene/cityColors";
@@ -104,5 +105,62 @@ describe("the colorBy constants", () => {
   it("offers exactly 8 categorical colours plus a reserved Other", () => {
     expect(CATEGORY_PALETTE_HEX).toHaveLength(8);
     expect(CATEGORY_PALETTE_HEX).not.toContain(CATEGORY_OTHER_HEX);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The rule palette (Task 26): the colours SUCCESSIVE rules take
+// ---------------------------------------------------------------------------
+
+describe("the rule palette", () => {
+  it("begins with the new-rule default, so a first rule is unchanged", () => {
+    expect(RULE_PALETTE_HEX[0]).toBe(NEW_RULE_COLOR_HEX);
+  });
+
+  it("never collides with the chrome — highlight, hover or a base surface", () => {
+    // The hard rule this file exists for: a rule colour equal to the highlight
+    // makes a selected ruled surface look unselected.
+    const reserved = new Set(CHROME.map(([, hex]) => lower(hex)));
+    for (const hex of RULE_PALETTE_HEX) {
+      expect([hex, reserved.has(lower(hex))]).toEqual([hex, false]);
+    }
+  });
+
+  it("never collides with the default geospatial colour", () => {
+    // A rule and an untouched vector layer on the same colour makes the rule
+    // look like it painted the overlay.
+    for (const hex of RULE_PALETTE_HEX) {
+      expect([
+        hex,
+        lower(hex) === lower(DEFAULT_GEO_LAYER_STYLE.color),
+      ]).toEqual([hex, false]);
+    }
+  });
+
+  it("never collides with the categorical scale", () => {
+    // Design decision (i): a rule wearing a CATEGORY's colour reads as a
+    // category.
+    const categories = new Set(CATEGORY_PALETTE_HEX.map(lower));
+    for (const hex of RULE_PALETTE_HEX) {
+      expect([hex, categories.has(lower(hex))]).toEqual([hex, false]);
+    }
+    expect(RULE_PALETTE_HEX).not.toContain(CATEGORY_OTHER_HEX);
+  });
+
+  it("is eight DISTINCT `#rrggbb` values", () => {
+    expect(RULE_PALETTE_HEX).toHaveLength(8);
+    expect(new Set(RULE_PALETTE_HEX.map(lower)).size).toBe(8);
+    for (const hex of RULE_PALETTE_HEX) {
+      expect([hex, /^#[0-9a-f]{6}$/i.test(hex)]).toEqual([hex, true]);
+    }
+  });
+
+  it("touches a preset at index 0 only — that IS the new-rule default", () => {
+    // Unlike the four `colorBy` constants above, these ARE rule colours, so
+    // coinciding with a preset is not a collision in the same sense. Pinned so
+    // a future palette edit is a deliberate one.
+    const presets = new Set(RULE_PRESETS.map((p) => lower(p.create().color)));
+    const hits = RULE_PALETTE_HEX.filter((hex) => presets.has(lower(hex)));
+    expect(hits).toEqual([NEW_RULE_COLOR_HEX]);
   });
 });

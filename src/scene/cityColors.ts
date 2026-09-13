@@ -81,6 +81,36 @@ export const SURFACE_COLOR_HEX = resolved.surfaceColors;
 export const NEW_RULE_COLOR_HEX = "#7cb518";
 
 /**
+ * The colours successive rules take (spec §6.2, "the colour is the next palette
+ * colour").
+ *
+ * It BEGINS with {@link NEW_RULE_COLOR_HEX}, so nothing about a user's first
+ * rule changes. The other seven are the `-700` rung of seven separated hues,
+ * each checked against three lists by `tests/unit/scene/cityColors.test.ts`:
+ * this file's own chrome (the two interaction accents and the nine surface
+ * colours), because a rule equal to the highlight makes a selected surface look
+ * unselected; the four `RULE_PRESETS` and the default geospatial colour,
+ * because a rotation that lands on a preset makes two different rules
+ * indistinguishable; and {@link CATEGORY_PALETTE_HEX}, because that is the
+ * vector layers' CATEGORICAL scale and a rule wearing a category's colour reads
+ * as a category.
+ *
+ * It is a RULE palette, so — unlike the four constants below — its members may
+ * and do coincide with a rule preset at index 0; what they may never coincide
+ * with is the chrome.
+ */
+export const RULE_PALETTE_HEX: readonly string[] = [
+  NEW_RULE_COLOR_HEX, // lime-700
+  "#2563eb", // blue-700
+  "#c2410c", // orange-700
+  "#7e22ce", // purple-700
+  "#0f766e", // teal-700
+  "#be185d", // pink-700
+  "#b45309", // amber-700
+  "#15803d", // green-700
+];
+
+/**
  * What a roof wears in "Color by rules" when NO rule matches it — the editable
  * trailing catch-all's default.
  *
