@@ -478,6 +478,74 @@ describe("the SOURCE select and the prefix it names (§7.5, §7.7)", () => {
     );
   });
 
+  /**
+   * §7.5: `centre within` "forces the centre proxy" — in the form AND in the
+   * bag `submitRun` freezes, so §6.4's log cannot name a footprint the
+   * predicate overrode and §6's footprint workload note goes with it.
+   */
+  it("freezes the centre proxy when 'centre within' is chosen (§7.5)", () => {
+    const id = addCityLayer("Delft", true);
+    addGeoLayer("Zones", "Polygon");
+    useLayerTableStore.setState((state) => {
+      const entry = state.tables[id];
+      if (entry?.state !== "ready") return state;
+      return {
+        tables: {
+          ...state.tables,
+          [id]: {
+            ...entry,
+            info: { ...entry.info, sourceBytes: 180_000_000 },
+          },
+        },
+      };
+    });
+    render(<ToolView toolId="join-by-location" />);
+    expect(
+      screen.getByRole("radio", { name: "Footprint (LoD 0)" }),
+    ).toBeChecked();
+    expect(screen.getByText(/Re-reads a/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Predicate"), {
+      target: { value: "centreWithin" },
+    });
+    expect(screen.getByRole("radio", { name: "Extent centre" })).toBeChecked();
+    expect(
+      screen.getByRole("radio", { name: "Footprint (LoD 0)" }),
+    ).toBeDisabled();
+    // No footprint, no re-read, no warning about one.
+    expect(screen.queryByText(/Re-reads a/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(submitRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: expect.objectContaining({
+          predicate: "centreWithin",
+          proxy: "centre",
+        }),
+      }),
+    );
+  });
+
+  it("freezes the centre proxy for Aggregate too (§7.6)", () => {
+    addCityLayer("Delft", true);
+    addGeoLayer("Zones", "Polygon");
+    render(<ToolView toolId="aggregate-per-area" />);
+    fireEvent.change(screen.getByLabelText("Predicate"), {
+      target: { value: "centreWithin" },
+    });
+    expect(screen.getByRole("radio", { name: "Extent centre" })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(submitRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolId: "aggregate-per-area",
+        params: expect.objectContaining({
+          predicate: "centreWithin",
+          proxy: "centre",
+        }),
+      }),
+    );
+  });
+
   it("says why a source row is unusable, in §7.5's own order", () => {
     // A layer whose document is still loading has no geometry to ask about, so
     // "Needs areas (polygons)" would be a sentence about a fact nobody knows.

@@ -160,6 +160,52 @@ describe("resolveCrossLayerParams", () => {
     ).toMatchObject({ fields: ["noise"] });
   });
 
+  /**
+   * §7.5: `centre within` "forces the centre proxy". It is a statement about
+   * the RUN, so it has to hold in the bag the form displays AND in the one
+   * `submitRun` freezes — otherwise §6.4's log names a footprint the predicate
+   * overrode, the footprint workload note stays on screen, and `largest
+   * overlap` looks available.
+   */
+  it("forces the centre proxy under 'centre within' (§7.5)", () => {
+    expect(
+      resolveCrossLayerParams(
+        "join-by-location",
+        { proxy: "footprint", predicate: "centreWithin" },
+        ctx,
+      ),
+    ).toMatchObject({ proxy: "centre", predicate: "centreWithin" });
+    expect(
+      resolveCrossLayerParams(
+        "aggregate-per-area",
+        { proxy: "rectangle", predicate: "centreWithin" },
+        ctx,
+      ),
+    ).toMatchObject({ proxy: "centre", predicate: "centreWithin" });
+    // And it survives the re-normalise, so the FROZEN request says centre too.
+    const resolved = resolveCrossLayerParams(
+      "join-by-location",
+      { proxy: "footprint", predicate: "centreWithin" },
+      ctx,
+    );
+    expect(
+      resolveCrossLayerParams("join-by-location", resolved, BAG_ONLY),
+    ).toEqual(resolved);
+  });
+
+  it("gives the chosen proxy back when the predicate stops forcing it", () => {
+    // The bag keeps what the user picked, so switching away from `centre
+    // within` restores the footprint rather than stranding the run on a centre
+    // nobody chose.
+    expect(
+      resolveCrossLayerParams(
+        "join-by-location",
+        { proxy: "footprint", predicate: "within" },
+        ctx,
+      ),
+    ).toMatchObject({ proxy: "footprint" });
+  });
+
   it("forces the match count on for 'count only' (§7.5)", () => {
     expect(
       resolveCrossLayerParams("join-by-location", { tie: "countOnly" }, ctx),
@@ -419,6 +465,19 @@ describe("the validation §6 puts inline and blocks Run with", () => {
     expect(join({ fields: ["Zone Name", "zone_name"] })).toBe(
       "'zone_name' resolves to the same column",
     );
+  });
+
+  it("refuses largest overlap under 'centre within' too (§6)", () => {
+    // The predicate forces the centre proxy, so the pair cannot combine even
+    // while the bag still carries the footprint the user picked earlier.
+    expect(
+      join({
+        tie: "largestOverlap",
+        proxy: "footprint",
+        predicate: "centreWithin",
+        fields: ["noise"],
+      }),
+    ).toBe("Largest overlap needs a footprint or rectangle");
   });
 
   it("refuses a distance limit that is not positive", () => {

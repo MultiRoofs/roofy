@@ -25,7 +25,10 @@
  * null because neither function reads it.
  */
 import { useId, useState } from "react";
-import type { ProxyOption } from "../../features/processing/buildingProxy";
+import type {
+  BuildingProxy,
+  ProxyOption,
+} from "../../features/processing/buildingProxy";
 import {
   aggregateParams,
   aggregateRowErrors,
@@ -39,6 +42,10 @@ import {
 } from "../../features/processing/crossLayerParams";
 import type { ToolId } from "../../features/processing/types";
 import type { ColumnType } from "../../insights/computedColumns";
+
+/** §7.5's own parenthetical for `centre within`, on the predicate option AND on
+ *  the proxy radios it overrides — one sentence, one literal. */
+const CENTRE_FORCED = "Forces the centre proxy";
 
 /** §7.5's three predicates, in §7.5's order and its own spelling, with its own
  *  parentheticals as each option's tooltip. */
@@ -57,11 +64,7 @@ const PREDICATES: ReadonlyArray<{
     label: "within",
     hint: "The whole proxy inside the area, boundary included",
   },
-  {
-    key: "centreWithin",
-    label: "centre within",
-    hint: "Forces the centre proxy",
-  },
+  { key: "centreWithin", label: "centre within", hint: CENTRE_FORCED },
 ];
 
 const TIES: ReadonlyArray<{ readonly key: JoinTie; readonly label: string }> = [
@@ -97,8 +100,20 @@ export function CrossLayerParams({
   readonly numericColumns: ReadonlyArray<string>;
 }) {
   const [search, setSearch] = useState("");
-  const proxy =
-    toolId === "distance-to-nearest"
+  // §7.5: `centre within` "forces the centre proxy". `resolveCrossLayerParams`
+  // has already written that into the bag the hook hands down, and the rule is
+  // restated here so the RADIO says so for any bag — a footprint left selected
+  // beside the predicate would be a promise the run does not keep. Distance has
+  // no predicate and is never forced.
+  const centreForced =
+    toolId === "join-by-location"
+      ? joinParams(params).predicate === "centreWithin"
+      : toolId === "aggregate-per-area"
+        ? aggregateParams(params).predicate === "centreWithin"
+        : false;
+  const proxy: BuildingProxy = centreForced
+    ? "centre"
+    : toolId === "distance-to-nearest"
       ? distanceParams(params).proxy
       : toolId === "aggregate-per-area"
         ? aggregateParams(params).proxy
@@ -131,18 +146,28 @@ export function CrossLayerParams({
           role="radiogroup"
           aria-label="Building geometry"
         >
-          {proxies.map((option) => (
-            <label key={option.key} title={option.note ?? undefined}>
-              <input
-                type="radio"
-                name="proxy"
-                disabled={!option.available}
-                checked={proxy === option.key}
-                onChange={() => onChange({ ...params, proxy: option.key })}
-              />
-              {option.label}
-            </label>
-          ))}
+          {proxies.map((option) => {
+            const forcedOff = centreForced && option.key !== "centre";
+            return (
+              <label
+                key={option.key}
+                title={
+                  // §7.5's own parenthetical for the predicate that overrode
+                  // the choice; otherwise the proxy's own note.
+                  forcedOff ? CENTRE_FORCED : (option.note ?? undefined)
+                }
+              >
+                <input
+                  type="radio"
+                  name="proxy"
+                  disabled={!option.available || forcedOff}
+                  checked={proxy === option.key}
+                  onChange={() => onChange({ ...params, proxy: option.key })}
+                />
+                {option.label}
+              </label>
+            );
+          })}
         </div>
       </div>
       {footprintNote !== null && (
@@ -154,6 +179,7 @@ export function CrossLayerParams({
           onChange={onChange}
           keys={sourcePropertyKeys}
           types={sourcePropertyTypes}
+          proxy={proxy}
           search={search}
           setSearch={setSearch}
         />
@@ -216,6 +242,7 @@ function JoinFields({
   onChange,
   keys,
   types,
+  proxy,
   search,
   setSearch,
 }: {
@@ -223,6 +250,9 @@ function JoinFields({
   readonly onChange: (next: Readonly<Record<string, unknown>>) => void;
   readonly keys: ReadonlyArray<string>;
   readonly types: ReadonlyMap<string, ColumnType>;
+  /** The EFFECTIVE proxy — `centre` when the predicate forced it — so the tie
+   *  select refuses `largest overlap` for the run that will actually happen. */
+  readonly proxy: BuildingProxy;
   readonly search: string;
   readonly setSearch: (next: string) => void;
 }) {
@@ -300,11 +330,9 @@ function JoinFields({
               value={option.key}
               // §6: "a proxy/predicate pair that cannot combine … disables the
               // option with that text".
-              disabled={
-                option.key === "largestOverlap" && current.proxy === "centre"
-              }
+              disabled={option.key === "largestOverlap" && proxy === "centre"}
               title={
-                option.key === "largestOverlap" && current.proxy === "centre"
+                option.key === "largestOverlap" && proxy === "centre"
                   ? NEEDS_AREA_PROXY
                   : undefined
               }

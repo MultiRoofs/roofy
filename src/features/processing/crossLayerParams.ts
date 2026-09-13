@@ -341,7 +341,7 @@ export function resolveCrossLayerParams(
   // not used, and a footprint join would silently become a centre join.
   const chosen = pick(raw["proxy"], PROXIES, "centre");
   const table = ctx.table;
-  const proxy =
+  const offered =
     table === null
       ? chosen
       : raw["proxy"] === undefined ||
@@ -350,6 +350,15 @@ export function resolveCrossLayerParams(
           )
         ? defaultProxy(table)
         : chosen;
+  // §7.5: `centre within` "forces the centre proxy". It is forced HERE, in the
+  // one bag the form renders and `submitRun` freezes, so §6.4's log cannot name
+  // a proxy the predicate overrode, the footprint workload note goes away, and
+  // `largest overlap` is refused by the rule below. The bag keeps the user's
+  // own `proxy` untouched, so switching the predicate back restores it.
+  const forcesCentre =
+    toolId !== "distance-to-nearest" &&
+    pick(raw["predicate"], PREDICATES, "intersects") === "centreWithin";
+  const proxy: BuildingProxy = forcesCentre ? "centre" : offered;
   const known = new Set(ctx.sourcePropertyKeys);
   // No source in this context (the registry's `BAG_ONLY`) means "no opinion",
   // never "no properties": the caller that HAS the source has already pruned.
@@ -528,8 +537,14 @@ export function crossLayerParamsError(
   const p = joinParams(raw);
   // §6: "a proxy/predicate pair that cannot combine … disables the option with
   // that text" — and the same sentence blocks Run if a stored draft carries the
-  // pair anyway.
-  if (p.tie === "largestOverlap" && p.proxy === "centre") {
+  // pair anyway. `centre within` FORCES the centre proxy (§7.5), so the pair is
+  // refused on the predicate as well as on the proxy: a raw bag can still carry
+  // the footprint the user picked before switching the predicate, and
+  // `resolveCrossLayerParams` is the only thing that has rewritten it.
+  if (
+    p.tie === "largestOverlap" &&
+    (p.proxy === "centre" || p.predicate === "centreWithin")
+  ) {
     return "Largest overlap needs a footprint or rectangle";
   }
   const columns = joinColumns("", p);

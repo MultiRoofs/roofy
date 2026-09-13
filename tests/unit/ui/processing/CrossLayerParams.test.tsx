@@ -140,6 +140,61 @@ describe("the building-geometry radio (§7.5)", () => {
     });
   });
 
+  /**
+   * §7.5: `centre within` "forces the centre proxy". The radio has to SAY so —
+   * the run is going to use the centre whatever the bag was opened on, and a
+   * footprint left selected beside it is a promise the run does not keep.
+   */
+  it("forces and shows the centre proxy under 'centre within' (§7.5)", () => {
+    renderSection("join-by-location", {
+      proxy: "footprint",
+      predicate: "centreWithin",
+      fields: ["zone"],
+    });
+    expect(screen.getByRole("radio", { name: "Extent centre" })).toBeChecked();
+    const footprint = screen.getByRole("radio", { name: "Footprint (LoD 0)" });
+    expect(footprint).toBeDisabled();
+    expect(footprint.closest("label")).toHaveAttribute(
+      "title",
+      "Forces the centre proxy",
+    );
+    expect(
+      screen.getByRole("radio", { name: "Extent rectangle" }),
+    ).toBeDisabled();
+    // …and the tie rule that needs an area proxy goes with it (§6).
+    const option = screen.getByRole("option", { name: /largest overlap/ });
+    expect(option).toBeDisabled();
+    expect(option).toHaveAttribute(
+      "title",
+      "Largest overlap needs a footprint or rectangle",
+    );
+  });
+
+  it("forces the centre proxy for Aggregate too (§7.6 shares §7.5's)", () => {
+    renderSection("aggregate-per-area", {
+      proxy: "rectangle",
+      predicate: "centreWithin",
+      rows: [{ op: "count", column: null }],
+    });
+    expect(screen.getByRole("radio", { name: "Extent centre" })).toBeChecked();
+    expect(
+      screen.getByRole("radio", { name: "Extent rectangle" }),
+    ).toBeDisabled();
+  });
+
+  it("leaves the proxies alone for Distance, which has no predicate", () => {
+    renderSection("distance-to-nearest", {
+      proxy: "footprint",
+      predicate: "centreWithin",
+    });
+    expect(
+      screen.getByRole("radio", { name: "Footprint (LoD 0)" }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole("radio", { name: "Extent rectangle" }),
+    ).toBeEnabled();
+  });
+
   it("renders only its own tool's controls", () => {
     renderSection("join-by-location", { fields: ["zone"] });
     expect(screen.queryByLabelText("Max search distance (m)")).toBeNull();
