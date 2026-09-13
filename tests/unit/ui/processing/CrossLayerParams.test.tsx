@@ -273,6 +273,44 @@ describe("Join attributes by location (§7.5)", () => {
     expect(screen.queryByLabelText("Search fields")).toBeNull();
   });
 
+  /**
+   * Minor review finding: §6 flags a copied-field collision "on the second
+   * field", so the sentence has to be attached to THAT checkbox — the same
+   * shape Aggregate's row errors already have.
+   */
+  it("flags a colliding field on the SECOND checkbox, and only it", () => {
+    renderSection(
+      "join-by-location",
+      { fields: ["Zone Name", "zone_name"] },
+      {
+        sourcePropertyKeys: ["Zone Name", "zone_name"],
+        sourcePropertyTypes: new Map(),
+      },
+    );
+    expect(
+      describedBy(screen.getByRole("checkbox", { name: /^Zone Name/ })),
+    ).toBeNull();
+    expect(
+      describedBy(screen.getByRole("checkbox", { name: /^zone_name/ })),
+    ).toBe("'zone_name' resolves to the same column");
+    // ONE sentence on screen, beside the field — not a second copy under the
+    // whole section.
+    expect(
+      screen.getAllByText("'zone_name' resolves to the same column"),
+    ).toHaveLength(1);
+  });
+
+  it("keeps a section-level sentence that belongs to no field", () => {
+    renderSection("join-by-location", {
+      proxy: "centre",
+      tie: "largestOverlap",
+      fields: ["zone", "noise"],
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Largest overlap needs a footprint or rectangle",
+    );
+  });
+
   it("says inline why a join that copies nothing cannot run", () => {
     renderSection("join-by-location", { fields: [], writeMatchCount: false });
     expect(screen.getByRole("alert")).toHaveTextContent(

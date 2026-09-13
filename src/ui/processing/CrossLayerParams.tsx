@@ -20,9 +20,9 @@
  * has to render beside the row it is about and be associated with that row's
  * controls. Splitting it — rows here, everything else in the view — would print
  * the same sentence twice, which reads as two problems. So the whole answer is
- * rendered here, from `crossLayerParamsError` and `aggregateRowErrors`: the
- * same two functions the hook blocks Run with, over a context whose `table` is
- * null because neither function reads it.
+ * rendered here, from `crossLayerParamsError`, `aggregateRowErrors` and
+ * `joinFieldErrors`: the same functions the hook blocks Run with, over a
+ * context whose `table` is null because none of them reads it.
  */
 import { useId, useState } from "react";
 import type {
@@ -34,6 +34,7 @@ import {
   aggregateRowErrors,
   crossLayerParamsError,
   distanceParams,
+  joinFieldErrors,
   joinParams,
   type AggregateOp,
   type CrossLayerContext,
@@ -100,6 +101,7 @@ export function CrossLayerParams({
   readonly numericColumns: ReadonlyArray<string>;
 }) {
   const [search, setSearch] = useState("");
+  const errorId = useId();
   // §7.5: `centre within` "forces the centre proxy". `resolveCrossLayerParams`
   // has already written that into the bag the hook hands down, and the rule is
   // restated here so the RADIO says so for any bag — a footprint left selected
@@ -129,13 +131,25 @@ export function CrossLayerParams({
     numericColumns,
   };
   const error = crossLayerParamsError(toolId, params, ctx);
-  // Aggregate prints its row errors beside the rows, so the section-level
-  // paragraph would be the same sentence a second time. The condition is
-  // STRUCTURAL — "are there rows to carry it?" — rather than a match on the
-  // sentence, which this component does not own.
-  const rowLevel =
-    toolId === "aggregate-per-area" && aggregateParams(params).rows.length > 0;
-  const sectionError = rowLevel ? null : error;
+  // §6's inline validation, keyed to the control it is about: one sentence per
+  // aggregate row (§7.6) and one per copied field (§7.5's "flagged on the
+  // second field"). Computed HERE so the section-level paragraph can tell
+  // whether the sentence Run is blocked with is already beside a control — a
+  // membership test over what was actually rendered, never a match on a
+  // literal this component does not own.
+  const rowErrors =
+    toolId === "aggregate-per-area"
+      ? aggregateRowErrors(aggregateParams(params))
+      : [];
+  const fieldErrors =
+    toolId === "join-by-location"
+      ? joinFieldErrors(joinParams(params))
+      : new Map<string, string>();
+  const inline = new Set<string>([
+    ...rowErrors.filter((e): e is string => e !== null),
+    ...fieldErrors.values(),
+  ]);
+  const sectionError = error !== null && inline.has(error) ? null : error;
 
   return (
     <>
@@ -180,6 +194,8 @@ export function CrossLayerParams({
           keys={sourcePropertyKeys}
           types={sourcePropertyTypes}
           proxy={proxy}
+          fieldErrors={fieldErrors}
+          errorId={errorId}
           search={search}
           setSearch={setSearch}
         />
@@ -197,6 +213,8 @@ export function CrossLayerParams({
           params={params}
           onChange={onChange}
           numericColumns={numericColumns}
+          rowErrors={rowErrors}
+          errorId={errorId}
         />
       )}
       {sectionError !== null && (
@@ -243,6 +261,8 @@ function JoinFields({
   keys,
   types,
   proxy,
+  fieldErrors,
+  errorId,
   search,
   setSearch,
 }: {
@@ -253,6 +273,8 @@ function JoinFields({
   /** The EFFECTIVE proxy — `centre` when the predicate forced it — so the tie
    *  select refuses `largest overlap` for the run that will actually happen. */
   readonly proxy: BuildingProxy;
+  readonly fieldErrors: ReadonlyMap<string, string>;
+  readonly errorId: string;
   readonly search: string;
   readonly setSearch: (next: string) => void;
 }) {
@@ -282,28 +304,50 @@ function JoinFields({
             />
           )}
           <div className="processing-checks">
-            {shown.map((key) => (
-              <label key={key}>
-                <input
-                  type="checkbox"
-                  checked={ticked.has(key)}
-                  onChange={() =>
-                    onChange({
-                      ...params,
-                      // Rebuilt from the SOURCE order, not click order: §6.2's
-                      // "first copied TEXT field" depends on it.
-                      fields: keys.filter((k) =>
-                        k === key ? !ticked.has(k) : ticked.has(k),
-                      ),
-                    })
-                  }
-                />
-                {key}
-                <span className="processing-note">
-                  {types.get(key) ?? "VARCHAR"}
-                </span>
-              </label>
-            ))}
+            {shown.map((key, index) => {
+              // §6 flags a collision "on the second field", so the sentence is
+              // attached to THAT checkbox rather than left under the section.
+              const fieldError = fieldErrors.get(key) ?? null;
+              const describedBy =
+                fieldError === null ? undefined : `${errorId}-f${index}`;
+              return (
+                // The sentence is a SIBLING of the label, not a child of it:
+                // inside, it would become part of the checkbox's accessible
+                // name and a screen reader would read the error as the field.
+                <div key={key} className="processing-check-cell">
+                  <label>
+                    <input
+                      type="checkbox"
+                      aria-describedby={describedBy}
+                      checked={ticked.has(key)}
+                      onChange={() =>
+                        onChange({
+                          ...params,
+                          // Rebuilt from the SOURCE order, not click order:
+                          // §6.2's "first copied TEXT field" depends on it.
+                          fields: keys.filter((k) =>
+                            k === key ? !ticked.has(k) : ticked.has(k),
+                          ),
+                        })
+                      }
+                    />
+                    {key}
+                    <span className="processing-note">
+                      {types.get(key) ?? "VARCHAR"}
+                    </span>
+                  </label>
+                  {fieldError !== null && (
+                    <p
+                      className="processing-error"
+                      id={describedBy}
+                      role="alert"
+                    >
+                      {fieldError}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -433,17 +477,20 @@ function AggregateFields({
   params,
   onChange,
   numericColumns,
+  rowErrors,
+  errorId,
 }: {
   readonly params: Readonly<Record<string, unknown>>;
   readonly onChange: (next: Readonly<Record<string, unknown>>) => void;
   readonly numericColumns: ReadonlyArray<string>;
+  /** Residual B11: one sentence per row, from the same function
+   *  `crossLayerParamsError` is built out of, so the message Run is blocked
+   *  with is literally the one beside the row. Computed by the parent, which
+   *  also needs it to suppress the section-level copy. */
+  readonly rowErrors: ReadonlyArray<string | null>;
+  readonly errorId: string;
 }) {
   const current = aggregateParams(params);
-  // Residual B11: one sentence per row, from the same function
-  // `crossLayerParamsError` is built out of, so the message Run is blocked with
-  // is literally the one beside the row.
-  const rowErrors = aggregateRowErrors(current);
-  const errorId = useId();
   const replace = (
     index: number,
     next: { readonly op: AggregateOp; readonly column: string | null },

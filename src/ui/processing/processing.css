@@ -330,6 +330,11 @@
 .processing-field > div > .processing-checks:last-child {
   margin-bottom: 0;
 }
+/* One cell of §7.5's field checklist: the label, and under it the collision
+   sentence §6 flags on the second colliding field. */
+.processing-check-cell .processing-error {
+  margin: 2px 0 0 20px;
+}
 /* A checkbox that is a row of its own rather than a cell of the two-column
    grid: §7.5's match count and §7.7's nearest-feature id. */
 .processing-check {

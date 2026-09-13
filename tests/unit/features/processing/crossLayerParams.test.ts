@@ -14,6 +14,7 @@ import {
   distanceColumns,
   distanceParams,
   joinColumns,
+  joinFieldErrors,
   joinParams,
   numericColumnsOf,
   resolveCrossLayerParams,
@@ -608,6 +609,35 @@ describe("aggregateRowErrors (§6, per row)", () => {
         }),
       ),
     ).toEqual([null, "'buildings_n' resolves to the same column"]);
+  });
+});
+
+/**
+ * §6 flags a copied-field collision "on the second field", so the sentence has
+ * to be attributable to ONE field — the same rule `aggregateRowErrors` states
+ * for §7.6's rows.
+ */
+describe("joinFieldErrors (§6, per field)", () => {
+  it("is empty when every field resolves to its own column", () => {
+    expect(
+      joinFieldErrors(joinParams({ fields: ["Zone Name", "noise"] })),
+    ).toEqual(new Map());
+  });
+
+  it("names the SECOND of two colliding fields, and only it", () => {
+    expect(
+      joinFieldErrors(joinParams({ fields: ["Zone Name", "zone_name"] })),
+    ).toEqual(
+      new Map([["zone_name", "'zone_name' resolves to the same column"]]),
+    );
+  });
+
+  it("says nothing under 'count only', which copies no field at all", () => {
+    expect(
+      joinFieldErrors(
+        joinParams({ fields: ["Zone Name", "zone_name"], tie: "countOnly" }),
+      ),
+    ).toEqual(new Map());
   });
 });
 

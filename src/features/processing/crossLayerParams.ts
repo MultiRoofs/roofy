@@ -486,6 +486,35 @@ export function aggregateRowErrors(
 }
 
 /**
+ * §6's inline validation for §7.5's copied-field checklist, ONE ANSWER PER
+ * FIELD — keyed by the RAW property name, so the checkbox that carries the
+ * sentence is the one the collision is about.
+ *
+ * §6 flags a collision "on the second field", which is the same rule
+ * `aggregateRowErrors` states for §7.6's rows, and it is built the same way:
+ * `crossLayerParamsError` reads this, so the sentence Run is blocked with is
+ * literally the one beside the field.
+ *
+ * EMPTY under `count only`, which copies no field at all — two fields sharing a
+ * column name is not a problem for a run that writes neither.
+ */
+export function joinFieldErrors(
+  params: JoinParams,
+): ReadonlyMap<string, string> {
+  const errors = new Map<string, string>();
+  if (params.tie === "countOnly") return errors;
+  const seen = new Set<string>();
+  for (const field of params.fields) {
+    const name = slugifyField(field);
+    if (seen.has(name)) {
+      errors.set(field, `'${name}' resolves to the same column`);
+    }
+    seen.add(name);
+  }
+  return errors;
+}
+
+/**
  * §6's "Validation is inline and blocks Run", for the three cross-layer tools.
  *
  * Everything decidable from the BAG plus the SOURCE. The registry's
@@ -549,6 +578,11 @@ export function crossLayerParamsError(
   }
   const columns = joinColumns("", p);
   if (columns.length === 0) return "Pick at least one measure";
+  // The FIELD-level answer first, so the sentence Run repeats is the one the
+  // offending checkbox shows; the column-level sweep after it catches the one
+  // collision no field can own — a field slugging to `matches_n`.
+  const fieldError = [...joinFieldErrors(p).values()][0];
+  if (fieldError !== undefined) return fieldError;
   const duplicate = firstDuplicate(columns.map((c) => c.name));
   return duplicate === null
     ? null
