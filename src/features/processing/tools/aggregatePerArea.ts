@@ -350,7 +350,13 @@ export const aggregatePerArea: ToolExecutor = async (run, ctx) => {
     for (const row of out.rows) {
       const values: Record<string, unknown> = {};
       for (const column of columns) {
-        values[column.name] = row[column.name] ?? null;
+        // `num`, not the raw value: every column here is declared DOUBLE, and
+        // `COUNT(m."f")` is a BIGINT. `insights/duckdb`'s `toRows` narrows one
+        // at the seam, but the VECTOR path has no values file and no replacer
+        // behind it — §7.6's publication copies what it is handed straight onto
+        // the feature properties, where a `2n` would break a GeoJSON export.
+        // So the promise the column declared is kept here rather than borrowed.
+        values[column.name] = num(row[column.name]);
       }
       rows.set(String(row["sid"]), values);
     }

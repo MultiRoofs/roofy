@@ -220,7 +220,11 @@ function run(
 function area(
   sid: string,
   values: Record<string, unknown>,
-  card: { multi?: number; total?: number; noProxy?: number } = {},
+  card: {
+    multi?: number | bigint;
+    total?: number | bigint;
+    noProxy?: number | bigint;
+  } = {},
 ): Record<string, unknown> {
   return {
     sid,
@@ -464,6 +468,45 @@ describe("aggregatePerArea", () => {
       { name: "bld_buildings_n", type: "DOUBLE" },
       { name: "bld_sum_roof_area_m2", type: "DOUBLE" },
     ]);
+  });
+
+  it("publishes a COUNT as a plain number, whatever the engine handed back", async () => {
+    // `COUNT(m."f")` is a BIGINT. `insights/duckdb`'s `toRows` narrows one to a
+    // Number at the seam (`duckdb.ts:656-667`, "`JSON.stringify` throws on
+    // it"), but the vector path has no values file and no replacer behind it:
+    // §7.6's publication copies what it is given straight onto the feature
+    // properties, where a `2n` would break a GeoJSON export and read as a
+    // foreign type in the records panel. So the executor does not depend on the
+    // seam's narrowing — every column it declares is a DOUBLE and it answers
+    // with one.
+    const { ctx } = context({
+      rows: [
+        area(
+          "id:string:z1",
+          { bld_buildings_n: 2n, bld_sum_roof_area_m2: 90 },
+          { total: 2n, multi: 1n, noProxy: 1n },
+        ),
+        area(
+          "id:string:z2",
+          { bld_buildings_n: 0n, bld_sum_roof_area_m2: null },
+          { total: 2n, multi: 1n, noProxy: 1n },
+        ),
+      ],
+    });
+    const out = await aggregatePerArea(run(params), ctx);
+    expect(out.rows.get("id:string:z1")).toEqual({
+      bld_buildings_n: 2,
+      bld_sum_roof_area_m2: 90,
+    });
+    expect(typeof out.rows.get("id:string:z2")?.["bld_buildings_n"]).toBe(
+      "number",
+    );
+    // The card's own three scalars go through the same door already.
+    expect(out.line).toBe("2 areas aggregated over 2 buildings");
+    expect(out.caveats).toEqual([
+      { cause: "building counted in more than one area", count: 1 },
+    ]);
+    expect(out.skipped).toEqual([{ cause: "no geometry", count: 1 }]);
   });
 
   it("is §7.6's card line, with the overlap count as a caveat", async () => {

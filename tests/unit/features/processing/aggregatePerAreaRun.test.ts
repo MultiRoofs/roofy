@@ -328,7 +328,11 @@ function submitAggregate(zones: string): string {
 function area(
   sid: string,
   values: Record<string, unknown>,
-  card: { multi?: number; total?: number; noProxy?: number } = {},
+  card: {
+    multi?: number | bigint;
+    total?: number | bigint;
+    noProxy?: number | bigint;
+  } = {},
 ): Record<string, unknown> {
   return {
     sid,
@@ -381,16 +385,19 @@ beforeEach(() => {
   engineState = "ready";
   holdPrefix = null;
   sourceIds = ["B1", "B1P", "B2"];
+  // The COUNTs as BIGINTs, which is what `COUNT(m."f")` is: the publication
+  // must put plain numbers on the feature properties whatever the engine hands
+  // back, because a `2n` there would break a GeoJSON export of the layer.
   areaRows = [
     area(
       "id:string:z1",
-      { bld_buildings_n: 2, bld_sum_roof_area_m2: 90 },
-      { total: 2 },
+      { bld_buildings_n: 2n, bld_sum_roof_area_m2: 90 },
+      { total: 2n },
     ),
     area(
       "id:string:z2",
-      { bld_buildings_n: 0, bld_sum_roof_area_m2: null },
-      { total: 2 },
+      { bld_buildings_n: 0n, bld_sum_roof_area_m2: null },
+      { total: 2n },
     ),
   ];
   resetLayerTablesForTest();
@@ -425,6 +432,7 @@ describe("a real Aggregate run", () => {
       bld_buildings_n: 2,
       bld_sum_roof_area_m2: 90,
     });
+    expect(typeof zoneRecords(zones)[0]?.["bld_buildings_n"]).toBe("number");
     expect(zoneRecords(zones)[1]).toMatchObject({
       bld_buildings_n: 0,
       bld_sum_roof_area_m2: null,
