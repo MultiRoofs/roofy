@@ -114,6 +114,12 @@ function RunRow({ run }: { readonly run: RunRecord }) {
               lod: run.lod,
               prefix: run.prefix,
               params: run.params,
+              // §6's OUTPUT destination is not on the RECORD yet (a later task
+              // puts it there), so a reopened run offers the destination every
+              // run of this milestone used: This layer, under the name the
+              // form would prefill.
+              destination: "layer",
+              newLayerName: null,
             });
             // §5: the form opens "so parameters can be changed" — clear the
             // card that would otherwise lock it (§6.2) or leave it with no Run

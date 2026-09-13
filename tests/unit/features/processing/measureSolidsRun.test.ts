@@ -271,6 +271,8 @@ function solidRequest(overrides: Record<string, unknown> = {}) {
     lod: "2.2",
     params: { measures: ["volume", "envelope"] },
     prefix: "solid_",
+    destination: "layer" as const,
+    newLayerName: null,
     columns: [
       { name: "solid_volume_m3", type: "DOUBLE" as const },
       { name: "solid_envelope_m2", type: "DOUBLE" as const },

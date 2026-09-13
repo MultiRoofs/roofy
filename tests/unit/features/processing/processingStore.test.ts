@@ -57,6 +57,8 @@ describe("processingStore", () => {
       lod: null,
       prefix: "h_",
       params: {},
+      destination: "layer",
+      newLayerName: null,
     };
     s.setDraft("height-from-extent", draft);
     s.back();
@@ -190,6 +192,8 @@ describe("processingStore", () => {
       lod: null,
       prefix: "h_",
       params: {},
+      destination: "layer",
+      newLayerName: null,
     });
     expect(useProcessingStore.getState().dismissedRunIds).toEqual(["r1"]);
   });
@@ -204,6 +208,8 @@ describe("processingStore", () => {
       lod: null,
       prefix: "h_",
       params: {},
+      destination: "layer",
+      newLayerName: null,
     });
     expect(useProcessingStore.getState().dismissedRunIds).toEqual([]);
   });

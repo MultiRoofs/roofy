@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { RunRecord, Scope, ToolId } from "./types";
+import type { RunRecord, Scope, ToolDestination, ToolId } from "./types";
 
 export type ProcessingView =
   | { readonly kind: "catalogue" }
@@ -19,6 +19,17 @@ export interface ToolDraft {
   readonly lod: string | null;
   readonly prefix: string;
   readonly params: Readonly<Record<string, unknown>>;
+  /** §6's "Write to" radios. */
+  readonly destination: ToolDestination;
+  /**
+   * What the user typed in §6's Name field, or null for "whatever the tool
+   * would prefill".
+   *
+   * Null rather than the prefilled string, so a draft kept while the user
+   * changes the TARGET follows the new target's name instead of freezing the
+   * old one's — the same reason `lod` is dropped on a retarget.
+   */
+  readonly newLayerName: string | null;
 }
 
 const MAX_RUNS = 20;

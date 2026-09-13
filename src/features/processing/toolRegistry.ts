@@ -55,6 +55,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     sourceKind: null,
     needsLod: true,
     defaultPrefix: "roof_",
+    destinations: ["layer"],
     outputColumns: (prefix, params) =>
       roofColumnNames(prefix, roofParams(params)),
     validateParams: (params) =>
@@ -83,6 +84,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     sourceKind: null,
     needsLod: true,
     defaultPrefix: "solid_",
+    destinations: ["layer"],
     outputColumns: (prefix, params) =>
       solidColumns(prefix, solidParams(params)),
     validateParams: (params) =>
@@ -111,6 +113,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     sourceKind: null,
     needsLod: true,
     defaultPrefix: "solid_",
+    destinations: ["layer"],
     // No `validateParams` and no `normaliseParams`: §7.3 has no parameters, so
     // there is nothing to refuse and nothing to fill in.
     outputColumns: (prefix) => validationColumns(prefix),
@@ -139,6 +142,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     sourceKind: null,
     needsLod: false,
     defaultPrefix: "extent_",
+    destinations: ["layer"],
     outputColumns: (p) => [
       { name: `${p}height_m`, type: "DOUBLE" },
       { name: `${p}zmin_m`, type: "DOUBLE" },
@@ -165,6 +169,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     sourceKind: "vector",
     needsLod: false,
     defaultPrefix: "",
+    destinations: ["layer"],
     outputColumns: (prefix, params) => joinColumns(prefix, joinParams(params)),
     validateParams: (params) =>
       crossLayerParamsError("join-by-location", params, BAG_ONLY),
@@ -204,6 +209,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     sourceKind: "city",
     needsLod: false,
     defaultPrefix: "bld_",
+    destinations: ["layer"],
     outputColumns: (prefix, params) =>
       aggregateColumns(prefix, aggregateParams(params)),
     validateParams: (params) =>
@@ -233,6 +239,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     sourceKind: "vector",
     needsLod: false,
     defaultPrefix: "",
+    destinations: ["layer"],
     outputColumns: (prefix, params) =>
       distanceColumns(prefix, distanceParams(params)),
     validateParams: (params) =>

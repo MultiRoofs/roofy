@@ -268,6 +268,8 @@ function submitJoin(sourceLayerId: string): string {
     lod: null,
     params: {},
     prefix: "zones_",
+    destination: "layer" as const,
+    newLayerName: null,
     columns: [{ name: "zones_n", type: "DOUBLE" }],
   });
 }

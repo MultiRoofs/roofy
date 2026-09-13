@@ -270,6 +270,8 @@ function submitDistance(sourceLayerId: string): string {
     lod: null,
     params: PARAMS,
     prefix: "roads_",
+    destination: "layer" as const,
+    newLayerName: null,
     // What the FORM promised, from the registry's own answer.
     columns: [...distanceColumns("roads_", distanceParams(PARAMS))],
   });

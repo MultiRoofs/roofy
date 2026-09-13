@@ -448,6 +448,8 @@ function request(overrides: Record<string, unknown> = {}) {
     lod: null,
     params: {},
     prefix: "extent_",
+    destination: "layer" as const,
+    newLayerName: null,
     columns: [{ name: "extent_height_m", type: "DOUBLE" as const }],
     ...overrides,
   };

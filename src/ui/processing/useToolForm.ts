@@ -36,6 +36,11 @@ import {
   type ToolDraft,
 } from "../../features/processing/processingStore";
 import { toolById } from "../../features/processing/toolRegistry";
+import {
+  derivedLayerName,
+  nameTaken,
+  STREAMING_NO_NEW_LAYER,
+} from "../../features/processing/deriveLayer";
 import { toolEligibility } from "../../features/processing/eligibility";
 import { proxyOptions } from "../../features/processing/buildingProxy";
 import {
@@ -69,6 +74,12 @@ import { layerQuery, useQueryStore } from "../../features/query/queryStore";
  *  asked for, and the collision check below is what refuses it when they are
  *  already the source's. */
 const PREFIX_RE = /^(?:[a-z][a-z0-9_]*)?$/i;
+
+/** §6: "an empty or duplicate name is flagged inline at Run". The spec gives
+ *  no sentence for either; both are **[adapted copy A13, A14]**, written to
+ *  §6's own terse pattern and approved at the plan gate. */
+const NAME_EMPTY = "Name the new layer";
+const NAME_TAKEN = "A layer is already called that";
 
 /**
  * Spec §6: "a workload note when the target's source is large".
@@ -238,6 +249,8 @@ export function useToolForm(toolId: ToolId) {
           lod: null,
           prefix: tool.defaultPrefix,
           params: {},
+          destination: "layer",
+          newLayerName: null,
         }
       : storedTargetExists
         ? stored
@@ -506,6 +519,43 @@ export function useToolForm(toolId: ToolId) {
   const paramsError = crossLayer
     ? crossLayerParamsError(toolId, params, crossCtx)
     : (tool.validateParams?.(draft.params) ?? null);
+  // §6's prefill, "<target> · <tool noun>". It reads `targetName`, not
+  // `target.name`: a VECTOR-target tool has `target === null` by construction
+  // (§7.6 writes to the geo layer), and Aggregate must still prefill
+  // "Zones · buildings". Two of the seven names contain the SOURCE layer's
+  // name; `sourceName` above is already the chosen row's, from whichever store
+  // holds it.
+  const prefilledName =
+    targetName === null ? "" : derivedLayerName(targetName, toolId, sourceName);
+  const newLayerName = draft.newLayerName ?? prefilledName;
+  // Only for the destination it is about: a name left invalid under "This
+  // layer" must not disable Run for a run that creates no layer at all.
+  const nameError =
+    draft.destination !== "new"
+      ? null
+      : newLayerName.trim() === ""
+        ? NAME_EMPTY
+        : nameTaken(newLayerName, layers, geoLayers)
+          ? NAME_TAKEN
+          : null;
+  // §6's A2 case, as a REFUSAL and not only a disabled radio: the draft keeps
+  // `destination: "new"` across a retarget, so a form that only greyed the
+  // control would still offer Run for a destination it has just declared
+  // impossible. Same constant as the radio's title and the head's pre-flight.
+  // Only a CITY target can be streaming, and `target` is exactly that layer.
+  const newLayerBlocked =
+    tool.destinations.includes("new") && target?.isStreaming === true;
+  const destinationReason =
+    draft.destination === "new" && newLayerBlocked
+      ? STREAMING_NO_NEW_LAYER
+      : null;
+  // §6: the replace warning is SCOPED TO THE COPY for a New-layer run — "2
+  // inherited computed columns will be replaced in the new layer". The
+  // non-computed collisions are already the prefix error (`sourceCollisions`),
+  // so what is left of `existing` is exactly the inherited computed columns.
+  const inherited = existing.filter((c) =>
+    computedLower.has(c.name.toLowerCase()),
+  );
   // §6: "Extension note when the tool's extension is not yet loaded."
   const ext = tool.extension;
   const extensionNote =
@@ -545,7 +595,10 @@ export function useToolForm(toolId: ToolId) {
           : null;
   // Precedence, top to bottom: what the TOOL cannot do here (eligibility), what
   // the TARGET and the SOURCE cannot offer, then the things the user can fix in
-  // the form — the prefix, the parameters, the scope.
+  // the form — the prefix, the parameters, OUTPUT's destination and name, the
+  // scope. `destinationReason` comes before `nameError`: when the destination
+  // itself is impossible, what the user typed in Name is not the thing to
+  // complain about.
   const runReason = !eligibility.ok
     ? eligibility.reason
     : (lods.emptyReason ??
@@ -553,6 +606,8 @@ export function useToolForm(toolId: ToolId) {
       sourceReason ??
       prefixError ??
       paramsError ??
+      destinationReason ??
+      nameError ??
       scopeReason);
   const latestRun =
     runs.find(
@@ -594,6 +649,14 @@ export function useToolForm(toolId: ToolId) {
     noFilter,
     columns,
     existing,
+    inherited,
+    newLayerName,
+    nameError,
+    // §6's A2 case: the tool offers the destination, this target cannot take
+    // it (Design decision (f) — a streaming parent has no geometry to copy).
+    // Computed above, because `runReason` needs it too.
+    newLayerBlocked,
+    destinationReason,
     prefixError,
     paramsError,
     extensionNote,

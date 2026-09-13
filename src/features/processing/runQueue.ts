@@ -73,6 +73,7 @@ import {
 import { ensureModelCrsLoadable } from "../layers/ensureCrs";
 import { epsgForLayer } from "../../scene/cursorCrsReadout";
 import { SOURCE_NEEDS_AREAS } from "./crossLayerParams";
+import { STREAMING_NO_NEW_LAYER } from "./deriveLayer";
 import { reprojectGeoLayer, type VectorPreflight } from "./vectorSource";
 import { createVectorTable, type VectorTableHandle } from "./vectorTable";
 import { runById, useProcessingStore } from "./processingStore";
@@ -87,6 +88,7 @@ import type {
   RunSummary,
   Scope,
   SkipCount,
+  ToolDestination,
   ToolId,
 } from "./types";
 
@@ -101,6 +103,10 @@ export interface RunRequest {
   readonly params: Readonly<Record<string, unknown>>;
   readonly prefix: string;
   readonly columns: ReadonlyArray<OutputColumn>;
+  /** §6's "Write to", frozen at Run and re-validated at the head. */
+  readonly destination: ToolDestination;
+  /** §6's Name field, frozen; null for `destination === "layer"`. */
+  readonly newLayerName: string | null;
 }
 
 /** A {@link RunRequest} plus everything `submitRun` froze for it. */
@@ -815,6 +821,18 @@ async function execute(
     patch(id, { startedAt: Date.now() });
 
     const tool = toolById(request.toolId);
+    // A destination the tool does not offer has not shipped yet, which is the
+    // same fact an unimplemented tool reports and so reads with the same
+    // sentence. It is checked before anything is resolved, because it depends
+    // on nothing but the request.
+    if (request.destination === "new" && !tool.destinations.includes("new")) {
+      patch(id, {
+        status: "failed",
+        error: "Not available yet",
+        elapsedMs: elapsed(),
+      });
+      return;
+    }
     // §5's own reason, at the head: a vector-target tool with no source has no
     // compute ground at all, and resolving a city table for a vector layer id
     // would report "Layer removed" about a layer that is right there.
@@ -894,6 +912,23 @@ async function execute(
         layer: geo,
         records: geoRecords(geo.config.preparedData),
       };
+    }
+    // §6's A2 refusal, the head's copy of it. The form disables the radio, but
+    // the DRAFT keeps `destination: "new"` across a retarget onto a streaming
+    // layer, and `retryRun` replays a request frozen before one. Only a CITY
+    // destination can be streaming: a vector copy is a GeoJSON document, and
+    // `target.kind === "vector"` means the parent is the vector layer.
+    if (
+      request.destination === "new" &&
+      target.kind === "city" &&
+      target.layer.isStreaming
+    ) {
+      patch(id, {
+        status: "failed",
+        error: STREAMING_NO_NEW_LAYER,
+        elapsedMs: elapsed(),
+      });
+      return;
     }
     // A CITY source IS the compute layer — `submitRun` made it so — and a
     // VECTOR source is built in the "source" phase below.

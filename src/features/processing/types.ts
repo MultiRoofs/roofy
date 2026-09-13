@@ -22,6 +22,12 @@ export type ToolId =
 export type ToolExtension = "spatial" | "three_d";
 
 /**
+ * Spec §6's OUTPUT destination: "This layer" adds columns to the target,
+ * "New layer" creates a derived layer and leaves the target untouched.
+ */
+export type ToolDestination = "layer" | "new";
+
+/**
  * Where §6.2's prefilled rule value comes from: "median for a numeric column,
  * the most frequent value for a text column, `false` for a validity flag".
  */
@@ -170,6 +176,17 @@ export interface ToolDefinition {
    * guessing `columns[0] >` median on its behalf.
    */
   readonly styleByResult: StyleByResult | null;
+  /**
+   * Which of §6's two "Write to" destinations this tool offers, in display
+   * order. Always contains `"layer"`.
+   *
+   * The second radio is RENDERED whatever this says — §6 draws two, and a
+   * hidden destination is one the user has to assume — and disabled when
+   * `"new"` is absent. It is the same staging `implemented` gives an executor:
+   * the form can land before the machinery, without a live control in front of
+   * nothing.
+   */
+  readonly destinations: ReadonlyArray<ToolDestination>;
   /** False until a later milestone ships the executor. */
   readonly implemented: boolean;
 }

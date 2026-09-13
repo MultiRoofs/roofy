@@ -319,6 +319,8 @@ function submitAggregate(zones: string): string {
     lod: null,
     params: PARAMS,
     prefix: "bld_",
+    destination: "layer" as const,
+    newLayerName: null,
     // What the FORM promised, from the registry's own answer.
     columns: [...aggregateColumns("bld_", aggregateParams(PARAMS))],
   });

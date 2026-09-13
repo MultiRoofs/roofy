@@ -378,18 +378,21 @@ describe("ToolView", () => {
     );
   });
 
-  it("opens OUTPUT with Write to, on the target, with no other destination", () => {
-    // §6: OUTPUT "starts with the destination, Write to". New layer is a later
-    // milestone, so the one radio is checked and disabled rather than absent —
-    // the user can see where the columns are going.
+  it("opens OUTPUT with Write to on the target, New layer offered but staged off", () => {
+    // §6: OUTPUT "starts with the destination, Write to". BOTH radios are
+    // drawn; `New layer` is disabled until a tool's `destinations` include it
+    // (`outputDestination.test.tsx` owns that gate), so the user can see where
+    // the columns are going and what the other destination would be.
     addCityLayer();
     render(<ToolView toolId="height-from-extent" />);
     const writeTo = screen.getByRole("radio", {
       name: "This layer (Delft)",
     });
     expect(writeTo).toBeChecked();
-    expect(writeTo).toBeDisabled();
-    expect(screen.queryByRole("radio", { name: /New layer/ })).toBeNull();
+    expect(writeTo).toBeEnabled();
+    const newLayer = screen.getByRole("radio", { name: "New layer" });
+    expect(newLayer).not.toBeChecked();
+    expect(newLayer).toBeDisabled();
   });
 
   it("reads a count that has not arrived as pending, not as zero", () => {
@@ -439,6 +442,8 @@ describe("ToolView", () => {
         lod: null,
         prefix: "extent_",
         params: {},
+        destination: "layer",
+        newLayerName: null,
       }),
     );
     expect(
@@ -1030,6 +1035,8 @@ describe("ToolView", () => {
         lod: null,
         prefix: "extent_",
         params: {},
+        destination: "layer",
+        newLayerName: null,
       });
       useProcessingStore.getState().upsertRun(
         runFixture({
@@ -1063,6 +1070,8 @@ describe("ToolView", () => {
         lod: null,
         prefix: "extent_",
         params: {},
+        destination: "layer",
+        newLayerName: null,
       });
       // Queued with nothing running yet: the hand-off window between one run's
       // done patch and the next run's running patch.

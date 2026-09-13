@@ -272,6 +272,8 @@ function solidRequest(overrides: Record<string, unknown> = {}) {
     lod: "2.2",
     params: {},
     prefix: "solid_",
+    destination: "layer" as const,
+    newLayerName: null,
     columns: [
       { name: "solid_closed", type: "BOOLEAN" as const },
       { name: "solid_manifold", type: "BOOLEAN" as const },

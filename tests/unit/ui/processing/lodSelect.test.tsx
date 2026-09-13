@@ -274,6 +274,8 @@ describe("the LoD select (spec §6)", () => {
       lod: "2.2",
       prefix: "roof_",
       params: {},
+      destination: "layer",
+      newLayerName: null,
     });
     render(<ToolView toolId="roof-metrics" />);
     expect(screen.getByRole("combobox", { name: "LoD" })).toHaveValue("1.2");

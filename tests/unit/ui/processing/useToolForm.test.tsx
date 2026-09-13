@@ -227,6 +227,8 @@ describe("the Layer select (spec §6 TARGET)", () => {
       lod: null,
       prefix: "solid_",
       params: {},
+      destination: "layer",
+      newLayerName: null,
     });
     render(<ToolView toolId="measure-solids" />);
     // §5: "A disabled row still opens the tool view" — the select is never
@@ -780,6 +782,8 @@ describe("what a retarget keeps (§6's per-tool draft)", () => {
       lod: null,
       prefix: "roof_",
       params: { measures: ["roofArea"], flatThresholdDeg: 12 },
+      destination: "layer",
+      newLayerName: null,
     });
     render(<ToolView toolId="roof-metrics" />);
     fireEvent.change(screen.getByRole("combobox", { name: "Layer" }), {
@@ -804,6 +808,8 @@ describe("what a retarget keeps (§6's per-tool draft)", () => {
       lod: null,
       prefix: "solid_",
       params: { measures: ["volume"] },
+      destination: "layer",
+      newLayerName: null,
     });
     render(<ToolView toolId="measure-solids" />);
     fireEvent.change(screen.getByRole("combobox", { name: "Layer" }), {

@@ -196,6 +196,8 @@ const {
 } = await import("../../../../src/features/processing/runQueue");
 const { registerExecutor, EXECUTORS } =
   await import("../../../../src/features/processing/tools");
+const { TOOLS } =
+  await import("../../../../src/features/processing/toolRegistry");
 const { runById, useProcessingStore } =
   await import("../../../../src/features/processing/processingStore");
 const { useLayerStore } =
@@ -299,8 +301,32 @@ function request(overrides: Record<string, unknown> = {}) {
     params: {},
     prefix: "extent_",
     columns: [{ name: "extent_height_m", type: "DOUBLE" as const }],
+    destination: "layer" as const,
+    newLayerName: null,
     ...overrides,
   };
+}
+
+/** Give ONE registry entry the `"new"` destination for the length of one
+ *  case — `destinations` is a data property on an object literal, so
+ *  `vi.spyOn(tool, "destinations", "get")` cannot be used. The same trick
+ *  `outputDestination.test.tsx` uses, copied rather than shared: a fixture
+ *  module between two suites is a third thing to keep in step. */
+function withNewLayer(
+  toolId: string,
+  value: ReadonlyArray<string>,
+): () => void {
+  const tool = TOOLS.find((t) => t.id === toolId);
+  if (!tool) throw new Error(`no tool ${toolId}`);
+  const before = tool.destinations;
+  const set = (next: ReadonlyArray<string>) =>
+    Object.defineProperty(tool, "destinations", {
+      value: next,
+      configurable: true,
+      writable: true,
+    });
+  set(value);
+  return () => set(before);
 }
 
 beforeEach(() => {
@@ -753,6 +779,29 @@ describe("submitRun", () => {
     const id = submitRun(request({ toolId: "roof-metrics" }));
     await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
     expect(runById(id)?.error).toBe("Not available yet");
+  });
+
+  it("refuses a New-layer request for a tool that does not offer it", async () => {
+    const id = submitRun(request({ destination: "new", newLayerName: "X" }));
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
+    expect(runById(id)?.error).toBe("Not available yet");
+  });
+
+  it("refuses a New-layer request on a STREAMING target, with A2's reason", async () => {
+    // The form's radio is disabled for this case, so the request can only
+    // arrive from a draft frozen before a retarget (or from `retryRun`
+    // replaying one) — which is exactly what this guard is for.
+    const restore = withNewLayer("height-from-extent", ["layer", "new"]);
+    try {
+      useLayerStore.setState({ layers: [{ ...layer(), isStreaming: true }] });
+      const id = submitRun(request({ destination: "new", newLayerName: "X" }));
+      await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
+      expect(runById(id)?.error).toBe(
+        "New layer is not available for a streaming layer: its loaded buildings carry no geometry to copy.",
+      );
+    } finally {
+      restore();
+    }
   });
 });
 
@@ -2220,6 +2269,8 @@ describe("the context a one-layer tool is handed", () => {
       params: {},
       prefix: "extent_",
       columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+      destination: "layer",
+      newLayerName: null,
     });
     await vi.waitFor(() => expect(box.seen).not.toBeNull());
     expect(box.seen?.table).toBe("layer_1");

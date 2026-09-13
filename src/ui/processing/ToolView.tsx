@@ -7,6 +7,7 @@
  * four states replace each other in the same place (§6.1–§6.3).
  */
 import { useProcessingStore } from "../../features/processing/processingStore";
+import { STREAMING_NO_NEW_LAYER } from "../../features/processing/deriveLayer";
 import { submitRun } from "../../features/processing/runQueue";
 import type { ToolId } from "../../features/processing/types";
 import { useToolForm } from "./useToolForm";
@@ -49,13 +50,18 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
       latestRun.status === "queued" ||
       latestRun.status === "cancelling" ||
       latestRun.status === "done");
-  // Spec §6 puts Run's reason under the button; the prefix and parameter errors
-  // are the reasons that are ALREADY on screen — §6's "validation is inline",
-  // each under the field it belongs to — and printing the same sentence twice
-  // reads as two problems. Run is still disabled; only the echo is dropped.
+  // Spec §6 puts Run's reason under the button; the prefix, parameter, name and
+  // destination reasons are the ones that are ALREADY on screen — §6's
+  // "validation is inline", each under the field it belongs to (the name error
+  // in the Name field's own `role="alert"`, the destination reason in the note
+  // under the radios) — and printing the same sentence twice reads as two
+  // problems. Run is still disabled; only the echo is dropped.
   const footerReason =
     f.runReason !== null &&
-    (f.runReason === f.prefixError || f.runReason === f.paramsError)
+    (f.runReason === f.prefixError ||
+      f.runReason === f.paramsError ||
+      f.runReason === f.nameError ||
+      f.runReason === f.destinationReason)
       ? null
       : f.runReason;
   // Precedence, explicit: while THIS form's run waits in the queue, the queue
@@ -87,6 +93,11 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
       // idempotent over it by construction.
       params: f.tool.normaliseParams?.(f.params) ?? f.params,
       prefix: f.draft.prefix,
+      destination: f.draft.destination,
+      // NULL for "This layer", never the prefill: the frozen request is the
+      // reproducible record (§6.4), and a name on a run that created no layer
+      // would read as one that did.
+      newLayerName: f.draft.destination === "new" ? f.newLayerName : null,
       // The registry's own answer, types and all — §7 puts a column's type
       // beside its name, and the write path reads `col.type` straight out of
       // this list. There is no second place that decides a type.
@@ -325,11 +336,9 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
       )}
       <fieldset className="processing-section" disabled={locked}>
         <legend className="processing-group__label">OUTPUT</legend>
-        {/* §6: OUTPUT "starts with the destination, Write to". Its second
-            radio, New layer, is a later milestone — so the one destination
-            there is shows as a checked, disabled radio rather than as nothing
-            at all: where the columns land is part of reading the form, and an
-            invisible answer is one the user has to assume. */}
+        {/* §6: OUTPUT "starts with the destination, Write to". BOTH radios are
+            rendered whatever the tool offers — the spec draws two, and a
+            destination the user cannot see is one they have to assume. */}
         <div className="processing-field">
           <span>Write to</span>
           <div
@@ -338,13 +347,57 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
             aria-label="Write to"
           >
             <label>
-              {/* `readOnly` beside `checked`: the radio can never change (it is
-                  the only destination), and React asks for one or the other. */}
-              <input type="radio" name="writeTo" checked readOnly disabled />
+              <input
+                type="radio"
+                name="writeTo"
+                checked={f.draft.destination === "layer"}
+                onChange={() => f.setDraft({ destination: "layer" })}
+              />
               This layer{f.targetName === null ? "" : ` (${f.targetName})`}
             </label>
+            {/* Disabled when the tool has no such destination yet, and then
+                with NO reason line: nothing is wrong with the user's form, the
+                tool simply cannot write one — and Run's own reason is not
+                about this. **[adapted copy A2]** is the other case, where the
+                tool does offer it and this TARGET cannot take it. */}
+            <label
+              title={f.newLayerBlocked ? STREAMING_NO_NEW_LAYER : undefined}
+            >
+              <input
+                type="radio"
+                name="writeTo"
+                disabled={
+                  !f.tool.destinations.includes("new") || f.newLayerBlocked
+                }
+                checked={f.draft.destination === "new"}
+                onChange={() => f.setDraft({ destination: "new" })}
+              />
+              New layer
+            </label>
           </div>
+          {f.newLayerBlocked && (
+            <p className="processing-note">{STREAMING_NO_NEW_LAYER}</p>
+          )}
         </div>
+        {f.draft.destination === "new" && (
+          <>
+            <label className="processing-field">
+              <span>Name</span>
+              <input
+                type="text"
+                aria-label="Name"
+                value={f.newLayerName}
+                onChange={(e) => f.setDraft({ newLayerName: e.target.value })}
+                aria-invalid={f.nameError !== null}
+              />
+            </label>
+            {f.nameError !== null && (
+              <p className="processing-error" role="alert">
+                {f.nameError}
+              </p>
+            )}
+          </>
+        )}
         <label className="processing-field">
           <span>Prefix</span>
           <input
@@ -364,14 +417,35 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
         <p className="processing-columns">
           {f.columns.map((c) => c.name).join(", ")}
         </p>
-        {f.existing.length > 0 && f.prefixError === null && (
-          <p className="processing-warning">
-            <span aria-hidden="true">⚠ </span>
-            <span>
-              {f.existing.length} of these columns exist; they will be replaced.
-            </span>
-          </p>
-        )}
+        {/* §6: for This layer the warning lists what is on the TARGET; for New
+            layer it is scoped to the copy, and only the INHERITED computed
+            columns are replaceable — a collision with a source attribute is
+            still the prefix error above. */}
+        {f.draft.destination === "new"
+          ? f.inherited.length > 0 &&
+            f.prefixError === null && (
+              <p className="processing-warning">
+                <span aria-hidden="true">⚠ </span>
+                <span>
+                  {plural(
+                    f.inherited.length,
+                    "inherited computed column",
+                    "inherited computed columns",
+                  )}{" "}
+                  will be replaced in the new layer
+                </span>
+              </p>
+            )
+          : f.existing.length > 0 &&
+            f.prefixError === null && (
+              <p className="processing-warning">
+                <span aria-hidden="true">⚠ </span>
+                <span>
+                  {f.existing.length} of these columns exist; they will be
+                  replaced.
+                </span>
+              </p>
+            )}
         {/* §6: "Extension note when the tool's extension is not yet loaded" —
             the same sentence the catalogue's chip shows as its tooltip, here as
             a line the user does not have to hover to read. */}

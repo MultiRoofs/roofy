@@ -163,6 +163,10 @@ describe("RecentRuns", () => {
       lod: null,
       prefix: "extent_",
       params: {},
+      // The RECORD carries no destination yet, so a reopened run offers the
+      // one every run of this milestone used.
+      destination: "layer",
+      newLayerName: null,
     });
     expect(useShellStore.getState().rightCollapsed).toBe(false);
     // §5: it opens the form "so parameters can be changed" — so the run's own
