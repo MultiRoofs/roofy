@@ -549,6 +549,22 @@ describe("the SOURCE select and the prefix it names (§7.5, §7.7)", () => {
     ).toBeInTheDocument();
   });
 
+  /** §7.6's TARGET half of the same rule: the vector layer is the one written
+   *  to, so a point layer is refused there — the row with the copy table's
+   *  `Needs areas (polygons)`, Run with its own `The layer has no areas`. */
+  it("refuses a point-layer TARGET for Aggregate with §7.6's own sentences", () => {
+    addCityLayer("Delft", true);
+    addGeoLayer("Points", "Point");
+    render(<ToolView toolId="aggregate-per-area" />);
+    const option = screen.getByRole("option", { name: "Points" });
+    expect(option).toBeDisabled();
+    expect(option).toHaveAttribute("title", "Needs areas (polygons)");
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    expect(
+      screen.getByText("The layer has no areas", { selector: "p" }),
+    ).toBeInTheDocument();
+  });
+
   it("drops the parameters when the SOURCE changes, so stale fields cannot freeze", () => {
     addCityLayer("Delft", true);
     addGeoLayer("Zones", "Polygon");

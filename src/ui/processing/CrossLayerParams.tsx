@@ -114,12 +114,13 @@ export function CrossLayerParams({
     numericColumns,
   };
   const error = crossLayerParamsError(toolId, params, ctx);
-  // Aggregate prints its row errors beside the rows; the section-level
-  // paragraph would then be the same sentence a second time.
-  const sectionError =
-    toolId === "aggregate-per-area" && error !== "Pick at least one measure"
-      ? null
-      : error;
+  // Aggregate prints its row errors beside the rows, so the section-level
+  // paragraph would be the same sentence a second time. The condition is
+  // STRUCTURAL — "are there rows to carry it?" — rather than a match on the
+  // sentence, which this component does not own.
+  const rowLevel =
+    toolId === "aggregate-per-area" && aggregateParams(params).rows.length > 0;
+  const sectionError = rowLevel ? null : error;
 
   return (
     <>
