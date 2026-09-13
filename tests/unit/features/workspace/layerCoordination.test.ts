@@ -121,6 +121,50 @@ describe("activateLayer + invariants", () => {
     expect(useWorkspaceStore.getState().activeLayerId).toBe(b);
   });
 
+  it("a VECTOR layer becoming active keeps a CITY layer's selection (F5)", () => {
+    // §10.11's Aggregate run scoped to "Selected": the tool is offered only
+    // while the VECTOR target is active, and §7.6's scope counts the SOURCE
+    // city layer's selection — so clearing that selection on the way to the
+    // target made the scope unreachable through the UI. §6 settles it: changing
+    // the target does not change what the run is scoped to. Narrow on purpose:
+    // a vector layer owns areas, never buildings, so it cannot be the owner of
+    // the selection it is being handed the focus over.
+    const city = useLayerStore.getState().addLayer(layerInput("Delft"));
+    const zones = useGeoLayerStore.getState().addGeoLayer(geoInput("Zones"));
+    useSelectionStore
+      .getState()
+      .select({ kind: "object", layerId: city, objectId: "o1" });
+    activateLayer(zones);
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(zones);
+    expect(useSelectionStore.getState().selections).toHaveLength(1);
+    // And the reconciler does not hand the activation straight back: rule 2 is
+    // about a NEW pick, and nothing was picked here.
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(zones);
+  });
+
+  it("still clears a city selection for another CITY layer (F5 stays narrow)", () => {
+    const a = useLayerStore.getState().addLayer(layerInput("A"));
+    const b = useLayerStore.getState().addLayer(layerInput("B"));
+    useSelectionStore
+      .getState()
+      .select({ kind: "object", layerId: a, objectId: "o1" });
+    activateLayer(b);
+    expect(useSelectionStore.getState().selections).toEqual([]);
+  });
+
+  it("still clears a GEO selection when another vector layer becomes active (F5)", () => {
+    // The exemption is for a CITY selection only: two vector layers are the
+    // case rule 1 exists for, and a geo selection has no scope to freeze.
+    const g1 = useGeoLayerStore.getState().addGeoLayer(geoInput("G1"));
+    const g2 = useGeoLayerStore.getState().addGeoLayer(geoInput("G2"));
+    useSelectionStore
+      .getState()
+      .selectGeoFeature({ geoLayerId: g1, batchId: 0, properties: {} });
+    activateLayer(g2);
+    expect(useSelectionStore.getState().geoSelection).toBeNull();
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(g2);
+  });
+
   it("a pick activates its owning layer", () => {
     const a = useLayerStore.getState().addLayer(layerInput("A"));
     const b = useLayerStore.getState().addLayer(layerInput("B"));

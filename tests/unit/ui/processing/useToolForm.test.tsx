@@ -64,6 +64,17 @@ vi.mock("../../../../src/features/processing/runQueue", () => ({
  * gone and every case below asserts the REAL entry's readiness reasons.
  */
 
+/** The counts every case starts from; a case that changes them is put back by
+ *  the shared `afterEach` (`vi.clearAllMocks` clears CALLS, not an
+ *  implementation a `mockReturnValue` installed). */
+const DEFAULT_COUNTS = {
+  all: 2,
+  matching: null,
+  selected: 0,
+  loading: false,
+  message: null,
+} as const;
+
 vi.mock("../../../../src/ui/table/useLayerCounts", () => ({
   useLayerCounts: vi.fn(() => ({
     all: 2,
@@ -224,6 +235,7 @@ function addGeoLayer(
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  vi.mocked(useLayerCounts).mockReturnValue({ ...DEFAULT_COUNTS });
   useProcessingStore.getState().resetForTest();
   useGeoLayerStore.setState({ layers: [] });
   useLayerStore.getState().removeAllLayers();
@@ -768,6 +780,30 @@ describe("the SOURCE select and the prefix it names (§7.5, §7.7)", () => {
     expect(option).toBeDisabled();
     expect(option).toHaveAttribute("title", "Needs areas (polygons)");
     expect(screen.queryByText("The layer has no areas")).toBeNull();
+  });
+
+  it("offers Aggregate's Selected scope while the VECTOR target is active (F5)", () => {
+    // §10.11's Selected variant, at the form: the city layer owns the
+    // selection, the vector target is what Aggregate has to be active on, and
+    // §7.6 counts the SOURCE's buildings — so the radio is enabled and Run is
+    // not held back by "Nothing selected on this layer". Rule 1's narrow
+    // exemption in `workspaceStore` is what keeps the selection alive to be
+    // counted; this is the form's half.
+    vi.mocked(useLayerCounts).mockReturnValue({
+      all: 6,
+      matching: null,
+      selected: 2,
+      loading: false,
+      message: null,
+    });
+    addCityLayer("Delft", true);
+    addGeoLayer("Zones", "Polygon");
+    render(<ToolView toolId="aggregate-per-area" />);
+    const selected = screen.getByRole("radio", { name: /Selected 2/ });
+    expect(selected).not.toBeDisabled();
+    fireEvent.click(selected);
+    expect(screen.getByRole("button", { name: "Run" })).not.toBeDisabled();
+    expect(screen.queryByText("Nothing selected on this layer")).toBeNull();
   });
 
   it("keeps a MIXED layer eligible for the area tools (S3)", () => {

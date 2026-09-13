@@ -3,9 +3,13 @@
  * selection telling one story.
  *
  * Four rules, and nothing else in the app may restate them:
- *   1. Activating a layer clears a selection that belongs to another layer.
- *      Enforced inside `useWorkspaceStore.setActiveLayerId`, so no caller can
- *      bypass it; {@link activateLayer} is the documented entry point.
+ *   1. Activating a layer clears a selection that belongs to another layer —
+ *      EXCEPT a city selection when the layer taking the focus is a vector one
+ *      (`keepsCitySelection`, gate defect F5: §7.6's "Selected" scope counts
+ *      the SOURCE city layer and the tool is only offered on the vector
+ *      target). Enforced inside `useWorkspaceStore.setActiveLayerId`, so no
+ *      caller can bypass it; {@link activateLayer} is the documented entry
+ *      point.
  *   2. A pick activates the layer it landed on.
  *   3. A selection whose owning layer is removed or hidden is cleared.
  *   4. Removing the active layer hands over to the next layer in the unified
