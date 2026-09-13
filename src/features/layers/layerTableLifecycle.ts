@@ -68,6 +68,11 @@ export function residentTableSource(layerId: string): LayerTableSource {
  * indistinguishable in the store from a refresh that worked, which is exactly
  * the confusion that let an export write a stale resident set. Nothing is
  * thrown: a failure is still recorded on the entry as always.
+ *
+ * It deliberately does NOT go through the lifecycle's version bookkeeping
+ * (`enqueueAt`): this is an explicit "rebuild now whatever the version", and
+ * recording its version would let the next consumer sweep skip a rebuild that
+ * the export's own table change needs.
  */
 export async function refreshStreamingTable(
   layerId: string,
@@ -78,7 +83,63 @@ export async function refreshStreamingTable(
 export function installLayerTableLifecycle(): () => void {
   let knownLayerIds = new Set(useLayerStore.getState().layers.map((l) => l.id));
   const knownVersions = new Map<string, number>();
+  /**
+   * The stream version each layer's table has actually been BUILT at, and the
+   * version a build now in flight was enqueued at (Design decision (j)).
+   *
+   * `knownVersions` answers "has a commit arrived since we last looked", which
+   * is what the debounced rebuild needs. The consumer SWEEP asks a different
+   * question — "is this layer's table behind?" — and answering it with
+   * `knownVersions` rebuilds every streaming layer every time a consumer opens,
+   * which trips `installStaleWatcher` and retires a finished result card as
+   * "stale: layer reloaded" though nothing about the data moved.
+   *
+   * TWO maps and not one, because a build that FAILED leaves the previous ready
+   * table in place (`refreshStreamingTable`'s note above): a single map written
+   * at enqueue time would record the version as current, and every later
+   * consumer would skip the retry that layer needs for the rest of the session.
+   * So `pendingVersions` gates a second enqueue while a build is in flight and
+   * is dropped when it settles, and only a build that SUCCEEDED writes
+   * `builtVersions`.
+   */
+  const builtVersions = new Map<string, number>();
+  const pendingVersions = new Map<string, number>();
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /** The layer's current stream version, 0 when it has no stream yet. */
+  const versionOf = (layerId: string): number =>
+    useStreamStore.getState().streams[layerId]?.version ?? 0;
+
+  /** Is the layer's table at (or on its way to) the version the stream is at? */
+  const tableIsCurrent = (layerId: string): boolean => {
+    const version = versionOf(layerId);
+    return (
+      pendingVersions.get(layerId) === version ||
+      builtVersions.get(layerId) === version
+    );
+  };
+
+  /** Enqueue a rebuild and remember the version it was built at. */
+  const enqueueAt = (layerId: string): void => {
+    const version = versionOf(layerId);
+    pendingVersions.set(layerId, version);
+    const settle = (built: boolean): void => {
+      // Only OUR build: a newer enqueue has already replaced the pending entry
+      // and its own settle owns it.
+      if (pendingVersions.get(layerId) === version) {
+        pendingVersions.delete(layerId);
+      }
+      if (built) builtVersions.set(layerId, version);
+    };
+    // `enqueueLayerTable` resolves with the outcome and documents that it never
+    // throws — the rejection handler is here anyway, because a pending entry
+    // nothing ever cleared is exactly the stuck state this pair exists to
+    // avoid.
+    void enqueueLayerTable(layerId, residentTableSource(layerId)).then(
+      (outcome) => settle(outcome.ok),
+      () => settle(false),
+    );
+  };
 
   /**
    * Is a run over `layerId` still going to READ its table?
@@ -141,7 +202,7 @@ export function installLayerTableLifecycle(): () => void {
         // store: the id query for the retired table can still be in flight,
         // and only the generation bump stops its answer landing after this.
         clearMapFilter(layerId);
-        void enqueueLayerTable(layerId, residentTableSource(layerId));
+        enqueueAt(layerId);
       }, STREAM_REBUILD_DEBOUNCE_MS),
     );
   };
@@ -153,6 +214,10 @@ export function installLayerTableLifecycle(): () => void {
       if (ids.has(id)) continue;
       cancelRebuild(id);
       knownVersions.delete(id);
+      // A re-added layer under the same id is a DIFFERENT table and must not
+      // inherit the version the old one was built at.
+      builtVersions.delete(id);
+      pendingVersions.delete(id);
       // The query is written against THAT table's columns; a re-added layer is
       // a different table and must not inherit a predicate naming columns it
       // may not have.
@@ -179,7 +244,7 @@ export function installLayerTableLifecycle(): () => void {
         layer.isStreaming &&
         layer.derivedFrom === null
       ) {
-        void enqueueLayerTable(layer.id, residentTableSource(layer.id));
+        enqueueAt(layer.id);
       }
     }
 
@@ -212,6 +277,11 @@ export function installLayerTableLifecycle(): () => void {
   const sweepStreamingLayers = (): void => {
     for (const layer of useLayerStore.getState().layers) {
       if (!layer.isStreaming || layer.derivedFrom !== null) continue;
+      // Design decision (j): the sweep's job is "a consumer opened and this
+      // layer's table is behind". The VERSION is exactly that question, and
+      // rebuilding a table that is already current costs a rebuild AND retires
+      // a finished run's card as stale.
+      if (tableIsCurrent(layer.id)) continue;
       // Disarm first: a commit that landed while a consumer was open, before it
       // was shut, can still have a timer pending. Its fire-time gate would find
       // a consumer open AGAIN and rebuild a second time, moments after this one.
@@ -219,7 +289,7 @@ export function installLayerTableLifecycle(): () => void {
       // Same reason as `scheduleRebuild`: the ids belong to the table being
       // replaced, and an id query for it may still be out.
       clearMapFilter(layer.id);
-      void enqueueLayerTable(layer.id, residentTableSource(layer.id));
+      enqueueAt(layer.id);
     }
   };
 

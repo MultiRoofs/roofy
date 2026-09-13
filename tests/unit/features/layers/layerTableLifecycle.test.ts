@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const enqueued: string[] = [];
 const dropped: string[] = [];
+/** What the next build SETTLES with. A failed rebuild keeps the previous ready
+ *  table on screen (`layerTables`' own contract), so the store alone cannot
+ *  tell the two apart — which is why the lifecycle has to read the outcome. */
+let buildOutcome: { ok: true } | { ok: false; message: string } = { ok: true };
 vi.mock("../../../../src/insights/layerTables", async (importOriginal) => {
   const actual =
     await importOriginal<
@@ -11,6 +15,7 @@ vi.mock("../../../../src/insights/layerTables", async (importOriginal) => {
     ...actual,
     enqueueLayerTable: vi.fn(async (layerId: string) => {
       enqueued.push(layerId);
+      return buildOutcome;
     }),
     dropLayerTable: vi.fn(async (layerId: string) => {
       dropped.push(layerId);
@@ -90,6 +95,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   enqueued.length = 0;
   dropped.length = 0;
+  buildOutcome = { ok: true };
   clearMapFilter.mockReset();
   forgetMapFilter.mockReset();
   useLayerStore.setState({ layers: [] });
@@ -224,6 +230,12 @@ describe("streaming layers", () => {
         layer({ id: "S2", isStreaming: true }),
         layer({ id: "A" }),
       ],
+    });
+    // The versions really DO move while nothing is looking — which is the
+    // sweep's whole reason, and since Design decision (j) also the condition
+    // it tests. Nothing rebuilds yet: no consumer is open.
+    useStreamStore.setState({
+      streams: { S1: { version: 1 } as never, S2: { version: 1 } as never },
     });
     enqueued.length = 0;
     clearMapFilter.mockReset();
@@ -372,6 +384,9 @@ describe("the processing toolbox as a table consumer", () => {
         layer({ id: "A" }),
       ],
     });
+    useStreamStore.setState({
+      streams: { S1: { version: 1 } as never, S2: { version: 1 } as never },
+    });
     enqueued.length = 0;
     clearMapFilter.mockReset();
     useProcessingStore.getState().setOpen(true);
@@ -451,10 +466,125 @@ describe("the processing toolbox as a table consumer", () => {
 
   it("stops sweeping on uninstall", () => {
     useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    // A version the sweep WOULD act on, so this cannot pass for the version's
+    // sake rather than the uninstall's.
+    useStreamStore.setState({ streams: { S: { version: 1 } as never } });
     enqueued.length = 0;
     uninstall();
     useProcessingStore.getState().setOpen(true);
     expect(enqueued).toEqual([]);
+  });
+});
+
+describe("the consumer sweep compares versions (Design decision (j))", () => {
+  it("does not rebuild a streaming layer whose version has not moved", () => {
+    // M2's final wave made the toolbox a table consumer, so opening Tools swept
+    // every streaming layer and rebuilt its table — which trips
+    // `installStaleWatcher` on the `building → ready` transition and retires a
+    // FINISHED card as "stale: layer reloaded" though nothing about the data
+    // moved.
+    useLayerStore.setState({
+      layers: [layer({ id: "L1", isStreaming: true })],
+    });
+    useStreamStore.setState({ streams: { L1: { version: 3 } as never } });
+    vi.advanceTimersByTime(STREAM_REBUILD_DEBOUNCE_MS);
+    // The table-panel sweep builds it once at version 3.
+    useLayerTableStore.setState({ tablePanelOpen: true });
+    const afterFirst = enqueued.length;
+    expect(afterFirst).toBeGreaterThan(0);
+
+    // A SECOND consumer opens, with the stream exactly where it was — and the
+    // first build has not even settled yet, so the PENDING version is what
+    // has to answer here.
+    useProcessingStore.getState().setOpen(true);
+    expect(enqueued).toHaveLength(afterFirst);
+  });
+
+  it("skips it again once that build has SETTLED", async () => {
+    useLayerStore.setState({
+      layers: [layer({ id: "L1", isStreaming: true })],
+    });
+    useStreamStore.setState({ streams: { L1: { version: 3 } as never } });
+    useLayerTableStore.setState({ tablePanelOpen: true });
+    // The build resolves: the pending entry becomes a BUILT one, and the skip
+    // has to survive that handover.
+    await vi.advanceTimersByTimeAsync(0);
+    const afterFirst = enqueued.length;
+
+    useProcessingStore.getState().setOpen(true);
+    expect(enqueued).toHaveLength(afterFirst);
+  });
+
+  it("DOES rebuild when the version moved while nothing was looking", () => {
+    useLayerStore.setState({
+      layers: [layer({ id: "L1", isStreaming: true })],
+    });
+    useStreamStore.setState({ streams: { L1: { version: 3 } as never } });
+    useLayerTableStore.setState({ tablePanelOpen: true });
+    const afterFirst = enqueued.length;
+    useLayerTableStore.setState({ tablePanelOpen: false });
+    useStreamStore.setState({ streams: { L1: { version: 4 } as never } });
+    useProcessingStore.getState().setOpen(true);
+    expect(enqueued.length).toBeGreaterThan(afterFirst);
+  });
+
+  it("rebuilds after a FAILED build, with no new stream commit", async () => {
+    // Round-2 residual C5. A failed rebuild deliberately keeps the PREVIOUS
+    // ready table (`layerTables`' own contract), so recording the version as
+    // built would leave that layer's table stale for the rest of the session —
+    // every later consumer skipping the retry it needs.
+    buildOutcome = { ok: false, message: "Database was closed" };
+    useLayerStore.setState({
+      layers: [layer({ id: "L1", isStreaming: true })],
+    });
+    useStreamStore.setState({ streams: { L1: { version: 3 } as never } });
+    useLayerTableStore.setState({ tablePanelOpen: true });
+    await vi.advanceTimersByTimeAsync(0);
+    const afterFailed = enqueued.length;
+    expect(afterFailed).toBeGreaterThan(0);
+
+    // A consumer opens again. Nothing committed in between.
+    useLayerTableStore.setState({ tablePanelOpen: false });
+    buildOutcome = { ok: true };
+    useProcessingStore.getState().setOpen(true);
+    expect(enqueued).toHaveLength(afterFailed + 1);
+
+    // And once the retry has SUCCEEDED, the next consumer skips it again.
+    await vi.advanceTimersByTimeAsync(0);
+    useProcessingStore.getState().setOpen(false);
+    useLayerTableStore.setState({ tablePanelOpen: true });
+    expect(enqueued).toHaveLength(afterFailed + 1);
+  });
+
+  it("forgets a removed layer's version, so a re-add rebuilds", async () => {
+    useLayerStore.setState({
+      layers: [layer({ id: "L1", isStreaming: true })],
+    });
+    useStreamStore.setState({ streams: { L1: { version: 3 } as never } });
+    useLayerTableStore.setState({ tablePanelOpen: true });
+    await vi.advanceTimersByTimeAsync(0);
+
+    useLayerStore.setState({ layers: [] });
+    enqueued.length = 0;
+    // A different layer under the same id, and the stream's version happens to
+    // be the number the old one was built at.
+    useLayerStore.setState({
+      layers: [layer({ id: "L1", isStreaming: true })],
+    });
+    expect(enqueued).toEqual(["L1"]);
+    useProcessingStore.getState().setOpen(true);
+  });
+
+  it("refreshStreamingTable does not let the next sweep skip a rebuild", async () => {
+    // The export's door is an explicit "rebuild now whatever the version", and
+    // recording its version would let the next sweep skip a rebuild the
+    // export's own table change needs.
+    useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
+    useStreamStore.setState({ streams: { S: { version: 3 } as never } });
+    await refreshStreamingTable("S");
+    enqueued.length = 0;
+    useProcessingStore.getState().setOpen(true);
+    expect(enqueued).toEqual(["S"]);
   });
 });
 
