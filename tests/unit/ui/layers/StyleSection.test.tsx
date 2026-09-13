@@ -351,6 +351,43 @@ describe("StyleSection — a vector layer's Color by attribute", () => {
     expect(attributeSelect().value).toBe("");
   });
 
+  it("offers a computed property and colours by its real values (§7.6)", () => {
+    const id = addParcels();
+    useGeoLayerStore.getState().mergeGeoFeatureProperties(
+      id,
+      new Map([
+        ["index:0", { bld_buildings_n: 3 }],
+        ["index:1", { bld_buildings_n: 7 }],
+        ["index:2", { bld_buildings_n: 3 }],
+      ]),
+    );
+    render(<GeoHost id={id} />);
+
+    // The select reads the PREPARED document, so the run's column is offered —
+    // and the renderer's own envelope key still never is.
+    expect([...attributeSelect().options].map((o) => o.textContent)).toEqual([
+      "None",
+      "zone",
+      "name",
+      "bld_buildings_n",
+    ]);
+
+    fireEvent.change(attributeSelect(), {
+      target: { value: "bld_buildings_n" },
+    });
+
+    // The VALUES, not an empty list: `categoriesFor` read the prepared document
+    // too. Without that half, §7.6's Style by result would open Color by
+    // attribute on a column whose categories are empty.
+    expect(readStyle(id).colorByAttribute).toEqual({
+      attribute: "bld_buildings_n",
+      categories: [
+        { value: "3", color: CATEGORY_PALETTE_HEX[0] },
+        { value: "7", color: CATEGORY_PALETTE_HEX[1] },
+      ],
+    });
+  });
+
   it("says that rules are for city models, and offers no stroke colour", () => {
     render(<GeoHost id={addParcels()} />);
 

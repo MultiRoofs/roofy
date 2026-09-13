@@ -24,6 +24,7 @@ import {
   categoriesFor,
 } from "../../features/geoLayers/categorize";
 import { resolveGeoJsonDocument } from "../../features/geoLayers/geoLayerDocument";
+import { GEO_STABLE_FEATURE_KEY } from "../../features/geoLayers/geoJsonRecords";
 import { CATEGORY_OTHER_HEX } from "../../scene/cityColors";
 import { colorInputValue } from "./geoLayerMeta";
 
@@ -187,11 +188,19 @@ function GeoColorByAttribute({
 
   // Inline data's keys are free and stable on the config's identity; a URL's
   // arrive when the cached fetch lands (null = still loading).
-  const inlineKeys = useMemo(
-    () =>
-      layer.config.data === undefined ? null : attributeKeys(layer.config.data),
-    [layer.config.data],
-  );
+  //
+  // `preparedData` FIRST: it is the document the engine, the records panel and
+  // the GeoJSON export all read, and §7.6's computed properties live only
+  // there. Reading `config.data` would offer the file's own attributes only, so
+  // "Color by attribute" could not offer `bld_buildings_n` — which is exactly
+  // what §7.6's Style by result opens. The renderer's own envelope key is
+  // filtered out: the prepared clone carries it and it is not an attribute.
+  const inlineKeys = useMemo(() => {
+    const document = layer.config.preparedData ?? layer.config.data;
+    return document === undefined
+      ? null
+      : attributeKeys(document).filter((key) => key !== GEO_STABLE_FEATURE_KEY);
+  }, [layer.config.preparedData, layer.config.data]);
   const [fetchedKeys, setFetchedKeys] = useState<readonly string[] | null>(
     null,
   );
@@ -224,13 +233,18 @@ function GeoColorByAttribute({
       updateGeoLayer(layer.id, { style: rest });
       return;
     }
-    const apply = (document: unknown) => {
+    const apply = (fallback: unknown) => {
       // Read the LIVE record at write time: an async resolve may land after
       // another edit, and spreading the render-time style would drop it.
       const current = useGeoLayerStore
         .getState()
         .layers.find((l) => l.id === layer.id);
-      if (current === undefined) return;
+      if (current === undefined || current.kind !== "geojson") return;
+      // The SAME preference as the key list above. `categoriesFor` over
+      // `config.data` would find no `bld_buildings_n` and prefill an empty
+      // category list for a column the select is offering — §7.6's Style by
+      // result opens exactly that column.
+      const document = current.config.preparedData ?? fallback;
       updateGeoLayer(layer.id, {
         style: {
           ...current.style,
@@ -241,8 +255,9 @@ function GeoColorByAttribute({
         },
       });
     };
-    if (layer.config.data !== undefined) {
-      apply(layer.config.data);
+    const inline = layer.config.preparedData ?? layer.config.data;
+    if (inline !== undefined) {
+      apply(inline);
       return;
     }
     void resolveGeoJsonDocument(layer.config).then(

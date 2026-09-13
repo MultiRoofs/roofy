@@ -118,6 +118,10 @@ export function GeoRecordsPanel({
       <DataGrid
         columns={columns}
         rows={pageRows}
+        // §7.6: the registry under THIS layer's id is what badges a column a
+        // run wrote; a property of the file's own under the same name is not
+        // in it and stays unbadged.
+        layerId={layer.id}
         sort={query.sort}
         selectedIds={selected}
         emptyMessage={

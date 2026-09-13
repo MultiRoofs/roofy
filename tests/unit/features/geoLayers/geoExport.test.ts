@@ -5,6 +5,7 @@ import {
 } from "../../../../src/features/geoLayers/geoExport";
 import { normalizeGeoJsonDocument } from "../../../../src/features/geoLayers/geoJsonRecords";
 import { geoRecords } from "../../../../src/features/geoLayers/geoRecords";
+import { mergeGeoDocumentProperties } from "../../../../src/features/geoLayers/geoLayerStore";
 const name = `Al,pha\n"quoted"`;
 const data = normalizeGeoJsonDocument({
   type: "FeatureCollection",
@@ -43,5 +44,15 @@ describe("vector export", () => {
     expect(csv).toContain('[""a"",""b""]');
     expect(csv).toContain('""quoted""');
     expect(csv).not.toContain("__roofy");
+  });
+  it("carries a run's computed properties into the GeoJSON it writes (§7.6)", () => {
+    const merged = mergeGeoDocumentProperties(
+      data,
+      new Map([["id:string:a", { bld_buildings_n: 3 }]]),
+    );
+    const text = geoExportText(merged, "geojson", "all", matching, selected);
+    expect(text).toContain('"bld_buildings_n":3');
+    // The renderer's own bookkeeping is still not exported.
+    expect(text).not.toContain("__roofy_stable_feature_id");
   });
 });
