@@ -57,6 +57,13 @@ export interface LayerRowProps {
    *  `PlaceholderRow.onRelink`: a raw `File`, so the caller (which already
    *  reads a store) owns the parse and the write. */
   readonly onRelink?: (file: File) => void;
+  /** §6 and §8: the layer was created by a run and is not saved in
+   *  workspaces. It reads `Layer.derivedFrom`, never a name. */
+  readonly derived?: boolean;
+  /** §6.2's extra overflow item. `null` disables it — the run history keeps
+   *  20 runs (`processingStore.ts`'s `MAX_RUNS`) and a layer outlives its run,
+   *  so a layer whose log has aged out must not look like one with no log. */
+  readonly onShowRunLog?: (() => void) | null;
 }
 
 export function LayerRow({
@@ -73,6 +80,8 @@ export function LayerRow({
   onRemove,
   unavailable,
   onRelink,
+  derived,
+  onShowRunLog,
 }: LayerRowProps) {
   const { name, visible } = item.layer;
   const rowRef = useRef<HTMLDivElement>(null);
@@ -192,6 +201,16 @@ export function LayerRow({
           <span className="layer-row-state-line">{stateLine}</span>
           {filterChip}
         </span>
+        {/* §8's warning, on its own line under the state line rather than
+            beside it: `.layer-row-state` is a flex ROW shared with the filter
+            chip, and a second sentence in it would be squeezed onto the same
+            240 px. `.layer-row-body` is the column, so the marker is a third
+            line — and only a derived layer has one. */}
+        {derived === true && (
+          <span className="layer-row-derived">
+            Derived · not saved in workspaces
+          </span>
+        )}
       </span>
 
       {kind === "vector" && unavailable && onRelink && (
@@ -247,6 +266,13 @@ export function LayerRow({
         name={name}
         onZoom={onZoom}
         onOpenTable={onOpenTable}
+        // VERBATIM, with no `?? null`: the prop is a three-state one and the
+        // coalesce would destroy the distinction it exists for — `undefined`
+        // means "this layer has no run log at all" and the item is ABSENT,
+        // `null` means "it had one and the history dropped it" and the item is
+        // DISABLED. `onShowRunLog ?? null` would grow every ordinary row a
+        // greyed "Show run log".
+        onShowRunLog={onShowRunLog}
         onStartRename={startRename}
         onRemove={onRemove}
       />

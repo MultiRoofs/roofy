@@ -61,6 +61,19 @@ export interface LayerStateInput {
   /** Any kind: a restored placeholder awaiting a re-link. Wins over
    *  everything but `error`. */
   readonly unavailable?: boolean;
+  /**
+   * Any kind: the parent a New-layer run copied this layer from (§6.2's
+   * "312 buildings · LoD 2.2 · Derived from Delft").
+   *
+   * The `layerName` is the COPY recorded at publication, so the tail stays
+   * right after the parent is renamed or removed — "a derived layer is
+   * independent of its parent from publication on" (§6).
+   *
+   * Structurally typed, not `DerivedFrom`: this module words a sentence and
+   * needs one field of it, and `layerPresentation` has no other reason to
+   * know the layer store's types.
+   */
+  readonly derivedFrom?: { readonly layerName: string } | null;
 }
 
 /** "1 building", "2 buildings", "1,204 buildings" — grouped digits, unit
@@ -105,6 +118,17 @@ export function countRootObjects(model: CityModel): {
 export function layerStateLine(input: LayerStateInput): string {
   if (input.error != null) return `Error · ${input.error}`;
   if (input.unavailable) return "Needs re-link";
+  // ONE place, after the per-kind sentence: §6.2 spells the tail for a city
+  // layer, and a derived VECTOR layer is the same fact about the same kind of
+  // row. Both refusals above still outrank it — a layer that failed says so.
+  const tail =
+    input.derivedFrom == null
+      ? ""
+      : ` · Derived from ${input.derivedFrom.layerName}`;
+  return `${kindStateLine(input)}${tail}`;
+}
+
+function kindStateLine(input: LayerStateInput): string {
   switch (input.kind) {
     case "city":
       return cityStateLine(input);

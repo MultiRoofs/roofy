@@ -107,6 +107,10 @@ function layer(
     appearanceThemes: [],
     selectedAppearance: null,
     isStreaming: false,
+    // REQUIRED on the real record (Task 21). The cast compiles without it,
+    // but the row reads `derivedFrom !== null` — an `undefined` here would
+    // make every seeded layer look derived and then dereference a null run.
+    derivedFrom: null,
     ...overrides,
   } as Layer;
 }

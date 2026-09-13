@@ -3467,6 +3467,18 @@ body {
   white-space: nowrap;
 }
 
+/* §8's "not saved in workspaces" marker, a third line under the state line on
+   a derived row only. Same size and same ink as the state line — it is a
+   second muted sentence about the layer, not a louder one. */
+.layer-row-derived {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.68rem;
+  line-height: 0.85rem;
+  color: var(--fg-muted);
+}
+
 /* ── The overflow menu ─────────────────────────────────────────────────── */
 
 .layer-row-menu {

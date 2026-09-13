@@ -58,6 +58,8 @@ import type {
 } from "../../features/layers/useLayerFileLoader";
 import { LayerRow, PlaceholderRow } from "./LayerRow";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
+import { runById } from "../../features/processing/processingStore";
+import { openRunLog } from "../processing/revealTools";
 
 /**
  * A city layer that a restored snapshot could not rebuild, because its source
@@ -178,6 +180,11 @@ function StoreLayerRow({
 }) {
   const id = item.layer.id;
   const kind = layerKindOf(item);
+  // The parent a New-layer run copied this row from, for either store's kind:
+  // both `Layer` and `GeoLayer` carry the field (Tasks 21 and 23), so the
+  // union needs no branch — which is the point of giving them the same shape.
+  // Bound ONCE so the two props below narrow off the same reference.
+  const derivedFrom = item.layer.derivedFrom;
   const appliedFilter = useQueryStore((state) =>
     item.kind === "city" ||
     (item.kind === "geo" && item.layer.kind === "geojson")
@@ -232,6 +239,7 @@ function StoreLayerRow({
       kind,
       counts,
       lod: item.kind === "city" ? item.layer.selectedLod : null,
+      derivedFrom: item.kind === "city" ? item.layer.derivedFrom : null,
     };
   } else if (kind === "vector") {
     const geo = item.kind === "geo" ? item.layer : null;
@@ -239,6 +247,7 @@ function StoreLayerRow({
       kind,
       featureCount:
         geo?.kind === "geojson" ? inlineFeatureCount(geo.config) : undefined,
+      derivedFrom: geo?.derivedFrom ?? null,
       // The same bargain a file-backed city model gets: the document was too
       // big for localStorage, so the row kept the name and asks for the file.
       unavailable: geo !== null && isGeoLayerUnavailable(geo),
@@ -257,6 +266,17 @@ function StoreLayerRow({
       active={active}
       kind={kind}
       stateLine={layerStateLine(input)}
+      derived={derivedFrom !== null}
+      // Three states, on purpose: `undefined` for an ordinary layer (no item
+      // at all), `null` for a derived layer whose run has left the 20-run
+      // history (the item, disabled), and the callback otherwise.
+      onShowRunLog={
+        derivedFrom === null
+          ? undefined
+          : runById(derivedFrom.runId) === null
+            ? null
+            : () => openRunLog(derivedFrom.runId)
+      }
       filterChip={
         appliedFilter !== null && appliedFilter.conditions.length > 0 ? (
           <span className="layer-filter-chip">

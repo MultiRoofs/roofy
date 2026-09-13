@@ -55,6 +55,10 @@ export interface LayerRowMenuProps {
    *  to open. The item is then absent rather than disabled: a permanently
    *  greyed row teaches nothing. */
   readonly onOpenTable: (() => void) | null;
+  /** §6.2's derived-layer item. `undefined` omits it (an ordinary layer has no
+   *  run log at all); `null` renders it DISABLED, for a derived layer whose run
+   *  has left the 20-run history. */
+  readonly onShowRunLog?: (() => void) | null;
   /** Puts the ROW into its rename edit; the row owns that state and commits
    *  it, because the field lives in the row, not in this popover. */
   readonly onStartRename: () => void;
@@ -69,6 +73,7 @@ export function LayerRowMenu({
   name,
   onZoom,
   onOpenTable,
+  onShowRunLog,
   onStartRename,
   onRemove,
 }: LayerRowMenuProps) {
@@ -183,6 +188,21 @@ export function LayerRowMenu({
                 onClick={() => act(onOpenTable)}
               >
                 Open table
+              </button>
+            )}
+            {onShowRunLog !== undefined && (
+              // DISABLED rather than absent when the run has aged out of the
+              // 20-run history: a derived layer that still has its log and one
+              // whose log is gone must not look the same.
+              <button
+                type="button"
+                className="menu-item"
+                disabled={onShowRunLog === null}
+                onClick={() => {
+                  if (onShowRunLog !== null) act(onShowRunLog);
+                }}
+              >
+                Show run log
               </button>
             )}
             <button
