@@ -114,7 +114,9 @@ describe("toolEligibility", () => {
   });
 
   it("asks for a vector layer for cross-layer tools", () => {
-    const tool = { ...toolById("join-by-location"), implemented: true };
+    // The REAL Join entry: it is implemented now, so this is the reason its
+    // catalogue row actually shows on a workspace with no vector layer.
+    const tool = toolById("join-by-location");
     expect(toolEligibility(tool, { ...base, hasVectorLayer: false })).toEqual({
       ok: false,
       reason: "Add a vector layer to join with",
@@ -140,7 +142,7 @@ describe("toolEligibility", () => {
   });
 
   it("reports a missing extension download", () => {
-    const tool = { ...toolById("join-by-location"), implemented: true };
+    const tool = toolById("join-by-location");
     expect(
       toolEligibility(tool, {
         ...base,
@@ -238,6 +240,14 @@ describe("toolEligibility", () => {
     expect(toolEligibility(tool, base)).toEqual({
       ok: false,
       reason: "Needs a vector layer",
+    });
+  });
+
+  it("accepts the real Join entry on a ready city layer beside a vector one", () => {
+    // Every reason above answered: Join ships in this commit, so its row is
+    // enabled rather than "Not available yet".
+    expect(toolEligibility(toolById("join-by-location"), base)).toEqual({
+      ok: true,
     });
   });
 

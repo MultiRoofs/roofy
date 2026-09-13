@@ -20,6 +20,7 @@ describe("tools/register", () => {
       "roof-metrics",
       "measure-solids",
       "validate-solids",
+      "join-by-location",
     ]);
   });
 });

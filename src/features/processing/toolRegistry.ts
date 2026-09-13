@@ -170,13 +170,26 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
       crossLayerParamsError("join-by-location", params, BAG_ONLY),
     normaliseParams: (params) =>
       resolveCrossLayerParams("join-by-location", params, BAG_ONLY),
+    // §7.5: "a rule on the first copied TEXT field `=` its most frequent
+    // value; if no text field was copied, on `<prefix>matches_n > 0`". Both
+    // halves are the same seam, because `pick` chose the column — which is
+    // exactly what Task 9's operator/value FUNCTION unions exist for. This is
+    // the one entry that passes functions; the other six pass plain values.
     styleByResult: {
       kind: "rule",
-      operator: "=",
-      value: { kind: "mostFrequent" },
-      pick: (written) => written.find((c) => c.type === "VARCHAR") ?? null,
+      operator: (picked) => (picked.type === "VARCHAR" ? "=" : ">"),
+      value: (picked) =>
+        picked.type === "VARCHAR"
+          ? { kind: "mostFrequent" }
+          : { kind: "literal", value: 0 },
+      // The match count by NAME and case-insensitively, like Validate solids'
+      // validity flag: the TABLE's spelling of a column is the one that wins.
+      pick: (written) =>
+        written.find((c) => c.type === "VARCHAR") ??
+        written.find((c) => c.name.toLowerCase().endsWith("matches_n")) ??
+        null,
     },
-    implemented: false,
+    implemented: true,
   },
   {
     id: "aggregate-per-area",

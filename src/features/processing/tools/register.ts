@@ -11,3 +11,4 @@ import "./heightFromExtent";
 import "./roofMetrics";
 import "./measureSolids";
 import "./validateSolids";
+import "./joinByLocation";

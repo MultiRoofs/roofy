@@ -11,16 +11,12 @@
  * value came from), so a record that exists only as a prop is a run that
  * `runById` cannot find and the draft is never written.
  *
- * JOIN'S OWN descriptor is pinned DIRECTLY, not through the footer. Its `pick`
- * looks for a VARCHAR column, and a written column's TYPE is reproduced from
- * `tool.outputColumns` — which Join does not have until Task 15 embeds its
- * `fieldTypes`. So its `pick` and the resolvers are asserted over columns this
- * file types itself, and Task 16, where Join ships, adds Join's own end-to-end
- * footer case.
- *
- * The `mostFrequent` read and the FUNCTION forms are nonetheless exercised
- * through the real footer, against the synthetic tool declared below — see the
- * comment on that mock for why a tool had to be invented to do it.
+ * JOIN'S OWN descriptor is pinned twice: DIRECTLY, over columns this file
+ * types itself, and END TO END through the real footer — which is where the
+ * `mostFrequent` read and the operator/value FUNCTION forms are exercised. Task
+ * 9 had to invent a synthetic tool for that, because no registry entry supplied
+ * the function forms yet; Join now does, so the synthetic one is retired and
+ * the whole registry here is the real one.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -82,51 +78,6 @@ vi.mock("../../../../src/features/processing/runQueue", () => ({
   cancelRun: vi.fn(),
   undoRun: vi.fn(async () => {}),
 }));
-
-/**
- * ONE tool definition is replaced, so the footer's FUNCTION-form path has
- * something real to run.
- *
- * `StyleByResult.operator` and `.value` are each `T | ((picked) => T)` because
- * §7.5 needs two answers chosen by the column `pick` returned, and the ONLY
- * supplier of the function forms is Task 16, with the tool that ships them.
- * Until then nothing in the registry exercises those branches through the
- * component, and the resolvers would be proven only against plain values —
- * which is exactly the half that needs no resolver.
- *
- * So `distance-to-nearest` (unimplemented, unused by every other case here) is
- * given a descriptor of the §7.5 SHAPE: `=` and the modal value on a VARCHAR,
- * `<` and the median on a DOUBLE. The registry is otherwise the REAL one — the
- * mock delegates every other id to it, and the footer, the resolvers, the SQL
- * builders and the draft store are all the real ones. What is substituted is
- * the tool's own data, which is the input this seam exists to read.
- */
-vi.mock("../../../../src/features/processing/toolRegistry", async () => {
-  const actual = await vi.importActual<
-    typeof import("../../../../src/features/processing/toolRegistry")
-  >("../../../../src/features/processing/toolRegistry");
-  const synthetic: (typeof actual.TOOLS)[number] = {
-    ...actual.toolById("distance-to-nearest"),
-    outputColumns: (prefix) => [
-      { name: `${prefix}name`, type: "VARCHAR" },
-      { name: `${prefix}distance_m`, type: "DOUBLE" },
-    ],
-    styleByResult: {
-      kind: "rule",
-      operator: (picked) => (picked.type === "VARCHAR" ? "=" : "<"),
-      value: (picked) =>
-        picked.type === "VARCHAR"
-          ? { kind: "mostFrequent" }
-          : { kind: "median" },
-      pick: (written) => written[0] ?? null,
-    },
-  };
-  return {
-    ...actual,
-    toolById: (id: Parameters<typeof actual.toolById>[0]) =>
-      id === "distance-to-nearest" ? synthetic : actual.toolById(id),
-  };
-});
 
 const { RunFooter } = await import("../../../../src/ui/processing/RunFooter");
 const { useLayerStore } =
@@ -375,10 +326,15 @@ describe("Style by result, from the descriptor", () => {
     expect(resolveStyleValueSource(descriptor, text)).toEqual({
       kind: "mostFrequent",
     });
-    // No text field copied: nothing to style by YET. §7.5's other half
-    // (`<prefix>matches_n > 0`, which is what the operator/value FUNCTION
-    // unions exist for) is Task 16's, with the tool that ships it.
-    expect(descriptor.pick([count])).toBeNull();
+    // §7.5's other half: "if no text field was copied, on
+    // `<prefix>matches_n > 0`". The SAME descriptor, a different column —
+    // which is what the operator/value FUNCTION unions exist for.
+    expect(descriptor.pick([count])).toEqual(count);
+    expect(resolveStyleOperator(descriptor, count)).toBe(">");
+    expect(resolveStyleValueSource(descriptor, count)).toEqual({
+      kind: "literal",
+      value: 0,
+    });
   });
 
   it("resolves a PLAIN descriptor's operator and value as they are", () => {
@@ -390,69 +346,44 @@ describe("Style by result, from the descriptor", () => {
     expect(resolveStyleValueSource(solids, column)).toEqual({ kind: "median" });
   });
 
-  it("resolves the FUNCTION forms per picked column, through the footer", async () => {
-    // §7.5's shape end to end: the same descriptor answers `=` + the modal
-    // value on a TEXT column and `<` + the median on a numeric one, and the
-    // footer reads BOTH through the resolvers rather than off `.operator`.
-    // The tool is the synthetic one at the top of this file; everything else
-    // — footer, resolvers, SQL builders, draft store — is real.
-    const descriptor = toolById("distance-to-nearest").styleByResult!;
-    const text = { name: "near_name", type: "VARCHAR" as const };
-    const number = { name: "near_distance_m", type: "DOUBLE" as const };
-    expect(resolveStyleOperator(descriptor, text)).toBe("=");
-    expect(resolveStyleValueSource(descriptor, text)).toEqual({
-      kind: "mostFrequent",
-    });
-    expect(resolveStyleOperator(descriptor, number)).toBe("<");
-    expect(resolveStyleValueSource(descriptor, number)).toEqual({
-      kind: "median",
-    });
-
-    const layerId = addLayer();
-    const nearest = (columns: ReadonlyArray<string>): RunRecord =>
-      doneRun({
-        targetLayerId: layerId,
-        toolId: "distance-to-nearest",
-        prefix: "near_",
-        params: {},
-        columns,
-        summary: {
-          ...doneRun({}).summary!,
-          nonNullByColumn: { near_name: 2, near_distance_m: 2 },
-        },
-      });
-
-    // A TEXT column picked: `=` its most frequent value, read with the modal
-    // builder — which is not the median builder and not `columns[0] >`.
+  it("styles a Join by the copied TEXT field's most frequent value (§7.5)", async () => {
+    // The footer's own path, end to end: `outputColumns(prefix, params)` types
+    // the written columns from the FROZEN `fieldTypes`, `pick` finds the
+    // VARCHAR, the operator FUNCTION answers `=` for it, and the value is read
+    // with the modal builder over ROOT rows — never a median, and never a
+    // string handed to `>`.
+    const id = addLayer();
     runQuery.mockImplementationOnce(async (sql: string) => {
       statements.push(sql);
-      return { ok: true as const, columns: ["m"], rows: [{ m: "Centrum" }] };
+      return {
+        ok: true as const,
+        columns: ["m"],
+        rows: [{ m: "Centrum" } as Record<string, unknown>],
+      };
     });
-    const { unmount } = render(
-      <RunFooter
-        run={seed(nearest(["near_name", "near_distance_m"]))}
-        canRun
-        reason={null}
-        onRunAgain={() => {}}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
-    await waitFor(() => {
-      expect(
-        useRuleDraftStore.getState().drafts[layerId]?.form?.conditions,
-      ).toEqual([{ field: "near_name", operator: "=", value: "Centrum" }]);
-    });
-    expect(statements).toEqual([
-      'SELECT "v" AS m FROM (SELECT "near_name" AS "v", count(*) AS "n" FROM "layer_1" WHERE ("feature_id" IS NULL OR "feature_id" = "id") AND "near_name" IS NOT NULL GROUP BY "v") ORDER BY "n" DESC, "v" ASC LIMIT 1',
-    ]);
-    unmount();
-
-    // The SAME descriptor, a numeric column picked because no text one was
-    // written: the other operator, the other value source, the other builder.
-    statements.length = 0;
     render(
       <RunFooter
-        run={seed(nearest(["near_distance_m"]))}
+        run={seed(
+          doneRun({
+            targetLayerId: id,
+            toolId: "join-by-location",
+            lod: null,
+            prefix: "zones_",
+            params: {
+              proxy: "rectangle",
+              predicate: "intersects",
+              fields: ["name"],
+              tie: "first",
+              writeMatchCount: false,
+              fieldTypes: { name: "VARCHAR" },
+            },
+            columns: ["zones_name"],
+            summary: {
+              ...doneRun({}).summary!,
+              nonNullByColumn: { zones_name: 2 },
+            },
+          }),
+        )}
         canRun
         reason={null}
         onRunAgain={() => {}}
@@ -460,13 +391,57 @@ describe("Style by result, from the descriptor", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
     await waitFor(() => {
-      expect(
-        useRuleDraftStore.getState().drafts[layerId]?.form?.conditions,
-      ).toEqual([{ field: "near_distance_m", operator: "<", value: 4.2 }]);
+      expect(useRuleDraftStore.getState().drafts[id]?.form?.conditions).toEqual(
+        [{ field: "zones_name", operator: "=", value: "Centrum" }],
+      );
     });
     expect(statements).toEqual([
-      'SELECT median(CAST("near_distance_m" AS DOUBLE)) AS m FROM "layer_1" WHERE "feature_id" IS NULL OR "feature_id" = "id"',
+      'SELECT "v" AS m FROM (SELECT "zones_name" AS "v", count(*) AS "n" FROM "layer_1" WHERE ("feature_id" IS NULL OR "feature_id" = "id") AND "zones_name" IS NOT NULL GROUP BY "v") ORDER BY "n" DESC, "v" ASC LIMIT 1',
     ]);
+  });
+
+  it("styles a count-only Join on `<prefix>matches_n > 0`, reading nothing", async () => {
+    // §7.5's OTHER half, through the same descriptor and the same footer: no
+    // text field was copied, so `pick` falls to the match count and the
+    // operator and value FUNCTIONS answer `>` and a literal 0 — which needs no
+    // round trip to the engine at all.
+    const id = addLayer();
+    render(
+      <RunFooter
+        run={seed(
+          doneRun({
+            targetLayerId: id,
+            toolId: "join-by-location",
+            lod: null,
+            prefix: "zones_",
+            params: {
+              proxy: "rectangle",
+              predicate: "intersects",
+              fields: ["name"],
+              tie: "countOnly",
+              writeMatchCount: true,
+              fieldTypes: { name: "VARCHAR" },
+            },
+            columns: ["zones_matches_n"],
+            summary: {
+              ...doneRun({}).summary!,
+              nonNullByColumn: { zones_matches_n: 2 },
+            },
+          }),
+        )}
+        canRun
+        reason={null}
+        onRunAgain={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    await waitFor(() => {
+      expect(useRuleDraftStore.getState().drafts[id]?.form?.conditions).toEqual(
+        [{ field: "zones_matches_n", operator: ">", value: 0 }],
+      );
+    });
+    expect(runQuery).not.toHaveBeenCalled();
+    expect(statements).toEqual([]);
   });
 
   it("disables the button with §6.2's reason when the CHOSEN column is empty", () => {

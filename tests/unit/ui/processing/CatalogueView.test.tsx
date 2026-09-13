@@ -110,12 +110,17 @@ describe("CatalogueView", () => {
     const join = screen.getByRole("button", {
       name: /Join attributes by location/,
     });
+    // Join SHIPS now, so its row is no longer disabled for the release note:
+    // the workspace has no vector layer, which is §5's own reason for it. The
+    // REAL registry entry answers that — the spec's per-cause copy is pinned in
+    // `eligibility.test.ts`.
     expect(join).toHaveAttribute("aria-disabled", "true");
-    // Every tool but Height from extent, Roof metrics, Measure solids and
-    // Validate solids is still unimplemented, so that is the reason
-    // `toolEligibility` returns for the rest of the catalogue. The
-    // spec's per-cause copy is pinned in `eligibility.test.ts`; what this
-    // asserts is that a disabled row RENDERS its reason as a second line.
+    expect(join).toHaveAttribute("title", "Add a vector layer to join with");
+    expect(join.textContent).toContain("Add a vector layer to join with");
+    // Aggregate buildings per area and Distance to nearest are still
+    // unimplemented, so that is the reason `toolEligibility` returns for them.
+    // What this asserts is that a disabled row RENDERS its reason as a second
+    // line.
     expect(screen.getAllByText("Not available yet").length).toBeGreaterThan(0);
   });
 
