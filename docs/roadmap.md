@@ -631,63 +631,106 @@ Delft FCB layer (1,115 buildings, 9.2 s) in light and dark at 1000 px width. The
 M13.2 seams are in `docs/architecture-notes.md` ("Processing toolbox seam …
 M13.2 (2026-09-12)").
 
-Carried to 13.3 / M3 — things a user can notice today:
+**Milestone 13.3 implemented 2026-09-13** — the toolbox is finished. Five more
+tools ship: **Measure solids** and **Validate solids** (`three_d`, over the
+reader's own LoD geometry, with `ST_3DTryFromWKB`, `ST_3DValidationReport` and
+`ST_3DVolume` guarded exactly as the real engine requires) and the three
+cross-layer tools — **Join attributes by location**, **Aggregate buildings per
+area** and **Distance to nearest** (`spatial`, with the vector layer reprojected
+app-side through proj4 and registered as a per-run table). With them, three
+seams the toolbox needed: a **"Reading source"** run phase that re-registers a
+reader-backed layer's bytes for the length of one run and drops them again,
+typed output columns, and ONE Style-by-result descriptor on the tool definition
+instead of a branch per tool. Aggregate's count column is `bld_buildings_n`
+(`<prefix>buildings_n`) and its scope radios sit under TARGET, with a muted line
+saying the scope applies to the source layer's buildings.
 
-- **Streaming (FCB) runs write to the table only, and that is now a DEFERRAL
-  with a design.** A streaming layer's `model.objects` is empty, so a run's
-  values show in the grid, the filter and exports but not in Details, the rule
-  editor or a colour rule, which §7.1 and §8 do ask for. Closing it means an
-  attribute-overlay seam in the FCB plugin and worker plus an Undo path; the
-  repo owner has ruled it a future consideration (M2 plan, Design decision (b)
-  and its "Future consideration" section).
-- **A dead DuckDB worker is detected and contained, but not recovered from.**
-  Retry in the status bar reboots the engine and rebuilds only the sources
-  parked while it was coming up, so the tables that were `ready` when the worker
-  died stay `failed` and every tool stays disabled until the page is reloaded.
-- **Two known gaps left in that death path** (the table FIFO is no longer one:
-  every engine await in `layerTables` now races the death through
-  `insights/engineAwait.ts`, so a build releases the queue and abandons its
-  entry): `runQuery` callers outside the run queue and the builds (the export
-  dialog, the layer counts) still await a promise that never settles, and
-  `retryEngine` carries no engine-generation check.
-- ~~Style by result's median is over table ROWS, not features~~ — fixed at the
-  M2 gate: `buildMedianSql` restricts to the feature roots
-  (`"feature_id" IS NULL OR "feature_id" = "id"`), pinned by an exact-string test
-  and by a real-DuckDB probe where the row median is 10 and the root median 6.
-- **No rule-colour palette rotation**: every Style by result draft takes the
-  editor's one default new-rule colour, so successive drafts share it.
-- **Style by result sets `Color by = Rules` eagerly**, so a layer that was on
-  Surface type or Single colour repaints to the unmatched colour before the
-  draft rule is saved. The draft rule's own colour still waits for Save.
-- A run that goes stale or is undone while a Style by result median is in flight
-  still opens the draft the median produced.
-- **The drawer's synthetic "Roof area" and the computed `roof_area_m2` disagree**
-  where a feature has both its own roof and parts (correct per §7's contributor
-  rule — see the architecture note), and nothing in the UI says why.
-- The five remaining tools are registered but `implemented: false`, and that
-  reason outranks every other one — so a cross-layer row reads "Not available
-  yet" rather than "Add a vector layer to join with" until it is implemented.
-  No tool needs an extension yet, so what is unreachable through the UI is the
-  extension-failure RUN copy: nothing loads `spatial` or `three_d` to fail on.
-  The muted chip and its Retry link ARE reachable — an offline boot publishes
-  both lazy extensions as failed (spec §5's boot-time check), which is scenario
-  6 — they simply disable no row of their own while every extension tool still
-  reads "Not available yet".
-- **`useLodOptions` answers only for `roof-metrics`** while `ToolView` renders
-  the LoD field on `needsLod && implemented`: M3's solids tool must extend the
-  hook in the same commit that flips `implemented`.
+The **New layer** destination ships for every implemented tool: a run can write
+its results to a derived layer instead of to its target. A derived city layer is
+cut from its parent's TABLE and keeps its parent's reader, so it is
+reader-backed — every tool, proxy and export format the parent supports,
+CityParquet included, works on the copy — and a derived vector layer is a plain
+GeoJSON layer holding every area of its target. It is prepared inside the run's
+own queue slot and published in one step, so a cancel before that leaves nothing
+behind; its row is marked "Derived · not saved in workspaces", and both doors out
+of the workspace — the saved snapshot and the share link — omit it, with the
+active-layer index repointed at the filtered list. A derived layer dropped from a
+SHARE link gets no notice: §8 words that sentence for Save only.
+
+Also closed, all carried from 13.1 and 13.2: every engine await now settles when
+the worker dies — the race moved INTO `duckdb.ts`'s own primitives, so the export
+dialog, the layer counts, the grid query, the map-filter sync, the Stats tab and
+the result card's median return a message instead of hanging, with no call-site
+edit; `retryEngine` now checks the engine generation across its boot; `undoRun`
+no longer publishes a restore whose database is gone; rule drafts rotate an
+eight-colour palette and no longer set `Color by = Rules` before the user presses
+Save (at Save a result draft switches the mode from ANY mode, while a rule typed
+by hand keeps the editor's surface-only flip); the write step's SQL reaches the
+run log statement by statement; Open table scrolls the new columns into view; the
+drawer's synthetic "Roof area" header explains how it differs from the computed
+`roof_area_m2`; and the streaming-table sweep compares stream versions, so
+reopening the toolbox stops retiring a finished result card as stale.
+
+Two things a user meets that are deviations rather than details — the New layer
+destination is REFUSED on a streaming (FlatCityBuf) target, and a dead DuckDB
+worker is contained but still not recovered from — are in the carried list below.
+Browser acceptance is the milestone gate's own record:
+`scripts/smoke/processing-m3.md`. The M13.3 seams are in
+`docs/architecture-notes.md` ("Processing toolbox seam … M13.3 (2026-09-13)").
+
+Carried to M4 — things a user can notice today:
+
+- **The New layer destination is refused on a STREAMING target**, with "New
+  layer is not available for a streaming layer: its loaded buildings carry no
+  geometry to copy." A streaming layer's resident records carry no boundaries, so
+  the copy §6 describes could hold attributes but render nothing; building
+  geometry from resident records is a worker-protocol change, which §9 defers
+  ("Computing on layers without a reader"). Scenario 10's streaming variant is
+  therefore unmet.
+- **Streaming (FCB) runs still write to the table only** — unchanged since 13.2,
+  and still the repo owner's "future consideration". A streaming layer's
+  `model.objects` is empty, so a run's values show in the grid, the filter and
+  exports but not in Details, the rule editor or a colour rule, which §7.1 and §8
+  do ask for. Closing it means an attribute-overlay seam in the FCB plugin and
+  worker plus an Undo path (M2 plan, Design decision (b) and its "Future
+  consideration" section).
+- **A dead DuckDB worker is contained but still not recovered from.** Retry in
+  the status bar reboots the engine and rebuilds only the sources parked while it
+  was coming up, so a table that was `ready` when the worker died stays `failed`
+  and every tool stays disabled until the page is reloaded. What 13.3 fixed is
+  that nothing HANGS on that death any more, not that the session comes back.
+  Accepted as a deviation from §6.1's promise that Retry rebuilds tables, first
+  in M2 and again here.
+- **Two engine awaits are still unraced against that death**:
+  `queryParquetBuffer`'s VFS registration and read, and `ensureExtension`'s
+  in-flight INSTALL/LOAD. Both sit outside the six primitives the race covers, so
+  a parquet read or an extension download caught by a worker death still never
+  settles.
+- **A run over scope "All" builds an unbounded `IN (…)` list of contributor ids**
+  — on the solids path and on the cross-layer footprint path. Watched at the
+  milestone gate on the Delft sample; pushing contributor selection into SQL is
+  the fix if it bites a 100k-feature layer.
+- **Removing a layer does not clear its computed-column provenance** — only the
+  rebuild path calls `clearLayer`, so the session store keeps provenance for a
+  layer that is gone. Pre-existing, not introduced by the toolbox.
+- **"Show run log" on a derived layer's row goes dark once its run leaves the
+  20-run session history.** The ancestry itself is kept on the layer record; the
+  log it would open is not.
 - Cancel is best-effort at statement granularity for SQL — it is seen between
-  statements, so a long one runs to completion — and at a 500-feature batch
-  boundary inside Roof metrics' compute.
-- The write step is logged as a step with its timing, but its SQL is not in the
-  log view — a planner cannot read the UPDATE back and repeat it by hand.
-- "Open table" appends the run's columns to a customised column list but does
-  not scroll them into view (§6.2 asks for both).
+  statements, so a long one runs to completion — and at a batch boundary inside
+  the app-side computes (Roof metrics' roll-up, the vector reprojection and its
+  NDJSON encoding).
 - A queued run's "Matching" ids are resolved at the HEAD of the queue, from the
   filter frozen at Run. Ruled correct; recorded because the log header shows
   `scopeCount 0` until then.
 - A corrupt bbox with `zmin > zmax` writes a negative height and reports it
   honestly rather than guarding.
+- Everything §9 defers: footprint operations to a new vector layer, the field
+  calculator, city-to-city joins, replay of runs on restore, and computing on
+  layers without a reader.
+- Smaller items each task's reviewer deferred to the final review are recorded
+  per task in the milestone's SDD ledger (the M3 progress ledger, which lives
+  outside the repository).
 - **The app shell overflows horizontally below ~1024px** (`body.scrollWidth`
   1024 at `innerWidth` 1000), clipping the right edge of the right panel with
   the panel collapsed too. Pre-existing and unrelated to the toolbox.

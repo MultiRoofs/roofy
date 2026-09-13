@@ -407,5 +407,252 @@ reads its threshold straight out of that cell, so the probe — and
 `writeComputedColumns` — pin the column to DOUBLE; a future query that medians a
 column of unknown type must CAST first rather than trust the binding.
 
-Browser acceptance procedure: `scripts/smoke/processing-m1.md` (M13.1) and
-`scripts/smoke/processing-m2.md` (M13.2).
+### M13.3 (2026-09-13)
+
+The toolbox's last milestone: the five remaining tools, the New layer
+destination, and the engine-death and Style-by-result threads 13.1 and 13.2
+left on the carried list. Each seam below is a decision with a cost if it is
+wrong, not a detail.
+
+**Every `Surface` carries the CityJSON geometry type it came from.**
+`Surface.geometryType?: CityJSONGeometryType | null`
+(`navara-core/src/citymodel/types.ts:131`), set once in `buildSurface`'s object
+literal from the geometry being walked
+(`navara-core/src/citymodel/cityjson/parseHelpers.ts:195`) — one edit site
+covering all five surface-producing cases, and `parseCityObject` is the funnel
+for CityJSON, CityJSONSeq and FlatCityBuf alike. It is what makes "has a SOLID
+at LoD X" answerable from tags alone (`solidLodOptions` / `hasSolidAt` in
+`src/features/processing/solidGeometrySource.ts`, over `SOLID_GEOMETRY_TYPES`
+from `solidRollUp.ts`), which is the only way to answer it: the LoD select is
+drawn before any source is re-read, and nothing may walk a whole layer's
+geometry synchronously. The field is OPTIONAL as well as nullable, so the 21
+files of hand-built `Surface` literals stayed untouched. CityParquet's and
+CityGML's independently built surfaces carry no tag — neither has a
+geometry-type source — which reads as "unknown", i.e. "not a solid", and matches
+the eligibility reason those layers already get.
+
+**"Reading source" is a phase, and it holds the bytes for one run.**
+`readSource({ runId, table, lod, signal })`
+(`src/features/processing/sourceRead.ts:210`) mints a VFS name, calls the
+table's `SourceProvider` for a FRESH array, registers it, and returns the
+reader `FROM` clause plus the LoD geometry column; the executor calls
+`release()` in a `finally`. The shape is copied from `export.ts`'s working
+precedent, including the `dropBuffer` the moment the statement is done — a
+300 MB CityJSON must not sit in the wasm heap for the length of a compute. The
+LoD label → column mapping comes from `LayerTable.lods` (`{ label, suffix }`),
+never from string surgery: `"0.0"` and `"0"` are different columns and only the
+file knows which it has (`lodZeroLabel` in `buildingProxy.ts` looks the label up
+the same way). The PHASE is entered in `runQueue.ts:1303`, before `resolveScope`
+at `:1307` and not with the registration it names: `resolveScope` issues a
+statement of its own, and a run that waited for it in the phase it was already
+in would show "queued" while holding the FIFO.
+
+**The solids SQL is guarded by what the engine does, statement by statement.**
+`buildSolidMeasureSql` and `buildSolidValidationSql`
+(`src/features/processing/solidSql.ts:120`, `:140`) read EVERY validation-report
+field as `CASE WHEN s IS NOT NULL THEN r.<field> END` and the volume as
+`CASE WHEN s IS NOT NULL AND r.is_valid THEN ST_3DVolume(s) END`, and never
+select `r.code` or `r.message`. That is not defensive style, it is D1 below:
+`ST_3DValidationReport` over a runtime-NULL solid returns UNINITIALISED memory.
+Solid detection keys on the CityJSON geometry type — the model's tag and the
+reader's `geometry_properties_lod*.type` — and never on
+`cityjson_wkb_geometry_type`, because a CompositeSolid's WKB type name is
+"GeometryCollection Z" (D4) and keying on it would skip every CompositeSolid as
+"not a solid". Scope-wide source identity is checked with a separate cheap
+id-only statement (`buildSourceIdsSql`), compared against the ids the
+executor's own scope-rows read returned — never against `ctx.featureIds`, which
+is `null` for scope "all".
+
+**ONE Style-by-result descriptor, not a branch per tool.**
+`ToolDefinition.styleByResult: StyleByResult | null`
+(`src/features/processing/types.ts:49`, `:179`); `RunFooter` reads the
+descriptor, picks the column with `pick(written)`, resolves the operator and
+value through `resolveStyleOperator` / `resolveStyleValueSource` (both may be
+functions of the picked column) and opens either a rule draft or the vector
+layer's Color by attribute. No `toolId` appears in `RunFooter`: the descriptor is
+what keeps the seven tools' differences out of the one component.
+
+**One cross-layer run shape: the city table is the compute ground, the vector
+layer is a per-run table.** Every cross-layer run occupies the CITY layer's slot
+on the one table FIFO and computes over the city table, whatever the destination.
+The vector layer becomes `__src_<runId>` (`vectorTableName` /
+`createVectorTable`, `src/features/processing/vectorTable.ts`), built from an
+app-made NDJSON of reprojected features — the shape `computedColumns.ts` already
+uses for the write — and dropped in a `finally` on every exit path: done,
+failed, cancelled, engine death. Reprojection is app-side (`reprojectGeoLayer`,
+`vectorSource.ts:445`) through `crsFromGeodetic`
+(`src/scene/cursorCrsReadout.ts:53`), the app's single proj4 door, after
+`ensureModelCrsLoadable` (`features/layers/ensureCrs.ts`), because
+`crsFromGeodetic`'s own guard is synchronous and returns `null` for a definition
+proj4 has not loaded yet.
+`ST_Transform` exists in the wasm build and is deliberately not used, so the CRS
+answer lives in one place and the offline story does not depend on whether
+`spatial` ships PROJ data. A building reaches a 2-D predicate through a PROXY
+(`buildProxySql` / `buildFeatureProxySql`, `buildingProxy.ts`): an LoD 0
+footprint where the layer has one, otherwise the bbox rectangle or its centre,
+with `ST_Force2D` applied per row because `ST_Union_Agg` keeps Z (D7) and
+`ST_IsEmpty` folded over the union because an empty aggregate is
+`GEOMETRYCOLLECTION EMPTY`, not NULL (D8) — `g IS NULL` is the ONE "no proxy"
+signal the three cross-layer tools read. Distance uses `ST_Distance_GEOS`, not
+`ST_Distance`, because the core function returns 0 for any polygon↔polygon pair
+on this build (D10). A vector TARGET's results are merged into the layer's
+`config.preparedData` through `mergeGeoFeatureProperties` over the pure
+`mergeGeoDocumentProperties` (`features/geoLayers/geoLayerStore.ts`); provenance
+goes in `useComputedColumnStore` under the geo layer's id, and a vector run is
+retired by a rebuild of the SOURCE city table (the run is keyed by its
+`computeLayerId`) and its Undo revoked by an engine death like every other.
+Copied-field TYPES travel inside the frozen `params` as `fieldTypes`
+(`crossLayerParams.ts:53`), so `tool.outputColumns(run.prefix, run.params)` is
+exact for every tool and the write declares its columns rather than inferring
+them (D9).
+
+**A derived layer is cut from the parent's TABLE, prepared in the run's own FIFO
+slot and published in one step.** `prepareDerivedCityLayer`
+(`src/features/processing/deriveLayer.ts:191`) issues
+`CREATE TABLE … AS SELECT * FROM <parent> WHERE COALESCE("feature_id","id") IN
+(…)`, which works for every parent kind and brings the parent's computed columns
+across with their values, and returns a plan whose `publish()` is one
+synchronous step (`adoptLayerTable`, the provenance copy,
+`addLayer({ insertAfterId })`, `activateLayer`). `enqueueLayerTable` is unusable
+here and that is a hard fact: it goes through the same queue the run is already
+inside, so calling it would deadlock. Reader-backedness is then metadata plus a
+filter — the copy keeps the parent's `source` / `reader` / `extension` / `lods`
+and sets `LayerTable.sourceFeatureIds` (`deriveLayer.ts:395`), which TWO
+independent readers of the parent's source must AND in: `resolveScope`'s "all"
+branch (`scope.ts:125`, which turns `featureIds: null` into the derived table's
+own row ids, so `readSource`, every executor and `buildProxySql` need no change
+at all) and `buildCityParquetSourceSql`'s `where` (`insights/sql.ts:810`, the
+export path, which re-reads the PARENT file). Miss one and the copy quietly
+reads its parent whole. A derived VECTOR layer is a plain GeoJSON layer
+(`prepareDerivedVectorLayer`, `:488`) holding every area of its target, because
+§6 is explicit that Aggregate's copy keeps all target areas while the scope
+selects only the buildings counted. `src/app/snapshotLayers.ts` is the ONE
+derived-layer filter, for BOTH doors out of the workspace — the saved snapshot
+and the share link — and it computes the active-layer index from the same
+filtered arrays, because a filter and a per-kind index done in two places drift
+into a restore that opens the wrong layer. The accepted deviation is the
+streaming one: `STREAMING_NO_NEW_LAYER` (`deriveLayer.ts:54`) refuses the
+destination on an FCB target, because a resident record carries no boundaries
+and the copy would render nothing.
+
+**The engine-death race lives in the PRIMITIVE.** `settleOnDeath`
+(`src/insights/duckdb.ts:237`) wraps `runQuery` (and `ddl` through it),
+`queryDuckDB`, `registerBuffer`, `readFile` and `dropBuffer`: each races its
+in-flight await against this module's own death signal and returns its ordinary
+failure value. duckdb-wasm's `onError` clears its pending requests WITHOUT
+rejecting them, so a request caught by the death never settles at all;
+`layerTables.ts` had solved that for itself by shadowing each primitive
+(`racedWithDeath`), but `computedColumns.ts`, `export.ts` and every off-queue
+caller imported the unraced originals. One change in the primitive fixes them
+all, with no call-site edit, no new export and no mock-factory sweep — and every
+future caller by default, which is what a hazard with no visible symptom needs.
+The run queue is unchanged and provably so: `markEngineDead` dispatches
+listeners synchronously in registration order, and in `raced(runQuery(sql))` the
+argument is evaluated first, so the primitive's listener resolves a microtask
+while `raced`'s own listener REJECTS synchronously and `EngineDeadError` still
+wins. `retryEngine` (`layerTables.ts:842` — it lives there, not in `duckdb.ts`)
+now binds its generation AFTER the boot starts:
+`const booting = bootEngine(); const engine = getEngineGeneration(); await
+booting;`. `doInit` bumps the counter synchronously before its first await, so
+the number read after the call is the engine this retry is FOR, whether the boot
+is new or the memo of a live one; a number captured BEFORE the call would differ
+after every real boot and the retry would skip the rebuilds it exists for,
+leaving those layers table-less for the session with no error anywhere. The
+generation guard returns BEFORE `pendingSources.clear()`, so a worker that dies
+inside the boot window leaves every parked source parked for the next Retry. A
+post-COMMIT death inside `undoRun` leaves the card "done" with no Undo — the
+session's `engineStopped` flag governs, and the watcher never patches a done run.
+
+**The palette rotates, and `Color by` waits for Save.** `RULE_PALETTE_HEX`
+(`src/scene/cityColors.ts:102`) is eight colours beginning with the existing
+new-rule default, and `nextRuleColor(rules)`
+(`src/features/rules/nextRuleColor.ts:13`) returns the first no enabled rule is
+using; both the editor's "+ Add rule" and Style by result call it. Being a RULE
+palette its first member may coincide with a rule preset; what no member may
+coincide with is the chrome, which is the collision test's subject (Single colour
+and Unmatched included). `RunFooter` no longer writes `colorBy` when it opens a
+draft, so a layer on Surface type or Single colour does not repaint to the
+unmatched colour before the user presses Save. At Save a RESULT draft switches
+the mode from ANY mode, while a rule typed by hand keeps `ensureRulesMode`'s
+surface-only flip. The asymmetry is a ruling (Codex round-2 finding C6), kept as
+stated rather than smoothed over in either direction.
+
+**The streaming sweep compares versions, and a failed build does not count.**
+`layerTableLifecycle.ts` keeps `builtVersions` beside `pendingVersions`
+(`:105-132`) and skips a layer whose current stream version equals either.
+Splitting the two is the point: a failed rebuild can leave the previous ready
+table in place, and recording the version as built there would make every later
+consumer opening skip that layer indefinitely — so the pending entry is cleared
+on failure and only a successful build promotes the version. This closes the cost
+M13.2 carried: reopening the toolbox over an unchanged stream no longer retires a
+finished result card as "stale: layer reloaded".
+
+#### What real DuckDB 1.5.5 actually does (probes, 2026-09-12/13)
+
+Ten facts, each pinned by a probe in `tests/integration/duckdb/`
+(`solids.test.ts`, `crossLayer.test.ts`, `computedColumns.test.ts`;
+`DUCKDB_INTEGRATION=1 npx vitest run tests/integration/duckdb`). Several are
+traps rather than surprises, and the consequence in the code is named for each.
+
+- **D1. `ST_3DValidationReport(s)` on a runtime-NULL solid returns UNINITIALISED
+  memory**, not NULL: `is_valid` flipped between runs on the same row, the counts
+  were garbage, and reading `message` once crashed the wasm instance.
+  Consequence: every report field is read under `CASE WHEN s IS NOT NULL`, the
+  volume under `CASE WHEN s IS NOT NULL AND r.is_valid`, and `r.code` / `r.message`
+  are never selected (`solidSql.ts:123-150`).
+- **D2. `ST_3DValidationReport` and `ST_GeomFromGeoJSON` each have two
+  overloads**, so a bare `NULL` literal is a Binder error. A probe-level
+  consequence: the tests cast (`NULL::SOLID_3D`, `NULL::VARCHAR`).
+- **D3. The validation report struct has 13 fields**, including
+  `orientation_error_count` (1 on `NL.IMBAG.Pand.0001`). It is the thirteenth the
+  design did not know about; `buildSolidValidationSql` selects it as `ori_n`.
+- **D4. A CompositeSolid's WKB type name is "GeometryCollection Z"**, not
+  "PolyhedralSurface Z", and `ST_3DTryFromWKB` parses it (valid, 2 shells, 12
+  faces, volume 2). Consequence: solid detection keys on the CityJSON geometry
+  type — `Surface.geometryType` in the model, `geometry_properties_lod*.type` in
+  the reader, both through `SOLID_GEOMETRY_TYPES` — and never on
+  `cityjson_wkb_geometry_type`.
+- **D5. `ST_NDims` does not exist in this `spatial` build; `ST_HasZ` does.** A
+  probe-level consequence: Z is asserted with `ST_HasZ` in `crossLayer.test.ts`.
+- **D6. `ST_Within` is interior-only.** §7.5's "within (boundary included)" is
+  therefore `ST_CoveredBy`, pinned with a boundary point and used by both
+  predicates that need it (`joinByLocation.ts:110`, `aggregatePerArea.ts:109`).
+- **D7. `ST_GeomFromGeoJSON(NULL)` raises only while the `json` extension is
+  unloaded** — it returns NULL once `read_json` has autoloaded it, so the trap is
+  order-dependent and the probe pins both states on their own connection. That
+  half is probe-level: the app never calls `ST_GeomFromGeoJSON` at all (the
+  vector table reads app-made WKT through `ST_GeomFromText`, because the WKT is
+  already in the target's CRS — `vectorTable.ts:96-101`). The half with a code
+  consequence is the other one: `ST_Centroid` and `ST_Union_Agg` KEEP Z, only
+  `ST_Force2D` drops it, so `buildProxySql` wraps each row's geometry in
+  `ST_Force2D` where a 2-D output contract exists.
+- **D8. `ST_Union_Agg` over an empty set returns `GEOMETRYCOLLECTION EMPTY`, not
+  NULL.** Consequence: `buildFeatureProxySql` folds the union in
+  `CASE WHEN ST_IsEmpty(…) THEN NULL END`, which makes `g IS NULL` the one "no
+  proxy" signal. Two facts found beside it: the reader names LoD "0" as
+  `geometry_lod0_0` (so a label is looked up in `LayerTable.lods`, never
+  re-spelled — `lodZeroLabel`), and DuckDB PRUNES an unreferenced projection, so
+  a probe that means to force a parse must reference the parsed value
+  (`ST_Area(g)`, not the id alone).
+- **D9. `read_json_auto` infers JSON for a VARCHAR that first appears after
+  20,480 NULLs, and stores the two-character string `""`** — non-empty late text
+  is quoted too. Consequence: the write reads the values file with the DECLARED
+  column types (`read_json(…, columns = {…})`, `computedColumns.ts:93`), so
+  inference never decides a column's type. This corrected every tool's write, not
+  only the cross-layer ones.
+- **D10. Core `ST_Distance` and `ST_DWithin` return 0 for ANY polygon↔polygon
+  pair** on this build — a whole layer would read "0 m" under a card saying it was
+  measured. Consequence: Distance to nearest uses `ST_Distance_GEOS`, verified
+  present in the `wasm_eh` binary and correct on every probed pairing
+  (`distanceToNearest.ts:128-130`).
+
+Two facts from earlier milestones that M3 had to honour again: `mode()` is
+non-deterministic on ties, so the most-frequent value is
+`GROUP BY … ORDER BY "n" DESC, "v" ASC LIMIT 1` over feature roots with NULLs
+excluded (`buildMostFrequentSql`, `insights/sql.ts:472`), and `median()` over a
+DECIMAL column arrives as a `Uint32Array`, so every median CASTs to DOUBLE
+first.
+
+Browser acceptance procedure: `scripts/smoke/processing-m1.md` (M13.1),
+`scripts/smoke/processing-m2.md` (M13.2) and `scripts/smoke/processing-m3.md`
+(M13.3).
