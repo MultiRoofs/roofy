@@ -9,9 +9,10 @@
  * the geo layer store is the REAL one, because a vector target's identity is
  * what this task resolves.
  *
- * A vector TARGET's WRITE is refused here with "Not available yet": Task 18
- * publishes it into the feature properties and flips the two cases this file
- * names for it.
+ * A vector TARGET's WRITE is §7.6's publication into the feature properties:
+ * the run merges its results onto the target layer's `preparedData`, records
+ * its provenance under the GEO layer's id, and keeps an Undo of its OWN columns
+ * per feature.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Layer } from "../../../../src/features/layers/layerStore";
@@ -124,6 +125,7 @@ const {
   cancelRun,
   installStaleWatcher,
   installTargetRemovalWatcher,
+  undoRun,
 } = await import("../../../../src/features/processing/runQueue");
 type Ctx = import("../../../../src/features/processing/runQueue").ToolContext;
 const { registerExecutor, EXECUTORS } =
@@ -134,6 +136,12 @@ const { useLayerStore } =
   await import("../../../../src/features/layers/layerStore");
 const { useGeoLayerStore } =
   await import("../../../../src/features/geoLayers/geoLayerStore");
+type GeoJsonLayer =
+  import("../../../../src/features/geoLayers/geoLayerStore").GeoJsonLayer;
+const { geoRecordId, geoRecords } =
+  await import("../../../../src/features/geoLayers/geoRecords");
+const { computedColumnsOf, useComputedColumnStore } =
+  await import("../../../../src/insights/computedColumns");
 
 type Resettable = { __resetQueue: () => void };
 
@@ -255,6 +263,43 @@ function capturing(): { seen: Ctx | null } {
   return box;
 }
 
+/** The vector layer, NARROWED once: `layers[0]` read twice keeps neither the
+ *  union narrowing nor the proof that the element is there. */
+function zonesLayer(id: string): GeoJsonLayer {
+  const layer = useGeoLayerStore.getState().layers.find((l) => l.id === id);
+  if (layer === undefined || layer.kind !== "geojson") {
+    throw new Error(`no GeoJSON layer ${id}`);
+  }
+  return layer;
+}
+
+/** What the records panel would show for the vector layer right now. */
+function zoneRecords(id: string) {
+  return geoRecords(zonesLayer(id).config.preparedData);
+}
+
+/** An executor that writes one column onto EVERY area of the vector target,
+ *  keyed by the STABLE FEATURE ID — which is what the merge matches on. */
+function areaWriter(column: string, value: number) {
+  return async (
+    run: import("../../../../src/features/processing/types").RunRecord,
+    ctx: Ctx,
+  ) => ({
+    columns: [{ name: column, type: "DOUBLE" as const }],
+    rows: new Map(
+      ctx.target.kind === "vector"
+        ? ctx.target.records.map((record) => [
+            geoRecordId(record),
+            { [column]: value },
+          ])
+        : [],
+    ),
+    measured: 2,
+    skipped: [],
+    line: run.prefix,
+  });
+}
+
 async function settle(): Promise<void> {
   for (let round = 0; round < 6; round += 1) {
     for (let i = 0; i < 40; i += 1) await Promise.resolve();
@@ -273,6 +318,7 @@ beforeEach(() => {
   useProcessingStore.getState().resetForTest();
   useLayerStore.setState({ layers: [cityLayer()] });
   useGeoLayerStore.setState({ layers: [] });
+  useComputedColumnStore.setState({ byLayer: {} });
   delete EXECUTORS["aggregate-per-area"];
   delete EXECUTORS["join-by-location"];
   delete EXECUTORS["distance-to-nearest"];
@@ -413,9 +459,12 @@ describe("a run whose TARGET is a vector layer", () => {
     expect(runById(id)?.sourceName).toBe("Delft");
   });
 
-  it("refuses the WRITE until Task 18 publishes into the feature properties", async () => {
+  it("writes into the feature properties and never into the city table", async () => {
+    // §7.6: the durable copy of a vector layer's results is its FEATURE
+    // PROPERTIES. The city layer is where the run COMPUTED, and nothing at all
+    // may land on its table — no ALTER, no UPDATE, no transaction.
     const zones = addZones();
-    capturing();
+    registerExecutor("aggregate-per-area", areaWriter("bld_n", 4));
     const id = submitRun({
       toolId: "aggregate-per-area",
       targetLayerId: zones,
@@ -427,12 +476,8 @@ describe("a run whose TARGET is a vector layer", () => {
       columns: [{ name: "bld_n", type: "DOUBLE" }],
     });
     await settle();
-    expect(runById(id)).toMatchObject({
-      status: "failed",
-      error: "Not available yet",
-    });
-    // And NOTHING was written to the city layer's table, which is the bug the
-    // guard exists for: no ALTER, no UPDATE, no transaction at all.
+    expect(runById(id)).toMatchObject({ status: "done", undoable: true });
+    expect(zoneRecords(zones)[0]).toMatchObject({ zone: "A", bld_n: 4 });
     expect(sql.some((s) => s.startsWith("ALTER TABLE"))).toBe(false);
     expect(sql).not.toContain("BEGIN TRANSACTION");
   });
@@ -476,7 +521,11 @@ describe("a run whose TARGET is a vector layer", () => {
       columns: [{ name: "bld_n", type: "DOUBLE" }],
     });
     await settle();
-    expect(runById(id)?.error).not.toContain("belongs to the source data");
+    // Null-coalesced: the run now SUCCEEDS (§7.6 publishes into the feature
+    // properties), so there is no error string to search.
+    expect(runById(id)?.error ?? "").not.toContain(
+      "belongs to the source data",
+    );
   });
 
   it("fails when the vector TARGET is gone before the run starts", async () => {
@@ -564,12 +613,9 @@ describe("the stale watcher", () => {
     // vector-target run that is the SOURCE city layer — the run's record knows
     // only the vector target's id, which no table build ever names.
     //
-    // The run is forced to "done" through the store rather than reaching it,
-    // because this task refuses a vector target's WRITE ("Not available yet")
-    // and only Task 18 lets such a run finish. When it does, this case becomes
-    // an ordinary end-to-end one; the fact under test does not change.
+    // End to end: the run reaches "done" through §7.6's vector publication.
     const zones = addZones();
-    capturing();
+    registerExecutor("aggregate-per-area", areaWriter("bld_n", 4));
     const dispose = installStaleWatcher();
     const id = submitRun({
       toolId: "aggregate-per-area",
@@ -582,7 +628,7 @@ describe("the stale watcher", () => {
       columns: [{ name: "bld_n", type: "DOUBLE" }],
     });
     await settle();
-    useProcessingStore.getState().patchRun(id, { status: "done" });
+    expect(runById(id)?.status).toBe("done");
     layerTables.useLayerTableStore.setState({
       tables: { CITY: { state: "building" } },
     });
@@ -595,12 +641,38 @@ describe("the stale watcher", () => {
     dispose();
   });
 
-  // Task 18 publishes a vector target's results into its feature properties,
-  // which is what lets an Aggregate run reach "done" on its own. Flip the case
-  // above to an end-to-end one then, and delete this note.
-  it.todo(
-    "retires a vector-target run that reached done through the vector write (Task 18)",
-  );
+  it("takes the Undo of a vector-target run it retires", async () => {
+    // The retired card describes a compute table that no longer exists, so its
+    // Undo goes with it — and pressing Undo afterwards changes nothing, which
+    // is what `undoable: false` has to mean for a vector target too.
+    const zones = addZones();
+    registerExecutor("aggregate-per-area", areaWriter("bld_n", 4));
+    const dispose = installStaleWatcher();
+    const id = submitRun({
+      toolId: "aggregate-per-area",
+      targetLayerId: zones,
+      sourceLayerId: "CITY",
+      scope: "all",
+      lod: null,
+      params: {},
+      prefix: "bld_",
+      columns: [{ name: "bld_n", type: "DOUBLE" }],
+    });
+    await settle();
+    layerTables.useLayerTableStore.setState({
+      tables: { CITY: { state: "building" } },
+    });
+    layerTables.useLayerTableStore.setState({
+      tables: {
+        CITY: { state: "ready", info: freshTable("layer_9", ["id"]) },
+      },
+    });
+    expect(runById(id)?.undoable).toBe(false);
+    await undoRun(id);
+    await settle();
+    expect(zoneRecords(zones)[0]).toMatchObject({ bld_n: 4 });
+    dispose();
+  });
 });
 
 describe("the per-run vector table", () => {
@@ -839,5 +911,229 @@ describe("the per-run vector table", () => {
     expect(sql.some((s) => s.startsWith("CREATE OR REPLACE TABLE"))).toBe(
       false,
     );
+  });
+});
+
+describe("a vector target's publication", () => {
+  /** The request every case here submits; only the columns and the prefix
+   *  differ. */
+  function aggregate(
+    zones: string,
+    column: string,
+    prefix = "bld_",
+  ): Parameters<typeof submitRun>[0] {
+    return {
+      toolId: "aggregate-per-area",
+      targetLayerId: zones,
+      sourceLayerId: "CITY",
+      scope: "all",
+      lod: null,
+      params: {},
+      prefix,
+      columns: [{ name: column, type: "DOUBLE" as const }],
+    };
+  }
+
+  it("merges the results into the layer's properties and offers Undo", async () => {
+    const zones = addZones();
+    registerExecutor("aggregate-per-area", areaWriter("bld_buildings_n", 3));
+    const id = submitRun(aggregate(zones, "bld_buildings_n"));
+    await settle();
+    expect(runById(id)).toMatchObject({ status: "done", undoable: true });
+    expect(zoneRecords(zones)[0]).toMatchObject({ bld_buildings_n: 3 });
+    expect(zoneRecords(zones)[1]).toMatchObject({ bld_buildings_n: 3 });
+    // §7: provenance under the GEO layer's id, in the one registry.
+    expect(computedColumnsOf(zones).has("bld_buildings_n")).toBe(true);
+    expect(runById(id)?.columns).toEqual(["bld_buildings_n"]);
+
+    await undoRun(id);
+    await settle();
+    expect(zoneRecords(zones)[0]).toEqual(
+      expect.not.objectContaining({ bld_buildings_n: 3 }),
+    );
+    expect(zoneRecords(zones)[0]).toMatchObject({ zone: "A" });
+    expect(computedColumnsOf(zones).has("bld_buildings_n")).toBe(false);
+    expect(runById(id)?.note).toBe("Undone");
+    expect(runById(id)?.undoable).toBe(false);
+  });
+
+  it("undoes one run without taking a later run's disjoint columns", async () => {
+    // §6.2 steals Undo only where two runs share a COLUMN, so both of these are
+    // undoable at once — and undoing either must leave the other's results on
+    // the layer, which a whole-document restore could not do.
+    const zones = addZones();
+    registerExecutor("aggregate-per-area", areaWriter("bld_buildings_n", 3));
+    const first = submitRun(aggregate(zones, "bld_buildings_n"));
+    await settle();
+    registerExecutor("aggregate-per-area", areaWriter("bld_sum_m2", 90));
+    const second = submitRun(aggregate(zones, "bld_sum_m2"));
+    await settle();
+    expect(runById(second)?.status).toBe("done");
+    expect(runById(first)?.undoable).toBe(true);
+
+    await undoRun(first);
+    await settle();
+    expect(zoneRecords(zones)[0]).toMatchObject({ bld_sum_m2: 90 });
+    expect(zoneRecords(zones)[0]).toEqual(
+      expect.not.objectContaining({ bld_buildings_n: 3 }),
+    );
+    expect(runById(second)?.undoable).toBe(true);
+
+    // The OTHER order, from the state the first Undo left: the second run's
+    // Undo puts its own column back and touches nothing else.
+    await undoRun(second);
+    await settle();
+    expect(zoneRecords(zones)[0]).toEqual(
+      expect.not.objectContaining({ bld_sum_m2: 90 }),
+    );
+    expect(zoneRecords(zones)[0]).toMatchObject({ zone: "A" });
+  });
+
+  it("restores a property the run REPLACED rather than dropping it", async () => {
+    // `zone` belongs to the file, so a run may not write it — but a SECOND run
+    // over a column the first run created replaces a value that was there, and
+    // its Undo must put that value back rather than remove the key.
+    const zones = addZones();
+    registerExecutor("aggregate-per-area", areaWriter("bld_n", 3));
+    const first = submitRun(aggregate(zones, "bld_n"));
+    await settle();
+    registerExecutor("aggregate-per-area", areaWriter("bld_n", 7));
+    const second = submitRun(aggregate(zones, "bld_n"));
+    await settle();
+    expect(zoneRecords(zones)[0]).toMatchObject({ bld_n: 7 });
+    // The first run's Undo was stolen: only one run owns a column (§6.2).
+    expect(runById(first)?.undoable).toBe(false);
+
+    await undoRun(second);
+    await settle();
+    expect(zoneRecords(zones)[0]).toMatchObject({ bld_n: 3 });
+  });
+
+  it("refuses an output that would overwrite one of the layer's OWN properties", async () => {
+    // §6.1's "belongs to the source data", for a vector target: the document
+    // already carries `zone`, and no run may write over it under a computed
+    // badge. The city branch has had this since M1; this is its vector half.
+    const zones = addZones();
+    capturing();
+    const id = submitRun(aggregate(zones, "zone", ""));
+    await settle();
+    expect(runById(id)?.error).toBe(
+      "'zone' belongs to the source data; choose another prefix",
+    );
+  });
+
+  it("re-runs over a column a previous run created, which is not the file's", async () => {
+    const zones = addZones();
+    registerExecutor("aggregate-per-area", areaWriter("bld_n", 3));
+    const first = submitRun(aggregate(zones, "bld_n"));
+    await settle();
+    expect(runById(first)?.status).toBe("done");
+    const second = submitRun(aggregate(zones, "bld_n"));
+    await settle();
+    expect(runById(second)?.error).toBeNull();
+    expect(runById(second)?.status).toBe("done");
+  });
+
+  it("fails rather than overwrite a document that was replaced while it ran", async () => {
+    // §6.1's "Layer changed while running; run again", for the vector target:
+    // a re-link during the compute re-mints every stable id and may bring
+    // properties of its own — merging this run's results into it would write
+    // over the file's own values and record rollback values for a document
+    // that is gone.
+    const zones = addZones();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    registerExecutor("aggregate-per-area", async (run, ctx) => {
+      await held;
+      return areaWriter("bld_n", 3)(run, ctx);
+    });
+    const id = submitRun(aggregate(zones, "bld_n"));
+    await settle();
+    expect(runById(id)?.status).toBe("running");
+    useGeoLayerStore.getState().relinkGeoJsonLayer(zones, {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          id: "z1",
+          properties: { zone: "C" },
+          geometry: null,
+        },
+      ],
+    });
+    release();
+    await settle();
+    expect(runById(id)).toMatchObject({
+      status: "failed",
+      error: "Layer changed while running; run again",
+    });
+    expect(zoneRecords(zones)[0]).toEqual(
+      expect.not.objectContaining({ bld_n: 3 }),
+    );
+    expect(computedColumnsOf(zones).has("bld_n")).toBe(false);
+  });
+
+  it("refuses a queued Undo whose column a later run has already overwritten", async () => {
+    // The Undo waits on the SAME FIFO as the runs, and re-checks at the head:
+    // by then the later run has taken its Undo (§6.2), and restoring would
+    // erase a result that is on screen.
+    const zones = addZones();
+    registerExecutor("aggregate-per-area", areaWriter("bld_n", 3));
+    const first = submitRun(aggregate(zones, "bld_n"));
+    await settle();
+    registerExecutor("aggregate-per-area", areaWriter("bld_n", 7));
+    const second = submitRun(aggregate(zones, "bld_n"));
+    // Pressed while the second run is still queued behind the first: the Undo
+    // reaches the head AFTER it.
+    const undoing = undoRun(first);
+    await settle();
+    await undoing;
+    expect(runById(second)?.status).toBe("done");
+    expect(zoneRecords(zones)[0]).toMatchObject({ bld_n: 7 });
+    expect(runById(first)?.note).not.toBe("Undone");
+  });
+
+  it("refuses an Undo whose layer was re-linked while it waited", async () => {
+    // A new document: the ids the Undo holds name features of a file the user
+    // has replaced, and its values belong to none of them.
+    const zones = addZones();
+    registerExecutor("aggregate-per-area", areaWriter("bld_n", 3));
+    const id = submitRun(aggregate(zones, "bld_n"));
+    await settle();
+    useGeoLayerStore.getState().relinkGeoJsonLayer(zones, {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          id: "z1",
+          properties: { zone: "C" },
+          geometry: null,
+        },
+      ],
+    });
+    await undoRun(id);
+    await settle();
+    expect(zoneRecords(zones)[0]).toMatchObject({ zone: "C" });
+    expect(zoneRecords(zones)[0]).toEqual(
+      expect.not.objectContaining({ bld_n: 3 }),
+    );
+    expect(runById(id)?.undoable).toBe(false);
+    expect(runById(id)?.note).not.toBe("Undone");
+  });
+
+  it("is a DONE run with no Undo when the tool matched no feature", async () => {
+    const zones = addZones();
+    registerExecutor("aggregate-per-area", async (run) => ({
+      columns: [{ name: `${run.prefix}n`, type: "DOUBLE" as const }],
+      rows: new Map(),
+      measured: 0,
+      skipped: [],
+    }));
+    const id = submitRun(aggregate(zones, "bld_n"));
+    await settle();
+    expect(runById(id)).toMatchObject({ status: "done", undoable: false });
+    expect(computedColumnsOf(zones).has("bld_n")).toBe(false);
   });
 });

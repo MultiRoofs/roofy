@@ -59,10 +59,17 @@ import {
 } from "../../insights/layerTables";
 import { useLayerStore, type Layer } from "../layers/layerStore";
 import {
+  GEO_PROPERTY_ABSENT,
+  restoreGeoDocumentProperties,
   useGeoLayerStore,
   type GeoJsonLayer,
+  type GeoPreviousValues,
 } from "../geoLayers/geoLayerStore";
-import { geoRecords, type GeoRecord } from "../geoLayers/geoRecords";
+import {
+  geoRecordId,
+  geoRecords,
+  type GeoRecord,
+} from "../geoLayers/geoRecords";
 import { ensureModelCrsLoadable } from "../layers/ensureCrs";
 import { epsgForLayer } from "../../scene/cursorCrsReadout";
 import { SOURCE_NEEDS_AREAS } from "./crossLayerParams";
@@ -248,14 +255,75 @@ const ENGINE_STOPPED = "Analytics engine stopped";
 
 const controllers = new Map<string, AbortController>();
 
-interface UndoState {
-  readonly table: string;
-  readonly backupTable: string | null;
-  readonly created: ReadonlyArray<string>;
-  readonly replaced: ReadonlyArray<string>;
-  readonly ids: ReadonlyArray<string> | null;
-  /** The model attributes the run overwrote; `undefined` for "was not there". */
-  readonly previousModelValues: ReadonlyMap<string, Record<string, unknown>>;
+/**
+ * What an Undo needs to put a layer back, per destination kind.
+ *
+ * A CITY run's Undo is a transaction over a table plus the model values it
+ * overwrote. A VECTOR run's is a per-feature record of what THIS run's columns
+ * held before it wrote (§7.6). Two shapes and one Map, because §6.2's Undo is
+ * one button whichever kind of layer it is about.
+ */
+type UndoState =
+  | {
+      readonly kind: "city";
+      readonly table: string;
+      readonly backupTable: string | null;
+      readonly created: ReadonlyArray<string>;
+      readonly replaced: ReadonlyArray<string>;
+      readonly ids: ReadonlyArray<string> | null;
+      /** The model attributes the run overwrote; `undefined` for "was not there". */
+      readonly previousModelValues: ReadonlyMap<
+        string,
+        Record<string, unknown>
+      >;
+    }
+  | {
+      readonly kind: "vector";
+      readonly layerId: string;
+      /**
+       * Per feature, what THIS run's columns held before it wrote — with
+       * `GEO_PROPERTY_ABSENT` for a property the feature did not have.
+       *
+       * Not the document: two runs writing disjoint columns onto one layer are
+       * both undoable (Undo is stolen only where they share a column), so a
+       * snapshot-restore of run A would erase run B's results behind its back.
+       * This is `previousModelValues`' exact analogue for a vector layer.
+       */
+      readonly previousValues: GeoPreviousValues;
+      /** WHICH document these values belong to. Not `preparedData` — a later
+       *  run's disjoint merge moves that identity and must not block this
+       *  Undo — but the SOURCE the layer was prepared from: a re-link replaces
+       *  it, and the ids this Undo holds then name features of another file. */
+      readonly source: GeoSourceIdentity;
+      readonly created: ReadonlyArray<string>;
+      readonly replaced: ReadonlyArray<string>;
+    };
+
+/** The three fields that say WHICH document a GeoJSON layer is showing —
+ *  `geoSelectionRefresh.ts` compares the same three for the same reason. */
+interface GeoSourceIdentity {
+  readonly data: unknown;
+  readonly url: string | undefined;
+  readonly preparationEpoch: number | undefined;
+}
+
+function geoSourceIdentity(layer: GeoJsonLayer): GeoSourceIdentity {
+  return {
+    data: layer.config.data,
+    url: layer.config.url,
+    preparationEpoch: layer.config.preparationEpoch,
+  };
+}
+
+function sameGeoSource(
+  layer: GeoJsonLayer,
+  source: GeoSourceIdentity,
+): boolean {
+  return (
+    layer.config.data === source.data &&
+    layer.config.url === source.url &&
+    layer.config.preparationEpoch === source.preparationEpoch
+  );
 }
 
 const undoState = new Map<string, UndoState>();
@@ -555,6 +623,9 @@ function discardUndo(id: string): void {
   const state = undoState.get(id);
   if (!state) return;
   undoState.delete(id);
+  // A VECTOR run's Undo holds no database resource at all — its copy is one
+  // JavaScript object, which the Map delete above has already released.
+  if (state.kind !== "city") return;
   const backup = state.backupTable;
   if (!backup) return;
   // On the queue, like every other statement about a layer table, and NOT
@@ -569,6 +640,88 @@ function discardUndo(id: string): void {
   void runOnTableQueue(() =>
     raced(runQuery(`DROP TABLE IF EXISTS ${quoteIdent(backup)}`), null),
   ).catch(() => {});
+}
+
+/** Spec §7's provenance, for whichever layer the results landed on. */
+function publishProvenance(
+  runId: string,
+  layerId: string,
+  result: ToolResult,
+  toolName: string,
+  request: FrozenRequest,
+  scope: {
+    readonly featureIds: ReadonlyArray<string> | null;
+    readonly count: number;
+    readonly total: number;
+  },
+): void {
+  for (const col of result.columns) {
+    const registry = useComputedColumnStore.getState();
+    const previous = registry.byLayer[layerId]?.[col.name] ?? null;
+    registry.setProvenance(layerId, col.name, {
+      runId,
+      toolName,
+      summary: `${request.lod ? `LoD ${request.lod} · ` : ""}${scopeLabel(
+        request.scope,
+        scope.count,
+      )}`,
+      at: Date.now(),
+      // FEATURES on both sides of "312 of 1,115": `rows` are ROWS (a Building
+      // and its parts), and the tooltip would read as more than the layer has.
+      partial:
+        scope.featureIds === null
+          ? null
+          : { count: scope.count, total: scope.total },
+      previous,
+    });
+  }
+}
+
+/**
+ * Spec §6.2: only ONE run can own a column's Undo. An earlier run whose column
+ * this run has just overwritten can no longer restore anything — its backup
+ * describes a state two writes ago.
+ */
+function stealUndo(runId: string, layerId: string, result: ToolResult): void {
+  for (const other of useProcessingStore.getState().runs) {
+    if (
+      other.id !== runId &&
+      other.targetLayerId === layerId &&
+      other.undoable &&
+      // Case-insensitively, like every other comparison between column names:
+      // an earlier run recorded under a different spelling still owns the
+      // column this run has just overwritten.
+      other.columns.some((name) =>
+        result.columns.some((c) => c.name.toLowerCase() === name.toLowerCase()),
+      )
+    ) {
+      patch(other.id, { undoable: false });
+      discardUndo(other.id);
+    }
+  }
+}
+
+/**
+ * The registry half of §6.2's Undo: created columns go, replaced ones go back
+ * to the provenance they had. The same for both destinations.
+ */
+function rollBackProvenance(
+  layerId: string,
+  created: ReadonlyArray<string>,
+  replaced: ReadonlyArray<string>,
+): void {
+  const registry = useComputedColumnStore.getState();
+  registry.removeColumns(layerId, created);
+  for (const col of replaced) {
+    const provenance = registry.byLayer[layerId]?.[col];
+    // A replaced column goes back to the provenance it had, so the tooltip says
+    // which run the values on the layer now came from.
+    if (provenance?.previous) {
+      registry.setProvenance(layerId, col, provenance.previous);
+    } else {
+      registry.removeColumns(layerId, [col]);
+    }
+  }
 }
 
 /**
@@ -773,6 +926,37 @@ async function execute(
           status: "failed",
           // The TABLE's spelling: that is the column that belongs to the data.
           error: `'${clash.name}' belongs to the source data; choose another prefix`,
+          elapsedMs: elapsed(),
+        });
+        return;
+      }
+    } else {
+      // The same rule for a vector target, against its OWN attributes: the
+      // document's public property keys. The form checked them at Run, but a
+      // queued run can wait minutes and a re-linked source may have brought a
+      // `bld_buildings_n` of its own — and the merge would then overwrite a
+      // property of the file under a "computed" badge. The registry's own
+      // columns are excluded, exactly as on the city side: replacing a column a
+      // previous run wrote is what a re-run IS.
+      const owned = new Set(
+        [...computedColumnsOf(request.targetLayerId)].map((c) =>
+          c.toLowerCase(),
+        ),
+      );
+      const keys = new Set(
+        target.records.flatMap((record) => Object.keys(record)),
+      );
+      const clash = [...keys].find(
+        (key) =>
+          !owned.has(key.toLowerCase()) &&
+          request.columns.some(
+            (out) => out.name.toLowerCase() === key.toLowerCase(),
+          ),
+      );
+      if (clash !== undefined) {
+        patch(id, {
+          status: "failed",
+          error: `'${clash}' belongs to the source data; choose another prefix`,
           elapsedMs: elapsed(),
         });
         return;
@@ -1011,19 +1195,137 @@ async function execute(
     if (!record) return;
     const raw = await executor(record, ctx);
     if (signal.aborted) throw new CancelledError();
-    if (target.kind !== "city") {
-      // Task 18 publishes a vector target's results into its feature
-      // properties. Until it does, the write must not run: `table` is the
-      // SOURCE city layer's, so `writeComputedColumns` would put the vector
-      // layer's columns on the city layer's table. Aggregate is the only
-      // vector-target tool and is `implemented: false` until Task 19, so this
-      // is a guard on an unreachable path, not a feature.
-      patch(id, {
-        status: "failed",
-        phase: null,
-        error: "Not available yet",
-        elapsedMs: elapsed(),
+    if (target.kind === "vector") {
+      // §7.6: the durable copy of a vector layer's results is its FEATURE
+      // PROPERTIES. So no table, no transaction and no model — but the same
+      // canonical spelling, the same provenance, the same Undo-stealing and the
+      // same card as a city run.
+      //
+      // The document is re-read and VERIFIED first, immediately before anything
+      // is written: `target` was resolved before the compute, and a re-link in
+      // between replaced the document, re-minted every stable id and may have
+      // brought properties of its own. Merging into it would overwrite the
+      // file's own values and record rollback values for a document that is
+      // gone — so the run fails with §6.1's sentence instead.
+      const live = useGeoLayerStore
+        .getState()
+        .layers.find((l) => l.id === target.layer.id);
+      if (live === undefined || live.kind !== "geojson") {
+        patch(id, {
+          status: "failed",
+          phase: null,
+          error: "Layer removed",
+          elapsedMs: elapsed(),
+        });
+        return;
+      }
+      // NARROWED once, and every read below is off this one variable.
+      const verified: GeoJsonLayer = live;
+      if (verified.config.preparedData !== target.layer.config.preparedData) {
+        patch(id, {
+          status: "failed",
+          phase: null,
+          error: "Layer changed while running; run again",
+          elapsedMs: elapsed(),
+        });
+        return;
+      }
+      // From the VERIFIED document, never from the records captured before the
+      // compute: the spelling, the created/replaced split and the rollback
+      // values all have to describe what is about to be overwritten.
+      const records = geoRecords(verified.config.preparedData);
+      const existingProperties = [
+        ...new Set(records.flatMap((record) => Object.keys(record))),
+      ].map((name) => ({ name }));
+      const result = canonicalise(raw, existingProperties);
+      if (result.rows.size === 0) {
+        // Nothing matched, so there is nothing to merge and no column to own —
+        // a DONE run with a summary and no Undo, exactly as on the city side.
+        const summary = summarise(result, elapsed(), {
+          streaming: layer.isStreaming,
+        });
+        patch(id, {
+          status: "done",
+          phase: null,
+          elapsedMs: elapsed(),
+          summary,
+          log: [...log],
+          undoable: false,
+        });
+        if (runById(id)?.status === "done") {
+          useProcessingStore.getState().pushNotice(summary.line);
+        }
+        return;
+      }
+      patch(id, { phase: "write" });
+      const onDocument = new Set(
+        existingProperties.map((c) => c.name.toLowerCase()),
+      );
+      const existing = new Set(
+        result.columns
+          .map((c) => c.name)
+          .filter((name) => onDocument.has(name.toLowerCase())),
+      );
+      // Captured BEFORE the merge, per feature and per COLUMN — §6.2's Undo
+      // puts this run's own values back into whatever the document is by then,
+      // so a later run's results on the same layer survive it.
+      const before = new Map(
+        records.map((record) => [geoRecordId(record), record]),
+      );
+      const previousValues = new Map<string, Record<string, unknown>>();
+      for (const stableId of result.rows.keys()) {
+        const record = before.get(stableId);
+        const prior: Record<string, unknown> = {};
+        for (const column of result.columns) {
+          prior[column.name] =
+            record !== undefined && column.name in record
+              ? record[column.name]
+              : GEO_PROPERTY_ABSENT;
+        }
+        previousValues.set(stableId, prior);
+      }
+      useGeoLayerStore
+        .getState()
+        .mergeGeoFeatureProperties(verified.id, result.rows);
+      log.push({
+        label: "Writing results",
+        sql: null,
+        ms: 0,
+        rows: result.rows.size,
       });
+      publishProvenance(id, verified.id, result, tool.name, request, scope);
+      stealUndo(id, verified.id, result);
+      undoState.set(id, {
+        kind: "vector",
+        layerId: verified.id,
+        previousValues,
+        source: geoSourceIdentity(verified),
+        created: result.columns
+          .map((c) => c.name)
+          .filter((name) => !existing.has(name)),
+        replaced: result.columns
+          .map((c) => c.name)
+          .filter((name) => existing.has(name)),
+      });
+      // Evicted while it ran: no card, so nothing can press Undo.
+      if (!runById(id)) discardUndo(id);
+      const summary = summarise(result, elapsed(), {
+        streaming: layer.isStreaming,
+      });
+      patch(id, {
+        status: "done",
+        phase: null,
+        elapsedMs: elapsed(),
+        summary,
+        log: [...log],
+        columns: result.columns.map((c) => c.name),
+        undoable: true,
+      });
+      if (runById(id)?.status !== "done") {
+        discardUndo(id);
+        return;
+      }
+      useProcessingStore.getState().pushNotice(summary.line);
       return;
     }
     // The table's spelling wins from here on, so the SQL, the rows' keys, the
@@ -1107,50 +1409,11 @@ async function execute(
     }
     useLayerStore.getState().mergeAttributes(layer.id, merge);
 
-    for (const col of result.columns) {
-      const registry = useComputedColumnStore.getState();
-      const previous = registry.byLayer[layer.id]?.[col.name] ?? null;
-      registry.setProvenance(layer.id, col.name, {
-        runId: id,
-        toolName: tool.name,
-        summary: `${request.lod ? `LoD ${request.lod} · ` : ""}${scopeLabel(
-          request.scope,
-          scope.count,
-        )}`,
-        at: Date.now(),
-        // FEATURES on both sides of "312 of 1,115": `rows` are ROWS (a Building
-        // and its parts), and the tooltip would read as more than the layer has.
-        partial:
-          scope.featureIds === null
-            ? null
-            : { count: scope.count, total: scope.total },
-        previous,
-      });
-    }
-
-    // Spec §6.2: only ONE run can own a column's Undo. An earlier run whose
-    // column this run has just overwritten can no longer restore anything — its
-    // backup describes a state two writes ago.
-    for (const other of useProcessingStore.getState().runs) {
-      if (
-        other.id !== id &&
-        other.targetLayerId === layer.id &&
-        other.undoable &&
-        // Case-insensitively, like every other comparison between column
-        // names: an earlier run recorded under a different spelling still owns
-        // the column this run has just overwritten.
-        other.columns.some((name) =>
-          result.columns.some(
-            (c) => c.name.toLowerCase() === name.toLowerCase(),
-          ),
-        )
-      ) {
-        patch(other.id, { undoable: false });
-        discardUndo(other.id);
-      }
-    }
+    publishProvenance(id, layer.id, result, tool.name, request, scope);
+    stealUndo(id, layer.id, result);
 
     undoState.set(id, {
+      kind: "city",
       table: table.table,
       backupTable: written.backupTable,
       created: result.columns
@@ -1288,6 +1551,57 @@ export async function undoRun(id: string): Promise<void> {
   const run = runById(id);
   const state = undoState.get(id);
   if (!run || !run.undoable || !state) return;
+  if (state.kind === "vector") {
+    // ON THE FIFO, like the city Undo, although it writes no table: a
+    // cross-layer run holds that queue for its whole life and has CAPTURED this
+    // layer's records and built its preflight from them, so replacing the
+    // document underneath it would leave the run computing against a document
+    // nothing on screen shows. Serialising is the whole fix and it costs one
+    // queue slot.
+    await runOnTableQueue(async () => {
+      // Re-validated at the head, exactly as the city Undo is. While this
+      // waited a LATER run may have overwritten one of these columns, which
+      // takes this run's Undo with it (§6.2) — restoring now would erase a
+      // result that is on screen. The card already reads `undoable: false`, so
+      // it is left exactly as it is.
+      if (!runById(id)?.undoable || !undoState.has(id)) return;
+      const live = useGeoLayerStore
+        .getState()
+        .layers.find((l) => l.id === state.layerId);
+      // Gone, of another kind, or showing a DIFFERENT document than the one
+      // this run wrote into (a re-link, a re-prepare): the ids this Undo holds
+      // name features of a file the user has replaced, and there is nothing to
+      // put back. Not `preparedData` identity — a later run's disjoint merge
+      // moves that legitimately, and this Undo must still work.
+      if (live === undefined || live.kind !== "geojson") {
+        undoState.delete(id);
+        patch(id, { undoable: false });
+        return;
+      }
+      // NARROWED once; every read below is off this variable.
+      const verified: GeoJsonLayer = live;
+      if (!sameGeoSource(verified, state.source)) {
+        undoState.delete(id);
+        patch(id, { undoable: false });
+        return;
+      }
+      // This run's OWN columns, back into whatever the document is NOW — never
+      // a stored snapshot, or a later run's disjoint results would go with it.
+      const restored = restoreGeoDocumentProperties(
+        verified.config.preparedData,
+        state.previousValues,
+      );
+      if (restored !== null) {
+        useGeoLayerStore
+          .getState()
+          .replaceGeoPreparedData(state.layerId, restored);
+      }
+      rollBackProvenance(state.layerId, state.created, state.replaced);
+      undoState.delete(id);
+      patch(id, { undoable: false, note: "Undone" });
+    });
+    return;
+  }
   const out = await runOnTableQueue(async () => {
     // Re-validated at the head, exactly like a run's scope: while this Undo
     // waited, a later run over the same column may have published (§6.2) or a
@@ -1344,18 +1658,7 @@ export async function undoRun(id: string): Promise<void> {
   useLayerStore
     .getState()
     .mergeAttributes(run.targetLayerId, state.previousModelValues);
-  const registry = useComputedColumnStore.getState();
-  registry.removeColumns(run.targetLayerId, state.created);
-  for (const col of state.replaced) {
-    const provenance = registry.byLayer[run.targetLayerId]?.[col];
-    // A replaced column goes back to the provenance it had, so the tooltip says
-    // which run the values on the table now came from.
-    if (provenance?.previous) {
-      registry.setProvenance(run.targetLayerId, col, provenance.previous);
-    } else {
-      registry.removeColumns(run.targetLayerId, [col]);
-    }
-  }
+  rollBackProvenance(run.targetLayerId, state.created, state.replaced);
   undoState.delete(id);
   patch(id, { undoable: false, note: "Undone" });
 }
