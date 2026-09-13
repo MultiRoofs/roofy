@@ -115,19 +115,19 @@ function ToolRow({
 }) {
   const reason = eligibility.ok ? null : eligibility.reason;
   const ext = tool.extension;
-  // Gated on the EXTENSION's state, not on the row's reason: in M2 every
-  // extension tool is still `implemented: false`, so "Not available yet"
-  // outranks the download reason and it never reaches a row. §5's Retry still
-  // belongs beside those rows — the chip's tooltip is where the user reads
-  // why. It is also the one reason Retry can act on: a row disabled for a
-  // missing layer or a failed table is not a download away from working.
+  // Gated on the EXTENSION's state, not on the row's reason: an UNIMPLEMENTED
+  // extension tool's row says "Not available yet", which outranks the download
+  // reason, so that reason never reaches it. §5's Retry still belongs beside
+  // those rows — the chip's tooltip is where the user reads why. It is also the
+  // one reason Retry can act on: a row disabled for a missing layer or a failed
+  // table is not a download away from working.
   const canRetry = ext !== null && extensionState[ext] === "failed";
   // The download sentence, for the elements a KEYBOARD can reach. The chip
-  // carries it as a native `title`, but a `<span>` is not focusable, so on
-  // that element alone the explanation is mouse-only — and the row a keyboard
-  // does land on says "Not available yet" (M2's outranking reason), which
-  // explains nothing about the failed download. Same string as the chip and
-  // as `eligibility.ts`'s row reason.
+  // carries it as a native `title`, but a `<span>` is not focusable, so on that
+  // element alone the explanation is mouse-only — and a row whose own reason
+  // outranks the download (an unimplemented tool's "Not available yet", a
+  // missing layer) explains nothing about the failed download. Same string as
+  // the chip and as `eligibility.ts`'s row reason.
   const failureId = useId();
   return (
     // A wrapper, because the Retry link is a BUTTON and the row is a button:

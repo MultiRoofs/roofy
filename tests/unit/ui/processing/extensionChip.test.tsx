@@ -96,6 +96,8 @@ type WorkspaceModule =
 type LayerTablesModule = typeof import("../../../../src/insights/layerTables");
 type ProcessingModule =
   typeof import("../../../../src/features/processing/processingStore");
+type GeoLayerModule =
+  typeof import("../../../../src/features/geoLayers/geoLayerStore");
 
 let CatalogueView: CatalogueModule["CatalogueView"];
 let duckdb: DuckdbModule;
@@ -103,6 +105,7 @@ let useLayerStore: LayerStoreModule["useLayerStore"];
 let useWorkspaceStore: WorkspaceModule["useWorkspaceStore"];
 let useLayerTableStore: LayerTablesModule["useLayerTableStore"];
 let useProcessingStore: ProcessingModule["useProcessingStore"];
+let useGeoLayerStore: GeoLayerModule["useGeoLayerStore"];
 
 type LayerInput = Parameters<LayerStoreActions["addLayer"]>[0];
 
@@ -148,6 +151,38 @@ function addCityLayer(): string {
     },
   });
   return id;
+}
+
+/** An areas layer, so a SHIPPED cross-layer tool's row has nothing left to be
+ *  disabled for but the extension. */
+function addZones(): void {
+  useGeoLayerStore.getState().addGeoLayer({
+    name: "Zones",
+    kind: "geojson",
+    config: {
+      data: {
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            id: "z1",
+            properties: {},
+            geometry: {
+              type: "Polygon",
+              coordinates: [
+                [
+                  [4, 52],
+                  [5, 52],
+                  [5, 53],
+                  [4, 52],
+                ],
+              ],
+            },
+          },
+        ],
+      },
+    },
+  });
 }
 
 /** The chip for one extension. Both chips carry their label as their text. */
@@ -196,6 +231,8 @@ beforeEach(async () => {
     await import("../../../../src/insights/layerTables"));
   ({ useProcessingStore } =
     await import("../../../../src/features/processing/processingStore"));
+  ({ useGeoLayerStore } =
+    await import("../../../../src/features/geoLayers/geoLayerStore"));
   // Stubbed AFTER the dynamic imports (as `useDuckDBStatus.test.tsx` does, for
   // the same reason): vitest's module runner calls `new URL(...)` while
   // resolving an import, and this object stub is not constructible.
@@ -207,6 +244,7 @@ beforeEach(async () => {
   useProcessingStore.getState().resetForTest();
   useLayerStore.getState().removeAllLayers();
   useLayerTableStore.setState({ tables: {} });
+  useGeoLayerStore.setState({ layers: [] });
   addCityLayer();
 });
 
@@ -351,11 +389,11 @@ describe("the capability chips (spec §5)", () => {
       ),
     ).toBe(true);
     expect(chip("Spatial")).toHaveAttribute("data-state", "failed");
-    // §5's sentence lives on the CHIP in M2: all three spatial tools are still
-    // `implemented: false`, and `eligibility.ts`'s "Not available yet"
-    // outranks the extension reason, so the row's second line reads "Not
-    // available yet". The row-level reason becomes reachable when a spatial
-    // tool ships (M13.3).
+    // §5's sentence lives on the CHIP whatever the row says. Aggregate and
+    // Distance are still `implemented: false`, so `eligibility.ts`'s "Not
+    // available yet" outranks the extension reason on their rows; Join ships
+    // now, so ITS row reaches the download reason once a vector layer is there
+    // — the case below.
     expect(chip("Spatial")).toHaveAttribute("title", FAILED_REASON);
     // One per spatial tool: join-by-location, aggregate-per-area,
     // distance-to-nearest.
@@ -366,10 +404,39 @@ describe("the capability chips (spec §5)", () => {
     warn.mockRestore();
   });
 
+  it("puts §5's download reason on a SHIPPED spatial tool's own row", async () => {
+    // The path that was unreachable while every spatial tool was
+    // `implemented: false`: Join ships, the workspace has a city layer and an
+    // areas layer, so nothing outranks the extension — and §5's sentence is the
+    // row's own reason rather than only the chip's tooltip.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    addZones();
+    refuse.add("spatial");
+    await act(async () => {
+      await duckdb.initDuckDB();
+    });
+    render(<CatalogueView />);
+    await act(async () => {
+      await duckdb.ensureExtension("spatial");
+    });
+    const join = screen.getByRole("button", {
+      name: /Join attributes by location/,
+    });
+    expect(join).toHaveAttribute("title", FAILED_REASON);
+    expect(join.textContent).toContain(FAILED_REASON);
+    // Aggregate has not shipped, so its row still says the outranking reason.
+    const aggregate = screen.getByRole("button", {
+      name: /Aggregate buildings per area/,
+    });
+    expect(aggregate).toHaveAttribute("title", "Not available yet");
+    warn.mockRestore();
+  });
+
   it("puts the failure reason where a keyboard can reach it", async () => {
     // A `title` on a non-focusable `<span>` is a mouse-only tooltip: the chip
-    // cannot be tabbed to, and the row a keyboard DOES land on says only "Not
-    // available yet". So the same sentence is an accessible DESCRIPTION on
+    // cannot be tabbed to, and the row a keyboard DOES land on says a reason of
+    // its own (here "Add a vector layer to join with", with no areas layer in
+    // this workspace). So the same sentence is an accessible DESCRIPTION on
     // both focusable elements, and a `title` on the Retry link itself.
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     refuse.add("spatial");
