@@ -1,4 +1,15 @@
 import type { OutputColumn } from "../../insights/computedColumns";
+import {
+  aggregateColumns,
+  aggregateParams,
+  crossLayerParamsError,
+  distanceColumns,
+  distanceParams,
+  joinColumns,
+  joinParams,
+  resolveCrossLayerParams,
+  type CrossLayerContext,
+} from "./crossLayerParams";
 import { roofColumnNames, roofParams } from "./roofMetricsParams";
 import { solidColumns, solidParams, validationColumns } from "./solidParams";
 import type { ToolDefinition, ToolId } from "./types";
@@ -12,6 +23,22 @@ import type { ToolDefinition, ToolId } from "./types";
 const firstWritten = (
   written: ReadonlyArray<OutputColumn>,
 ): OutputColumn | null => written[0] ?? null;
+
+/** The context-free half of §6's validation: what the BAG alone decides. The
+ *  form re-asks with the real source (`useToolForm`), which is the only reader
+ *  that can decide §7.7's "Choose the property to copy". */
+const BAG_ONLY: CrossLayerContext = {
+  table: null,
+  sourcePropertyKeys: [],
+  // Empty on purpose. `resolveCrossLayerParams` reads an empty context as "no
+  // opinion" rather than "no properties" — it keeps the bag's own `fields`,
+  // `fieldTypes`, `nearestIdProperty` and aggregate columns — so re-normalising
+  // an already-resolved bag at `submitRun` changes nothing. Three cases in
+  // `crossLayerParams.test.ts` pin that, one per tool.
+  sourcePropertyTypes: new Map(),
+  sourceHasFeatureIds: true,
+  numericColumns: [],
+};
 
 /** Spec §5 catalogue, in display order. Names and descriptions verbatim. */
 export const TOOLS: ReadonlyArray<ToolDefinition> = [
@@ -138,6 +165,11 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     sourceKind: "vector",
     needsLod: false,
     defaultPrefix: "",
+    outputColumns: (prefix, params) => joinColumns(prefix, joinParams(params)),
+    validateParams: (params) =>
+      crossLayerParamsError("join-by-location", params, BAG_ONLY),
+    normaliseParams: (params) =>
+      resolveCrossLayerParams("join-by-location", params, BAG_ONLY),
     styleByResult: {
       kind: "rule",
       operator: "=",
@@ -159,6 +191,12 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     sourceKind: "city",
     needsLod: false,
     defaultPrefix: "bld_",
+    outputColumns: (prefix, params) =>
+      aggregateColumns(prefix, aggregateParams(params)),
+    validateParams: (params) =>
+      crossLayerParamsError("aggregate-per-area", params, BAG_ONLY),
+    normaliseParams: (params) =>
+      resolveCrossLayerParams("aggregate-per-area", params, BAG_ONLY),
     styleByResult: {
       kind: "attribute",
       // Unused for "attribute"; stated rather than left to a cast, because the
@@ -182,6 +220,12 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     sourceKind: "vector",
     needsLod: false,
     defaultPrefix: "",
+    outputColumns: (prefix, params) =>
+      distanceColumns(prefix, distanceParams(params)),
+    validateParams: (params) =>
+      crossLayerParamsError("distance-to-nearest", params, BAG_ONLY),
+    normaliseParams: (params) =>
+      resolveCrossLayerParams("distance-to-nearest", params, BAG_ONLY),
     styleByResult: {
       kind: "rule",
       operator: "<",

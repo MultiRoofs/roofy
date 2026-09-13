@@ -65,6 +65,7 @@ import {
 import { geoRecords, type GeoRecord } from "../geoLayers/geoRecords";
 import { ensureModelCrsLoadable } from "../layers/ensureCrs";
 import { epsgForLayer } from "../../scene/cursorCrsReadout";
+import { SOURCE_NEEDS_AREAS } from "./crossLayerParams";
 import { reprojectGeoLayer, type VectorPreflight } from "./vectorSource";
 import { createVectorTable, type VectorTableHandle } from "./vectorTable";
 import { runById, useProcessingStore } from "./processingStore";
@@ -931,9 +932,10 @@ async function execute(
         // sentence; §7.7's source is any geometry type and its only sentence is
         // "The source layer has no features" (§7.7: "An empty source (no usable
         // geometry after preflight) disables Run with …"). Task 15's
-        // `SOURCE_NEEDS_AREAS` is the FORM's copy of the same fact and replaces
-        // this literal when it lands.
-        const sourceMustBeAreas = tool.id === "join-by-location";
+        // `SOURCE_NEEDS_AREAS` is the FORM's copy of the same fact, and it is
+        // now the ONE owner: the form's disabled source row and this refusal
+        // read the same set, so they cannot come to disagree.
+        const sourceMustBeAreas = SOURCE_NEEDS_AREAS.has(tool.id);
         patch(id, {
           status: "failed",
           phase: null,
