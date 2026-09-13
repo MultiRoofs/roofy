@@ -112,6 +112,7 @@ function readyTableInfo(withReader: boolean): LayerTable {
     // An LoD 0 rung, so §7.5's "Footprint (LoD 0)" proxy is offered on a table
     // that also has a reader — which is what makes the default proxy testable.
     lods: withReader ? [{ label: "0", suffix: "0" }] : [],
+    sourceFeatureIds: null,
     rowCount: 2,
   };
 }

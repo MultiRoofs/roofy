@@ -188,6 +188,7 @@ function addSolidLayer(options: LayerOptions = {}): string {
             { label: "2.2", suffix: "2_2" },
             { label: "1.2", suffix: "1_2" },
           ],
+          sourceFeatureIds: null,
           rowCount: 4,
         },
       },

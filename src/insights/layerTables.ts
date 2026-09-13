@@ -194,6 +194,17 @@ export interface LayerTable {
    *  to SHOW and the suffix to BUILD A COLUMN NAME WITH, because the two are
    *  not interconvertible. `[]` for a fallback table. */
   readonly lods: ReadonlyArray<LodColumn>;
+  /**
+   * The FEATURE ROOT ids this table is restricted to — set only on a DERIVED
+   * layer (§6, "What a derived layer is"), null on every ordinary one.
+   *
+   * Three things read the PARENT's source on this layer's behalf, and every
+   * one of them must AND this filter in or the derived layer quietly reads its
+   * parent whole: `readSource`'s reader `FROM` (Task 5), `resolveScope`'s
+   * "all" (this task) and `buildCityParquetSourceSql`'s `where` (Task 24).
+   * That is why it lives on the table and not inside `deriveLayer.ts`.
+   */
+  readonly sourceFeatureIds: ReadonlyArray<string> | null;
   /** `null` when the COUNT itself failed — the table exists and is browsable,
    *  but its size is UNKNOWN. Not 0: a zero would be shown as "0 rows" over a
    *  grid that then pages real data, which is worse than saying nothing. */
@@ -455,6 +466,38 @@ export function runOnTableQueue<T>(task: () => Promise<T>): Promise<T> {
 }
 
 /**
+ * The next table name, from the SAME counter the builds use.
+ *
+ * A derived layer's table is created by the RUN, inside the run's own FIFO
+ * slot — `enqueueLayerTable` goes through `enqueue` (see {@link dropLayerTable}
+ * for the same reason), and enqueueing from inside the queue is a deadlock.
+ * The name still has to come from here: a second counter would eventually mint
+ * a `layer_N` an ordinary build is about to use, and the collision would be a
+ * silent `CREATE OR REPLACE` over a live table.
+ *
+ * Call it from INSIDE a queued task only, like {@link adoptLayerTable}.
+ */
+export function nextTableName(): string {
+  return `layer_${++counter}`;
+}
+
+/**
+ * Adopt a table that was built OUTSIDE this module's build path.
+ *
+ * The derived layer's one door (Design decision (f)). It seeds the registry
+ * and the store as `ready`, so nothing rebuilds it, nothing retries it, and
+ * `getLayerTable` answers for it exactly as for a built table.
+ *
+ * Note what it does NOT do: no `enqueue`, no DESCRIBE, no source parking. The
+ * caller has just created the table and knows its shape; a round trip here
+ * would have to be awaited, and the publication is one SYNCHRONOUS step.
+ */
+export function adoptLayerTable(layerId: string, info: LayerTable): void {
+  registry.set(layerId, info);
+  setState(layerId, { state: "ready", info });
+}
+
+/**
  * Spec §6.1: the DuckDB worker died, so every table it held died with it.
  *
  * INVALIDATION, not recovery. The status bar's Retry reboots the engine but
@@ -648,6 +691,9 @@ async function buildFromReader(
       // From ALL the described names, never the kept ones: the `geometry_lod*`
       // columns the ladder is read from are exactly the ones dropped.
       lods: lodsFromColumnNames(all.map((c) => c.name)),
+      // An ordinary build holds the WHOLE source; only a derived layer's
+      // adopted table carries a cut (`adoptLayerTable`).
+      sourceFeatureIds: null,
       rowCount: await countRows(table),
     };
   } finally {
@@ -754,6 +800,7 @@ async function buildFromRows(
       sourceBytes: null,
       columns: columnsFromDescribe(described.rows),
       lods: [],
+      sourceFeatureIds: null,
       rowCount: await countRows(table),
     };
   } finally {

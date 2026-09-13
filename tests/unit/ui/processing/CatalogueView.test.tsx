@@ -81,6 +81,7 @@ function addCityLayer(): string {
           lods: [],
           extension: null,
           sourceBytes: null,
+          sourceFeatureIds: null,
           rowCount: 2,
         },
       },

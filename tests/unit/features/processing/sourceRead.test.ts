@@ -112,6 +112,7 @@ function table(over: Partial<LayerTable> = {}): LayerTable {
       { label: "2.2", suffix: "2_2" },
       { label: "0", suffix: "0" },
     ],
+    sourceFeatureIds: null,
     rowCount: 2,
     ...over,
   };

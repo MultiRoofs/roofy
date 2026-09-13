@@ -37,6 +37,7 @@ const TABLE = {
   lods: [],
   extension: null,
   sourceBytes: null,
+  sourceFeatureIds: null,
   rowCount: 3,
   columns: [
     { name: "id", type: "VARCHAR", kind: "scalar" as const },

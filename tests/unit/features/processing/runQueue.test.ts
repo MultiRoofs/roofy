@@ -30,6 +30,7 @@ let tableInfo: {
   lods: [];
   extension: null;
   sourceBytes: null;
+  sourceFeatureIds: null;
   rowCount: number | null;
 } = freshTable();
 
@@ -46,6 +47,7 @@ function freshTable() {
     lods: [] as [],
     extension: null,
     sourceBytes: null,
+    sourceFeatureIds: null,
     rowCount: 3 as number | null,
   };
 }
@@ -60,6 +62,9 @@ let gate: { needle: string; promise: Promise<void> } | null = null;
 let failing: string | null = null;
 /** The columns the fake database holds, tracked from the ALTERs it is sent. */
 let liveColumns: string[] = ["id", "feature_id"];
+/** Tables `adoptLayerTable` was handed, by layer id. */
+const adopted = new Map<string, unknown>();
+let mockTableCounter = 100;
 /** What they were when the open transaction began, for its ROLLBACK. */
 let columnsAtBegin: string[] | null = null;
 /** Whoever `subscribeDuckDBStatus` handed a listener to, so a test can publish
@@ -151,6 +156,13 @@ vi.mock("../../../../src/insights/layerTables", async () => {
   let chain: Promise<unknown> = Promise.resolve();
   return {
     useLayerTableStore: store,
+    // A derived layer's table is minted and adopted from INSIDE the run's own
+    // FIFO slot (Task 21): `runQueue`'s graph imports both, and a factory
+    // without them throws `No "nextTableName" export is defined on the mock`.
+    nextTableName: vi.fn(() => `layer_${++mockTableCounter}`),
+    adoptLayerTable: vi.fn((layerId: string, info: unknown) => {
+      adopted.set(layerId, info);
+    }),
     getLayerTable: vi.fn(() => tableInfo),
     runOnTableQueue: vi.fn(<T>(task: () => Promise<T>): Promise<T> => {
       const next = chain.then(task, task);
@@ -343,6 +355,8 @@ beforeEach(() => {
   gate = null;
   failing = null;
   liveColumns = ["id", "feature_id"];
+  adopted.clear();
+  mockTableCounter = 100;
   columnsAtBegin = null;
   statusListeners.clear();
   deathListeners.clear();
@@ -1321,6 +1335,35 @@ describe("installStaleWatcher", () => {
             },
           },
         },
+      } as never);
+      expect(runById(id)?.stale).toBe(false);
+      expect(runById(id)?.undoable).toBe(true);
+      expect(computedColumnsOf("L1").has("extent_height_m")).toBe(true);
+    } finally {
+      stop();
+    }
+  });
+
+  it("leaves a run alone when a FIRST ready entry appears — an adoption, not a rebuild", async () => {
+    // A New-layer run publishes its copy's table with `adoptLayerTable`, which
+    // seeds a `ready` entry under an id the store has never held. That is an
+    // ARRIVAL, not a rebuild — a watcher that read it as one would mark the run
+    // that just succeeded stale and revoke its own Undo on publication.
+    registerExecutor("height-from-extent", async () => ({
+      columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+    // NO entry to begin with, which is the state `adoptLayerTable` writes into:
+    // the registry answers for the layer (the mocked `getLayerTable`) while the
+    // STORE has never held it.
+    const stop = installStaleWatcher();
+    try {
+      const id = submitRun(request());
+      await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+      tables.useLayerTableStore.setState({
+        tables: { L1: { state: "ready", info: tableInfo } },
       } as never);
       expect(runById(id)?.stale).toBe(false);
       expect(runById(id)?.undoable).toBe(true);

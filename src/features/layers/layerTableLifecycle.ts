@@ -168,7 +168,17 @@ export function installLayerTableLifecycle(): () => void {
       // A STATIC layer's table was enqueued by `addCityLayer`, which is the
       // only place that has its bytes. A STREAMING layer has none to give, so
       // it is enqueued here — empty at first, then rebuilt as cells land.
-      if (!knownLayerIds.has(layer.id) && layer.isStreaming) {
+      //
+      // A DERIVED layer is neither: its table was CREATED by the run that
+      // published it and adopted straight into the registry
+      // (`adoptLayerTable`), and rebuilding it from a resident set would
+      // replace a cut of the parent with the parent's own rows. Excluded here
+      // and in `sweepStreamingLayers` below by the same test.
+      if (
+        !knownLayerIds.has(layer.id) &&
+        layer.isStreaming &&
+        layer.derivedFrom === null
+      ) {
         void enqueueLayerTable(layer.id, residentTableSource(layer.id));
       }
     }
@@ -201,7 +211,7 @@ export function installLayerTableLifecycle(): () => void {
    */
   const sweepStreamingLayers = (): void => {
     for (const layer of useLayerStore.getState().layers) {
-      if (!layer.isStreaming) continue;
+      if (!layer.isStreaming || layer.derivedFrom !== null) continue;
       // Disarm first: a commit that landed while a consumer was open, before it
       // was shut, can still have a timer pending. Its fire-time gate would find
       // a consumer open AGAIN and rebuild a second time, moments after this one.

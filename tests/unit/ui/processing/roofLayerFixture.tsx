@@ -130,6 +130,7 @@ export function addRoofLayer(
           lods: [],
           extension: "city.json",
           sourceBytes: null,
+          sourceFeatureIds: null,
           rowCount: ROOF_FIXTURE_ROWS,
         },
       },

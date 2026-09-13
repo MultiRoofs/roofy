@@ -145,6 +145,7 @@ function addCityLayer(): string {
           lods: [],
           extension: "city.json",
           sourceBytes: null,
+          sourceFeatureIds: null,
           rowCount: 2,
         },
       },

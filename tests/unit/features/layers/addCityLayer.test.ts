@@ -12,6 +12,11 @@ let enqueueRejects = false;
  *  Deliberately not an `async` function body, which could not do that. */
 let enqueueThrowsSync = false;
 vi.mock("../../../../src/insights/layerTables", () => ({
+  // Present for the same reason `enqueueLayerTable` is: the graph under test
+  // imports the module, and a derived layer's publication (Task 21) reaches it
+  // through these two names.
+  nextTableName: vi.fn(() => "layer_99"),
+  adoptLayerTable: vi.fn(),
   enqueueLayerTable: vi.fn((layerId: string, source: unknown) => {
     enqueued.push({ layerId, source });
     if (enqueueThrowsSync) throw new Error("DuckDB module failed to load");

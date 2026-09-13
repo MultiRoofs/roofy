@@ -130,9 +130,11 @@ vi.mock("../../../src/insights/duckdb", () => {
 });
 
 const {
+  adoptLayerTable,
   dropLayerTable,
   enqueueLayerTable,
   getLayerTable,
+  nextTableName,
   refreshLayerTableColumns,
   resetLayerTablesForTest,
   retryEngine,
@@ -1388,5 +1390,39 @@ describe("a build the removal and the death both overtook", () => {
     expect(seen.filter((entry) => entry !== null)).toEqual([]);
     expect(stateOf("L1")).toBeUndefined();
     expect(getLayerTable("L1")).toBeNull();
+  });
+});
+
+describe("a derived layer's table is adopted, never built", () => {
+  it("mints a name from the SAME counter an ordinary build uses", () => {
+    // A separate counter would eventually collide with `layer_N`, and the
+    // collision would be a silent CREATE OR REPLACE over a live table.
+    const a = nextTableName();
+    const b = nextTableName();
+    expect(a).toMatch(/^layer_\d+$/);
+    expect(b).not.toBe(a);
+  });
+
+  it("seeds a READY entry that nothing will rebuild", () => {
+    const info = {
+      table: "layer_9",
+      sourceName: "layer_1.city.json",
+      source: null,
+      reader: "read_cityjson" as const,
+      extension: "city.json" as const,
+      sourceBytes: null,
+      sourceFeatureIds: ["a", "b"],
+      columns: [{ name: "id", type: "VARCHAR", kind: "scalar" as const }],
+      lods: [{ label: "2.2", suffix: "2_2" }],
+      rowCount: 3,
+    };
+    adoptLayerTable("L-derived", info);
+    const entry = useLayerTableStore.getState().tables["L-derived"];
+    expect(entry?.state).toBe("ready");
+    expect(entry?.state === "ready" ? entry.info : null).toEqual(info);
+    // And the REGISTRY, not only the store — `getLayerTable` is what a run and
+    // an export read, and an entry only the store knew about would give a
+    // derived layer a grid and no tools.
+    expect(getLayerTable("L-derived")).toEqual(info);
   });
 });

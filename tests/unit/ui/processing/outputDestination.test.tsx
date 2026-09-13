@@ -127,6 +127,7 @@ function addCityLayer(
           sourceBytes: null,
           columns,
           lods: [],
+          sourceFeatureIds: null,
           rowCount: 2,
         },
       },

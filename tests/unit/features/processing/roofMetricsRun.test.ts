@@ -44,6 +44,7 @@ let tableInfo: {
   lods: [];
   extension: null;
   sourceBytes: null;
+  sourceFeatureIds: null;
   rowCount: number | null;
 } = freshTable();
 
@@ -60,6 +61,7 @@ function freshTable() {
     lods: [] as [],
     extension: null,
     sourceBytes: null,
+    sourceFeatureIds: null,
     rowCount: 3 as number | null,
   };
 }
@@ -74,6 +76,9 @@ let gate: { needle: string; promise: Promise<void> } | null = null;
 let failing: string | null = null;
 /** The columns the fake database holds, tracked from the ALTERs it is sent. */
 let liveColumns: string[] = ["id", "feature_id"];
+/** Tables `adoptLayerTable` was handed, by layer id. */
+const adopted = new Map<string, unknown>();
+let mockTableCounter = 100;
 /** What they were when the open transaction began, for its ROLLBACK. */
 let columnsAtBegin: string[] | null = null;
 /** Whoever `subscribeDuckDBStatus` handed a listener to, so a test can publish
@@ -213,6 +218,13 @@ vi.mock("../../../../src/insights/layerTables", async () => {
   let chain: Promise<unknown> = Promise.resolve();
   return {
     useLayerTableStore: store,
+    // A derived layer's table is minted and adopted from INSIDE the run's own
+    // FIFO slot (Task 21): `runQueue`'s graph imports both, and a factory
+    // without them throws `No "nextTableName" export is defined on the mock`.
+    nextTableName: vi.fn(() => `layer_${++mockTableCounter}`),
+    adoptLayerTable: vi.fn((layerId: string, info: unknown) => {
+      adopted.set(layerId, info);
+    }),
     getLayerTable: vi.fn(() => tableInfo),
     runOnTableQueue: vi.fn(<T>(task: () => Promise<T>): Promise<T> => {
       const next = chain.then(task, task);
@@ -469,6 +481,8 @@ beforeEach(() => {
   gate = null;
   failing = null;
   liveColumns = ["id", "feature_id"];
+  adopted.clear();
+  mockTableCounter = 100;
   columnsAtBegin = null;
   residentObjects = {};
   writtenRows = [];

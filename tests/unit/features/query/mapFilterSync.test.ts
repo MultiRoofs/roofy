@@ -56,6 +56,7 @@ const TABLE = {
   lods: [],
   extension: null,
   sourceBytes: null,
+  sourceFeatureIds: null,
   rowCount: 3,
 };
 

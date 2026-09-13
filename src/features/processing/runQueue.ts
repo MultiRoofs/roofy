@@ -674,8 +674,12 @@ function publishProvenance(
       at: Date.now(),
       // FEATURES on both sides of "312 of 1,115": `rows` are ROWS (a Building
       // and its parts), and the tooltip would read as more than the layer has.
+      // A derived layer's scope "all" now resolves to ITS OWN row ids rather
+      // than null (`resolveScope`, Task 21), so "kept no id list" is no
+      // longer the same question as "covered the whole layer". Compared on
+      // the COUNTS, which is what the tooltip is about.
       partial:
-        scope.featureIds === null
+        scope.featureIds === null || scope.count >= scope.total
           ? null
           : { count: scope.count, total: scope.total },
       previous,

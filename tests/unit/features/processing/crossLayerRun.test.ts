@@ -54,6 +54,7 @@ function freshTable(name: string, columns: string[]) {
       kind: "scalar" as const,
     })),
     lods: [] as [],
+    sourceFeatureIds: null,
     rowCount: 2 as number | null,
   };
 }
@@ -100,8 +101,17 @@ vi.mock("../../../../src/insights/layerTables", async () => {
     tables: {},
   }));
   let chain: Promise<unknown> = Promise.resolve();
+  // A derived layer's table is minted and adopted from INSIDE the run's own
+  // FIFO slot (Task 21), so `runQueue`'s module graph imports both names and a
+  // factory without them throws at import.
+  const adopted = new Map<string, unknown>();
+  let mockTableCounter = 100;
   return {
     useLayerTableStore: store,
+    nextTableName: vi.fn(() => `layer_${++mockTableCounter}`),
+    adoptLayerTable: vi.fn((layerId: string, info: unknown) => {
+      adopted.set(layerId, info);
+    }),
     getLayerTable: vi.fn((layerId: string) => tables[layerId] ?? null),
     runOnTableQueue: vi.fn(<T>(task: () => Promise<T>): Promise<T> => {
       const next = chain.then(task, task);

@@ -57,6 +57,7 @@ const table = {
   lods: [],
   extension: null,
   sourceBytes: null,
+  sourceFeatureIds: null,
   rowCount: 3,
 };
 
@@ -271,5 +272,63 @@ describe("resolveScope", () => {
         snapshot: { selectedObjectIds: ["gone"], filter: null },
       }),
     ).toEqual({ ok: false, message: "Nothing to run on (0 buildings)" });
+  });
+});
+
+describe("scope 'all' on a DERIVED table", () => {
+  it("resolves to the table's OWN row ids, not to null", async () => {
+    // `featureIds: null` reaches `readSource` as "no filter", and the reader
+    // would then re-read the parent WHOLE. A table that knows which features
+    // it was cut from answers with its own rows — roots AND parts, because
+    // that is what the write touches.
+    countOnce(2);
+    vi.mocked(duck.runQuery).mockResolvedValueOnce({
+      ok: true,
+      columns: ["id"],
+      rows: [{ id: "a" }, { id: "a-1" }, { id: "b" }],
+    });
+    const out = await resolveScope({
+      table: { ...table, sourceFeatureIds: ["a", "b"] },
+      scope: "all",
+      snapshot: nothingSelected,
+    });
+    expect(out).toEqual({
+      ok: true,
+      featureIds: ["a", "a-1", "b"],
+      count: 2,
+      total: 2,
+    });
+    // ROWS, not roots: `SELECT "id"`, with no `AS f` and no WHERE.
+    expect(vi.mocked(duck.runQuery).mock.calls[1]?.[0]).toBe(
+      'SELECT "id" FROM "layer_1"',
+    );
+  });
+
+  it("still answers null for an ORDINARY table", async () => {
+    countOnce(2);
+    const out = await resolveScope({
+      table: { ...table, sourceFeatureIds: null },
+      scope: "all",
+      snapshot: nothingSelected,
+    });
+    expect(out).toEqual({ ok: true, featureIds: null, count: 2, total: 2 });
+  });
+
+  it("refuses an EMPTY derived table rather than sending `IN ()`", async () => {
+    countOnce(0);
+    vi.mocked(duck.runQuery).mockResolvedValueOnce({
+      ok: true,
+      columns: ["id"],
+      rows: [],
+    });
+    const out = await resolveScope({
+      table: { ...table, sourceFeatureIds: ["a"] },
+      scope: "all",
+      snapshot: nothingSelected,
+    });
+    expect(out).toEqual({
+      ok: false,
+      message: "Nothing to run on (0 buildings)",
+    });
   });
 });

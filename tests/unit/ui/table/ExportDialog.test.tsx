@@ -91,6 +91,7 @@ const READER_TABLE = {
   ],
   extension: "city.json" as const,
   sourceBytes: null,
+  sourceFeatureIds: null,
   rowCount: 10,
 };
 

@@ -48,6 +48,7 @@ const READY = {
     lods: [],
     extension: null,
     sourceBytes: null,
+    sourceFeatureIds: null,
     rowCount: 3,
   },
 };

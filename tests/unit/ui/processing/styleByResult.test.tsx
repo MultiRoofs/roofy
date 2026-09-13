@@ -129,6 +129,7 @@ function addLayer(): string {
           sourceBytes: null,
           columns: [],
           lods: [],
+          sourceFeatureIds: null,
           rowCount: 2,
         },
       },

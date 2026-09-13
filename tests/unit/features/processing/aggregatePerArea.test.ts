@@ -179,6 +179,7 @@ function table(): LayerTable {
       { name: "roof_area_m2", type: "DOUBLE", kind: "scalar" },
     ],
     lods: [{ label: "0", suffix: "0" }],
+    sourceFeatureIds: null,
     rowCount: 3,
   } as LayerTable;
 }

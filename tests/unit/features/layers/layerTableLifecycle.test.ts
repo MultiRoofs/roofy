@@ -151,6 +151,29 @@ describe("streaming layers", () => {
     expect(enqueued).toEqual(["S"]);
   });
 
+  it("never rebuilds a DERIVED layer's table from a resident set", () => {
+    // A derived layer's table was CREATED by the run that published it and
+    // adopted straight into the registry (`adoptLayerTable`), so rebuilding it
+    // from a resident set would replace a cut of the parent with the parent's
+    // own rows.
+    useLayerStore.setState({
+      layers: [
+        layer({ id: "L1", isStreaming: true }),
+        layer({
+          id: "L2",
+          isStreaming: true,
+          derivedFrom: { layerId: "L1", layerName: "Delft", runId: "run_1" },
+        }),
+      ],
+    });
+    expect(enqueued).toContain("L1");
+    expect(enqueued).not.toContain("L2");
+    // And the consumer sweep leaves it alone too.
+    enqueued.length = 0;
+    useProcessingStore.getState().setOpen(true);
+    expect(enqueued).not.toContain("L2");
+  });
+
   it("ignores a commit while the table panel is closed", () => {
     useLayerStore.setState({ layers: [layer({ id: "S", isStreaming: true })] });
     enqueued.length = 0;

@@ -53,6 +53,10 @@ const tables = vi.hoisted(() => ({
 
 vi.mock("../../../../src/insights/layerTables", () => ({
   enqueueLayerTable: tables.enqueueLayerTable,
+  // A derived layer's publication (Task 21) reaches the module through these
+  // two; the graph under test imports them whether or not this file calls one.
+  nextTableName: vi.fn(() => "layer_99"),
+  adoptLayerTable: vi.fn(),
 }));
 
 /**

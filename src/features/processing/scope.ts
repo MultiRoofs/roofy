@@ -115,6 +115,31 @@ export async function resolveScope(input: {
   const total = await countFeatures(input.table.table);
   if (!total.ok) return { ok: false, message: total.message };
   if (where === null) {
+    // A DERIVED layer's table holds a SUBSET of its parent's source, and
+    // "every row" is a different question there: `featureIds: null` travels to
+    // `readSource` and the CityParquet export as "no filter", and the reader
+    // would re-read the PARENT whole. A table that knows the features it was
+    // cut from therefore answers with its own ROW ids — roots AND parts,
+    // because that is what a write touches — and every executor,
+    // `buildProxySql` and `buildSolidMeasureSql` need no change at all.
+    const cut = input.table.sourceFeatureIds;
+    if (cut !== null) {
+      const rows = await runQuery(
+        `SELECT "id" FROM ${quoteIdent(input.table.table)}`,
+      );
+      if (!rows.ok) return { ok: false, message: rows.message };
+      const featureIds = rows.rows.map((r) => String(r.id));
+      if (featureIds.length === 0)
+        return { ok: false, message: "Nothing to run on (0 buildings)" };
+      return {
+        ok: true,
+        featureIds,
+        count: total.count,
+        // The list the table was CUT with, which is the honest denominator for
+        // "312 of 1,115" — the parent's count would describe another layer.
+        total: cut.length,
+      };
+    }
     return {
       ok: true,
       featureIds: null,
