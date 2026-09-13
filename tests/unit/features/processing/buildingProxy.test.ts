@@ -135,8 +135,37 @@ describe("buildProxySql — one row per TABLE ROW", () => {
     ).toBe(
       'SELECT "id", COALESCE("feature_id", "id") AS f, ' +
         'CASE WHEN "geometry_lod0" IS NULL THEN NULL ELSE ST_Force2D(ST_GeomFromWKB("geometry_lod0")) END AS g ' +
-        "FROM read_cityjson('layer_1_run_7.city.json', lod => '0')",
+        "FROM read_cityjson('layer_1_run_7.city.json', lod => '0') " +
+        'WHERE "id" IN (SELECT "id" FROM "layer_1")',
     );
+  });
+
+  it("restricts scope ALL to the LAYER TABLE's own ids (S1)", () => {
+    // `ids: null` is scope "All", and the reader is a RE-READ of the file the
+    // layer was loaded from. If the file has GAINED buildings since, an
+    // unrestricted reader hands §7.6 features the loaded layer never had — and
+    // §6.1's id join cannot catch it, because it only asks whether every
+    // requested id still comes back. The table is the authority on which rows
+    // exist, so the widest scope asks it rather than a 100k-id literal list.
+    const sql = buildProxySql({
+      proxy: "footprint",
+      table: "layer_1",
+      from: "read_cityjson('layer_1_run_7.city.json', lod => '0')",
+      geometryColumn: "geometry_lod0",
+      ids: null,
+    });
+    expect(sql).toContain('WHERE "id" IN (SELECT "id" FROM "layer_1")');
+    // The two bbox proxies read the table directly and are already restricted;
+    // a subquery against the table they select FROM would be noise.
+    expect(
+      buildProxySql({
+        proxy: "rectangle",
+        table: "layer_1",
+        from: null,
+        geometryColumn: null,
+        ids: null,
+      }),
+    ).not.toContain('SELECT "id" FROM');
   });
 
   it("restricts the READER relation to the frozen ids, like the table one", () => {
@@ -259,6 +288,18 @@ describe("buildFeatureProxySql — one row per FEATURE", () => {
         ids: ["b1", "b1p"],
       }),
     ).toContain("WHERE \"id\" IN ('b1', 'b1p')");
+  });
+
+  it("carries the TABLE restriction into the feature relation on scope all (S1)", () => {
+    expect(
+      buildFeatureProxySql({
+        proxy: "footprint",
+        table: "layer_1",
+        from: "read_cityjson('x.city.json', lod => '0')",
+        geometryColumn: "geometry_lod0",
+        ids: null,
+      }),
+    ).toContain('WHERE "id" IN (SELECT "id" FROM "layer_1")');
   });
 
   it("aggregates the BBOX NUMBERS for the two extent proxies, not the shapes", () => {

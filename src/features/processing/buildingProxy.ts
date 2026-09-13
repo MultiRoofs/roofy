@@ -165,9 +165,23 @@ export function buildProxySql(input: ProxySqlInput): string {
     // `ST_Force2D` is applied HERE, per row, rather than to the union above:
     // then the aggregate runs on 2-D inputs and BOTH relations this module
     // builds carry the same 2-D contract.
+    // AND SCOPE "ALL" IS SCOPED TOO (gate finding S1). `ids === null` means
+    // "every row of the layer", NOT "every object of the file": the reader is a
+    // RE-READ, and a file that has GAINED buildings since the layer was loaded
+    // would otherwise hand §7.6 features the loaded layer never had — counted
+    // per area, with nothing in any output column to show for them. §6.1's id
+    // join cannot catch that: it asks only whether every id it requested still
+    // comes back, so a gain passes it. The LAYER TABLE is the authority on
+    // which rows exist (it is what the write targets), so the widest scope
+    // asks IT — as a subquery rather than a literal list, because spelling
+    // 100k ids into the statement is what `ids === null` exists to avoid.
+    const scopedTo =
+      input.ids === null
+        ? ` WHERE "id" IN (SELECT "id" FROM ${quoteIdent(input.table)})`
+        : whereIds(input.ids);
     return (
       `${head}CASE WHEN ${col} IS NULL THEN NULL ELSE ST_Force2D(ST_GeomFromWKB(${col})) END AS g ` +
-      `FROM ${input.from}${whereIds(input.ids)}`
+      `FROM ${input.from}${scopedTo}`
     );
   }
   const geometry =

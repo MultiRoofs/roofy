@@ -859,17 +859,115 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
     // footprint taken from a solid LoD is not a rougher answer, it is a failed
     // run. `ST_Area(g)` rather than `f` alone, because DuckDB prunes an
     // unreferenced projection and the parse then never happens.
+    db.query(
+      `CREATE OR REPLACE TABLE solid_lod_rows AS SELECT "id", "feature_id" FROM read_cityjson('${SOURCE}', lod => '${LOD}')`,
+    );
     expect(() =>
       db.query(
         `SELECT f, ST_Area(g) AS a FROM (${buildFeatureProxySql({
           proxy: "footprint",
-          table: "unused",
+          table: "solid_lod_rows",
           from: `read_cityjson('${SOURCE}', lod => '${LOD}')`,
           geometryColumn: "geometry_lod2_2",
           ids: null,
         })})`,
       ),
     ).toThrow(/Unsupported geometry type in WKB/);
+    db.query(`DROP TABLE IF EXISTS solid_lod_rows`);
+  });
+
+  it("keeps scope ALL inside the LAYER TABLE when the file has gained a building (S1)", () => {
+    // The gate finding: `ids === null` used to hand the whole RE-READ file to
+    // the proxy relation. `probe_lod0.city.json` holds P3 with a real LoD 0
+    // footprint at x 100-110; the LAYER never had it. §6.1's id join passes
+    // either way — it only asks whether every id it requested still comes back
+    // — so nothing but the table's own row list can keep P3 out.
+    db.query(
+      `CREATE OR REPLACE TABLE s1_rows AS SELECT * FROM (VALUES
+         ('P1', 'P1'), ('P1-0', 'P1'), ('P2', 'P2')
+       ) AS t("id", "feature_id")`,
+    );
+    const from = `read_cityjson('${LOD0_FILE}', lod => '0.0')`;
+    const proxies = db.query(
+      `SELECT f, ST_Area(g) AS a FROM (${buildFeatureProxySql({
+        proxy: "footprint",
+        table: "s1_rows",
+        from,
+        geometryColumn: "geometry_lod0_0",
+        ids: null,
+      })}) ORDER BY f`,
+    );
+    // The same three features the frozen-id case above returns — P3 is not
+    // here, even though the reader would answer for it.
+    expect(proxies).toEqual([
+      { f: "P1", a: 16 },
+      { f: "P2", a: null },
+    ]);
+    db.query(`DROP TABLE IF EXISTS s1_rows`);
+  });
+
+  it("does not let a gained building reach §7.6's per-area count (S1)", async () => {
+    // The user-visible half of the same finding: an area drawn over P3's
+    // footprint must count ZERO buildings, because the loaded layer has no
+    // building there. Before the fix the reader's P3 was counted.
+    db.query(
+      `CREATE OR REPLACE TABLE s1_agg_rows AS SELECT * FROM (VALUES
+         ('P1', 'P1'), ('P1-0', 'P1')
+       ) AS t("id", "feature_id")`,
+    );
+    db.registerBytes(
+      "__src_s1.json",
+      await encodeProjectedFeatures([
+        {
+          idx: 0,
+          stableId: "id:string:home",
+          featureId: "home",
+          properties: {},
+          // Over P1's own 10 x 10 footprint.
+          wkt: "POLYGON ((-1 -1, 11 -1, 11 11, -1 11, -1 -1))",
+        },
+        {
+          idx: 1,
+          stableId: "id:string:gained",
+          featureId: "gained",
+          properties: {},
+          // Over P3's footprint, which the layer table does not hold.
+          wkt: "POLYGON ((99 -1, 111 -1, 111 11, 99 11, 99 -1))",
+        },
+      ]),
+    );
+    db.query(buildVectorTableSql("__src_s1", "__src_s1.json"));
+    const rows = db.query(
+      buildAggregateSql({
+        table: "s1_agg_rows",
+        source: "__src_s1",
+        proxy: "footprint",
+        from: `read_cityjson('${LOD0_FILE}', lod => '0.0')`,
+        geometryColumn: "geometry_lod0_0",
+        ids: null,
+        predicate: "intersects",
+        rows: [{ op: "count", column: null, name: "bld_buildings_n" }],
+      }),
+    );
+    expect(rows).toEqual([
+      {
+        sid: "id:string:gained",
+        bld_buildings_n: 0,
+        multi_n: 0,
+        buildings_total: 1,
+        no_proxy_n: 0,
+      },
+      {
+        sid: "id:string:home",
+        bld_buildings_n: 1,
+        multi_n: 0,
+        buildings_total: 1,
+        no_proxy_n: 0,
+      },
+    ]);
+    db.query(buildDropVectorTableSql("__src_s1"));
+    db.query(`DROP TABLE IF EXISTS s1_agg_rows`);
+    db.dropFile("__src_s1.json");
   });
   it("runs buildJoinSql's OWN statement, per FEATURE, over the vector table", () => {
     // §7.5 end to end against the engine: the rectangle proxy, the copied
