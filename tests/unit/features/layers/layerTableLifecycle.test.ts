@@ -557,6 +557,11 @@ describe("the consumer sweep compares versions (Design decision (j))", () => {
   });
 
   it("forgets a removed layer's version, so a re-add rebuilds", async () => {
+    // A re-added layer under the same id is a DIFFERENT table and must not
+    // inherit the number. The add branch itself has no version gate, so the
+    // discriminating case is a re-add whose own build FAILS: the pending entry
+    // clears, and a version left over from the REMOVED layer would then make
+    // every later consumer skip the retry for the rest of the session.
     useLayerStore.setState({
       layers: [layer({ id: "L1", isStreaming: true })],
     });
@@ -565,14 +570,16 @@ describe("the consumer sweep compares versions (Design decision (j))", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     useLayerStore.setState({ layers: [] });
+    // The stream stays exactly where it was, so the leftover number would match.
+    buildOutcome = { ok: false, message: "Database was closed" };
     enqueued.length = 0;
-    // A different layer under the same id, and the stream's version happens to
-    // be the number the old one was built at.
     useLayerStore.setState({
       layers: [layer({ id: "L1", isStreaming: true })],
     });
-    expect(enqueued).toEqual(["L1"]);
+    await vi.advanceTimersByTimeAsync(0);
     useProcessingStore.getState().setOpen(true);
+    // The add's own build, and then the sweep's retry.
+    expect(enqueued).toEqual(["L1", "L1"]);
   });
 
   it("refreshStreamingTable does not let the next sweep skip a rebuild", async () => {

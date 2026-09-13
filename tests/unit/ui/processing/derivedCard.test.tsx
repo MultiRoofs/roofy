@@ -57,6 +57,8 @@ vi.mock("../../../../src/features/processing/runQueue", async () => {
 
 const { RunFooter } = await import("../../../../src/ui/processing/RunFooter");
 const { useShellStore } = await import("../../../../src/ui/shell/shellStore");
+const { clearColumnReveals } =
+  await import("../../../../src/ui/table/revealColumns");
 const { useQueryStore } =
   await import("../../../../src/features/query/queryStore");
 const { useProcessingStore } =
@@ -156,6 +158,9 @@ afterEach(() => {
   useRuleDraftStore.setState({ drafts: {} });
   useShellStore.getState().requestZoom(null);
   useShellStore.getState().closeDrawer();
+  // Open table RETAINS its scroll request until a grid acknowledges it, and no
+  // case here renders one.
+  clearColumnReveals();
 });
 
 describe("the New-layer result card", () => {
