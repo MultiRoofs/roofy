@@ -10,6 +10,7 @@ import { useProcessingStore } from "../../features/processing/processingStore";
 import { submitRun } from "../../features/processing/runQueue";
 import type { ToolId } from "../../features/processing/types";
 import { useToolForm } from "./useToolForm";
+import { CrossLayerParams } from "./CrossLayerParams";
 import { RoofMetricsParams } from "./RoofMetricsParams";
 import { SolidParams } from "./SolidParams";
 import { RunFooter } from "./RunFooter";
@@ -69,29 +70,22 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
   // hand-off between one run finishing and the next starting), and that footer
   // must still say "Queued" rather than fall through to the draft's reason.
   const footerNote = latestRun?.status === "queued" ? queueNote : footerReason;
-  // §5: "A disabled row still opens the tool view", so a target the user has
-  // already chosen stays in the select even when the tool cannot run on it —
-  // a blank select would hide which layer the reason under Run is about.
-  const chosen = f.target;
-  const targetOptions =
-    chosen !== null && !f.eligibleTargets.some((l) => l.id === chosen.id)
-      ? [...f.eligibleTargets, chosen]
-      : f.eligibleTargets;
   const run = () => {
-    if (!f.target || !f.canRun) return;
+    if (f.targetLayerId === null || !f.canRun) return;
     submitRun({
       toolId,
-      targetLayerId: f.target.id,
-      // Task 15 gives the form its SOURCE select; until then every run this
-      // view submits is a one-layer run.
-      sourceLayerId: null,
+      targetLayerId: f.targetLayerId,
+      sourceLayerId: f.sourceLayerId,
       scope: f.draft.scope,
       lod: f.draft.lod,
       // §6.1 freezes "everything the run needs" and §6.4 makes the log the
-      // reproducible record of it, so what is frozen is the NORMALISED bag: an
+      // reproducible record of it, so what is frozen is the RESOLVED bag — an
       // untouched draft is `{}`, and a log reading "Parameters: —" for a run
-      // that used six measures and a 5° threshold records nothing.
-      params: f.tool.normaliseParams?.(f.draft.params) ?? f.draft.params,
+      // that used six measures and a 5° threshold records nothing. For a
+      // cross-layer tool that includes the building-geometry proxy the form
+      // SHOWED: `normaliseParams` re-resolves an already-resolved bag and is
+      // idempotent over it by construction.
+      params: f.tool.normaliseParams?.(f.params) ?? f.params,
       prefix: f.draft.prefix,
       // The registry's own answer, types and all — §7 puts a column's type
       // beside its name, and the write path reads `col.type` straight out of
@@ -130,16 +124,45 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
           <span>Layer</span>
           <select
             aria-label="Layer"
-            value={f.target?.id ?? ""}
+            value={f.targetLayerId ?? ""}
             onChange={(e) => f.setDraft({ targetLayerId: e.target.value })}
           >
-            {targetOptions.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
+            {f.targetOptions.map((option) => (
+              <option
+                key={option.id}
+                value={option.id}
+                disabled={option.disabled}
+                title={option.reason ?? undefined}
+              >
+                {option.name}
               </option>
             ))}
           </select>
         </label>
+        {/* §6's TARGET section carries the SOURCE select for a cross-layer
+            tool; a disabled row keeps §5's reason as its tooltip, and Run
+            repeats it under the button. */}
+        {f.tool.sourceKind !== null && (
+          <label className="processing-field">
+            <span>Source</span>
+            <select
+              aria-label="Source"
+              value={f.sourceLayerId ?? ""}
+              onChange={(e) => f.setDraft({ sourceLayerId: e.target.value })}
+            >
+              {f.sourceOptions.map((option) => (
+                <option
+                  key={option.id}
+                  value={option.id}
+                  disabled={option.disabled}
+                  title={option.reason ?? undefined}
+                >
+                  {option.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {/* §6's LoD select — and `f.eligibility.ok`, because a tool this layer
             refuses states nothing about the layer's geometry: the empty select
             would read "No solid geometry in this layer" beside a footer saying
@@ -218,10 +241,18 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
               Selected {fmt(f.counts.selected)}
             </label>
           </div>
-          {f.target?.isStreaming === true && (
+          {f.cityLayer?.isStreaming === true && (
             <p className="processing-note">
               Runs over the {fmt(f.counts.all)} currently loaded buildings, not
               the whole dataset.
+            </p>
+          )}
+          {f.tool.target === "vector" && (
+            // **[adapted copy A12]** — Decisions recorded item 4: the radios
+            // stay under TARGET and say which layer they count (§7.6: "Scope
+            // applies to the SOURCE buildings").
+            <p className="processing-note">
+              Scope applies to the source layer&apos;s buildings.
             </p>
           )}
         </div>
@@ -257,6 +288,25 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
           )}
         </fieldset>
       )}
+      {f.tool.group === "cross-layer" && (
+        <fieldset className="processing-section" disabled={locked}>
+          <legend className="processing-group__label">PARAMETERS</legend>
+          {/* The section renders §6's inline validation itself: §7.6's
+              offences belong to ONE aggregate row (residual B11), so the
+              sentence has to sit beside that row rather than under the whole
+              section — and printing it in both places reads as two problems. */}
+          <CrossLayerParams
+            toolId={toolId}
+            params={f.params}
+            onChange={(params) => f.setDraft({ params })}
+            proxies={f.proxies}
+            sourcePropertyKeys={f.sourcePropertyKeys}
+            sourcePropertyTypes={f.sourcePropertyTypes}
+            sourceHasFeatureIds={f.sourceHasFeatureIds}
+            numericColumns={f.numericColumns}
+          />
+        </fieldset>
+      )}
       {toolId === "validate-solids" && (
         <fieldset className="processing-section" disabled={locked}>
           <legend className="processing-group__label">PARAMETERS</legend>
@@ -286,7 +336,7 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
               {/* `readOnly` beside `checked`: the radio can never change (it is
                   the only destination), and React asks for one or the other. */}
               <input type="radio" name="writeTo" checked readOnly disabled />
-              This layer{f.target === null ? "" : ` (${f.target.name})`}
+              This layer{f.targetName === null ? "" : ` (${f.targetName})`}
             </label>
           </div>
         </div>

@@ -269,6 +269,7 @@ describe("the LoD select (spec §6)", () => {
     const layerId = addRoofLayer({ selectedLod: "1.2" });
     useProcessingStore.getState().setDraft("roof-metrics", {
       targetLayerId: "gone",
+      sourceLayerId: null,
       scope: "all",
       lod: "2.2",
       prefix: "roof_",

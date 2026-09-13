@@ -2,17 +2,30 @@
  * Everything spec §6's form needs about ONE tool, gathered from the stores.
  *
  * It lives beside the view rather than under `features/` because it is a hook
- * over four UI-side stores (the layer tables, the counts hook, the computed
- * column registry and the query store) — the pure parts it leans on
- * (`toolEligibility`, `toolById`) are already engine-free and tested there.
+ * over several UI-side stores (the layer tables, the geo layers, the counts
+ * hook, the computed column registry and the query store) — the pure parts it
+ * leans on (`toolEligibility`, `toolById`, `resolveCrossLayerParams`) are
+ * already engine-free and tested there.
  *
  * The draft is stored per tool for the session (spec §6), so the form is
  * restored on the way back from the catalogue; a stored draft naming a layer
  * that has since gone falls back to the default target rather than rendering an
  * empty select.
+ *
+ * TWO LAYERS, NOT ONE. A cross-layer tool reads a SOURCE as well as writing a
+ * TARGET (spec §3), and for §7.6 the two swap stores: the target is the vector
+ * layer and the buildings come from a city one. Everything that is really a
+ * question about the CITY layer — the table, the proxies, the LoD ladder, the
+ * scope counts, §6's workload note — is asked of `cityLayer` below, which is
+ * the same layer the queue calls `computeLayerId`.
  */
 import { useMemo } from "react";
-import { useLayerStore } from "../../features/layers/layerStore";
+import { useLayerStore, type Layer } from "../../features/layers/layerStore";
+import {
+  useGeoLayerStore,
+  type GeoJsonLayer,
+} from "../../features/geoLayers/geoLayerStore";
+import { geoRecords } from "../../features/geoLayers/geoRecords";
 import { useLayerCounts } from "../table/useLayerCounts";
 import {
   computedColumnsOf,
@@ -24,6 +37,23 @@ import {
 } from "../../features/processing/processingStore";
 import { toolById } from "../../features/processing/toolRegistry";
 import { toolEligibility } from "../../features/processing/eligibility";
+import { proxyOptions } from "../../features/processing/buildingProxy";
+import {
+  crossLayerParamsError,
+  numericColumnsOf,
+  resolveCrossLayerParams,
+  slugifyField,
+  POLYGONAL_KINDS,
+  SOURCE_NEEDS_AREAS,
+  TARGET_NEEDS_AREAS,
+  type CrossLayerContext,
+} from "../../features/processing/crossLayerParams";
+import {
+  documentGeometryKinds,
+  documentHasFeatureIds,
+  documentHasFeatures,
+  geoPropertyTypes,
+} from "../../features/processing/vectorSource";
 import { sourceWorkloadNote } from "../../features/processing/sourceRead";
 import type { ToolDefinition, ToolId } from "../../features/processing/types";
 import type { LayerTable } from "../../insights/layerTables";
@@ -43,33 +73,91 @@ const PREFIX_RE = /^(?:[a-z][a-z0-9_]*)?$/i;
 /**
  * Spec §6: "a workload note when the target's source is large".
  *
- * Only for a tool that RE-READS the source — a tool computing from the table or
+ * Only for a run that RE-READS the source — a run computing from the table or
  * the model pays none of this cost, and a warning about a read that will not
- * happen is a false alarm — and only for an IMPLEMENTED one: §6's rule is that
+ * happen is a false alarm — and only for an IMPLEMENTED tool: §6's rule is that
  * a tool whose executor has not shipped claims no fact about the user's data,
  * and "this can take a minute" is a fact about a read the app cannot perform.
  *
+ * THE RE-READ IS A QUESTION ABOUT THE PARAMETERS TOO, not only about the tool.
+ * The three cross-layer tools declare `needsReader: false` because their source
+ * read is OPTIONAL: only §7.5's "Footprint (LoD 0)" proxy opens the reader, and
+ * the two bbox proxies answer out of the browsing table. So the resolved bag is
+ * asked as well, and a run on the extent rectangle or the extent centre shows
+ * no note at all.
+ *
  * A function of a tool DEFINITION rather than an expression inside the hook, so
- * both conjuncts can be stated on a definition that declares itself: the rule
+ * every conjunct can be stated on a definition that declares itself: the rule
  * outlives whichever registry entry has not shipped yet.
  */
 export function toolWorkloadNote(
   tool: ToolDefinition,
   table: LayerTable | null,
+  params: Readonly<Record<string, unknown>> = {},
 ): string | null {
-  if (!tool.implemented || !tool.needsReader || table === null) return null;
+  if (!tool.implemented || table === null) return null;
+  if (!tool.needsReader && params["proxy"] !== "footprint") return null;
   return sourceWorkloadNote(table);
+}
+
+/** One row of the TARGET or SOURCE select. */
+export interface LayerOption {
+  readonly id: string;
+  readonly name: string;
+  readonly disabled: boolean;
+  /** §5's reason, as the row's tooltip and as Run's reason. */
+  readonly reason: string | null;
+}
+
+/** Does the document carry at least one area (§7.5, §7.6)? */
+function hasAreas(layer: GeoJsonLayer): boolean {
+  return [...documentGeometryKinds(layer.config.preparedData)].some((kind) =>
+    POLYGONAL_KINDS.has(kind),
+  );
+}
+
+/**
+ * Why a vector layer cannot be this tool's SOURCE, or null.
+ *
+ * IN THE SPEC'S OWN ORDER, and the order is the whole of it: a layer that is
+ * still loading, or that failed, has no document to ask about geometry — and
+ * asking anyway answers "no polygons", which would put "Needs areas
+ * (polygons)" on a layer that is full of them. So preparation first
+ * (**[adapted copy A4]**, the same two sentences `eligibility.ts` says about a
+ * vector TARGET), then §7.5/§7.7's empty-source sentence, and only then the
+ * geometry kind §7.5 needs.
+ */
+function vectorSourceReason(
+  layer: GeoJsonLayer,
+  toolId: ToolId,
+): string | null {
+  const preparation = layer.config.preparation;
+  if (preparation === "loading") return "This vector layer is still loading";
+  if (preparation === "failed") return "This vector layer could not be loaded";
+  if (!documentHasFeatures(layer.config.preparedData)) {
+    return "The source layer has no features";
+  }
+  if (SOURCE_NEEDS_AREAS.has(toolId) && !hasAreas(layer)) {
+    return "Needs areas (polygons)";
+  }
+  return null;
 }
 
 export function useToolForm(toolId: ToolId) {
   const tool = toolById(toolId);
   const active = useActiveLayer();
   const layers = useLayerStore((s) => s.layers);
+  const geoLayers = useGeoLayerStore((s) => s.layers);
   const inputs = useEligibilityInputs();
   const { tables } = inputs;
   const drafts = useProcessingStore((s) => s.drafts);
   const runs = useProcessingStore((s) => s.runs);
   useComputedColumnStore((s) => s.byLayer); // subscribe: the replace warning depends on it
+
+  const vectorCandidates = useMemo(
+    () => geoLayers.filter((l): l is GeoJsonLayer => l.kind === "geojson"),
+    [geoLayers],
+  );
   // Spec §6: the select lists "only layers the tool can target", which is the
   // tool's whole eligibility, not just "the table is ready". `candidates` keeps
   // the wider list so an UNIMPLEMENTED tool (every eligibility fails) still
@@ -93,18 +181,47 @@ export function useToolForm(toolId: ToolId) {
     // the alternative is five dependencies that drift.
     [candidates, inputs, tool],
   );
+  const eligibleVectorTargets = useMemo(
+    () =>
+      vectorCandidates.filter(
+        (l) =>
+          toolEligibility(
+            tool,
+            eligibilityContextFor({ kind: "geo", layer: l }, inputs),
+          ).ok,
+      ),
+    [vectorCandidates, inputs, tool],
+  );
+
   const stored = drafts[toolId];
-  const preferred = eligibleTargets.length > 0 ? eligibleTargets : candidates;
+  const vectorTargeted = tool.target === "vector";
+  const preferred = vectorTargeted
+    ? eligibleVectorTargets.length > 0
+      ? eligibleVectorTargets
+      : vectorCandidates
+    : eligibleTargets.length > 0
+      ? eligibleTargets
+      : candidates;
+  const activeIsTargetKind =
+    active !== null &&
+    (vectorTargeted ? active.kind === "geo" : active.kind === "city");
   const defaultTarget =
-    active?.kind === "city" && preferred.some((l) => l.id === active.layer.id)
+    activeIsTargetKind && preferred.some((l) => l.id === active.layer.id)
       ? active.layer.id
       : (preferred[0]?.id ?? null);
+  const allIds = useMemo(
+    () => new Set([...layers.map((l) => l.id), ...geoLayers.map((l) => l.id)]),
+    [layers, geoLayers],
+  );
   const storedTargetExists =
-    stored !== undefined && layers.some((l) => l.id === stored.targetLayerId);
+    stored !== undefined &&
+    stored.targetLayerId !== null &&
+    allIds.has(stored.targetLayerId);
   const base: ToolDraft =
     stored === undefined
       ? {
           targetLayerId: defaultTarget,
+          sourceLayerId: null,
           scope: "all",
           lod: null,
           prefix: tool.defaultPrefix,
@@ -116,9 +233,137 @@ export function useToolForm(toolId: ToolId) {
           // LoD it carried was a statement about THAT layer. Dropped here for
           // the same reason `setDraft` drops it on an explicit target change.
           { ...stored, targetLayerId: defaultTarget, lod: null };
-  const target = layers.find((l) => l.id === base.targetLayerId) ?? null;
+
+  // The TARGET, in whichever store it lives.
+  const target: Layer | null = vectorTargeted
+    ? null
+    : (layers.find((l) => l.id === base.targetLayerId) ?? null);
+  const vectorTarget: GeoJsonLayer | null = vectorTargeted
+    ? (vectorCandidates.find((l) => l.id === base.targetLayerId) ?? null)
+    : null;
+  const targetLayerId = vectorTargeted
+    ? (vectorTarget?.id ?? null)
+    : (target?.id ?? null);
+  const targetName = vectorTargeted
+    ? (vectorTarget?.name ?? null)
+    : (target?.name ?? null);
+  const targetOptions: ReadonlyArray<LayerOption> = useMemo(() => {
+    // §7.6: a point or line TARGET is listed DISABLED with this reason. The
+    // question is only ever asked of a vector layer, so the row builder takes
+    // the narrowed one.
+    const rowFor = (l: GeoJsonLayer): LayerOption => {
+      const refused = TARGET_NEEDS_AREAS.has(toolId) && !hasAreas(l);
+      return {
+        id: l.id,
+        name: l.name,
+        disabled: refused,
+        reason: refused ? "Needs areas (polygons)" : null,
+      };
+    };
+    const rows: ReadonlyArray<LayerOption> = vectorTargeted
+      ? eligibleVectorTargets.map(rowFor)
+      : eligibleTargets.map((l) => ({
+          id: l.id,
+          name: l.name,
+          disabled: false,
+          reason: null,
+        }));
+    // §5: "a disabled row still opens the tool view", so a target the user has
+    // already chosen stays in the select even when the tool cannot run on it —
+    // and it carries the SAME reason its eligible siblings would.
+    if (vectorTargeted) {
+      return vectorTarget !== null &&
+        !rows.some((r) => r.id === vectorTarget.id)
+        ? [...rows, rowFor(vectorTarget)]
+        : rows;
+    }
+    return target !== null && !rows.some((r) => r.id === target.id)
+      ? [
+          ...rows,
+          { id: target.id, name: target.name, disabled: false, reason: null },
+        ]
+      : rows;
+  }, [
+    vectorTargeted,
+    eligibleVectorTargets,
+    eligibleTargets,
+    toolId,
+    vectorTarget,
+    target,
+  ]);
+
+  // The SOURCE: §7.5/§7.7 want a vector layer, §7.6 a city layer.
+  const sourceOptions: ReadonlyArray<LayerOption> = useMemo(() => {
+    if (tool.sourceKind === "vector") {
+      return vectorCandidates.map((l) => {
+        const reason = vectorSourceReason(l, toolId);
+        return { id: l.id, name: l.name, disabled: reason !== null, reason };
+      });
+    }
+    if (tool.sourceKind === "city") {
+      return candidates.map((l) => ({
+        id: l.id,
+        name: l.name,
+        disabled: false,
+        reason: null,
+      }));
+    }
+    return [];
+  }, [tool.sourceKind, toolId, vectorCandidates, candidates]);
+  const storedSourceValid =
+    base.sourceLayerId !== null &&
+    sourceOptions.some((o) => o.id === base.sourceLayerId);
+  // Residual B6: when EVERY row is disabled the form still opens on one of
+  // them, because the row's reason is the only true thing there is to say and
+  // a null source would leave Run blocked by an unrelated sentence — or, for
+  // §7.7, by nothing at all. `canRun` below refuses a null source outright.
+  const sourceLayerId = storedSourceValid
+    ? base.sourceLayerId
+    : (sourceOptions.find((o) => !o.disabled)?.id ??
+      sourceOptions[0]?.id ??
+      null);
+  const sourceGeo =
+    tool.sourceKind === "vector"
+      ? (vectorCandidates.find((l) => l.id === sourceLayerId) ?? null)
+      : null;
+  const sourceDocument = sourceGeo?.config.preparedData;
+  const sourceRecords = useMemo(
+    () => (sourceDocument === undefined ? [] : geoRecords(sourceDocument)),
+    [sourceDocument],
+  );
+  const sourcePropertyTypes = useMemo(
+    () => geoPropertyTypes(sourceRecords),
+    [sourceRecords],
+  );
+  const sourcePropertyKeys = useMemo(
+    () => [...sourcePropertyTypes.keys()],
+    [sourcePropertyTypes],
+  );
+  const sourceHasFeatureIds = useMemo(
+    () => documentHasFeatureIds(sourceDocument),
+    [sourceDocument],
+  );
+
+  // The layer whose TABLE, LoD ladder and scope counts the form reads — the
+  // same thing the queue calls `computeLayerId`. §7.6: "Scope applies to the
+  // SOURCE buildings", so Aggregate's radios count the CITY layer.
+  const cityLayer: Layer | null = vectorTargeted
+    ? (layers.find((l) => l.id === sourceLayerId) ?? null)
+    : target;
+  const cityTableState = cityLayer ? tables[cityLayer.id] : undefined;
+  const cityTable =
+    cityTableState !== undefined && cityTableState.state === "ready"
+      ? cityTableState.info
+      : null;
+
   const targetCtx = eligibilityContextFor(
-    target ? { kind: "city", layer: target } : null,
+    vectorTargeted
+      ? vectorTarget
+        ? { kind: "geo", layer: vectorTarget }
+        : null
+      : target
+        ? { kind: "city", layer: target }
+        : null,
     inputs,
   );
   const eligibility = toolEligibility(tool, targetCtx);
@@ -126,10 +371,9 @@ export function useToolForm(toolId: ToolId) {
   // refused on this target (no reader, a streaming or CityParquet source, a
   // failed engine) has no source of truthful counts either, and a select
   // reading "No solid geometry in this layer" beside "this layer was loaded
-  // from a streaming FlatCityBuf" is a verdict on data the app never inspected
-  // — `hasSolidAt` answers `false` for a streaming layer BY CONSTRUCTION and a
-  // CityParquet surface carries no geometry type at all. §5's row reason is
-  // the only true sentence there is, so the form shows no LoD control at all.
+  // from a streaming FlatCityBuf" is a verdict on data the app never inspected.
+  // §5's row reason is the only true sentence there is, so the form shows no
+  // LoD control at all.
   //
   // The hook is called unconditionally, as a hook must be, and its answer is
   // dropped here rather than inside it: eligibility is the FORM's question, not
@@ -141,41 +385,90 @@ export function useToolForm(toolId: ToolId) {
   // render is a side effect, and the stored draft is the USER's choice — one
   // that stops qualifying (a streaming commit took the rung away) must not be
   // overwritten in the store, only overridden here.
-  //
-  // `base.lod`, not `stored.lod`: the draft whose target was just replaced has
-  // already dropped its LoD above, and reading the raw stored value here would
-  // hand it straight back.
   const qualifies = (lod: string | null): boolean =>
     lod !== null && lods.options.some((o) => o.lod === lod);
   const defaultLod = qualifies(target?.selectedLod ?? null)
     ? (target?.selectedLod ?? null)
     : (lods.options[0]?.lod ?? null);
   const lod = qualifies(base.lod) ? base.lod : defaultLod;
-  const draft: ToolDraft = { ...base, lod };
-  const counts = useLayerCounts(target?.id ?? null);
+  // §7.5 and §7.7: "OUTPUT prefix defaults to the source layer name slugified
+  // (`zones_`)" — `roads_distance_m`, `zones_matches_n`. It depends on the
+  // SOURCE, which is resolved just above, so it is derived here rather than
+  // stored: a stored default would freeze against a later source change, and
+  // `setDraft` below keeps the RAW prefix for that reason. A slug §6's own
+  // prefix rule would reject (one starting with a digit) falls back to the
+  // tool's default rather than opening the form on an invalid value.
+  const sourceName =
+    sourceOptions.find((o) => o.id === sourceLayerId)?.name ?? null;
+  const slug = sourceName === null ? null : `${slugifyField(sourceName)}_`;
+  const sourcePrefix =
+    tool.sourceKind === "vector" && slug !== null && PREFIX_RE.test(slug)
+      ? slug
+      : tool.defaultPrefix;
+  // Applied only to a draft still on the tool's own default, never over a
+  // prefix the user typed. (Clearing the field therefore re-offers the source's
+  // prefix, which is what the form opened with.)
+  const prefix =
+    base.prefix === tool.defaultPrefix ? sourcePrefix : base.prefix;
+  const draft: ToolDraft = { ...base, sourceLayerId, lod, prefix };
+
+  const counts = useLayerCounts(cityLayer?.id ?? null);
   // `useLayerCounts` answers the ALL count for `matching` when nothing is
   // filtered (its SQL has no WHERE), so "no filter applied" has to come from
   // the query store itself rather than from a null count.
   const noFilter = useQueryStore((s) =>
-    target === null ? true : layerQuery(s, target.id).applied === null,
+    cityLayer === null ? true : layerQuery(s, cityLayer.id).applied === null,
   );
+
+  // §7.5's defaults need the SOURCE's keys and the TARGET's table, so they are
+  // resolved here rather than written into the store from a render.
+  const crossCtx: CrossLayerContext = {
+    table: cityTable,
+    sourcePropertyKeys,
+    sourcePropertyTypes,
+    sourceHasFeatureIds,
+    numericColumns: numericColumnsOf(cityTable),
+  };
+  const crossLayer = tool.group === "cross-layer";
+  const params = crossLayer
+    ? resolveCrossLayerParams(toolId, draft.params, crossCtx)
+    : draft.params;
   // The registry's own builder (spec §6 prints the resolved column list before
-  // Run); a tool whose executor has not shipped promises nothing.
-  const columns = tool.outputColumns?.(draft.prefix, draft.params) ?? [];
-  const tableInfo =
-    target && tables[target.id]?.state === "ready" ? tables[target.id] : null;
-  const tableColumns =
-    tableInfo && tableInfo.state === "ready"
-      ? tableInfo.info.columns.map((c) => c.name)
+  // Run); a tool whose executor has not shipped promises nothing. TWO arguments
+  // (Decisions item 6 (iii)): for Join the copied fields' types are already
+  // inside `params`, put there by `resolveCrossLayerParams`.
+  const columns = tool.outputColumns?.(draft.prefix, params) ?? [];
+
+  // §6's "belongs to the source data" is about the TARGET's own attributes: a
+  // city layer's table columns, a vector layer's public property keys.
+  const targetDocument = vectorTarget?.config.preparedData;
+  const existingNames = useMemo(
+    () =>
+      targetDocument === undefined
+        ? []
+        : [
+            ...new Set(
+              geoRecords(targetDocument).flatMap((r) => Object.keys(r)),
+            ),
+          ],
+    [targetDocument],
+  );
+  const targetColumns = vectorTargeted
+    ? existingNames
+    : cityTable !== null && target !== null
+      ? cityTable.columns.map((c) => c.name)
       : [];
-  const computed = target ? computedColumnsOf(target.id) : new Set<string>();
+  const computed =
+    targetLayerId === null
+      ? new Set<string>()
+      : computedColumnsOf(targetLayerId);
   // DuckDB identifiers are CASE-INSENSITIVE, so "EXTENT_height_m" and
   // "extent_height_m" are one column: a case-sensitive check here would let a
   // prefix the user typed in capitals overwrite the file's own data. The map
-  // keeps the table's spelling, which is the one the error names — it is the
-  // column that belongs to the source.
+  // keeps the target's spelling, which is the one the error names — it is the
+  // column that belongs to the source data.
   const onTable = new Map(
-    tableColumns.map((name) => [name.toLowerCase(), name]),
+    targetColumns.map((name) => [name.toLowerCase(), name]),
   );
   const computedLower = new Set([...computed].map((c) => c.toLowerCase()));
   const existing = columns.filter((c) => onTable.has(c.name.toLowerCase()));
@@ -189,23 +482,35 @@ export function useToolForm(toolId: ToolId) {
       : null;
   // Spec §6: "Validation is inline and blocks Run" — the message comes from the
   // tool's own definition, so the rule and the columns it governs live together.
-  const paramsError = tool.validateParams?.(draft.params) ?? null;
+  // A cross-layer tool re-asks with the real SOURCE, which is the only context
+  // that can decide §7.7's "Choose the property to copy"; the registry's own
+  // `validateParams` answers the same question from the bag alone.
+  const paramsError = crossLayer
+    ? crossLayerParamsError(toolId, params, crossCtx)
+    : (tool.validateParams?.(draft.params) ?? null);
   // §6: "Extension note when the tool's extension is not yet loaded."
   const ext = tool.extension;
   const extensionNote =
     ext !== null && targetCtx.extensionState[ext] !== "loaded"
       ? `Loads the ${ext} extension on first run (about ${ext === "spatial" ? "24 MB" : "1 MB"}, once per session).`
       : null;
-  // §6's workload note, decided by `toolWorkloadNote` above.
-  //
-  // `tableInfo?.state`, not `tableInfo !== null`: `tableInfo` is
-  // `tables[target.id]` under an indexed lookup, so its type carries
-  // `undefined` as well as `null` and the line above it uses the same truthy
-  // shape.
-  const workloadNote = toolWorkloadNote(
-    tool,
-    tableInfo?.state === "ready" ? tableInfo.info : null,
-  );
+  // §6's workload note, decided by `toolWorkloadNote` above. The table is the
+  // CITY one: the note is about the layer whose SOURCE the run re-reads, which
+  // for §7.6 is the city SOURCE and not the vector target.
+  const workloadNote = toolWorkloadNote(tool, cityTable, params);
+  // §7.6: an empty TARGET disables Run with its own sentence; §7.5/§7.7: an
+  // empty SOURCE with theirs.
+  const targetReason =
+    vectorTargeted && vectorTarget !== null && !hasAreas(vectorTarget)
+      ? "The layer has no areas"
+      : null;
+  // §5's rule is that Run repeats the chosen row's own reason, and
+  // `vectorSourceReason` has already asked the questions in the spec's order
+  // (still loading / could not be loaded / no features / needs areas), so there
+  // is exactly one producer of each sentence.
+  const sourceReason =
+    sourceOptions.find((o) => o.id === sourceLayerId)?.reason ?? null;
+
   const scopeCount =
     draft.scope === "all"
       ? counts.all
@@ -220,15 +525,21 @@ export function useToolForm(toolId: ToolId) {
         : scopeCount === 0
           ? "Nothing to run on (0 buildings)"
           : null;
-  // Precedence, top to bottom: what the TOOL cannot do here (eligibility),
-  // what the TARGET cannot offer (no qualifying LoD), then the things the user
-  // can fix in the form — the prefix, the parameters, the scope.
+  // Precedence, top to bottom: what the TOOL cannot do here (eligibility), what
+  // the TARGET and the SOURCE cannot offer, then the things the user can fix in
+  // the form — the prefix, the parameters, the scope.
   const runReason = !eligibility.ok
     ? eligibility.reason
-    : (lods.emptyReason ?? prefixError ?? paramsError ?? scopeReason);
+    : (lods.emptyReason ??
+      targetReason ??
+      sourceReason ??
+      prefixError ??
+      paramsError ??
+      scopeReason);
   const latestRun =
-    runs.find((r) => r.toolId === toolId && r.targetLayerId === target?.id) ??
-    null;
+    runs.find(
+      (r) => r.toolId === toolId && r.targetLayerId === targetLayerId,
+    ) ?? null;
   // At most one run executes at a time (spec §6.1), so "the running one" is a
   // single record — and the footer names its TOOL, not the run.
   const running =
@@ -241,8 +552,23 @@ export function useToolForm(toolId: ToolId) {
   return {
     tool,
     draft,
+    params,
     eligibleTargets,
     target,
+    vectorTarget,
+    targetLayerId,
+    targetName,
+    targetOptions,
+    sourceOptions,
+    sourceLayerId,
+    sourceReason,
+    sourcePropertyKeys,
+    sourcePropertyTypes,
+    sourceHasFeatureIds,
+    cityLayer,
+    cityTable,
+    proxies: cityTable === null ? [] : proxyOptions(cityTable),
+    numericColumns: crossCtx.numericColumns,
     lodOptions: lods.options,
     lodNoun: lods.noun,
     lodReason: lods.emptyReason,
@@ -255,21 +581,39 @@ export function useToolForm(toolId: ToolId) {
     extensionNote,
     workloadNote,
     eligibility,
-    canRun: runReason === null && target !== null,
+    // Residual B6: a cross-layer run with no source is not runnable, whatever
+    // else the form says — §7.7 would otherwise expose Run with nothing to
+    // measure against.
+    canRun:
+      runReason === null &&
+      targetLayerId !== null &&
+      (tool.sourceKind === null || sourceLayerId !== null),
     runReason,
     latestRun,
     queuedBehind,
     setDraft: (patch: Partial<ToolDraft>) => {
       // A LoD is a statement about ONE layer (§6's default is read off the
       // target), so changing the target drops it and the default rule above
-      // re-applies on the next render. The patch is spread LAST, so a caller
-      // that changes both at once still gets the LoD it asked for.
+      // re-applies on the next render. The PARAMETERS are a statement about the
+      // SOURCE (which fields to copy, which property to write) as well as the
+      // target (the proxy), so changing either drops them and the defaults
+      // re-apply. The patch is spread LAST, so a caller that changes both at
+      // once still gets what it asked for.
       const retarget =
         patch.targetLayerId !== undefined &&
         patch.targetLayerId !== draft.targetLayerId;
+      const resource =
+        patch.sourceLayerId !== undefined &&
+        patch.sourceLayerId !== draft.sourceLayerId;
       useProcessingStore.getState().setDraft(toolId, {
         ...draft,
+        // The DERIVED prefix is never stored: it is a function of the source,
+        // and storing it would freeze it against the next source change. What
+        // is stored is the RAW prefix — the tool's default until the user types
+        // one.
+        prefix: base.prefix,
         ...(retarget ? { lod: null } : {}),
+        ...(retarget || resource ? { params: {} } : {}),
         ...patch,
       });
     },

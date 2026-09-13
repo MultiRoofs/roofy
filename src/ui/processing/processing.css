@@ -315,10 +315,63 @@
   color: var(--fg-muted);
 }
 .processing-field select,
-.processing-field input[type="text"] {
+.processing-field input[type="text"],
+.processing-field input[type="number"],
+.processing-field input[type="search"] {
   width: 100%;
   min-width: 0;
   min-height: var(--control-height-compact);
+}
+/* §7.5's field checklist sits in the control column beside its caption, with
+   its search box above it — one grid cell holding two stacked controls. */
+.processing-field > div > input[type="search"] {
+  margin-bottom: 6px;
+}
+.processing-field > div > .processing-checks:last-child {
+  margin-bottom: 0;
+}
+/* A checkbox that is a row of its own rather than a cell of the two-column
+   grid: §7.5's match count and §7.7's nearest-feature id. */
+.processing-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+/* §7.6's aggregate rows: an operator, a column and a remove button on one
+   line, with the row's own validation sentence under it (residual B11). */
+.processing-aggregate {
+  margin-bottom: 8px;
+}
+.processing-aggregate__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.processing-aggregate__row select {
+  min-width: 0;
+  min-height: var(--control-height-compact);
+}
+.processing-aggregate__row select:first-child {
+  flex: 0 0 84px;
+}
+.processing-aggregate__row select + select {
+  flex: 1 1 auto;
+}
+.processing-aggregate__remove {
+  flex: 0 0 auto;
+  width: var(--control-height-compact);
+  height: var(--control-height-compact);
+  padding: 0;
+  line-height: 1;
+}
+.processing-aggregate .processing-error {
+  margin: 4px 0 0;
+}
+.processing-add {
+  min-height: var(--control-height-compact);
+  margin-bottom: 8px;
 }
 .processing-radios {
   display: flex;

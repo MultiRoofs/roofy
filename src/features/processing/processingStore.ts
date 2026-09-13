@@ -13,6 +13,8 @@ export type ProcessingView =
 /** The form's draft (spec §6: kept per tool for the session). */
 export interface ToolDraft {
   readonly targetLayerId: string | null;
+  /** The SECOND layer a cross-layer run reads (spec §3), or null. */
+  readonly sourceLayerId: string | null;
   readonly scope: Scope;
   readonly lod: string | null;
   readonly prefix: string;

@@ -255,6 +255,7 @@ describe("ToolView", () => {
       expect.objectContaining({
         toolId: "height-from-extent",
         targetLayerId: layerId,
+        sourceLayerId: null,
         scope: "all",
         prefix: "extent_",
         columns: [
@@ -338,6 +339,7 @@ describe("ToolView", () => {
       expect.objectContaining({
         toolId: "height-from-extent",
         targetLayerId: layerId,
+        sourceLayerId: null,
         scope: "matching",
       }),
     );
@@ -351,6 +353,7 @@ describe("ToolView", () => {
     act(() =>
       useProcessingStore.getState().setDraft("height-from-extent", {
         targetLayerId: useLayerStore.getState().layers[0]!.id,
+        sourceLayerId: null,
         scope: "selected",
         lod: null,
         prefix: "extent_",
@@ -941,6 +944,7 @@ describe("ToolView", () => {
     act(() => {
       useProcessingStore.getState().setDraft("height-from-extent", {
         targetLayerId: layerId,
+        sourceLayerId: null,
         scope: "selected",
         lod: null,
         prefix: "extent_",
@@ -973,6 +977,7 @@ describe("ToolView", () => {
     act(() => {
       useProcessingStore.getState().setDraft("height-from-extent", {
         targetLayerId: layerId,
+        sourceLayerId: null,
         scope: "selected",
         lod: null,
         prefix: "extent_",

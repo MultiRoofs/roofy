@@ -157,6 +157,8 @@ describe("RecentRuns", () => {
     });
     expect(useProcessingStore.getState().drafts["height-from-extent"]).toEqual({
       targetLayerId: "L1",
+      // §6.3's "the same parameters" includes WHICH layer the run read.
+      sourceLayerId: null,
       scope: "all",
       lod: null,
       prefix: "extent_",

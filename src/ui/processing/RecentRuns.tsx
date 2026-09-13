@@ -107,6 +107,9 @@ function RunRow({ run }: { readonly run: RunRecord }) {
             // form opens on exactly the run the user is editing.
             useProcessingStore.getState().setDraft(run.toolId, {
               targetLayerId: run.targetLayerId,
+              // §6.3's "the same parameters" includes WHICH layer the run
+              // read: a join reopened without its source is not that run.
+              sourceLayerId: run.sourceLayerId,
               scope: run.scope,
               lod: run.lod,
               prefix: run.prefix,

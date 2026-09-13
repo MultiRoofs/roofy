@@ -52,6 +52,7 @@ describe("processingStore", () => {
     s.openTool("height-from-extent");
     const draft: ToolDraft = {
       targetLayerId: "L1",
+      sourceLayerId: null,
       scope: "selected",
       lod: null,
       prefix: "h_",
@@ -184,6 +185,7 @@ describe("processingStore", () => {
     s.upsertRun(run("r1", { status: "failed", error: "Binder Error: x" }));
     s.setDraft("height-from-extent", {
       targetLayerId: "L1",
+      sourceLayerId: null,
       scope: "all",
       lod: null,
       prefix: "h_",
@@ -197,6 +199,7 @@ describe("processingStore", () => {
     s.upsertRun(run("r1", { status: "running", phase: "compute" }));
     s.setDraft("height-from-extent", {
       targetLayerId: "L1",
+      sourceLayerId: null,
       scope: "all",
       lod: null,
       prefix: "h_",

@@ -10,7 +10,7 @@
  * registry to invent a tool that could.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
 import type { LayerStoreActions } from "../../../../src/features/layers/layerStore";
 import type {
@@ -53,14 +53,47 @@ vi.mock("../../../../src/features/processing/runQueue", () => ({
   undoRun: vi.fn(async () => {}),
 }));
 
+/**
+ * The three cross-layer tools, switched ON.
+ *
+ * Task 15 builds their FORM and leaves `implemented: false` for Tasks 16/17/19
+ * to flip — and `toolEligibility` refuses an unimplemented tool outright with
+ * "Not available yet", which sits above every other reason. Driving the form
+ * through the real registry would therefore assert nothing about the source
+ * select, the proxy or the frozen request. `toolById` is re-implemented over
+ * the patched list because the real one closes over the module's own array.
+ */
+const CROSS_LAYER = new Set([
+  "join-by-location",
+  "aggregate-per-area",
+  "distance-to-nearest",
+]);
+vi.mock("../../../../src/features/processing/toolRegistry", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../../../src/features/processing/toolRegistry")
+  >("../../../../src/features/processing/toolRegistry");
+  const TOOLS = actual.TOOLS.map((tool) =>
+    CROSS_LAYER.has(tool.id) ? { ...tool, implemented: true } : tool,
+  );
+  return {
+    ...actual,
+    TOOLS,
+    toolById: (id: string) => {
+      const tool = TOOLS.find((t) => t.id === id);
+      if (!tool) throw new Error(`Unknown tool: ${id}`);
+      return tool;
+    },
+  };
+});
+
 vi.mock("../../../../src/ui/table/useLayerCounts", () => ({
-  useLayerCounts: () => ({
+  useLayerCounts: vi.fn(() => ({
     all: 2,
     matching: null,
     selected: 0,
     loading: false,
     message: null,
-  }),
+  })),
 }));
 
 const { ToolView } = await import("../../../../src/ui/processing/ToolView");
@@ -78,6 +111,12 @@ const { toolWorkloadNote } =
   await import("../../../../src/ui/processing/useToolForm");
 const { toolById } =
   await import("../../../../src/features/processing/toolRegistry");
+const { useGeoLayerStore } =
+  await import("../../../../src/features/geoLayers/geoLayerStore");
+const { submitRun } =
+  await import("../../../../src/features/processing/runQueue");
+const { useLayerCounts } =
+  await import("../../../../src/ui/table/useLayerCounts");
 
 type LayerInput = Parameters<LayerStoreActions["addLayer"]>[0];
 
@@ -92,7 +131,9 @@ function readyTableInfo(withReader: boolean): LayerTable {
     extension: withReader ? "city.json" : null,
     sourceBytes: null,
     columns: [],
-    lods: [],
+    // An LoD 0 rung, so §7.5's "Footprint (LoD 0)" proxy is offered on a table
+    // that also has a reader — which is what makes the default proxy testable.
+    lods: withReader ? [{ label: "0", suffix: "0" }] : [],
     rowCount: 2,
   };
 }
@@ -140,10 +181,45 @@ function addCityLayer(name: string, withReader: boolean): string {
   return id;
 }
 
+/** A polygon layer and a point layer, so §7.5's source select can refuse one. */
+function addGeoLayer(name: string, kind: "Polygon" | "Point"): string {
+  return useGeoLayerStore.getState().addGeoLayer({
+    name,
+    kind: "geojson",
+    config: {
+      data: {
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            id: `${name}-1`,
+            properties: { zone: "A" },
+            geometry:
+              kind === "Polygon"
+                ? {
+                    type: "Polygon",
+                    coordinates: [
+                      [
+                        [4, 52],
+                        [5, 52],
+                        [5, 53],
+                        [4, 52],
+                      ],
+                    ],
+                  }
+                : { type: "Point", coordinates: [4, 52] },
+          },
+        ],
+      },
+    },
+  });
+}
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   useProcessingStore.getState().resetForTest();
+  useGeoLayerStore.setState({ layers: [] });
   useLayerStore.getState().removeAllLayers();
   useWorkspaceStore.getState().setActiveLayerId(null);
   useLayerTableStore.setState({ tables: {} });
@@ -168,6 +244,7 @@ describe("the Layer select (spec §6 TARGET)", () => {
     useWorkspaceStore.getState().setActiveLayerId(withReader);
     useProcessingStore.getState().setDraft("measure-solids", {
       targetLayerId: withoutReader,
+      sourceLayerId: null,
       scope: "all",
       lod: null,
       prefix: "solid_",
@@ -278,5 +355,214 @@ describe("§6's workload note", () => {
   it("says nothing without a ready table to read the size off", () => {
     const tool = { ...toolById("measure-solids"), implemented: true };
     expect(toolWorkloadNote(tool, null)).toBeNull();
+  });
+});
+
+/**
+ * §6's TARGET section for a cross-layer tool: a SOURCE select beside the layer
+ * select, the prefix it names, and the two layers the form has to keep apart.
+ */
+describe("the SOURCE select and the prefix it names (§7.5, §7.7)", () => {
+  it("lists the vector layers and disables a point layer", () => {
+    addCityLayer("Delft", true);
+    addGeoLayer("Zones", "Polygon");
+    addGeoLayer("Points", "Point");
+    render(<ToolView toolId="join-by-location" />);
+    const select = screen.getByRole("combobox", { name: "Source" });
+    const options = [...select.querySelectorAll("option")];
+    expect(options.map((o) => o.textContent)).toEqual(["Zones", "Points"]);
+    // §7.5: a point layer is listed DISABLED with its reason.
+    expect(options[1]).toBeDisabled();
+    expect(options[1]).toHaveAttribute("title", "Needs areas (polygons)");
+    // The first ELIGIBLE row is the one chosen.
+    expect(select).toHaveValue(options[0]?.getAttribute("value"));
+  });
+
+  it("prefills the prefix from the source layer's slugified name", () => {
+    addCityLayer("Delft", true);
+    addGeoLayer("Zones", "Polygon");
+    render(<ToolView toolId="join-by-location" />);
+    expect(screen.getByLabelText("Prefix")).toHaveValue("zones_");
+  });
+
+  it("resolves the target's own default proxy, which the log then names", () => {
+    // The fixture's ready table has a reader and an LoD 0 rung, so §7.5's
+    // default is the footprint — which is what the frozen bag must carry.
+    addCityLayer("Delft", true);
+    addGeoLayer("Zones", "Polygon");
+    render(<ToolView toolId="join-by-location" />);
+    expect(
+      screen.getByRole("radio", { name: "Footprint (LoD 0)" }),
+    ).toBeChecked();
+  });
+
+  it("warns about a large source only when the PROXY will re-read it", () => {
+    // Task 5 guarded the note with `tool.needsReader`, and the three
+    // cross-layer tools declare `needsReader: false` because their source read
+    // is OPTIONAL — only the footprint proxy re-reads. So the guard follows the
+    // resolved proxy here.
+    const id = addCityLayer("Delft", true);
+    addGeoLayer("Zones", "Polygon");
+    useLayerTableStore.setState((state) => {
+      const entry = state.tables[id];
+      if (entry?.state !== "ready") return state;
+      return {
+        tables: {
+          ...state.tables,
+          [id]: {
+            ...entry,
+            info: { ...entry.info, sourceBytes: 180_000_000 },
+          },
+        },
+      };
+    });
+    render(<ToolView toolId="join-by-location" />);
+    expect(
+      screen.getByText(
+        "Re-reads a 180 MB source; this can take a minute and needs memory",
+      ),
+    ).toBeInTheDocument();
+
+    // Switch to a proxy that reads the browsing table's `bbox` and nothing
+    // else: no read, no note. A warning about a read that will not happen is
+    // the false alarm Task 5's guard exists to prevent.
+    fireEvent.click(screen.getByRole("radio", { name: "Extent rectangle" }));
+    expect(screen.queryByText(/Re-reads a/)).toBeNull();
+  });
+
+  it("counts the SOURCE city layer's buildings for Aggregate (§7.6)", () => {
+    const delft = addCityLayer("Delft", true);
+    addGeoLayer("Zones", "Polygon");
+    render(<ToolView toolId="aggregate-per-area" />);
+    // The counts come from the CITY layer, never from the vector TARGET —
+    // §7.6: "Scope applies to the SOURCE buildings".
+    expect(useLayerCounts).toHaveBeenCalledWith(delft);
+    // The TARGET select lists the vector layer; the scope radios count Delft.
+    expect(screen.getByRole("combobox", { name: "Layer" })).toHaveTextContent(
+      "Zones",
+    );
+    expect(screen.getByRole("combobox", { name: "Source" })).toHaveTextContent(
+      "Delft",
+    );
+    expect(screen.getByLabelText(/All 2 buildings/)).toBeInTheDocument();
+    // **[adapted copy A12]**
+    expect(
+      screen.getByText("Scope applies to the source layer's buildings."),
+    ).toBeInTheDocument();
+  });
+
+  it("freezes the proxy the form SHOWED, through `normaliseParams`", () => {
+    // The registry's `normaliseParams` re-resolves the already-resolved bag
+    // with a context that has no table. If that pass narrowed the proxy, the
+    // run submitted here would be a CENTRE join while the form said footprint
+    // — and §6.4's log would name a proxy that was never used. The assertion is
+    // on the request the mocked `submitRun` actually received.
+    addCityLayer("Delft", true);
+    const zones = addGeoLayer("Zones", "Polygon");
+    render(<ToolView toolId="join-by-location" />);
+    expect(
+      screen.getByRole("radio", { name: "Footprint (LoD 0)" }),
+    ).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(submitRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolId: "join-by-location",
+        sourceLayerId: zones,
+        prefix: "zones_",
+        params: expect.objectContaining({
+          proxy: "footprint",
+          fields: ["zone"],
+          fieldTypes: { zone: "VARCHAR" },
+        }),
+        columns: [{ name: "zones_zone", type: "VARCHAR" }],
+      }),
+    );
+  });
+
+  it("says why a source row is unusable, in §7.5's own order", () => {
+    // A layer whose document is still loading has no geometry to ask about, so
+    // "Needs areas (polygons)" would be a sentence about a fact nobody knows.
+    addCityLayer("Delft", true);
+    const loading = useGeoLayerStore.getState().addGeoLayer({
+      name: "Pending",
+      kind: "geojson",
+      config: { url: "https://x/zones.geojson" },
+    });
+    const empty = useGeoLayerStore.getState().addGeoLayer({
+      name: "Empty",
+      kind: "geojson",
+      config: { data: { type: "FeatureCollection", features: [] } },
+    });
+    render(<ToolView toolId="join-by-location" />);
+    const options = [
+      ...screen
+        .getByRole("combobox", { name: "Source" })
+        .querySelectorAll("option"),
+    ];
+    const titleOf = (id: string) =>
+      options
+        .find((o) => o.getAttribute("value") === id)
+        ?.getAttribute("title");
+    expect(titleOf(loading)).toBe("This vector layer is still loading");
+    expect(titleOf(empty)).toBe("The source layer has no features");
+  });
+
+  /**
+   * Residual B6. Every source row is disabled, so there is no enabled default
+   * to fall back to — and a null source would take the row's reason off the
+   * screen and leave Run blocked by something unrelated (Join) or by nothing at
+   * all (Distance, whose parameters are valid on their own).
+   */
+  it("keeps a disabled source chosen, so its reason is what Run repeats", () => {
+    addCityLayer("Delft", true);
+    const empty = useGeoLayerStore.getState().addGeoLayer({
+      name: "Empty",
+      kind: "geojson",
+      config: { data: { type: "FeatureCollection", features: [] } },
+    });
+    render(<ToolView toolId="join-by-location" />);
+    const select = screen.getByRole("combobox", { name: "Source" });
+    expect(select).toHaveValue(empty);
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    expect(
+      screen.getByText("The source layer has no features", {
+        selector: "p",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("never exposes Run for Distance with no usable source (§7.7)", () => {
+    // Distance's own parameters (500 m, no nearest id) are valid, so nothing
+    // else in the form would block it.
+    addCityLayer("Delft", true);
+    useGeoLayerStore.getState().addGeoLayer({
+      name: "Empty",
+      kind: "geojson",
+      config: { data: { type: "FeatureCollection", features: [] } },
+    });
+    render(<ToolView toolId="distance-to-nearest" />);
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    expect(
+      screen.getByText("The source layer has no features", {
+        selector: "p",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("drops the parameters when the SOURCE changes, so stale fields cannot freeze", () => {
+    addCityLayer("Delft", true);
+    addGeoLayer("Zones", "Polygon");
+    const other = addGeoLayer("Districts", "Polygon");
+    render(<ToolView toolId="join-by-location" />);
+    fireEvent.click(screen.getByRole("checkbox", { name: /zone/ }));
+    expect(
+      useProcessingStore.getState().drafts["join-by-location"]?.params,
+    ).toMatchObject({ fields: [] });
+    fireEvent.change(screen.getByRole("combobox", { name: "Source" }), {
+      target: { value: other },
+    });
+    expect(
+      useProcessingStore.getState().drafts["join-by-location"]?.params,
+    ).toEqual({});
   });
 });
