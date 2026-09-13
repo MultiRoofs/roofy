@@ -400,6 +400,51 @@ describe("Style by result, from the descriptor", () => {
     ]);
   });
 
+  it("styles a Distance run on `<prefix>distance_m <` the median (§7.7)", async () => {
+    // §7.7's own descriptor through the real footer, now that the tool ships:
+    // `pick` finds the distance column BESIDE the nearest id (a VARCHAR the
+    // default `columns[0]` rule would have been happy with in another order),
+    // the operator is `<` — the NEARER half, which is the opposite direction
+    // from every other median rule — and the threshold is the same CAST median
+    // over root rows.
+    const id = addLayer();
+    render(
+      <RunFooter
+        run={seed(
+          doneRun({
+            targetLayerId: id,
+            toolId: "distance-to-nearest",
+            lod: null,
+            prefix: "roads_",
+            params: {
+              proxy: "rectangle",
+              maxDistanceM: 500,
+              writeNearestId: true,
+              nearestIdProperty: null,
+            },
+            columns: ["roads_distance_m", "roads_nearest_id"],
+            summary: {
+              ...doneRun({}).summary!,
+              nonNullByColumn: { roads_distance_m: 2, roads_nearest_id: 2 },
+            },
+          }),
+        )}
+        canRun
+        reason={null}
+        onRunAgain={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    await waitFor(() => {
+      expect(useRuleDraftStore.getState().drafts[id]?.form?.conditions).toEqual(
+        [{ field: "roads_distance_m", operator: "<", value: 4.2 }],
+      );
+    });
+    expect(statements).toEqual([
+      'SELECT median(CAST("roads_distance_m" AS DOUBLE)) AS m FROM "layer_1" WHERE "feature_id" IS NULL OR "feature_id" = "id"',
+    ]);
+  });
+
   it("styles a count-only Join on `<prefix>matches_n > 0`, reading nothing", async () => {
     // §7.5's OTHER half, through the same descriptor and the same footer: no
     // text field was copied, so `pick` falls to the match count and the

@@ -389,11 +389,11 @@ describe("the capability chips (spec §5)", () => {
       ),
     ).toBe(true);
     expect(chip("Spatial")).toHaveAttribute("data-state", "failed");
-    // §5's sentence lives on the CHIP whatever the row says. Aggregate and
-    // Distance are still `implemented: false`, so `eligibility.ts`'s "Not
-    // available yet" outranks the extension reason on their rows; Join ships
-    // now, so ITS row reaches the download reason once a vector layer is there
-    // — the case below.
+    // §5's sentence lives on the CHIP whatever the row says. Aggregate is
+    // still `implemented: false`, so `eligibility.ts`'s "Not available yet"
+    // outranks the extension reason on its row; Join and Distance ship now, so
+    // THEIR rows reach the download reason once a vector layer is there — the
+    // case below.
     expect(chip("Spatial")).toHaveAttribute("title", FAILED_REASON);
     // One per spatial tool: join-by-location, aggregate-per-area,
     // distance-to-nearest.
