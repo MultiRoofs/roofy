@@ -33,6 +33,7 @@ import {
   buildSourceIdsSql,
 } from "../solidSql";
 import {
+  CAVEAT_DEGENERATE_SOLIDS,
   CAVEAT_INVALID_SOLIDS,
   SKIP_NOT_A_SOLID,
   countsAsSkips,
@@ -63,6 +64,7 @@ function toSolidRow(row: Readonly<Record<string, unknown>>): SolidRow {
     geometry_type: typeof type === "string" ? type : null,
     parsed: row["parsed"] === true,
     is_valid: bool(row["is_valid"]),
+    degenerate: bool(row["degenerate"]),
     volume_m3: num(row["volume_m3"]),
     envelope_m2: num(row["envelope_m2"]),
     footprint_m2: num(row["footprint_m2"]),
@@ -190,6 +192,7 @@ export const measureSolids: ToolExecutor = async (run, ctx) => {
     let noGeometry = 0;
     let notASolid = 0;
     let invalid = 0;
+    let degenerate = 0;
     let sinceYield = 0;
 
     for (const group of groups) {
@@ -209,6 +212,12 @@ export const measureSolids: ToolExecutor = async (run, ctx) => {
         // §6.2's caveat, and only when a volume was actually withheld.
         if (rollUp.hasInvalid && params.measures.includes("volume")) {
           invalid += 1;
+        }
+        // F1's caveat, the same rule about the other withheld measure: the
+        // statement guards `ST_3DSurfaceArea` on the degenerate-face count, so
+        // this building was measured with no envelope.
+        if (rollUp.hasDegenerate && params.measures.includes("envelope")) {
+          degenerate += 1;
         }
       }
 
@@ -250,7 +259,10 @@ export const measureSolids: ToolExecutor = async (run, ctx) => {
         [skipNoGeometry(lod), noGeometry],
         [SKIP_NOT_A_SOLID, notASolid],
       ]),
-      caveats: countsAsSkips([[CAVEAT_INVALID_SOLIDS, invalid]]),
+      caveats: countsAsSkips([
+        [CAVEAT_INVALID_SOLIDS, invalid],
+        [CAVEAT_DEGENERATE_SOLIDS, degenerate],
+      ]),
     };
   } finally {
     // ALWAYS: done, failed or cancelled, the buffer must not outlive the run.

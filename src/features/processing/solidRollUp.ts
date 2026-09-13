@@ -44,6 +44,11 @@ export interface SolidRow {
   readonly geometry_type: string | null;
   readonly parsed: boolean;
   readonly is_valid: boolean | null;
+  /**
+   * `r.degenerate_face_count > 0` — F1's reason for a withheld envelope, NULL
+   * when there is no report to read it from.
+   */
+  readonly degenerate: boolean | null;
   readonly volume_m3: number | null;
   readonly envelope_m2: number | null;
   readonly footprint_m2: number | null;
@@ -65,6 +70,15 @@ export const skipNoGeometry = (lod: string): string =>
   `no geometry at LoD ${lod}`;
 /** §6.2's caveat for a building measured with its volume withheld. */
 export const CAVEAT_INVALID_SOLIDS = "invalid solids (no volume)";
+/**
+ * The same sentence for a building measured with its ENVELOPE withheld —
+ * `ST_3DSurfaceArea` raises on a degenerate face, so the statement's guard
+ * returns NULL for it (gate defect F1). **[adapted copy A18]**: the plan's copy
+ * table has no string for it, and this one is `CAVEAT_INVALID_SOLIDS` said
+ * about the other measure, so the count reads as the FEATURES it counts.
+ */
+export const CAVEAT_DEGENERATE_SOLIDS =
+  "solids with degenerate faces (no area)";
 
 /**
  * §7's contributor rule, verbatim: "At the chosen LoD, if any part of the
@@ -143,6 +157,12 @@ export interface SolidRollUp {
   readonly valid: boolean | null;
   /** At least one contributor parsed but did not validate (§7.2's caveat). */
   readonly hasInvalid: boolean;
+  /**
+   * At least one contributor has a degenerate face, so the statement withheld
+   * its surface area (F1). Separate from `hasInvalid` because a degenerate
+   * solid is invalid too, and the card has to say which measure went missing.
+   */
+  readonly hasDegenerate: boolean;
 }
 
 /**
@@ -176,6 +196,7 @@ export function rollUpSolids(
   let ground = Number.POSITIVE_INFINITY;
   let ridge = Number.NEGATIVE_INFINITY;
   let hasInvalid = false;
+  let hasDegenerate = false;
   let hasUnknown = false;
   for (const row of rows) {
     if (row.volume_m3 === null) volume = null;
@@ -190,6 +211,9 @@ export function rollUpSolids(
     // `false` means the engine checked this solid and rejected it.
     if (row.is_valid === false) hasInvalid = true;
     else if (row.is_valid === null) hasUnknown = true;
+    // READ the same way, and strictly `true`: NULL is "no report", which is
+    // not a degenerate face.
+    if (row.degenerate === true) hasDegenerate = true;
   }
   // Three-valued AND, decided AFTER the loop so the reader's row ORDER cannot
   // decide it: one contributor the engine checked and REJECTED makes the feature
@@ -210,6 +234,7 @@ export function rollUpSolids(
     ridge: ridgeOut,
     valid,
     hasInvalid,
+    hasDegenerate,
   };
 }
 

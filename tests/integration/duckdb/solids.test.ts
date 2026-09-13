@@ -66,7 +66,7 @@ const VALID = "NL.IMBAG.Pand.0002";
  * restores exactly the §7.2 output (`valid` NULL for a row that is not a
  * solid). See the "tells a NULL solid's report apart" case below for the pin.
  */
-const MEASURE_SQL = `SELECT "id", COALESCE("feature_id", "id") AS f, geometry_type, s IS NOT NULL AS parsed, CASE WHEN s IS NOT NULL THEN r.is_valid END AS is_valid, CASE WHEN s IS NOT NULL AND r.is_valid THEN ST_3DVolume(s) END AS volume_m3, ST_3DSurfaceArea(s) AS envelope_m2, ST_3DFootprintArea(s) AS footprint_m2, ST_3DZMin(s) AS ground_m, ST_3DZMax(s) AS ridge_m FROM (SELECT "id", "feature_id", "geometry_properties_lod2_2".type AS geometry_type, ST_3DTryFromWKB("geometry_lod2_2") AS s, ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r FROM read_cityjson('two.city.json', lod => '2.2'))`;
+const MEASURE_SQL = `SELECT "id", COALESCE("feature_id", "id") AS f, geometry_type, s IS NOT NULL AS parsed, CASE WHEN s IS NOT NULL THEN r.is_valid END AS is_valid, CASE WHEN s IS NOT NULL THEN r.degenerate_face_count > 0 END AS degenerate, CASE WHEN s IS NOT NULL AND r.is_valid THEN ST_3DVolume(s) END AS volume_m3, CASE WHEN s IS NOT NULL AND r.degenerate_face_count = 0 THEN ST_3DSurfaceArea(s) END AS envelope_m2, ST_3DFootprintArea(s) AS footprint_m2, ST_3DZMin(s) AS ground_m, ST_3DZMax(s) AS ridge_m FROM (SELECT "id", "feature_id", "geometry_properties_lod2_2".type AS geometry_type, ST_3DTryFromWKB("geometry_lod2_2") AS s, ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r FROM read_cityjson('two.city.json', lod => '2.2'))`;
 
 /**
  * §7.3's statement, the same way: all EIGHT report fields a validation run
@@ -625,6 +625,191 @@ describe.skipIf(!enabled)("three_d against real DuckDB 1.5.5", () => {
       footprint: 80,
       ground: 0,
       ridge: 8.4,
+    });
+  });
+
+  // ---------------------------------------------------------------- F1 / D11
+  //
+  // `ST_3DSurfaceArea` RAISES on a solid with a degenerate (zero-area) face,
+  // and ONE such row aborts the whole statement — which is what broke the
+  // Delft LoD 2.2 run at the M3 gate ("Invalid Error: ST_3DSurfaceArea: solid
+  // contains degenerate faces", the whole scope lost). There is no fixture
+  // file for it: the solid is BUILT here, as a closed box with one extra face
+  // whose four indices collapse onto two vertices.
+  //
+  // The three things this block pins, none of which any unit test can see:
+  //  - WHICH functions raise. Only `ST_3DSurfaceArea` does; the footprint,
+  //    ZMin and ZMax all answer normally, so guarding them would cost a real
+  //    footprint and a real height for nothing.
+  //  - That DuckDB's `TRY()` does NOT catch it (finding D11). `TRY` exists in
+  //    1.5.5 and swallows a CAST error, but a three_d "Invalid Error" comes
+  //    out of the extension and propagates through it.
+  //  - That the guard the app now issues — the report's own
+  //    `degenerate_face_count = 0` — makes exactly the raising row NULL and
+  //    leaves every other row's envelope intact.
+  describe("a solid with a degenerate face (F1)", () => {
+    const DEG_SOURCE = "degenerate.city.json";
+    const GOOD = "B.good";
+    const DEGENERATE = "B.degenerate";
+    const parsed = (source: string) =>
+      `(SELECT "id", ST_3DTryFromWKB("geometry_lod2_2") AS s, ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r FROM read_cityjson('${source}', lod => '2.2'))`;
+
+    beforeAll(() => {
+      /** A closed box, plus whatever extra faces the caller adds. */
+      const box = (extra: number[][][]) => ({
+        type: "Building",
+        geometry: [
+          {
+            type: "Solid",
+            lod: "2.2",
+            boundaries: [
+              [
+                [[0, 3, 2, 1]],
+                [[4, 5, 6, 7]],
+                [[0, 1, 5, 4]],
+                [[1, 2, 6, 5]],
+                [[2, 3, 7, 6]],
+                [[3, 0, 4, 7]],
+                ...extra,
+              ],
+            ],
+          },
+        ],
+      });
+      const doc = {
+        type: "CityJSON",
+        version: "2.0",
+        transform: {
+          scale: [0.001, 0.001, 0.001],
+          translate: [85000, 446000, 0],
+        },
+        metadata: {
+          referenceSystem: "https://www.opengis.net/def/crs/EPSG/0/7415",
+        },
+        CityObjects: {
+          [GOOD]: box([]),
+          // The quad 0,1,1,0 has two pairs of identical vertices: zero area.
+          [DEGENERATE]: box([[[0, 1, 1, 0]]]),
+        },
+        vertices: [
+          [0, 0, 0],
+          [10000, 0, 0],
+          [10000, 8000, 0],
+          [0, 8000, 0],
+          [0, 0, 6000],
+          [10000, 0, 6000],
+          [10000, 8000, 6000],
+          [0, 8000, 6000],
+        ],
+      };
+      db.registerBytes(
+        DEG_SOURCE,
+        new TextEncoder().encode(JSON.stringify(doc)),
+      );
+    });
+
+    it("is reported as degenerate, and the good box beside it is not", () => {
+      const rows = db.query(
+        `SELECT "id",
+                CASE WHEN s IS NOT NULL THEN r.is_valid END AS is_valid,
+                CASE WHEN s IS NOT NULL THEN r.degenerate_face_count END AS deg_n,
+                CASE WHEN s IS NOT NULL THEN r.face_count END AS face_n
+         FROM ${parsed(DEG_SOURCE)} ORDER BY "id"`,
+      );
+      const byId = new Map(rows.map((r) => [String(r["id"]), r]));
+      expectRow(byId.get(DEGENERATE), {
+        is_valid: false,
+        deg_n: 1,
+        face_n: 7,
+      });
+      expectRow(byId.get(GOOD), { is_valid: true, deg_n: 0, face_n: 6 });
+    });
+
+    it("RAISES from ST_3DSurfaceArea only — footprint, ZMin and ZMax answer", () => {
+      expect(() =>
+        db.query(`SELECT ST_3DSurfaceArea(s) AS v FROM ${parsed(DEG_SOURCE)}`),
+      ).toThrow(/ST_3DSurfaceArea: solid contains degenerate faces/);
+      // The other three measures the statement takes are SAFE on the very same
+      // row: this is the evidence the guard is put on one function and not on
+      // all four.
+      const rows = db.query(
+        `SELECT "id", ST_3DFootprintArea(s) AS footprint, ST_3DZMin(s) AS ground, ST_3DZMax(s) AS ridge FROM ${parsed(DEG_SOURCE)} ORDER BY "id"`,
+      );
+      const byId = new Map(rows.map((r) => [String(r["id"]), r]));
+      expectRow(byId.get(DEGENERATE), { footprint: 80, ground: 0, ridge: 6 });
+      expectRow(byId.get(GOOD), { footprint: 80, ground: 0, ridge: 6 });
+    });
+
+    it("is NOT caught by DuckDB's TRY() (finding D11)", () => {
+      // `TRY` is a real 1.5.5 expression and it does swallow a CAST error …
+      expect(db.query("SELECT TRY(CAST('x' AS INTEGER)) AS v")[0]?.["v"]).toBe(
+        null,
+      );
+      // … but a three_d "Invalid Error" propagates straight through it, which
+      // is why the guard has to come from the validation report instead.
+      expect(() =>
+        db.query(
+          `SELECT TRY(ST_3DSurfaceArea(s)) AS v FROM ${parsed(DEG_SOURCE)}`,
+        ),
+      ).toThrow(/ST_3DSurfaceArea: solid contains degenerate faces/);
+    });
+
+    it("runs the APP's builder over it without raising, NULLing only the envelope", () => {
+      const rows = db.query(
+        buildSolidMeasureSql({
+          from: `read_cityjson('${DEG_SOURCE}', lod => '2.2')`,
+          geometryColumn: "geometry_lod2_2",
+          propertiesColumn: "geometry_properties_lod2_2",
+          ids: null,
+        }),
+      );
+      const byId = new Map(rows.map((r) => [String(r["id"]), r]));
+      expectRow(byId.get(DEGENERATE), {
+        parsed: true,
+        is_valid: false,
+        degenerate: true,
+        // Both withheld: the volume by validity, the envelope by the new guard.
+        volume_m3: null,
+        envelope_m2: null,
+        // And both KEPT, which is what §7.2's caveat rule needs.
+        footprint_m2: 80,
+        ground_m: 0,
+        ridge_m: 6,
+      });
+      expectRow(byId.get(GOOD), {
+        parsed: true,
+        is_valid: true,
+        degenerate: false,
+        volume_m3: 480,
+        envelope_m2: 376,
+        footprint_m2: 80,
+      });
+    });
+
+    it("leaves the 2B invalid solid's envelope alone: it has NO degenerate face", () => {
+      // The reason the guard is `degenerate_face_count = 0` and never
+      // `r.is_valid`: `invalid-solid.city.json` is unclosed (2 open edges, 1
+      // non-manifold) with ZERO degenerate faces, and scenario 2B's card shows
+      // its envelope of 388. An `is_valid` guard would have erased it.
+      db.register("invalid-for-guard.city.json", "invalid-solid.city.json");
+      const rows = db.query(
+        buildSolidMeasureSql({
+          from: `read_cityjson('invalid-for-guard.city.json', lod => '2.2')`,
+          geometryColumn: "geometry_lod2_2",
+          propertiesColumn: "geometry_properties_lod2_2",
+          ids: null,
+        }),
+      );
+      expect(rows).toHaveLength(1);
+      expectRow(rows[0], {
+        is_valid: false,
+        degenerate: false,
+        volume_m3: null,
+        envelope_m2: 388,
+        footprint_m2: 80,
+        ground_m: 0,
+        ridge_m: 8.4,
+      });
     });
   });
 

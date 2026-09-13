@@ -73,6 +73,7 @@ const solidRow = (
     geometry_type: string | null;
     parsed: boolean;
     is_valid: boolean | null;
+    degenerate: boolean | null;
     volume_m3: number | null;
     envelope_m2: number | null;
     footprint_m2: number | null;
@@ -85,6 +86,7 @@ const solidRow = (
   geometry_type: "Solid",
   parsed: true,
   is_valid: true,
+  degenerate: false,
   volume_m3: 100,
   envelope_m2: 20,
   footprint_m2: 10,
@@ -99,6 +101,7 @@ const notASolidRow = (id: string, f: string) =>
     geometry_type: "MultiSurface",
     parsed: false,
     is_valid: null,
+    degenerate: null,
     volume_m3: null,
     envelope_m2: null,
     footprint_m2: null,
@@ -224,6 +227,24 @@ describe("rollUpSolids", () => {
 
   it("is null for no contributors at all", () => {
     expect(rollUpSolids([])).toBeNull();
+  });
+
+  it("raises the degenerate flag from any contributor (F1)", () => {
+    // The statement withholds the ENVELOPE of a solid with a degenerate face —
+    // `ST_3DSurfaceArea` raises on one and would abort the whole run — so the
+    // roll-up has to carry the reason to the card, exactly as `hasInvalid`
+    // carries the withheld volume.
+    expect(
+      rollUpSolids([
+        solidRow("p1", "B"),
+        solidRow("p2", "B", { degenerate: true, envelope_m2: null }),
+      ])?.hasDegenerate,
+    ).toBe(true);
+    expect(rollUpSolids([solidRow("p1", "B")])?.hasDegenerate).toBe(false);
+    // A row that never parsed reports NULL, which is not a degenerate face.
+    expect(
+      rollUpSolids([solidRow("p1", "B", { degenerate: null })])?.hasDegenerate,
+    ).toBe(false);
   });
 });
 
@@ -737,6 +758,61 @@ describe("measureSolids", () => {
       solid_height_m: null,
       solid_valid: true,
     });
+  });
+
+  it("reports the degenerate-face caveat beside the invalid one (F1)", async () => {
+    // A solid with a degenerate face is BOTH: `three_d` calls it invalid (the
+    // volume is withheld) and `ST_3DSurfaceArea` raises on it (the envelope is
+    // withheld by the statement's guard). The building is still measured — its
+    // footprint and height are real — so both reasons are caveats, never skips.
+    const layer = layerWith({ B1: ["2.2"] });
+    const { ctx } = context(layer, [
+      scopeRows([["B1", "B1"]]),
+      sourceIds(["B1"]),
+      measured([
+        solidRow("B1", "B1", {
+          is_valid: false,
+          degenerate: true,
+          volume_m3: null,
+          envelope_m2: null,
+          footprint_m2: 80,
+          ground_m: 0,
+          ridge_m: 6,
+        }),
+      ]),
+    ]);
+    const result = await measureSolids(run(), ctx as never);
+    expect(result.measured).toBe(1);
+    expect(result.skipped).toEqual([]);
+    expect(result.caveats).toEqual([
+      { cause: "invalid solids (no volume)", count: 1 },
+      // [adapted copy A18] — see the fix-wave report.
+      { cause: "solids with degenerate faces (no area)", count: 1 },
+    ]);
+    expect(result.rows.get("B1")).toMatchObject({
+      solid_volume_m3: null,
+      solid_envelope_m2: null,
+      solid_footprint_m2: 80,
+      solid_height_m: 6,
+      solid_valid: false,
+    });
+  });
+
+  it("reports no degenerate caveat when the envelope was not asked for", async () => {
+    // The caveat is "(no area)": nothing was withheld from a run that never
+    // ticked the envelope, exactly as the volume's caveat works.
+    const layer = layerWith({ B1: ["2.2"] });
+    const { ctx } = context(layer, [
+      scopeRows([["B1", "B1"]]),
+      sourceIds(["B1"]),
+      measured([solidRow("B1", "B1", { degenerate: true, envelope_m2: null })]),
+    ]);
+    const result = await measureSolids(
+      run({ params: { measures: ["footprint"] } }),
+      ctx as never,
+    );
+    expect(result.measured).toBe(1);
+    expect(result.caveats).toEqual([]);
   });
 
   it("reports no caveat when the volume was not asked for", async () => {

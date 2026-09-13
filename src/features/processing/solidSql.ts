@@ -17,6 +17,18 @@
  *    and ONE such row fails the whole statement. Every other measure — surface
  *    area, footprint area, ZMin/ZMax — returns a value on an invalid solid,
  *    which is exactly what §7.2's "invalid solid" outcome requires.
+ *  - `ST_3DSurfaceArea` only under `CASE WHEN s IS NOT NULL AND
+ *    r.degenerate_face_count = 0` (gate defect F1). It RAISES
+ *    "ST_3DSurfaceArea: solid contains degenerate faces" on a solid with a
+ *    zero-area face, and ONE such row failed the whole Delft LoD 2.2 run.
+ *    DuckDB's `TRY()` does NOT catch a three_d "Invalid Error" (finding D11),
+ *    so the guard has to come out of the validation report — and it is the
+ *    DEGENERATE count and never `r.is_valid`, because an unclosed solid with no
+ *    degenerate face still answers with its envelope (388 m² on
+ *    `invalid-solid.city.json`) and §7.2's caveat rule depends on that. The
+ *    probe suite pins `ST_3DFootprintArea`, `ST_3DZMin` and `ST_3DZMax` as
+ *    SAFE on the same row, so they stay unguarded: a degenerate solid keeps its
+ *    real footprint and its real height and loses only the area.
  *  - EVERY validation-report field under `CASE WHEN s IS NOT NULL` (Task 1's
  *    finding D1). `ST_3DValidationReport(s)` over a ROW VECTOR sets the struct's
  *    own validity mask but leaves its CHILD vectors uninitialised for a NULL
@@ -121,8 +133,10 @@ export function buildSolidMeasureSql(input: SolidSqlInput): string {
   return (
     ROW_IDENTITY +
     `CASE WHEN s IS NOT NULL THEN r.is_valid END AS is_valid, ` +
+    `CASE WHEN s IS NOT NULL THEN r.degenerate_face_count > 0 END AS degenerate, ` +
     `CASE WHEN s IS NOT NULL AND r.is_valid THEN ST_3DVolume(s) END AS volume_m3, ` +
-    `ST_3DSurfaceArea(s) AS envelope_m2, ST_3DFootprintArea(s) AS footprint_m2, ` +
+    `CASE WHEN s IS NOT NULL AND r.degenerate_face_count = 0 THEN ST_3DSurfaceArea(s) END AS envelope_m2, ` +
+    `ST_3DFootprintArea(s) AS footprint_m2, ` +
     `ST_3DZMin(s) AS ground_m, ST_3DZMax(s) AS ridge_m ` +
     `FROM ${parsedRows(input)}`
   );

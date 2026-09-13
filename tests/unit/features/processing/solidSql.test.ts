@@ -52,10 +52,50 @@ describe("buildSolidMeasureSql", () => {
       `SELECT "id", COALESCE("feature_id", "id") AS f, geometry_type, ` +
         `s IS NOT NULL AS parsed, ` +
         `CASE WHEN s IS NOT NULL THEN r.is_valid END AS is_valid, ` +
+        `CASE WHEN s IS NOT NULL THEN r.degenerate_face_count > 0 END AS degenerate, ` +
         `CASE WHEN s IS NOT NULL AND r.is_valid THEN ST_3DVolume(s) END AS volume_m3, ` +
-        `ST_3DSurfaceArea(s) AS envelope_m2, ST_3DFootprintArea(s) AS footprint_m2, ` +
+        `CASE WHEN s IS NOT NULL AND r.degenerate_face_count = 0 THEN ST_3DSurfaceArea(s) END AS envelope_m2, ` +
+        `ST_3DFootprintArea(s) AS footprint_m2, ` +
         `ST_3DZMin(s) AS ground_m, ST_3DZMax(s) AS ridge_m ` +
         `FROM ${PARSED_ROWS}`,
+    );
+  });
+
+  it("guards ST_3DSurfaceArea on the degenerate-face count, never on validity", () => {
+    // F1: `ST_3DSurfaceArea` RAISES "solid contains degenerate faces" and ONE
+    // such row aborts the whole statement (the Delft LoD 2.2 run). DuckDB's
+    // `TRY()` does not catch a three_d Invalid Error (finding D11), so the
+    // guard has to come from the validation report. It must NOT be `is_valid`:
+    // an unclosed-but-not-degenerate solid still has an envelope (388 m² on
+    // `invalid-solid.city.json`), which §7.2's caveat rule depends on.
+    const sql = buildSolidMeasureSql({
+      from: FROM,
+      geometryColumn: G,
+      propertiesColumn: P,
+      ids: null,
+    });
+    expect(sql).toContain(
+      "CASE WHEN s IS NOT NULL AND r.degenerate_face_count = 0 THEN ST_3DSurfaceArea(s) END AS envelope_m2",
+    );
+    expect(sql).not.toContain("AND r.is_valid THEN ST_3DSurfaceArea");
+    // The three measures the probe pins as SAFE on a degenerate solid keep
+    // their values: guarding them would cost a real footprint and a real
+    // height for nothing.
+    expect(sql).toContain("ST_3DFootprintArea(s) AS footprint_m2");
+    expect(sql).toContain("ST_3DZMin(s) AS ground_m");
+    expect(sql).toContain("ST_3DZMax(s) AS ridge_m");
+  });
+
+  it("reports the degenerate faces as a column, so the caveat can be counted", () => {
+    expect(
+      buildSolidMeasureSql({
+        from: FROM,
+        geometryColumn: G,
+        propertiesColumn: P,
+        ids: null,
+      }),
+    ).toContain(
+      "CASE WHEN s IS NOT NULL THEN r.degenerate_face_count > 0 END AS degenerate",
     );
   });
 
