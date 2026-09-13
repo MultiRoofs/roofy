@@ -261,6 +261,65 @@ describe("encodeProjectedFeatures", () => {
     expect(seen.reads).toBe(1);
   });
 
+  it("yields INSIDE one feature, when that feature is all there is", async () => {
+    // The budget that matters for a roads layer of a few enormous geometries.
+    // ONE feature: nothing here can yield "between features", so a checkpoint
+    // at all proves the serialisation of a single line is itself bounded.
+    const seen = { reads: 0 };
+    let checkpoints = 0;
+    let turned = false;
+    setTimeout(() => {
+      turned = true;
+    }, 0);
+    const wkt = hugeWkt();
+    const bytes = await encodeProjectedFeatures([counted(0, wkt, seen)], {
+      checkpoint: () => (checkpoints += 1),
+    });
+    expect(checkpoints).toBeGreaterThan(0);
+    expect(turned).toBe(true);
+    // And the line it built is still ONE line that reads back exactly.
+    const text = new TextDecoder().decode(bytes);
+    expect(text.trimEnd().split("\n")).toHaveLength(1);
+    expect(JSON.parse(text.trim())).toMatchObject({ idx: 0, wkt });
+  });
+
+  it("cancels mid-encode of a source that is ONE long WKT", async () => {
+    // Read through a try/catch for the reason the assembly case is: an encoder
+    // that does NOT stop resolves with five megabytes, and `rejects.toThrow`
+    // would spend half a minute printing it.
+    const seen = { reads: 0 };
+    let cancelled = false;
+    setTimeout(() => {
+      cancelled = true;
+    }, 0);
+    let outcome = "";
+    try {
+      await encodeProjectedFeatures([counted(0, hugeWkt(), seen)], {
+        checkpoint: () => {
+          if (cancelled) throw new Error("cancelled");
+        },
+      });
+      outcome = "encoded the whole feature";
+    } catch (error) {
+      outcome = error instanceof Error ? error.message : String(error);
+    }
+    expect(outcome).toBe("cancelled");
+  });
+
+  it("escapes a value that spans slice boundaries exactly as one piece would", async () => {
+    // The geometry is written into the line in slices, so the JSON escape has
+    // to be per character (it is) and a slice must never split a surrogate
+    // pair (an emoji is two code units). Nothing §7.5 produces looks like
+    // this; the encoder still has to be right about it.
+    const tricky = 'a"b\\c\nd\u00e9\u{1F600}'.repeat(40_000);
+    const seen = { reads: 0 };
+    const text = new TextDecoder().decode(
+      await encodeProjectedFeatures([counted(0, tricky, seen)]),
+    );
+    expect(text.trimEnd().split("\n")).toHaveLength(1);
+    expect(JSON.parse(text.trim()).wkt).toBe(tricky);
+  });
+
   it("checkpoints during the final assembly, not only during the walk", async () => {
     // The copy of ten megabytes of chunks into one buffer is work of its own,
     // and a Cancel delivered while it runs must be honoured there too.

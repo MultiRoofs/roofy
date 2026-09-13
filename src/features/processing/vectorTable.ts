@@ -52,15 +52,25 @@ const ENCODE_BATCH = 1_000;
 /**
  * How many BYTES may be serialised between two yields.
  *
- * `JSON.stringify` of one feature and the UTF-8 encoding of the line it
- * produces are each a single synchronous call that cannot be interrupted from
- * outside, so the bound has to be the amount of work admitted BETWEEN them:
- * once a line pushes the running total past this, the walk checkpoints and
- * hands the event loop a macrotask before it touches the next feature. Four
- * megabytes is a few milliseconds of `stringify` on the shapes §7.5 sees and
- * far below the allocation sizes that matter.
+ * Four megabytes is a few milliseconds of `stringify` and `encode` on the
+ * shapes §7.5 sees, and far below the allocation sizes that matter.
  */
 const ENCODE_BYTES = 4_000_000;
+
+/**
+ * How much of ONE value is serialised, encoded and copied per step.
+ *
+ * THE BUDGET ABOVE IS ONLY A BOUND IF NO SINGLE STEP CAN EXCEED IT.
+ * `JSON.stringify`, `TextEncoder.encode` and `TypedArray.set` are each one
+ * synchronous call that nothing can interrupt from outside, so a source whose
+ * ONE feature is a five-megabyte ring would run every one of them to the end
+ * before any budget was ever consulted — which is exactly the "Cancel does
+ * nothing" §6.1 forbids. The geometry is the only value whose size is
+ * unbounded by nature (Task 12 bounds its ASSEMBLY by the same argument), so
+ * the line is written head-first and the WKT is appended in pieces of this
+ * size, each escaped, encoded and later copied on its own.
+ */
+const TEXT_SLICE = 262_144;
 
 /** The same budget for the final copy, which is real work on a large source. */
 const COPY_BYTES = 4_000_000;
@@ -127,12 +137,14 @@ async function pause(control: YieldControl | undefined): Promise<void> {
  * geometry. Every key is written even when its value is null, so the column
  * list above is satisfied by every line.
  *
- * ASYNC AND BOUNDED BY BOTH FEATURES AND BYTES, for the reason
- * `reprojectGeoLayer` is: a source is not "many small features" or "few large
- * ones", it is whatever the user loaded, and only a byte budget bounds the
- * second kind. Each line is encoded on its own — there is no `join` of a whole
- * batch into an intermediate string — so the byte count is exact rather than
- * estimated and no batch is ever held twice.
+ * ASYNC AND BOUNDED BY FEATURES, BY BYTES AND WITHIN ONE FEATURE, for the
+ * reason `reprojectGeoLayer` is: a source is not "many small features" or "few
+ * large ones", it is whatever the user loaded. The feature count bounds the
+ * first kind, {@link ENCODE_BYTES} bounds the second, and {@link TEXT_SLICE}
+ * bounds the case both miss — the source whose ONE feature is a five-megabyte
+ * ring, where a whole-line `stringify` or `encode` would run to the end before
+ * any budget was read. Every piece is encoded as it is produced, so the byte
+ * count is exact rather than estimated and no batch is ever held twice.
  *
  * THE FINAL BUFFER IS ONE EXACT ALLOCATION, filled chunk by chunk with each
  * chunk RELEASED as it is copied. The total is already known (it was counted
@@ -151,33 +163,59 @@ export async function encodeProjectedFeatures(
   let total = 0;
   let sinceYield = 0;
   let inBatch = 0;
+  const write = (text: string): void => {
+    const bytes = encoder.encode(text);
+    chunks.push(bytes);
+    total += bytes.byteLength;
+    sinceYield += bytes.byteLength;
+  };
+  const spent = (): boolean => sinceYield >= ENCODE_BYTES;
+  const rest = async (): Promise<void> => {
+    sinceYield = 0;
+    inBatch = 0;
+    await pause(control);
+  };
   for (const [index, f] of features.entries()) {
-    const line = JSON.stringify(
-      {
-        idx: f.idx,
-        sid: f.stableId,
-        fid: f.featureId,
-        props: f.properties,
-        wkt: f.wkt,
-      },
+    // The head is everything but the geometry: four keys of scalars, which is
+    // one small `stringify` however large the feature is.
+    const head = JSON.stringify(
+      { idx: f.idx, sid: f.stableId, fid: f.featureId, props: f.properties },
       // A BIGINT that came from an upstream table arrives as a `BigInt`, which
       // `JSON.stringify` refuses outright rather than skipping — the same
       // replacer `computedColumns.ts`'s write needs.
       (_key, value: unknown) =>
         typeof value === "bigint" ? value.toString() : value,
     );
-    const bytes = encoder.encode(`${line}\n`);
-    chunks.push(bytes);
-    total += bytes.byteLength;
-    sinceYield += bytes.byteLength;
+    // `head` ends in the object's own `}`; the geometry is appended as the
+    // fifth member and the object is closed after it.
+    write(`${head.slice(0, -1)},"wkt":"`);
+    const wkt = f.wkt;
+    let from = 0;
+    while (from < wkt.length) {
+      let end = Math.min(from + TEXT_SLICE, wkt.length);
+      // Never split a surrogate PAIR: JSON escaping is per code unit, so a
+      // lone half would be written as one and the value would not read back.
+      const last = wkt.charCodeAt(end - 1);
+      if (
+        end < wkt.length &&
+        end - 1 > from &&
+        last >= 0xd800 &&
+        last <= 0xdbff
+      ) {
+        end -= 1;
+      }
+      // `JSON.stringify` of the piece, minus its quotes, IS the escape rule —
+      // it is per character, so a piece escapes exactly as the whole would.
+      write(JSON.stringify(wkt.slice(from, end)).slice(1, -1));
+      from = end;
+      if (from < wkt.length && spent()) await rest();
+    }
+    write('"}\n');
     inBatch += 1;
-    if (inBatch < ENCODE_BATCH && sinceYield < ENCODE_BYTES) continue;
-    inBatch = 0;
-    sinceYield = 0;
     // Nothing left to stop before: a yield after the last feature would only
     // delay the caller.
     if (index + 1 >= features.length) break;
-    await pause(control);
+    if (inBatch >= ENCODE_BATCH || spent()) await rest();
   }
   const out = new Uint8Array(total);
   let at = 0;
@@ -185,13 +223,23 @@ export async function encodeProjectedFeatures(
   for (let i = 0; i < chunks.length; i += 1) {
     const chunk = chunks[i];
     if (chunk === undefined) continue;
-    out.set(chunk, at);
+    // Sliced for the same reason the encode is: one `set` of a whole chunk is
+    // uninterruptible, and a feature with a large property bag makes a chunk
+    // as big as its head.
+    let piece = 0;
+    while (piece < chunk.byteLength) {
+      const end = Math.min(piece + TEXT_SLICE, chunk.byteLength);
+      out.set(chunk.subarray(piece, end), at + piece);
+      copied += end - piece;
+      piece = end;
+      const more = piece < chunk.byteLength || i + 1 < chunks.length;
+      if (copied >= COPY_BYTES && more) {
+        copied = 0;
+        await pause(control);
+      }
+    }
     at += chunk.byteLength;
-    copied += chunk.byteLength;
     chunks[i] = EMPTY;
-    if (copied < COPY_BYTES || i + 1 >= chunks.length) continue;
-    copied = 0;
-    await pause(control);
   }
   return out;
 }
