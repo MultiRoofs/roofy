@@ -44,6 +44,7 @@ import {
   captureSnapshot,
 } from "../persistence/captureSnapshot";
 import { restoreSnapshot } from "../persistence/restoreSnapshot";
+import { derivedNotSavedNote, snapshotLayers } from "./snapshotLayers";
 import { readShareHash, buildShareUrl } from "../persistence/urlShare";
 import type { ColorBy } from "../features/rules/colorBy";
 import type { ShareableViewState } from "../persistence/urlShare";
@@ -1033,45 +1034,31 @@ export function App({
     const { mode: viewMode } = useViewModeStore.getState();
     const { theme: sceneTheme } = useSceneThemeStore.getState();
 
-    // The ACTIVE layer names the snapshot, with no fallback to the first: a
-    // save labelled "Delft" because Delft happened to be added first, while
-    // the user was looking at Rotterdam, is a label that lies in the list of
-    // saved workspaces. Read from the store rather than from the render, so
-    // the callback does not have to be rebuilt on every activation.
     const allGeoLayers = useGeoLayerStore.getState().layers;
-    const activeLayer = resolveActiveLayer(
-      useWorkspaceStore.getState().activeLayerId,
-      allLayers,
-      allGeoLayers,
-    );
-    // The WORKSPACE names its own snapshot now — it has a name, the user can
+    // The WORKSPACE names its own snapshot — it has a name, the user can
     // edit it in the header, and the list of saved workspaces is the one
     // place that name is read back. It used to be the active layer's name,
     // which meant two workspaces built on the same file were indistinguishable
     // in that list and renaming the workspace changed nothing about it.
     const label = useWorkspaceStore.getState().name;
-    // ...and it is written down as well as read, as a per-kind INDEX into the
-    // two lists this same call is about to write (see
-    // `ProjectSnapshot.activeLayer`). `undefined` — nothing active, or an id
-    // that resolves to neither list — omits the field, and a restore then
-    // falls back to the first layer.
-    const activeLayerRef =
-      activeLayer === null
-        ? undefined
-        : activeLayer.kind === "city"
-          ? {
-              kind: "city" as const,
-              index: allLayers.indexOf(activeLayer.layer),
-            }
-          : {
-              kind: "geo" as const,
-              index: allGeoLayers.indexOf(activeLayer.layer),
-            };
+    // §8: a derived layer is omitted from the snapshot ENTIRELY, and the
+    // active-layer reference is a per-kind INDEX into the arrays written
+    // beside it (see `ProjectSnapshot.activeLayer`) — so the filter and the
+    // index are one decision, made in one pure place. `undefined` — nothing
+    // active, an id that resolves to neither list, or an active layer that is
+    // itself derived — omits the field, and a restore then falls back to the
+    // first layer.
+    const selection = snapshotLayers({
+      layers: allLayers,
+      geoLayers: allGeoLayers,
+      activeLayerId: useWorkspaceStore.getState().activeLayerId,
+    });
+    const activeLayerRef = selection.activeLayer;
 
     const snapshot = captureSnapshot({
       basemap: captureBasemap(),
       label,
-      layers: allLayers.map((l) => ({
+      layers: selection.layers.map((l) => ({
         name: l.name,
         modelRef: l.modelRef,
         rules: [...l.rules],
@@ -1091,7 +1078,7 @@ export function App({
       })),
       // Stripped of anything that cannot survive a reload — an inline GeoJSON
       // document above all; see `geoLayerSnapshot`.
-      geoLayers: allGeoLayers.map(geoLayerSnapshot),
+      geoLayers: selection.geoLayers.map(geoLayerSnapshot),
       camera: cameraState,
       datetime,
       timeZone,
@@ -1113,10 +1100,14 @@ export function App({
       // workspaces are listed on the landing page on the next visit, and
       // nobody discovers that by guessing — so it gets the explanatory
       // duration, not the 3 s status one.
+      // §8's extra sentence, appended rather than replacing: the save DID
+      // happen, and the note is about what it could not carry.
+      const note = derivedNotSavedNote(selection.derivedCount);
+      const saved = partialRestoreRef.current
+        ? "Loaded layers saved as a new workspace. The original save still contains the layers that could not be restored."
+        : "Workspace saved — you'll find it here next time you open Roofy.";
       showToast(
-        partialRestoreRef.current
-          ? "Loaded layers saved as a new workspace. The original save still contains the layers that could not be restored."
-          : "Workspace saved — you'll find it here next time you open Roofy.",
+        note === null ? saved : `${saved} ${note}`,
         EXPLANATION_TOAST_MS,
       );
       partialRestoreRef.current = false;
@@ -1508,8 +1499,18 @@ export function App({
     const state: ShareableViewState = {
       basemap: captureBasemap(),
       v: 3,
-      layers: allLayers
-        .filter((l) => l.modelRef.type === "url")
+      // §8's exclusion reaches the SHARE link through the same decision the
+      // save uses, and it has to come FIRST: a derived city layer inherits its
+      // parent's `modelRef`, so it passes the URL filter below and the link
+      // would restore the whole parent under the copy's name. A share hash
+      // carries no active reference and no geo layers (`ShareableViewState`
+      // is a lightweight subset and stays one), so only `layers` is read.
+      layers: snapshotLayers({
+        layers: allLayers,
+        geoLayers: [],
+        activeLayerId: null,
+      })
+        .layers.filter((l) => l.modelRef.type === "url")
         .map((l) => ({
           name: l.name,
           modelUrl: (l.modelRef as { type: "url"; url: string }).url,
