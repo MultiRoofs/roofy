@@ -206,6 +206,52 @@ export function onEngineDeath(listener: () => void): () => void {
   };
 }
 
+/** Spec §6.1's sentence for work the engine's death took. Local, because this
+ *  module cannot import `engineAwait` (which imports IT). */
+const ENGINE_STOPPED = "Analytics engine stopped";
+
+/**
+ * Settle an in-flight engine await when the worker dies under it.
+ *
+ * THE HAZARD, precisely: duckdb-wasm's own `onError` does
+ * `this._pendingRequests.clear()` without rejecting, and once the worker is
+ * gone `postTask` logs and returns `undefined` — so a request caught by the
+ * death never settles at all. `layerTables.ts` already solves this for its own
+ * calls by shadowing each primitive with `racedWithDeath`; putting the race in
+ * the PRIMITIVE fixes every other caller at once, with no call-site edit, no
+ * new export and no mock-factory sweep — and every future caller by default,
+ * which is what a hazard with no visible symptom needs.
+ *
+ * It returns the primitive's ORDINARY failure value, so the callers that
+ * already handle a failure (the export dialog and writer, the layer counts, the
+ * grid query, the map-filter sync, the Stats tab, `RunFooter`'s median) settle
+ * with a message instead of hanging, unchanged.
+ *
+ * Note what this does NOT change: `raced`'s own death listener is registered
+ * AFTER this one (its promise argument is evaluated first), and `markEngineDead`
+ * dispatches synchronously in registration order — so in `raced(runQuery(sql))`
+ * the inner listener resolves a microtask while the outer REJECTS
+ * synchronously, and `EngineDeadError` still wins. The run queue's behaviour is
+ * therefore unchanged, and `duckdbEngine.test.ts` pins that ordering.
+ */
+function settleOnDeath<T>(promise: Promise<T>, fallback: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const stop = onEngineDeath(() => {
+      resolve(fallback);
+    });
+    promise.then(
+      (value) => {
+        stop();
+        resolve(value);
+      },
+      () => {
+        stop();
+        resolve(fallback);
+      },
+    );
+  });
+}
+
 export function subscribeDuckDBStatus(listener: () => void): () => void {
   statusListeners.add(listener);
   return () => {
@@ -592,11 +638,19 @@ export async function ensureExtension(name: ExtensionName): Promise<boolean> {
  */
 export async function queryDuckDB(sql: string): Promise<QueryResult | null> {
   if (!conn || status.state !== "ready") return null;
-  try {
-    return toRows(await conn.query(sql));
-  } catch {
-    return null;
-  }
+  const live = conn;
+  return await settleOnDeath(
+    (async (): Promise<QueryResult | null> => {
+      try {
+        return toRows(await live.query(sql));
+      } catch {
+        return null;
+      }
+    })(),
+    // Swallow-to-null is already this function's contract; its two legacy
+    // callers (`stacItems`, the old stats path) hang the same way without it.
+    null,
+  );
 }
 
 /**
@@ -682,12 +736,20 @@ export async function runQuery(sql: string): Promise<QueryOutcome> {
   if (!conn || status.state !== "ready") {
     return { ok: false, message: NOT_RUNNING };
   }
-  try {
-    const { columns, rows } = toRows(await conn.query(sql));
-    return { ok: true, columns, rows };
-  } catch (error) {
-    return { ok: false, message: formatDuckDBError(error) };
-  }
+  // `markEngineDead` nulls `conn` before the await below resumes, and the inner
+  // function would otherwise re-read a null.
+  const live = conn;
+  return await settleOnDeath(
+    (async (): Promise<QueryOutcome> => {
+      try {
+        const { columns, rows } = toRows(await live.query(sql));
+        return { ok: true, columns, rows };
+      } catch (error) {
+        return { ok: false, message: formatDuckDBError(error) };
+      }
+    })(),
+    { ok: false, message: ENGINE_STOPPED },
+  );
 }
 
 /** {@link runQuery} for a statement run for EFFECT (CREATE, DROP, COPY,
@@ -726,30 +788,48 @@ export async function registerBuffer(
   bytes: Uint8Array,
 ): Promise<boolean> {
   if (!db || status.state !== "ready") return false;
-  try {
-    await db.registerFileBuffer(name, bytes);
-    return true;
-  } catch (error) {
-    console.warn(`DuckDB could not register "${name}":`, error);
-    return false;
-  }
+  const live = db;
+  return await settleOnDeath(
+    (async (): Promise<boolean> => {
+      try {
+        await live.registerFileBuffer(name, bytes);
+        return true;
+      } catch (error) {
+        console.warn(`DuckDB could not register "${name}":`, error);
+        return false;
+      }
+    })(),
+    false,
+  );
 }
 
 /** Drop a VFS entry. Never throws: a drop that fails must not discard a
  *  result already produced, and the name is dead either way. */
 export async function dropBuffer(name: string): Promise<void> {
   if (!db) return;
-  await db.dropFile(name).catch(() => {});
+  // Raced for the reason that is easiest to miss: the `.catch` swallows a
+  // REJECTION and does nothing about a promise that never settles — and both
+  // `release()` paths await this from a `finally` INSIDE the run's FIFO slot.
+  await settleOnDeath(
+    db.dropFile(name).catch(() => undefined),
+    undefined,
+  );
 }
 
 /** A file DuckDB wrote (a `COPY` target, a `cityparquet_write` output) as
  *  bytes, or null when there is no database or no such file. */
 export async function readFile(name: string): Promise<Uint8Array | null> {
   if (!db || status.state !== "ready") return null;
-  try {
-    return await db.copyFileToBuffer(name);
-  } catch (error) {
-    console.warn(`DuckDB could not read "${name}":`, error);
-    return null;
-  }
+  const live = db;
+  return await settleOnDeath(
+    (async (): Promise<Uint8Array | null> => {
+      try {
+        return await live.copyFileToBuffer(name);
+      } catch (error) {
+        console.warn(`DuckDB could not read "${name}":`, error);
+        return null;
+      }
+    })(),
+    null,
+  );
 }

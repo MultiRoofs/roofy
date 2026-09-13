@@ -119,6 +119,13 @@ interface EngineHarness {
   readonly sql: string[];
   /** Make matching statements throw, e.g. the next INSTALL. */
   readonly failWhen: (match: (sql: string) => boolean) => void;
+  /**
+   * Make matching work NEVER SETTLE, the way duckdb-wasm strands a request its
+   * worker died under (`onError` clears the pending map without rejecting).
+   * Statements match on their SQL; the three VFS calls match on
+   * `register:<name>` / `read:<name>` / `drop:<name>`.
+   */
+  readonly hangWhen: (match: (key: string) => boolean) => void;
 }
 
 const EXTENSION_REFUSED = "Catalog Error: extension is not available";
@@ -137,10 +144,15 @@ async function bootEngine(): Promise<EngineHarness> {
   // a real database would.
   const loaded = new Set<string>(["parquet"]);
   let failMatch: (sql: string) => boolean = () => false;
+  let hangMatch: (sql: string) => boolean = () => false;
+  /** Never-settling promises the harness hands out. Held so a case can assert
+   *  it never resolved them itself — the death, and only the death, ends them. */
+  const forever = <T>(): Promise<T> => new Promise<T>(() => {});
 
   const connection = {
     query: async (statement: string) => {
       sql.push(statement);
+      if (hangMatch(statement)) return await forever<unknown>();
       if (failMatch(statement)) throw new Error(EXTENSION_REFUSED);
       const load = /^LOAD (\w+)$/.exec(statement);
       if (load) loaded.add(load[1]!);
@@ -172,6 +184,19 @@ async function bootEngine(): Promise<EngineHarness> {
       async connect() {
         return connection;
       }
+      async registerFileBuffer(name: string) {
+        return hangMatch(`register:${name}`)
+          ? await forever<void>()
+          : undefined;
+      }
+      async copyFileToBuffer(name: string) {
+        return hangMatch(`read:${name}`)
+          ? await forever<Uint8Array>()
+          : new Uint8Array();
+      }
+      async dropFile(name: string) {
+        return hangMatch(`drop:${name}`) ? await forever<void>() : undefined;
+      }
     },
   }));
   vi.stubGlobal(
@@ -197,7 +222,12 @@ async function bootEngine(): Promise<EngineHarness> {
   vi.unstubAllGlobals();
 
   sql.length = 0; // Init's own statements are not what these tests are about.
-  return { engine, sql, failWhen: (match) => (failMatch = match) };
+  return {
+    engine,
+    sql,
+    failWhen: (match) => (failMatch = match),
+    hangWhen: (match) => (hangMatch = match),
+  };
 }
 
 describe("ensureExtension", () => {
@@ -271,6 +301,101 @@ describe("ensureExtension", () => {
     failWhen(() => false);
     expect(await engine.ensureExtension("spatial")).toBe(true);
     expect(sql.filter((s) => s === "INSTALL spatial")).toHaveLength(2);
+  });
+});
+
+describe("a primitive caught by the engine's death", () => {
+  afterEach(() => {
+    vi.doUnmock("@duckdb/duckdb-wasm");
+    vi.resetModules();
+  });
+
+  it("settles `runQuery` with the ordinary failure message", async () => {
+    const h = await bootEngine();
+    h.hangWhen((key) => key === "SELECT 1");
+    // NEVER resolved by this test — the whole point is that the death, and
+    // nothing else, is what ends the await.
+    const pending = h.engine.runQuery("SELECT 1");
+    h.engine.markEngineDead("worker gone");
+    await expect(pending).resolves.toEqual({
+      ok: false,
+      message: "Analytics engine stopped",
+    });
+  });
+
+  it("settles `ddl` the same way, since it IS `runQuery`", async () => {
+    const h = await bootEngine();
+    h.hangWhen((key) => key.startsWith("CREATE"));
+    const pending = h.engine.ddl("CREATE TABLE t (a INT)");
+    h.engine.markEngineDead("worker gone");
+    await expect(pending).resolves.toMatchObject({ ok: false });
+  });
+
+  it("settles `queryDuckDB` with its own contract, null", async () => {
+    // Swallow-to-null is already this function's contract; its two legacy
+    // callers (`stacItems`, the old stats path) hang the same way without it.
+    const h = await bootEngine();
+    h.hangWhen((key) => key === "SELECT 1");
+    const pending = h.engine.queryDuckDB("SELECT 1");
+    h.engine.markEngineDead("worker gone");
+    await expect(pending).resolves.toBeNull();
+  });
+
+  it("settles `registerBuffer` false", async () => {
+    const h = await bootEngine();
+    h.hangWhen((key) => key === "register:x.json");
+    const pending = h.engine.registerBuffer("x.json", new Uint8Array([1]));
+    h.engine.markEngineDead("worker gone");
+    await expect(pending).resolves.toBe(false);
+  });
+
+  it("settles `readFile` null", async () => {
+    const h = await bootEngine();
+    h.hangWhen((key) => key === "read:y.parquet");
+    const pending = h.engine.readFile("y.parquet");
+    h.engine.markEngineDead("worker gone");
+    await expect(pending).resolves.toBeNull();
+  });
+
+  it("settles `dropBuffer`, which a run's `finally` awaits inside the FIFO", async () => {
+    // The easiest one to miss: its body is `await db.dropFile(name).catch(…)`,
+    // which swallows a REJECTION and does nothing about a promise that never
+    // settles — and `readSource.release()` and `VectorTableHandle.release()`
+    // both await it from a `finally` INSIDE the run's queue slot. A death
+    // during cleanup would strand the queue for the life of the page.
+    const h = await bootEngine();
+    h.hangWhen((key) => key === "drop:x.json");
+    const pending = h.engine.dropBuffer("x.json");
+    h.engine.markEngineDead("worker gone");
+    await expect(pending).resolves.toBeUndefined();
+  });
+
+  it("lets `EngineDeadError` still win inside `raced` (§6.1's sentence)", async () => {
+    // `markEngineDead` dispatches its listeners SYNCHRONOUSLY in registration
+    // order. In `raced(runQuery(sql), signal)` the inner listener registers
+    // FIRST and RESOLVES a promise (a microtask); the outer one REJECTS
+    // `raced`'s promise synchronously — so a run still reads "Analytics engine
+    // stopped" by the `EngineDeadError` path and not by the `ok: false` one.
+    // Pinned rather than asserted in prose.
+    const h = await bootEngine();
+    const { raced, EngineDeadError } =
+      await import("../../../src/insights/engineAwait");
+    h.hangWhen((key) => key === "SELECT 1");
+    const pending = raced(h.engine.runQuery("SELECT 1"), null);
+    h.engine.markEngineDead("worker gone");
+    await expect(pending).rejects.toBeInstanceOf(EngineDeadError);
+  });
+
+  it("still returns the not-running message when the engine was ALREADY dead", async () => {
+    // `onEngineDeath` fires once per engine and drops its waiters, so a race
+    // STARTED after the death hears nothing — which is why every primitive
+    // also has to answer immediately on its own. That guard is unchanged.
+    const h = await bootEngine();
+    h.engine.markEngineDead("worker gone");
+    await expect(h.engine.runQuery("SELECT 1")).resolves.toEqual({
+      ok: false,
+      message: "The analytics engine is not running.",
+    });
   });
 });
 
