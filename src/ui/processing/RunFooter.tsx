@@ -152,9 +152,11 @@ function styleGeoLayerByAttribute(
 }
 
 /**
- * §6.2's "Style by result": open the target's STYLE section with Color by =
- * Rules and the rule editor on a DRAFT — never a saved rule, because "the map
- * does NOT change until the user presses Save in the editor".
+ * §6.2's "Style by result": open the target's STYLE section with the rule
+ * editor on a DRAFT — never a saved rule, and never a repaint, because "the map
+ * does NOT change until the user presses Save in the editor". `Color by =
+ * Rules` is the EDITOR's write, applied when that Save comes (M3 ruling C6);
+ * nothing in this file touches `colorBy`.
  *
  * WHICH column, WHICH operator and WHERE the value comes from are the tool's
  * own answer — `ToolDefinition.styleByResult`, read through the two resolvers.
