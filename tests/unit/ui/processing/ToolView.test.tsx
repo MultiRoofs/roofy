@@ -56,12 +56,21 @@ vi.mock("../../../../src/insights/duckdb", async () => ({
   initDuckDB: vi.fn(async () => {}),
 }));
 
-vi.mock("../../../../src/features/processing/runQueue", () => ({
-  submitRun: vi.fn(() => "run_1"),
-  retryRun: vi.fn(() => "run_2"),
-  cancelRun: vi.fn(),
-  undoRun: vi.fn(async () => {}),
-}));
+vi.mock("../../../../src/features/processing/runQueue", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../../../src/features/processing/runQueue")
+  >("../../../../src/features/processing/runQueue");
+  return {
+    // §6.2's Undo block is REAL: the footer reads it for every done card, and
+    // a stub would let the card claim any reason it liked. It answers null for
+    // every This-layer run, which is all this suite has.
+    newLayerUndoBlock: actual.newLayerUndoBlock,
+    submitRun: vi.fn(() => "run_1"),
+    retryRun: vi.fn(() => "run_2"),
+    cancelRun: vi.fn(),
+    undoRun: vi.fn(async () => {}),
+  };
+});
 
 const counts = {
   all: 2 as number | null,

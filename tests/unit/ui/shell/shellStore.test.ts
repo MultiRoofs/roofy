@@ -23,6 +23,7 @@ describe("defaultShellState (pure)", () => {
       filterRequest: 0,
       openSections: {},
       requestedSection: null,
+      requestedZoom: null,
     });
   });
 
@@ -252,6 +253,19 @@ describe("useShellStore", () => {
         "style",
         "details",
       ]);
+    });
+  });
+
+  describe("requestZoom", () => {
+    it("records the layer and clears it with null", () => {
+      // §6.2's "Zoom to layer": the only channel from the toolbox to `App`,
+      // which holds the scene handle. It records the ASK and nothing else —
+      // no activation, no panel — because the card activates the copy itself.
+      useShellStore.getState().requestZoom("layer-a");
+      expect(useShellStore.getState().requestedZoom).toBe("layer-a");
+      expect(useWorkspaceStore.getState().activeLayerId).toBeNull();
+      useShellStore.getState().requestZoom(null);
+      expect(useShellStore.getState().requestedZoom).toBeNull();
     });
   });
 });

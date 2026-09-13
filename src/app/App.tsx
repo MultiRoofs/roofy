@@ -2028,6 +2028,19 @@ export function App({
     if (activeLayer !== null) handleZoomToLayer(activeLayer);
   }, [activeLayer, handleZoomToLayer]);
 
+  // §6.2's "Zoom to layer" on a New-layer result card. The scene handle lives
+  // here and nowhere else, so the toolbox asks through the shell store and this
+  // effect consumes the request and clears it — the same shape
+  // `ActiveLayerPanel` uses for `requestedSection`. `handleZoomToLayer` takes
+  // an `ActiveLayer`, not an id, so the id is resolved against both stores.
+  const requestedZoom = useShellStore((s) => s.requestedZoom);
+  useEffect(() => {
+    if (requestedZoom === null) return;
+    const target = resolveActiveLayer(requestedZoom, layers, geoLayers);
+    if (target !== null) handleZoomToLayer(target);
+    useShellStore.getState().requestZoom(null);
+  }, [requestedZoom, layers, geoLayers, handleZoomToLayer]);
+
   const selectedObjectIds = useMemo(
     () =>
       activeLayer?.kind === "city"

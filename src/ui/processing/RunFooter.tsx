@@ -12,6 +12,7 @@ import {
 } from "../../features/processing/processingStore";
 import {
   cancelRun,
+  newLayerUndoBlock,
   retryRun,
   undoRun,
 } from "../../features/processing/runQueue";
@@ -199,8 +200,9 @@ function useStyleByResult(runId: string | null): {
 
   const start = useCallback(
     (run: RunRecord, column: OutputColumn, descriptor: StyleByResult) => {
-      // The run's own target is the frozen truth (§6.1), as for Open table.
-      const layerId = run.targetLayerId;
+      // The run's own target is the frozen truth (§6.1), as for Open table —
+      // except for a New-layer run, whose results live in the COPY (§6.2).
+      const layerId = run.newLayerId ?? run.targetLayerId;
       const token = tokenRef.current + 1;
       tokenRef.current = token;
       setPending(true);
@@ -386,6 +388,14 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
     // §6.2/§7 through ONE descriptor: the tool says which column, which
     // operator and where the value comes from. No `toolId` appears in this
     // component.
+    // §6.2: for a New-layer run every action points at the COPY — "Open table
+    // (the drawer on the new layer), Style by result (the new layer's STYLE
+    // section)" — and not at the target, which the run left untouched.
+    const cardLayerId = run.newLayerId ?? run.targetLayerId;
+    const created = run.newLayerId !== null;
+    // §6.2's block on a derived layer that has since been used. Null for a
+    // This-layer run, whose Undo has its own rules.
+    const undoBlock = newLayerUndoBlock(run);
     const descriptor = toolById(run.toolId).styleByResult;
     const written = writtenColumns(run);
     const styleColumn = descriptor?.pick(written) ?? null;
@@ -419,21 +429,40 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
           {run.summary?.detail && (
             <p className="processing-note">{run.summary.detail}</p>
           )}
-          <p className="processing-note">
-            Wrote {plural(run.columns.length, "column", "columns")} to{" "}
-            {run.targetName}.
-          </p>
+          {/* §6.2's This-layer card names what it wrote and where. A
+              New-layer run wrote nothing to the target: its own "Created …"
+              line already names the layer, and repeating a target that did not
+              change would be the one sentence on the card that is false. */}
+          {!created && (
+            <p className="processing-note">
+              Wrote {plural(run.columns.length, "column", "columns")} to{" "}
+              {run.targetName}.
+            </p>
+          )}
           {run.note !== null && <p className="processing-note">{run.note}</p>}
           {run.stale && (
             <p className="processing-note">stale: layer reloaded</p>
           )}
           <div className="processing-card__actions">
+            {/* §6.2 lists it FIRST for a New-layer run: the copy is somewhere
+                on the globe and the user has not seen it yet. */}
+            {created && (
+              <button
+                type="button"
+                onClick={() => {
+                  activateLayer(cardLayerId);
+                  useShellStore.getState().requestZoom(cardLayerId);
+                }}
+              >
+                Zoom to layer
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
                 // The run's own target is the frozen truth (§6.1); the form's
                 // select may have moved on since it finished.
-                activateLayer(run.targetLayerId);
+                activateLayer(cardLayerId);
                 useShellStore.getState().openDrawer();
                 // §6.2: "the new columns appended after the existing ones".
                 // Only for a list the user has customised — a default list
@@ -441,11 +470,11 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
                 // it would freeze the default.
                 const columns = layerQuery(
                   useQueryStore.getState(),
-                  run.targetLayerId,
+                  cardLayerId,
                 ).columns;
                 const next = appendColumns(columns, run.columns);
                 if (next !== null && next !== columns)
-                  useQueryStore.getState().setColumns(run.targetLayerId, next);
+                  useQueryStore.getState().setColumns(cardLayerId, next);
               }}
             >
               Open table
@@ -469,8 +498,10 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
             {run.undoable && (
               <button
                 type="button"
-                disabled={engineStopped}
-                title={engineStopped ? UNDO_ENGINE_STOPPED : undefined}
+                disabled={engineStopped || undoBlock !== null}
+                title={
+                  engineStopped ? UNDO_ENGINE_STOPPED : (undoBlock ?? undefined)
+                }
                 onClick={() => void undoRun(run.id)}
               >
                 Undo

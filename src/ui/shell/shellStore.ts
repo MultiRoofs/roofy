@@ -52,6 +52,16 @@ export interface ShellState {
   /** Set by `requestSection`; consumed (and cleared) by `ActiveLayerPanel`
    *  once it has opened and scrolled to the section. */
   readonly requestedSection: { layerId: string; section: PanelSection } | null;
+  /**
+   * A layer the UI has asked the viewport to fly to; consumed (and cleared) by
+   * `App`, which is the only place that holds the scene handle.
+   *
+   * §6.2's New-layer card offers "Zoom to layer", and the card is three
+   * components deep in the RIGHT panel while the zoom is `sceneRef.fitLayer`
+   * in `App`. One request field, exactly like `requestedSection` above, rather
+   * than a callback prop-drilled through the toolbox.
+   */
+  readonly requestedZoom: string | null;
 }
 
 export interface ShellActions {
@@ -74,6 +84,8 @@ export interface ShellActions {
   /** Clears the stored request only — it does not undo the activation or
    *  close the section that a prior call opened. */
   requestSection(layerId: null): void;
+  /** Ask `App` to fly to this layer; `null` clears a consumed request. */
+  requestZoom(layerId: string | null): void;
 }
 
 export type ShellStore = ShellState & ShellActions;
@@ -116,6 +128,7 @@ export function defaultShellState(
     filterRequest: 0,
     openSections: {},
     requestedSection: null,
+    requestedZoom: null,
   };
 }
 
@@ -196,6 +209,10 @@ export const useShellStore = create<ShellStore>((set, get) => ({
       openSections: { ...state.openSections, [layerId]: openSections },
       requestedSection: { layerId, section: section! },
     }));
+  },
+
+  requestZoom(layerId) {
+    set({ requestedZoom: layerId });
   },
 }));
 
