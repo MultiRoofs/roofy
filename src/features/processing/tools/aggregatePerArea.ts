@@ -62,7 +62,7 @@ import {
   type ReadSourceHandle,
 } from "../sourceRead";
 import { buildScopeRowsSql, buildSourceIdsSql } from "../solidSql";
-import { reprojectGeoLayer } from "../vectorSource";
+import { preflightWarnings, reprojectGeoLayer } from "../vectorSource";
 import { createVectorTable, type VectorTableHandle } from "../vectorTable";
 import type { ToolExecutor } from "../runQueue";
 import type { SkipCount } from "../types";
@@ -241,21 +241,29 @@ export const aggregatePerArea: ToolExecutor = async (run, ctx) => {
     const preflight =
       epsg === null
         ? null
-        : await reprojectGeoLayer(target.layer.config.preparedData, epsg, {
-            // The batched walk's cancel hook — a Cancel lands inside the
-            // reprojection of a large target, not after it (Task 12).
-            checkpoint: () => ctx.throwIfCancelled(),
-          });
+        : await reprojectGeoLayer(
+            target.layer.config.preparedData,
+            epsg,
+            {
+              // The batched walk's cancel hook — a Cancel lands inside the
+              // reprojection of a large target, not after it (Task 12).
+              checkpoint: () => ctx.throwIfCancelled(),
+            },
+            // S3: §7.6's target is AREAS, and a mixed polygon/point layer is
+            // eligible as long as it holds one polygon. The features that are
+            // not areas never reach the table, so no point is ever written a
+            // building count; §7.6's "every target feature is written" still
+            // holds for them, as §6.2's NULL.
+            { areasOnly: true },
+          );
     if (preflight === null || preflight.features.length === 0) {
       // §7.6's own sentence for a target with nothing usable in it.
       throw new Error("The layer has no areas");
     }
     if (preflight.skipped > 0) {
-      // §7.5's sentence, which §7.6 adopts: "preflight and skip counts as in
+      // §7.5's sentences, which §7.6 adopts: "preflight and skip counts as in
       // §7.5 apply to the areas".
-      ctx.warn(
-        `${plural(preflight.skipped, "area", "areas")} skipped: invalid geometry`,
-      );
+      for (const warning of preflightWarnings(preflight)) ctx.warn(warning);
     }
     areas = await createVectorTable({
       runId: run.id,

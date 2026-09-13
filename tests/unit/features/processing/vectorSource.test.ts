@@ -179,6 +179,90 @@ describe("reprojectGeoLayer", () => {
     expect(out.polygonOnly).toBe(false);
   });
 
+  it("drops the non-areas and counts them when the tool needs areas (S3)", async () => {
+    // S3: ONE polygon used to make a mixed layer eligible, and the whole layer
+    // then reached the compute — so §7.5's Join could pick a coincident POINT
+    // as the nearest "area", and §7.6 wrote building counts onto points. The
+    // features that are not areas are skipped here, counted separately from
+    // §7.5's "invalid geometry" ones, and never reach the vector table.
+    const document = collection(
+      {
+        type: "Feature",
+        properties: {},
+        geometry: {
+          type: "Polygon",
+          coordinates: [
+            [
+              [4, 52],
+              [5, 52],
+              [5, 53],
+              [4, 52],
+            ],
+          ],
+        },
+      },
+      {
+        type: "Feature",
+        properties: {},
+        geometry: { type: "Point", coordinates: [4, 52] },
+      },
+      { type: "Feature", properties: {}, geometry: null },
+    );
+    const all = await reprojectGeoLayer(document, 28992);
+    expect(all.features).toHaveLength(2);
+    expect(all).toMatchObject({ skipped: 1, notAreas: 0, polygonOnly: false });
+
+    const areas = await reprojectGeoLayer(document, 28992, undefined, {
+      areasOnly: true,
+    });
+    expect(areas.features.map((f) => f.wkt)).toEqual([
+      "POLYGON ((4000 52000, 5000 52000, 5000 53000, 4000 52000))",
+    ]);
+    // The point joins the skip count, under a cause of its own; the null
+    // geometry keeps §7.5's.
+    expect(areas).toMatchObject({
+      skipped: 2,
+      notAreas: 1,
+      polygonOnly: true,
+    });
+    // And the properties of EVERY live feature are still the layer's fields —
+    // a geometry the tool cannot use does not revoke a column.
+    expect(areas.propertyKeys).toEqual(all.propertyKeys);
+  });
+
+  it("keeps a mixed GEOMETRYCOLLECTION out when areas are required (S3)", async () => {
+    // A collection is an area only if every member is: one point inside it and
+    // §7.5 cannot take the shape as an area at all.
+    const out = await reprojectGeoLayer(
+      collection({
+        type: "Feature",
+        properties: {},
+        geometry: {
+          type: "GeometryCollection",
+          geometries: [
+            {
+              type: "Polygon",
+              coordinates: [
+                [
+                  [4, 52],
+                  [5, 52],
+                  [5, 53],
+                  [4, 52],
+                ],
+              ],
+            },
+            { type: "Point", coordinates: [4, 52] },
+          ],
+        },
+      }),
+      28992,
+      undefined,
+      { areasOnly: true },
+    );
+    expect(out.features).toEqual([]);
+    expect(out).toMatchObject({ skipped: 1, notAreas: 1 });
+  });
+
   it("skips and COUNTS a null, an empty and an unknown geometry", async () => {
     const out = await reprojectGeoLayer(
       collection(

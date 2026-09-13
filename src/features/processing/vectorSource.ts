@@ -88,6 +88,31 @@ export interface VectorPreflight {
   /** Every kept feature is an area — a Polygon, a MultiPolygon, or a
    *  collection of nothing else (§7.5's areas). */
   readonly polygonOnly: boolean;
+  /**
+   * How many of `skipped` were dropped for NOT BEING AN AREA (finding S3).
+   *
+   * Always 0 unless the caller asked for `areasOnly`. Separate from the rest of
+   * `skipped` because the two have different sentences: §7.5's is "invalid
+   * geometry", and a point is perfectly valid — it is simply not something an
+   * area tool can take.
+   */
+  readonly notAreas: number;
+}
+
+/** What a caller wants out of the document, beyond the projection itself. */
+export interface ReprojectOptions {
+  /**
+   * Keep only the AREAS (finding S3).
+   *
+   * §7.5 and §7.6 are defined over areas, and a mixed polygon/point layer is
+   * eligible for them as long as it holds ONE polygon — the form says "Needs
+   * areas (polygons)" only when there is none. Without this, every other
+   * feature reached the compute too: Join could pick a coincident POINT as the
+   * nearest area, and Aggregate wrote building counts onto points. §7.6's
+   * "every target feature is written" still holds for them — a dropped feature
+   * is written NULL, which is §6.2's "could not be evaluated".
+   */
+  readonly areasOnly?: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -446,10 +471,12 @@ export async function reprojectGeoLayer(
   document: unknown,
   epsg: number,
   control?: YieldControl,
+  options?: ReprojectOptions,
 ): Promise<VectorPreflight> {
   const features: ProjectedFeature[] = [];
   const bags: Array<Readonly<Record<string, unknown>>> = [];
   let skipped = 0;
+  let notAreas = 0;
   let polygonOnly = true;
   const budget: Budget = { left: COORDINATE_BUDGET };
   const source = featuresOf(document);
@@ -464,6 +491,15 @@ export async function reprojectGeoLayer(
     const shape = await shapeOf(feature.geometry, epsg, budget, control);
     if (shape === null) {
       skipped += 1;
+      continue;
+    }
+    // S3: not an area, and this tool is defined over areas. Skipped BEFORE the
+    // feature is built, so nothing that is not an area can reach the vector
+    // table — the table is what the predicates and the counts are evaluated
+    // against.
+    if (options?.areasOnly === true && !shape.areaOnly) {
+      skipped += 1;
+      notAreas += 1;
       continue;
     }
     // A document that never went through `normalizeGeoJsonDocument` (a test,
@@ -492,7 +528,42 @@ export async function reprojectGeoLayer(
     propertyKeys,
     propertyTypes: typesOf(bags, propertyKeys),
     polygonOnly,
+    notAreas,
   };
+}
+
+/**
+ * §7.5's skip sentences for one preflight, in the order the card shows them.
+ *
+ * TWO causes, not one: §7.5's own "4 areas skipped: invalid geometry" covers a
+ * null, empty or unprojectable geometry, and S3's non-areas are a separate
+ * count with a separate reason — a point is perfectly valid geometry, it is
+ * simply not something §7.5 or §7.6 can take. The second sentence is
+ * **[adapted copy A19]**, written to §7.5's own `<count> <noun> skipped:
+ * <cause>` pattern; the spec words no case in which a usable geometry is set
+ * aside for its KIND.
+ *
+ * Shared by the queue head (§7.5's source) and by Aggregate (§7.6's target) so
+ * the two destinations cannot word the same fact differently.
+ */
+export function preflightWarnings(
+  preflight: Pick<VectorPreflight, "skipped" | "notAreas">,
+): ReadonlyArray<string> {
+  const out: string[] = [];
+  const invalid = preflight.skipped - preflight.notAreas;
+  if (invalid > 0) {
+    out.push(`${count(invalid, "area", "areas")} skipped: invalid geometry`);
+  }
+  if (preflight.notAreas > 0) {
+    out.push(
+      `${count(preflight.notAreas, "feature", "features")} skipped: not an area`,
+    );
+  }
+  return out;
+}
+
+function count(n: number, one: string, many: string): string {
+  return `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 }
 
 /** Every key any bag carries, in first-seen order. */

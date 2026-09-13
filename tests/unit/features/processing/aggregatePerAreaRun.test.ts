@@ -269,24 +269,46 @@ function addZones(broken = false): string {
   });
 }
 
+/** The layer's CURRENT prepared document with the second area replaced by a
+ *  POINT — a perfectly valid geometry that is simply not an area (S3). */
+function secondAreaAsPoint(): unknown {
+  const document = preparedDocument();
+  return {
+    ...document,
+    features: document.features.map((feature, i) =>
+      i === 1
+        ? { ...feature, geometry: { type: "Point", coordinates: [4.5, 52.5] } }
+        : feature,
+    ),
+  };
+}
+
 /** The layer's CURRENT prepared document with the second area's geometry
  *  removed — its properties, a finished run's results included, untouched. */
 function withoutGeometry(): unknown {
+  const document = preparedDocument();
+  return {
+    ...document,
+    features: document.features.map((feature, i) =>
+      i === 1 ? { ...feature, geometry: null } : feature,
+    ),
+  };
+}
+
+/** The zones layer's prepared document, narrowed once. */
+function preparedDocument(): {
+  type: string;
+  features: Array<Record<string, unknown>>;
+} {
   const layer = useGeoLayerStore
     .getState()
     .layers.find((l) => l.kind === "geojson");
   if (layer === undefined || layer.kind !== "geojson") {
     throw new Error("the zones layer is gone");
   }
-  const document = layer.config.preparedData as {
+  return layer.config.preparedData as {
     type: string;
     features: Array<Record<string, unknown>>;
-  };
-  return {
-    ...document,
-    features: document.features.map((feature, i) =>
-      i === 1 ? { ...feature, geometry: null } : feature,
-    ),
   };
 }
 
@@ -520,6 +542,45 @@ describe("a real Aggregate run", () => {
       expect.arrayContaining([`__src_${id}.json`, readerNameOf(id)]),
     );
     expect(await queueIsFree()).toBe(true);
+  });
+
+  it("never writes a count onto a POINT of a mixed target layer (S3)", async () => {
+    // S3: §7.6's target is areas, and one polygon makes a mixed layer eligible
+    // — so a point used to reach the join and come back with a building count
+    // on it. It is skipped at preflight now, under its own cause, and §7.6's
+    // "the target's every feature is written" gives it §6.2's NULL.
+    await seedCity();
+    const zones = addZones();
+    const first = submitAggregate(zones);
+    await until(() => runById(first)?.status === "done");
+    expect(zoneRecords(zones)[1]).toMatchObject({ bld_buildings_n: 0 });
+
+    useGeoLayerStore
+      .getState()
+      .replaceGeoPreparedData(zones, secondAreaAsPoint());
+    areaRows = [
+      area(
+        "id:string:z1",
+        { bld_buildings_n: 4, bld_sum_roof_area_m2: 120 },
+        { total: 4 },
+      ),
+    ];
+    const second = submitAggregate(zones);
+    await until(() => runById(second)?.status === "done");
+
+    expect(runById(second)?.summary?.line).toMatch(
+      /^1 area aggregated over 4 buildings · /,
+    );
+    expect(runById(second)?.warnings).toContain(
+      "1 feature skipped: not an area",
+    );
+    expect(runById(second)?.warnings).not.toContain(
+      "1 area skipped: invalid geometry",
+    );
+    const records = zoneRecords(zones);
+    expect(records[0]).toMatchObject({ bld_buildings_n: 4 });
+    // NULL, never the 0 the first run wrote and never a count of its own.
+    expect(records[1]).toMatchObject({ bld_buildings_n: null });
   });
 
   it("writes NULL over an area whose geometry became unusable", async () => {

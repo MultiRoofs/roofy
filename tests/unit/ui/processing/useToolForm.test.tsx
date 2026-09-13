@@ -161,7 +161,24 @@ function addCityLayer(name: string, withReader: boolean): string {
 }
 
 /** A polygon layer and a point layer, so §7.5's source select can refuse one. */
-function addGeoLayer(name: string, kind: "Polygon" | "Point"): string {
+function addGeoLayer(
+  name: string,
+  kind: "Polygon" | "Point",
+  /** A second feature of the OTHER kind, for §7.5/§7.6's mixed-layer rule. */
+  mixed = false,
+): string {
+  const point = { type: "Point", coordinates: [4, 52] };
+  const polygon = {
+    type: "Polygon",
+    coordinates: [
+      [
+        [4, 52],
+        [5, 52],
+        [5, 53],
+        [4, 52],
+      ],
+    ],
+  };
   return useGeoLayerStore.getState().addGeoLayer({
     name,
     kind: "geojson",
@@ -169,6 +186,16 @@ function addGeoLayer(name: string, kind: "Polygon" | "Point"): string {
       data: {
         type: "FeatureCollection",
         features: [
+          ...(mixed
+            ? [
+                {
+                  type: "Feature",
+                  id: `${name}-mixed`,
+                  properties: { zone: "A" },
+                  geometry: kind === "Polygon" ? point : polygon,
+                },
+              ]
+            : []),
           {
             type: "Feature",
             id: `${name}-1`,
@@ -740,6 +767,21 @@ describe("the SOURCE select and the prefix it names (§7.5, §7.7)", () => {
     const option = screen.getByRole("option", { name: "Points" });
     expect(option).toBeDisabled();
     expect(option).toHaveAttribute("title", "Needs areas (polygons)");
+    expect(screen.queryByText("The layer has no areas")).toBeNull();
+  });
+
+  it("keeps a MIXED layer eligible for the area tools (S3)", () => {
+    // §7.5/§7.6's "Needs areas (polygons)" is about a layer with NO polygon in
+    // it. One polygon is enough to run, and the features that are not areas are
+    // skipped by the execution preflight rather than by the form — which is
+    // what keeps a real mixed layer usable instead of refusing it outright.
+    addCityLayer("Delft", true);
+    const mixed = addGeoLayer("Mixed", "Polygon", true);
+    render(<ToolView toolId="aggregate-per-area" />);
+    const option = screen.getByRole("option", { name: "Mixed" });
+    expect(option).not.toBeDisabled();
+    expect(option).not.toHaveAttribute("title");
+    expect(screen.getByRole("combobox", { name: "Layer" })).toHaveValue(mixed);
     expect(screen.queryByText("The layer has no areas")).toBeNull();
   });
 

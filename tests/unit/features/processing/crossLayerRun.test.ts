@@ -906,6 +906,76 @@ describe("the per-run vector table", () => {
     expect(runById(id)?.warnings).toContain("1 area skipped: invalid geometry");
   });
 
+  it("keeps a mixed layer's NON-AREAS out of §7.5's source table (S3)", async () => {
+    // S3: one polygon makes a mixed polygon/point layer eligible for Join —
+    // the form says "Needs areas (polygons)" only when there is none — and the
+    // whole layer used to reach the compute, so `ST_CoveredBy` could pick a
+    // coincident POINT as the nearest "area". The point is skipped at the
+    // queue head instead, counted, and named on the card.
+    const zones = useGeoLayerStore.getState().addGeoLayer({
+      name: "Zones",
+      kind: "geojson",
+      config: {
+        data: {
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              id: "p1",
+              properties: { zone: "point" },
+              geometry: { type: "Point", coordinates: [4.5, 52.5] },
+            },
+            {
+              type: "Feature",
+              id: "z2",
+              properties: { zone: "B" },
+              geometry: {
+                type: "Polygon",
+                coordinates: [
+                  [
+                    [4, 52],
+                    [5, 52],
+                    [5, 53],
+                    [4, 52],
+                  ],
+                ],
+              },
+            },
+          ],
+        },
+      },
+    });
+    const box = capturing();
+    const id = submitRun({
+      toolId: "join-by-location",
+      targetLayerId: "CITY",
+      sourceLayerId: zones,
+      scope: "all",
+      lod: null,
+      destination: "layer",
+      newLayerName: null,
+      params: {},
+      prefix: "zones_",
+      columns: [{ name: "zones_n", type: "DOUBLE" }],
+    });
+    await settle();
+    expect(runById(id)?.status).toBe("done");
+    // The cause is its OWN sentence: a point is valid geometry, so calling it
+    // "invalid geometry" would send the user looking for a broken ring.
+    expect(runById(id)?.warnings).toContain("1 feature skipped: not an area");
+    expect(runById(id)?.warnings).not.toContain(
+      "1 area skipped: invalid geometry",
+    );
+    const source = box.seen?.source;
+    expect(source?.kind).toBe("vector");
+    expect(source?.kind === "vector" ? source.skipped : null).toBe(1);
+    // The layer's FIELDS are untouched: a geometry the tool cannot use does not
+    // revoke a property the checklist offered.
+    expect(source?.kind === "vector" ? [...source.propertyKeys] : null).toEqual(
+      ["zone"],
+    );
+  });
+
   it("shows Reading source while the SCOPE query is still in flight", async () => {
     // §6.1's phases are discrete and in order, and the scope query is work the
     // run does under the phase it has already entered — a vector run that

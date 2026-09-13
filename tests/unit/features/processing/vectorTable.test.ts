@@ -133,6 +133,7 @@ function preflight(...features: Projected[]): Preflight {
       ["noise", "DOUBLE"],
     ]),
     polygonOnly: true,
+    notAreas: 0,
   };
 }
 

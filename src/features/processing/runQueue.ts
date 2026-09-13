@@ -85,7 +85,11 @@ import {
   prepareDerivedVectorLayer,
   STREAMING_NO_NEW_LAYER,
 } from "./deriveLayer";
-import { reprojectGeoLayer, type VectorPreflight } from "./vectorSource";
+import {
+  preflightWarnings,
+  reprojectGeoLayer,
+  type VectorPreflight,
+} from "./vectorSource";
 import { createVectorTable, type VectorTableHandle } from "./vectorTable";
 import { runById, useProcessingStore } from "./processingStore";
 import { resolveScope, snapshotScopeInputs, type ScopeSnapshot } from "./scope";
@@ -1374,6 +1378,11 @@ async function execute(
       // refuses the others), so a null here is a layer nothing can be projected
       // INTO — the same outcome as every area failing to reproject, which §7.5
       // already has the sentence for.
+      // S3: §7.5's source is defined over AREAS, and a mixed polygon/point
+      // layer is eligible as long as it holds one polygon — so the features
+      // that are not areas are dropped HERE, before the vector table exists,
+      // rather than left for a predicate to match a point with.
+      const sourceMustBeAreas = SOURCE_NEEDS_AREAS.has(tool.id);
       const preflight: VectorPreflight =
         epsg === null
           ? {
@@ -1382,8 +1391,11 @@ async function execute(
               propertyKeys: [],
               propertyTypes: new Map(),
               polygonOnly: true,
+              notAreas: 0,
             }
-          : await reprojectGeoLayer(geo.config.preparedData, epsg, control);
+          : await reprojectGeoLayer(geo.config.preparedData, epsg, control, {
+              areasOnly: sourceMustBeAreas,
+            });
       if (preflight.features.length === 0) {
         // §7.5's source must be AREAS, so "No usable areas in Zones" is ITS
         // sentence; §7.7's source is any geometry type and its only sentence is
@@ -1392,7 +1404,6 @@ async function execute(
         // `SOURCE_NEEDS_AREAS` is the FORM's copy of the same fact, and it is
         // now the ONE owner: the form's disabled source row and this refusal
         // read the same set, so they cannot come to disagree.
-        const sourceMustBeAreas = SOURCE_NEEDS_AREAS.has(tool.id);
         patch(id, {
           status: "failed",
           phase: null,
@@ -1406,10 +1417,9 @@ async function execute(
       }
       if (preflight.skipped > 0) {
         // §7.5's "4 areas skipped: invalid geometry", recorded on the run so
-        // §6.4's log says what the compute never saw.
-        warnings.push(
-          `${plural(preflight.skipped, "area", "areas")} skipped: invalid geometry`,
-        );
+        // §6.4's log says what the compute never saw — and S3's own cause
+        // beside it, because a point is not invalid, it is simply not an area.
+        warnings.push(...preflightWarnings(preflight));
         patch(id, { warnings: [...warnings] });
       }
       vectorSourceHandle = await createVectorTable({
