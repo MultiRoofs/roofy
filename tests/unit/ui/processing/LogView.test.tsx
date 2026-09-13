@@ -11,6 +11,8 @@ const { formatRunLog, clockTime } =
   await import("../../../../src/ui/processing/runFormat");
 const { useProcessingStore } =
   await import("../../../../src/features/processing/processingStore");
+const { useGeoLayerStore } =
+  await import("../../../../src/features/geoLayers/geoLayerStore");
 const { useLayerStore } =
   await import("../../../../src/features/layers/layerStore");
 
@@ -66,6 +68,7 @@ afterEach(() => {
   cleanup();
   useProcessingStore.getState().resetForTest();
   useLayerStore.setState({ layers: [] });
+  useGeoLayerStore.setState({ layers: [] });
 });
 
 describe("LogView", () => {
@@ -151,6 +154,36 @@ describe("LogView", () => {
     render(<LogView runId="r1" />);
     expect(
       screen.getByText("Delft · solids · Derived from Delft"),
+    ).toBeInTheDocument();
+  });
+
+  it("names the parent of a derived VECTOR target too — [adapted copy A7]", () => {
+    // A derived layer is a derived layer: §6.2's sentence does not distinguish
+    // the two kinds, and a vector copy's row is in the OTHER store — so a
+    // lookup in the city store alone would drop the segment for exactly the
+    // runs Aggregate produces.
+    useGeoLayerStore.setState({
+      layers: [
+        {
+          id: "L1",
+          name: "Zones · buildings",
+          kind: "geojson",
+          derivedFrom: {
+            layerId: "L0",
+            layerName: "Zones",
+            runId: "run_0",
+          },
+        } as never,
+      ],
+    });
+    useProcessingStore
+      .getState()
+      .upsertRun(
+        runFixture({ targetLayerId: "L1", targetName: "Zones · buildings" }),
+      );
+    render(<LogView runId="r1" />);
+    expect(
+      screen.getByText("Zones · buildings · Derived from Zones"),
     ).toBeInTheDocument();
   });
 
