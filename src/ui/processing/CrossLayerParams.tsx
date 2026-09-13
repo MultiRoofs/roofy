@@ -145,9 +145,16 @@ export function CrossLayerParams({
     toolId === "join-by-location"
       ? joinFieldErrors(joinParams(params))
       : new Map<string, string>();
+  // ONLY the sentences that are actually on screen. Every aggregate row is
+  // rendered, and `JoinFields` keeps a colliding field visible through the
+  // search for exactly this reason — but a field the SOURCE no longer offers
+  // has no checkbox to carry its sentence, so it is not counted here and the
+  // section paragraph says it instead.
   const inline = new Set<string>([
     ...rowErrors.filter((e): e is string => e !== null),
-    ...fieldErrors.values(),
+    ...[...fieldErrors]
+      .filter(([field]) => sourcePropertyKeys.includes(field))
+      .map(([, message]) => message),
   ]);
   const sectionError = error !== null && inline.has(error) ? null : error;
 
@@ -280,10 +287,18 @@ function JoinFields({
 }) {
   const current = joinParams(params);
   const ticked = new Set(current.fields);
+  // A FIELD THE SEARCH WOULD HIDE STAYS WHEN IT CARRIES A SENTENCE. §6 flags a
+  // collision on the second field and the section-level paragraph is suppressed
+  // because the sentence is beside that checkbox — so filtering it out would
+  // leave Run disabled with no visible reason anywhere. Keeping the offending
+  // fields is also what makes the parent's "already rendered" suppression true
+  // rather than hopeful.
   const shown =
     keys.length > SEARCH_AT && search.trim() !== ""
-      ? keys.filter((k) =>
-          k.toLowerCase().includes(search.trim().toLowerCase()),
+      ? keys.filter(
+          (k) =>
+            k.toLowerCase().includes(search.trim().toLowerCase()) ||
+            fieldErrors.has(k),
         )
       : keys;
   return (

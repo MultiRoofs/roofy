@@ -300,6 +300,30 @@ describe("Join attributes by location (§7.5)", () => {
     ).toHaveLength(1);
   });
 
+  it("keeps a colliding field visible through a search that would hide it", async () => {
+    // §7.5's search box appears past twelve fields, and it must not be able to
+    // hide the explanation: the section paragraph is suppressed because the
+    // sentence is beside the field, so a filtered-out checkbox would leave Run
+    // disabled with no visible reason at all.
+    const many = [
+      "Zone Name",
+      "zone_name",
+      ...Array.from({ length: 11 }, (_, i) => `p${i}`),
+    ];
+    renderSection(
+      "join-by-location",
+      { fields: ["Zone Name", "zone_name"] },
+      { sourcePropertyKeys: many, sourcePropertyTypes: new Map() },
+    );
+    await userEvent.type(screen.getByLabelText("Search fields"), "Zone Name");
+    // The match, and the field the collision is about — which does NOT match
+    // the query, and is kept for its sentence.
+    expect(screen.queryByRole("checkbox", { name: /^p0/ })).toBeNull();
+    expect(
+      describedBy(screen.getByRole("checkbox", { name: /^zone_name/ })),
+    ).toBe("'zone_name' resolves to the same column");
+  });
+
   it("keeps a section-level sentence that belongs to no field", () => {
     renderSection("join-by-location", {
       proxy: "centre",
