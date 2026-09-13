@@ -546,6 +546,60 @@ describe("the SOURCE select and the prefix it names (§7.5, §7.7)", () => {
     );
   });
 
+  /**
+   * The DRAFT keeps what the user picked; only the RESOLVED bag carries the
+   * proxy the predicate forced. The section renders the resolved bag and writes
+   * it back whole, so without that separation a round trip through `centre
+   * within` would overwrite the footprint with the centre it was shown — and
+   * the run after it would silently use a proxy nobody chose.
+   */
+  it("gives the footprint back when the predicate stops forcing the centre", () => {
+    addCityLayer("Delft", true);
+    addGeoLayer("Zones", "Polygon");
+    render(<ToolView toolId="join-by-location" />);
+    const predicate = screen.getByLabelText("Predicate");
+    expect(
+      screen.getByRole("radio", { name: "Footprint (LoD 0)" }),
+    ).toBeChecked();
+
+    fireEvent.change(predicate, { target: { value: "centreWithin" } });
+    expect(screen.getByRole("radio", { name: "Extent centre" })).toBeChecked();
+
+    fireEvent.change(predicate, { target: { value: "within" } });
+    expect(
+      screen.getByRole("radio", { name: "Footprint (LoD 0)" }),
+    ).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(submitRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: expect.objectContaining({
+          predicate: "within",
+          proxy: "footprint",
+        }),
+      }),
+    );
+  });
+
+  it("still stores a proxy the user picks with the radio", () => {
+    addCityLayer("Delft", true);
+    addGeoLayer("Zones", "Polygon");
+    render(<ToolView toolId="join-by-location" />);
+    fireEvent.click(screen.getByRole("radio", { name: "Extent rectangle" }));
+    fireEvent.change(screen.getByLabelText("Predicate"), {
+      target: { value: "within" },
+    });
+    expect(
+      screen.getByRole("radio", { name: "Extent rectangle" }),
+    ).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    expect(submitRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: expect.objectContaining({ proxy: "rectangle" }),
+      }),
+    );
+  });
+
   it("says why a source row is unusable, in §7.5's own order", () => {
     // A layer whose document is still loading has no geometry to ask about, so
     // "Needs areas (polygons)" would be a sentence about a fact nobody knows.

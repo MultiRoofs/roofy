@@ -628,6 +628,26 @@ export function useToolForm(toolId: ToolId) {
         patch.sourceLayerId !== undefined &&
         patch.sourceLayerId !== draft.sourceLayerId;
       const dropParams = crossLayer && (retarget || resource);
+      // THE DRAFT KEEPS THE USER'S OWN PROXY; only the RESOLVED bag carries the
+      // one `centre within` forced (§7.5). The section renders the resolved bag
+      // and writes it back WHOLE, so a change to anything else — the predicate,
+      // a field — would otherwise carry the forced centre into the draft and
+      // overwrite the footprint the user picked: switching the predicate back
+      // to `within` would then run on a centre nobody chose. The preference is
+      // restored whenever the write-back did not change the proxy itself, which
+      // is exactly "the user changed something else".
+      const keepsProxy =
+        crossLayer &&
+        !dropParams &&
+        patch.params !== undefined &&
+        patch.params["proxy"] === params["proxy"] &&
+        draft.params["proxy"] !== undefined;
+      const patched: Partial<ToolDraft> = keepsProxy
+        ? {
+            ...patch,
+            params: { ...patch.params, proxy: draft.params["proxy"] },
+          }
+        : patch;
       useProcessingStore.getState().setDraft(toolId, {
         ...draft,
         // The DERIVED prefix is never stored: it is a function of the source,
@@ -637,7 +657,7 @@ export function useToolForm(toolId: ToolId) {
         prefix: base.prefix,
         ...(retarget ? { lod: null } : {}),
         ...(dropParams ? { params: {} } : {}),
-        ...patch,
+        ...patched,
       });
     },
   };
