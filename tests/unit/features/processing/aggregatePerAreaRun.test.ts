@@ -37,6 +37,14 @@ let holdPrefix: string | null = null;
 let sourceIds: string[] = ["B1", "B1P", "B2"];
 /** The rows the aggregate statement answers with. */
 let areaRows: Array<Record<string, unknown>> = [];
+/** The layer table's own rows: `id` and its feature root. */
+let tableRows: Array<{ id: string; f: string }> = [
+  { id: "B1", f: "B1" },
+  { id: "B1P", f: "B1" },
+  { id: "B2", f: "B2" },
+];
+/** What `COUNT(DISTINCT …)` answers — the layer's FEATURE count. */
+let featureTotal = 2;
 
 function die(): void {
   if (engineState === "failed") return;
@@ -77,20 +85,24 @@ vi.mock("../../../../src/insights/duckdb", () => {
       return { ok: true as const, columns: [], rows: areaRows };
     }
     if (statement.includes("COUNT(")) {
-      return { ok: true as const, columns: ["n"], rows: [{ n: 2 }] };
+      return { ok: true as const, columns: ["n"], rows: [{ n: featureTotal }] };
     }
-    // The scope rows off the layer TABLE.
+    // The scope rows off the layer TABLE — filtered the way the real table
+    // would filter them, so a SELECTED scope actually leaves the unselected
+    // buildings out instead of quietly answering for the whole layer.
     if (
       statement.startsWith(`SELECT "id", COALESCE("feature_id", "id") AS f`)
     ) {
+      const wanted = [...statement.matchAll(/'([^']+)'/g)].map((m) => m[1]);
       return {
         ok: true as const,
         columns: ["id", "f"],
-        rows: [
-          { id: "B1", f: "B1" },
-          { id: "B1P", f: "B1" },
-          { id: "B2", f: "B2" },
-        ],
+        rows:
+          wanted.length === 0
+            ? tableRows
+            : tableRows.filter(
+                (row) => wanted.includes(row.id) || wanted.includes(row.f),
+              ),
       };
     }
     // §6.1's id join, straight off the reader.
@@ -160,6 +172,10 @@ const { aggregateColumns, aggregateParams } =
   await import("../../../../src/features/processing/crossLayerParams");
 const { geoRecords } =
   await import("../../../../src/features/geoLayers/geoRecords");
+const { useSelectionStore } =
+  await import("../../../../src/features/selection/selectionStore");
+const { useWorkspaceStore } =
+  await import("../../../../src/features/workspace/workspaceStore");
 const { SOURCE_IDS_DIFFER } =
   await import("../../../../src/features/processing/sourceRead");
 // The real executor, registered by `tools/register` — which `runQueue` imports.
@@ -410,6 +426,12 @@ beforeEach(() => {
   engineState = "ready";
   holdPrefix = null;
   sourceIds = ["B1", "B1P", "B2"];
+  tableRows = [
+    { id: "B1", f: "B1" },
+    { id: "B1P", f: "B1" },
+    { id: "B2", f: "B2" },
+  ];
+  featureTotal = 2;
   // The COUNTs as BIGINTs, which is what `COUNT(m."f")` is: the publication
   // must put plain numbers on the feature properties whatever the engine hands
   // back, because a `2n` there would break a GeoJSON export of the layer.
@@ -430,6 +452,8 @@ beforeEach(() => {
   useLayerStore.setState({ layers: [] });
   useGeoLayerStore.setState({ layers: [] });
   useComputedColumnStore.setState({ byLayer: {} });
+  useSelectionStore.getState().clear();
+  useWorkspaceStore.setState({ activeLayerId: null });
 });
 
 afterEach(() => {
@@ -621,4 +645,192 @@ describe("a real Aggregate run", () => {
     // so the layer never shows a value this run does not stand behind.
     expect(records[1]).toMatchObject({ bld_buildings_n: null });
   });
+  it("scenario 11: Selected(2) into a New layer over six areas (M1)", async () => {
+    // §10 scenario 11's SELECTED variant, through the REAL executor, the real
+    // `buildAggregateSql` and the real publication — the piece the milestone
+    // review found untested. Six valid areas, two of the layer's four
+    // buildings selected, and the destination is a GeoJSON copy.
+    useLayerStore.setState({
+      layers: [{ ...cityLayer(), model: wideModel() }],
+    });
+    tableRows = [
+      { id: "B1", f: "B1" },
+      { id: "B1P", f: "B1" },
+      { id: "B2", f: "B2" },
+      { id: "B3", f: "B3" },
+      { id: "B4", f: "B4" },
+    ];
+    featureTotal = 4;
+    sourceIds = ["B1", "B1P", "B2", "B3", "B4"];
+    await enqueueLayerTable("CITY", readerBytes());
+    sql.length = 0;
+    registered.length = 0;
+    dropped.length = 0;
+    const zones = addSixZones();
+    const before = JSON.stringify(geoLayerById(zones).config);
+    // TWO of the four buildings, on the CITY layer — which is what §7.6's
+    // "Scope applies to the SOURCE buildings" freezes.
+    useSelectionStore.getState().selectMany([
+      { kind: "object", layerId: "CITY", objectId: "B1" },
+      { kind: "object", layerId: "CITY", objectId: "B2" },
+    ]);
+    // And then the user activates the VECTOR target, which is the only state
+    // Aggregate is offered in (gate defect F5). Rule 1's exemption is what
+    // keeps the two selected buildings alive to be scoped by; without it this
+    // run would refuse with "Nothing selected on this layer".
+    useWorkspaceStore.getState().setActiveLayerId(zones);
+    expect(useSelectionStore.getState().selections).toHaveLength(2);
+    // Six areas, and the counts the statement answers with: two of them hold
+    // nobody, which is §6.2's real 0 rather than a NULL.
+    areaRows = [
+      area(
+        "id:string:z1",
+        { bld_buildings_n: 2n, bld_sum_roof_area_m2: 90 },
+        { total: 2n },
+      ),
+      area(
+        "id:string:z2",
+        { bld_buildings_n: 0n, bld_sum_roof_area_m2: null },
+        { total: 2n },
+      ),
+      area(
+        "id:string:z3",
+        { bld_buildings_n: 1n, bld_sum_roof_area_m2: 40 },
+        { total: 2n },
+      ),
+      area(
+        "id:string:z4",
+        { bld_buildings_n: 0n, bld_sum_roof_area_m2: null },
+        { total: 2n },
+      ),
+      area(
+        "id:string:z5",
+        { bld_buildings_n: 1n, bld_sum_roof_area_m2: 50 },
+        { total: 2n },
+      ),
+      area(
+        "id:string:z6",
+        { bld_buildings_n: 2n, bld_sum_roof_area_m2: 90 },
+        { total: 2n },
+      ),
+    ];
+
+    const id = submitRun({
+      toolId: "aggregate-per-area",
+      targetLayerId: zones,
+      sourceLayerId: "CITY",
+      scope: "selected",
+      lod: null,
+      params: PARAMS,
+      prefix: "bld_",
+      destination: "new" as const,
+      newLayerName: "Zones · buildings",
+      columns: [...aggregateColumns("bld_", aggregateParams(PARAMS))],
+    });
+    await until(() => runById(id)?.status === "done");
+    expect(runById(id)?.status).toBe("done");
+
+    // The SCOPE: the two selected features and their part, and neither of the
+    // two buildings nobody selected.
+    expect(runById(id)?.featureIds).toEqual(["B1", "B1P", "B2"]);
+    expect(runById(id)?.scopeCount).toBe(2);
+    const scoped = sql.filter((s) => s.includes("'B1P'"));
+    expect(scoped.length).toBeGreaterThan(0);
+    for (const statement of sql) {
+      expect(statement).not.toContain("'B3'");
+      expect(statement).not.toContain("'B4'");
+    }
+
+    // ALL SIX areas are in the copy, in the target's own order, with their
+    // exact counts — the two zeros included.
+    const copyId = runById(id)?.newLayerId ?? "";
+    const copied = areasOf(copyId);
+    expect(copied).toHaveLength(6);
+    expect(copied.map((f) => f.properties["name"])).toEqual([
+      "z1",
+      "z2",
+      "z3",
+      "z4",
+      "z5",
+      "z6",
+    ]);
+    expect(copied.map((f) => f.properties["bld_buildings_n"])).toEqual([
+      2, 0, 1, 0, 1, 2,
+    ]);
+    // Plain numbers, never the engine's BigInts (a GeoJSON export of the copy
+    // would refuse those).
+    for (const feature of copied) {
+      expect(typeof feature.properties["bld_buildings_n"]).toBe("number");
+    }
+    expect(copied.map((f) => f.properties["bld_sum_roof_area_m2"])).toEqual([
+      90,
+      null,
+      40,
+      null,
+      50,
+      90,
+    ]);
+
+    // And the PARENT is untouched: the same document, and no computed column.
+    expect(JSON.stringify(geoLayerById(zones).config)).toBe(before);
+    expect(useComputedColumnStore.getState().byLayer[zones]).toBeUndefined();
+    expect(Object.keys(areasOf(zones)[0]?.properties ?? {})).not.toContain(
+      "bld_buildings_n",
+    );
+    // The copy carries the provenance, and the card says what it created.
+    expect(
+      useComputedColumnStore.getState().byLayer[copyId]?.["bld_buildings_n"]
+        ?.toolName,
+    ).toBe("Aggregate buildings per area");
+    expect(runById(id)?.summary?.line).toMatch(
+      /^Created Zones · buildings · 6 areas aggregated over 2 buildings · /,
+    );
+  });
 });
+
+/** Four features — B1 with a part, plus B2, B3 and B4 — so a Selected(2) scope
+ *  has buildings to leave out. */
+function wideModel(): CityModel {
+  return {
+    ...model(),
+    objects: {
+      B1: object("B1"),
+      B1P: object("B1P", ["B1"]),
+      B2: object("B2"),
+      B3: object("B3"),
+      B4: object("B4"),
+    },
+  } as unknown as CityModel;
+}
+
+/** Six valid areas, named z1…z6 and laid out side by side. */
+function addSixZones(): string {
+  return useGeoLayerStore.getState().addGeoLayer({
+    name: "Zones",
+    kind: "geojson",
+    config: {
+      data: {
+        type: "FeatureCollection",
+        features: [1, 2, 3, 4, 5, 6].map((n) => ({
+          type: "Feature",
+          id: `z${n}`,
+          properties: { name: `z${n}` },
+          geometry: { type: "Polygon", coordinates: [ring(n * 2)] },
+        })),
+      },
+    },
+  });
+}
+
+function geoLayerById(id: string) {
+  const layer = useGeoLayerStore.getState().layers.find((l) => l.id === id);
+  if (layer?.kind !== "geojson") throw new Error("not a geojson layer");
+  return layer;
+}
+
+function areasOf(id: string): Array<{ properties: Record<string, unknown> }> {
+  const doc = geoLayerById(id).config.preparedData as {
+    features?: Array<{ properties: Record<string, unknown> }>;
+  };
+  return doc.features ?? [];
+}
