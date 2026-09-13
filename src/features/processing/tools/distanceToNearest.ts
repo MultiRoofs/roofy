@@ -122,15 +122,33 @@ export function buildDistanceSql(input: DistanceSqlInput): string {
     input.ids === null
       ? ""
       : ` WHERE t."id" IN (${input.ids.map((id) => quoteLiteral(id)).join(", ")})`;
+  const src = quoteIdent(input.source);
+  // S4: the winner's row, and only then the source's payload. `props` is a
+  // JSON blob per source feature; carrying it through a sort over every
+  // candidate pair is what made a dense run unaffordable, and nothing needs it
+  // until the nearest candidate is known. A run that writes no id never looks
+  // at the source a second time at all.
+  const winner =
+    input.nearestId === null
+      ? `SELECT * FROM r WHERE "rn" = 1`
+      : `SELECT w.*, s."fid" AS "fid", s."props" AS "props" ` +
+        `FROM (SELECT * FROM r WHERE "rn" = 1) w ` +
+        `LEFT JOIN ${src} s ON s."idx" = w."idx"`;
   return (
-    `WITH b AS (${b}), ` +
-    `j AS (SELECT b."f" AS "f", (b."g" IS NULL) AS "no_proxy", s."idx" AS "idx", ` +
-    `s."fid" AS "fid", s."props" AS "props", ST_Distance_GEOS(b."g", s."geom") AS "d" ` +
-    `FROM b LEFT JOIN ${quoteIdent(input.source)} s ` +
-    `ON b."g" IS NOT NULL AND ST_Distance_GEOS(b."g", s."geom") <= ${limit}), ` +
+    // The expanded box is computed ONCE per building, in `b`, not per candidate
+    // pair inside the join's inner loop.
+    `WITH b AS (SELECT "f", "g", CASE WHEN "g" IS NULL THEN NULL ` +
+    `ELSE ST_Expand("g", ${limit}) END AS "box" FROM (${b})), ` +
+    `c AS (SELECT b."f" AS "f", (b."g" IS NULL) AS "no_proxy", s."idx" AS "idx", ` +
+    `ST_Distance_GEOS(b."g", s."geom") AS "d" ` +
+    `FROM b LEFT JOIN ${src} s ` +
+    // The CHEAP test first: a bbox against a bbox, which short-circuits the
+    // GEOS distance for every candidate the box cannot reach.
+    `ON b."g" IS NOT NULL AND ST_Intersects_Extent(b."box", s."geom") ` +
+    `AND ST_Distance_GEOS(b."g", s."geom") <= ${limit}), ` +
     `r AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY "f" ` +
-    `ORDER BY "d" ASC NULLS LAST, "idx" ASC NULLS LAST) AS "rn" FROM j), ` +
-    `m AS (SELECT * FROM r WHERE "rn" = 1) ` +
+    `ORDER BY "d" ASC NULLS LAST, "idx" ASC NULLS LAST) AS "rn" FROM c), ` +
+    `m AS (${winner}) ` +
     // `f` and `no_proxy` are INTERNAL: the per-FEATURE accounting needs the
     // feature key and whether it had a proxy, and neither is an output column.
     `SELECT t."id" AS "id", m."f" AS "f", m."no_proxy" AS "no_proxy", ` +

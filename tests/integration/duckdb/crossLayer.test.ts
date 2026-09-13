@@ -1467,6 +1467,88 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
     db.query("DROP TABLE IF EXISTS probe_distance");
   });
 
+  it("bounds the candidates with the expanded box, and stays conservative (S4)", async () => {
+    // S4's prefilter, on the engine. A pair within `limit` metres cannot fall
+    // outside a box grown by `limit` — |qx - px| <= |q - p| — so the test is
+    // conservative, and these two cases are the two sides of it: a source just
+    // INSIDE the limit is still found, and one beyond it is not measured at all.
+    db.query(
+      `CREATE OR REPLACE TABLE probe_bound AS SELECT * FROM (VALUES
+         ('B1', NULL::VARCHAR, {'xmin': 0.0, 'ymin': 0.0, 'zmin': 0.0, 'xmax': 10.0, 'ymax': 10.0, 'zmax': 3.0})
+       ) AS t("id", "feature_id", "bbox")`,
+    );
+    const table = vectorTableName("run_bound");
+    const file = `${table}.json`;
+    db.registerBytes(
+      file,
+      await encodeProjectedFeatures([
+        {
+          idx: 0,
+          stableId: "id:string:far",
+          featureId: "far",
+          properties: { name: "far" },
+          // 990 m east of B1's east edge.
+          wkt: "POLYGON ((1000 0, 1010 0, 1010 10, 1000 10, 1000 0))",
+        },
+        {
+          idx: 1,
+          stableId: "id:string:near",
+          featureId: "near",
+          properties: { name: "near" },
+          // 90 m east of B1's east edge.
+          wkt: "POLYGON ((100 0, 110 0, 110 10, 100 10, 100 0))",
+        },
+      ]),
+    );
+    db.query(buildVectorTableSql(table, file));
+    const statement = (maxDistanceM: number) =>
+      buildDistanceSql({
+        table: "probe_bound",
+        source: table,
+        proxy: "rectangle",
+        from: null,
+        geometryColumn: null,
+        ids: null,
+        maxDistanceM,
+        prefix: "roads_",
+        nearestId: { property: null },
+      });
+    // The near one is inside the box AND inside the limit.
+    expect(db.query(statement(500))).toEqual([
+      {
+        id: "B1",
+        f: "B1",
+        no_proxy: false,
+        roads_distance_m: 90,
+        roads_nearest_id: "near",
+      },
+    ]);
+    // At 90 m the near source is EXACTLY at the limit — the box is grown by
+    // the same 90, so a prefilter that were even slightly tight would lose it.
+    expect(db.query(statement(90))[0]?.["roads_nearest_id"]).toBe("near");
+    // And at 50 m nothing is within reach: the far source never reaches the
+    // GEOS distance at all, and the near one fails the limit.
+    expect(db.query(statement(50))).toEqual([
+      {
+        id: "B1",
+        f: "B1",
+        no_proxy: false,
+        roads_distance_m: null,
+        roads_nearest_id: null,
+      },
+    ]);
+    // The prefilter is what keeps the far source out of the candidate set: the
+    // box grown by 50 m reaches x = 60, and the far source starts at x = 1000.
+    expect(
+      db.query(
+        `SELECT ST_Intersects_Extent(ST_Expand(ST_MakeEnvelope(0, 0, 10, 10), 50.0), s."geom") AS hit FROM ${quoteIdent(table)} s WHERE s."idx" = 0`,
+      ),
+    ).toEqual([{ hit: false }]);
+    db.query(buildDropVectorTableSql(table));
+    db.query("DROP TABLE IF EXISTS probe_bound");
+    db.dropFile(file);
+  });
+
   it("answers the POINT→polygon pair the same through buildDistanceSql as core ST_Distance", () => {
     // PARITY, explicitly. The case above ("finds the nearest source feature
     // with MIN(ST_Distance)") measures core `ST_Distance` from the point

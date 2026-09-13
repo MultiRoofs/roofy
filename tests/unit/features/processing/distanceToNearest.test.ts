@@ -275,9 +275,7 @@ describe("buildDistanceSql", () => {
     expect(sql).not.toContain("ST_Distance(");
     expect(sql).not.toContain("ST_DWithin");
     // The FEATURE proxy, and the answer copied back to every row (§7).
-    expect(sql).toContain(
-      'WITH b AS (SELECT COALESCE("feature_id", "id") AS f',
-    );
+    expect(sql).toContain('FROM (SELECT COALESCE("feature_id", "id") AS f');
     expect(sql).toContain(
       'FROM "layer_1" t JOIN m ON COALESCE(t."feature_id", t."id") = m."f"',
     );
@@ -317,6 +315,49 @@ describe("buildDistanceSql", () => {
     const sql = buildDistanceSql({ ...base, ids: ["b1"] });
     expect(sql).toContain(`WHERE "id" IN ('b1')`);
     expect(sql).toContain(`WHERE t."id" IN ('b1')`);
+  });
+
+  it("bounds the candidate set with an expanded envelope (S4)", () => {
+    // S4: the join used to feed EVERY within-limit pair — source properties
+    // and all — into one partitioned sort, and the distance limit put no bound
+    // on the pairs it had to measure. A bbox test around the building's proxy,
+    // grown by the limit, is a CONSERVATIVE prefilter (a pair within `limit`
+    // metres cannot fall outside a box grown by `limit`) and it short-circuits
+    // before the expensive GEOS distance.
+    const sql = buildDistanceSql(base);
+    expect(sql).toContain('ST_Expand("g", 500) END AS "box"');
+    expect(sql).toContain('ST_Intersects_Extent(b."box", s."geom")');
+    // The cheap test comes BEFORE the expensive one in the ON clause.
+    expect(sql.indexOf("ST_Intersects_Extent")).toBeLessThan(
+      sql.indexOf('ST_Distance_GEOS(b."g", s."geom") <= 500'),
+    );
+    // NOT ST_DWithin: it answers TRUE for polygons 40 m apart at a 39 m
+    // threshold on DuckDB 1.5.5 (finding D10), so it is not a filter at all.
+    expect(sql).not.toContain("ST_DWithin");
+  });
+
+  it("reads the source's properties only for the WINNER (S4)", () => {
+    // The partitioned sort carries the feature key, the candidate index and the
+    // distance — nothing else. `props` is a JSON blob per source feature, and
+    // dragging it through a sort over every candidate pair is what made a dense
+    // run unaffordable. It is joined back once the winner is known.
+    const sql = buildDistanceSql({ ...base, nearestId: { property: "name" } });
+    const sortAt = sql.indexOf("ROW_NUMBER() OVER");
+    const propsAt = sql.indexOf('s."props"');
+    expect(propsAt).toBeGreaterThan(sortAt);
+    expect(sql).toContain(`LEFT JOIN "${SRC}" s ON s."idx" = w."idx"`);
+    // The candidate relation names neither of the source's payload columns.
+    const candidates = sql.slice(sql.indexOf("c AS ("), sortAt);
+    expect(candidates).not.toContain('s."props"');
+    expect(candidates).not.toContain('s."fid"');
+  });
+
+  it("does not join the source at all when no id is written (S4)", () => {
+    // Nothing but the distance is asked for, so the winner needs no second
+    // look at the source.
+    const sql = buildDistanceSql(base);
+    expect(sql).not.toContain('s."idx" = w."idx"');
+    expect(sql).not.toContain('s."props"');
   });
 
   it("carries the no-proxy flag §6.2's value rule needs", () => {
