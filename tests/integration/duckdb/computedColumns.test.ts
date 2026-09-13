@@ -195,7 +195,7 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
       const out = attemptAll([
         "BEGIN TRANSACTION",
         ...COLUMNS.map((c) => buildAddColumnSql(TABLE, c)),
-        buildUpdateFromValuesSql(TABLE, file, NAMES),
+        buildUpdateFromValuesSql(TABLE, file, COLUMNS),
         "COMMIT",
       ]);
       if (!out.ok) {
@@ -238,7 +238,7 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
         "BEGIN TRANSACTION",
         buildBackupSql(TABLE, backup, NAMES, ["b1"]),
         ...COLUMNS.map((c) => buildAddColumnSql(TABLE, c)),
-        buildUpdateFromValuesSql(TABLE, file, NAMES),
+        buildUpdateFromValuesSql(TABLE, file, COLUMNS),
         "COMMIT",
       ]);
       if (!out.ok) {
@@ -314,7 +314,9 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
             name: "EXTENT_height_m",
             type: "DOUBLE",
           }),
-          buildUpdateFromValuesSql(TABLE, file, ["EXTENT_height_m"]),
+          buildUpdateFromValuesSql(TABLE, file, [
+            { name: "EXTENT_height_m", type: "DOUBLE" },
+          ]),
         ]).ok,
       ).toBe(true);
 
@@ -332,8 +334,17 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
   });
 
   describe("probe 2: read_json_auto inference", () => {
-    /** Builds a values file, reports what was inferred, and tries to assign it
-     *  into a DOUBLE column through the app's UPDATE. */
+    /**
+     * Builds a values file, reports what `read_json_auto` INFERS for it, and
+     * assigns it into a DOUBLE column through the app's UPDATE.
+     *
+     * The two halves came apart at finding D9: the app's UPDATE now reads the
+     * file at its DECLARED types (`read_json` with `columns=`), so what is
+     * inferred no longer decides what is written. The inference is still
+     * pinned — it is the fact the architecture note carries, and `layerRows`
+     * and the flat fallback still depend on `read_json_auto` — and the write
+     * assertions below now say what the TYPED read does with the same bytes.
+     */
     function assignInto(
       label: string,
       rows: ReadonlyArray<Record<string, unknown>>,
@@ -349,7 +360,9 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
       const write = attemptAll([
         "BEGIN TRANSACTION",
         buildAddColumnSql(table, { name: "extent_height_m", type: "DOUBLE" }),
-        buildUpdateFromValuesSql(table, file, ["extent_height_m"]),
+        buildUpdateFromValuesSql(table, file, [
+          { name: "extent_height_m", type: "DOUBLE" },
+        ]),
         "COMMIT",
       ]);
       if (!write.ok) attempt("ROLLBACK");
@@ -490,7 +503,11 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
         ).ok,
       ).toBe(true);
       expect(
-        attempt(buildUpdateFromValuesSql(TABLE, file, ["extent_height_m"])).ok,
+        attempt(
+          buildUpdateFromValuesSql(TABLE, file, [
+            { name: "extent_height_m", type: "DOUBLE" },
+          ]),
+        ).ok,
       ).toBe(true);
 
       // The table panel's OWN two reads, before COMMIT. The node bindings are
@@ -665,6 +682,137 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
       expect(db.query(buildMostFrequentSql("layer_cc8", "zones_name"))).toEqual(
         [{ m: "B" }],
       );
+    });
+  });
+  describe("probe 6: the write preserves the DECLARED column types", () => {
+    /**
+     * §7.5's "copied values keep their type", at the write.
+     *
+     * The values file is a document the APP just built out of columns whose
+     * types the run already declared, so nothing about it needs inferring — and
+     * inference is not merely redundant here, it is wrong: JSON's sample is
+     * 20,480 rows, and a VARCHAR column whose first value appears after it is
+     * read back as JSON, which renders a string WITH ITS QUOTES. A join whose
+     * first 20,480 buildings fall outside every area would then write the
+     * two-character value `""` into every empty zone name.
+     */
+    function write(
+      label: string,
+      columns: ReadonlyArray<OutputColumn>,
+      rows: ReadonlyArray<Record<string, unknown>>,
+    ): { readonly table: string; readonly write: Attempt } {
+      const table = `layer_cc9_${label}`;
+      const file = `__vals_${label}.json`;
+      makeTable(
+        table,
+        rows.map((r) => String(r.id)),
+      );
+      db.registerBytes(file, encodeValues(rows));
+      const out = attemptAll([
+        "BEGIN TRANSACTION",
+        ...columns.map((c) => buildAddColumnSql(table, c)),
+        buildUpdateFromValuesSql(table, file, columns),
+        "COMMIT",
+      ]);
+      if (!out.ok) {
+        attempt("ROLLBACK");
+        console.log(`[cc] probe 5/${label} REFUSED: ${out.message}`);
+      }
+      db.dropFile(file);
+      return { table, write: out };
+    }
+
+    it("stores TEXT that first appears past the sample size as itself, unquoted", () => {
+      const columns: ReadonlyArray<OutputColumn> = [
+        { name: "zones_name", type: "VARCHAR" },
+      ];
+      const rows: Array<Record<string, unknown>> = [];
+      for (let i = 0; i < SAMPLE_SIZE; i++) {
+        rows.push({ id: `b${i}`, zones_name: null });
+      }
+      // The empty string is the one that exposes the defect most plainly — a
+      // JSON-typed read renders it as two quotation marks — and the non-empty
+      // one shows the same rendering with content in it.
+      rows.push({ id: `b${SAMPLE_SIZE}`, zones_name: "" });
+      rows.push({ id: `b${SAMPLE_SIZE + 1}`, zones_name: "Centrum" });
+      const out = write("latetext", columns, rows);
+      expect(out.write.ok).toBe(true);
+      expect(
+        db.query(
+          `SELECT "id", "zones_name" FROM ${quoteIdent(out.table)} WHERE "id" IN ('b${SAMPLE_SIZE}', 'b${SAMPLE_SIZE + 1}') ORDER BY "id"`,
+        ),
+      ).toEqual([
+        { id: `b${SAMPLE_SIZE}`, zones_name: "" },
+        { id: `b${SAMPLE_SIZE + 1}`, zones_name: "Centrum" },
+      ]);
+      // And the NULLs before it are still NULL, not the string "null".
+      expect(
+        db.query(
+          `SELECT COUNT(*) AS n FROM ${quoteIdent(out.table)} WHERE "zones_name" IS NULL`,
+        ),
+      ).toEqual([{ n: SAMPLE_SIZE }]);
+    });
+
+    it("stores an early empty string and a quote-bearing one as themselves", () => {
+      const columns: ReadonlyArray<OutputColumn> = [
+        { name: "zones_name", type: "VARCHAR" },
+      ];
+      const out = write("text", columns, [
+        { id: "b1", zones_name: "" },
+        { id: "b2", zones_name: 'He said "hi"' },
+        { id: "b3", zones_name: null },
+        // A nested object arrives from §7.5's copy as JSON TEXT already.
+        { id: "b4", zones_name: '{"k":1}' },
+      ]);
+      expect(out.write.ok).toBe(true);
+      expect(
+        db.query(
+          `SELECT "id", "zones_name" FROM ${quoteIdent(out.table)} ORDER BY "id"`,
+        ),
+      ).toEqual([
+        { id: "b1", zones_name: "" },
+        { id: "b2", zones_name: 'He said "hi"' },
+        { id: "b3", zones_name: null },
+        { id: "b4", zones_name: '{"k":1}' },
+      ]);
+    });
+
+    it("keeps DOUBLE and BOOLEAN columns typed, sample or no sample", () => {
+      const columns: ReadonlyArray<OutputColumn> = [
+        { name: "zones_noise", type: "DOUBLE" },
+        { name: "solid_valid", type: "BOOLEAN" },
+      ];
+      const rows: Array<Record<string, unknown>> = [];
+      for (let i = 0; i < SAMPLE_SIZE; i++) {
+        rows.push({ id: `b${i}`, zones_noise: null, solid_valid: null });
+      }
+      rows.push({
+        id: `b${SAMPLE_SIZE}`,
+        zones_noise: 62.5,
+        solid_valid: false,
+      });
+      const out = write("latenumber", columns, rows);
+      expect(out.write.ok).toBe(true);
+      expect(
+        db.query(
+          `SELECT "zones_noise", "solid_valid" FROM ${quoteIdent(out.table)} WHERE "id" = 'b${SAMPLE_SIZE}'`,
+        ),
+      ).toEqual([{ zones_noise: 62.5, solid_valid: false }]);
+    });
+
+    it("takes a column name that needs quoting in the columns= list", () => {
+      // Output names are slugified, but the TABLE's own spelling wins
+      // (`canonicalise`), and a file's column can be anything.
+      const columns: ReadonlyArray<OutputColumn> = [
+        { name: 'odd "name"', type: "VARCHAR" },
+      ];
+      const out = write("oddname", columns, [{ id: "b1", 'odd "name"': "x" }]);
+      expect(out.write.ok).toBe(true);
+      expect(
+        db.query(
+          `SELECT ${quoteIdent('odd "name"')} AS v FROM ${quoteIdent(out.table)}`,
+        ),
+      ).toEqual([{ v: "x" }]);
     });
   });
 });

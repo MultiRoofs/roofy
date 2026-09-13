@@ -62,11 +62,30 @@ describe("computed column SQL", () => {
       `CREATE TABLE "__undo_r1" AS SELECT "id", "a" FROM "layer_1"`,
     );
   });
-  it("updates from the registered values", () => {
+  it("updates from the registered values, reading them at their DECLARED types", () => {
+    // `read_json`, never `read_json_auto` (finding D9): JSON's sample is 20,480
+    // rows, and a VARCHAR column whose first value appears after it is inferred
+    // JSON — which renders a string WITH its quotes. `"id"` is declared with
+    // the rest, because it is the join key.
     expect(
-      cc.buildUpdateFromValuesSql("layer_1", "__vals_r1.json", ["a", "b"]),
+      cc.buildUpdateFromValuesSql("layer_1", "__vals_r1.json", [
+        { name: "a", type: "DOUBLE" },
+        { name: "b", type: "VARCHAR" },
+      ]),
     ).toBe(
-      `UPDATE "layer_1" SET "a" = v."a", "b" = v."b" FROM read_json_auto('__vals_r1.json') AS v WHERE "layer_1"."id" = v."id"`,
+      `UPDATE "layer_1" SET "a" = v."a", "b" = v."b" FROM read_json('__vals_r1.json', columns = {"id": 'VARCHAR', "a": 'DOUBLE', "b": 'VARCHAR'}) AS v WHERE "layer_1"."id" = v."id"`,
+    );
+  });
+
+  it("quotes a column name in the columns= list as an identifier", () => {
+    // The struct literal's keys are identifiers: a name carrying a quotation
+    // mark would otherwise end the key and change the read's shape.
+    expect(
+      cc.buildUpdateFromValuesSql("layer_1", "__vals_r1.json", [
+        { name: 'odd "name"', type: "BOOLEAN" },
+      ]),
+    ).toBe(
+      `UPDATE "layer_1" SET "odd ""name""" = v."odd ""name""" FROM read_json('__vals_r1.json', columns = {"id": 'VARCHAR', "odd ""name""": 'BOOLEAN'}) AS v WHERE "layer_1"."id" = v."id"`,
     );
   });
   it("restores and nullifies", () => {

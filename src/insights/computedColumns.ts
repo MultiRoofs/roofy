@@ -56,15 +56,43 @@ export function buildBackupSql(
   return `CREATE TABLE ${quoteIdent(backupTable)} AS SELECT ${cols} FROM ${quoteIdent(table)}${where}`;
 }
 
+/**
+ * The write's UPDATE, reading the values file with the columns' DECLARED types.
+ *
+ * `read_json` with an explicit `columns=`, NEVER `read_json_auto` (finding D9).
+ * The file is a document this module built one line ago out of columns whose
+ * types the run already declared, so there is nothing to infer — and inference
+ * here is not merely redundant, it is WRONG: JSON's sample is 20,480 rows, and
+ * a VARCHAR column whose first value appears after it is inferred `JSON`, which
+ * renders a string WITH ITS QUOTES. Measured on DuckDB 1.5.5: an empty string
+ * landed in the destination as the two-character value `""` and `Centrum` as
+ * `"Centrum"`. A join whose first 20,480 buildings fall outside every area hits
+ * exactly that (§7.5's "copied values keep their type"), and the table then
+ * disagrees with the values published to the model.
+ *
+ * `"id"` is declared too, because it is the join key and a file of numeric-
+ * looking ids would otherwise be inferred as numbers and match nothing.
+ */
 export function buildUpdateFromValuesSql(
   table: string,
   valuesFile: string,
-  columns: ReadonlyArray<string>,
+  columns: ReadonlyArray<OutputColumn>,
 ): string {
   const sets = columns
-    .map((c) => `${quoteIdent(c)} = v.${quoteIdent(c)}`)
+    .map((c) => `${quoteIdent(c.name)} = v.${quoteIdent(c.name)}`)
     .join(", ");
-  return `UPDATE ${quoteIdent(table)} SET ${sets} FROM read_json_auto(${quoteLiteral(valuesFile)}) AS v WHERE ${quoteIdent(table)}."id" = v."id"`;
+  // A struct literal, so every key is a quoted identifier and every value the
+  // type name as a string — the same shape `vectorTable.ts` reads its source
+  // with, and for the same reason.
+  const declared = [
+    `"id": 'VARCHAR'`,
+    ...columns.map((c) => `${quoteIdent(c.name)}: ${quoteLiteral(c.type)}`),
+  ].join(", ");
+  return (
+    `UPDATE ${quoteIdent(table)} SET ${sets} ` +
+    `FROM read_json(${quoteLiteral(valuesFile)}, columns = {${declared}}) AS v ` +
+    `WHERE ${quoteIdent(table)}."id" = v."id"`
+  );
 }
 
 export function buildRestoreSql(
@@ -176,12 +204,9 @@ export async function writeComputedColumns(
   for (const col of input.columns) {
     statements.push([buildAddColumnSql(input.table, col), "ddl"]);
   }
+  // The COLUMNS, not their names: the read declares their types (finding D9).
   statements.push([
-    buildUpdateFromValuesSql(
-      input.table,
-      valuesFile,
-      input.columns.map((c) => c.name),
-    ),
+    buildUpdateFromValuesSql(input.table, valuesFile, input.columns),
     "query",
   ]);
   try {
