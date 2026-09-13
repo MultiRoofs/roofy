@@ -9,10 +9,22 @@ import { ComputedAttributeBadge } from "./ComputedAttributeBadge";
 
 import { ColumnStatsHint } from "./ColumnStatsHint";
 import type { ColumnStatsLoader } from "../../insights/columnStats";
-import { Fragment, memo, useState } from "react";
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type { ColumnInfo } from "../../insights/columnKind";
 import { formatCell, rawCellTitle } from "./tableText";
 import { columnLabel, derivedColumnTitle } from "../drawer/columnPolicy";
+import {
+  drainColumnReveals,
+  subscribeColumnReveal,
+  type ColumnReveal,
+} from "./revealColumns";
 import {
   formatProvenance,
   useComputedColumnStore,
@@ -92,6 +104,39 @@ export const DataGrid = memo(function DataGrid({
   const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
   const hasParts = Object.keys(partsById).length > 0;
 
+  const headerRefs = useRef(new Map<string, HTMLTableCellElement>());
+  /**
+   * Scroll to the first requested column this grid is SHOWING, and say whether
+   * it did (spec §6.2's "and scrolled into view").
+   *
+   * The first and not the last: scrolling to the last would leave the others
+   * off-screen to its left. `false` for another layer's request, and for one
+   * whose columns this grid has no header for — hidden by the chooser, or not
+   * rendered at all because the query has not answered yet (the empty
+   * placeholder below has no `<th>`). The channel then KEEPS the request.
+   */
+  const reveal = useCallback(
+    ({ layerId: id, columns: names }: ColumnReveal): boolean => {
+      if (layerId === null || id !== layerId) return false;
+      for (const name of names) {
+        const cell = headerRefs.current.get(name);
+        if (cell === undefined) continue;
+        cell.scrollIntoView({ inline: "nearest", block: "nearest" });
+        return true;
+      }
+      return false;
+    },
+    [layerId],
+  );
+  useEffect(() => subscribeColumnReveal(reveal), [reveal]);
+  // Re-offer whatever is outstanding whenever this grid's HEADERS change: the
+  // request routinely lands before the columns do, and `rows` is in the deps
+  // because an empty grid renders no `<th>` at all — the first page arriving
+  // is exactly when the headers appear.
+  useEffect(() => {
+    drainColumnReveals(reveal);
+  }, [reveal, columns, rows]);
+
   if (rows.length === 0) {
     return <div className="table-empty">{emptyMessage}</div>;
   }
@@ -107,6 +152,13 @@ export const DataGrid = memo(function DataGrid({
             return (
               <th
                 key={col.name}
+                // The element a reveal scrolls to. Registered on mount and
+                // dropped on unmount, so the map never names a header this
+                // grid has stopped rendering.
+                ref={(el) => {
+                  if (el === null) headerRefs.current.delete(col.name);
+                  else headerRefs.current.set(col.name, el);
+                }}
                 className={`data-th ${sorted ? "sorted" : ""} ${canSort ? "" : "data-th-static"}`}
                 title={
                   derivedColumnNames.has(col.name)

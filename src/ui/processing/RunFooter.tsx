@@ -29,6 +29,7 @@ import { activateLayer } from "../../features/workspace/layerCoordination";
 import { useShellStore } from "../shell/shellStore";
 import { layerQuery, useQueryStore } from "../../features/query/queryStore";
 import { appendColumns } from "../drawer/columnPolicy";
+import { requestColumnReveal } from "../table/revealColumns";
 import { openRunLog } from "./revealTools";
 import { UNDO_ENGINE_STOPPED, phaseLine, plural, seconds } from "./runFormat";
 import { useLayerStore } from "../../features/layers/layerStore";
@@ -519,6 +520,11 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
                 const next = appendColumns(columns, run.columns);
                 if (next !== null && next !== columns)
                   useQueryStore.getState().setColumns(cardLayerId, next);
+                // §6.2: "…and scrolled into view". Requested unconditionally,
+                // including for the DEFAULT column list (which already shows
+                // the run's columns without an append) — the scroll is what
+                // the user came for either way.
+                requestColumnReveal(cardLayerId, run.columns);
               }}
             >
               Open table

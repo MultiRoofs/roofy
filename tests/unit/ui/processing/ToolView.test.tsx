@@ -107,6 +107,8 @@ const { useRuleDraftStore } =
 const { runQuery, formatDuckDBError } =
   await import("../../../../src/insights/duckdb");
 const { NEW_RULE_COLOR_HEX } = await import("../../../../src/scene/cityColors");
+const { clearColumnReveals, subscribeColumnReveal } =
+  await import("../../../../src/ui/table/revealColumns");
 
 type LayerInput = Parameters<LayerStoreActions["addLayer"]>[0];
 
@@ -274,6 +276,10 @@ afterEach(() => {
   useComputedColumnStore.setState({ byLayer: {} });
   useQueryStore.setState({ queries: {} });
   useRuleDraftStore.setState({ drafts: {} });
+  // Open table RETAINS its scroll request until a grid acknowledges it, and no
+  // case here renders one — so without this the next case's first listener
+  // would be handed the previous case's request.
+  clearColumnReveals();
   // `requestedSection` is consumed by the layer panel, which no test here
   // renders — so without this a case that asserts "nothing was requested"
   // would read the PREVIOUS case's request.
@@ -1020,6 +1026,32 @@ describe("ToolView", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Open table" }));
     expect(layerQuery(useQueryStore.getState(), layerId).columns).toBeNull();
+  });
+
+  it("asks the grid to scroll the run's columns into view (§6.2)", () => {
+    // §6.2: "…appended after the existing ones AND SCROLLED INTO VIEW". On the
+    // DEFAULT list too, where the append is a no-op — the scroll is what the
+    // user pressed Open table for either way.
+    const layerId = addCityLayer();
+    render(<ToolView toolId="height-from-extent" />);
+    act(() =>
+      useProcessingStore
+        .getState()
+        .upsertRun(runFixture({ status: "done", targetLayerId: layerId })),
+    );
+    const seen: Array<{ layerId: string; columns: ReadonlyArray<string> }> = [];
+    const stop = subscribeColumnReveal((reveal) => {
+      seen.push({ layerId: reveal.layerId, columns: reveal.columns });
+      return true;
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open table" }));
+    expect(seen).toEqual([
+      {
+        layerId,
+        columns: ["extent_height_m", "extent_zmin_m", "extent_zmax_m"],
+      },
+    ]);
+    stop();
   });
 
   it("says nothing about a queue before anything is queued", () => {
