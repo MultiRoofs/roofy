@@ -35,6 +35,7 @@ import {
   firstMatchingRule,
 } from "../../../../src/features/rules/colorBy";
 import { useStreamStore } from "../../../../src/features/streaming/streamStore";
+import { evaluateRule } from "@cityjson/navara-core";
 import { CellCache } from "@cityjson/navara-flatcitybuf";
 import { buildResidentModel } from "@cityjson/navara-flatcitybuf";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
@@ -420,6 +421,87 @@ describe("RulesEditor — unsaved draft survives switching layers", () => {
       "A rule",
     );
     expect(screen.getByRole("button", { name: "+ Add rule" })).toBeDisabled();
+  });
+
+  it("saves a BOOLEAN condition from a draft as a boolean, and it evaluates", () => {
+    // The draft §6.2's Style by result writes for Validate solids
+    // (`solid_valid = false`). The value must survive Save as a BOOLEAN:
+    // `evaluateCondition` compares `=` with a strict `===`, so the string
+    // "false" would match nothing and the map would simply not change.
+    //
+    // The layer is set up the way a RUN leaves it, not the way the shortest
+    // test would: `runQueue` merges the values onto the objects (so
+    // `collectAttributeFields` finds the column) and registers the provenance
+    // (so it renders in the editor's COMPUTED optgroup). The condition's field
+    // is then an option the select actually offers, which is the path
+    // production takes — a controlled select whose value is in none of its
+    // options renders with nothing chosen.
+    useLayerStore.setState({
+      layers: [
+        baseLayer({
+          id: "A",
+          name: "Delft",
+          model: {
+            ...emptyModel(),
+            objects: {
+              b1: {
+                id: "b1",
+                objectType: "Building",
+                attributes: { solid_valid: false },
+                surfaces: [],
+                bbox: null,
+                children: [],
+                parents: [],
+                lod: null,
+              },
+            },
+          } as unknown as CityModel,
+        }),
+        baseLayer({ id: "B", name: "Rotterdam" }),
+      ],
+    });
+    useComputedColumnStore.getState().setProvenance("A", "solid_valid", {
+      runId: "run_1",
+      toolName: "Validate solids",
+      summary: "1 valid",
+      at: 0,
+      partial: null,
+      previous: null,
+    });
+    useRuleDraftStore.getState().setDraft("A", {
+      editingId: null,
+      open: true,
+      form: {
+        name: "solid_valid",
+        color: NEW_RULE_COLOR_HEX,
+        logic: "AND",
+        conditions: [{ field: "solid_valid", operator: "=", value: false }],
+      },
+    });
+    const model = useLayerStore
+      .getState()
+      .layers.find((l) => l.id === "A")!.model;
+    render(<RulesEditor model={model} layerId="A" />);
+    // The select offers the column, in its own COMPUTED group (spec §8).
+    expect(screen.getByRole("combobox", { name: "Attribute" })).toHaveValue(
+      "solid_valid",
+    );
+    fireEvent.click(screen.getByText("Add"));
+
+    const rule = useLayerStore.getState().layers.find((l) => l.id === "A")!
+      .rules[0]!;
+    expect(rule.conditions).toEqual([
+      { field: "solid_valid", operator: "=", value: false },
+    ]);
+    // `evaluateRule(attributes, metrics, rule)` — attributes FIRST.
+    const metrics = {
+      areaSqM: 0,
+      inclinationDeg: 0,
+      azimuthDeg: 0,
+      elevationM: 0,
+    };
+    expect(evaluateRule({ solid_valid: false }, metrics, rule)).toBe(true);
+    expect(evaluateRule({ solid_valid: true }, metrics, rule)).toBe(false);
   });
 });
 

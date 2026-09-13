@@ -188,7 +188,7 @@ function doneRun(layerId: string, patch: Partial<RunRecord> = {}): RunRecord {
       skipped: [],
       // Both buildings got a height: this is the summary of a run that CAN be
       // styled, which is what every case built on `doneRun` assumes.
-      firstColumnNonNull: 2,
+      nonNullByColumn: { extent_height_m: 2 },
     },
     ...patch,
   });
@@ -451,7 +451,7 @@ describe("ToolView", () => {
           detail: null,
           measured: 2,
           skipped: [],
-          firstColumnNonNull: 2,
+          nonNullByColumn: { extent_height_m: 2 },
         },
         undoable: true,
       }),
@@ -531,7 +531,7 @@ describe("ToolView", () => {
             detail: null,
             measured: 2,
             skipped: [],
-            firstColumnNonNull: 2,
+            nonNullByColumn: { extent_height_m: 2 },
           },
         }),
       ),
@@ -571,7 +571,7 @@ describe("ToolView", () => {
             detail: null,
             measured: 2,
             skipped: [],
-            firstColumnNonNull: 2,
+            nonNullByColumn: { extent_height_m: 2 },
           },
         }),
       ),
@@ -586,9 +586,11 @@ describe("ToolView", () => {
     });
     // ROOT ROWS ONLY: the run copied its value onto the root and its parts, so
     // a median over every row would weight each building by its part count
-    // (`buildMedianSql`).
+    // (`buildMedianSql`). CAST to DOUBLE for the M2 DECIMAL trap: a DECIMAL
+    // median reaches JS as an object and `typeof value === "number"` below
+    // would then report "All values are empty" over a column full of numbers.
     expect(runQuery).toHaveBeenCalledWith(
-      'SELECT median("extent_height_m") AS m FROM "layer_1" WHERE "feature_id" IS NULL OR "feature_id" = "id"',
+      'SELECT median(CAST("extent_height_m" AS DOUBLE)) AS m FROM "layer_1" WHERE "feature_id" IS NULL OR "feature_id" = "id"',
     );
     expect(
       useLayerStore.getState().layers.find((l) => l.id === layerId)?.colorBy,
@@ -622,7 +624,7 @@ describe("ToolView", () => {
             // azimuth ticked over flat roofs lands exactly here.
             measured: 2,
             skipped: [],
-            firstColumnNonNull: 0,
+            nonNullByColumn: { extent_height_m: 0 },
           },
         }),
       ),
@@ -649,7 +651,7 @@ describe("ToolView", () => {
             detail: null,
             measured: 2,
             skipped: [],
-            firstColumnNonNull: 1,
+            nonNullByColumn: { extent_height_m: 1 },
           },
         }),
       ),
@@ -710,7 +712,7 @@ describe("ToolView", () => {
             detail: null,
             measured: 0,
             skipped: [],
-            firstColumnNonNull: 0,
+            nonNullByColumn: { extent_height_m: 0 },
           },
         }),
       ),
@@ -1036,7 +1038,7 @@ describe("ToolView", () => {
           detail: null,
           measured: 2,
           skipped: [],
-          firstColumnNonNull: 2,
+          nonNullByColumn: { extent_height_m: 2 },
         },
       }),
     );
@@ -1094,7 +1096,7 @@ describe("ToolView", () => {
           detail: null,
           measured: 2,
           skipped: [],
-          firstColumnNonNull: 2,
+          nonNullByColumn: { extent_height_m: 2 },
         },
       }),
     );

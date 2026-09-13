@@ -1,9 +1,12 @@
 /**
  * Processing toolbox vocabulary (spec §3). Engine-free: nothing here imports
- * DuckDB, Navara or React — the one import below is TYPE-ONLY, so it is erased
- * at compile time and this module still pulls nothing in at runtime.
+ * DuckDB, Navara or React — both imports below are TYPE-ONLY, so they are
+ * erased at compile time and this module still pulls nothing in at runtime.
+ * The two resolvers at the bottom are the only runtime code here, and they are
+ * three lines of `typeof` each.
  */
 import type { OutputColumn } from "../../insights/computedColumns";
+import type { ConditionOperator } from "../rules/types";
 
 export type ToolGroup = "roof" | "3d" | "cross-layer";
 
@@ -17,6 +20,74 @@ export type ToolId =
   | "distance-to-nearest";
 
 export type ToolExtension = "spatial" | "three_d";
+
+/**
+ * Where §6.2's prefilled rule value comes from: "median for a numeric column,
+ * the most frequent value for a text column, `false` for a validity flag".
+ */
+export type StyleValueSource =
+  | { readonly kind: "median" }
+  | { readonly kind: "mostFrequent" }
+  | { readonly kind: "literal"; readonly value: number | string | boolean };
+
+/**
+ * §6.2's "Style by result", as data on the tool rather than as a branch in the
+ * footer.
+ *
+ * Seven tools want seven combinations of (which column, which operator, which
+ * value, rule or Color-by-attribute). A `switch (toolId)` in `RunFooter` would
+ * put that knowledge in the component furthest from the tool that owns it, and
+ * the footer would grow a case per tool for ever.
+ */
+export interface StyleByResult {
+  /** "rule" opens the rule editor on a draft; "attribute" opens a vector
+   *  layer's Color by attribute on the picked column (spec §7.6). */
+  readonly kind: "rule" | "attribute";
+  /**
+   * The rule's operator. A FUNCTION of the picked column for §7.5, whose rule
+   * is `=` on a copied TEXT field but `>` on `<prefix>matches_n` when no text
+   * field was copied — two operators chosen by which column `pick` returned.
+   * The five descriptors that need only one operator pass it plainly.
+   */
+  readonly operator:
+    | ConditionOperator
+    | ((picked: OutputColumn) => ConditionOperator);
+  /** The same union, for the same §7.5 reason: `mostFrequent` on a text field,
+   *  a `0` literal on `<prefix>matches_n`. Unused for `kind: "attribute"`. */
+  readonly value:
+    | StyleValueSource
+    | ((picked: OutputColumn) => StyleValueSource);
+  /**
+   * The column to style by, from the ones the run ACTUALLY wrote, in the
+   * tool's own §7 order. Null when the run wrote nothing styleable.
+   *
+   * It takes the WRITTEN columns, not the prefix, because §6.2's rule is "the
+   * first column the run actually wrote … (an unticked measure is never
+   * chosen)" — a rule about what happened, not about what was offered. It takes
+   * them TYPED because §7.5's own answer is "the first copied TEXT field".
+   */
+  readonly pick: (written: ReadonlyArray<OutputColumn>) => OutputColumn | null;
+}
+
+/** The ONE place either field is read, so `RunFooter` has no branch and a
+ *  plain (non-function) descriptor is returned as it is. */
+export function resolveStyleOperator(
+  descriptor: StyleByResult,
+  picked: OutputColumn,
+): ConditionOperator {
+  return typeof descriptor.operator === "function"
+    ? descriptor.operator(picked)
+    : descriptor.operator;
+}
+
+export function resolveStyleValueSource(
+  descriptor: StyleByResult,
+  picked: OutputColumn,
+): StyleValueSource {
+  return typeof descriptor.value === "function"
+    ? descriptor.value(picked)
+    : descriptor.value;
+}
 
 export interface ToolDefinition {
   readonly id: ToolId;
@@ -84,6 +155,13 @@ export interface ToolDefinition {
   readonly normaliseParams?: (
     params: Readonly<Record<string, unknown>>,
   ) => Readonly<Record<string, unknown>>;
+  /**
+   * §6.2's Style by result for this tool, or null when it has none.
+   *
+   * REQUIRED on every entry, so a new tool cannot ship with the footer quietly
+   * guessing `columns[0] >` median on its behalf.
+   */
+  readonly styleByResult: StyleByResult | null;
   /** False until a later milestone ships the executor. */
   readonly implemented: boolean;
 }
@@ -120,15 +198,17 @@ export interface RunSummary {
   readonly measured: number;
   readonly skipped: ReadonlyArray<SkipCount>;
   /**
-   * How many written rows have a value in the run's FIRST output column.
+   * How many written rows have a value, per output column.
    *
    * Spec §6.2 disables Style by result "when the chosen column is NULL for
-   * every object in the run", and the chosen column is `columns[0]`. It is not
-   * the same as `measured === 0`: a run with only Dominant azimuth ticked over
-   * flat roofs measures every building and writes NULL to all of them (§7,
-   * "a feature with no remaining contributor for a measure gets NULL for it").
+   * every object in the run", and the CHOSEN column is the one the tool's
+   * `styleByResult.pick` returns — for Validate solids that is the fourth
+   * column written, not the first. It is not the same as `measured === 0`: a
+   * run with only Dominant azimuth ticked over flat roofs measures every
+   * building and writes NULL to all of them (§7, "a feature with no remaining
+   * contributor for a measure gets NULL for it").
    */
-  readonly firstColumnNonNull: number;
+  readonly nonNullByColumn: Readonly<Record<string, number>>;
 }
 
 export interface RunRecord {

@@ -238,14 +238,17 @@ export function summarise(
     );
   }
 
-  // The FIRST written column is the one §6.2's Style by result offers; a run
-  // that wrote none has nothing to style either way.
-  const first = result.columns[0]?.name ?? null;
-  let firstColumnNonNull = 0;
-  if (first !== null) {
-    for (const values of result.rows.values()) {
-      const value = values[first];
-      if (value !== null && value !== undefined) firstColumnNonNull += 1;
+  // Every written column, in ONE pass: §6.2's "All values are empty" is about
+  // the column the tool's `styleByResult` CHOOSES, which is not always the
+  // first one written (Validate solids styles `<prefix>valid`, its fourth).
+  const nonNullByColumn: Record<string, number> = {};
+  for (const col of result.columns) nonNullByColumn[col.name] = 0;
+  for (const values of result.rows.values()) {
+    for (const col of result.columns) {
+      const value = values[col.name];
+      if (value !== null && value !== undefined) {
+        nonNullByColumn[col.name] = (nonNullByColumn[col.name] ?? 0) + 1;
+      }
     }
   }
 
@@ -254,7 +257,7 @@ export function summarise(
     detail: detailParts.length > 0 ? detailParts.join(" · ") : null,
     measured: result.measured,
     skipped: result.skipped,
-    firstColumnNonNull,
+    nonNullByColumn,
   };
 }
 

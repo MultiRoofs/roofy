@@ -578,5 +578,26 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
         { m: 6 },
       ]);
     });
+
+    it("reads a DECIMAL column back as a NUMBER through buildMedianSql", () => {
+      // The M2 DECIMAL trap, against the real engine and through the BUILDER —
+      // not through a hand-written `median(CAST(...))`, which would pass while
+      // the builder went on emitting the uncast form. A joined column (§7.5)
+      // carries the source's own type, and DuckDB hands a DECIMAL to JS as an
+      // object.
+      const DECIMAL_TABLE = "layer_cc5";
+      db.query(
+        `CREATE OR REPLACE TABLE ${quoteIdent(DECIMAL_TABLE)} AS
+           SELECT "id", "feature_id", CAST("v" AS DECIMAL(18, 3)) AS "zones_rate"
+           FROM (VALUES
+             ('b1', 'b1', 1.5),
+             ('b2', 'b2', 2.5),
+             ('b3', 'b3', 9.5)
+           ) AS t("id", "feature_id", "v")`,
+      );
+      const rows = db.query(buildMedianSql(DECIMAL_TABLE, "zones_rate"));
+      expect(typeof rows[0]?.["m"]).toBe("number");
+      expect(Number(rows[0]?.["m"])).toBeCloseTo(2.5, 6);
+    });
   });
 });

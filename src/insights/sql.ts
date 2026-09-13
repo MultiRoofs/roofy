@@ -436,7 +436,31 @@ export function buildCountSql(table: string, where: string | null): string {
  * and `NULL = "id"` is NULL, which would drop the row.
  */
 export function buildMedianSql(table: string, column: string): string {
-  return `SELECT median(${quoteIdent(column)}) AS m FROM ${quoteIdent(table)} WHERE "feature_id" IS NULL OR "feature_id" = "id"`;
+  // CAST to DOUBLE, always. `median()` over a DECIMAL column answers with a
+  // DECIMAL, which reaches JS as an OBJECT — `typeof value === "number"` in
+  // `RunFooter` is then false, and §6.2's Style by result reports "All values
+  // are empty" over a column full of numbers. Every column the tools write
+  // today is DOUBLE, but §7.5's Join copies the SOURCE's own type, so this is
+  // the difference between a working button and a silently dead one.
+  return `SELECT median(CAST(${quoteIdent(column)} AS DOUBLE)) AS m FROM ${quoteIdent(table)} WHERE "feature_id" IS NULL OR "feature_id" = "id"`;
+}
+
+/**
+ * The most frequent value of one COMPUTED COLUMN, over the feature ROOTS only
+ * — §6.2's prefilled value for a TEXT column.
+ *
+ * Root-only for exactly `buildMedianSql`'s reason: a run writes its value onto
+ * the root row AND onto each part (§7, "then copied to root and parts alike"),
+ * so a mode over every row weights each building by how many parts it happens
+ * to have modelled. A building with six parts must not outvote one with none.
+ *
+ * NULLs are excluded explicitly rather than left to `mode()`'s own handling, so
+ * the answer is a value the user can see in the data — a NULL prefilled into a
+ * rule is a condition that matches nothing.
+ */
+export function buildMostFrequentSql(table: string, column: string): string {
+  const col = quoteIdent(column);
+  return `SELECT mode(${col}) AS m FROM ${quoteIdent(table)} WHERE ("feature_id" IS NULL OR "feature_id" = "id") AND ${col} IS NOT NULL`;
 }
 
 /**

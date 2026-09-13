@@ -1,6 +1,17 @@
+import type { OutputColumn } from "../../insights/computedColumns";
 import { roofColumnNames, roofParams } from "./roofMetricsParams";
 import { solidColumns, solidParams } from "./solidParams";
 import type { ToolDefinition, ToolId } from "./types";
+
+/**
+ * §6.2's default: the first column the run actually wrote. Correct for every
+ * tool whose §7 order puts its primary measure first — Roof metrics
+ * (`roof_area_m2 >` median), Measure solids (`solid_volume_m3 >` median) and
+ * Height from extent (`extent_height_m >` median).
+ */
+const firstWritten = (
+  written: ReadonlyArray<OutputColumn>,
+): OutputColumn | null => written[0] ?? null;
 
 /** Spec §5 catalogue, in display order. Names and descriptions verbatim. */
 export const TOOLS: ReadonlyArray<ToolDefinition> = [
@@ -24,6 +35,12 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
         ? "Pick at least one measure"
         : null,
     normaliseParams: (params) => ({ ...roofParams(params) }),
+    styleByResult: {
+      kind: "rule",
+      operator: ">",
+      value: { kind: "median" },
+      pick: firstWritten,
+    },
     implemented: true,
   },
   {
@@ -46,6 +63,12 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
         ? "Pick at least one measure"
         : null,
     normaliseParams: (params) => ({ ...solidParams(params) }),
+    styleByResult: {
+      kind: "rule",
+      operator: ">",
+      value: { kind: "median" },
+      pick: firstWritten,
+    },
     implemented: true,
   },
   {
@@ -61,6 +84,16 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     needsVectorSource: false,
     needsLod: true,
     defaultPrefix: "solid_",
+    styleByResult: {
+      kind: "rule",
+      operator: "=",
+      value: { kind: "literal", value: false },
+      // The validity flag by NAME, not by position: §7.3 writes seven columns
+      // and this is the fourth. `endsWith` rather than an interpolated prefix,
+      // because the run's prefix is the user's and the table's spelling wins.
+      pick: (written) =>
+        written.find((c) => c.name.toLowerCase().endsWith("valid")) ?? null,
+    },
     implemented: false,
   },
   {
@@ -81,6 +114,12 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
       { name: `${p}zmin_m`, type: "DOUBLE" },
       { name: `${p}zmax_m`, type: "DOUBLE" },
     ],
+    styleByResult: {
+      kind: "rule",
+      operator: ">",
+      value: { kind: "median" },
+      pick: firstWritten,
+    },
     implemented: true,
   },
   {
@@ -96,6 +135,12 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     needsVectorSource: true,
     needsLod: false,
     defaultPrefix: "",
+    styleByResult: {
+      kind: "rule",
+      operator: "=",
+      value: { kind: "mostFrequent" },
+      pick: (written) => written.find((c) => c.type === "VARCHAR") ?? null,
+    },
     implemented: false,
   },
   {
@@ -111,6 +156,14 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     needsVectorSource: false,
     needsLod: false,
     defaultPrefix: "bld_",
+    styleByResult: {
+      kind: "attribute",
+      // Unused for "attribute"; stated rather than left to a cast, because the
+      // field is required and a lie would be worse than a redundancy.
+      operator: "=",
+      value: { kind: "literal", value: true },
+      pick: firstWritten,
+    },
     implemented: false,
   },
   {
@@ -126,6 +179,14 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
     needsVectorSource: true,
     needsLod: false,
     defaultPrefix: "",
+    styleByResult: {
+      kind: "rule",
+      operator: "<",
+      value: { kind: "median" },
+      pick: (written) =>
+        written.find((c) => c.name.toLowerCase().endsWith("distance_m")) ??
+        null,
+    },
     implemented: false,
   },
 ];

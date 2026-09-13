@@ -2024,7 +2024,7 @@ describe("summarise", () => {
     skipped: [],
   });
 
-  it("counts the rows whose FIRST output column has a value", () => {
+  it("counts the rows that have a value, for EVERY output column", () => {
     const summary = summarise(
       result(
         [
@@ -2036,7 +2036,29 @@ describe("summarise", () => {
       1000,
       { streaming: false },
     );
-    expect(summary.firstColumnNonNull).toBe(1);
+    expect(summary.nonNullByColumn).toEqual({ roof_azimuth_deg: 1 });
+  });
+
+  it("counts each column separately, not the first one for all of them", () => {
+    // The whole point of the per-column count: §6.2's "All values are empty" is
+    // about the column the tool's `styleByResult` CHOOSES, and a run can write
+    // one column for every feature and another for none of them (§7: azimuth
+    // over flat roofs is NULL while area is not).
+    const summary = summarise(
+      result(
+        [
+          ["a", { roof_area_m2: 12, roof_azimuth_deg: null }],
+          ["b", { roof_area_m2: 30, roof_azimuth_deg: null }],
+        ],
+        ["roof_area_m2", "roof_azimuth_deg"],
+      ),
+      1000,
+      { streaming: false },
+    );
+    expect(summary.nonNullByColumn).toEqual({
+      roof_area_m2: 2,
+      roof_azimuth_deg: 0,
+    });
   });
 
   it("is 0 when every object got NULL, even though features were measured", () => {
@@ -2054,12 +2076,12 @@ describe("summarise", () => {
       { streaming: false },
     );
     expect(summary.measured).toBe(2);
-    expect(summary.firstColumnNonNull).toBe(0);
+    expect(summary.nonNullByColumn).toEqual({ roof_azimuth_deg: 0 });
   });
 
-  it("is 0 for a run that wrote no column at all", () => {
+  it("is EMPTY for a run that wrote no column at all", () => {
     const summary = summarise(result([], []), 1000, { streaming: false });
-    expect(summary.firstColumnNonNull).toBe(0);
+    expect(summary.nonNullByColumn).toEqual({});
   });
 
   it("says the run was over the resident set, for a streaming target", () => {

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildCountSql,
   buildMedianSql,
+  buildMostFrequentSql,
   buildFeatureIdsSql,
   buildFeatureRowsSql,
   buildFeatureScopeWhere,
@@ -182,21 +183,44 @@ describe("buildCountSql", () => {
 });
 
 describe("buildMedianSql", () => {
-  it("takes the median over the ROOT rows only", () => {
-    // §6.2's Style-by-result threshold. A run copies its value onto the root
-    // AND its parts (spec §7.3), so a median over every row weights each
-    // building by how many parts it happens to have modelled — a 3-part
-    // building counts four times, and the threshold the user is offered is not
-    // the median of the buildings they measured.
+  it("casts to DOUBLE, and takes the median over the ROOT rows only", () => {
+    // The M2 DECIMAL trap. `median()` over a DECIMAL column answers with a
+    // DECIMAL, which arrives in JS as an OBJECT — `typeof value === "number"`
+    // in `RunFooter` is then false and §6.2's Style by result reports "All
+    // values are empty" over a column full of numbers. Every computed column
+    // this app writes is DOUBLE today, but a JOINED column (§7.5) copies the
+    // source's own type, so the cast is the difference between a working
+    // button and a silent one.
+    //
+    // Root rows only for the reason it always was: a run copies its value onto
+    // the root AND its parts (§7.3), so a median over every row weights each
+    // building by how many parts it happens to have modelled.
     expect(buildMedianSql("layer_1", "extent_height_m")).toBe(
-      'SELECT median("extent_height_m") AS m FROM "layer_1" WHERE "feature_id" IS NULL OR "feature_id" = "id"',
+      'SELECT median(CAST("extent_height_m" AS DOUBLE)) AS m FROM "layer_1" WHERE "feature_id" IS NULL OR "feature_id" = "id"',
     );
   });
 
   it("quotes a column whose name would otherwise end the identifier", () => {
     expect(buildMedianSql("layer_1", 'roof"area')).toBe(
-      'SELECT median("roof""area") AS m FROM "layer_1" WHERE "feature_id" IS NULL OR "feature_id" = "id"',
+      'SELECT median(CAST("roof""area" AS DOUBLE)) AS m FROM "layer_1" WHERE "feature_id" IS NULL OR "feature_id" = "id"',
     );
+  });
+});
+
+describe("buildMostFrequentSql", () => {
+  it("is the modal value over the feature ROOTS only", () => {
+    // The same restriction as `buildMedianSql`, for the same reason: a run
+    // writes its value onto the root AND onto every part, so a mode over every
+    // row weights each building by how many parts it happens to have modelled.
+    // On 3D BAG, where every Building has exactly one geometry-bearing part,
+    // the unrestricted answer is not even a value from the data.
+    expect(buildMostFrequentSql("layer_3", "zones_name")).toBe(
+      'SELECT mode("zones_name") AS m FROM "layer_3" WHERE ("feature_id" IS NULL OR "feature_id" = "id") AND "zones_name" IS NOT NULL',
+    );
+  });
+
+  it("quotes an identifier with a quote in it", () => {
+    expect(buildMostFrequentSql('a"b', 'c"d')).toContain('FROM "a""b"');
   });
 });
 
