@@ -885,4 +885,32 @@ describe("Style by result, at the moment it opens the draft", () => {
     await act(async () => {});
     expect(useRuleDraftStore.getState().drafts[id]).toBeUndefined();
   });
+
+  it("colours NOTHING on a vector layer whose run was undone", () => {
+    // §7.6's attribute path is the OTHER Style-by-result destination, and it
+    // needs the same test: an Undo leaves the record on `done` and says so only
+    // in the note, so a card sitting on an undone Aggregate run would otherwise
+    // colour the vector layer by a column whose values have been taken back.
+    const id = addZonesWithResults();
+    const run = seed({ ...aggregateRun(id), undoable: false, note: "Undone" });
+    render(<RunFooter run={run} canRun reason={null} onRunAgain={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    expect(
+      useGeoLayerStore.getState().layers.find((l) => l.id === id)?.style
+        .colorByAttribute,
+    ).toBeUndefined();
+    // And the panel is not navigated: nothing to show there.
+    expect(useShellStore.getState().requestedSection).toBeNull();
+  });
+
+  it("colours NOTHING on a vector layer whose run went stale", () => {
+    const id = addZonesWithResults();
+    const run = seed({ ...aggregateRun(id), stale: true });
+    render(<RunFooter run={run} canRun reason={null} onRunAgain={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
+    expect(
+      useGeoLayerStore.getState().layers.find((l) => l.id === id)?.style
+        .colorByAttribute,
+    ).toBeUndefined();
+  });
 });

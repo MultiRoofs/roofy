@@ -129,9 +129,18 @@ function styleGeoLayerByAttribute(
   column: OutputColumn,
 ): void {
   // §7: a run that went stale or was undone while the card was on screen no
-  // longer describes the column this colouring would be about.
+  // longer describes the column this colouring would be about. An Undo leaves
+  // the record on `done` and says so only in the note (`runQueue.ts`'s
+  // `undoRun`), so the note is part of the test — the same guard the median
+  // path makes, because the two are one button.
   const current = runById(run.id);
-  if (current === null || current.stale || current.status !== "done") return;
+  if (
+    current === null ||
+    current.stale ||
+    current.status !== "done" ||
+    current.note === "Undone"
+  )
+    return;
   const layer = useGeoLayerStore
     .getState()
     .layers.find((l) => l.id === layerId);
