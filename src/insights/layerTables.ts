@@ -845,7 +845,30 @@ export async function retryEngine(): Promise<void> {
   // one — and there is nothing for a death to release anyway. Every build this
   // function starts is raced on its own, inside the queue, where a release
   // actually frees something.
-  await bootEngine();
+  //
+  // STARTED FIRST, AND THE GENERATION READ AFTER. A boot bumps the counter
+  // itself — `doInit` opens with `const gen = ++generation` (`duckdb.ts:405`),
+  // which runs synchronously, before its first await and therefore before this
+  // line — so the number below is the engine this retry is FOR, whether
+  // `bootEngine()` started a new one or handed back the memo of a live one. A
+  // number captured BEFORE the call would differ after every real boot, and
+  // the retry would skip the rebuilds it exists for, leaving those layers
+  // table-less for the session with no error anywhere.
+  const booting = bootEngine();
+  const engine = getEngineGeneration();
+  await booting;
+  // Only a LATER move — a worker that died inside the ~5 s boot window, or an
+  // engine replaced under it — is a reason to stop. Rebuilding into an engine
+  // that has already gone writes `ready` entries over the invalidation, which
+  // is the exact state the catalogue would then offer tools against. The
+  // builds below each check `engineGone()` for themselves, but the retry's own
+  // `pendingSources.clear()` below them is not undone by that.
+  //
+  // FIRST of the two guards, deliberately: it returns before `pendingSources`
+  // is cleared, so a death during the boot leaves every parked source parked
+  // and the next Retry has something to retry — which is the whole reason
+  // `retryEngine` keeps them.
+  if (getEngineGeneration() !== engine) return;
   if (getDuckDBStatus().state !== "ready") return;
   // Snapshot and CLEAR first: each `enqueueLayerTable` below can put its layer
   // straight back in (a second failure), and iterating a map being written to

@@ -26,6 +26,12 @@ const statusListeners = new Set<() => void>();
 const deathListeners = new Set<() => void>();
 /** How many times `initDuckDB` was asked for an engine. */
 let initCalls = 0;
+/** What a case wants the BOOT itself to do — used to move the engine
+ *  generation a SECOND time, under `retryEngine`'s await. */
+let bootAlso: () => void = () => {};
+/** Whether `initDuckDB` is holding a SETTLED memo — `duckdb.ts`'s
+ *  `initPromise`. True means the next call boots nothing. */
+let booted = true;
 /** Holds every statement containing `needle` until `promise` settles, so a
  *  death can be timed INSIDE one the module is awaiting. */
 let holdStatement: { needle: string; promise: Promise<void> } | null = null;
@@ -78,7 +84,27 @@ vi.mock("../../../src/insights/duckdb", () => {
   return {
     initDuckDB: vi.fn(async () => {
       initCalls += 1;
+      // THE MEMO, modelled: `initDuckDB` re-runs `doInit` only when
+      // `initPromise` is null (`duckdb.ts:526-531`), so a call made while the
+      // engine is UP boots nothing and moves no counter — which is what every
+      // build's own `await initDuckDB()` is. Only a call made while it is down
+      // is a boot.
+      const boots = !booted;
+      // A REAL boot bumps the generation SYNCHRONOUSLY, before its first await
+      // (`doInit`, `duckdb.ts:405`) — so it has already happened by the time
+      // `retryEngine` reads the number. That ordering is exactly what the
+      // check is written against, so the mock reproduces it.
+      if (boots) engineGeneration += 1;
+      // The boot's first await. Everything after it happens DURING the boot,
+      // which is where a worker death would land — `bootAlso` is how a case
+      // puts one there, and a bump before this line would be part of the boot
+      // rather than a death inside it.
+      await Promise.resolve();
+      if (boots) bootAlso();
       if (initGate) await initGate;
+      // A boot that came up is memoised; one that did not cleared the memo, so
+      // the next call really boots again.
+      booted = engineReady && !engineDead;
     }),
     onEngineDeath: vi.fn((listener: () => void) => {
       deathListeners.add(listener);
@@ -251,6 +277,9 @@ beforeEach(() => {
   engineGeneration = 1;
   deathListeners.clear();
   initCalls = 0;
+  bootAlso = () => {};
+  // The suite starts with the engine up, which is a boot already memoised.
+  booted = true;
   holdStatement = null;
   initGate = null;
   registerAccepts = true;
@@ -674,6 +703,63 @@ describe("waiting for the engine", () => {
     await retryEngine();
     expect(sql).toEqual([]);
     expect(stateOf("L1")).toMatchObject({ state: "failed" });
+  });
+
+  it("retryEngine REBUILDS across an ordinary boot — a boot is not a death", async () => {
+    // THE REGRESSION THIS PAIR EXISTS FOR. A real boot bumps the generation
+    // itself, synchronously, before its first await (`doInit`'s
+    // `const gen = ++generation`, `duckdb.ts:405`) — so a check that captured
+    // the number BEFORE `bootEngine()` would see it move on every successful
+    // Retry and skip every parked rebuild, leaving those layers table-less for
+    // the session with no error anywhere.
+    engineReady = false;
+    await enqueueLayerTable("L1", readerSource());
+    expect(stateOf("L1")).toMatchObject({ state: "failed" });
+    sql.length = 0;
+
+    engineReady = true;
+    await retryEngine();
+
+    expect(getLayerTable("L1")).toMatchObject({ table: "layer_1" });
+  });
+
+  it("…and ABANDONS them when a DEATH moved the engine under the boot", async () => {
+    // `bootEngine` takes ~5 s for a 36 MB wasm module, and a worker can die
+    // inside that window. Rebuilding into an engine that has already gone
+    // writes `ready` entries over the invalidation — the exact state the
+    // catalogue would then offer tools against.
+    engineReady = false;
+    await enqueueLayerTable("L1", readerSource());
+    sql.length = 0;
+
+    // The boot runs (and bumps the generation, as a boot does); a death lands
+    // DURING it and bumps it again. Only that second move is a reason to stop.
+    engineReady = true;
+    bootAlso = () => {
+      engineGeneration += 1;
+    };
+    await retryEngine();
+
+    expect(sql).toEqual([]);
+    expect(getLayerTable("L1")).toBeNull();
+  });
+
+  it("still re-parks the source when it abandons, so the NEXT Retry works", async () => {
+    // The generation check returns BEFORE `pendingSources.clear()`, which is
+    // the whole reason the two guards are in that order: a death during the
+    // boot must not cost the user their parked source.
+    engineReady = false;
+    await enqueueLayerTable("L1", readerSource());
+    engineReady = true;
+    bootAlso = () => {
+      engineGeneration += 1;
+    };
+    await retryEngine();
+
+    // Second Retry, same engine this time.
+    bootAlso = () => {};
+    await retryEngine();
+    expect(getLayerTable("L1")).toMatchObject({ table: "layer_1" });
   });
 
   it("does NOT retry a table that failed on its own merits", async () => {
