@@ -218,7 +218,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
       value: { kind: "literal", value: true },
       pick: firstWritten,
     },
-    implemented: false,
+    implemented: true,
   },
   {
     id: "distance-to-nearest",

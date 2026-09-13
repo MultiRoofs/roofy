@@ -22,6 +22,7 @@ describe("tools/register", () => {
       "validate-solids",
       "join-by-location",
       "distance-to-nearest",
+      "aggregate-per-area",
     ]);
   });
 });

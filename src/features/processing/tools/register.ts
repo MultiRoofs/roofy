@@ -13,3 +13,4 @@ import "./measureSolids";
 import "./validateSolids";
 import "./joinByLocation";
 import "./distanceToNearest";
+import "./aggregatePerArea";

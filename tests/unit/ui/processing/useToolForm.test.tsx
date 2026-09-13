@@ -53,38 +53,16 @@ vi.mock("../../../../src/features/processing/runQueue", () => ({
   undoRun: vi.fn(async () => {}),
 }));
 
-/**
- * The cross-layer tools that have not shipped yet, switched ON.
+/*
+ * THE REGISTRY IS THE REAL ONE.
  *
- * Task 15 built their FORM while they were all `implemented: false` — and
- * `toolEligibility` refuses an unimplemented tool outright with "Not available
- * yet", which sits above every other reason, so driving the form through the
- * real registry would assert nothing about the source select, the proxy or the
- * frozen request. `toolById` is re-implemented over the patched list because
- * the real one closes over the module's own array.
- *
- * JOIN AND DISTANCE ARE NOT IN THE SET: both ship in this milestone, so every
- * Join and Distance case below runs against the REAL registry entry — its
- * readiness reasons included.
+ * Task 15 built the three cross-layer forms while every one of them was
+ * `implemented: false`, and `toolEligibility` refuses an unimplemented tool
+ * outright with "Not available yet" — which sits above every other reason — so
+ * this file used to patch them ON before driving the form. All three ship now
+ * (Join in Task 16, Distance in Task 17, Aggregate in Task 19), so the patch is
+ * gone and every case below asserts the REAL entry's readiness reasons.
  */
-const CROSS_LAYER = new Set(["aggregate-per-area"]);
-vi.mock("../../../../src/features/processing/toolRegistry", async () => {
-  const actual = await vi.importActual<
-    typeof import("../../../../src/features/processing/toolRegistry")
-  >("../../../../src/features/processing/toolRegistry");
-  const TOOLS = actual.TOOLS.map((tool) =>
-    CROSS_LAYER.has(tool.id) ? { ...tool, implemented: true } : tool,
-  );
-  return {
-    ...actual,
-    TOOLS,
-    toolById: (id: string) => {
-      const tool = TOOLS.find((t) => t.id === id);
-      if (!tool) throw new Error(`Unknown tool: ${id}`);
-      return tool;
-    },
-  };
-});
 
 vi.mock("../../../../src/ui/table/useLayerCounts", () => ({
   useLayerCounts: vi.fn(() => ({

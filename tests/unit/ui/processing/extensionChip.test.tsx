@@ -389,11 +389,9 @@ describe("the capability chips (spec §5)", () => {
       ),
     ).toBe(true);
     expect(chip("Spatial")).toHaveAttribute("data-state", "failed");
-    // §5's sentence lives on the CHIP whatever the row says. Aggregate is
-    // still `implemented: false`, so `eligibility.ts`'s "Not available yet"
-    // outranks the extension reason on its row; Join and Distance ship now, so
-    // THEIR rows reach the download reason once a vector layer is there — the
-    // case below.
+    // §5's sentence lives on the CHIP whatever the row says. Every spatial
+    // tool ships now, so a row reaches the download reason once its own
+    // layer requirements are met — the case below.
     expect(chip("Spatial")).toHaveAttribute("title", FAILED_REASON);
     // One per spatial tool: join-by-location, aggregate-per-area,
     // distance-to-nearest.
@@ -424,11 +422,13 @@ describe("the capability chips (spec §5)", () => {
     });
     expect(join).toHaveAttribute("title", FAILED_REASON);
     expect(join.textContent).toContain(FAILED_REASON);
-    // Aggregate has not shipped, so its row still says the outranking reason.
+    // Aggregate ships too, and its TARGET is the vector layer: the active
+    // layer here is the city one, so §5's target sentence outranks the
+    // extension reason on its row.
     const aggregate = screen.getByRole("button", {
       name: /Aggregate buildings per area/,
     });
-    expect(aggregate).toHaveAttribute("title", "Not available yet");
+    expect(aggregate).toHaveAttribute("title", "Needs a vector layer");
     warn.mockRestore();
   });
 

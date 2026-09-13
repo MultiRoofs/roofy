@@ -192,7 +192,7 @@ describe("toolEligibility", () => {
   });
 
   it("asks for a city layer for Aggregate buildings per area", () => {
-    const tool = { ...toolById("aggregate-per-area"), implemented: true };
+    const tool = toolById("aggregate-per-area");
     expect(
       toolEligibility(tool, {
         ...base,
@@ -204,7 +204,7 @@ describe("toolEligibility", () => {
   });
 
   it("refuses a vector target whose document is still loading, or failed", () => {
-    const tool = { ...toolById("aggregate-per-area"), implemented: true };
+    const tool = toolById("aggregate-per-area");
     expect(
       toolEligibility(tool, {
         ...base,
@@ -224,7 +224,7 @@ describe("toolEligibility", () => {
   it("says the document is loading before it asks for a city layer", () => {
     // §5's order: the target's own readiness outranks the workspace question,
     // so a user with neither is told about the layer in front of them first.
-    const tool = { ...toolById("aggregate-per-area"), implemented: true };
+    const tool = toolById("aggregate-per-area");
     expect(
       toolEligibility(tool, {
         ...base,
@@ -236,7 +236,7 @@ describe("toolEligibility", () => {
   });
 
   it("still refuses Aggregate on a city layer, with \u00a75's own words", () => {
-    const tool = { ...toolById("aggregate-per-area"), implemented: true };
+    const tool = toolById("aggregate-per-area");
     expect(toolEligibility(tool, base)).toEqual({
       ok: false,
       reason: "Needs a vector layer",
@@ -263,15 +263,15 @@ describe("toolEligibility", () => {
     expect(toolEligibility(tool, base)).toEqual({ ok: true });
   });
 
-  it("keeps the real Aggregate row at 'Not available yet' until Task 19", () => {
-    // `!implemented` outranks every reason above, on a target that satisfies
-    // all of them.
+  it("accepts the real Aggregate entry on a ready vector target", () => {
+    // Aggregate ships in this commit, so nothing outranks the reasons above
+    // any more: a ready vector layer beside a city layer is a runnable row.
     expect(
       toolEligibility(toolById("aggregate-per-area"), {
         ...base,
         targetKind: "vector",
         vectorPreparation: "ready",
       }),
-    ).toEqual({ ok: false, reason: "Not available yet" });
+    ).toEqual({ ok: true });
   });
 });

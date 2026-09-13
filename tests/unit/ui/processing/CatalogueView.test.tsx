@@ -127,10 +127,19 @@ describe("CatalogueView", () => {
       "title",
       "Add a vector layer to join with",
     );
-    // Aggregate buildings per area is the one still unimplemented, so that is
-    // the reason `toolEligibility` returns for it. What this asserts is that a
-    // disabled row RENDERS its reason as a second line.
-    expect(screen.getAllByText("Not available yet").length).toBeGreaterThan(0);
+    // Aggregate SHIPS now too, and it is the one whose TARGET is the vector
+    // layer — so on a workspace of city layers §5's own sentence for it is the
+    // target one, not the source one. What this asserts is that a disabled row
+    // RENDERS its reason as a second line.
+    const aggregate = screen.getByRole("button", {
+      name: /Aggregate buildings per area/,
+    });
+    expect(aggregate).toHaveAttribute("aria-disabled", "true");
+    expect(aggregate).toHaveAttribute("title", "Needs a vector layer");
+    expect(aggregate.textContent).toContain("Needs a vector layer");
+    // No tool in the catalogue is `implemented: false` any more, so the
+    // release note has no row left to sit on.
+    expect(screen.queryByText("Not available yet")).toBeNull();
   });
 
   it("carries the capability chip and its cost tooltip", () => {

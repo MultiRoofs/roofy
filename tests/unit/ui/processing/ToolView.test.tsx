@@ -267,35 +267,40 @@ afterEach(() => {
 });
 
 /**
- * The global constraint, against the REAL registry: a tool whose executor has
- * not shipped claims nothing about the user's data. Task 15 gave the three
- * cross-layer entries their column builders so Tasks 16/17/19 would have
- * nothing to wire — which is exactly why the form has to keep its own guard.
- * `aggregate-per-area` is the last one still `implemented: false`; Join (Task
- * 16) and Distance (Task 17) ship, and Distance is the control.
+ * Every cross-layer tool now ships, against the REAL registry: the form
+ * promises its columns and prints its geometry verdict.
+ *
+ * This block used to assert the GLOBAL CONSTRAINT's other half — a tool whose
+ * executor has not shipped claims nothing about the user's data — on
+ * `aggregate-per-area`, the last entry that was `implemented: false`. Task 19
+ * ships it, so the registry has no unimplemented subject left; the guard itself
+ * is still pinned, on a PATCHED definition, in `useToolForm.test.tsx` ("says
+ * nothing about the columns of an unimplemented tool") and `lodSelect.test.tsx`.
  *
  * Aggregate's TARGET is the vector layer and its compute table is the CITY
  * layer's, so both are added: without the vector layer the form would print
  * nothing for want of a target and the case would pass for the wrong reason.
  */
-describe("an unimplemented tool promises nothing (global constraint)", () => {
-  it("prints no column list and no geometry verdict", () => {
+describe("a shipped cross-layer tool promises its columns", () => {
+  it("prints Aggregate's column list and its geometry verdict", () => {
     addCityLayer();
     addZonesLayer();
     render(<ToolView toolId="aggregate-per-area" />);
-    // The table has no LoD 0 rung and no reader, so the proxy radio would say
-    // so — a verdict on geometry for a run that cannot happen.
+    // The table has no LoD 0 rung and no reader, so the proxy radio says so —
+    // §7.5's muted line, on the option it explains.
     expect(
-      screen.queryByText(/LoD 0 footprints are not in this layer/),
-    ).toBeNull();
+      screen.getByText(/LoD 0 footprints are not in this layer/),
+    ).toBeInTheDocument();
     expect(
-      screen.queryByRole("radiogroup", { name: "Building geometry" }),
-    ).toBeNull();
-    expect(document.querySelector(".processing-columns")).toHaveTextContent("");
-    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+      screen.getByRole("radiogroup", { name: "Building geometry" }),
+    ).toBeInTheDocument();
+    // §7.6's default row is a count, so the promised column is the count one.
+    expect(document.querySelector(".processing-columns")).toHaveTextContent(
+      "bld_buildings_n",
+    );
   });
 
-  it("prints both for the cross-layer tool that HAS shipped", () => {
+  it("prints both for the cross-layer tool whose target is the city layer", () => {
     addCityLayer();
     addZonesLayer();
     render(<ToolView toolId="distance-to-nearest" />);

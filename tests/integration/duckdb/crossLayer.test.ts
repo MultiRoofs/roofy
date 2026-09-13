@@ -27,6 +27,7 @@ import {
 } from "../../../src/features/processing/buildingProxy";
 import { buildJoinSql } from "../../../src/features/processing/tools/joinByLocation";
 import { buildDistanceSql } from "../../../src/features/processing/tools/distanceToNearest";
+import { buildAggregateSql } from "../../../src/features/processing/tools/aggregatePerArea";
 import { quoteIdent } from "../../../src/insights/sql";
 
 /**
@@ -1504,5 +1505,187 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
                     ST_GeomFromText('POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0))') AS a)`,
     );
     expect(rows).toEqual([{ area: 0, covered: true, intersects: true }]);
+  });
+
+  /**
+   * §7.6's own statement, which is the only one in M3 with three CTEs, a
+   * `p.* EXCLUDE` and three scalar sub-selects — a string assertion cannot tell
+   * a binder error from a typo.
+   *
+   * `agg_rows` is one feature with a part (`b1`/`b1p`), a lone building (`b2`),
+   * a building with no extent at all (`b3`) and a building whose value is NULL
+   * (`b4`). The three areas are one that holds two buildings, one that holds
+   * only the NULL-valued building, and one that holds nothing.
+   */
+  async function aggregateFixture(): Promise<void> {
+    db.query(
+      `CREATE OR REPLACE TABLE agg_rows AS SELECT * FROM (VALUES
+         ('b1', 'b1', 50.0, {'xmin': 1.0, 'ymin': 1.0, 'zmin': 0.0, 'xmax': 2.0, 'ymax': 2.0, 'zmax': 3.0}),
+         ('b1p', 'b1', 50.0, NULL),
+         ('b2', 'b2', 20.0, {'xmin': 3.0, 'ymin': 1.0, 'zmin': 0.0, 'xmax': 4.0, 'ymax': 2.0, 'zmax': 3.0}),
+         ('b3', 'b3', NULL, NULL),
+         ('b4', 'b4', NULL, {'xmin': 100.2, 'ymin': 100.2, 'zmin': 0.0, 'xmax': 100.4, 'ymax': 100.4, 'zmax': 3.0})
+       ) AS t("id", "feature_id", "roof_area_m2", "bbox")`,
+    );
+    db.registerBytes(
+      "__src_agg.json",
+      await encodeProjectedFeatures([
+        {
+          idx: 0,
+          stableId: "id:string:z1",
+          featureId: "z1",
+          properties: {},
+          wkt: "POLYGON ((0 0, 5 0, 5 5, 0 5, 0 0))",
+        },
+        {
+          idx: 1,
+          stableId: "id:string:z2",
+          featureId: "z2",
+          properties: {},
+          wkt: "POLYGON ((100 100, 101 100, 101 101, 100 101, 100 100))",
+        },
+        {
+          idx: 2,
+          stableId: "id:string:z3",
+          featureId: "z3",
+          properties: {},
+          wkt: "POLYGON ((200 200, 201 200, 201 201, 200 201, 200 200))",
+        },
+      ]),
+    );
+    db.query(buildVectorTableSql("__src_agg", "__src_agg.json"));
+  }
+
+  function dropAggregateFixture(): void {
+    db.query(buildDropVectorTableSql("__src_agg"));
+    db.query(`DROP TABLE IF EXISTS agg_rows`);
+    db.dropFile("__src_agg.json");
+  }
+
+  it("runs the app's OWN aggregate statement, every area kept", async () => {
+    await aggregateFixture();
+    const rows = db.query(
+      buildAggregateSql({
+        table: "agg_rows",
+        source: "__src_agg",
+        proxy: "rectangle",
+        from: null,
+        geometryColumn: null,
+        ids: null,
+        predicate: "intersects",
+        rows: [
+          { op: "count", column: null, name: "bld_buildings_n" },
+          { op: "sum", column: "roof_area_m2", name: "bld_sum_roof_area_m2" },
+          { op: "mean", column: "roof_area_m2", name: "bld_mean_roof_area_m2" },
+        ],
+      }),
+    );
+    expect(rows).toEqual([
+      {
+        sid: "id:string:z1",
+        bld_buildings_n: 2,
+        // The ROOT rows only: b1's 50 counted ONCE despite its part, plus b2's
+        // 20 — a per-ROW sum would answer 120.
+        bld_sum_roof_area_m2: 70,
+        bld_mean_roof_area_m2: 35,
+        multi_n: 0,
+        buildings_total: 3,
+        // b3 has no bbox at all — §6.2's "no proxy", never an area's zero.
+        no_proxy_n: 1,
+      },
+      {
+        // §7.6: "an area whose buildings are all NULL gets NULL" — and its
+        // COUNT is still the real 1, because counting is not measuring.
+        sid: "id:string:z2",
+        bld_buildings_n: 1,
+        bld_sum_roof_area_m2: null,
+        bld_mean_roof_area_m2: null,
+        multi_n: 0,
+        buildings_total: 3,
+        no_proxy_n: 1,
+      },
+      {
+        // The area with no buildings KEEPS its row: count 0, the rest NULL.
+        sid: "id:string:z3",
+        bld_buildings_n: 0,
+        bld_sum_roof_area_m2: null,
+        bld_mean_roof_area_m2: null,
+        multi_n: 0,
+        buildings_total: 3,
+        no_proxy_n: 1,
+      },
+    ]);
+    dropAggregateFixture();
+  });
+
+  it("counts a building on a shared boundary in BOTH areas, and says so once", async () => {
+    // §7.6: "a building counts for every area its proxy satisfies the predicate
+    // with (a building on a boundary counts in both areas); the card says so
+    // when it happens". The building spans the two zones' shared edge at x = 5.
+    db.query(
+      `CREATE OR REPLACE TABLE agg_edge AS SELECT * FROM (VALUES
+         ('b1', 'b1', 10.0, {'xmin': 4.0, 'ymin': 1.0, 'zmin': 0.0, 'xmax': 6.0, 'ymax': 2.0, 'zmax': 3.0}),
+         ('b2', 'b2', 7.0, {'xmin': 1.0, 'ymin': 1.0, 'zmin': 0.0, 'xmax': 2.0, 'ymax': 2.0, 'zmax': 3.0})
+       ) AS t("id", "feature_id", "roof_area_m2", "bbox")`,
+    );
+    db.registerBytes(
+      "__src_edge.json",
+      await encodeProjectedFeatures([
+        {
+          idx: 0,
+          stableId: "id:string:a",
+          featureId: "a",
+          properties: {},
+          wkt: "POLYGON ((0 0, 5 0, 5 5, 0 5, 0 0))",
+        },
+        {
+          idx: 1,
+          stableId: "id:string:b",
+          featureId: "b",
+          properties: {},
+          wkt: "POLYGON ((5 0, 10 0, 10 5, 5 5, 5 0))",
+        },
+      ]),
+    );
+    db.query(buildVectorTableSql("__src_edge", "__src_edge.json"));
+    const rows = db.query(
+      buildAggregateSql({
+        table: "agg_edge",
+        source: "__src_edge",
+        proxy: "rectangle",
+        from: null,
+        geometryColumn: null,
+        ids: null,
+        predicate: "intersects",
+        rows: [
+          { op: "count", column: null, name: "bld_buildings_n" },
+          { op: "sum", column: "roof_area_m2", name: "bld_sum_roof_area_m2" },
+        ],
+      }),
+    );
+    expect(rows).toEqual([
+      // `b1` is in BOTH, and its 10 is summed into both — nothing de-duplicates
+      // the join, which is §7.6's rule.
+      {
+        sid: "id:string:a",
+        bld_buildings_n: 2,
+        bld_sum_roof_area_m2: 17,
+        multi_n: 1,
+        // The DISTINCT buildings the run aggregated over: two, not three.
+        buildings_total: 2,
+        no_proxy_n: 0,
+      },
+      {
+        sid: "id:string:b",
+        bld_buildings_n: 1,
+        bld_sum_roof_area_m2: 10,
+        multi_n: 1,
+        buildings_total: 2,
+        no_proxy_n: 0,
+      },
+    ]);
+    db.query(buildDropVectorTableSql("__src_edge"));
+    db.query(`DROP TABLE IF EXISTS agg_edge`);
+    db.dropFile("__src_edge.json");
   });
 });
