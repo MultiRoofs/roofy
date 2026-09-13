@@ -16,7 +16,7 @@
  * layer stores. It is called from INSIDE the run's own FIFO slot.
  */
 import { runQuery, type QueryOutcome } from "../../insights/duckdb";
-import { raced } from "../../insights/engineAwait";
+import { CancelledError, raced } from "../../insights/engineAwait";
 import {
   useComputedColumnStore,
   writeComputedColumns,
@@ -264,7 +264,17 @@ export async function prepareDerivedCityLayer(input: {
         }),
         null,
       );
-      if (!written.ok) throw new Error(written.message);
+      // A cancelled write is the user's Cancel arriving during the
+      // transaction, not a failure — the same translation `execute`'s own
+      // write does (`runQueue.ts`: `throw written.cancelled ? new
+      // CancelledError() : new Error(written.message)`). Its catch keys on the
+      // CLASS, so a generic `Error` here would land a cancelled New-layer run
+      // on the card as "failed: Cancelled".
+      if (!written.ok) {
+        throw written.cancelled
+          ? new CancelledError()
+          : new Error(written.message);
+      }
     }
   } catch (error) {
     await drop();

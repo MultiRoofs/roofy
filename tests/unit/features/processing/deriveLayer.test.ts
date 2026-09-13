@@ -201,6 +201,8 @@ const { useComputedColumnStore } =
   await import("../../../../src/insights/computedColumns");
 const { runQuery } = await import("../../../../src/insights/duckdb");
 const tables = await import("../../../../src/insights/layerTables");
+const { CancelledError, EngineDeadError } =
+  await import("../../../../src/insights/engineAwait");
 
 function parentLayer(): Layer {
   return useLayerStore.getState().layers[0]!;
@@ -450,11 +452,15 @@ describe("prepareDerivedCityLayer", () => {
     // every partial resource … and the run reads cancelled with nothing
     // changed." The cancel is seen by the raced write, which is the longest
     // await of the preparation and where a Cancel actually lands.
+    // The CLASS, not just "it threw": `execute` reads a `CancelledError` as
+    // "cancelled" and anything else as "failed" (`runQueue.ts`'s own write does
+    // the same translation), so a generic Error here would make a cancelled
+    // New-layer run read as a failed one with the word "Cancelled" on it.
     const controller = new AbortController();
     controller.abort();
     await expect(
       prepareOnQueue(["a", "a-1"], controller.signal),
-    ).rejects.toThrow();
+    ).rejects.toBeInstanceOf(CancelledError);
     await settle();
     expect(sql.some((s) => /^DROP TABLE IF EXISTS "layer_\d+"$/.test(s))).toBe(
       true,
@@ -469,7 +475,9 @@ describe("prepareDerivedCityLayer", () => {
     // queue would be held for the life of the page and nothing would be
     // dropped either.
     dieOn = "BEGIN TRANSACTION";
-    await expect(prepareOnQueue(["a", "a-1"])).rejects.toThrow();
+    await expect(prepareOnQueue(["a", "a-1"])).rejects.toBeInstanceOf(
+      EngineDeadError,
+    );
     await settle();
     expect(sql.some((s) => /^DROP TABLE IF EXISTS "layer_\d+"$/.test(s))).toBe(
       true,
