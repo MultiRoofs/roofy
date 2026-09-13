@@ -1040,6 +1040,47 @@ describe("a cancel during the write", () => {
     expect(runById(id)?.undoable).toBe(false);
     expect(runById(id)?.error).toBeNull();
   });
+
+  it("keeps the statements it issued when the ENGINE dies under the write", async () => {
+    // §6.4's record is of what was ATTEMPTED, and this is the failure a bug
+    // report is most likely to be written about. duckdb-wasm strands the
+    // requests that were in flight when its worker died, so the write's own
+    // promise NEVER settles — the death race is what ends the run, and an
+    // outcome read off that promise would never arrive. The statements have to
+    // reach the log as they are issued.
+    const stop = installEngineWatcher();
+    const never = deferred<void>();
+    gate = { needle: "UPDATE", promise: never.promise };
+    registerExecutor("height-from-extent", async () => ({
+      columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+    const id = submitRun(request());
+    await vi.waitFor(() =>
+      expect(sql.some((s) => s.startsWith("UPDATE"))).toBe(true),
+    );
+
+    killEngine();
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
+    expect(runById(id)?.error).toBe("Analytics engine stopped");
+
+    const statements = (runById(id)?.log ?? [])
+      .filter((entry) => entry.label.startsWith("Writing results ("))
+      .map((entry) => entry.sql);
+    expect(statements).toEqual([
+      "BEGIN TRANSACTION",
+      'ALTER TABLE "layer_1" ADD COLUMN IF NOT EXISTS "extent_height_m" DOUBLE',
+      expect.stringContaining('UPDATE "layer_1" SET "extent_height_m"'),
+    ]);
+    // Neither was ever sent: the COMMIT was never reached and the ROLLBACK is
+    // skipped for a database that is gone.
+    expect(statements).not.toContain("COMMIT");
+    expect(statements).not.toContain("ROLLBACK");
+    gate = null;
+    stop();
+  });
 });
 
 describe("undoRun", () => {

@@ -273,6 +273,11 @@ export async function prepareDerivedCityLayer(input: {
     // death never answers, and this await is inside the shared FIFO slot.
     if (input.rows.size > 0) {
       const t0 = performance.now();
+      // Mirrored as they are ISSUED: the race below can reject with the write
+      // still in flight (duckdb-wasm strands the statement its worker died
+      // under), and there is then no outcome to read the record off. Identical
+      // to `written.statements` on every path that resolves.
+      const issuedByWrite: string[] = [];
       const written = await raced(
         writeComputedColumns({
           runId: input.runId,
@@ -280,14 +285,24 @@ export async function prepareDerivedCityLayer(input: {
           columns: input.columns,
           rows: input.rows,
           existing: new Set<string>(),
+          onStatement: (sql) => issuedByWrite.push(sql),
           signal: input.signal,
         }),
         null,
-      );
+      ).catch((error: unknown) => {
+        // The engine died under the copy's write. §6.4 still has to say what
+        // was attempted, so the statements go into the run's log on the way
+        // past — the same promise the resolved paths keep below.
+        input.recordWrite?.(
+          issuedByWrite,
+          Math.round(performance.now() - t0),
+          input.rows.size,
+        );
+        throw error;
+      });
       // BEFORE the throw below: §6.4's record is of what was ATTEMPTED, so a
       // failed or cancelled write reports its statements exactly as a
-      // successful one does. (The engine's DEATH is the one path with nothing
-      // to report — `raced` rejects before `written` exists.)
+      // successful one does.
       input.recordWrite?.(
         written.statements,
         Math.round(performance.now() - t0),

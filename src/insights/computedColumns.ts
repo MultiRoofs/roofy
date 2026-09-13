@@ -137,6 +137,18 @@ export interface WriteInput {
    * the check before COMMIT rolls back just as completely.
    */
   readonly signal?: AbortSignal;
+  /**
+   * Each statement, the moment it is ISSUED (spec §6.4).
+   *
+   * The resolved `WriteOutcome.statements` is the SAME list, fed from the same
+   * place — this exists for the one path where no outcome ever arrives:
+   * duckdb-wasm strands the requests that were in flight when its worker died,
+   * so a caller's death race rejects and this promise never settles at all.
+   * Without a live report, an engine death under the UPDATE would leave the
+   * run's log with no SQL whatever, which is the failure a bug report is most
+   * likely to be written about.
+   */
+  readonly onStatement?: (sql: string) => void;
 }
 
 export type WriteOutcome =
@@ -236,13 +248,19 @@ export async function writeComputedColumns(
   // What was actually SENT, in order — not the plan above, which may not have
   // been reached in full (§6.4).
   const issued: string[] = [];
+  /** The ONE place a statement enters the record, so the outcome's list and the
+   *  caller's live report can never disagree. */
+  const record = (sql: string): void => {
+    issued.push(sql);
+    input.onStatement?.(sql);
+  };
   /** Roll back, and record it only if the statement really went out. */
   const rollback = async (): Promise<void> => {
-    if (await cleanup("ROLLBACK")) issued.push("ROLLBACK");
+    if (await cleanup("ROLLBACK")) record("ROLLBACK");
   };
   try {
     for (const [sql, use] of statements) {
-      issued.push(sql);
+      record(sql);
       const out = await step(sql, use);
       if (!out.ok) {
         await rollback();
@@ -264,7 +282,7 @@ export async function writeComputedColumns(
     }
     // Recorded BEFORE it is sent, like every statement in the loop: a COMMIT
     // that FAILED is the one a planner most needs to see in the log.
-    issued.push("COMMIT");
+    record("COMMIT");
     const committed = await step("COMMIT");
     if (!committed.ok) {
       await rollback();

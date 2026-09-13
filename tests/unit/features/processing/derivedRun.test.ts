@@ -320,6 +320,36 @@ describe("destination: New layer", () => {
     expect(useLayerStore.getState().layers).toHaveLength(1);
   });
 
+  it("keeps the COPY's issued statements when the engine dies under the write", async () => {
+    // The same §6.4 promise for the other destination, and the same reason it
+    // cannot be read off an outcome: duckdb-wasm strands the UPDATE, so the
+    // preparation's `raced` rejects with the write still in flight.
+    fakeExecutor();
+    const never = deferred<void>();
+    gate = { needle: "UPDATE", promise: never.promise };
+    const id = submitRun(newLayerRequest());
+    await vi.waitFor(() =>
+      expect(sql.some((s) => s.startsWith("UPDATE"))).toBe(true),
+    );
+    killEngine();
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
+    expect(runById(id)?.error).toBe("Analytics engine stopped");
+
+    const statements = (runById(id)?.log ?? [])
+      .filter((e) => e.label.startsWith("Writing results ("))
+      .map((e) => e.sql);
+    expect(statements[0]).toBe("BEGIN TRANSACTION");
+    expect(
+      statements.some((s) => s?.includes("ADD COLUMN IF NOT EXISTS")),
+    ).toBe(true);
+    expect(statements.some((s) => s?.startsWith("UPDATE"))).toBe(true);
+    expect(statements).not.toContain("COMMIT");
+    expect(statements).not.toContain("ROLLBACK");
+    // Nothing published, exactly as for a death before the write.
+    expect(useLayerStore.getState().layers).toHaveLength(1);
+    gate = null;
+  });
+
   it("inserts the copy under its parent, with its provenance inherited", async () => {
     // §6: "inherited computed columns keep their provenance", and §6.2's row
     // sits directly under the layer it was cut from.

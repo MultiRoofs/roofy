@@ -1816,17 +1816,37 @@ async function execute(
         .filter((name) => onTable.has(name.toLowerCase())),
     );
     const t0 = performance.now();
+    // Mirrored as they are ISSUED, because the death race below can reject with
+    // the write still in flight: duckdb-wasm strands the statement its worker
+    // died under, so that promise never settles and there is no outcome to read
+    // the record off. Identical to `written.statements` on every path that
+    // resolves (`writeComputedColumns` feeds both from one place).
+    const issuedByWrite: string[] = [];
     const writing = writeComputedColumns({
       runId: id,
       table: table.table,
       columns: result.columns,
       rows: result.rows,
       existing,
+      onStatement: (sql) => issuedByWrite.push(sql),
       // Spec §6.1: the write is the publication, so the LAST moment a cancel
       // can still mean "nothing changed" is inside it, before its COMMIT.
       signal,
     });
-    const written = await raced(writing, null);
+    const written = await raced(writing, null).catch((error: unknown) => {
+      // The engine died under the write. §6.4 still has to say what was
+      // attempted, and a `log`-only patch is accepted even for a run the death
+      // watcher has already failed (`patch` refuses a second STATUS, not a
+      // record).
+      logWriteStatements(
+        log,
+        issuedByWrite,
+        Math.round(performance.now() - t0),
+        result.rows.size,
+      );
+      patch(id, { log: [...log] });
+      throw error;
+    });
     logWriteStatements(
       log,
       written.statements,
