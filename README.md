@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="public/brand/roofy-lockup-animated-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="public/brand/roofy-lockup-animated-light.svg">
-    <img alt="" src="public/brand/roofy-mark-light.svg" width="500" height="500">
+    <img alt="" src="public/brand/roofy-mark-light.svg" width="500" height="200">
   </picture>
 </p>
 
