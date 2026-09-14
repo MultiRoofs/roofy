@@ -149,3 +149,18 @@ export function modelDataUrl(model: CityModel): string {
     )
   );
 }
+
+/** Ground distance on a mean-radius Earth, independent of map projection. */
+export function drawingEdgeLength(a: Vec3, b: Vec3): number {
+  const radians = Math.PI / 180;
+  const latitude = (b[1] - a[1]) * radians;
+  const longitude = (b[0] - a[0]) * radians;
+  const haversine =
+    Math.sin(latitude / 2) ** 2 +
+    Math.cos(a[1] * radians) *
+      Math.cos(b[1] * radians) *
+      Math.sin(longitude / 2) ** 2;
+  return (
+    2 * 6371008.8 * Math.asin(Math.sqrt(Math.min(1, Math.max(0, haversine))))
+  );
+}

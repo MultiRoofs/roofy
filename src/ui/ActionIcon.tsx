@@ -15,9 +15,15 @@ export function ActionIcon({
     | "expand"
     | "restore"
     | "clear"
-    | "tools";
+    | "tools"
+    | "undo"
+    | "log"
+    | "rerun";
 }) {
   const paths = {
+    undo: "M9 4 4 9l5 5M4 9h10a6 6 0 0 1 0 12",
+    log: "M6 3h9l4 4v14H6ZM14 3v5h5M9 12h7M9 16h7",
+    rerun: "M20 7v5h-5M20 12a8 8 0 1 0-2 5",
     draw: "m4 16 11-11 4 4L8 20H4v-4ZM13 7l4 4M3 3h5M3 3v5",
     columns: "M3 4h18v16H3ZM9 4v16M15 4v16",
     export: "M12 3v12m-4-4 4 4 4-4M4 15v6h16v-6",

@@ -178,7 +178,6 @@ export function ViewerShell({
             >
               <ActionIcon name="table" /> Open table
             </button>
-            <span>Drag up to expand</span>
           </div>
         )}
         {drawer !== null && (

@@ -34,7 +34,7 @@
    ("Flat threshold" measures 70px at 12px); a 64px field column left the
    slider's control 22px to the right of every select. */
 .processing-panel {
-  --processing-caption: 84px;
+  --processing-caption: 104px;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -448,15 +448,20 @@
 .processing-footer {
   position: sticky;
   bottom: 0;
-  padding: 10px 0 2px;
+  padding: 12px 0;
   border-top: 1px solid var(--border);
-  background: var(--bg-panel);
+  background: var(--bg-root);
 }
 .processing-footer__row {
   display: flex;
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
+}
+.processing-footer__row > button {
+  min-height: var(--control-height);
+  min-width: 76px;
+  padding: 0 16px;
 }
 .processing-footer__row .processing-elapsed {
   margin: 0 auto 0 0;
@@ -646,4 +651,51 @@
   background: var(--bg-raised);
   font: 11px/1.5 var(--font-mono);
   color: var(--fg);
+}
+
+/* Equal action slots keep the completed run controls on one line. */
+.processing-footer__row--result > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1 1 0;
+  min-width: 0;
+  padding-inline: 8px;
+  white-space: nowrap;
+}
+
+/* Processing help also opens when its field is reached by keyboard. */
+.processing-panel [data-tooltip]:focus-within::after {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 300ms;
+}
+.processing-panel .processing-field[data-tooltip]::after,
+.processing-panel .processing-slider[data-tooltip]::after {
+  max-width: min(16rem, 100%);
+}
+
+.processing-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  color: var(--fg-muted);
+  cursor: help;
+  border-radius: var(--control-radius);
+}
+.processing-info svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+.processing-info:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

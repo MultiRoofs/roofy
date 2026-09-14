@@ -1,3 +1,4 @@
+import { ProcessingInfo } from "./ProcessingInfo";
 /**
  * Spec §7.1's parameters: six measure checkboxes and the flat-threshold slider.
  *
@@ -50,20 +51,35 @@ export function RoofMetricsParams({
           // §7.1's parenthetical explanations, which the labels trim, live
           // here: a tooltip the label carries rather than a second muted line
           // under every checkbox.
-          <label key={measure.key} title={measure.hint ?? undefined}>
+          <label
+            key={measure.key}
+            data-tooltip={measure.hint ?? undefined}
+            data-tooltip-align="end"
+          >
             <input
               type="checkbox"
+              aria-label={measure.label}
+              aria-description={measure.hint ?? undefined}
               checked={ticked.has(measure.key)}
               onChange={() => toggle(measure.key)}
             />
             {measure.label}
+            <ProcessingInfo description={measure.hint ?? undefined} />
           </label>
         ))}
       </div>
-      <label className="processing-slider">
-        <span>Flat threshold</span>
+      <label
+        className="processing-slider"
+        data-tooltip="Roof surfaces with a slope below this angle count as flat. This affects flat roof area, flat share, and which surface supplies the dominant azimuth."
+        data-tooltip-align="end"
+      >
+        <span>
+          Flat threshold
+          <ProcessingInfo description="Roof surfaces with a slope below this angle count as flat. This affects flat roof area, flat share, and which surface supplies the dominant azimuth." />
+        </span>
         <input
           aria-label="Flat threshold"
+          aria-description="Roof surfaces with a slope below this angle count as flat. This affects flat roof area, flat share, and which surface supplies the dominant azimuth."
           type="range"
           min={FLAT_THRESHOLD_MIN}
           max={FLAT_THRESHOLD_MAX}

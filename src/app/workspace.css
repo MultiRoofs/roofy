@@ -178,8 +178,20 @@ body:has(.viewer-shell) :is(.modal, .toast, .unavailable-layers) {
 }
 
 .viewer-shell .legend-group-name {
+  min-height: var(--control-height-compact);
+  padding: 4px 8px;
+  gap: 8px;
+  margin-bottom: 8px;
   letter-spacing: normal;
   text-transform: none;
+}
+
+.viewer-shell .legend-card {
+  padding: 8px;
+}
+
+.viewer-shell .legend-group + .legend-group {
+  margin-top: 8px;
 }
 
 /* A map can be narrow even on a large monitor after both panels open. */
@@ -773,4 +785,24 @@ body:has(.viewer-shell) :is(.modal, .toast, .unavailable-layers) {
   top: 4px;
   background: var(--fg-muted);
   border-radius: 2px;
+}
+
+.viewer-shell .attribute-drag-handle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 20px;
+  align-self: stretch;
+  padding: 0;
+  cursor: grab;
+  background: transparent !important;
+  color: var(--fg-muted) !important;
+}
+.viewer-shell .attribute-order-row[data-dragging] {
+  opacity: 0.5;
+}
+.viewer-shell .attribute-order-row[data-drop-target] {
+  background: var(--control-selected);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  border-radius: var(--control-radius);
 }

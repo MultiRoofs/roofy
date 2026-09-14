@@ -199,13 +199,16 @@ describe("Roof metrics PARAMETERS (spec §6, §7.1)", () => {
     render(<ToolView toolId="roof-metrics" />);
     expect(
       screen.getByLabelText("Flat share").closest("label"),
-    ).toHaveAttribute("title", "0-1: the flat area over the total roof area");
+    ).toHaveAttribute(
+      "data-tooltip",
+      "0-1: the flat area over the total roof area",
+    );
     expect(
       screen.getByLabelText("Mean slope (deg)").closest("label"),
-    ).toHaveAttribute("title", "Area-weighted over every roof surface");
+    ).toHaveAttribute("data-tooltip", "Area-weighted over every roof surface");
     expect(
       screen.getByLabelText("Dominant azimuth (deg)").closest("label"),
-    ).toHaveAttribute("title", "Of the largest non-flat surface");
+    ).toHaveAttribute("data-tooltip", "Of the largest non-flat surface");
   });
 
   it("offers no PARAMETERS section for a tool that has none", () => {

@@ -7,13 +7,7 @@
  * eligibility of a tool it is not about.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { RunRecord } from "../../../../src/features/processing/types";
 
 vi.mock("../../../../src/insights/duckdb", () => ({
@@ -164,7 +158,34 @@ afterEach(() => {
 });
 
 describe("the New-layer result card", () => {
-  it("reads §6.2's Created line and offers five actions", () => {
+  it("groups Undo, Log, and Run again outside the result card with icons", () => {
+    const onRunAgain = vi.fn();
+    render(
+      <RunFooter
+        run={createdRun({ undoable: true })}
+        canRun
+        reason={null}
+        onRunAgain={onRunAgain}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Open table" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Style by result" }),
+    ).toBeNull();
+    const undo = screen.getByRole("button", { name: "Undo" });
+    const log = screen.getByRole("button", { name: "Log" });
+    const again = screen.getByRole("button", { name: "Run again" });
+    expect(undo.parentElement).toBe(again.parentElement);
+    expect(log.parentElement).toBe(again.parentElement);
+    for (const button of [undo, log, again]) {
+      expect(button.closest(".processing-card")).toBeNull();
+      expect(button.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    }
+    fireEvent.click(again);
+    expect(onRunAgain).toHaveBeenCalledOnce();
+  });
+
+  it("shows the Created line and the remaining actions", () => {
     render(
       <RunFooter
         run={createdRun({ undoable: true })}
@@ -176,51 +197,10 @@ describe("the New-layer result card", () => {
     expect(
       screen.getByText("Created Delft · extent · 2 buildings · 0.3 s"),
     ).toBeTruthy();
-    // §6.2 lists five for a New-layer run, Zoom to layer first.
-    for (const name of [
-      "Zoom to layer",
-      "Open table",
-      "Style by result",
-      "Undo",
-      "Log",
-    ]) {
+    // Derived results retain their zoom shortcut.
+    for (const name of ["Zoom to layer", "Undo", "Log"]) {
       expect(screen.getByRole("button", { name })).toBeTruthy();
     }
-  });
-
-  it("points Open table at the COPY, never at the untouched target", () => {
-    addLayers();
-    render(
-      <RunFooter
-        run={createdRun()}
-        canRun
-        reason={null}
-        onRunAgain={() => {}}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Open table" }));
-    expect(useWorkspaceStore.getState().activeLayerId).toBe("NEW");
-  });
-
-  it("opens the Style-by-result draft on the COPY, not on the target", async () => {
-    // The THIRD of the card's three copy-pointing actions (Open table and Zoom
-    // are above). It is also the only one that goes through the click handler's
-    // `runById` guard — §7's "a run that went stale or was undone while the
-    // read was in flight" — so the record must be in the STORE and not only in
-    // the prop, or the draft is silently never written and this case would pass
-    // against an empty draft store.
-    addLayers();
-    const run = createdRun();
-    useProcessingStore.getState().upsertRun(run);
-    render(<RunFooter run={run} canRun reason={null} onRunAgain={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: "Style by result" }));
-    await waitFor(() => {
-      expect(
-        useRuleDraftStore.getState().drafts["NEW"]?.form?.conditions?.[0]
-          ?.field,
-      ).toBe("extent_height_m");
-    });
-    expect(useRuleDraftStore.getState().drafts["L"]).toBeUndefined();
   });
 
   it("asks the shell to zoom to the COPY", () => {
@@ -290,7 +270,6 @@ describe("the New-layer result card", () => {
     fireEvent.click(screen.getByRole("button", { name: "Zoom to layer" }));
     expect(useWorkspaceStore.getState().activeLayerId).toBeNull();
     expect(useShellStore.getState().requestedZoom).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Open table" }));
     expect(useWorkspaceStore.getState().activeLayerId).toBeNull();
     expect(useShellStore.getState().drawerOpen).toBe(false);
   });

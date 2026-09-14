@@ -8,7 +8,7 @@ export function revealAppAfterLaunch(): () => void {
     root?.removeAttribute("aria-hidden");
     splash?.classList.add("launch-screen--leaving");
     removal = setTimeout(() => splash?.remove(), 180);
-    // 2 s logo + 750 ms headline reveal + 750 ms to read the headline.
+    // The center-out tagline finishes at 2.1 s, leaving 1.4 s to read it.
   }, 3500);
   return () => {
     clearTimeout(reveal);

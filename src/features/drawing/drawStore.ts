@@ -18,6 +18,7 @@ export const useDrawStore = create<{
       useGeoLayerStore.getState().layers.some((l) => l.id === get().layerId)
     ) {
       activateLayer(get().layerId!);
+      get().start();
       return;
     }
     const id = useGeoLayerStore.getState().addGeoLayer({
@@ -27,6 +28,7 @@ export const useDrawStore = create<{
     });
     set({ layerId: id, active: false });
     activateLayer(id);
+    get().start();
   },
   start: () => {
     const id = get().layerId;

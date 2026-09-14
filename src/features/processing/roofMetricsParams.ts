@@ -44,7 +44,7 @@ export const ROOF_MEASURES: ReadonlyArray<RoofMeasureSpec> = [
   {
     key: "area",
     label: "Total roof area (m²)",
-    hint: null,
+    hint: "Combined area of all roof surfaces, measured along their slopes in square metres.",
     suffix: "area_m2",
   },
   {
@@ -74,7 +74,7 @@ export const ROOF_MEASURES: ReadonlyArray<RoofMeasureSpec> = [
   {
     key: "surfaces",
     label: "Roof surface count",
-    hint: null,
+    hint: "Number of roof surfaces used to calculate this building’s metrics.",
     suffix: "surfaces_n",
   },
 ];

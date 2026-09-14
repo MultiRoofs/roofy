@@ -298,6 +298,7 @@ export function AddLayerDialog({
               role="tabpanel"
               id={`${tabIdPrefix}-draw-panel`}
               aria-labelledby={`${tabIdPrefix}-draw-tab`}
+              className="add-layer-draw"
             >
               <h3>Create a draw layer</h3>
               <p>
@@ -305,8 +306,8 @@ export function AddLayerDialog({
                 into a solid.
               </p>
               <p>
-                Choose Mode → Draw model in the map toolbar to begin. Finished
-                shapes become normal model layers.
+                Drawing starts automatically. Double-click to close the
+                footprint, move to adjust the height, then click to finish.
               </p>
               <button
                 type="button"

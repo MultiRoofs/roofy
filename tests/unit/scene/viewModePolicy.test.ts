@@ -36,18 +36,18 @@ const CAMERA = {
 };
 
 describe("viewModePolicy", () => {
-  it("leaves 3D exactly as the viewer has always behaved", () => {
+  it("disables spin in 3D while retaining tilt", () => {
     const policy = viewModePolicy("3d");
-    expect(policy.enableSpin).toBe(true);
+    expect(policy.enableSpin).toBe(false);
     expect(policy.enableTilt).toBe(true);
     expect(policy.minPitchDeg).toBe(MIN_PITCH_DEG);
     expect(policy.maxPitchDeg).toBe(MAX_PITCH_DEG);
     expect(policy.entryPitchDeg).toBeNull();
   });
 
-  it("keeps rotation but locks tilt in 2.5D", () => {
+  it("disables spin and locks tilt in 2.5D", () => {
     const policy = viewModePolicy("2.5d");
-    expect(policy.enableSpin).toBe(true);
+    expect(policy.enableSpin).toBe(false);
     expect(policy.enableTilt).toBe(false);
     // Pinned, not merely limited: min === max === the entry pitch.
     expect(policy.minPitchDeg).toBe(TILTED_PITCH_DEG);

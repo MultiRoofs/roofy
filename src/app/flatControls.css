@@ -626,3 +626,34 @@ body
 .viewer-shell .geo-style-slider {
   width: 80px;
 }
+
+.draw-edge-length,
+.draw-feedback {
+  position: absolute;
+  pointer-events: none;
+  padding: 6px 8px;
+  border-radius: var(--control-radius);
+  background: var(--bg-panel);
+  color: var(--fg);
+  font: 500 12px/1.5 var(--font-ui);
+  box-shadow: 0 3px 12px rgb(0 0 0 / 16%);
+}
+.draw-edge-length {
+  font-variant-numeric: tabular-nums;
+}
+.draw-feedback {
+  top: 12px;
+  left: 12px;
+  max-width: calc(100% - 24px);
+  margin: 0;
+}
+
+.draw-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

@@ -1597,6 +1597,13 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           const result = await session.ready;
           if (cancelled) return;
 
+          // Disable idle carry-over before publishing the ready view.
+          result.view.camera.options = {
+            enableSpin: false,
+            spinDuration: 0,
+            enableTilt: viewModePolicy(useViewModeStore.getState().mode)
+              .enableTilt,
+          };
           viewRef.current = result.view;
           cityPluginRef.current = cityPlugin;
           flatPluginRef.current = flatPlugin;
@@ -3579,6 +3586,7 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       const policy = viewModePolicy(viewMode);
       view.camera.options = {
         enableSpin: policy.enableSpin,
+        spinDuration: 0,
         enableTilt: policy.enableTilt,
       };
 

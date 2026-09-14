@@ -34,3 +34,11 @@ it("stops drawing as soon as a different layer is selected", async () => {
   useWorkspaceStore.setState({ activeLayerId: "other" });
   expect(useDrawStore.getState().active).toBe(false);
 });
+
+it("enters drawing immediately when creating or reactivating a draw layer", () => {
+  useDrawStore.getState().create();
+  expect(useDrawStore.getState().active).toBe(true);
+  useDrawStore.getState().stop();
+  useDrawStore.getState().create();
+  expect(useDrawStore.getState().active).toBe(true);
+});

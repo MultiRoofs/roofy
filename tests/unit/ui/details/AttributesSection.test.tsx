@@ -65,3 +65,27 @@ it("offers reordering without losing attributes absent from this object", () => 
   expect(saved).toEqual(["b", "c", "a"]);
   cleanup();
 });
+
+it("drags attributes into order while preserving keys absent from this object", () => {
+  cleanup();
+  let saved: readonly string[] = [];
+  render(
+    <AttributesSection
+      attributes={{ a: 1, c: 3 }}
+      order={["b", "a", "c"]}
+      onOrderChange={(next) => {
+        saved = next;
+      }}
+    />,
+  );
+  expect(screen.queryByRole("button", { name: "Drag c" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Reorder attributes" }));
+  const handle = screen.getByRole("button", { name: "Drag c" });
+  fireEvent.dragStart(handle, {
+    dataTransfer: { setData() {}, effectAllowed: "" },
+  });
+  fireEvent.dragOver(screen.getByText("a").closest(".attribute-order-row")!);
+  fireEvent.drop(screen.getByText("a").closest(".attribute-order-row")!);
+  expect(saved).toEqual(["b", "c", "a"]);
+  cleanup();
+});

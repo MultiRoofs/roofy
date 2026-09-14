@@ -1,3 +1,4 @@
+import { ProcessingInfo } from "./ProcessingInfo";
 /**
  * Spec §6's parameter form for one tool.
  *
@@ -133,9 +134,16 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
       <fieldset className="processing-section" disabled={locked}>
         <legend className="processing-group__label">TARGET</legend>
         <label className="processing-field">
-          <span>Layer</span>
+          <span
+            data-tooltip="The layer that receives the calculated attributes."
+            data-tooltip-align="start"
+          >
+            Layer
+            <ProcessingInfo description="The layer that receives the calculated attributes." />
+          </span>
           <select
             aria-label="Layer"
+            title="The layer that receives the calculated attributes."
             value={f.targetLayerId ?? ""}
             onChange={(e) => f.setDraft({ targetLayerId: e.target.value })}
           >
@@ -182,17 +190,29 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
             for the same reason; this is what keeps the CONTROL off the form. */}
         {f.tool.needsLod && f.tool.implemented && f.eligibility.ok && (
           <label className="processing-field">
-            <span>LoD</span>
+            <span
+              data-tooltip="Level of detail: choose which geometry representation to measure."
+              data-tooltip-align="start"
+            >
+              LoD
+              <ProcessingInfo description="Level of detail: choose which geometry representation to measure." />
+            </span>
             {f.lodOptions.length === 0 ? (
               // §6: "When no LoD qualifies the select shows [the empty text]
               // and Run is disabled with that reason." A disabled select with
               // one unselectable option, not a hidden field: the user has to
               // see WHICH requirement this layer fails.
-              <select aria-label="LoD" disabled value="">
+              <select
+                title="Level of detail: choose which geometry representation to measure."
+                aria-label="LoD"
+                disabled
+                value=""
+              >
                 <option value="">{f.lodReason}</option>
               </select>
             ) : (
               <select
+                title="Level of detail: choose which geometry representation to measure."
                 aria-label="LoD"
                 value={f.draft.lod ?? ""}
                 onChange={(e) => f.setDraft({ lod: e.target.value })}
@@ -207,50 +227,94 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
           </label>
         )}
         <div className="processing-field">
-          <span>Scope</span>
+          <span
+            data-tooltip="Choose which buildings are included in the calculation."
+            data-tooltip-align="start"
+          >
+            Scope
+            <ProcessingInfo description="Choose which buildings are included in the calculation." />
+          </span>
           <div
             className="processing-radios"
             role="radiogroup"
             aria-label="Scope"
           >
-            <label>
+            <label
+              data-tooltip="Process all available buildings in the scope layer, regardless of filters or selection."
+              data-tooltip-align="end"
+            >
               <input
+                aria-description="Process all available buildings in the scope layer, regardless of filters or selection."
                 type="radio"
                 name="scope"
+                aria-label={
+                  f.counts.all === null
+                    ? "All … buildings"
+                    : `All ${plural(f.counts.all, "building", "buildings")}`
+                }
                 checked={f.draft.scope === "all"}
                 onChange={() => f.setDraft({ scope: "all" })}
               />
               {f.counts.all === null
                 ? "All … buildings"
                 : `All ${plural(f.counts.all, "building", "buildings")}`}
+              <ProcessingInfo description="Process all available buildings in the scope layer, regardless of filters or selection." />
             </label>
-            <label title={f.noFilter ? "No filter applied" : undefined}>
+            <label
+              data-tooltip={
+                f.noFilter
+                  ? "No filter applied. Apply a layer filter to process only matching buildings."
+                  : "Process only buildings that match the current layer filter."
+              }
+              data-tooltip-align="end"
+            >
               <input
                 type="radio"
                 name="scope"
                 disabled={f.noFilter}
+                aria-description="Process only buildings that match the current layer filter. Requires an active filter."
+                aria-label={
+                  f.noFilter ? "Matching" : `Matching ${fmt(f.counts.matching)}`
+                }
                 checked={f.draft.scope === "matching"}
                 onChange={() => f.setDraft({ scope: "matching" })}
               />
               {/* With no filter the count would be the ALL count, which means
                   nothing here — so the disabled radio carries no number. */}
               {f.noFilter ? "Matching" : `Matching ${fmt(f.counts.matching)}`}
+              <ProcessingInfo
+                description={
+                  f.noFilter
+                    ? "No filter applied. Apply a layer filter to process only matching buildings."
+                    : "Process only buildings that match the current layer filter."
+                }
+              />
             </label>
             <label
-              title={
+              data-tooltip={
                 !f.counts.selected
-                  ? "Nothing selected on this layer"
-                  : undefined
+                  ? "Nothing selected on this layer. Select buildings in the map or table first."
+                  : "Process only the buildings currently selected on this layer."
               }
+              data-tooltip-align="end"
             >
               <input
                 type="radio"
                 name="scope"
                 disabled={!f.counts.selected}
+                aria-description="Process only the buildings currently selected on this layer. Select buildings in the map or table first."
+                aria-label={`Selected ${fmt(f.counts.selected)}`}
                 checked={f.draft.scope === "selected"}
                 onChange={() => f.setDraft({ scope: "selected" })}
               />
               Selected {fmt(f.counts.selected)}
+              <ProcessingInfo
+                description={
+                  !f.counts.selected
+                    ? "Nothing selected on this layer. Select buildings in the map or table first."
+                    : "Process only the buildings currently selected on this layer."
+                }
+              />
             </label>
           </div>
           {f.cityLayer?.isStreaming === true && (
@@ -274,7 +338,14 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
           branch per tool. */}
       {toolId === "roof-metrics" && (
         <fieldset className="processing-section" disabled={locked}>
-          <legend className="processing-group__label">PARAMETERS</legend>
+          <legend
+            className="processing-group__label"
+            data-tooltip="Choose which metrics to calculate and adjust how they are measured."
+            data-tooltip-align="start"
+          >
+            PARAMETERS
+            <ProcessingInfo description="Choose which metrics to calculate and adjust how they are measured." />
+          </legend>
           <RoofMetricsParams
             params={f.draft.params}
             onChange={(params) => f.setDraft({ params })}
@@ -351,6 +422,7 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
               <input
                 type="radio"
                 name="writeTo"
+                title="Write calculated attributes to the target layer. Existing output columns may be replaced, as listed below."
                 checked={f.draft.destination === "layer"}
                 onChange={() => f.setDraft({ destination: "layer" })}
               />
@@ -362,7 +434,12 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
                 about this. **[adapted copy A2]** is the other case, where the
                 tool does offer it and this TARGET cannot take it. */}
             <label
-              title={f.newLayerBlocked ? STREAMING_NO_NEW_LAYER : undefined}
+              data-tooltip={
+                f.newLayerBlocked
+                  ? STREAMING_NO_NEW_LAYER
+                  : "Create a separate layer with the results and keep the original layer unchanged."
+              }
+              data-tooltip-align="end"
             >
               <input
                 type="radio"
@@ -370,10 +447,18 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
                 disabled={
                   !f.tool.destinations.includes("new") || f.newLayerBlocked
                 }
+                aria-label="New layer"
                 checked={f.draft.destination === "new"}
                 onChange={() => f.setDraft({ destination: "new" })}
               />
               New layer
+              <ProcessingInfo
+                description={
+                  f.newLayerBlocked
+                    ? STREAMING_NO_NEW_LAYER
+                    : "Create a separate layer with the results and keep the original layer unchanged."
+                }
+              />
             </label>
           </div>
           {f.newLayerBlocked && (
@@ -400,10 +485,18 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
           </>
         )}
         <label className="processing-field">
-          <span>Prefix</span>
+          <span
+            data-tooltip="Text added before each output column name. For example, roof_ produces roof_area_m2. Change it to keep separate sets of results."
+            data-tooltip-align="start"
+          >
+            Prefix
+            <ProcessingInfo description="Text added before each output column name. For example, roof_ produces roof_area_m2. Change it to keep separate sets of results." />
+          </span>
           <input
             type="text"
             aria-label="Prefix"
+            title="Text added before each output column name. For example, roof_ produces roof_area_m2. Change it to keep separate sets of results."
+            aria-description="Text added before each output column name. For example, roof_ produces roof_area_m2. Change it to keep separate sets of results."
             value={f.draft.prefix}
             onChange={(e) => f.setDraft({ prefix: e.target.value })}
             aria-invalid={f.prefixError !== null}

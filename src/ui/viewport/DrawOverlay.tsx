@@ -4,7 +4,11 @@ import { useState, useEffect, useRef, type RefObject } from "react";
 import type { CitySceneHandle } from "../../scene/NavaraViewport";
 import type { Vec3 } from "../../domain/citymodel/types";
 import { useDrawStore } from "../../features/drawing/drawStore";
-import { drawnModel, modelDataUrl } from "../../features/drawing/geometry";
+import {
+  drawnModel,
+  modelDataUrl,
+  drawingEdgeLength,
+} from "../../features/drawing/geometry";
 import { addCityLayer } from "../../features/layers/addCityLayer";
 import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
 import { activateLayer } from "../../features/workspace/layerCoordination";
@@ -16,6 +20,11 @@ export function DrawOverlay({
   const [points, setPoints] = useState<{ world: Vec3; x: number; y: number }[]>(
     [],
   );
+  const [cursor, setCursor] = useState<{
+    world: Vec3;
+    x: number;
+    y: number;
+  } | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const alive = useRef(true);
   const pending = useRef(false);
@@ -30,6 +39,7 @@ export function DrawOverlay({
   const [extruding, setExtruding] = useState(false);
   const [height, setHeight] = useState(10);
   const [error, setError] = useState("");
+  const [announcement, setAnnouncement] = useState("");
   useEffect(() => {
     let frame = 0;
     const update = () => {
@@ -105,6 +115,8 @@ export function DrawOverlay({
         0,
       );
       setExtruding(true);
+      setCursor(points.at(-1) ?? null);
+      setHeight(10);
       setError("");
     } catch (e) {
       setError(String(e));
@@ -123,8 +135,33 @@ export function DrawOverlay({
       ref={root}
       className="draw-overlay"
       tabIndex={0}
+      aria-label="Draw model. Double-click or Enter finishes the footprint. Up and Down adjust height; Shift changes it by ten metres. Enter saves. Escape cancels."
       onKeyDown={(e) => {
+        if (
+          extruding &&
+          !busy &&
+          (e.key === "ArrowUp" || e.key === "ArrowDown")
+        ) {
+          e.preventDefault();
+          const next = Math.max(
+            0,
+            Math.min(
+              1000,
+              height + (e.key === "ArrowUp" ? 1 : -1) * (e.shiftKey ? 10 : 1),
+            ),
+          );
+          setHeight(next);
+          setAnnouncement(`Height ${next} metres`);
+        }
         if (e.key === "Escape") useDrawStore.getState().stop();
+        if (
+          !extruding &&
+          (e.key === "Backspace" || e.key === "Delete") &&
+          e.target === e.currentTarget
+        ) {
+          e.preventDefault();
+          setPoints((current) => current.slice(0, -1));
+        }
         if (e.key === "Enter" && e.target === e.currentTarget) {
           e.preventDefault();
           if (extruding) void finish(height);
@@ -134,26 +171,45 @@ export function DrawOverlay({
     >
       <svg
         className="draw-canvas"
+        onPointerLeave={() => setCursor(null)}
+        onDoubleClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!busy && !extruding) finishFootprint();
+        }}
         onPointerMove={(e) => {
           if (busy) return;
           if (extruding) {
             const rect = e.currentTarget.getBoundingClientRect();
             const last = points.at(-1)!;
+            setCursor({
+              world: last.world,
+              x: e.clientX - rect.left,
+              y: e.clientY - rect.top,
+            });
             setHeight(
               Math.max(
                 0,
                 Math.min(
                   1000,
-                  Math.round((last.y - (e.clientY - rect.top)) * 0.5),
+                  Math.round(10 + (last.y - (e.clientY - rect.top)) * 2),
                 ),
               ),
             );
+          } else {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = e.clientX - rect.left,
+              y = e.clientY - rect.top;
+            const world = scene.current?.pickDrawingPoint?.(x, y);
+            setCursor(world ? { world, x, y } : null);
           }
         }}
         onClick={(e) => {
-          if (busy) return;
+          // A double-click's second click must not add a duplicate vertex or
+          // immediately commit the extrusion that the gesture is opening.
+          if (busy || e.detail > 1) return;
           if (extruding) {
-            finish(height);
+            void finish(height);
             return;
           }
           if (points.length >= 64) {
@@ -163,13 +219,6 @@ export function DrawOverlay({
           const rect = e.currentTarget.getBoundingClientRect();
           const x = e.clientX - rect.left,
             y = e.clientY - rect.top;
-          if (
-            points.length >= 3 &&
-            Math.hypot(x - points[0]!.x, y - points[0]!.y) < 12
-          ) {
-            finishFootprint();
-            return;
-          }
           const world = scene.current?.pickDrawingPoint?.(x, y);
           if (!world) {
             setError("Click a visible ground surface, not the sky.");
@@ -179,6 +228,17 @@ export function DrawOverlay({
           setPoints([...points, { world, x, y }]);
         }}
       >
+        {!extruding && cursor && points.length > 0 && (
+          <line
+            x1={points.at(-1)!.x}
+            y1={points.at(-1)!.y}
+            x2={cursor.x}
+            y2={cursor.y}
+            stroke="#486f2c"
+            strokeWidth="2"
+            strokeDasharray="5 4"
+          />
+        )}
         <polygon
           points={points.map((p) => `${p.x},${p.y}`).join(" ")}
           fill="#a7e32b33"
@@ -217,56 +277,47 @@ export function DrawOverlay({
           />
         ))}
       </svg>
-      <div
-        className="draw-instructions"
-        role="region"
-        aria-label="Drawing controls"
-      >
-        <strong>{extruding ? "Set height" : "Draw footprint"}</strong>
-        <p>
-          {extruding
-            ? "Move up to raise the preview, then click the map to finish."
-            : "Click to add corners. Click the first corner or Finish footprint to close."}
+      {cursor && points.length > 0 && (
+        <div
+          className="draw-edge-length"
+          role="tooltip"
+          style={{
+            left: Math.max(
+              8,
+              Math.min(
+                cursor.x + 14,
+                (root.current?.clientWidth ?? 1000) - 100,
+              ),
+            ),
+            top: Math.max(
+              8,
+              Math.min(
+                cursor.y + 14,
+                (root.current?.clientHeight ?? 1000) - 40,
+              ),
+            ),
+          }}
+        >
+          {(extruding
+            ? height
+            : drawingEdgeLength(points.at(-1)!.world, cursor.world)
+          ).toFixed(1)}{" "}
+          m
+        </div>
+      )}
+      <span className="draw-announcement" role="status">
+        {announcement}
+      </span>
+      {error && (
+        <p className="draw-feedback" role="alert">
+          {error}
         </p>
-        {error && <p role="alert">{error}</p>}
-        {busy && <p role="status">Placing your model…</p>}
-        <fieldset disabled={busy} className="button-group">
-          {extruding ? (
-            <>
-              <label>
-                Height (m){" "}
-                <input
-                  type="number"
-                  min="0"
-                  max="1000"
-                  value={height}
-                  onChange={(e) => setHeight(Number(e.target.value))}
-                />
-              </label>
-              <button onClick={() => finish(height)}>Finish solid</button>
-              <button onClick={() => setExtruding(false)}>
-                Edit footprint
-              </button>
-            </>
-          ) : (
-            <>
-              <button disabled={points.length < 3} onClick={finishFootprint}>
-                Finish footprint
-              </button>
-              <button disabled={points.length < 3} onClick={() => finish(0)}>
-                Finish as 2D
-              </button>
-              <button
-                disabled={!points.length}
-                onClick={() => setPoints(points.slice(0, -1))}
-              >
-                Undo corner
-              </button>
-            </>
-          )}
-          <button onClick={() => useDrawStore.getState().stop()}>Cancel</button>
-        </fieldset>
-      </div>
+      )}
+      {busy && (
+        <p className="draw-feedback" role="status">
+          Placing your model…
+        </p>
+      )}
     </div>
   );
 }

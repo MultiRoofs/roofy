@@ -29,6 +29,12 @@ export function AttributesSection({
   const entries = keys.map((key) => [key, attributes[key]] as const);
   const [reordering, setReordering] = useState(false);
   const [query, setQuery] = useState("");
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const clearDrag = () => {
+    setDragging(null);
+    setDropTarget(null);
+  };
 
   const filtered =
     query === ""
@@ -64,7 +70,10 @@ export function AttributesSection({
               reordering ? "Finish reordering attributes" : "Reorder attributes"
             }
             aria-pressed={reordering}
-            onClick={() => setReordering(!reordering)}
+            onClick={() => {
+              clearDrag();
+              setReordering(!reordering);
+            }}
           >
             {reordering ? "Done" : "Reorder"}
           </button>
@@ -72,7 +81,8 @@ export function AttributesSection({
       </div>
       {reordering && (
         <p className="details-note">
-          Order is shared by objects of this type in this layer.
+          Drag rows or use the arrow buttons to reorder. Order is shared by
+          objects of this type in this layer.
         </p>
       )}
       {entries.length > 8 && (
@@ -86,7 +96,60 @@ export function AttributesSection({
         />
       )}
       {filtered.map(([key, value], index) => (
-        <div key={key} className="attribute-order-row">
+        <div
+          key={key}
+          className="attribute-order-row"
+          data-dragging={dragging === key || undefined}
+          data-drop-target={dropTarget === key || undefined}
+          onDragOver={(event) => {
+            if (!reordering || dragging === null || dragging === key) return;
+            event.preventDefault();
+            setDropTarget(key);
+          }}
+          onDragLeave={() => setDropTarget(null)}
+          onDrop={(event) => {
+            if (!reordering || dragging === null || !keys.includes(dragging))
+              return;
+            event.preventDefault();
+            if (dragging !== key)
+              onOrderChange?.(reorderAttribute(order, keys, dragging, key));
+            clearDrag();
+          }}
+        >
+          {reordering && onOrderChange && (
+            <button
+              type="button"
+              className="attribute-drag-handle"
+              aria-label={`Drag ${key}`}
+              title="Drag to reorder. You can also use the arrow buttons."
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", key);
+                setDragging(key);
+              }}
+              onDragEnd={clearDrag}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") clearDrag();
+              }}
+            >
+              <svg
+                width="12"
+                height="16"
+                viewBox="0 0 12 16"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path
+                  d="M3 3h1M8 3h1M3 8h1M8 8h1M3 13h1M8 13h1"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          )}
           <AttrRow label={key} value={formatValue(value)} />
           {reordering && onOrderChange && (
             <div className="attribute-order-actions">
