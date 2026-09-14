@@ -47,6 +47,16 @@ const ALL_VALUES_EMPTY = "All values are empty";
  *  longer describes what a median would be read from. Same string the card
  *  already prints for a stale run. */
 const STALE_LAYER_RELOADED = "stale: layer reloaded";
+/**
+ * The note `undoRun` writes onto a run it took back — and therefore the reason
+ * Style by result is off on that card (gate defect F3).
+ *
+ * ONE constant for both readings: the two guards inside `useStyleByResult` and
+ * `styleGeoLayerByAttribute` test the same note, and a string spelled twice is
+ * how a button would come to be disabled for a reason the click no longer
+ * recognises.
+ */
+const UNDONE_NOTE = "Undone";
 
 /**
  * The columns the run WROTE, with their types.
@@ -138,7 +148,7 @@ function styleGeoLayerByAttribute(
     current === null ||
     current.stale ||
     current.status !== "done" ||
-    current.note === "Undone"
+    current.note === UNDONE_NOTE
   )
     return;
   const layer = useGeoLayerStore
@@ -257,7 +267,7 @@ function useStyleByResult(runId: string | null): {
             current === null ||
             current.stale ||
             current.status !== "done" ||
-            current.note === "Undone"
+            current.note === UNDONE_NOTE
           )
             return;
 
@@ -466,11 +476,18 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
     // actions, so that one is not repeated below them.
     const styleReason = run.stale
       ? STALE_LAYER_RELOADED
-      : styleColumn === null ||
-          run.summary === null ||
-          (run.summary.nonNullByColumn[styleColumn.name] ?? 0) === 0
-        ? ALL_VALUES_EMPTY
-        : null;
+      : // An UNDONE run is the same case as a stale one and outranks empty for
+        // the same reason (gate defect F3): its values have been taken back, so
+        // the guards inside `style.start` abandon the click — a live button that
+        // opens nothing is worse than a disabled one. The record's own word is
+        // the reason, because the card already prints it as the note.
+        run.note === UNDONE_NOTE
+        ? UNDONE_NOTE
+        : styleColumn === null ||
+            run.summary === null ||
+            (run.summary.nonNullByColumn[styleColumn.name] ?? 0) === 0
+          ? ALL_VALUES_EMPTY
+          : null;
     return (
       <div className="processing-footer processing-footer--card">
         <div className="processing-card">
@@ -572,7 +589,8 @@ export function RunFooter({ run, canRun, reason, onRunAgain }: Props) {
           </div>
           {styleColumn !== null &&
             styleReason !== null &&
-            styleReason !== STALE_LAYER_RELOADED && (
+            styleReason !== STALE_LAYER_RELOADED &&
+            styleReason !== UNDONE_NOTE && (
               <p className="processing-note">{styleReason}</p>
             )}
         </div>

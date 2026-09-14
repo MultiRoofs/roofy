@@ -669,6 +669,49 @@ describe("Style by result, from the descriptor", () => {
     expect(screen.getByText("All values are empty")).toBeInTheDocument();
   });
 
+  it("DISABLES the button on an UNDONE card (F3)", () => {
+    // The gate defect: Style by result stayed live on an undone card and did
+    // nothing — the draft guard inside abandons the click silently, so the
+    // button looked functional and was inert. A STALE run is disabled with its
+    // reason as the `title`; an undone one is the same case and now reads the
+    // same way, with the card's own word for it.
+    const id = addLayer();
+    render(
+      <RunFooter
+        run={seed(doneRun({ targetLayerId: id, note: "Undone" }))}
+        canRun
+        reason={null}
+        onRunAgain={() => {}}
+      />,
+    );
+    const button = screen.getByRole("button", { name: "Style by result" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "Undone");
+    // The card already prints the note above the actions, so the muted line
+    // under them does not repeat it — exactly as for a stale run.
+    expect(screen.queryByText("All values are empty")).toBeNull();
+  });
+
+  it("keeps it live on a card whose note is NOT the Undo one (F3 stays narrow)", () => {
+    const id = addLayer();
+    render(
+      <RunFooter
+        run={seed(
+          doneRun({
+            targetLayerId: id,
+            note: "finished before the cancel arrived",
+          }),
+        )}
+        canRun
+        reason={null}
+        onRunAgain={() => {}}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Style by result" }),
+    ).not.toBeDisabled();
+  });
+
   it("opens §7.6's STYLE section on the FIRST output column, categories filled", async () => {
     // §7.6: "Style by result opens the vector layer's STYLE section with Color
     // by attribute set to the first output column (categories prefilled from
