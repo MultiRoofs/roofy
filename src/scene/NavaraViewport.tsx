@@ -1597,10 +1597,13 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
           const result = await session.ready;
           if (cancelled) return;
 
-          // Disable idle carry-over before publishing the ready view.
+          // Allow manual rotation immediately. Navara needs a nonzero spin
+          // duration for drag updates; 1 ms avoids noticeable release inertia.
           result.view.camera.options = {
-            enableSpin: false,
-            spinDuration: 0,
+            enableSpin: viewModePolicy(useViewModeStore.getState().mode)
+              .enableSpin,
+            // A zero duration also disables manual spin in Navara.
+            spinDuration: 1,
             enableTilt: viewModePolicy(useViewModeStore.getState().mode)
               .enableTilt,
           };
@@ -3602,7 +3605,8 @@ export const NavaraViewport = forwardRef<CitySceneHandle, NavaraViewportProps>(
       const policy = viewModePolicy(viewMode);
       view.camera.options = {
         enableSpin: policy.enableSpin,
-        spinDuration: 0,
+        // A zero duration also disables manual spin in Navara.
+        spinDuration: 1,
         enableTilt: policy.enableTilt,
       };
 

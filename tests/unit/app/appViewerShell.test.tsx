@@ -365,3 +365,53 @@ it("opens directly in an empty viewer with a Delft example instead of the home s
   ).toBeInTheDocument();
   expect(screen.queryByRole("dialog", { name: "Add layer" })).toBeNull();
 });
+
+it("dismisses the welcome card and keeps help available", async () => {
+  const { walkthroughStore } =
+    await import("../../../src/features/walkthrough/walkthroughStore");
+  walkthroughStore.setState({ seen: false, phase: "idle" });
+  useLayerStore.setState({ layers: [] });
+  useGeoLayerStore.setState({ layers: [] });
+  const view = render(<App persistenceStore={emptyStore} />);
+  fireEvent.click(screen.getByRole("button", { name: "Close welcome" }));
+  expect(screen.queryByRole("region", { name: "Get started" })).toBeNull();
+  view.unmount();
+  render(<App persistenceStore={emptyStore} />);
+  expect(screen.queryByRole("region", { name: "Get started" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Walkthrough help" }));
+  expect(
+    screen.getByRole("button", { name: "Start walkthrough" }),
+  ).toBeInTheDocument();
+});
+
+it("places the walkthrough sample action in the expanded layers panel", async () => {
+  const { walkthroughStore } =
+    await import("../../../src/features/walkthrough/walkthroughStore");
+  useLayerStore.setState({ layers: [] });
+  useGeoLayerStore.setState({ layers: [] });
+  walkthroughStore.getState().start();
+  render(<App persistenceStore={emptyStore} />);
+  const sample = screen.getByRole("button", { name: "Load Delft sample" });
+  expect(sample.closest('[aria-label="Layers panel"]')).not.toBeNull();
+});
+
+it("reuses a loaded Delft sample when replaying the walkthrough", async () => {
+  const { walkthroughStore } =
+    await import("../../../src/features/walkthrough/walkthroughStore");
+  useLayerStore.setState({ layers: [] });
+  useLayerStore.getState().addLayer({
+    name: "Delft",
+    model,
+    modelRef: {
+      type: "url",
+      url: "https://storage.googleapis.com/cityjson/delft.city.jsonl",
+    },
+    visible: true,
+    rules: [],
+  });
+  walkthroughStore.getState().start();
+  render(<App persistenceStore={emptyStore} />);
+  expect(
+    screen.queryByRole("button", { name: "Load Delft sample" }),
+  ).toBeNull();
+});

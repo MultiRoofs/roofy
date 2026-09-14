@@ -1,3 +1,4 @@
+import { ensureDelftLandUse } from "../features/walkthrough/delftLandUse";
 import { Walkthrough } from "../ui/walkthrough/Walkthrough";
 import {
   walkthroughStore,
@@ -288,6 +289,8 @@ export function App({
     readonly string[]
   >([]);
   const [addLayerOpen, setAddLayerOpen] = useState(false);
+  const tourIndex = useWalkthroughStore((state) => state.index);
+  const tourSeen = useWalkthroughStore((state) => state.seen);
   const tourPhase = useWalkthroughStore((state) => state.phase);
   const [restoringWorkspace, setRestoringWorkspace] = useState(false);
   /** The minted share link currently on display, or null. Non-null IS the
@@ -2008,7 +2011,9 @@ export function App({
   );
 
   const handleLoadSample = useCallback(() => {
-    void handleUrl(SAMPLE_DATA_URL);
+    void handleUrl(SAMPLE_DATA_URL).then((id) => {
+      if (id) ensureDelftLandUse();
+    });
   }, [handleUrl]);
 
   // Keep the viewport mounted across empty workspaces and workspace management.
@@ -2099,6 +2104,17 @@ export function App({
               />
             ) : (
               <LeftPanel
+                onLoadSample={
+                  tourPhase === "active" &&
+                  tourIndex === 0 &&
+                  !layers.some(
+                    (layer) =>
+                      layer.modelRef.type === "url" &&
+                      layer.modelRef.url === SAMPLE_DATA_URL,
+                  )
+                    ? handleLoadSample
+                    : undefined
+                }
                 onRequestAdd={() => setAddLayerOpen(true)}
                 addDialogOpen={addLayerOpen}
                 onAddFile={handlePickedFile}
@@ -2133,6 +2149,7 @@ export function App({
                 </p>
               )}
               {!hasWorkspace &&
+                !tourSeen &&
                 !loading &&
                 !restoringWorkspace &&
                 (tourPhase === "idle" || tourPhase === "welcome") && (
@@ -2140,6 +2157,14 @@ export function App({
                     className="empty-workspace-start"
                     aria-label="Get started"
                   >
+                    <button
+                      type="button"
+                      className="empty-workspace-close"
+                      aria-label="Close welcome"
+                      onClick={() => walkthroughStore.getState().dismiss()}
+                    >
+                      ×
+                    </button>
                     <h2>Explore Delft</h2>
                     <p>
                       Try the example city model to explore roofs, attributes
@@ -2147,7 +2172,7 @@ export function App({
                     </p>
                     <button
                       type="button"
-                      className="sample-link"
+                      className="empty-workspace-load"
                       onClick={handleLoadSample}
                     >
                       Load Delft sample
@@ -2299,6 +2324,7 @@ export function App({
 
         {!workspacePage && (
           <Walkthrough
+            externalLoadControl
             onLoadSample={handleLoadSample}
             loading={loading}
             loadError={loadError}

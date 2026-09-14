@@ -6678,3 +6678,36 @@ button.file-label:disabled {
 .empty-workspace-start button {
   margin: 0 8px 8px 0;
 }
+
+.empty-workspace-start {
+  box-sizing: border-box;
+}
+.empty-workspace-start h2 {
+  padding-right: 30px;
+}
+.empty-workspace-start button:not(.empty-workspace-close) {
+  min-height: var(--control-height);
+  padding: 0 12px;
+  font: inherit;
+  font-size: 13px;
+}
+.empty-workspace-start .empty-workspace-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  margin: 0;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font-size: 20px;
+}
+
+.left-panel-sample {
+  padding: 12px;
+}
+.left-panel-sample button {
+  min-height: var(--control-height);
+  padding: 0 12px;
+  width: 100%;
+  font-size: 13px;
+}

@@ -25,7 +25,6 @@ import {
 import type { Selection } from "../../domain/selection/types";
 import { ResizeHandle } from "../shell/ResizeHandle";
 import { SHELL_LIMITS, useShellStore } from "../shell/shellStore";
-import { SummaryView } from "../drawer/SummaryView";
 import { DataGrid } from "./DataGrid";
 import { FilterBar } from "./FilterBar";
 import { Pagination } from "./Pagination";
@@ -97,13 +96,6 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
     ),
   );
 
-  const summaryOpen = query?.drawerTab === "summary";
-  const setSummaryOpen = (open: boolean) => {
-    if (layerId !== null)
-      useQueryStore
-        .getState()
-        .setDrawerTab(layerId, open ? "summary" : "records");
-  };
   const [columnsOpen, setColumnsOpen] = useState(false);
   const columnsButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -448,30 +440,6 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
       {activeLayer !== null && (
         <div className="table-view-controls">
           <div
-            className="data-drawer-tabs"
-            role="tablist"
-            aria-label="Drawer view"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={!summaryOpen}
-              className="data-drawer-tab"
-              onClick={() => setSummaryOpen(false)}
-            >
-              Records
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={summaryOpen}
-              className="data-drawer-tab"
-              onClick={() => setSummaryOpen(true)}
-            >
-              Summary
-            </button>
-          </div>
-          <div
             className="table-record-controls"
             role="group"
             aria-label="Record controls"
@@ -519,132 +487,125 @@ export function TablePanel({ duckdbStatus, onRetryDuckDB }: TablePanelProps) {
         </div>
       )}
 
-      {summaryOpen && activeLayer !== null ? (
-        <SummaryView layer={activeLayer} query={query} table={view.table} />
-      ) : (
-        <>
-          {view.status === "ready" && query !== null && layerId !== null && (
-            <FilterBar
-              getCandidates={view.getCandidates}
-              columns={view.columns}
-              filter={query.filter}
-              // The body renders it instead when it is the reason the grid is
-              // empty — see `pageError` — so it is never said twice.
-              error={pageError ? null : view.message}
-              disabled={view.loading}
-              onChange={(filter) =>
-                useQueryStore.getState().setFilter(layerId, filter)
-              }
-              onApply={() => useQueryStore.getState().applyFilter(layerId)}
-              onClear={() => useQueryStore.getState().clearFilter(layerId)}
-            />
-          )}
+      <>
+        {view.status === "ready" && query !== null && layerId !== null && (
+          <FilterBar
+            getCandidates={view.getCandidates}
+            columns={view.columns}
+            filter={query.filter}
+            // The body renders it instead when it is the reason the grid is
+            // empty — see `pageError` — so it is never said twice.
+            error={pageError ? null : view.message}
+            disabled={view.loading}
+            onChange={(filter) =>
+              useQueryStore.getState().setFilter(layerId, filter)
+            }
+            onApply={() => useQueryStore.getState().applyFilter(layerId)}
+            onClear={() => useQueryStore.getState().clearFilter(layerId)}
+          />
+        )}
 
-          <div
-            className={`table-panel-body ${view.loading ? "table-loading" : ""}`}
-          >
-            {activeGeoLayer !== null ? (
-              activeGeoLayer.kind === "geojson" ? (
-                <GeoRecordsPanel
-                  key={activeGeoLayer.id}
-                  layer={activeGeoLayer}
-                />
-              ) : (
-                <div className="table-message">
-                  This layer has no browsable vector records.
-                </div>
-              )
-            ) : duckdbStatus.state === "initializing" ? (
-              /* BEFORE the table state, deliberately. A Retry sets the status back
+        <div
+          className={`table-panel-body ${view.loading ? "table-loading" : ""}`}
+        >
+          {activeGeoLayer !== null ? (
+            activeGeoLayer.kind === "geojson" ? (
+              <GeoRecordsPanel key={activeGeoLayer.id} layer={activeGeoLayer} />
+            ) : (
+              <div className="table-message">
+                This layer has no browsable vector records.
+              </div>
+            )
+          ) : duckdbStatus.state === "initializing" ? (
+            /* BEFORE the table state, deliberately. A Retry sets the status back
              to `initializing` while every table is still `failed` from the
              outage, and "This layer's table could not be built" over a retry
              in progress reads as a Retry that did nothing. */
-              <div className="table-message">
-                <span className="loading-spinner" />
-                <span>Starting the analytics engine…</span>
-              </div>
-            ) : engineDown ? (
-              <div className="table-message" role="alert">
-                <p>
-                  The analytics engine is not running
-                  {duckdbStatus.state === "failed"
-                    ? `: ${duckdbStatus.error}`
-                    : "."}
-                </p>
-                <button
-                  type="button"
-                  className="tb-btn table-action-btn"
-                  onClick={onRetryDuckDB}
-                >
-                  Retry
-                </button>
-              </div>
-            ) : view.status === "no-layer" ? (
-              <div className="table-message">
-                Select a layer to browse its table.
-              </div>
-            ) : view.status === "queued" || view.status === "building" ? (
-              <div className="table-message">
-                <span className="loading-spinner" />
-                <span>Building this layer's table…</span>
-              </div>
-            ) : view.status === "failed" ? (
-              <div className="table-message" role="alert">
-                This layer's table could not be built: {view.message}
-              </div>
-            ) : (
-              <>
-                {/* The FilterBar carries this too — but the bar is COLLAPSED by
+            <div className="table-message">
+              <span className="loading-spinner" />
+              <span>Starting the analytics engine…</span>
+            </div>
+          ) : engineDown ? (
+            <div className="table-message" role="alert">
+              <p>
+                The analytics engine is not running
+                {duckdbStatus.state === "failed"
+                  ? `: ${duckdbStatus.error}`
+                  : "."}
+              </p>
+              <button
+                type="button"
+                className="tb-btn table-action-btn"
+                onClick={onRetryDuckDB}
+              >
+                Retry
+              </button>
+            </div>
+          ) : view.status === "no-layer" ? (
+            <div className="table-message">
+              Select a layer to browse its table.
+            </div>
+          ) : view.status === "queued" || view.status === "building" ? (
+            <div className="table-message">
+              <span className="loading-spinner" />
+              <span>Building this layer's table…</span>
+            </div>
+          ) : view.status === "failed" ? (
+            <div className="table-message" role="alert">
+              This layer's table could not be built: {view.message}
+            </div>
+          ) : (
+            <>
+              {/* The FilterBar carries this too — but the bar is COLLAPSED by
                 default, so a DuckDB page error or a compile refusal would
                 otherwise leave a stale grid with no explanation anywhere on
                 screen. */}
-                {view.message !== null && pageError && (
-                  <div className="table-message" role="alert">
-                    {view.message}
-                  </div>
-                )}
-                {!pageError && (
-                  <DataGrid
-                    getColumnStats={view.getColumnStats}
-                    columns={visibleColumns}
-                    rows={derivedRows}
-                    sort={query?.sort ?? null}
-                    selectedIds={selectedIds}
-                    partsById={partsById}
-                    partRows={partRows}
-                    derivedColumnNames={
-                      new Set(derivedKeys.map((column) => column.name))
-                    }
-                    layerId={layerId}
-                    emptyMessage={emptyGridMessage(
-                      (query?.applied ?? null) !== null,
-                      activeLayer?.isStreaming !== true,
-                      view.unfilteredRows,
-                    )}
-                    onSort={handleSort}
-                    onReorder={reorderColumn}
-                    onRowClick={handleRowClick}
-                  />
-                )}
-              </>
-            )}
-          </div>
-
-          {view.status === "ready" && query !== null && layerId !== null && (
-            <Pagination
-              page={query.page}
-              pageSize={query.pageSize}
-              totalRows={view.totalRows}
-              unfilteredRows={view.unfilteredRows}
-              filtered={query.applied !== null}
-              onPage={(page) => useQueryStore.getState().setPage(layerId, page)}
-              onPageSize={(size) =>
-                useQueryStore.getState().setPageSize(layerId, size)
-              }
-            />
+              {view.message !== null && pageError && (
+                <div className="table-message" role="alert">
+                  {view.message}
+                </div>
+              )}
+              {!pageError && (
+                <DataGrid
+                  getColumnStats={view.getColumnStats}
+                  columns={visibleColumns}
+                  rows={derivedRows}
+                  sort={query?.sort ?? null}
+                  selectedIds={selectedIds}
+                  partsById={partsById}
+                  partRows={partRows}
+                  derivedColumnNames={
+                    new Set(derivedKeys.map((column) => column.name))
+                  }
+                  layerId={layerId}
+                  emptyMessage={emptyGridMessage(
+                    (query?.applied ?? null) !== null,
+                    activeLayer?.isStreaming !== true,
+                    view.unfilteredRows,
+                  )}
+                  onSort={handleSort}
+                  onReorder={reorderColumn}
+                  onRowClick={handleRowClick}
+                />
+              )}
+            </>
           )}
-        </>
-      )}
+        </div>
+
+        {view.status === "ready" && query !== null && layerId !== null && (
+          <Pagination
+            page={query.page}
+            pageSize={query.pageSize}
+            totalRows={view.totalRows}
+            unfilteredRows={view.unfilteredRows}
+            filtered={query.applied !== null}
+            onPage={(page) => useQueryStore.getState().setPage(layerId, page)}
+            onPageSize={(size) =>
+              useQueryStore.getState().setPageSize(layerId, size)
+            }
+          />
+        )}
+      </>
     </div>
   );
 }

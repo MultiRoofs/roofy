@@ -47,3 +47,17 @@ export function placeWalkthroughCard(
     side,
   };
 }
+
+/** Clip padded edges independently so edge-aligned panels stay aligned. */
+export function spotlightBounds(
+  target: WalkthroughRect,
+  viewport: { width: number; height: number },
+): WalkthroughRect | null {
+  const left = Math.max(0, target.left - 6);
+  const top = Math.max(0, target.top - 6);
+  const right = Math.min(viewport.width, target.left + target.width + 6);
+  const bottom = Math.min(viewport.height, target.top + target.height + 6);
+  return right > left && bottom > top
+    ? { left, top, width: right - left, height: bottom - top }
+    : null;
+}

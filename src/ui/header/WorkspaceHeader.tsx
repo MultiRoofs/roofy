@@ -1,3 +1,4 @@
+import { WalkthroughHelp } from "./WalkthroughHelp";
 /**
  * The viewer's header: the WORKSPACE's home.
  *
@@ -183,6 +184,7 @@ export function WorkspaceHeader({
         <span>Share</span>
       </button>
 
+      <WalkthroughHelp />
       <PreferencesMenu tooltip />
 
       <button

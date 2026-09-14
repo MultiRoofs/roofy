@@ -53,6 +53,7 @@ import { useLayerStore } from "../../features/layers/layerStore";
 import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
 
 export interface LeftPanelProps {
+  readonly onLoadSample?: () => void;
   readonly onRequestAdd?: () => void;
   readonly addDialogOpen?: boolean;
   /** The file and the format the user confirmed it is — see
@@ -84,6 +85,7 @@ export interface LeftPanelProps {
 const NO_ROWS: ReadonlyArray<never> = [];
 
 export function LeftPanel({
+  onLoadSample,
   onRequestAdd,
   addDialogOpen,
   onAddFile,
@@ -134,6 +136,13 @@ export function LeftPanel({
         </button>
       </div>
 
+      {onLoadSample && (
+        <div className="left-panel-sample">
+          <button type="button" disabled={loading} onClick={onLoadSample}>
+            {loading ? "Loading Delft…" : "Load Delft sample"}
+          </button>
+        </div>
+      )}
       <div className="left-panel-list">
         {empty ? (
           <p className="left-panel-empty">No layers yet</p>

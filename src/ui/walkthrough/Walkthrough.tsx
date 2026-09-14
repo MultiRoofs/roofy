@@ -1,4 +1,9 @@
-import { placeWalkthroughCard } from "./placement";
+import {
+  ensureDelftLandUse,
+  DELFT_LANDUSE_URL,
+} from "../../features/walkthrough/delftLandUse";
+import { useGeoLayerStore } from "../../features/geoLayers/geoLayerStore";
+import { placeWalkthroughCard, spotlightBounds } from "./placement";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useWalkthroughStore } from "../../features/walkthrough/walkthroughStore";
@@ -18,8 +23,8 @@ import { useSceneSheetStore } from "../../features/sceneSheet/sceneSheetStore";
 import { useShellStore } from "../shell/shellStore";
 import "./walkthrough.css";
 
-const TARGETS: Record<WalkthroughStepId, string> = {
-  load: ".sample-link, .shell-left",
+const TARGETS: Record<WalkthroughStepId, string | null> = {
+  load: ".left-panel",
   pick: ".viewport",
   inspect: ".details-panel",
   style: ".style-city",
@@ -85,25 +90,17 @@ function useSpotlight(selector: string | null) {
       );
       const bounds = target?.getBoundingClientRect();
       const next = bounds
-        ? {
-            left: Math.max(8, bounds.left - 6),
-            top: Math.max(8, bounds.top - 6),
-            width: Math.min(bounds.width + 12, window.innerWidth - 16),
-            height: Math.min(bounds.height + 12, window.innerHeight - 16),
-          }
+        ? spotlightBounds(bounds, {
+            width: window.innerWidth,
+            height: window.innerHeight,
+          })
         : null;
       setRect((old) =>
         JSON.stringify(old) === JSON.stringify(next) ? old : next,
       );
       if (document.querySelector(".scene-export-popover, .share-dialog"))
         setDialogOpen(true);
-      const matching = document.querySelector(
-        '.summary-scope button[aria-pressed="true"]',
-      );
-      if (
-        matching?.textContent?.trim() === "Matching" &&
-        document.querySelector(".summary-definition-grid")
-      )
+      if (document.querySelector(".column-stats-popover dl"))
         setMatchingSeen(true);
     };
     const schedule = () => {
@@ -131,10 +128,12 @@ function useSpotlight(selector: string | null) {
 
 export function Walkthrough({
   onLoadSample,
+  externalLoadControl = false,
   loading,
   loadError,
 }: {
   onLoadSample: () => void;
+  externalLoadControl?: boolean;
   loading: boolean;
   loadError: string | null;
 }) {
@@ -142,6 +141,23 @@ export function Walkthrough({
   const layer = useLayerStore((s) =>
     s.layers.find(
       (l) => l.modelRef.type === "url" && l.modelRef.url === DELFT_SAMPLE_URL,
+    ),
+  );
+  const landUse = useGeoLayerStore((s) =>
+    s.layers.find(
+      (item) =>
+        item.kind === "geojson" && item.config.url === DELFT_LANDUSE_URL,
+    ),
+  );
+  const joinDone = useProcessingStore((s) =>
+    s.runs.some(
+      (run) =>
+        run.toolId === "join-by-location" &&
+        run.targetLayerId === layer?.id &&
+        run.sourceLayerId === landUse?.id &&
+        run.status === "done" &&
+        !run.stale &&
+        run.note !== "Undone",
     ),
   );
   const selected = useSelectionStore((s) =>
@@ -191,7 +207,10 @@ export function Walkthrough({
     offer();
   }, [offer]);
   useEffect(() => {
+    if (active && step.id === "load")
+      useShellStore.getState().setLeftCollapsed(false);
     if (!active || !layerId) return;
+    ensureDelftLandUse();
     reveal(step.id, layerId);
     if (step.id === "sun")
       setSunStart(useSolarStore.getState().datetime.getTime());
@@ -202,7 +221,9 @@ export function Walkthrough({
     const escape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (
-        document.querySelector('[role="dialog"], .header-popover, .map-sheet')
+        document.querySelector(
+          '[role="dialog"], .header-popover, .map-sheet, .column-stats-popover',
+        )
       )
         return;
       if (
@@ -245,9 +266,9 @@ export function Walkthrough({
     style:
       layer?.colorBy === "rules" && layer.rules.some((rule) => rule.enabled),
     filter: !!query?.applied?.conditions.length,
-    stats: query?.drawerTab === "summary" && matchingSeen,
+    stats: matchingSeen,
     volume: volumeDone,
-    join: true,
+    join: !!landUse && joinDone,
     sun: shadows && datetime !== sunStart,
     share: dialogOpen,
   };
@@ -338,25 +359,32 @@ export function Walkthrough({
             className={`walkthrough-task ${done ? "is-complete" : ""}`}
             role="status"
           >
-            {done && step.id !== "join" ? "Ready to continue" : step.action}
+            {done ? "Ready to continue" : step.action}
           </p>
         )}
         {active && (step.id === "load" || missingLayer) && !layer && (
           <>
-            <button
-              className="walkthrough-primary"
-              type="button"
-              onClick={onLoadSample}
-              disabled={loading}
-            >
-              {loading ? "Loading Delft…" : "Load Delft sample"}
-            </button>
+            {(!externalLoadControl || missingLayer) && (
+              <button
+                className="walkthrough-primary"
+                type="button"
+                onClick={onLoadSample}
+                disabled={loading}
+              >
+                {loading ? "Loading Delft…" : "Load Delft sample"}
+              </button>
+            )}
             {loadError && (
               <p role="alert" className="walkthrough-error">
                 {loadError} Try loading the sample again.
               </p>
             )}
           </>
+        )}
+        {active && step.id === "join" && !landUse && (
+          <button type="button" onClick={() => ensureDelftLandUse()}>
+            Reload Delft land use
+          </button>
         )}
         {active && !missingLayer && !rect && step.id !== "load" && layer && (
           <button type="button" onClick={() => reveal(step.id, layer.id)}>
@@ -394,7 +422,7 @@ export function Walkthrough({
               >
                 Back
               </button>
-              {step.id !== "load" && step.id !== "join" && (
+              {step.id !== "load" && (
                 <button
                   type="button"
                   className="walkthrough-skip"

@@ -210,3 +210,30 @@ describe("interactive walkthrough", () => {
     expect(screen.getByRole("button", { name: "Finish" })).toBeEnabled();
   });
 });
+
+it("completes the statistics step after column statistics load", async () => {
+  addDelft();
+  walkthroughStore.setState({ phase: "active", index: 5 });
+  renderTour();
+  expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+  const stats = document.createElement("div");
+  stats.className = "column-stats-popover";
+  stats.innerHTML = "<dl><dt>Minimum</dt><dd>1</dd></dl>";
+  document.body.append(stats);
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled(),
+  );
+  stats.remove();
+});
+
+it("lets column statistics handle Escape without dismissing the guide", () => {
+  addDelft();
+  walkthroughStore.setState({ phase: "active", index: 5 });
+  renderTour();
+  const stats = document.createElement("div");
+  stats.className = "column-stats-popover";
+  document.body.append(stats);
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(walkthroughStore.getState().phase).toBe("active");
+  stats.remove();
+});

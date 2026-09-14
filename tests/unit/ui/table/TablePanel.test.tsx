@@ -781,25 +781,18 @@ describe("TablePanel columns and child records", () => {
   });
 });
 
-it("returns from Summary to Records when filter setup is requested", async () => {
+it("shows records even when a saved workspace requested the removed Summary tab", () => {
   useLayerStore.setState({ layers: [layer()] });
   useWorkspaceStore.setState({ activeLayerId: "L" });
   useLayerTableStore.setState({
     tables: { L: { state: "ready", info: TABLE } },
   });
+  useQueryStore.getState().setDrawerTab("L", "summary");
   panel();
-  fireEvent.click(screen.getByRole("tab", { name: "Summary" }));
-  expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
-  act(() => useShellStore.getState().openFilter());
-  await waitFor(() =>
-    expect(screen.getByRole("tab", { name: "Records" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    ),
-  );
+  expect(screen.queryByRole("tab", { name: "Summary" })).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Add condition" }),
+  ).toBeInTheDocument();
 });
 
 it("keeps column picker and table in the same chosen order", async () => {

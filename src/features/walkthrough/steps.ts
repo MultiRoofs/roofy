@@ -6,7 +6,7 @@ export const WALKTHROUGH_STEPS = [
     id: "load",
     chapter: 1,
     title: "Start with Delft",
-    body: "Load the example city model to explore real buildings, roofs and attributes. Your existing layers stay in the workspace.",
+    body: "Load the example city model and PDOK land-use polygons for Delft. Explore buildings, roofs and land-use attributes together.",
     action: "Load Delft sample",
   },
   {
@@ -41,8 +41,8 @@ export const WALKTHROUGH_STEPS = [
     id: "stats",
     chapter: 4,
     title: "Understand the matching buildings",
-    body: "Open Summary in the table window, then choose Matching. Compare the counts and statistics for your filtered buildings with All.",
-    action: "Open Summary and choose Matching",
+    body: "Click a statistics icon beside a column name in the table. Inspect the values for your filtered buildings.",
+    action: "Open a column’s statistics",
   },
   {
     id: "volume",
@@ -55,8 +55,8 @@ export const WALKTHROUGH_STEPS = [
     id: "join",
     chapter: 6,
     title: "Connect buildings to areas",
-    body: "Join attributes by location copies values from a second layer onto buildings using their location. This exercise needs the Delft 2D example dataset, which will be added later. You can continue now.",
-    action: "Continue without the join exercise",
+    body: "Keep the Delft city model as the target. Choose Delft land use (PDOK) as the source layer, select landCoverObservationClass, then Run to copy the matching land-use class onto buildings. The land-use layer is also available to other overlay tools.",
+    action: "Run Join attributes by location using Delft land use",
   },
   {
     id: "sun",

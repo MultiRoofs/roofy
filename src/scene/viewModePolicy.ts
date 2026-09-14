@@ -67,7 +67,7 @@ export interface ViewModePolicy {
 
 const POLICIES: Record<ViewMode, ViewModePolicy> = {
   "3d": {
-    enableSpin: false,
+    enableSpin: true,
     enableTilt: true,
     minPitchDeg: MIN_PITCH_DEG,
     maxPitchDeg: MAX_PITCH_DEG,
@@ -76,7 +76,7 @@ const POLICIES: Record<ViewMode, ViewModePolicy> = {
     tiltButtons: true,
   },
   "2.5d": {
-    enableSpin: false,
+    enableSpin: true,
     enableTilt: false,
     minPitchDeg: TILTED_PITCH_DEG,
     maxPitchDeg: TILTED_PITCH_DEG,
@@ -85,7 +85,7 @@ const POLICIES: Record<ViewMode, ViewModePolicy> = {
     tiltButtons: true,
   },
   "2d": {
-    enableSpin: false,
+    enableSpin: true,
     enableTilt: false,
     minPitchDeg: PLAN_PITCH_DEG,
     maxPitchDeg: PLAN_PITCH_DEG,

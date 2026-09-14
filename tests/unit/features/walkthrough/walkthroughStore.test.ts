@@ -57,3 +57,32 @@ describe("walkthrough lifecycle", () => {
     expect(store.getState().phase).toBe("active");
   });
 });
+
+it("remembers dismissal and restores unfinished progress for explicit resume", () => {
+  let seen = false;
+  let progress: number | null = null;
+  const persistence = {
+    hasSeen: () => seen,
+    markSeen: () => {
+      seen = true;
+    },
+    readProgress: () => progress,
+    writeProgress: (index: number | null) => {
+      progress = index;
+    },
+  };
+  const first = createWalkthroughStore(persistence);
+  first.getState().start();
+  first.getState().next();
+  first.getState().dismiss();
+  expect(first.getState().seen).toBe(true);
+  const returning = createWalkthroughStore(persistence);
+  expect(returning.getState().seen).toBe(true);
+  returning.getState().offer();
+  expect(returning.getState().phase).toBe("idle");
+  returning.getState().resume();
+  expect(returning.getState()).toMatchObject({ phase: "active", index: 1 });
+  for (let i = 0; i < 20; i++) returning.getState().next();
+  expect(progress).toBeNull();
+  expect(returning.getState().canResume).toBe(false);
+});

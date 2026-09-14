@@ -541,23 +541,24 @@ describe("NavaraViewport view modes and flyTo", () => {
     await mount();
     cameraThrows = false;
     fireView("postRender");
+    expect(cameraOptions[0]?.enableSpin).toBe(true);
     expect(cameraOptions.at(-1)).toEqual({
-      enableSpin: false,
-      spinDuration: 0,
+      enableSpin: true,
+      spinDuration: 1,
       enableTilt: true,
     });
 
     act(() => useViewModeStore.getState().setViewMode("2.5d"));
     expect(cameraOptions.at(-1)).toEqual({
-      enableSpin: false,
-      spinDuration: 0,
+      enableSpin: true,
+      spinDuration: 1,
       enableTilt: false,
     });
 
     act(() => useViewModeStore.getState().setViewMode("2d"));
     expect(cameraOptions.at(-1)).toEqual({
-      enableSpin: false,
-      spinDuration: 0,
+      enableSpin: true,
+      spinDuration: 1,
       enableTilt: false,
     });
   });
@@ -609,8 +610,8 @@ describe("NavaraViewport view modes and flyTo", () => {
     expect(flyTo).not.toHaveBeenCalled();
     // The controller flags ARE applied, though — the mode has to be real.
     expect(cameraOptions.at(-1)).toEqual({
-      enableSpin: false,
-      spinDuration: 0,
+      enableSpin: true,
+      spinDuration: 1,
       enableTilt: false,
     });
   });
@@ -625,8 +626,8 @@ describe("NavaraViewport view modes and flyTo", () => {
     act(() => useViewModeStore.getState().setViewMode("3d"));
     expect(flyTo).not.toHaveBeenCalled();
     expect(cameraOptions.at(-1)).toEqual({
-      enableSpin: false,
-      spinDuration: 0,
+      enableSpin: true,
+      spinDuration: 1,
       enableTilt: true,
     });
   });

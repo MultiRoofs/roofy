@@ -29,3 +29,20 @@ describe("walkthrough placement", () => {
     expect(p.top + 350).toBeLessThanOrEqual(556);
   });
 });
+
+it("clips spotlight padding to the viewport without shifting the target", async () => {
+  const { spotlightBounds } =
+    await import("../../../src/ui/walkthrough/placement");
+  expect(
+    spotlightBounds(
+      { left: 0, top: 40, width: 300, height: 1500 },
+      { width: 1179, height: 1575 },
+    ),
+  ).toEqual({ left: 0, top: 34, width: 306, height: 1512 });
+  expect(
+    spotlightBounds(
+      { left: 1000, top: 1500, width: 300, height: 200 },
+      { width: 1179, height: 1575 },
+    ),
+  ).toEqual({ left: 994, top: 1494, width: 185, height: 81 });
+});
