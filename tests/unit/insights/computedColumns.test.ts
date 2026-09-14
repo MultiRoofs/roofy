@@ -144,6 +144,55 @@ describe("typeMigrations", () => {
   });
 });
 
+describe("migrationRefusal", () => {
+  // S2 round 2: a DROP takes the column away from EVERY row, so a re-type on a
+  // SCOPED run would clear the values the run never measured while the model
+  // attributes and the "the rest from …" provenance still claim them. The type
+  // change is therefore all-or-nothing, and a scoped one is refused.
+  it("names the column, its CURRENT type and the scope that would be allowed", () => {
+    expect(
+      cc.migrationRefusal(
+        [{ name: "zone_name", type: "VARCHAR" }],
+        [
+          { name: "id", type: "VARCHAR" },
+          { name: "zone_name", type: "DOUBLE" },
+        ],
+      ),
+    ).toBe(
+      "The existing zone_name is DOUBLE; run on All buildings to change its type",
+    );
+  });
+
+  it("names the TABLE's spelling, not the run's", () => {
+    // The same rule `typeMigrations` matches by, and the same reason the
+    // "belongs to the source data" refusal names the table's spelling: that is
+    // the column the user will go and look at.
+    expect(
+      cc.migrationRefusal(
+        [{ name: "ZONE_name", type: "VARCHAR" }],
+        [{ name: "zone_name", type: "DOUBLE" }],
+      ),
+    ).toBe(
+      "The existing zone_name is DOUBLE; run on All buildings to change its type",
+    );
+  });
+
+  it("is silent when every replaced column keeps its type", () => {
+    expect(
+      cc.migrationRefusal(
+        [
+          { name: "a", type: "DOUBLE" },
+          { name: "b", type: "BOOLEAN" },
+        ],
+        [
+          { name: "a", type: "DOUBLE" },
+          { name: "c", type: "VARCHAR" },
+        ],
+      ),
+    ).toBe(null);
+  });
+});
+
 describe("writeComputedColumns", () => {
   it("issues backup, add, update inside one transaction and registers the rows", async () => {
     const calls: string[] = [];

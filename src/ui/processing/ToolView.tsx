@@ -61,7 +61,8 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
     (f.runReason === f.prefixError ||
       f.runReason === f.paramsError ||
       f.runReason === f.nameError ||
-      f.runReason === f.destinationReason)
+      f.runReason === f.destinationReason ||
+      f.runReason === f.typeReason)
       ? null
       : f.runReason;
   // Precedence, explicit: while THIS form's run waits in the queue, the queue
@@ -420,32 +421,43 @@ export function ToolView({ toolId }: { readonly toolId: ToolId }) {
         {/* §6: for This layer the warning lists what is on the TARGET; for New
             layer it is scoped to the copy, and only the INHERITED computed
             columns are replaceable — a collision with a source attribute is
-            still the prefix error above. */}
-        {f.draft.destination === "new"
-          ? f.inherited.length > 0 &&
-            f.prefixError === null && (
-              <p className="processing-warning">
-                <span aria-hidden="true">⚠ </span>
-                <span>
-                  {plural(
-                    f.inherited.length,
-                    "inherited computed column",
-                    "inherited computed columns",
-                  )}{" "}
-                  will be replaced in the new layer
-                </span>
-              </p>
-            )
-          : f.existing.length > 0 &&
-            f.prefixError === null && (
-              <p className="processing-warning">
-                <span aria-hidden="true">⚠ </span>
-                <span>
-                  {f.existing.length} of these columns exist; they will be
-                  replaced.
-                </span>
-              </p>
-            )}
+            still the prefix error above.
+
+            S2: a REPLACEMENT that would change a column's type is refused
+            unless the run covers every row of it, and this is the slot that
+            talks about replacement — so the refusal takes the warning's PLACE
+            rather than appearing beside it. */}
+        {f.typeReason !== null ? (
+          <p className="processing-error" role="alert">
+            {f.typeReason}
+          </p>
+        ) : f.draft.destination === "new" ? (
+          f.inherited.length > 0 &&
+          f.prefixError === null && (
+            <p className="processing-warning">
+              <span aria-hidden="true">⚠ </span>
+              <span>
+                {plural(
+                  f.inherited.length,
+                  "inherited computed column",
+                  "inherited computed columns",
+                )}{" "}
+                will be replaced in the new layer
+              </span>
+            </p>
+          )
+        ) : (
+          f.existing.length > 0 &&
+          f.prefixError === null && (
+            <p className="processing-warning">
+              <span aria-hidden="true">⚠ </span>
+              <span>
+                {f.existing.length} of these columns exist; they will be
+                replaced.
+              </span>
+            </p>
+          )
+        )}
         {/* §6: "Extension note when the tool's extension is not yet loaded" —
             the same sentence the catalogue's chip shows as its tooltip, here as
             a line the user does not have to hover to read. */}

@@ -313,6 +313,101 @@ describe("the OUTPUT column list, typed (spec §7)", () => {
     ).toBeInTheDocument();
   });
 
+  it("refuses a SCOPED re-type in the replace slot, and Run with it (S2)", () => {
+    // The head refuses a type change that does not cover the whole column, so
+    // the form says it BEFORE the user queues a run that cannot succeed —
+    // in the slot that would otherwise read "1 of these columns exist".
+    vi.mocked(useLayerCounts).mockReturnValue({
+      all: 6,
+      matching: null,
+      selected: 2,
+      loading: false,
+      message: null,
+    });
+    const id = addCityLayer("Delft", true);
+    useWorkspaceStore.getState().setActiveLayerId(id);
+    useLayerTableStore.setState({
+      tables: {
+        ...useLayerTableStore.getState().tables,
+        [id]: {
+          state: "ready",
+          info: {
+            ...readyTableInfo(true),
+            // An earlier run left it VARCHAR; Height from extent declares
+            // DOUBLE.
+            columns: [
+              { name: "extent_height_m", type: "VARCHAR", kind: "scalar" },
+            ],
+          },
+        },
+      },
+    });
+    useComputedColumnStore
+      .getState()
+      .setProvenance(id, "extent_height_m", PROVENANCE);
+    render(<ToolView toolId="height-from-extent" />);
+    // Scope All covers the whole column, so the re-type is allowed …
+    expect(
+      screen.getByText("1 of these columns exist; they will be replaced."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run" })).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole("radio", { name: /Selected 2/ }));
+    // … and Selected does not.
+    expect(
+      screen.getByText(
+        "The existing extent_height_m is VARCHAR; run on All buildings to change its type",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("1 of these columns exist; they will be replaced."),
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    // Said ONCE: the sentence is already on screen, so the footer does not
+    // repeat it (the rule the prefix and name errors follow).
+    expect(
+      screen.getAllByText(
+        "The existing extent_height_m is VARCHAR; run on All buildings to change its type",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("leaves a SCOPED SAME-typed replacement alone (S2)", () => {
+    // The narrowness: only a TYPE change is all-or-nothing.
+    vi.mocked(useLayerCounts).mockReturnValue({
+      all: 6,
+      matching: null,
+      selected: 2,
+      loading: false,
+      message: null,
+    });
+    const id = addCityLayer("Delft", true);
+    useWorkspaceStore.getState().setActiveLayerId(id);
+    useLayerTableStore.setState({
+      tables: {
+        ...useLayerTableStore.getState().tables,
+        [id]: {
+          state: "ready",
+          info: {
+            ...readyTableInfo(true),
+            columns: [
+              { name: "extent_height_m", type: "DOUBLE", kind: "scalar" },
+            ],
+          },
+        },
+      },
+    });
+    useComputedColumnStore
+      .getState()
+      .setProvenance(id, "extent_height_m", PROVENANCE);
+    render(<ToolView toolId="height-from-extent" />);
+    fireEvent.click(screen.getByRole("radio", { name: /Selected 2/ }));
+    expect(
+      screen.getByText("1 of these columns exist; they will be replaced."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run" })).not.toBeDisabled();
+  });
+
   it("names the TABLE's spelling when a typed column collides with the file", () => {
     // §6, verbatim: "'height' belongs to the source data; choose another
     // prefix" — and the spelling in the message is the table's, which is now

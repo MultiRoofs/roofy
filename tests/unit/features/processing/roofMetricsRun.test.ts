@@ -76,6 +76,16 @@ let gate: { needle: string; promise: Promise<void> } | null = null;
 let failing: string | null = null;
 /** The columns the fake database holds, tracked from the ALTERs it is sent. */
 let liveColumns: string[] = ["id", "feature_id"];
+/**
+ * The type each live column was ADDED with.
+ *
+ * A DESCRIBE reports the type a column holds, and S2's rule reads it: a run
+ * declaring DOUBLE over a column the fake called VARCHAR would look like a
+ * type MIGRATION and be refused at the head. The fake therefore records what
+ * the ALTER actually said.
+ */
+let liveColumnTypes = new Map<string, string>();
+let typesAtBegin: Map<string, string> | null = null;
 /** Tables `adoptLayerTable` was handed, by layer id. */
 const adopted = new Map<string, unknown>();
 let mockTableCounter = 100;
@@ -144,22 +154,39 @@ vi.mock("../../../../src/insights/duckdb", () => {
     // that: the ROLLBACK is what takes the added columns (and the backup
     // table) away again. A fake that kept them would let a broken write look
     // clean.
-    if (statement === "BEGIN TRANSACTION") columnsAtBegin = [...liveColumns];
+    if (statement === "BEGIN TRANSACTION") {
+      columnsAtBegin = [...liveColumns];
+      typesAtBegin = new Map(liveColumnTypes);
+    }
     if (statement === "ROLLBACK" && columnsAtBegin !== null) {
       liveColumns = columnsAtBegin;
       columnsAtBegin = null;
+      if (typesAtBegin !== null) liveColumnTypes = typesAtBegin;
+      typesAtBegin = null;
     }
-    if (statement === "COMMIT") columnsAtBegin = null;
+    if (statement === "COMMIT") {
+      columnsAtBegin = null;
+      typesAtBegin = null;
+    }
     // The registry's column list is what decides CREATE vs REPLACE on the next
     // run, so the fake database has to actually change shape.
     const added =
-      /^ALTER TABLE "[^"]+" ADD COLUMN IF NOT EXISTS "([^"]+)"/.exec(statement);
-    if (added?.[1] && !liveColumns.includes(added[1]))
+      /^ALTER TABLE "[^"]+" ADD COLUMN IF NOT EXISTS "([^"]+)" (.+)$/.exec(
+        statement,
+      );
+    if (added?.[1] && !liveColumns.includes(added[1])) {
       liveColumns.push(added[1]);
+      // `IF NOT EXISTS` is a NO-OP on a column that already exists, TYPE
+      // included, so the type is recorded only when the column is created.
+      if (added[2]) liveColumnTypes.set(added[1], added[2]);
+    }
     const dropped = /^ALTER TABLE "[^"]+" DROP COLUMN IF EXISTS "([^"]+)"/.exec(
       statement,
     );
-    if (dropped?.[1]) liveColumns = liveColumns.filter((c) => c !== dropped[1]);
+    if (dropped?.[1]) {
+      liveColumns = liveColumns.filter((c) => c !== dropped[1]);
+      liveColumnTypes.delete(dropped[1]);
+    }
     if (statement.includes("COUNT(DISTINCT")) {
       return { ok: true as const, columns: ["n"], rows: [{ n: featureTotal }] };
     }
@@ -243,7 +270,7 @@ vi.mock("../../../../src/insights/layerTables", async () => {
         ...tableInfo,
         columns: liveColumns.map((name) => ({
           name,
-          type: "VARCHAR",
+          type: liveColumnTypes.get(name) ?? "VARCHAR",
           kind: "scalar" as const,
         })),
       };
@@ -481,6 +508,8 @@ beforeEach(() => {
   gate = null;
   failing = null;
   liveColumns = ["id", "feature_id"];
+  liveColumnTypes = new Map();
+  typesAtBegin = null;
   adopted.clear();
   mockTableCounter = 100;
   columnsAtBegin = null;

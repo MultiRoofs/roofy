@@ -981,6 +981,110 @@ describe("a run over a column an earlier run wrote", () => {
     expect(restore).toBeGreaterThan(undoAdd);
   });
 
+  it("refuses a SCOPED re-type and leaves all three stories alone (S2)", async () => {
+    // The migration DROPs the column, which takes its values from EVERY row —
+    // so on a subset it would clear the buildings this run never measured while
+    // their model attributes and the "the rest from …" provenance still hold
+    // the old values. A type change is all-or-nothing; the head refuses.
+    featureTotal = 3;
+    scopeRows = [{ id: "a", f: "a" }];
+    liveColumns = ["id", "feature_id", "extent_height_m"];
+    liveColumnTypes = new Map([["extent_height_m", "VARCHAR"]]);
+    computedAlready("extent_height_m");
+    tableInfo = {
+      ...freshTable(),
+      columns: liveColumns.map((name) => ({
+        name,
+        type: liveColumnTypes.get(name) ?? "VARCHAR",
+        kind: "scalar" as const,
+      })),
+    };
+    writeHeight();
+    useSelectionStore
+      .getState()
+      .selectMany([{ kind: "object", layerId: "L1", objectId: "a" }]);
+    const id = submitRun(request({ scope: "selected" }));
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
+    expect(runById(id)?.error).toBe(
+      "The existing extent_height_m is VARCHAR; run on All buildings to change its type",
+    );
+    // Nothing was written: no transaction, no schema change, no values.
+    expect(
+      sql.filter(
+        (statement) =>
+          statement.startsWith("BEGIN") ||
+          statement.startsWith("ALTER TABLE") ||
+          statement.startsWith("UPDATE") ||
+          statement.startsWith('CREATE TABLE "__undo_'),
+      ),
+    ).toEqual([]);
+    // The column is the type it was …
+    expect(
+      tableInfo.columns.find((c) => c.name === "extent_height_m")?.type,
+    ).toBe("VARCHAR");
+    // … the model never heard of this run …
+    expect(attributesOf("a")).toEqual({});
+    // … and the earlier run still owns the column.
+    expect(provenanceOf("L1", "extent_height_m")?.runId).toBe("run_0");
+  });
+
+  it("lets a SCOPED replacement through when the type does not change", async () => {
+    // The narrowness of the refusal above: a same-typed replacement writes the
+    // scoped rows and backs up exactly those, which is what it always did.
+    featureTotal = 3;
+    scopeRows = [{ id: "a", f: "a" }];
+    liveColumns = ["id", "feature_id", "extent_height_m"];
+    liveColumnTypes = new Map([["extent_height_m", "DOUBLE"]]);
+    computedAlready("extent_height_m");
+    tableInfo = {
+      ...freshTable(),
+      columns: liveColumns.map((name) => ({
+        name,
+        type: liveColumnTypes.get(name) ?? "VARCHAR",
+        kind: "scalar" as const,
+      })),
+    };
+    writeHeight();
+    useSelectionStore
+      .getState()
+      .selectMany([{ kind: "object", layerId: "L1", objectId: "a" }]);
+    const id = submitRun(request({ scope: "selected" }));
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    expect(sql).toContain(
+      `CREATE TABLE "__undo_${id}" AS SELECT "id", "extent_height_m" FROM "layer_1" WHERE "id" IN ('a')`,
+    );
+    expect(sql.some((statement) => statement.includes("DROP COLUMN"))).toBe(
+      false,
+    );
+  });
+
+  it("allows the re-type when the SCOPE covers every feature (S2)", async () => {
+    // "Scope All, or the scoped ids equal the whole table": a filter that
+    // matches everything is the whole column, so the migration is honest.
+    featureTotal = 1;
+    scopeRows = [{ id: "a", f: "a" }];
+    liveColumns = ["id", "feature_id", "extent_height_m"];
+    liveColumnTypes = new Map([["extent_height_m", "VARCHAR"]]);
+    computedAlready("extent_height_m");
+    tableInfo = {
+      ...freshTable(),
+      columns: liveColumns.map((name) => ({
+        name,
+        type: liveColumnTypes.get(name) ?? "VARCHAR",
+        kind: "scalar" as const,
+      })),
+    };
+    writeHeight();
+    useSelectionStore
+      .getState()
+      .selectMany([{ kind: "object", layerId: "L1", objectId: "a" }]);
+    const id = submitRun(request({ scope: "selected" }));
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    expect(sql).toContain(
+      'ALTER TABLE "layer_1" DROP COLUMN IF EXISTS "extent_height_m"',
+    );
+  });
+
   it("writes a differently-cased run under the column's own spelling", async () => {
     // DuckDB matched `EXTENT_height_m` to the column run 1 created and wrote
     // the same values; everything app-side keyed on the TYPED spelling instead

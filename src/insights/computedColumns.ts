@@ -83,6 +83,42 @@ export function typeMigrations(
   return out;
 }
 
+/**
+ * §6.1's refusal for a re-type the run cannot carry out honestly — S2, round 2.
+ * **[adapted copy A20]**, and the plan's copy table has no sentence for it.
+ *
+ * A migration DROPs the column and re-adds it, which takes its values away
+ * from EVERY row of the table and not only from the rows in scope. On a scoped
+ * run that leaves the out-of-scope buildings NULL in the database while the
+ * model attributes the earlier run published still hold their values and the
+ * provenance still reads "312 of 1,115 in this run; the rest from …" — three
+ * representations of one column telling three different stories. A partial
+ * migration is therefore not allowed at all: the run is refused, and the
+ * sentence says the one scope that CAN change a column's type.
+ *
+ * `existingColumns` is the TABLE's own column list (`ColumnInfo` satisfies it),
+ * because the sentence names the table's spelling and DuckDB's own type — the
+ * two things the user will go and look at. The DECISION is `typeMigrations`,
+ * so the refusal and the write cannot come to disagree about what a migration
+ * is.
+ *
+ * `null` when nothing would migrate, which is every same-typed replacement.
+ */
+export function migrationRefusal(
+  columns: ReadonlyArray<OutputColumn>,
+  existingColumns: ReadonlyArray<ExistingColumn>,
+): string | null {
+  const types = new Map(
+    existingColumns.map((c) => [c.name.toLowerCase(), c.type]),
+  );
+  const [first] = typeMigrations(columns, types);
+  if (first === undefined) return null;
+  const spelled = existingColumns.find(
+    (c) => c.name.toLowerCase() === first.name.toLowerCase(),
+  );
+  return `The existing ${spelled?.name ?? first.name} is ${first.type}; run on All buildings to change its type`;
+}
+
 function idList(ids: ReadonlyArray<string>): string {
   return ids.map((id) => quoteLiteral(id)).join(", ");
 }

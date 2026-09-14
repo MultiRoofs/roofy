@@ -29,6 +29,7 @@ import { geoRecords } from "../../features/geoLayers/geoRecords";
 import { useLayerCounts } from "../table/useLayerCounts";
 import {
   computedColumnsOf,
+  migrationRefusal,
   useComputedColumnStore,
 } from "../../insights/computedColumns";
 import {
@@ -506,6 +507,31 @@ export function useToolForm(toolId: ToolId) {
   const sourceCollisions = existing
     .filter((c) => !computedLower.has(c.name.toLowerCase()))
     .map((c) => onTable.get(c.name.toLowerCase()) ?? c.name);
+  // The scope's own count, needed by S2's rule below as well as by its reason.
+  const scopeCount =
+    draft.scope === "all"
+      ? counts.all
+      : draft.scope === "matching"
+        ? counts.matching
+        : counts.selected;
+
+  // S2, round 2: the head refuses a REPLACEMENT that would change a column's
+  // type unless the run covers every row of it (the migration DROPs the column,
+  // which takes its values from the whole table). The form says so first, in
+  // the slot that would otherwise read "1 of these columns exist".
+  //
+  // Only for a CITY target writing to THIS layer: a vector target's values land
+  // on feature properties, which have no schema to migrate, and a New-layer
+  // run's table is CUT to the scope, so every row of the copy is in it.
+  const wholeColumn =
+    draft.scope === "all" ||
+    (typeof scopeCount === "number" &&
+      typeof counts.all === "number" &&
+      scopeCount === counts.all);
+  const typeReason =
+    vectorTargeted || draft.destination === "new" || wholeColumn
+      ? null
+      : migrationRefusal(columns, cityTable === null ? [] : cityTable.columns);
   const prefixError = !PREFIX_RE.test(draft.prefix)
     ? "Use letters, digits and underscores, starting with a letter"
     : sourceCollisions.length > 0
@@ -579,12 +605,6 @@ export function useToolForm(toolId: ToolId) {
   const sourceReason =
     sourceOptions.find((o) => o.id === sourceLayerId)?.reason ?? null;
 
-  const scopeCount =
-    draft.scope === "all"
-      ? counts.all
-      : draft.scope === "matching"
-        ? counts.matching
-        : counts.selected;
   const scopeReason =
     draft.scope === "matching" && noFilter
       ? "No filter applied"
@@ -608,7 +628,11 @@ export function useToolForm(toolId: ToolId) {
       paramsError ??
       destinationReason ??
       nameError ??
-      scopeReason);
+      scopeReason ??
+      // LAST: a scope the user has not filled in yet ("Nothing selected on
+      // this layer") is the reason to give for an empty Selected, not a
+      // sentence about a type that the same empty scope produced.
+      typeReason);
   const latestRun =
     runs.find(
       (r) => r.toolId === toolId && r.targetLayerId === targetLayerId,
@@ -659,6 +683,7 @@ export function useToolForm(toolId: ToolId) {
     destinationReason,
     prefixError,
     paramsError,
+    typeReason,
     extensionNote,
     workloadNote,
     eligibility,

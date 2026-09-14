@@ -44,6 +44,7 @@ import {
 import { quoteIdent } from "../../insights/sql";
 import {
   computedColumnsOf,
+  migrationRefusal,
   typeMigrations,
   undoComputedColumns,
   type ExistingColumn,
@@ -1346,6 +1347,38 @@ async function execute(
         patch(id, { status: "cancelled", phase: null, elapsedMs: elapsed() });
       }
       return;
+    }
+    // S2, round 2: a REPLACEMENT that would change the column's TYPE is only
+    // allowed when the run covers every row of it.
+    //
+    // The write migrates a re-typed column by DROPPING it and re-adding it, and
+    // a DROP takes the values from the whole table — so on a subset the rows
+    // this run never measured would be NULL in the database while the model
+    // attributes and the "the rest from <earlier tool>" provenance still held
+    // their old values. There is no honest partial migration to write (a DOUBLE
+    // cannot live in a BOOLEAN column), so the run is refused and the sentence
+    // names the one scope that CAN do it.
+    //
+    // It sits HERE rather than beside the other pre-flight refusals because
+    // "covers every row" is not knowable until the scope is resolved: `all` is
+    // the ruling's own first clause, and a filter or a selection that happens
+    // to name every feature is the second. A NEW-layer run is exempt: its table
+    // is CUT to the scope, so every row of the copy is in it by construction.
+    if (target.kind === "city" && request.destination !== "new") {
+      const wholeColumn =
+        request.scope === "all" || scope.count === scope.total;
+      const refusal = wholeColumn
+        ? null
+        : migrationRefusal(request.columns, target.table.columns);
+      if (refusal !== null) {
+        patch(id, {
+          status: "failed",
+          phase: null,
+          error: refusal,
+          elapsedMs: elapsed(),
+        });
+        return;
+      }
     }
     if (tool.sourceKind === "vector") {
       // §6.1's second phase, for the other kind of source — ENTERED ABOVE,
