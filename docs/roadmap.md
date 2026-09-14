@@ -657,11 +657,16 @@ of the workspace — the saved snapshot and the share link — omit it, with the
 active-layer index repointed at the filtered list. A derived layer dropped from a
 SHARE link gets no notice: §8 words that sentence for Save only.
 
-Also closed, all carried from 13.1 and 13.2: every engine await now settles when
-the worker dies — the race moved INTO `duckdb.ts`'s own primitives, so the export
-dialog, the layer counts, the grid query, the map-filter sync, the Stats tab and
-the result card's median return a message instead of hanging, with no call-site
-edit; `retryEngine` now checks the engine generation across its boot; `undoRun`
+Also closed, all carried from 13.1 and 13.2: every await on one of `duckdb.ts`'s
+SIX raced primitives now settles when the worker dies — the race moved INTO the
+primitives, so the export dialog, the layer counts, the grid query, the
+map-filter sync, the Stats tab and the result card's median all stop waiting
+instead of hanging, with no call-site edit. What each of them then SHOWS differs
+and is the call site's own business: the export dialog and the median report the
+engine's sentence, while the map-filter sync clears the filter and the Stats tab
+simply stops waiting. Two awaits are deliberately still outside the race and are
+in the carried list below. `retryEngine` now checks the engine generation across
+its boot; `undoRun`
 no longer publishes a restore whose database is gone; rule drafts rotate an
 eight-colour palette and no longer set `Color by = Rules` before the user presses
 Save (at Save a result draft switches the mode from ANY mode, while a rule typed
@@ -677,6 +682,32 @@ worker is contained but still not recovered from — are in the carried list bel
 Browser acceptance is the milestone gate's own record:
 `scripts/smoke/processing-m3.md`. The M13.3 seams are in
 `docs/architecture-notes.md` ("Processing toolbox seam … M13.3 (2026-09-13)").
+
+The gate's own review found five things the milestone then fixed, and four of
+them change what a run computes. The all-scope FOOTPRINT reread is restricted to
+the layer table's own row ids, so a source file that gained buildings cannot
+reach §7.6's per-area counts with features the layer never had. A replaced
+computed column whose DECLARED TYPE differs is migrated inside the write's
+transaction (the whole column backed up, dropped and re-added), and Undo puts the
+original type back before restoring the values. §7.5's and §7.6's area tools drop
+the features of a MIXED layer that are not areas, counted under their own skip
+cause, so a Join cannot pick a coincident point as an area and an Aggregate never
+writes a building count onto one. And the distance join is bounded: candidates
+are prefiltered by the building's proxy box grown by the limit, and the source's
+properties are read only for the nearest candidate. Measure solids also guards
+`ST_3DSurfaceArea` on the validation report's degenerate-face count — it RAISES
+on such a solid and one row used to abort a whole Delft LoD 2.2 run.
+
+Three smaller gate findings closed with it: a caveat or skip cause now reads
+singular at a count of one ("1 invalid solid (no volume)", not "1 invalid
+solids"); Style by result is DISABLED on an undone card, where it was live and
+inert; and a VECTOR layer taking the focus no longer clears a CITY layer's
+selection, which is what made §10.11's "Selected" Aggregate scope unreachable
+through the UI (§6: changing the target does not change what a run is scoped to).
+Two user-visible strings are new and have no row in the plan's copy table —
+`solids with degenerate faces (no area)` and `<n> features skipped: not an area`,
+both written to §7.2's and §7.5's own patterns — and are proposed as adapted copy
+A18 and A19.
 
 Carried to M4 — things a user can notice today:
 
@@ -700,16 +731,20 @@ Carried to M4 — things a user can notice today:
   and every tool stays disabled until the page is reloaded. What 13.3 fixed is
   that nothing HANGS on that death any more, not that the session comes back.
   Accepted as a deviation from §6.1's promise that Retry rebuilds tables, first
-  in M2 and again here.
+  in M2 and again here. What 13.3 fixed is that no await on one of the six raced
+  primitives hangs on that death; the two below still can.
 - **Two engine awaits are still unraced against that death**:
-  `queryParquetBuffer`'s VFS registration and read, and `ensureExtension`'s
-  in-flight INSTALL/LOAD. Both sit outside the six primitives the race covers, so
-  a parquet read or an extension download caught by a worker death still never
-  settles.
+  `queryParquetBuffer`'s VFS REGISTRATION and CLEANUP (its query itself delegates
+  to the raced `queryDuckDB`), and `ensureExtension`'s in-flight INSTALL/LOAD.
+  Both sit outside the six primitives the race covers, so a parquet read or an
+  extension download caught by a worker death still never settles.
 - **A run over scope "All" builds an unbounded `IN (…)` list of contributor ids**
   — on the solids path and on the cross-layer footprint path. Watched at the
   milestone gate on the Delft sample; pushing contributor selection into SQL is
-  the fix if it bites a 100k-feature layer.
+  the fix if it bites a 100k-feature layer. The same gate MEASURED it on 1,115
+  buildings: a 40,830-character measure statement and a 78,204-character write,
+  both planned in well under a second, so nothing observed argues for doing it
+  now.
 - **Removing a layer does not clear its computed-column provenance** — only the
   rebuild path calls `clearLayer`, so the session store keeps provenance for a
   layer that is gone. Pre-existing, not introduced by the toolbox.

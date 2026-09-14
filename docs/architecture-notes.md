@@ -414,6 +414,31 @@ destination, and the engine-death and Style-by-result threads 13.1 and 13.2
 left on the carried list. Each seam below is a decision with a cost if it is
 wrong, not a detail.
 
+**Four seams the milestone's own review moved, and what each one now promises.**
+(1) THE SCOPED REREAD: `buildProxySql`'s footprint arm restricts the reader to
+the LAYER TABLE's own ids on scope "All" too — as a subquery, not a 100k-id
+literal — because §6.1's id join is one-way (it asks only whether every id it
+requested still comes back), so a source file that GAINED buildings would
+otherwise reach §7.6's per-area counts with features the layer never had.
+(2) THE TYPED REPLACEMENT: `ALTER TABLE … ADD COLUMN IF NOT EXISTS` is a no-op on
+an existing column, TYPE included, so `typeMigrations` names every replaced column
+whose declared type differs and the write DROPS and re-adds it inside its own
+transaction; the backup then covers the WHOLE column, because a drop takes every
+row's value and not only the scoped ones, and Undo puts the original type back
+before restoring. A derived copy's INHERITED columns go through the same path
+(`existingTypes` is wider than `existing` for exactly that reason).
+(3) POLYGON-ONLY ELIGIBILITY: "Needs areas (polygons)" stays a statement about a
+layer with NO polygon in it — one polygon makes a MIXED layer eligible — and the
+execution preflight then drops the features that are not areas
+(`reprojectGeoLayer(…, { areasOnly: true })`), counted under their own skip cause.
+§7.6's "every target feature is written" gives the dropped ones §6.2's NULL, so no
+point is ever written a building count.
+(4) THE BOUNDED DISTANCE JOIN: candidates are prefiltered by the building proxy's
+own box grown by the limit (an extent test, computed once per building) and the
+source's `fid`/`props` are joined back only after the nearest candidate has been
+picked, so the partitioned sort carries a feature key, an index and a distance
+and nothing else. `ST_Distance_GEOS` and the source-order tie rule are unchanged.
+
 **Every `Surface` carries the CityJSON geometry type it came from.**
 `Surface.geometryType?: CityJSONGeometryType | null`
 (`navara-core/src/citymodel/types.ts:131`), set once in `buildSurface`'s object
@@ -431,13 +456,20 @@ CityGML's independently built surfaces carry no tag — neither has a
 geometry-type source — which reads as "unknown", i.e. "not a solid", and matches
 the eligibility reason those layers already get.
 
-**"Reading source" is a phase, and it holds the bytes for one run.**
+**"Reading source" is a phase, and it holds the bytes for as long as the reader
+statements need them.**
 `readSource({ runId, table, lod, signal })`
 (`src/features/processing/sourceRead.ts:210`) mints a VFS name, calls the
 table's `SourceProvider` for a FRESH array, registers it, and returns the
 reader `FROM` clause plus the LoD geometry column; the executor calls
-`release()` in a `finally`. The shape is copied from `export.ts`'s working
-precedent, including the `dropBuffer` the moment the statement is done — a
+`release()` in a `finally`. THE LIFETIME IS THE READER STATEMENTS, not the run:
+the bytes live from the registration until the last statement that reads the
+reader relation has answered, and every executor releases them there — before
+the per-feature roll-up, the write and the publication, all of which work on rows
+the engine has already returned. The `finally` is the guarantee for the paths
+that never get that far (a failure, a cancel, a death), and `release()` is
+idempotent so the happy path's early drop is not undone. The shape is copied from
+`export.ts`'s working precedent, for the reason that early drop exists — a
 300 MB CityJSON must not sit in the wasm heap for the length of a compute. The
 LoD label → column mapping comes from `LayerTable.lods` (`{ label, suffix }`),
 never from string surgery: `"0.0"` and `"0"` are different columns and only the
@@ -469,8 +501,10 @@ is `null` for scope "all".
 descriptor, picks the column with `pick(written)`, resolves the operator and
 value through `resolveStyleOperator` / `resolveStyleValueSource` (both may be
 functions of the picked column) and opens either a rule draft or the vector
-layer's Color by attribute. No `toolId` appears in `RunFooter`: the descriptor is
-what keeps the seven tools' differences out of the one component.
+layer's Color by attribute. There is no tool-specific BRANCHING in `RunFooter` —
+it reads `run.toolId` to look the definition up, and never to decide anything:
+the descriptor is what keeps the seven tools' differences out of the one
+component.
 
 **One cross-layer run shape: the city table is the compute ground, the vector
 layer is a per-run table.** Every cross-layer run occupies the CITY layer's slot
@@ -601,8 +635,11 @@ traps rather than surprises, and the consequence in the code is named for each.
   volume under `CASE WHEN s IS NOT NULL AND r.is_valid`, and `r.code` / `r.message`
   are never selected (`solidSql.ts:123-150`).
 - **D2. `ST_3DValidationReport` and `ST_GeomFromGeoJSON` each have two
-  overloads**, so a bare `NULL` literal is a Binder error. A probe-level
-  consequence: the tests cast (`NULL::SOLID_3D`, `NULL::VARCHAR`).
+  overloads**, so a bare `NULL` literal is a Binder error — for
+  `ST_GeomFromGeoJSON` only while the `json` extension is still UNLOADED, which
+  is the same order-dependence D7 records (once `read_json` has autoloaded it the
+  call binds and returns NULL). A probe-level consequence: the tests cast
+  (`NULL::SOLID_3D`, `NULL::VARCHAR`).
 - **D3. The validation report struct has 13 fields**, including
   `orientation_error_count` (1 on `NL.IMBAG.Pand.0001`). It is the thirteenth the
   design did not know about; `buildSolidValidationSql` selects it as `ori_n`.
@@ -640,11 +677,32 @@ traps rather than surprises, and the consequence in the code is named for each.
   column types (`read_json(…, columns = {…})`, `computedColumns.ts:93`), so
   inference never decides a column's type. This corrected every tool's write, not
   only the cross-layer ones.
-- **D10. Core `ST_Distance` and `ST_DWithin` return 0 for ANY polygon↔polygon
-  pair** on this build — a whole layer would read "0 m" under a card saying it was
-  measured. Consequence: Distance to nearest uses `ST_Distance_GEOS`, verified
+- **D10. Core `ST_Distance` returns 0 for ANY polygon↔polygon pair on this
+  build, and `ST_DWithin` is TRUE for the same pair at any threshold** — the two
+  are different failures with one cause. `ST_Distance` gives a NUMBER that is
+  wrong (a whole layer would read "0 m" under a card saying it was measured);
+  `ST_DWithin` gives a BOOLEAN false positive — the probe has two polygons 40 m
+  apart answering `true` at a 39 m threshold, so it is not even usable as a
+  filter. Consequence: Distance to nearest uses `ST_Distance_GEOS`, verified
   present in the `wasm_eh` binary and correct on every probed pairing
-  (`distanceToNearest.ts:128-130`).
+  (`distanceToNearest.ts`), and nothing anywhere reaches for `ST_DWithin` —
+  including the candidate prefilter the fix wave added, which is an EXTENT test
+  (`ST_Intersects_Extent(ST_Expand(g, limit), geom)`) and conservative by
+  construction: a pair within `limit` metres cannot fall outside a box grown by
+  `limit`.
+- **D11. DuckDB's `TRY()` does NOT catch a `three_d` "Invalid Error", and
+  `ST_3DSurfaceArea` raises one on a solid with a degenerate (zero-area) face.**
+  `TRY` is a real 1.5.5 expression — it swallows a CAST error — but the
+  extension's error propagates straight through it, and one such row aborted a
+  whole Delft LoD 2.2 run at the M13.3 gate. Probed against a solid built in the
+  suite: only `ST_3DSurfaceArea` raises; `ST_3DFootprintArea`, `ST_3DZMin` and
+  `ST_3DZMax` all answer normally on the same row. Consequence: the measure
+  statement guards the surface area on the validation report's own
+  `degenerate_face_count = 0` and leaves the other three unguarded, so a
+  degenerate solid loses its area and keeps its real footprint and height. The
+  guard is NOT `r.is_valid`: an unclosed solid with no degenerate face still
+  answers with its envelope (388 m² on `invalid-solid.city.json`), which §7.2's
+  caveat rule depends on.
 
 Two facts from earlier milestones that M3 had to honour again: `mode()` is
 non-deterministic on ties, so the most-frequent value is
