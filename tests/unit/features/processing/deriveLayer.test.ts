@@ -18,6 +18,9 @@ import type {
 } from "../../../../src/features/geoLayers/geoLayerStore";
 import type { Layer } from "../../../../src/features/layers/layerStore";
 import type { CityModel } from "../../../../src/domain/citymodel/types";
+import type { LayerTable } from "../../../../src/insights/layerTables";
+import type { RunRecord } from "../../../../src/features/processing/types";
+import type { Surface } from "@cityjson/navara-core";
 
 /** Every statement the preparation sent, in order. */
 const sql: string[] = [];
@@ -27,6 +30,10 @@ const adopted = new Map<string, unknown>();
 const deathListeners = new Set<() => void>();
 /** The engine dies while the first statement containing this is in flight. */
 let dieOn: string | null = null;
+/** M2's Measure-solids-on-the-copy answers. */
+let measureRows: Array<Record<string, unknown>> = [];
+let sourceIdRows: string[] = ["a"];
+let scopeRowsAnswer: Array<{ id: string; f: string }> = [{ id: "a", f: "a" }];
 
 vi.mock("../../../../src/insights/duckdb", () => {
   const run = async (statement: string) => {
@@ -40,8 +47,21 @@ vi.mock("../../../../src/insights/duckdb", () => {
         listener();
       }
     }
+    // The GUARDED measure statement, told apart by its parse (M2's Measure
+    // solids over the published copy).
+    if (statement.includes("ST_3DTryFromWKB")) {
+      return { ok: true as const, columns: [], rows: measureRows };
+    }
+    // §6.1's id join off the copy's own reader.
+    if (statement.startsWith('SELECT "id" FROM read_cityjson(')) {
+      return {
+        ok: true as const,
+        columns: ["id"],
+        rows: sourceIdRows.map((id) => ({ id })),
+      };
+    }
     if (statement.includes('COALESCE("feature_id", "id") AS f')) {
-      return { ok: true as const, columns: ["f"], rows: [{ f: "a" }] };
+      return { ok: true as const, columns: ["id", "f"], rows: scopeRowsAnswer };
     }
     return { ok: true as const, columns: [], rows: [] };
   };
@@ -214,6 +234,8 @@ const { GEO_STABLE_FEATURE_KEY, readGeoStableFeatureId } =
 const { geoRecords } =
   await import("../../../../src/features/geoLayers/geoRecords");
 const { runQuery } = await import("../../../../src/insights/duckdb");
+const { measureSolids } =
+  await import("../../../../src/features/processing/tools/measureSolids");
 const tables = await import("../../../../src/insights/layerTables");
 const { CancelledError, EngineDeadError } =
   await import("../../../../src/insights/engineAwait");
@@ -326,6 +348,9 @@ beforeEach(() => {
   sql.length = 0;
   adopted.clear();
   dieOn = null;
+  measureRows = [];
+  sourceIdRows = ["a"];
+  scopeRowsAnswer = [{ id: "a", f: "a" }];
   deathListeners.clear();
   useLayerStore.setState({ layers: [] });
   useGeoLayerStore.setState({ layers: [] });
@@ -818,5 +843,237 @@ describe("prepareDerivedVectorLayer", () => {
         rows: new Map(),
       }),
     ).rejects.toThrow();
+  });
+});
+/**
+ * M2: a MULTI-LoD root + parts fixture, prepared through the real FIFO, and
+ * Measure solids run on the copy afterwards.
+ *
+ * What the older cases could not show: their fixture's objects carried
+ * `surfaces: []`, so "the copy holds the scoped features with their geometry at
+ * every LoD" (§6) was asserted over nothing. This one gives the root geometry
+ * at LoD 1.2 AND 2.2, its part geometry at 2.2, and a SIBLING feature with its
+ * own part — so a copy that kept a sibling, or dropped a rung, is visible.
+ */
+describe("a multi-LoD copy, and a tool run on it (M2)", () => {
+  /** One surface tagged with its LoD, as the parsers write them. */
+  const surface = (lod: string, geometryType: string) => ({
+    type: "RoofSurface" as const,
+    rings: [
+      [
+        [0, 0, 0],
+        [1, 0, 0],
+        [1, 1, 0],
+      ],
+    ] as unknown as Surface["rings"],
+    attributes: { slope: 35 },
+    lod,
+    geometryType: geometryType as Surface["geometryType"],
+  });
+
+  const richObject = (
+    id: string,
+    parents: string[],
+    lods: ReadonlyArray<string>,
+  ) => ({
+    id,
+    objectType: parents.length > 0 ? "BuildingPart" : "Building",
+    attributes: { roofType: "gabled", yearOfConstruction: 1923 },
+    surfaces: lods.map((lod) => surface(lod, "Solid")),
+    bbox: [0, 0, 0, 10, 10, 9],
+    children: parents.length > 0 ? [] : [`${id}-1`],
+    parents,
+    lod: null,
+  });
+
+  function seedMultiLod(): string {
+    useLayerStore.setState({ layers: [] });
+    return useLayerStore.getState().addLayer({
+      name: "Delft",
+      model: {
+        sourceEncoding: "cityjson",
+        metadata: {},
+        bbox: [0, 0, 0, 110, 110, 9],
+        objects: {
+          // The feature in scope: the root at two rungs, its part at one.
+          a: richObject("a", [], ["1.2", "2.2"]),
+          "a-1": richObject("a-1", ["a"], ["2.2"]),
+          // The SIBLING feature, with a part of its own. Neither may survive.
+          b: richObject("b", [], ["1.2", "2.2"]),
+          "b-1": richObject("b-1", ["b"], ["2.2"]),
+        },
+        vertexCount: 12,
+      } as unknown as CityModel,
+      modelRef: { type: "url", url: "https://x/delft.city.json" },
+      visible: true,
+      rules: [],
+    });
+  }
+
+  const twoRungTable = () => ({
+    ...parentTable(),
+    lods: [
+      { label: "1.2", suffix: "1_2" },
+      { label: "2.2", suffix: "2_2" },
+    ],
+    rowCount: 4,
+  });
+
+  async function prepareMultiLod() {
+    return await tables.runOnTableQueue(() =>
+      prepareDerivedCityLayer({
+        runId: "run_m2",
+        parent: parentLayer(),
+        parentTable: twoRungTable(),
+        name: "Delft · solids",
+        rowIds: ["a", "a-1"],
+        columns: [{ name: "solid_volume_m3", type: "DOUBLE" as const }],
+        rows: new Map([["a", { solid_volume_m3: 100 }]]),
+        signal: new AbortController().signal,
+        query: async (_label, statement) => await runQuery(statement),
+      }),
+    );
+  }
+
+  beforeEach(() => {
+    seedMultiLod();
+  });
+
+  it("keeps every rung's geometry and the attributes, and no sibling", async () => {
+    const parent = parentLayer();
+    const plan = await prepareMultiLod();
+    const id = plan.publish();
+    const copy = useLayerStore.getState().layers.find((l) => l.id === id)!;
+
+    // The scoped FEATURE and nothing else: the sibling and ITS part are gone.
+    expect(Object.keys(copy.model.objects).sort()).toEqual(["a", "a-1"]);
+
+    // GEOMETRY, rung by rung. The root kept both of its surfaces and the part
+    // kept its one, each still tagged with the LoD it was parsed at.
+    expect(copy.model.objects.a?.surfaces.map((s) => s.lod)).toEqual([
+      "1.2",
+      "2.2",
+    ]);
+    expect(copy.model.objects["a-1"]?.surfaces.map((s) => s.lod)).toEqual([
+      "2.2",
+    ]);
+    // The same arrays, not rebuilt ones: `SELECT *` copied the rows and the
+    // model copy hands the objects across untouched.
+    expect(copy.model.objects.a?.surfaces).toBe(
+      parent.model.objects.a?.surfaces,
+    );
+    expect(copy.model.objects.a?.surfaces[0]?.rings).toBe(
+      parent.model.objects.a?.surfaces[0]?.rings,
+    );
+
+    // ATTRIBUTES: the file's own, plus the run's value merged onto the root.
+    expect(copy.model.objects.a?.attributes).toEqual({
+      roofType: "gabled",
+      yearOfConstruction: 1923,
+      solid_volume_m3: 100,
+    });
+    // The part keeps its own attributes and gains nothing it was not written.
+    expect(copy.model.objects["a-1"]?.attributes).toEqual({
+      roofType: "gabled",
+      yearOfConstruction: 1923,
+    });
+
+    // And the TABLE is reader-backed at BOTH rungs, filtered to the root it was
+    // cut with — which is what makes a tool run on the copy possible at all.
+    expect(adopted.get(id)).toMatchObject({
+      reader: "read_cityjson",
+      lods: [
+        { label: "1.2", suffix: "1_2" },
+        { label: "2.2", suffix: "2_2" },
+      ],
+      sourceFeatureIds: ["a"],
+      rowCount: 2,
+    });
+    // The PARENT is untouched.
+    expect(Object.keys(parentLayer().model.objects).sort()).toEqual([
+      "a",
+      "a-1",
+      "b",
+      "b-1",
+    ]);
+    expect(parentLayer().model.objects.a?.attributes).toEqual({
+      roofType: "gabled",
+      yearOfConstruction: 1923,
+    });
+  });
+
+  it("runs the REAL Measure solids over the published copy", async () => {
+    const plan = await prepareMultiLod();
+    const id = plan.publish();
+    const copy = useLayerStore.getState().layers.find((l) => l.id === id)!;
+    const info = adopted.get(id) as LayerTable;
+
+    // The copy's OWN rows, and the answers the reader gives for them. §7's
+    // contributor rule picks the PART at 2.2 (the root's geometry at that rung
+    // is ignored), so `a-1` is the one measured and its answer rolls up to `a`.
+    scopeRowsAnswer = [
+      { id: "a", f: "a" },
+      { id: "a-1", f: "a" },
+    ];
+    sourceIdRows = ["a", "a-1"];
+    measureRows = [
+      {
+        id: "a-1",
+        f: "a",
+        geometry_type: "Solid",
+        parsed: true,
+        is_valid: true,
+        degenerate: false,
+        volume_m3: 480,
+        envelope_m2: 376,
+        footprint_m2: 80,
+        ground_m: 0,
+        ridge_m: 6,
+      },
+    ];
+    const statements: string[] = [];
+    const result = await measureSolids(
+      {
+        id: "run_m2b",
+        lod: "2.2",
+        prefix: "solid_",
+        params: { measures: ["volume", "envelope"] },
+      } as unknown as RunRecord,
+      {
+        table: info,
+        layer: copy,
+        featureIds: ["a", "a-1"],
+        signal: new AbortController().signal,
+        query: async (_label: string, statement: string) => {
+          statements.push(statement);
+          return await runQuery(statement);
+        },
+        phase: () => {},
+        warn: () => {},
+        throwIfCancelled: () => {},
+      } as never,
+    );
+
+    // The COPY's table and the COPY's reader name — never the parent's.
+    expect(statements[0]).toContain(`FROM ${JSON.stringify(info.table)}`);
+    expect(statements[1]).toContain(`${info.table}_run_m2b.city.json`);
+    // And filtered to the copy's own rows: the sibling appears nowhere.
+    for (const statement of statements) {
+      expect(statement).not.toContain("'b-1'");
+    }
+    expect(statements[2]).toContain("geometry_lod2_2");
+
+    // §7's roll-up landed on the feature ROOT, and the part carries its own.
+    expect(result.measured).toBe(1);
+    expect(result.skipped).toEqual([]);
+    expect(result.rows.get("a")).toMatchObject({
+      solid_volume_m3: 480,
+      solid_envelope_m2: 376,
+      solid_valid: true,
+    });
+    expect(result.rows.get("a-1")).toMatchObject({
+      solid_volume_m3: 480,
+      solid_valid: true,
+    });
   });
 });
