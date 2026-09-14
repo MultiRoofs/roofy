@@ -454,6 +454,42 @@ describe("destination: New layer", () => {
     );
   });
 
+  it("a cancel that arrives DURING publication still publishes, and says so (M3)", async () => {
+    // §6.1's other side of the boundary: the check that discards sits
+    // immediately before `publish()`, so a Cancel that lands after it cannot
+    // un-create the layer — the run finishes and the card says the cancel lost
+    // the race. The click is landed from a store subscription that fires
+    // synchronously INSIDE `publish()`'s own `addLayer`, which is exactly the
+    // window a real click has to hit.
+    fakeExecutor();
+    let cancelled = false;
+    const id = submitRun(newLayerRequest());
+    const unsubscribe = useLayerStore.subscribe((state) => {
+      if (!cancelled && state.layers.length === 2) {
+        cancelled = true;
+        cancelRun(id);
+      }
+    });
+    try {
+      await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    } finally {
+      unsubscribe();
+    }
+    expect(cancelled).toBe(true);
+    expect(runById(id)?.note).toBe("finished before the cancel arrived");
+    // The layer EXISTS, and nothing was discarded behind the user's back.
+    const layers = useLayerStore.getState().layers;
+    expect(layers.map((l) => l.name)).toEqual(["Delft", "Delft · extent"]);
+    expect(runById(id)?.newLayerId).toBe(layers[1]?.id);
+    expect(sql.some((s) => /^DROP TABLE IF EXISTS "layer_\d+"$/.test(s))).toBe(
+      false,
+    );
+    // And Undo is the way back — §6.2's "removes the new layer".
+    expect(runById(id)?.undoable).toBe(true);
+    await undoRun(id);
+    expect(useLayerStore.getState().layers).toHaveLength(1);
+  });
+
   it("a FAILURE during the copy fails the run and drops the half-built table", async () => {
     fakeExecutor();
     failing = "CREATE TABLE";
@@ -1006,6 +1042,99 @@ describe("destination: New layer, with a VECTOR target", () => {
     expect(useGeoLayerStore.getState().layers).toHaveLength(1);
     expect(runById(id)?.newLayerId).toBeNull();
     expect(useComputedColumnStore.getState().byLayer).toEqual({});
+  });
+
+  it("a cancel that arrives DURING publication still publishes the COPY (M3)", async () => {
+    // The vector half of the same boundary: the copy is a GeoJSON layer, so the
+    // window is `addGeoLayer` inside `publish()`.
+    const zones = seedAggregate();
+    let cancelled = false;
+    const id = submitRun(aggregateRequest(zones));
+    const unsubscribe = useGeoLayerStore.subscribe((state) => {
+      if (!cancelled && state.layers.length === 2) {
+        cancelled = true;
+        cancelRun(id);
+      }
+    });
+    try {
+      await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    } finally {
+      unsubscribe();
+    }
+    expect(cancelled).toBe(true);
+    expect(runById(id)?.note).toBe("finished before the cancel arrived");
+    const layers = useGeoLayerStore.getState().layers;
+    expect(layers.map((l) => l.name)).toEqual(["Zones", "Zones · buildings"]);
+    expect(runById(id)?.newLayerId).toBe(layers[1]?.id);
+    // The provenance is the COPY's, and Undo takes the copy away again.
+    expect(
+      useComputedColumnStore.getState().byLayer[layers[1]?.id ?? ""],
+    ).toBeDefined();
+    expect(runById(id)?.undoable).toBe(true);
+    await undoRun(id);
+    expect(useGeoLayerStore.getState().layers).toHaveLength(1);
+    expect(
+      useComputedColumnStore.getState().byLayer[layers[1]?.id ?? ""],
+    ).toBeUndefined();
+  });
+
+  it("refuses to copy a vector parent RE-LINKED while the compute was pending (M3)", async () => {
+    // §6.1: the parent's document is re-read and verified immediately before
+    // publication, because a re-link replaces it and re-mints every stable id —
+    // a copy built from the captured document would be a layer of a Zones the
+    // user no longer sees, keyed by ids it no longer has.
+    const zones = seedAggregate();
+    const held = deferred<void>();
+    gate = { needle: "/* aggregate */", promise: held.promise };
+    const id = submitRun(aggregateRequest(zones));
+    await vi.waitFor(() =>
+      expect(sql.some((s) => s.includes("/* aggregate */"))).toBe(true),
+    );
+    // The re-link: a NEW document object, which is what the identity check
+    // compares.
+    const replacement = {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: { name: "Relinked" },
+          geometry: { type: "Polygon", coordinates: [[]] },
+        },
+      ],
+    };
+    useGeoLayerStore.getState().replaceGeoPreparedData(zones, replacement);
+    const afterRelink = JSON.stringify(geoLayerById(zones).config.preparedData);
+    gate = null;
+    held.resolve(undefined);
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("failed"));
+
+    expect(runById(id)?.error).toBe("Layer changed while running; run again");
+    // NO copy, NO provenance anywhere, and the replacement document is exactly
+    // as the re-link left it.
+    expect(useGeoLayerStore.getState().layers).toHaveLength(1);
+    expect(runById(id)?.newLayerId).toBeNull();
+    expect(useComputedColumnStore.getState().byLayer).toEqual({});
+    expect(JSON.stringify(geoLayerById(zones).config.preparedData)).toBe(
+      afterRelink,
+    );
+    expect(Object.keys(areasOf(zones)[0]?.properties ?? {})).not.toContain(
+      "bld_buildings_n",
+    );
+
+    // And the FIFO moved on: a following run over a healthy target reaches its
+    // own head and finishes. (The relinked layer itself cannot be re-run here:
+    // `replaceGeoPreparedData` puts a document back verbatim, without the
+    // stable-id envelope `addGeoLayer` mints, so it has no records to aggregate
+    // over — which is a fixture limit and not what this case is about.)
+    const other = useGeoLayerStore.getState().addGeoLayer({
+      kind: "geojson",
+      name: "Districts",
+      config: { data: zonesDocument() },
+    });
+    const after = submitRun(
+      aggregateRequest(other, { newLayerName: "Districts · buildings" }),
+    );
+    await vi.waitFor(() => expect(runById(after)?.status).toBe("done"));
   });
 
   it("the engine's DEATH before publication publishes nothing", async () => {
