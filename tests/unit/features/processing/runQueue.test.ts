@@ -1482,6 +1482,66 @@ describe("installStaleWatcher", () => {
     }
   });
 
+  it("never clears a layer's provenance without marking its runs stale (F4)", async () => {
+    // The gate saw a layer lose its computed-column provenance while the card
+    // still read `done` and kept its Undo — a state in which the grid shows no
+    // COMPUTED group and a second run of the same tool is refused with
+    // "'extent_height_m' belongs to the source data". It was not reproduced, so
+    // what is pinned here is the INVARIANT whose violation it was: the stale
+    // marking and `clearLayer` are ONE decision, and every table transition
+    // either does both or does neither.
+    registerExecutor("height-from-extent", async () => ({
+      columns: [{ name: "extent_height_m", type: "DOUBLE" }],
+      rows: new Map([["a", { extent_height_m: 4 }]]),
+      measured: 1,
+      skipped: [],
+    }));
+    tables.useLayerTableStore.setState({
+      tables: { L1: { state: "ready", info: tableInfo } },
+    } as never);
+    const stop = installStaleWatcher();
+    try {
+      const id = submitRun(request());
+      await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+      const live = tableInfo;
+
+      // A build still IN FLIGHT over the existing table: `layerTables` keeps the
+      // entry `ready` under the SAME info and only flags `rebuilding`, so
+      // neither half fires. This is the transition that would have to leak for
+      // the gate's state to exist at all.
+      tables.useLayerTableStore.setState({
+        tables: { L1: { state: "ready", info: live, rebuilding: true } },
+      } as never);
+      expect(runById(id)?.stale).toBe(false);
+      expect(computedColumnsOf("L1").has("extent_height_m")).toBe(true);
+
+      // A FAILED rebuild puts the same info back with the flag off: still
+      // neither — the old table was never touched.
+      tables.useLayerTableStore.setState({
+        tables: { L1: { state: "ready", info: live, rebuilding: false } },
+      } as never);
+      expect(runById(id)?.stale).toBe(false);
+      expect(computedColumnsOf("L1").has("extent_height_m")).toBe(true);
+      expect(runById(id)?.undoable).toBe(true);
+
+      // And a real rebuild, under a new name: BOTH, in one store write. The two
+      // assertions are read together on purpose — a version that cleared the
+      // provenance and left the card alone is exactly the gate's report.
+      tables.useLayerTableStore.setState({
+        tables: {
+          L1: { state: "ready", info: { ...live, table: "layer_9" } },
+        },
+      } as never);
+      expect([
+        computedColumnsOf("L1").size === 0,
+        runById(id)?.stale === true,
+      ]).toEqual([true, true]);
+      expect(runById(id)?.undoable).toBe(false);
+    } finally {
+      stop();
+    }
+  });
+
   it("leaves a run alone when a FIRST ready entry appears — an adoption, not a rebuild", async () => {
     // A New-layer run publishes its copy's table with `adoptLayerTable`, which
     // seeds a `ready` entry under an id the store has never held. That is an
