@@ -815,6 +815,35 @@ function publishProvenance(
 }
 
 /**
+ * §6.1's re-validation for a VECTOR SOURCE, asked at the publication boundary.
+ *
+ * The areas are read ONCE, before the compute: they are reprojected into the
+ * target's CRS and written to a per-run table, and every value the run produces
+ * is measured against that snapshot. A re-link in the meantime replaces the
+ * document — other areas, other attributes, other stable ids — so publishing
+ * afterwards would write numbers about a Zones the user can no longer see, and
+ * the column's provenance would name a source that no longer exists.
+ *
+ * The TARGET has been checked this way since Task 18; the SOURCE was not, and
+ * the removal watcher only sees removals. The identity compared is the same
+ * one the target's check uses — `config.preparedData`, which re-linking
+ * replaces — so the two cannot come to disagree about what "changed" means.
+ *
+ * Returns the SENTENCE to fail with, or null when the source stood still (and
+ * for a city source, which has no document).
+ */
+function vectorSourceMoved(source: ToolSource | null): string | null {
+  if (source === null || source.kind !== "vector") return null;
+  const live = useGeoLayerStore
+    .getState()
+    .layers.find((l) => l.id === source.layer.id);
+  if (live === undefined || live.kind !== "geojson") return "Layer removed";
+  return live.config.preparedData === source.layer.config.preparedData
+    ? null
+    : "Layer changed while running; run again";
+}
+
+/**
  * Spec §6.2: only ONE run can own a column's Undo. An earlier run whose column
  * this run has just overwritten can no longer restore anything — its backup
  * describes a state two writes ago.
@@ -1645,6 +1674,21 @@ async function execute(
         await plan.discard();
         throw new CancelledError();
       }
+      // The SOURCE's own re-validation, at the same boundary and for the same
+      // reason as the target's above: the copy would otherwise carry columns
+      // measured against a document the user replaced while it was being
+      // built. `discard()` first — after `publish()` there is a layer to see.
+      const sourceMoved = vectorSourceMoved(source);
+      if (sourceMoved !== null) {
+        await plan.discard();
+        patch(id, {
+          status: "failed",
+          phase: null,
+          error: sourceMoved,
+          elapsedMs: elapsed(),
+        });
+        return;
+      }
       const newLayerId = plan.publish();
       // BOTH stores. A derived CITY layer's row is in `layerStore`; a derived
       // VECTOR layer's (Task 23) is in `geoLayerStore`, and reading only the
@@ -1863,6 +1907,20 @@ async function execute(
       return;
     }
 
+    // The SOURCE's re-validation, immediately before the write opens — the
+    // last moment at which "nothing has been published" is still true for a
+    // city target. A vector TARGET is checked the same way further up; this is
+    // the other half of §6.1's sentence.
+    const sourceMoved = vectorSourceMoved(source);
+    if (sourceMoved !== null) {
+      patch(id, {
+        status: "failed",
+        phase: null,
+        error: sourceMoved,
+        elapsedMs: elapsed(),
+      });
+      return;
+    }
     patch(id, { phase: "write" });
     // Which of THIS run's columns the table already has — matched the way
     // DuckDB matches them, without regard to case. A column classified as new

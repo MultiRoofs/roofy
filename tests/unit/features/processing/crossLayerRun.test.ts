@@ -1177,6 +1177,190 @@ describe("the per-run vector table", () => {
   });
 });
 
+describe("a vector SOURCE replaced while the run is in flight", () => {
+  /** The relinked document: a DIFFERENT, still usable, one-area collection —
+   *  so a follow-up run has something to succeed on and the FIFO's progress is
+   *  observable. */
+  function relinkZones(id: string): void {
+    useGeoLayerStore.getState().relinkGeoJsonLayer(id, {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          id: "z9",
+          properties: { zone: "Z" },
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [4, 52],
+                [4.5, 52],
+                [4.5, 52.5],
+                [4, 52],
+              ],
+            ],
+          },
+        },
+      ],
+    });
+  }
+
+  function sourced(
+    toolId: "join-by-location" | "distance-to-nearest",
+    zones: string,
+    destination: "layer" | "new",
+  ): Parameters<typeof submitRun>[0] {
+    return {
+      toolId,
+      targetLayerId: "CITY",
+      sourceLayerId: zones,
+      scope: "all",
+      lod: null,
+      destination,
+      newLayerName: destination === "new" ? "Delft + Zones" : null,
+      params: {},
+      prefix: "zones_",
+      columns: [{ name: "zones_n", type: "DOUBLE" as const }],
+    };
+  }
+
+  /**
+   * Everything the failed run must NOT have left behind.
+   *
+   * The two destinations differ in ONE way, and deliberately: a This-layer run
+   * never opens its transaction at all, while a New-layer run has already
+   * built its copy in a table nobody can see — the same private resource a
+   * cancel at this boundary discards, and it is dropped the same way. What
+   * neither leaves is a layer, a column on the parent, or a provenance entry.
+   */
+  function expectNothingPublished(
+    id: string,
+    destination: "layer" | "new",
+  ): void {
+    // Nothing written on the TARGET's own table …
+    expect(sql.some((s) => s.startsWith('ALTER TABLE "layer_1"'))).toBe(false);
+    expect(sql.some((s) => s.startsWith('UPDATE "layer_1"'))).toBe(false);
+    if (destination === "layer") expect(sql).not.toContain("BEGIN TRANSACTION");
+    else {
+      // … the copy's table built and then DROPPED, so there is no orphan …
+      const copy = sql
+        .find((st) => st.startsWith('CREATE TABLE "layer_1'))
+        ?.match(/^CREATE TABLE "([^"]+)"/)?.[1];
+      expect(copy).toBeDefined();
+      expect(sql).toContain(`DROP TABLE IF EXISTS "${copy ?? ""}"`);
+    }
+    // … no copy …
+    expect(useLayerStore.getState().layers).toHaveLength(1);
+    // … no provenance on either layer …
+    expect(computedColumnsOf("CITY").size).toBe(0);
+    // … and the run's own vector table released.
+    expect(sql).toContain(`DROP TABLE IF EXISTS "__src_${id}"`);
+  }
+
+  const CASES = [
+    ["join-by-location", "layer"],
+    ["join-by-location", "new"],
+    ["distance-to-nearest", "layer"],
+    ["distance-to-nearest", "new"],
+  ] as const;
+
+  it.each(CASES)(
+    "%s → %s: a relink DURING THE COMPUTE fails the run and the FIFO moves on",
+    async (toolId, destination) => {
+      // §6.1's sentence for the SOURCE, which only the TARGET used to get. The
+      // areas were reprojected into a per-run table before the compute; a
+      // re-link replaces the document, so publishing now would write values
+      // measured against areas the user can no longer see.
+      const zones = addZones();
+      const held = makeGate();
+      registerExecutor(toolId, async (run) => {
+        await held.promise;
+        return {
+          columns: [{ name: `${run.prefix}n`, type: "DOUBLE" as const }],
+          rows: new Map([["a", { [`${run.prefix}n`]: 1 }]]),
+          measured: 1,
+          skipped: [],
+        };
+      });
+      const id = submitRun(sourced(toolId, zones, destination));
+      await settle();
+      expect(runById(id)?.status).toBe("running");
+
+      relinkZones(zones);
+      held.open();
+      await settle();
+
+      expect(runById(id)).toMatchObject({
+        status: "failed",
+        error: "Layer changed while running; run again",
+      });
+      expectNothingPublished(id, destination);
+
+      // The FIFO is free: the next run, over the document the user now has,
+      // goes through.
+      registerExecutor(toolId, async (run) => ({
+        columns: [{ name: `${run.prefix}n`, type: "DOUBLE" as const }],
+        rows: new Map([["a", { [`${run.prefix}n`]: 2 }]]),
+        measured: 1,
+        skipped: [],
+      }));
+      const next = submitRun(sourced(toolId, zones, "layer"));
+      await settle();
+      expect(runById(next)?.status).toBe("done");
+    },
+  );
+
+  it.each(CASES)(
+    "%s → %s: a relink as the compute hands over to the WRITE fails the run",
+    async (toolId, destination) => {
+      // The other side of the boundary: the executor has finished and the run
+      // is preparing to write (a city transaction, or the copy's own table).
+      // Nothing between those two points awaits, so the relink is landed by
+      // the executor itself, on the tick it returns — which is exactly the
+      // window the check has to cover.
+      const zones = addZones();
+      registerExecutor(toolId, async (run) => {
+        const out = {
+          columns: [{ name: `${run.prefix}n`, type: "DOUBLE" as const }],
+          rows: new Map([["a", { [`${run.prefix}n`]: 1 }]]),
+          measured: 1,
+          skipped: [],
+        };
+        relinkZones(zones);
+        return out;
+      });
+      const id = submitRun(sourced(toolId, zones, destination));
+      await settle();
+
+      expect(runById(id)).toMatchObject({
+        status: "failed",
+        error: "Layer changed while running; run again",
+      });
+      expectNothingPublished(id, destination);
+    },
+  );
+
+  it.each(CASES)(
+    "%s → %s: an untouched source publishes normally",
+    async (toolId, destination) => {
+      // The control: the check must not refuse a run whose source stood still.
+      const zones = addZones();
+      registerExecutor(toolId, async (run) => ({
+        columns: [{ name: `${run.prefix}n`, type: "DOUBLE" as const }],
+        rows: new Map([["a", { [`${run.prefix}n`]: 1 }]]),
+        measured: 1,
+        skipped: [],
+      }));
+      const id = submitRun(sourced(toolId, zones, destination));
+      await settle();
+      expect(runById(id)?.status).toBe("done");
+      expect(useLayerStore.getState().layers).toHaveLength(
+        destination === "new" ? 2 : 1,
+      );
+    },
+  );
+});
+
 describe("a vector target's publication", () => {
   /** The request every case here submits; only the columns and the prefix
    *  differ. */
