@@ -651,8 +651,19 @@ describe.skipIf(!enabled)("three_d against real DuckDB 1.5.5", () => {
     const DEG_SOURCE = "degenerate.city.json";
     const GOOD = "B.good";
     const DEGENERATE = "B.degenerate";
+    /** The THREE zero-area faces probed, so the guard is not written against
+     *  one shape's accident. `DEGENERATE` is the first of them. */
+    const SHAPES = [DEGENERATE, "B.collapsed_triangle", "B.collinear_triangle"];
+    /** The control: a repeated face has REAL area, so it makes the solid
+     *  invalid without making it degenerate. */
+    const REPEATED = "B.repeated_ring";
     const parsed = (source: string) =>
       `(SELECT "id", ST_3DTryFromWKB("geometry_lod2_2") AS s, ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r FROM read_cityjson('${source}', lod => '2.2'))`;
+    /** ONE object of the fixture: `ST_3DSurfaceArea` raises for the whole
+     *  statement as soon as any row is degenerate, so a per-shape claim has to
+     *  be asked per row. */
+    const parsedOne = (source: string, id: string) =>
+      `(SELECT "id", ST_3DTryFromWKB("geometry_lod2_2") AS s, ST_3DValidationReport(ST_3DTryFromWKB("geometry_lod2_2")) AS r FROM read_cityjson('${source}', lod => '2.2') WHERE "id" = '${id}')`;
 
     beforeAll(() => {
       /** A closed box, plus whatever extra faces the caller adds. */
@@ -690,6 +701,13 @@ describe.skipIf(!enabled)("three_d against real DuckDB 1.5.5", () => {
           [GOOD]: box([]),
           // The quad 0,1,1,0 has two pairs of identical vertices: zero area.
           [DEGENERATE]: box([[[0, 1, 1, 0]]]),
+          // A triangle with a repeated vertex.
+          "B.collapsed_triangle": box([[[0, 1, 1]]]),
+          // Three COLLINEAR vertices — all distinct, and still no area
+          // (vertex 8 is the midpoint of the edge 0–1).
+          "B.collinear_triangle": box([[[0, 8, 1]]]),
+          // The ground ring again: a face with real area, repeated.
+          "B.repeated_ring": box([[[0, 3, 2, 1]]]),
         },
         vertices: [
           [0, 0, 0],
@@ -700,12 +718,69 @@ describe.skipIf(!enabled)("three_d against real DuckDB 1.5.5", () => {
           [10000, 0, 6000],
           [10000, 8000, 6000],
           [0, 8000, 6000],
+          // 8: the midpoint of the ground edge 0–1, for the collinear face.
+          [5000, 0, 0],
         ],
       };
       db.registerBytes(
         DEG_SOURCE,
         new TextEncoder().encode(JSON.stringify(doc)),
       );
+    });
+
+    it("reports each zero-area shape as degenerate, and the repeated face as not", () => {
+      // The evidence the guard reads `degenerate_face_count` rather than the
+      // one shape that reproduced the gate's abort: a collapsed quad, a
+      // collapsed triangle and three collinear points all answer the same way,
+      // and a repeated face — which has real area — does not.
+      const rows = db.query(
+        `SELECT "id", CASE WHEN s IS NOT NULL THEN r.degenerate_face_count END AS deg_n
+         FROM ${parsed(DEG_SOURCE)} ORDER BY "id"`,
+      );
+      const byId = new Map(rows.map((r) => [String(r["id"]), r]));
+      for (const shape of SHAPES) {
+        expect([shape, byId.get(shape)?.["deg_n"]]).toEqual([shape, 1]);
+      }
+      expect(byId.get(GOOD)?.["deg_n"]).toBe(0);
+      // And the control: a REPEATED ground ring is a face with real area, so
+      // the solid is invalid (§7.3 reports it) and NOT degenerate. Measured,
+      // not assumed — it is why the guard reads `degenerate_face_count` and
+      // never `is_valid`, which would withhold the area of every §7.3 failure.
+      expect(byId.get(REPEATED)?.["deg_n"]).toBe(0);
+    });
+
+    it("RAISES from ST_3DSurfaceArea on each shape, and answers the footprint", () => {
+      // F1's whole argument, per shape: the surface area is the ONLY measure
+      // that cannot be taken, so it is the only one guarded. The footprint is
+      // the box's own 10 × 8 m ground in every case — a zero-area face adds
+      // nothing to it.
+      for (const shape of SHAPES) {
+        expect(() =>
+          db.query(
+            `SELECT ST_3DSurfaceArea(s) AS v FROM ${parsedOne(DEG_SOURCE, shape)}`,
+          ),
+        ).toThrow(/ST_3DSurfaceArea: solid contains degenerate faces/);
+        const rows = db.query(
+          `SELECT ST_3DFootprintArea(s) AS footprint, ST_3DZMin(s) AS ground, ST_3DZMax(s) AS ridge FROM ${parsedOne(DEG_SOURCE, shape)}`,
+        );
+        expect([shape, rows[0]?.["footprint"]]).toEqual([shape, 80]);
+        expect([shape, rows[0]?.["ground"], rows[0]?.["ridge"]]).toEqual([
+          shape,
+          0,
+          6,
+        ]);
+      }
+      // The control answers everything, area included: no degenerate face, no
+      // refusal — although the solid is invalid.
+      const control = db.query(
+        `SELECT CASE WHEN s IS NOT NULL THEN r.is_valid END AS is_valid, ST_3DSurfaceArea(s) AS envelope, ST_3DFootprintArea(s) AS footprint FROM ${parsedOne(DEG_SOURCE, REPEATED)}`,
+      );
+      expect(control[0]?.["is_valid"]).toBe(false);
+      expect(control[0]?.["envelope"]).toBeGreaterThan(0);
+      // 120 m², not the box's 80: the repeated ring is a second real face and
+      // the footprint projection counts it. An answer, which is the point —
+      // the engine refuses nothing here.
+      expect(control[0]?.["footprint"]).toBe(120);
     });
 
     it("is reported as degenerate, and the good box beside it is not", () => {
