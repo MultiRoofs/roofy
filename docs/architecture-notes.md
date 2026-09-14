@@ -711,6 +711,28 @@ excluded (`buildMostFrequentSql`, `insights/sql.ts:472`), and `median()` over a
 DECIMAL column arrives as a `Uint32Array`, so every median CASTs to DOUBLE
 first.
 
+**The gate's last two rulings (2026-09-14).** A run may change a computed
+column's TYPE only when it covers EVERY row of that column: the migration is a
+`DROP COLUMN` + `ADD COLUMN <declared type>` inside the write transaction, and
+on a scoped run it would have left the out-of-scope buildings NULL in the table
+while the model and the provenance still held the earlier run's values — so a
+scoped re-type is refused at the head and in the form with **[adapted copy
+A20]** `The existing <column> is <TYPE>; run on All buildings to change its
+type`, and a re-typed column is a NEW column (§7: "in a new column they are
+NULL"), so the rows the run skipped read NULL in the model and the provenance
+too, and Undo restores the original type and values from the backup. And a
+vector SOURCE is identity-checked the way a vector target is: `Join` and
+`Distance` capture the source document's `preparedData` identity at Run and
+re-check it at the publication boundary for both destinations, failing with
+§6.1's "Layer changed while running; run again" when the layer was relinked
+under the run, with the per-run vector table dropped and the FIFO released.
+Two more adapted strings shipped with the fix wave: **A18** `solids with
+degenerate faces (no area)` (the caveat for a solid whose `ST_3DSurfaceArea`
+raises — engine fact D11: DuckDB's `TRY()` does not catch `three_d`'s errors,
+so the guard is the validation report's `degenerate_face_count`), and **A19**
+the skip sentence for a usable geometry set aside for its KIND (a point or a
+line in an areas-only source).
+
 Browser acceptance procedure: `scripts/smoke/processing-m1.md` (M13.1),
 `scripts/smoke/processing-m2.md` (M13.2) and `scripts/smoke/processing-m3.md`
 (M13.3).
