@@ -135,8 +135,34 @@ export function installWorkspaceInvariants(): () => void {
   };
 
   // Rule 2: a pick activates the layer it landed on.
+  //
+  // WHAT IS SELECTED, not what the selection store wrote. The store carries the
+  // hover, the pick mode and the tool mode beside the selection, and every one
+  // of those notifies this subscriber — so a user who selected two buildings,
+  // activated a vector target and then moved the mouse was thrown back to the
+  // city layer, taking §10.11's "Selected" run with them (gate defect F5, round
+  // 2). The key below changes only when the SELECTED THINGS change.
+  //
+  // Ids only, never `kind` or `surfaceIndex`: `setMode("object")` REBUILDS the
+  // selection array to narrow surface picks to their objects, and that is a
+  // change of pick mode, not a pick. Its cost is that re-picking the very same
+  // object does not re-activate its layer, which is a no-op by any other name.
+  let selected: string | null = null;
   const reconcileSelection = () => {
-    const owner = selectionLayerId(useSelectionStore.getState());
+    const state = useSelectionStore.getState();
+    const key =
+      state.selections.length > 0
+        ? state.selections
+            .map((s) => `${s.layerId}\u0000${s.objectId}`)
+            .join("\u0001")
+        : state.geoSelection === null
+          ? ""
+          : `geo\u0000${state.geoSelection.geoLayerId}\u0000${String(
+              state.geoSelection.stableFeatureId ?? state.geoSelection.batchId,
+            )}`;
+    if (key === selected) return;
+    selected = key;
+    const owner = selectionLayerId(state);
     if (
       owner !== null &&
       owner !== useWorkspaceStore.getState().activeLayerId

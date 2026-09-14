@@ -165,6 +165,56 @@ describe("activateLayer + invariants", () => {
     expect(useWorkspaceStore.getState().activeLayerId).toBe(g2);
   });
 
+  it("a HOVER does not hand the activation back to the city layer (F5)", () => {
+    // The regression the M3 gate's second pass found: rule 2 subscribed to
+    // EVERY selection-store write, and the store carries the hover, the pick
+    // mode and the tool mode beside the selection. So the user who selected
+    // two buildings, went to the vector target and then moved the mouse over
+    // the model was thrown back to the city layer — and §10.11's run with it.
+    const city = useLayerStore.getState().addLayer(layerInput("Delft"));
+    const zones = useGeoLayerStore.getState().addGeoLayer(geoInput("Zones"));
+    useSelectionStore
+      .getState()
+      .select({ kind: "object", layerId: city, objectId: "o1" });
+    activateLayer(zones);
+
+    useSelectionStore
+      .getState()
+      .hover({ kind: "object", layerId: city, objectId: "o2" });
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(zones);
+    useSelectionStore.getState().hover(null);
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(zones);
+    // The tool mode and the pick mode are the same kind of write — and the
+    // pick-mode one REBUILDS the selection array (it narrows surface picks to
+    // their objects), which is why the comparison is of the selected ids and
+    // not of the array's identity.
+    useSelectionStore.getState().setToolMode("measure");
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(zones);
+    useSelectionStore.getState().setMode("surface");
+    useSelectionStore.getState().setMode("object");
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(zones);
+    // And the selection is still there to be run on.
+    expect(useSelectionStore.getState().selections).toHaveLength(1);
+  });
+
+  it("a real pick after all that still coordinates (F5)", () => {
+    const city = useLayerStore.getState().addLayer(layerInput("Delft"));
+    const zones = useGeoLayerStore.getState().addGeoLayer(geoInput("Zones"));
+    useSelectionStore
+      .getState()
+      .select({ kind: "object", layerId: city, objectId: "o1" });
+    activateLayer(zones);
+    useSelectionStore
+      .getState()
+      .hover({ kind: "object", layerId: city, objectId: "o2" });
+    // A DIFFERENT building: rule 2 is untouched, and the city layer takes the
+    // focus back.
+    useSelectionStore
+      .getState()
+      .select({ kind: "object", layerId: city, objectId: "o2" });
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(city);
+  });
+
   it("a pick activates its owning layer", () => {
     const a = useLayerStore.getState().addLayer(layerInput("A"));
     const b = useLayerStore.getState().addLayer(layerInput("B"));
