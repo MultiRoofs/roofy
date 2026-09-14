@@ -197,6 +197,63 @@ describe("activateLayer + invariants", () => {
     expect(useSelectionStore.getState().selections).toHaveLength(1);
   });
 
+  it("a re-pick of the SAME object re-activates its layer (F5)", () => {
+    // The round-2 fix compared the selected IDENTITY, which made an honest
+    // pick of the building that is already selected look like a hover: the
+    // user clicked the building they had selected, expecting to go back to it,
+    // and stayed on the vector layer. A pick is a pick — what the reconciler
+    // ignores is the hover and the tool/pick-mode writes, not a repeated one.
+    const city = useLayerStore.getState().addLayer(layerInput("Delft"));
+    const zones = useGeoLayerStore.getState().addGeoLayer(geoInput("Zones"));
+    useSelectionStore
+      .getState()
+      .select({ kind: "object", layerId: city, objectId: "o1" });
+    activateLayer(zones);
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(zones);
+
+    // The very same building, picked again.
+    useSelectionStore
+      .getState()
+      .select({ kind: "object", layerId: city, objectId: "o1" });
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(city);
+  });
+
+  it("a re-pick through toggleSelect and selectMany coordinates too (F5)", () => {
+    // The other two ways a pick reaches the store — Shift+click and a batch —
+    // both of which can land on exactly what is already selected.
+    const city = useLayerStore.getState().addLayer(layerInput("Delft"));
+    const zones = useGeoLayerStore.getState().addGeoLayer(geoInput("Zones"));
+    useSelectionStore
+      .getState()
+      .selectMany([{ kind: "object", layerId: city, objectId: "o1" }]);
+    activateLayer(zones);
+    useSelectionStore
+      .getState()
+      .selectMany([{ kind: "object", layerId: city, objectId: "o1" }]);
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(city);
+
+    activateLayer(zones);
+    // Shift+clicking a second building of the same layer.
+    useSelectionStore
+      .getState()
+      .toggleSelect({ kind: "object", layerId: city, objectId: "o2" });
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(city);
+  });
+
+  it("a re-pick of the SAME geo feature re-activates its layer (F5)", () => {
+    const city = useLayerStore.getState().addLayer(layerInput("Delft"));
+    const zones = useGeoLayerStore.getState().addGeoLayer(geoInput("Zones"));
+    useSelectionStore
+      .getState()
+      .selectGeoFeature({ geoLayerId: zones, batchId: 3, properties: {} });
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(zones);
+    activateLayer(city);
+    useSelectionStore
+      .getState()
+      .selectGeoFeature({ geoLayerId: zones, batchId: 3, properties: {} });
+    expect(useWorkspaceStore.getState().activeLayerId).toBe(zones);
+  });
+
   it("a real pick after all that still coordinates (F5)", () => {
     const city = useLayerStore.getState().addLayer(layerInput("Delft"));
     const zones = useGeoLayerStore.getState().addGeoLayer(geoInput("Zones"));

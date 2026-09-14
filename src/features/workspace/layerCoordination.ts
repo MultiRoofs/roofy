@@ -136,32 +136,29 @@ export function installWorkspaceInvariants(): () => void {
 
   // Rule 2: a pick activates the layer it landed on.
   //
-  // WHAT IS SELECTED, not what the selection store wrote. The store carries the
-  // hover, the pick mode and the tool mode beside the selection, and every one
-  // of those notifies this subscriber — so a user who selected two buildings,
+  // A PICK, not any write to the selection store. The store carries the hover,
+  // the pick mode and the tool mode beside the selection, and every one of
+  // those notifies this subscriber - so a user who selected two buildings,
   // activated a vector target and then moved the mouse was thrown back to the
-  // city layer, taking §10.11's "Selected" run with them (gate defect F5, round
-  // 2). The key below changes only when the SELECTED THINGS change.
+  // city layer, taking the "Selected" scope of a run with them (gate defect
+  // F5).
   //
-  // Ids only, never `kind` or `surfaceIndex`: `setMode("object")` REBUILDS the
-  // selection array to narrow surface picks to their objects, and that is a
-  // change of pick mode, not a pick. Its cost is that re-picking the very same
-  // object does not re-activate its layer, which is a no-op by any other name.
-  let selected: string | null = null;
+  // `selectionVersion` is the store's own pick counter, and it is the ONLY
+  // thing compared here. Comparing what is SELECTED instead (round 2's fix)
+  // gets the hover right and the RE-PICK wrong: clicking the building that is
+  // already selected is an honest pick - the user is asking to be taken back
+  // to it - and it changes no id. Comparing the state, or the selections
+  // array's identity, gets the re-pick right and `setMode` wrong, because
+  // narrowing surface picks to their objects rebuilds that array without
+  // anything having been picked.
+  //
+  // `null` until the first reconcile, so installing over a restored selection
+  // still lets that selection name the active layer.
+  let pick: number | null = null;
   const reconcileSelection = () => {
     const state = useSelectionStore.getState();
-    const key =
-      state.selections.length > 0
-        ? state.selections
-            .map((s) => `${s.layerId}\u0000${s.objectId}`)
-            .join("\u0001")
-        : state.geoSelection === null
-          ? ""
-          : `geo\u0000${state.geoSelection.geoLayerId}\u0000${String(
-              state.geoSelection.stableFeatureId ?? state.geoSelection.batchId,
-            )}`;
-    if (key === selected) return;
-    selected = key;
+    if (pick === state.selectionVersion) return;
+    pick = state.selectionVersion;
     const owner = selectionLayerId(state);
     if (
       owner !== null &&

@@ -9,6 +9,61 @@ describe("selectionStore", () => {
       selections: [],
       hovered: null,
       geoSelection: null,
+      selectionVersion: 0,
+    });
+  });
+
+  describe("selectionVersion", () => {
+    // The store's pick counter, and the one signal `layerCoordination`'s rule 2
+    // reads: it must count the actions that CHOOSE what is selected and no
+    // others, or a hover starts activating layers again (gate defect F5).
+    const version = () => useSelectionStore.getState().selectionVersion;
+
+    it("counts every way a selection is made, the repeats included", () => {
+      const store = useSelectionStore.getState();
+      const before = version();
+      store.select(citySel);
+      expect(version()).toBe(before + 1);
+      // THE SAME building again: a pick, and the counter says so even though
+      // nothing about the selection changed.
+      store.select(citySel);
+      expect(version()).toBe(before + 2);
+      store.toggleSelect({
+        kind: "object",
+        layerId: "layer-1",
+        objectId: "b2",
+      });
+      expect(version()).toBe(before + 3);
+      store.selectMany([citySel]);
+      expect(version()).toBe(before + 4);
+      store.selectGeoFeature(geoSel);
+      expect(version()).toBe(before + 5);
+      store.selectGeoFeature(null);
+      expect(version()).toBe(before + 6);
+      store.clear();
+      expect(version()).toBe(before + 7);
+      // A miss is a pick too: it ends the selection.
+      store.select(null);
+      expect(version()).toBe(before + 8);
+    });
+
+    it("does NOT count a hover, a tool mode or a pick mode", () => {
+      const store = useSelectionStore.getState();
+      store.select({
+        kind: "surface",
+        layerId: "layer-1",
+        objectId: "b1",
+        surfaceIndex: 2,
+      });
+      const after = version();
+      store.hover(citySel);
+      store.hover(null);
+      store.setToolMode("measure");
+      // This one REBUILDS the selections array (it narrows the surface pick to
+      // its object), which is why the array's identity cannot be the signal.
+      store.setMode("object");
+      expect(version()).toBe(after);
+      expect(useSelectionStore.getState().selections).toEqual([citySel]);
     });
   });
 
