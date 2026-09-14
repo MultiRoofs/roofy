@@ -1,12 +1,11 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="public/brand/roofy-mark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="public/brand/roofy-mark-light.svg">
-    <img alt="" src="public/brand/roofy-mark-light.svg" width="72" height="72">
+    <source media="(prefers-color-scheme: dark)" srcset="public/brand/roofy-lockup-animated-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="public/brand/roofy-lockup-animated-light.svg">
+    <img alt="" src="public/brand/roofy-mark-light.svg" width="500" height="500">
   </picture>
 </p>
 
-<h1 align="center">Roofy</h1>
 
 <p align="center"><strong>Your city, roof by roof.</strong><br>
 A browser-based 3D city model viewer and analyser, rendered on a real globe with photorealistic terrain.</p>
