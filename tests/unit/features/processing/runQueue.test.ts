@@ -1085,6 +1085,105 @@ describe("a run over a column an earlier run wrote", () => {
     );
   });
 
+  /** The layer, with a SECOND building the executor will not measure. */
+  function twoBuildings(): void {
+    const base = layer();
+    useLayerStore.setState({
+      layers: [
+        {
+          ...base,
+          model: {
+            ...base.model,
+            objects: {
+              ...base.model.objects,
+              b: {
+                id: "b",
+                objectType: "Building",
+                attributes: {},
+                surfaces: [],
+                bbox: null,
+                children: [],
+                parents: [],
+                lod: null,
+              },
+            },
+          },
+        },
+      ],
+    });
+  }
+
+  /** The table as it is after an earlier run wrote `extent_height_m` at
+   *  `type`, with THIS run's scope covering both buildings. */
+  function replacing(type: string): void {
+    featureTotal = 2;
+    scopeRows = [
+      { id: "a", f: "a" },
+      { id: "b", f: "b" },
+    ];
+    liveColumns = ["id", "feature_id", "extent_height_m"];
+    liveColumnTypes = new Map([["extent_height_m", type]]);
+    computedAlready("extent_height_m");
+    tableInfo = {
+      ...freshTable(),
+      columns: liveColumns.map((name) => ({
+        name,
+        type: liveColumnTypes.get(name) ?? "VARCHAR",
+        kind: "scalar" as const,
+      })),
+    };
+    // What the earlier run left on the model for the building THIS run will
+    // skip — the value the table holds for it too.
+    useLayerStore
+      .getState()
+      .mergeAttributes("L1", new Map([["b", { extent_height_m: 9 }]]));
+  }
+
+  it("NULLs a SKIPPED row's attribute when the column is re-typed (S2)", async () => {
+    // §7: "in a new column they are NULL", and a re-typed column IS a new
+    // column — the DROP took every row's value with it. So the building this
+    // run skipped reads NULL in the model exactly as it does in the table,
+    // instead of holding a value the database no longer has.
+    twoBuildings();
+    replacing("VARCHAR");
+    writeHeight(); // measures "a" only
+    const id = submitRun(request());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    // The table: the column was re-added empty and the UPDATE named only "a".
+    expect(sql).toContain(
+      'ALTER TABLE "layer_1" DROP COLUMN IF EXISTS "extent_height_m"',
+    );
+    expect(sql.some((s) => s.startsWith("UPDATE") && s.includes("'b'"))).toBe(
+      false,
+    );
+    // The model agrees with it, row for row.
+    expect(attributesOf("a").extent_height_m).toBe(4);
+    expect(attributesOf("b").extent_height_m).toBe(null);
+    // And the provenance says nothing about "the rest from …": this run owns
+    // the whole column.
+    expect(provenanceOf("L1", "extent_height_m")?.partial).toBe(null);
+
+    await undoRun(id);
+    // Undo restores both halves: the backup covers the whole column, and the
+    // model gets the value the NULL replaced.
+    expect(attributesOf("a").extent_height_m).toBeUndefined();
+    expect(attributesOf("b").extent_height_m).toBe(9);
+  });
+
+  it("leaves a SKIPPED row alone when the type does not change (S2)", async () => {
+    // The narrowness. A same-typed replacement changes no schema, so the
+    // skipped building's value is still in the table — and the model must not
+    // contradict it.
+    twoBuildings();
+    replacing("DOUBLE");
+    writeHeight();
+    const id = submitRun(request());
+    await vi.waitFor(() => expect(runById(id)?.status).toBe("done"));
+    expect(sql.some((s) => s.includes("DROP COLUMN"))).toBe(false);
+    expect(attributesOf("a").extent_height_m).toBe(4);
+    expect(attributesOf("b").extent_height_m).toBe(9);
+  });
+
   it("writes a differently-cased run under the column's own spelling", async () => {
     // DuckDB matched `EXTENT_height_m` to the column run 1 created and wrote
     // the same values; everything app-side keyed on the TYPED spelling instead

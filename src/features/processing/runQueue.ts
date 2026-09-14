@@ -2004,6 +2004,42 @@ async function execute(
       previousModelValues.set(objectId, previous);
       merge.set(objectId, values);
     }
+    // S2: a RE-TYPED column is a new column, and §7 says of one that "in a new
+    // column they are NULL".
+    //
+    // The migration DROPPED the column and re-added it, so every row the
+    // UPDATE did not name is NULL in the table — including the rows this run
+    // COVERED but skipped (no geometry, not a solid, outside every area). Their
+    // model attributes still held the previous run's values, and the table and
+    // the model would have told two different stories about the same building.
+    // So the NULL is published too. A same-typed replacement changes no schema
+    // and is untouched: there the skipped row's value is still in the table.
+    //
+    // Covered, not "every object": the table's other rows are not this run's to
+    // speak about — and a migration is only allowed on a run that covers the
+    // whole column (the head refuses the others), so in practice this is every
+    // row of it.
+    const migratedNames = migrated.map((m) => m.name);
+    if (migratedNames.length > 0) {
+      const covered =
+        scope.featureIds === null ? null : new Set(scope.featureIds);
+      // ONE object, read and never written by `mergeAttributes`.
+      const nulls: Record<string, unknown> = Object.fromEntries(
+        migratedNames.map((name) => [name, null]),
+      );
+      for (const [objectId, object] of Object.entries(layer.model.objects)) {
+        if (result.rows.has(objectId)) continue;
+        if (covered !== null && !covered.has(objectId)) continue;
+        const previous: Record<string, unknown> = {};
+        for (const name of migratedNames) {
+          previous[name] = object.attributes[name];
+        }
+        // Undo puts these back the same way it puts the measured rows back:
+        // an `undefined` here removes the attribute again.
+        previousModelValues.set(objectId, previous);
+        merge.set(objectId, nulls);
+      }
+    }
     useLayerStore.getState().mergeAttributes(layer.id, merge);
 
     publishProvenance(id, layer.id, result, tool.name, request, scope);

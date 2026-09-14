@@ -882,6 +882,14 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
     });
 
     it("migrates DOUBLE to BOOLEAN, and Undo restores both type and values", () => {
+      // b2 is a row the run COVERED and the executor SKIPPED (no geometry, not
+      // a solid, outside every area) — the only shape left after round 2, which
+      // refuses a re-type that does not cover the whole column. §7: "in a new
+      // column they are NULL", and a re-typed column is a new column, so b2
+      // reads NULL here. `runQueue` publishes that same NULL to b2's model
+      // attribute so the two agree; `runQueue.test.ts`'s "NULLs a SKIPPED row's
+      // attribute when the column is re-typed (S2)" is the model half of this
+      // assertion, and both halves are restored by the Undo below.
       makeTable("layer_s2b", ["b1", "b2"]);
       db.query(`ALTER TABLE "layer_s2b" ADD COLUMN "solid_valid" DOUBLE`);
       db.query(
@@ -890,8 +898,8 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
       const columns: ReadonlyArray<OutputColumn> = [
         { name: "solid_valid", type: "BOOLEAN" },
       ];
-      // Only b1 is in scope; b2's old value is what the whole-column backup is
-      // for.
+      // Only b1 has a value to write; b2's old value is what the whole-column
+      // backup is for.
       expect(
         migrate(
           "layer_s2b",
@@ -908,7 +916,8 @@ describe.skipIf(!enabled)("computed columns against real DuckDB", () => {
         ),
       ).toEqual([
         { id: "b1", v: true },
-        // Out of scope, and the column is a new one: NULL, not 42.
+        // Skipped by the run, and the column is a new one: NULL, not 42 — and
+        // the model attribute published for b2 is NULL beside it.
         { id: "b2", v: null },
       ]);
 

@@ -18,6 +18,7 @@
 import { runQuery, type QueryOutcome } from "../../insights/duckdb";
 import { CancelledError, raced } from "../../insights/engineAwait";
 import {
+  typeMigrations,
   useComputedColumnStore,
   writeComputedColumns,
   type OutputColumn,
@@ -249,6 +250,19 @@ export async function prepareDerivedCityLayer(input: {
     parentTableName,
   )}${where === null ? "" : ` WHERE ${where}`}`;
 
+  // The copy is `SELECT *` off the parent, so it INHERITS every one of the
+  // parent's columns — a run whose output collides with one of them has to
+  // re-type it (S2), even though `existing` is empty because a New-layer Undo
+  // removes the layer rather than restoring values.
+  const inheritedTypes = new Map(
+    input.parentTable.columns.map((c) => [c.name.toLowerCase(), c.type]),
+  );
+  /** The inherited columns this run's write DROPS and re-adds — and therefore
+   *  empties for every row the run wrote no value for. */
+  const migratedNames = typeMigrations(input.columns, inheritedTypes).map(
+    (c) => c.name,
+  );
+
   /** Everything this function made, for {@link DerivedPlan.discard}. */
   const drop = async (): Promise<void> => {
     // RACED, and swallowed: the DROP is housekeeping inside a FIFO slot, and a
@@ -289,12 +303,7 @@ export async function prepareDerivedCityLayer(input: {
           // the parent's columns — a run whose output collides with one of them
           // has to re-type it (S2), even though `existing` is empty because a
           // New-layer Undo removes the layer rather than restoring values.
-          existingTypes: new Map(
-            input.parentTable.columns.map((c) => [
-              c.name.toLowerCase(),
-              c.type,
-            ]),
-          ),
+          existingTypes: inheritedTypes,
           onStatement: (sql) => issuedByWrite.push(sql),
           signal: input.signal,
         }),
@@ -345,10 +354,19 @@ export async function prepareDerivedCityLayer(input: {
       ? Object.keys(input.parent.model.objects)
       : input.rowIds;
   const objects: Record<string, CityObject> = {};
+  // §7's "in a new column they are NULL", for the columns the write re-typed:
+  // the DROP took every INHERITED value with it, so an object the run wrote
+  // nothing for must not go on showing the parent's number in the copy's model
+  // while the copy's table holds NULL. Empty for the ordinary case, where the
+  // object is carried across untouched.
+  const nulls: Record<string, unknown> = Object.fromEntries(
+    migratedNames.map((name) => [name, null]),
+  );
   for (const id of keep) {
     const object = input.parent.model.objects[id];
     if (object === undefined) continue;
-    const values = input.rows.get(id);
+    const values =
+      input.rows.get(id) ?? (migratedNames.length > 0 ? nulls : undefined);
     objects[id] =
       values === undefined
         ? object

@@ -443,6 +443,61 @@ describe("prepareDerivedCityLayer", () => {
     ).toEqual({ height: 9 });
   });
 
+  it("NULLs an inherited column the copy RE-TYPES, for the rows with no value (S2)", async () => {
+    // The copy is `SELECT *` off the parent, so it inherits the parent's
+    // computed columns WITH their values — and a run whose output collides with
+    // one of them at another type migrates it, which DROPS the column and takes
+    // every inherited value with it. §7: "in a new column they are NULL". So
+    // the objects this run wrote no value for read NULL in the copy's model
+    // too, instead of showing a number the copy's table no longer has.
+    const parentId = parentLayer().id;
+    useLayerStore.getState().mergeAttributes(
+      parentId,
+      new Map([
+        ["a", { zones_name: "Centrum" }],
+        ["a-1", { zones_name: "Centrum" }],
+      ]),
+    );
+    const plan = await prepareDerivedCityLayer({
+      runId: "run_8",
+      parent: parentLayer(),
+      parentTable: {
+        ...parentTable(),
+        columns: [
+          ...parentTable().columns,
+          { name: "zones_name", type: "VARCHAR", kind: "scalar" as const },
+        ],
+      },
+      name: "Delft · join",
+      rowIds: ["a", "a-1"],
+      // The SAME column, at another type: the write migrates it.
+      columns: [{ name: "zones_name", type: "DOUBLE" as const }],
+      rows: new Map([["a", { zones_name: 62.5 }]]),
+      signal: new AbortController().signal,
+      query: async (_label, statement) => await runQuery(statement),
+    });
+    plan.publish();
+    // The copy's table name is minted per call, so it is READ off the trace
+    // rather than spelled — this case's position in the file must not decide
+    // whether it passes.
+    const copy = sql
+      .find((st) => st.startsWith("CREATE TABLE "))
+      ?.match(/^CREATE TABLE "([^"]+)"/)?.[1];
+    expect(sql).toContain(
+      `ALTER TABLE "${copy ?? ""}" DROP COLUMN IF EXISTS "zones_name"`,
+    );
+    const model = useLayerStore.getState().layers[1]!.model;
+    expect(model.objects.a?.attributes).toMatchObject({ zones_name: 62.5 });
+    // The part had the parent's value and the run wrote none for it.
+    expect(model.objects["a-1"]?.attributes).toMatchObject({
+      zones_name: null,
+    });
+    // The PARENT keeps its own, untouched.
+    expect(
+      useLayerStore.getState().layers[0]!.model.objects["a-1"]?.attributes,
+    ).toEqual({ zones_name: "Centrum" });
+  });
+
   it("carries the parent's provenance across for inherited columns", async () => {
     const parentId = parentLayer().id;
     useComputedColumnStore.getState().setProvenance(parentId, "roof_area_m2", {
