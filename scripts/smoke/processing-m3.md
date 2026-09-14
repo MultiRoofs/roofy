@@ -14,15 +14,15 @@ last run.
 
 ## Last run
 
-|            |                                                                                                                                                                                                                                                                                                                  |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Date       | 2026-09-13 / 14 (one session across midnight)                                                                                                                                                                                                                                                                    |
-| Branch     | `develop` @ `910a06c`                                                                                                                                                                                                                                                                                            |
-| Browser    | Chrome/151.0.7922.34 headless (`--headless=new`), SwiftShader, 1–2 fps                                                                                                                                                                                                                                           |
-| Driver     | `agent-browser connect 9333` against a hand-launched Chromium                                                                                                                                                                                                                                                    |
-| Dev server | `npm run dev -- --port 5210 --strictPort --host 127.0.0.1` (5173–5177, 5199 and 5390 were taken by other sessions)                                                                                                                                                                                               |
-| DuckDB     | `duckdb-eh.wasm` + the `cityjson` community extension; `three_d` loaded on the first Measure solids run (27.7 s cold, ≈ 8 s warm), `spatial` on the first Join                                                                                                                                                   |
-| Result     | **Scenarios 2, 3, 5 (second half), 10 and 12 PASS in full.** **Scenario 8 passes except its LoD 2.2 whole-scope run, which FAILS** (defect **F1**). **Scenario 11's `Selected (2)` scope is UNREACHABLE** (defect **F5**); the rest of 11 passes on scope `Matching`. Five defects and three observations below. |
+|            |                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Date       | 2026-09-13 / 14 (one session across midnight)                                                                                                                                                                                                                                                                                                                                                                             |
+| Branch     | `develop` @ `910a06c`                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Browser    | Chrome/151.0.7922.34 headless (`--headless=new`), SwiftShader, 1–2 fps                                                                                                                                                                                                                                                                                                                                                    |
+| Driver     | `agent-browser connect 9333` against a hand-launched Chromium                                                                                                                                                                                                                                                                                                                                                             |
+| Dev server | `npm run dev -- --port 5210 --strictPort --host 127.0.0.1` (5173–5177, 5199 and 5390 were taken by other sessions)                                                                                                                                                                                                                                                                                                        |
+| DuckDB     | `duckdb-eh.wasm` + the `cityjson` community extension; `three_d` loaded on the first Measure solids run (27.7 s cold, ≈ 8 s warm), `spatial` on the first Join                                                                                                                                                                                                                                                            |
+| Result     | **Scenarios 2, 3, 5 (second half), 10 and 12 PASS in full.** **Scenario 8 passes except its LoD 2.2 whole-scope run, which FAILS** (defect **F1**). **Scenario 11's `Selected (2)` scope is UNREACHABLE** (defect **F5**); the rest of 11 passes on scope `Matching`. Five defects and three observations below. **F1 and F5 were re-smoked after fix wave 1 and both now PASS — see the 2026-09-14 section at the end.** |
 
 ### Automated gates, same checkout
 
@@ -365,8 +365,11 @@ this layer was loaded from a streaming FlatCityBuf`**). `01-catalogue.png`
 
 ## Defects for the fix wave
 
-**F1 — CRITICAL. Measure solids fails outright on the real Delft sample at LoD
-2.2.**
+**F1 — CRITICAL — CLOSED by fix wave 1 (`e8f3640`), re-smoked 2026-09-14: the
+whole-scope LoD 2.2 run now reaches `done` with `6 solids with degenerate faces
+(no area)` and `solid_envelope_m2` NULL on exactly those 6 buildings and their
+parts. The original report follows. Measure solids fails outright on the real
+Delft sample at LoD 2.2.**
 `✕ Failed after 9.5 s — Invalid Error: ST_3DSurfaceArea: solid contains
 degenerate faces`. Reproduced five times: scope Matching 81 (9.5 s), scope All
 1,115 (7.4 s), and on the derived 81-building copy at LoD 2.2 (5.0 s) and LoD
@@ -432,8 +435,10 @@ That is worth naming because Task 27's reveal channel keys on the grid's first
 prefix block is the user-visible half and it makes a second run of the same tool
 impossible until the page is reloaded.
 
-**F5 — MAJOR (design conflict). A cross-layer tool with a VECTOR target can
-never be scoped to "Selected".** Aggregate buildings per area is only eligible
+**F5 — MAJOR — CLOSED by fix wave 1 (`f97ce8c`), re-smoked 2026-09-14: a vector
+layer taking the focus now keeps the city layer's selection, `Selected 2` is
+enabled and the run publishes its copy. The original report follows. A
+cross-layer tool with a VECTOR target can never be scoped to "Selected".** Aggregate buildings per area is only eligible
 while the vector layer is active (`eligibility.ts`, "Needs a vector layer"), and
 `src/features/workspace/layerCoordination.ts`'s first two rules close the loop:
 rule 1 ("activating a layer clears a selection that belongs to another layer",
@@ -478,3 +483,114 @@ layer`; the user has to click All. A retarget could fall back to `all` when the
   extended by Task 25's suites; not re-driven here.
 - **Scenario 8 at LoD 2.2 over a whole scope** — blocked by F1, not by the
   driver.
+
+---
+
+## Re-smoke after fix wave 1 (2026-09-14)
+
+|            |                                                                                                                                                     |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Date       | 2026-09-14                                                                                                                                          |
+| Branch     | `develop` @ `1f20d46` (fix wave 1)                                                                                                                  |
+| Browser    | Chrome/151.0.7922.34 headless (`--headless=new`), SwiftShader, 1–3 fps, CDP 9333                                                                    |
+| Dev server | `npm run dev -- --port 5210 --strictPort --host 127.0.0.1`                                                                                          |
+| Scope      | ONLY the two checks the fix wave reopened: scenario 8's LoD 2.2 run (**F1**) and scenario 11's `Selected (2)` (**F5**). Nothing else was re-driven. |
+| Result     | **Both PASS. F1 and F5 are closed.**                                                                                                                |
+
+Screenshots are numbered from `15-` so the first run's `01-`–`14-` still stand,
+in the same scratch directory:
+`/tmp/claude-1020/-data2-hideba-multiroof-viewer/9d7538d6-bee9-4194-bf86-967da2bad364/scratchpad/smoke-m3/`.
+The run was driven incrementally (one step per Bash call), which the `setsid`
+process fact above makes possible and which the 600 s Bash cap makes necessary
+for the Delft load.
+
+### F1 — scenario 8's LoD 2.2 run, whole scope — PASS
+
+Remote `https://storage.googleapis.com/cityjson/delft.city.jsonl` through the
+landing page's URL field (`Detected: CityJSONSeq`) → `1,115 buildings · LoD 2.2`,
+`2.2K loaded objects`. Measure solids, LoD **2.2**, scope **All 1,115 buildings**,
+**all six measures** ticked (the two elevations added to the four defaults), so
+seven columns. Form: `15-f1-form-lod22-all.png`.
+
+- **The run reaches `done`, not `failed`.** Card, verbatim:
+  **`✓ 1,115 buildings measured · 18 invalid solids (no volume) · 6 solids with
+degenerate faces (no area) · 32.0 s`**, then
+  `Wrote 7 columns to delft.city.jsonl.` — **32.0 s** including the cold
+  `three_d` download, and **no skipped count**. `16-f1-card-done.png`
+- The degenerate caveat is **[adapted copy A18]** verbatim, and both caveats read
+  plural at a plural count (F2's rule, exercised on the other side of its
+  singular case).
+- Column badge: `Measure solids · LoD 2.2 · All 1,115 buildings · 2026-09-14 03:27`.
+- **`solid_envelope_m2` is NULL only on the caveated rows.** Sorting the table by
+  that column (`17-f1-table-sorted-envelope.png`; the grid sorts NULLs last in
+  both directions) shows 21.89 at the ascending head and 120354.88 at the
+  descending head, with `solid_valid = false` rows among the largest envelopes —
+  i.e. an invalid solid still carries its area. Counted exactly out of the
+  layer's CSV export (2,231 rows = 1,115 `Building` + 1,116 `BuildingPart`):
+
+| measure                          | rows                                                                                    |
+| -------------------------------- | --------------------------------------------------------------------------------------- |
+| `solid_envelope_m2` NULL         | **12 = 6 Buildings + their 6 parts** — exactly the card's 6 caveated solids             |
+| `solid_envelope_m2` present      | 2,219                                                                                   |
+| `solid_volume_m3` NULL           | 36 = 18 Buildings + their 18 parts — exactly the card's 18                              |
+| NULL volume **with** an envelope | **24** — invalid-but-not-degenerate solids keep their area (§7.2, scenario 2B at scale) |
+
+Every NULL-envelope row still carries `solid_footprint_m2` and `solid_height_m`,
+and every one reads `solid_valid = false`. That is the fix wave's deviation
+(only `ST_3DSurfaceArea` guarded, the footprint and the two elevations left
+bare) behaving in the browser exactly as the probe predicted — on the REAL Delft
+LoD 2.2 shapes, which the probe could not reach.
+
+### F5 — scenario 11's `Selected (2)` — PASS
+
+`fixtures/two-buildings.city.json` over HTTP, plus a 3-area EPSG:4326 polygon
+layer through the Add-layer file input
+(`…/scratchpad/smoke-m3/two-building-zones.geojson`, rebuilt for this run:
+`Zone West` over RD 84995–85017 × 445995–446015, `Zone East` over
+85018–85045 × 445995–446015, and `Zone North` over 84995–85045 × 446030–446060
+with no building in it; the two buildings' extent centres are 85008/446004 and
+85027.5/446006, and the fixture has no LoD 0 so the **extent-centre** proxy is
+the one in play).
+
+1. Both buildings selected by clicking their table rows (plain click, then
+   SHIFT+click): `All 2 · Matching 2 · Selected 2 buildings`.
+   `18-f5-city-selection-2.png`
+2. **The city selection survives the vector layer taking the focus** — the F5
+   fix. With `two-building-zones.geojson` active the panel still reads
+   `2 buildings selected` and the inspector tab `Details · 2 selected`.
+   `19-f5-selection-survives-vector-active.png`
+3. Aggregate buildings per area, TARGET `two-building-zones.geojson`, SOURCE
+   `two-buildings.city.json`: **scope `Selected 2` is ENABLED** (`disabled:false`,
+   no `title="Nothing selected on this layer"`) and selectable, and **Run is
+   enabled**. `20-f5-form-selected2.png`
+4. Destination **New layer** (suggested name
+   `two-building-zones.geojson · buildings`) → the run finishes
+   **`✓ Created two-building-zones.geojson · buildings · 3 areas aggregated over
+2 buildings · 16.3 s`** (cold `spatial`). `21-f5-card-created.png`
+5. **The copy holds ALL the target's areas**, in the target's order, with the
+   counts `Zone West 1 · Zone East 1 · Zone North 0` (1 + 1 + 0 = 2 = the two
+   selected), badged `Aggregate buildings per area · Selected 2 buildings ·
+2026-09-14 03:46`. `22-f5-derived-areas.png`
+6. **The original vector layer is unchanged**: `NAME · ZONE_CODE · OWNER`, no
+   `BLD_BUILDINGS_N`. `23-f5-original-unchanged.png`
+
+The run log is the scope's own evidence:
+`Scope · Selected · 2 buildings (frozen at 03:46:24)` and the aggregate
+statement's `WHERE "id" IN ('NL.IMBAG.Pand.0001', 'NL.IMBAG.Pand.0001-part1',
+'NL.IMBAG.Pand.0002')` — the two selected buildings and the part of one of them,
+nothing else.
+
+**Fixture limit, recorded rather than smoothed over:** `two-buildings` holds
+exactly two buildings, so `Selected 2` and `All 2` cannot be told apart by
+`bld_buildings_n` alone. What discriminates the scope here is the column badge
+(`Selected 2 buildings`), the frozen-scope line and the id list in the log; the
+empty `Zone North` is what shows the copy carries every area and not only the
+counted ones.
+
+### Still open after this re-smoke
+
+- **F2, F3, F4** were not re-driven (out of this run's scope). F2 and F3 have
+  their fixes and unit tests in fix wave 1; F4 stays unreproduced.
+- Everything under "What this run did NOT cover" above still stands, except its
+  last bullet: scenario 8 at LoD 2.2 over a whole scope is now COVERED and
+  passing.
