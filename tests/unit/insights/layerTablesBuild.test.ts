@@ -1480,13 +1480,32 @@ describe("a build the removal and the death both overtook", () => {
 });
 
 describe("a derived layer's table is adopted, never built", () => {
-  it("mints a name from the SAME counter an ordinary build uses", () => {
+  it("mints a name from the SAME counter an ordinary build uses", async () => {
     // A separate counter would eventually collide with `layer_N`, and the
-    // collision would be a silent CREATE OR REPLACE over a live table.
-    const a = nextTableName();
-    const b = nextTableName();
-    expect(a).toMatch(/^layer_\d+$/);
-    expect(b).not.toBe(a);
+    // collision would be a silent CREATE OR REPLACE over a live table. Two
+    // calls in a row prove only that the counter moves, so the allocations are
+    // INTERLEAVED with real builds here (minor 8): what has to hold is that
+    // every LIVE table name is distinct and that neither build's table was
+    // replaced by an adoption's name.
+    const before = nextTableName();
+    await enqueueLayerTable("L1", readerSource());
+    const between = nextTableName();
+    await enqueueLayerTable("L2", readerSource());
+    const after = nextTableName();
+
+    const built = [getLayerTable("L1")?.table, getLayerTable("L2")?.table];
+    const minted = [before, between, after];
+    for (const name of [...built, ...minted]) {
+      expect(name).toMatch(/^layer_\d+$/);
+    }
+    // SIX names, all different: two live tables and four allocations from the
+    // one counter.
+    expect(new Set([...built, ...minted]).size).toBe(5);
+    // And the two live tables really are still there — a name the counter handed
+    // out cannot be one of them.
+    for (const name of minted) expect(built).not.toContain(name);
+    expect(stateOf("L1")?.state).toBe("ready");
+    expect(stateOf("L2")?.state).toBe("ready");
   });
 
   it("seeds a READY entry that nothing will rebuild", () => {

@@ -228,10 +228,23 @@ type ScrollIntoView = (arg?: boolean | ScrollIntoViewOptions) => void;
 
 describe("DataGrid honouring a reveal", () => {
   let scrollIntoView: Mock<ScrollIntoView>;
+  /**
+   * The DESCRIPTOR `Element.prototype.scrollIntoView` had before this suite
+   * patched it — `undefined` under jsdom, which implements no scrolling at all.
+   *
+   * A descriptor rather than the function itself: reading the method off the
+   * prototype is an unbound reference the lint baseline refuses, and a
+   * descriptor also puts back whatever shape it really had.
+   */
+  let originalDescriptor: PropertyDescriptor | undefined;
 
   beforeEach(() => {
     // jsdom implements no scrolling at all, so the method the grid calls has
     // to be supplied here — its ARGUMENTS are the assertion.
+    originalDescriptor = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      "scrollIntoView",
+    );
     scrollIntoView = vi.fn<ScrollIntoView>();
     Element.prototype.scrollIntoView = scrollIntoView;
   });
@@ -239,6 +252,19 @@ describe("DataGrid honouring a reveal", () => {
   afterEach(() => {
     cleanup();
     clearColumnReveals();
+    // PUT BACK (minor 12): a prototype patched for one suite is a patch every
+    // file that runs after it in the same worker inherits, and a spy nobody
+    // owns is how an unrelated assertion comes to read this one's calls.
+    if (originalDescriptor === undefined) {
+      delete (Element.prototype as { scrollIntoView?: ScrollIntoView })
+        .scrollIntoView;
+    } else {
+      Object.defineProperty(
+        Element.prototype,
+        "scrollIntoView",
+        originalDescriptor,
+      );
+    }
   });
 
   it("scrolls a mounted grid to the run's own column", () => {

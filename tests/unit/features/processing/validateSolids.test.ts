@@ -373,31 +373,52 @@ describe("validateSolids", () => {
     });
   });
 
-  it("lets FALSE dominate an unknown flag, in either row order", async () => {
-    // Three-valued AND, decided after the loop: the reader's row ORDER cannot
-    // decide a feature's verdict.
-    for (const order of [0, 1]) {
-      const rows = [
-        reportRow("B1P", "B1", { is_closed: false, is_valid: false }),
-        reportRow("B1Q", "B1", { is_closed: null, is_valid: null }),
-      ];
+  it("lets FALSE dominate an unknown flag, in either row order (minor 9)", async () => {
+    // Three-valued AND, decided after the loop: NOTHING about the reader's or
+    // the table's order may decide a feature's verdict. Reversing the report
+    // rows alone left the SCOPE and the contributor list fixed, so the only
+    // order actually varied was the one `groupContributors` never reads —
+    // here the scope's parts turn round with them, and the summed diagnostic
+    // counts are asserted too (a sum is the other thing an order could move).
+    const scope: Array<[string, string]> = [
+      ["B1", "B1"],
+      ["B1P", "B1"],
+      ["B1Q", "B1"],
+    ];
+    const rows = [
+      reportRow("B1P", "B1", {
+        is_closed: false,
+        is_valid: false,
+        open_n: 2,
+        nm_n: 1,
+      }),
+      reportRow("B1Q", "B1", {
+        is_closed: null,
+        is_valid: null,
+        open_n: 5,
+        nm_n: 0,
+      }),
+    ];
+    for (const reverse of [false, true]) {
       const layer = layerWith(
         { B1: ["2.2"], B1P: ["2.2"], B1Q: ["2.2"] },
         { B1P: "B1", B1Q: "B1" },
       );
       const { ctx } = context(layer, [
-        scopeRows([
-          ["B1", "B1"],
-          ["B1P", "B1"],
-          ["B1Q", "B1"],
-        ]),
+        // The SCOPE's own order turns round as well — which is what decides
+        // the contributor list and the order it is rolled up in.
+        scopeRows(reverse ? [...scope].reverse() : scope),
         sourceIds(["B1", "B1P", "B1Q"]),
-        reported(order === 0 ? rows : [...rows].reverse()),
+        reported(reverse ? [...rows].reverse() : rows),
       ]);
       const result = await validateSolids(run(), ctx as never);
       expect(result.rows.get("B1")).toMatchObject({
         solid_closed: false,
         solid_valid: false,
+        // The SUMS, identical either way: 2 + 5 open edges and 1 + 0
+        // non-manifold ones over the two contributing parts.
+        solid_open_edges_n: 7,
+        solid_nonmanifold_edges_n: 1,
       });
     }
   });

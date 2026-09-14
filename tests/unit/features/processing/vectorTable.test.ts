@@ -359,26 +359,38 @@ describe("encodeProjectedFeatures", () => {
     expect(JSON.parse(text.trim()).wkt).toBe(tricky);
   });
 
-  it("checkpoints during the final assembly, not only during the walk", async () => {
+  it("checkpoints during the final assembly, not only during the walk (minor 10)", async () => {
     // The copy of ten megabytes of chunks into one buffer is work of its own,
     // and a Cancel delivered while it runs must be honoured there too.
     //
+    // THE ARMING IS THE WHOLE ARGUMENT. Arming when the SECOND feature's `wkt`
+    // is read proved nothing while that feature was itself megabytes long: its
+    // own slicing still takes checkpoints, so deleting the assembly's could not
+    // fail the case. The last feature here is TINY — one point, well under the
+    // byte budget — so its head and its geometry are written with no checkpoint
+    // at all, and the walk then `break`s without one. Every checkpoint after
+    // that read is therefore inside the assembly, and the first one is what
+    // this throws on.
+    //
     // The outcome is read through a try/catch rather than `rejects.toThrow`:
-    // without the assembly's checkpoint this RESOLVES with a ten-megabyte
+    // without the assembly's checkpoint this RESOLVES with a five-megabyte
     // array, and vitest would spend half a minute serialising it into the
     // failure message before saying so.
     const seen = { reads: 0, onRead: () => {} };
-    let walked = false;
+    let walkFinished = false;
     seen.onRead = () => {
-      if (seen.reads === 2) walked = true;
+      if (seen.reads === 2) walkFinished = true;
     };
+    let afterWalk = 0;
     let outcome = "";
     try {
       await encodeProjectedFeatures(
-        [counted(0, hugeWkt(), seen), counted(1, hugeWkt(), seen)],
+        [counted(0, hugeWkt(), seen), counted(1, "POINT (1 1)", seen)],
         {
           checkpoint: () => {
-            if (walked) throw new Error("cancelled in assembly");
+            if (!walkFinished) return;
+            afterWalk += 1;
+            throw new Error("cancelled in assembly");
           },
         },
       );
@@ -387,6 +399,9 @@ describe("encodeProjectedFeatures", () => {
       outcome = error instanceof Error ? error.message : String(error);
     }
     expect(outcome).toBe("cancelled in assembly");
+    // Exactly one: the FIRST checkpoint past the walk, which is the assembly's.
+    expect(afterWalk).toBe(1);
+    expect(seen.reads).toBe(2);
   });
 });
 

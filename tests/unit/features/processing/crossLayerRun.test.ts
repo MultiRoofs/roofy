@@ -385,6 +385,137 @@ describe("a run that names a source layer", () => {
     });
   });
 
+  it.each([
+    ["join-by-location", "CITY", "zones_"] as const,
+    ["distance-to-nearest", "CITY", "roads_"] as const,
+  ])(
+    "refuses %s at the HEAD when the source went while it waited, and the FIFO moves on (minor 7)",
+    async (toolId, targetLayerId, prefix) => {
+      // The older case removed the source IMMEDIATELY after Run, so the queue
+      // may never have let the run reach its head at all: a refusal that only
+      // happens before the head proves nothing about §6.1's head
+      // re-validation. Here a PREDECESSOR holds the FIFO, the source is removed
+      // while the run is queued behind it, and only then is the slot released.
+      const zones = addZones();
+      const box = capturing();
+      // `capturing()` wires the two tools it was written for; the tool under
+      // test gets the same stand-in, so the follow-up run below finishes
+      // without reaching the real executor's engine statements.
+      registerExecutor(toolId, async (run, ctx) => {
+        box.seen = ctx;
+        return {
+          columns: [{ name: `${run.prefix}n`, type: "DOUBLE" as const }],
+          rows: new Map([["a", { [`${run.prefix}n`]: 1 }]]),
+          measured: 1,
+          skipped: [],
+        };
+      });
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const predecessor = layerTables.runOnTableQueue(async () => {
+        await held;
+      });
+      const id = submitRun({
+        toolId,
+        targetLayerId,
+        sourceLayerId: zones,
+        scope: "all",
+        lod: null,
+        destination: "layer",
+        newLayerName: null,
+        params: {},
+        prefix,
+        columns: [{ name: `${prefix}n`, type: "DOUBLE" }],
+      });
+      await settle();
+      // Still waiting: the predecessor has the slot.
+      expect(runById(id)?.status).toBe("queued");
+      useGeoLayerStore.getState().removeGeoLayer(zones);
+      release();
+      await predecessor;
+      await settle();
+      expect(runById(id)).toMatchObject({
+        status: "failed",
+        error: "Layer removed",
+      });
+
+      // And the FIFO moved on rather than being left holding the refused run's
+      // slot: a following run over a fresh source finishes.
+      const again = addZones();
+      const next = submitRun({
+        toolId,
+        targetLayerId,
+        sourceLayerId: again,
+        scope: "all",
+        lod: null,
+        destination: "layer",
+        newLayerName: null,
+        params: {},
+        prefix,
+        columns: [{ name: `${prefix}n`, type: "DOUBLE" }],
+      });
+      await settle();
+      expect(runById(next)?.status).toBe("done");
+    },
+  );
+
+  it("refuses AGGREGATE at the head when its CITY source went while it waited (minor 7)", async () => {
+    // §7.6's reversed direction: the source is the CITY layer and the target is
+    // the vector one, so the removal is on the other store.
+    const zones = addZones();
+    registerExecutor("aggregate-per-area", areaWriter("bld_n", 1));
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const predecessor = layerTables.runOnTableQueue(async () => {
+      await held;
+    });
+    const id = submitRun({
+      toolId: "aggregate-per-area",
+      targetLayerId: zones,
+      sourceLayerId: "CITY",
+      scope: "all",
+      lod: null,
+      destination: "layer",
+      newLayerName: null,
+      params: {},
+      prefix: "bld_",
+      columns: [{ name: "bld_n", type: "DOUBLE" }],
+    });
+    await settle();
+    expect(runById(id)?.status).toBe("queued");
+    useLayerStore.setState({ layers: [] });
+    release();
+    await predecessor;
+    await settle();
+    expect(runById(id)).toMatchObject({
+      status: "failed",
+      error: "Layer removed",
+    });
+    // Nothing was written onto the target's features.
+    expect(Object.keys(zoneRecords(zones)[0] ?? {})).not.toContain("bld_n");
+
+    // The FIFO moves on: the city layer comes back and a following run finishes.
+    useLayerStore.setState({ layers: [cityLayer()] });
+    const next = submitRun({
+      toolId: "aggregate-per-area",
+      targetLayerId: zones,
+      sourceLayerId: "CITY",
+      scope: "all",
+      lod: null,
+      destination: "layer",
+      newLayerName: null,
+      params: {},
+      prefix: "bld_",
+      columns: [{ name: "bld_n", type: "DOUBLE" }],
+    });
+    await settle();
+    expect(runById(next)?.status).toBe("done");
+  });
+
   it("cancels a RUNNING run when the source layer goes away mid-compute", async () => {
     const zones = addZones();
     let release!: () => void;
@@ -534,7 +665,9 @@ describe("a run whose TARGET is a vector layer", () => {
     // target, so §6.1's "belongs to the source data" refusal must not fire.
     tables.CITY = freshTable("layer_1", ["id", "feature_id", "bld_n"]);
     const zones = addZones();
-    capturing();
+    // A real area writer, not `capturing()`: the value has to land on the
+    // target's own features for the positive assertion below to mean anything.
+    registerExecutor("aggregate-per-area", areaWriter("bld_n", 1));
     const id = submitRun({
       toolId: "aggregate-per-area",
       targetLayerId: zones,
@@ -548,11 +681,18 @@ describe("a run whose TARGET is a vector layer", () => {
       columns: [{ name: "bld_n", type: "DOUBLE" }],
     });
     await settle();
-    // Null-coalesced: the run now SUCCEEDS (§7.6 publishes into the feature
-    // properties), so there is no error string to search.
-    expect(runById(id)?.error ?? "").not.toContain(
-      "belongs to the source data",
-    );
+    // The POSITIVE assertion, not only the absence of one substring (minor 5):
+    // excluding a message lets an unrelated failure pass for a success. The run
+    // finishes, its value lands on the vector layer's feature properties (§7.6),
+    // and nothing was written to the CITY table at all.
+    expect(runById(id)?.status).toBe("done");
+    expect(runById(id)?.error).toBeNull();
+    expect(zoneRecords(zones)[0]).toMatchObject({ bld_n: 1 });
+    // The city layer keeps the `bld_n` of its own that it happened to have, and
+    // no transaction was opened over its table.
+    expect(sql.some((s) => s.startsWith("BEGIN TRANSACTION"))).toBe(false);
+    expect(sql.some((s) => s.startsWith('ALTER TABLE "layer_1"'))).toBe(false);
+    expect(sql.some((s) => s.startsWith('UPDATE "layer_1"'))).toBe(false);
   });
 
   it("fails when the vector TARGET is gone before the run starts", async () => {

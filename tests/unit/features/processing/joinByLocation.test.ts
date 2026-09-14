@@ -520,6 +520,32 @@ describe("joinByLocation", () => {
     );
   });
 
+  it("stops mid-walk on a cancel delivered by a TIMER (minor 10)", async () => {
+    // The case above counts checkpoints, which a walk that never yielded would
+    // also satisfy — a synchronous loop calling `throwIfCancelled` between
+    // batches passes it. This one proves the YIELD: the cancel is set by a
+    // `setTimeout(0)`, which can only run while the walk is parked in its own
+    // macrotask, and the row it was still to reach is absent from the result.
+    const many = Array.from({ length: JOIN_BATCH_ROWS * 3 }, (_, i) =>
+      row(`B${i}`, `B${i}`, 1, { zones_matches_n: 1 }),
+    );
+    let cancelled = false;
+    setTimeout(() => {
+      cancelled = true;
+    }, 0);
+    const { ctx } = context(
+      { join: many },
+      {
+        throwIfCancelled: () => {
+          if (cancelled) throw new Error("cancelled mid-walk");
+        },
+      },
+    );
+    await expect(
+      joinByLocation(run({ ...params, tie: "countOnly" }), ctx),
+    ).rejects.toThrow("cancelled mid-walk");
+  });
+
   it("opens and RELEASES the reader for the footprint proxy", async () => {
     const { ctx, sql, phases } = context({
       join: [row("B1", "B1", 1, { zones_matches_n: 1 })],

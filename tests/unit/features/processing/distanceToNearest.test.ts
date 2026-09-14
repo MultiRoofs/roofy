@@ -487,6 +487,32 @@ describe("distanceToNearest", () => {
     );
   });
 
+  it("stops mid-walk on a cancel delivered by a TIMER (minor 10)", async () => {
+    // The case above counts checkpoints, which a walk that never yielded would
+    // also satisfy — a synchronous loop calling `throwIfCancelled` between
+    // batches passes it. This one proves the YIELD: the cancel is set by a
+    // `setTimeout(0)`, which can only run while the walk is parked in its own
+    // macrotask.
+    const many = Array.from({ length: DISTANCE_BATCH_ROWS * 3 }, (_, i) =>
+      row(`B${i}`, `B${i}`, { roads_distance_m: 1, roads_nearest_id: "r7" }),
+    );
+    let cancelled = false;
+    setTimeout(() => {
+      cancelled = true;
+    }, 0);
+    const { ctx } = context(
+      { distance: many },
+      {
+        throwIfCancelled: () => {
+          if (cancelled) throw new Error("cancelled mid-walk");
+        },
+      },
+    );
+    await expect(distanceToNearest(run(params), ctx)).rejects.toThrow(
+      "cancelled mid-walk",
+    );
+  });
+
   it("omits the id column when the checkbox is off", async () => {
     const { ctx, sql } = context({
       distance: [row("B1", "B1", { roads_distance_m: 1 })],

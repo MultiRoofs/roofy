@@ -164,6 +164,8 @@ const { SOURCE_IDS_DIFFER } =
 // The real executor, registered by `tools/register` — which `runQueue` imports.
 // Named here so the suite fails loudly if it ever stops being wired.
 const { EXECUTORS } = await import("../../../../src/features/processing/tools");
+const { useComputedColumnStore } =
+  await import("../../../../src/insights/computedColumns");
 
 function object(id: string, parents: string[] = []) {
   return {
@@ -358,6 +360,10 @@ beforeEach(() => {
   useProcessingStore.getState().resetForTest();
   useLayerStore.setState({ layers: [] });
   useGeoLayerStore.setState({ layers: [] });
+  // Provenance is a MODULE store and outlives a test (minor 12): a case that
+  // asserts "this failed run published none" would otherwise be reading an
+  // earlier case's entries and passing for the wrong reason.
+  useComputedColumnStore.setState({ byLayer: {} });
 });
 
 afterEach(() => {
@@ -412,9 +418,12 @@ describe("a real Join run", () => {
       expect.arrayContaining([`__src_${id}.json`, readerNameOf(id)]),
     );
     expect(sql).toContain(`DROP TABLE IF EXISTS "__src_${id}"`);
-    // Nothing published: no write transaction was ever opened.
+    // Nothing published: no write transaction was ever opened, and no
+    // provenance either (minor 12 — the store is reset per case, so this is a
+    // statement about THIS run).
     expect(sql.some((s) => s.startsWith("BEGIN"))).toBe(false);
     expect(sql.some((s) => s.startsWith("ALTER TABLE"))).toBe(false);
+    expect(useComputedColumnStore.getState().byLayer).toEqual({});
     expect(await queueIsFree()).toBe(true);
   });
 
@@ -450,6 +459,8 @@ describe("a real Join run", () => {
     await until(() => runById(id)?.status === "failed");
 
     expect(runById(id)?.error).toBe(SOURCE_IDS_DIFFER);
+    // A FAILED run publishes no provenance either (minor 12).
+    expect(useComputedColumnStore.getState().byLayer).toEqual({});
     // BEFORE the compute, and with both handles released anyway.
     expect(sql.some((s) => s.startsWith("WITH b AS ("))).toBe(false);
     expect(dropped).toEqual(

@@ -209,6 +209,47 @@ const LOD0_DOC = JSON.stringify({
         { type: "MultiSurface", lod: "0", boundaries: [[[8, 9, 10, 11]]] },
       ],
     },
+    // Minor 6: a feature with TWO contributing parts, whose footprints are
+    // DISJOINT — so the union's area is their sum (16 + 16) and not either one.
+    // The root carries a footprint too, which the contributor rule must ignore.
+    Q1: {
+      type: "Building",
+      children: ["Q1-0", "Q1-1"],
+      geometry: [
+        { type: "MultiSurface", lod: "0", boundaries: [[[0, 1, 2, 3]]] },
+      ],
+    },
+    "Q1-0": {
+      type: "BuildingPart",
+      parents: ["Q1"],
+      geometry: [
+        { type: "MultiSurface", lod: "0", boundaries: [[[4, 5, 6, 7]]] },
+      ],
+    },
+    "Q1-1": {
+      type: "BuildingPart",
+      parents: ["Q1"],
+      geometry: [
+        { type: "MultiSurface", lod: "0", boundaries: [[[12, 13, 14, 15]]] },
+      ],
+    },
+    // Minor 6: the ROOT FALLBACK — the part has geometry, but not at LoD 0, so
+    // §7's "the union of its parts' footprints" has nothing and the root's own
+    // 10 x 10 is the feature's proxy.
+    R1: {
+      type: "Building",
+      children: ["R1-0"],
+      geometry: [
+        { type: "MultiSurface", lod: "0", boundaries: [[[0, 1, 2, 3]]] },
+      ],
+    },
+    "R1-0": {
+      type: "BuildingPart",
+      parents: ["R1"],
+      geometry: [
+        { type: "MultiSurface", lod: "2", boundaries: [[[4, 5, 6, 7]]] },
+      ],
+    },
   },
   // Z on every vertex, so the WKB is the MultiPolygon Z an LoD 0 column really
   // carries and `ST_Force2D` has something to drop.
@@ -225,6 +266,11 @@ const LOD0_DOC = JSON.stringify({
     [110, 0, 5],
     [110, 10, 5],
     [100, 10, 5],
+    // 12-15: a second 4 x 4, well away from the first one.
+    [20, 0, 5],
+    [24, 0, 5],
+    [24, 4, 5],
+    [20, 4, 5],
   ],
 });
 
@@ -874,6 +920,29 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
       ),
     ).toThrow(/Unsupported geometry type in WKB/);
     db.query(`DROP TABLE IF EXISTS solid_lod_rows`);
+  });
+
+  it("unions SEVERAL parts' footprints, and falls back to the root (minor 6)", () => {
+    // §7's contributor rule, the two halves the older case could not show: a
+    // feature with more than ONE contributing part, and a feature whose parts
+    // have geometry but none at LoD 0.
+    const from = `read_cityjson('${LOD0_FILE}', lod => '0.0')`;
+    const rows = db.query(
+      `SELECT f, ST_Area(g) AS a FROM (${buildFeatureProxySql({
+        proxy: "footprint",
+        table: "unused_minor6",
+        from,
+        geometryColumn: "geometry_lod0_0",
+        ids: ["Q1", "Q1-0", "Q1-1", "R1", "R1-0"],
+      })}) ORDER BY f`,
+    );
+    expect(rows).toEqual([
+      // TWO parts, 4 x 4 each and disjoint: 32, never one part's 16 and never
+      // the root's 100.
+      { f: "Q1", a: 32 },
+      // The part has LoD 2 geometry only, so the ROOT is the sole contributor.
+      { f: "R1", a: 100 },
+    ]);
   });
 
   it("keeps scope ALL inside the LAYER TABLE when the file has gained a building (S1)", () => {
@@ -1888,6 +1957,105 @@ describe.skipIf(!enabled)("spatial against real DuckDB 1.5.5", () => {
       },
     ]);
     dropAggregateFixture();
+  });
+
+  it("runs MIN and MAX over mixed, all-NULL and empty membership (minor 6)", async () => {
+    // §7.6's aggregate list includes min and max, and the older cases only ran
+    // count/sum/mean. The three membership shapes are told apart on one
+    // statement: an area whose buildings are PARTLY valued (the NULLs are
+    // ignored, never treated as zero), one whose buildings are ALL NULL, and one
+    // with no building at all.
+    db.query(
+      `CREATE OR REPLACE TABLE agg_mm AS SELECT * FROM (VALUES
+         ('m1', 'm1', 50.0, {'xmin': 1.0, 'ymin': 1.0, 'zmin': 0.0, 'xmax': 2.0, 'ymax': 2.0, 'zmax': 3.0}),
+         ('m2', 'm2', NULL, {'xmin': 3.0, 'ymin': 1.0, 'zmin': 0.0, 'xmax': 4.0, 'ymax': 2.0, 'zmax': 3.0}),
+         ('m3', 'm3', 12.0, {'xmin': 1.5, 'ymin': 1.5, 'zmin': 0.0, 'xmax': 2.5, 'ymax': 2.5, 'zmax': 3.0}),
+         ('m4', 'm4', NULL, {'xmin': 100.2, 'ymin': 100.2, 'zmin': 0.0, 'xmax': 100.4, 'ymax': 100.4, 'zmax': 3.0}),
+         ('m5', 'm5', NULL, {'xmin': 100.6, 'ymin': 100.6, 'zmin': 0.0, 'xmax': 100.8, 'ymax': 100.8, 'zmax': 3.0})
+       ) AS t("id", "feature_id", "roof_area_m2", "bbox")`,
+    );
+    db.registerBytes(
+      "__src_mm.json",
+      await encodeProjectedFeatures([
+        {
+          idx: 0,
+          stableId: "id:string:mixed",
+          featureId: "mixed",
+          properties: {},
+          // Holds m1 (50), m2 (NULL) and m3 (12).
+          wkt: "POLYGON ((0 0, 5 0, 5 5, 0 5, 0 0))",
+        },
+        {
+          idx: 1,
+          stableId: "id:string:allnull",
+          featureId: "allnull",
+          properties: {},
+          // Holds m4 and m5, both NULL.
+          wkt: "POLYGON ((100 100, 101 100, 101 101, 100 101, 100 100))",
+        },
+        {
+          idx: 2,
+          stableId: "id:string:empty",
+          featureId: "empty",
+          properties: {},
+          wkt: "POLYGON ((200 200, 201 200, 201 201, 200 201, 200 200))",
+        },
+      ]),
+    );
+    db.query(buildVectorTableSql("__src_mm", "__src_mm.json"));
+    const rows = db.query(
+      buildAggregateSql({
+        table: "agg_mm",
+        source: "__src_mm",
+        proxy: "rectangle",
+        from: null,
+        geometryColumn: null,
+        ids: null,
+        predicate: "intersects",
+        rows: [
+          { op: "count", column: null, name: "bld_buildings_n" },
+          { op: "min", column: "roof_area_m2", name: "bld_min_roof_area_m2" },
+          { op: "max", column: "roof_area_m2", name: "bld_max_roof_area_m2" },
+        ],
+      }),
+    );
+    expect(rows).toEqual([
+      {
+        // ALL NULL: the count is real, the extremes are NULL — never 0.
+        sid: "id:string:allnull",
+        bld_buildings_n: 2,
+        bld_min_roof_area_m2: null,
+        bld_max_roof_area_m2: null,
+        multi_n: 0,
+        buildings_total: 5,
+        no_proxy_n: 0,
+      },
+      {
+        // EMPTY membership: count 0 and no extremes, which is a different fact
+        // from "every building here is NULL" and reads the same in the columns
+        // — the COUNT is what tells them apart.
+        sid: "id:string:empty",
+        bld_buildings_n: 0,
+        bld_min_roof_area_m2: null,
+        bld_max_roof_area_m2: null,
+        multi_n: 0,
+        buildings_total: 5,
+        no_proxy_n: 0,
+      },
+      {
+        // MIXED: the NULL is ignored rather than dragged in as a zero minimum.
+        sid: "id:string:mixed",
+        bld_buildings_n: 3,
+        bld_min_roof_area_m2: 12,
+        bld_max_roof_area_m2: 50,
+        multi_n: 0,
+        buildings_total: 5,
+        no_proxy_n: 0,
+      },
+    ]);
+    db.query(buildDropVectorTableSql("__src_mm"));
+    db.query(`DROP TABLE IF EXISTS agg_mm`);
+    db.dropFile("__src_mm.json");
   });
 
   it("counts a building on a shared boundary in BOTH areas, and says so once", async () => {
