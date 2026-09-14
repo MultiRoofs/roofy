@@ -95,8 +95,8 @@ const addMessages: (string | null)[] = [];
 /** The dialog stub: a marker (was it mounted?), a close button (does the
  *  landing page own the open state?) and an add button (does its URL reach
  *  the app's ONE loading path, and what does that path report back?). */
-vi.mock("../../../src/ui/stac/StacBrowserDialog", () => ({
-  StacBrowserDialog: (props: {
+vi.mock("../../../src/ui/stac/StacBrowser", () => ({
+  StacBrowser: (props: {
     onClose: () => void;
     onAddUrl: (url: string) => Promise<AddUrlResult>;
   }) => (
@@ -111,9 +111,6 @@ vi.mock("../../../src/ui/stac/StacBrowserDialog", () => ({
         }}
       >
         stub catalog add
-      </button>
-      <button type="button" onClick={props.onClose}>
-        stub catalog close
       </button>
     </div>
   ),
@@ -174,21 +171,15 @@ describe("App landing page — catalog entry point", () => {
 
   afterEach(cleanup);
 
-  it("offers the catalog as one of the landing page's two entry paths", () => {
+  it("opens in the viewer with Add layer and a Delft example", () => {
     render(<App persistenceStore={emptyStore} />);
 
-    // Two peers, one heading each; the sample is a footnote link below them.
+    expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Open your data" }),
+      screen.getByRole("button", { name: "Add layer" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Browse the catalog" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Browse catalog" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "try the Delft sample" }),
+      screen.getByRole("button", { name: "Load Delft sample" }),
     ).toBeInTheDocument();
     // Closed until asked for.
     expect(screen.queryByTestId("stac-dialog-stub")).toBeNull();
@@ -214,17 +205,19 @@ describe("App landing page — catalog entry point", () => {
   it("mounts the catalog dialog on click and closes it again", () => {
     render(<App persistenceStore={emptyStore} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Browse catalog" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Catalog" }));
     expect(screen.getByTestId("stac-dialog-stub")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "stub catalog close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByTestId("stac-dialog-stub")).toBeNull();
   });
 
   it("routes an added catalog URL through the app's one loading path", async () => {
     render(<App persistenceStore={emptyStore} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Browse catalog" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Catalog" }));
     fireEvent.click(screen.getByRole("button", { name: "stub catalog add" }));
 
     await waitFor(() => expect(loadFromUrl).toHaveBeenCalledWith(CATALOG_URL));
@@ -240,7 +233,8 @@ describe("App landing page — catalog entry point", () => {
     loadFromUrl.mockRejectedValue(new Error("404 Not Found"));
     render(<App persistenceStore={emptyStore} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Browse catalog" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Catalog" }));
     fireEvent.click(screen.getByRole("button", { name: "stub catalog add" }));
 
     await waitFor(() => expect(addOutcomes).toEqual([false]));
@@ -255,7 +249,8 @@ describe("App landing page — catalog entry point", () => {
     loadFromUrl.mockResolvedValue(loaded);
     render(<App persistenceStore={emptyStore} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Browse catalog" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Catalog" }));
     fireEvent.click(screen.getByRole("button", { name: "stub catalog add" }));
 
     await waitFor(() => expect(addOutcomes).toEqual([true]));
@@ -270,12 +265,14 @@ describe("App landing page — catalog entry point", () => {
     loadFromUrl.mockResolvedValue(loaded);
     render(<App persistenceStore={emptyStore} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Browse catalog" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Catalog" }));
     fireEvent.click(screen.getByRole("button", { name: "stub catalog add" }));
 
     await waitFor(() =>
-      expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
+      expect(useLayerStore.getState().layers).toHaveLength(1),
     );
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
     fireEvent.click(
       screen.getByRole("button", { name: /^Layer actions for / }),
@@ -284,9 +281,7 @@ describe("App landing page — catalog entry point", () => {
       fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     });
 
-    expect(
-      screen.getByRole("dialog", { name: "Add layer" }),
-    ).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Add layer" })).toBeNull();
     expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
     expect(screen.queryByTestId("stac-dialog-stub")).toBeNull();
   });
@@ -299,14 +294,16 @@ describe("App landing page — catalog entry point", () => {
     loadFromUrl.mockResolvedValue(loaded);
     render(<App persistenceStore={emptyStore} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Browse catalog" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Catalog" }));
     fireEvent.click(screen.getByRole("button", { name: "stub catalog add" }));
 
     // The layer lands, the viewer shell replaces the landing branch, and the
     // dialog goes with it (accepted behaviour — the branch owns it).
     await waitFor(() =>
-      expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
+      expect(useLayerStore.getState().layers).toHaveLength(1),
     );
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByTestId("stac-dialog-stub")).toBeNull();
 
     // "New workspace" in the header's workspace menu — what "Close file" in

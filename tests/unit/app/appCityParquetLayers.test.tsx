@@ -240,7 +240,16 @@ function storeWith(snapshot: ProjectSnapshot | null): ProjectStateStore {
 }
 
 async function clickRestore(): Promise<void> {
-  fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: useWorkspaceStore.getState().name }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open…" }));
+  await waitFor(() =>
+    expect(document.querySelector(".workspace-snapshot")).not.toBeNull(),
+  );
+  fireEvent.click(
+    document.querySelector<HTMLButtonElement>(".workspace-snapshot")!,
+  );
 }
 
 function shareHash(
@@ -424,6 +433,8 @@ describe("App — a failed group add is reported", () => {
   /** Two files, the way a browser delivers a multi-file drop. jsdom has no
    *  real `DataTransfer`, so the shape the handler reads is supplied. */
   function dropTwoFiles(): void {
+    if (!screen.queryByRole("dialog", { name: "Add layer" }))
+      fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
     fireEvent.drop(screen.getByTestId("source-picker-drop-zone"), {
       dataTransfer: {
         files: [new File(["a"], "a.city.json"), new File(["b"], "b.city.json")],
@@ -481,16 +492,19 @@ describe("App — a failed group add is reported", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("reports it ONCE on the landing page — inline, with no toast", async () => {
+  it("reports a failed first add once in the empty viewer", async () => {
     loadCityParquetFromFiles.mockRejectedValue(new Error(NO_TABLES));
     render(<App persistenceStore={storeWith(null)} />);
 
     dropTwoFiles();
-
-    expect(await screen.findByText(NO_TABLES)).toBeTruthy();
-    expect(document.querySelector(".error-message")?.textContent).toBe(
-      NO_TABLES,
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Add layer" })).getByRole(
+        "button",
+        { name: "Add layer" },
+      ),
     );
+    expect(await screen.findByText(`Error · ${NO_TABLES}`)).toBeTruthy();
+    expect(screen.getAllByText(new RegExp(NO_TABLES))).toHaveLength(1);
     expect(document.querySelector(".toast")).toBeNull();
   });
 });

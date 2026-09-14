@@ -351,3 +351,17 @@ it("keeps the same viewport mounted while managing workspaces", async () => {
   expect(screen.getByTestId("navara-viewport")).toBe(viewport);
   cleanup();
 });
+
+it("opens directly in an empty viewer with a Delft example instead of the home screen", () => {
+  useLayerStore.setState({ layers: [] });
+  useGeoLayerStore.setState({ layers: [] });
+  render(<App persistenceStore={emptyStore} />);
+  expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
+  expect(
+    screen.queryByRole("heading", { name: "Your city, roof by roof." }),
+  ).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Load Delft sample" }),
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Add layer" })).toBeNull();
+});

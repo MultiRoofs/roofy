@@ -1,3 +1,8 @@
+import { Walkthrough } from "../ui/walkthrough/Walkthrough";
+import {
+  walkthroughStore,
+  useWalkthroughStore,
+} from "../features/walkthrough/walkthroughStore";
 import { useDrawStore } from "../features/drawing/drawStore";
 import { DrawOverlay } from "../ui/viewport/DrawOverlay";
 import { saveWorkspace } from "../persistence/saveWorkspace";
@@ -118,27 +123,19 @@ import { DetailsPanel } from "../ui/details/DetailsPanel";
 import { WorkspaceHeader } from "../ui/header/WorkspaceHeader";
 import { exportScene } from "../features/export/browserSceneExport";
 import { LeftPanel } from "../ui/sidebar/LeftPanel";
-import { SourcePicker } from "../ui/layers/SourcePicker";
 import { AddLayerDialog } from "../ui/layers/AddLayerDialog";
-import { UrlSourceForm } from "../ui/layers/UrlSourceForm";
-import {
-  addGeoSourceFromFile,
-  addGeoSourceFromUrl,
-} from "../features/geoLayers/addGeoSource";
+import { addGeoSourceFromFile } from "../features/geoLayers/addGeoSource";
 import {
   detectSourceFromName,
   type DetectedSource,
 } from "../features/layers/detectSource";
-import { StacBrowserDialog } from "../ui/stac/StacBrowserDialog";
 import type { AddUrlResult } from "../ui/stac/StacBrowser";
 import { ShareDialog } from "../ui/ShareDialog";
 import { StatusBar } from "../ui/StatusBar";
 import { ViewerShell } from "../ui/shell/ViewerShell";
 import { installShellListeners, useShellStore } from "../ui/shell/shellStore";
 import { LeftRail } from "../ui/shell/LeftRail";
-import { PreferencesMenu } from "../ui/header/PreferencesMenu";
 import { installThemeListener } from "../features/theme/themeStore";
-import { RoofyLockup } from "../ui/RoofyLockup";
 import { LegendOverlay } from "../ui/viewport/LegendOverlay";
 import { FilterChip } from "../ui/viewport/FilterChip";
 import { HoverTooltip } from "../ui/viewport/HoverTooltip";
@@ -290,19 +287,9 @@ export function App({
   const [viewportAttribution, setViewportAttribution] = useState<
     readonly string[]
   >([]);
-  /**
-   * The LANDING page's catalog dialog — the viewer shell reaches the same
-   * browser through the Add Layer dialog's "Catalog" tab instead.
-   *
-   * INVARIANT, enforced by an effect below rather than by this declaration:
-   * false whenever the viewer shell is up. `App` is not remounted across the
-   * two branches, so nothing about the flag's lifetime is implied by the
-   * branch that renders it — it is plain state that outlives its own UI.
-   */
-  const [catalogOpen, setCatalogOpen] = useState(false);
   const [addLayerOpen, setAddLayerOpen] = useState(false);
+  const tourPhase = useWalkthroughStore((state) => state.phase);
   const [restoringWorkspace, setRestoringWorkspace] = useState(false);
-  const [hasEnteredViewer, setHasEnteredViewer] = useState(false);
   /** The minted share link currently on display, or null. Non-null IS the
    *  dialog's open state: the URL is a snapshot of the view at the moment
    *  Share was clicked, so a new click mints a new one rather than reopening
@@ -423,39 +410,17 @@ export function App({
   const previousWorkspaceSizeRef = useRef(0);
 
   /**
-   * Close the catalog on ANY transition into the viewer shell — the one place
-   * that enforces "`catalogOpen` is false whenever the shell is up".
-   *
-   * Resetting on the way OUT instead does not work: there is more than one way
-   * back to the landing page (the toolbar's Close file, and removing the last
-   * layer from the sidebar, which calls `removeLayer` directly), and fixing
-   * them one at a time is how the second one got missed. This condition is the
-   * same one the render branch below uses, `engineBooting` included, so a
-   * `.fcb` open that boots the shell and then FAILS also returns to a landing
-   * page with no modal over it.
-   *
-   * Nothing user-visible changes: the landing branch — dialog and all — is
-   * already unmounted by the time this runs.
-   */
-  useEffect(() => {
-    if (hasWorkspace || engineBooting) {
-      setCatalogOpen(false);
-      setHasEnteredViewer(true);
-    }
-  }, [hasWorkspace, engineBooting]);
-
-  /**
    * A retained empty viewer is still a new workspace. It must not retain
    * panels that describe the layer which was just removed, whether that was
    * through the header's "New workspace" action or the final row's menu.
    */
   useEffect(() => {
-    if (hasWorkspace || engineBooting || !hasEnteredViewer) return;
+    if (hasWorkspace || engineBooting) return;
     useShellStore.getState().closeDrawer();
     useSceneSheetStore.getState().setSheet(null);
     useSelectionStore.getState().clear();
     activateLayer(null);
-  }, [hasWorkspace, engineBooting, hasEnteredViewer]);
+  }, [hasWorkspace, engineBooting]);
 
   // Active layer's streaming state, if any. Selected as individual
   // primitive fields (not the whole `StreamState` object) so this component
@@ -699,24 +664,6 @@ export function App({
     failed,
     dismissFailed,
   } = useLayerFileLoader({ resolveStreamPlugin });
-  useEffect(() => {
-    if (
-      !hasWorkspace &&
-      !engineBooting &&
-      !loading &&
-      !restoringWorkspace &&
-      hasEnteredViewer &&
-      pathname !== "/workspaces"
-    )
-      setAddLayerOpen(true);
-  }, [
-    hasWorkspace,
-    engineBooting,
-    loading,
-    restoringWorkspace,
-    hasEnteredViewer,
-    pathname,
-  ]);
 
   /*
    * A failed load has ONE surface, and since 12.2 it is a ROW.
@@ -1463,14 +1410,6 @@ export function App({
     ],
   );
 
-  const handleDeleteSnapshot = useCallback(
-    async (id: string) => {
-      await persistenceStore.remove(id);
-      await refreshSnapshots();
-    },
-    [persistenceStore, refreshSnapshots],
-  );
-
   /** The dialog's clipboard seam. Wrapped in a stable callback rather than
    *  passed as `platform.clipboard.writeText` directly, so the dialog's
    *  auto-copy effect cannot re-fire on an unrelated re-render — and so the
@@ -1736,23 +1675,6 @@ export function App({
     [handleFiles],
   );
 
-  /** The landing page's URL field, which detects exactly as the dialog does:
-   *  a city model goes into the loading path, a geospatial source is written
-   *  to its store and activated. Returns the sentence to show in place, or
-   *  null. */
-  const handleSubmitUrl = useCallback(
-    (url: string, detected: DetectedSource, name?: string): string | null => {
-      if (detected.kind === "unknown") return null;
-      if (detected.kind === "geo") {
-        const added = addGeoSourceFromUrl(url, detected.geoKind, name);
-        return added.ok ? null : added.error;
-      }
-      void handleUrl(url, detected);
-      return null;
-    },
-    [handleUrl],
-  );
-
   /** The catalog's version of the same path: the caller WANTS the outcome —
    *  including the loader's failure sentence, which is why this reads
    *  `lastError()` the moment the add resolves rather than the (async) error
@@ -1774,20 +1696,11 @@ export function App({
     pendingRestoredCameraRef.current = null;
     closeAllStreamingLayers(getStreamPlugin());
     useLayerStore.getState().removeAllLayers();
-    // No `setCatalogOpen(false)` here: the effect above already guarantees the
-    // flag is false for as long as the shell is up, and this is only one of
-    // the exits back to the landing page. Two half-rules for one invariant is
-    // what let the sidebar's remove-last-layer path slip through.
-    // The drawer belongs to a workspace that no longer has any layers.
     useShellStore.getState().closeDrawer();
     setFps(undefined);
     setCursorPosition(null);
     setUnavailableLayers([]);
     clearSelection();
-    // "Close" empties the workspace, geospatial context included. Keeping the
-    // geo layers used to leave the next city model opening onto the
-    // geospatial view of a layer nobody had just picked — and a "Close file"
-    // that visibly leaves half the map behind is not what the word promises.
     useGeoLayerStore.getState().removeAllGeoLayers();
     // Last, and after both removals: the invariants hand the active id over to
     // whatever survives each one, and nothing survives this.
@@ -2098,12 +2011,7 @@ export function App({
     void handleUrl(SAMPLE_DATA_URL);
   }, [handleUrl]);
 
-  // Viewer state. `engineBooting` puts the shell up with ZERO layers for the
-  // duration of a `.fcb` open — the engine has to be running before a
-  // streaming layer can exist at all, so this is the only way a `.fcb` can be
-  // the first thing opened. Everything below already reads `activeLayer`
-  // optional-chained, so an empty workspace renders an empty globe rather than
-  // throwing.
+  // Keep the viewport mounted across empty workspaces and workspace management.
   const workspacePage =
     pathname === "/workspaces" ? (
       <WorkspacesPage
@@ -2118,18 +2026,13 @@ export function App({
         }}
         onOpen={(id) => {
           navigate("/");
-          setHasEnteredViewer(true);
           void handleRestore(id);
         }}
       />
     ) : null;
-  if (workspacePage && !(hasWorkspace || engineBooting || hasEnteredViewer))
-    return workspacePage;
+  const hasUrlLayers = layers.some((l) => l.modelRef.type === "url");
 
-  if (hasWorkspace || engineBooting || hasEnteredViewer) {
-    const hasUrlLayers = layers.some((l) => l.modelRef.type === "url");
-
-    /* The right column follows the SELECTION: there is no inspector toggle
+  /* The right column follows the SELECTION: there is no inspector toggle
        any more, and the `right` prop below is null exactly when both
        `selections` and `geoSelection` are empty. The header's chevron
        (`rightCollapsed`) still collapses the panel without touching what is
@@ -2141,493 +2044,268 @@ export function App({
        With the toolbox open the panel is the toolbox and this node becomes its
        Details TAB (spec §4.2), which is why the title and the "is anything
        selected" answer are named once here and handed to both. */
-    const hasSelection = selections.length > 0 || geoSelection !== null;
-    const detailsNode = hasSelection ? (
-      <DetailsPanel onClose={clearSelection} />
-    ) : null;
-    const detailsTitle = selectionTitle(selections, geoSelection !== null);
+  const hasSelection = selections.length > 0 || geoSelection !== null;
+  const detailsNode = hasSelection ? (
+    <DetailsPanel onClose={clearSelection} />
+  ) : null;
+  const detailsTitle = selectionTitle(selections, geoSelection !== null);
 
-    return (
-      <>
-        {workspacePage}
-        <div
-          className={
-            workspacePage
-              ? "viewer-route viewer-route-inactive"
-              : "viewer-route"
-          }
-          inert={workspacePage ? true : undefined}
-          aria-hidden={workspacePage ? true : undefined}
-        >
-          <ViewerShell
-            header={
-              <WorkspaceHeader
-                onExportScene={(format) =>
-                  exportScene(format, () => {
-                    const scene = sceneRef.current;
-                    if (!scene)
-                      return Promise.reject(
-                        new Error("The scene is not ready to capture."),
-                      );
-                    return scene.captureImage(viewportAttribution);
-                  })
-                }
-                onSave={handleSave}
-                onShare={handleShare}
-                canShare={hasUrlLayers}
-                /* "New workspace" is what "Close file" was: it empties the
+  return (
+    <>
+      {workspacePage}
+      <div
+        className={
+          workspacePage ? "viewer-route viewer-route-inactive" : "viewer-route"
+        }
+        inert={workspacePage ? true : undefined}
+        aria-hidden={workspacePage ? true : undefined}
+      >
+        <ViewerShell
+          header={
+            <WorkspaceHeader
+              onExportScene={(format) =>
+                exportScene(format, () => {
+                  const scene = sceneRef.current;
+                  if (!scene)
+                    return Promise.reject(
+                      new Error("The scene is not ready to capture."),
+                    );
+                  return scene.captureImage(viewportAttribution);
+                })
+              }
+              onSave={handleSave}
+              onShare={handleShare}
+              canShare={hasUrlLayers}
+              /* "New workspace" is what "Close file" was: it empties the
                  workspace (and resets its name) and hands the user back to
                  the landing page. */
-                onNewWorkspace={handleClose}
-                onOpenWorkspace={(id) => void handleRestore(id)}
-                snapshots={savedSnapshots}
-              />
-            }
-            /* The rail is not a collapsed panel: it is a different component
+              onNewWorkspace={handleClose}
+              onOpenWorkspace={(id) => void handleRestore(id)}
+              snapshots={savedSnapshots}
+            />
+          }
+          /* The rail is not a collapsed panel: it is a different component
              for a 40px column (the shell already narrows the track), which
              is why the choice is made here rather than inside the panel. */
-            left={
-              leftCollapsed ? (
-                /* The same three row sources the panel gets: the rail's badge
+          left={
+            leftCollapsed ? (
+              /* The same three row sources the panel gets: the rail's badge
                  counts what the list WOULD show, not what the stores hold. */
-                <LeftRail
-                  extraRows={unavailableRows}
-                  pending={pending}
-                  failed={failed}
-                  failedCount={failed.length}
-                />
-              ) : (
-                <LeftPanel
-                  onRequestAdd={() => setAddLayerOpen(true)}
-                  addDialogOpen={addLayerOpen}
+              <LeftRail
+                extraRows={unavailableRows}
+                pending={pending}
+                failed={failed}
+                failedCount={failed.length}
+              />
+            ) : (
+              <LeftPanel
+                onRequestAdd={() => setAddLayerOpen(true)}
+                addDialogOpen={addLayerOpen}
+                onAddFile={handlePickedFile}
+                onAddFiles={handlePickedFiles}
+                onAddUrl={handleAddUrl}
+                loading={loading}
+                /* The one thing only `App` can answer: a city layer is flown
+                   to through the scene handle, a geospatial one through an
+                   extent this app computes for itself. */
+                onZoomToLayer={handleZoomToLayer}
+                extraRows={unavailableRows}
+                pending={pending}
+                failed={failed}
+                dismissFailed={dismissFailed}
+              />
+            )
+          }
+          map={
+            <div className="viewport" ref={viewportRef}>
+              {addLayerOpen && pathname !== "/workspaces" && (
+                <AddLayerDialog
+                  onClose={() => setAddLayerOpen(false)}
                   onAddFile={handlePickedFile}
                   onAddFiles={handlePickedFiles}
                   onAddUrl={handleAddUrl}
                   loading={loading}
-                  /* The one thing only `App` can answer: a city layer is flown
-                   to through the scene handle, a geospatial one through an
-                   extent this app computes for itself. */
-                  onZoomToLayer={handleZoomToLayer}
-                  extraRows={unavailableRows}
-                  pending={pending}
-                  failed={failed}
-                  dismissFailed={dismissFailed}
                 />
-              )
-            }
-            map={
-              <div className="viewport" ref={viewportRef}>
-                {addLayerOpen && pathname !== "/workspaces" && (
-                  <AddLayerDialog
-                    onClose={() => setAddLayerOpen(false)}
-                    onAddFile={handlePickedFile}
-                    onAddFiles={handlePickedFiles}
-                    onAddUrl={handleAddUrl}
-                    loading={loading}
-                  />
-                )}
-                {loadError && !hasWorkspace && (
-                  <p
-                    className="empty-workspace-error error-message"
-                    role="alert"
+              )}
+              {loadError && !hasWorkspace && failed.length === 0 && (
+                <p className="empty-workspace-error error-message" role="alert">
+                  {loadError}
+                </p>
+              )}
+              {!hasWorkspace &&
+                !loading &&
+                !restoringWorkspace &&
+                (tourPhase === "idle" || tourPhase === "welcome") && (
+                  <section
+                    className="empty-workspace-start"
+                    aria-label="Get started"
                   >
-                    {loadError}
-                  </p>
+                    <h2>Explore Delft</h2>
+                    <p>
+                      Try the example city model to explore roofs, attributes
+                      and analysis.
+                    </p>
+                    <button
+                      type="button"
+                      className="sample-link"
+                      onClick={handleLoadSample}
+                    >
+                      Load Delft sample
+                    </button>
+                    {tourPhase === "idle" && (
+                      <button
+                        type="button"
+                        onClick={() => walkthroughStore.getState().start()}
+                      >
+                        Start walkthrough
+                      </button>
+                    )}
+                  </section>
                 )}
-                <NavaraViewport
-                  ref={attachScene}
-                  onTriangleCount={() => {}}
-                  onFps={setFps}
-                  onCursorPosition={setCursorPosition}
-                  onLayerError={handleLayerError}
-                  onAttributionChange={setViewportAttribution}
-                />
-                <CameraCluster
-                  onZoomIn={() => sceneRef.current?.zoomIn()}
-                  onZoomOut={() => sceneRef.current?.zoomOut()}
-                  onResetNorth={() => sceneRef.current?.resetNorth()}
-                  onFit={handleFitActiveLayer}
-                  fitDisabled={activeLayer === null}
-                  fitTitle={
-                    activeLayer === null
-                      ? "Choose a layer to fit"
-                      : "Fit active layer"
-                  }
-                  onFitSelection={handleFitSelection}
-                  selectionPresent={
-                    selectedObjectIds.length > 0 || geoSelection !== null
-                  }
-                  selectionDisabled={
-                    selectedObjectIds.length === 0 && selectedGeoBounds === null
-                  }
-                  selectionTitle={
-                    geoSelection !== null
-                      ? selectedGeoBounds === null
-                        ? "Selected geo feature has no coordinates"
-                        : "Zoom to selected geo feature"
-                      : "Zoom to selection"
-                  }
-                />
-                {drawActive && <DrawOverlay scene={sceneRef} />}
-                <LegendOverlay />
-                <FilterChip />
-                <HoverTooltip />
-              </div>
-            }
-            toolbar={
-              <div
-                className="map-tool-header"
-                role="toolbar"
-                aria-label="Map tools"
-              >
-                <div className="map-tool-header__editing">
-                  <SelectModeControl
-                    mode={mode}
-                    toolMode={toolMode}
-                    cityActive={activeCityLayer !== null}
-                    onSetMode={setMode}
-                    onSetToolMode={setToolMode}
-                    drawActive={drawActive}
-                    canDraw={
-                      activeLayer?.layer.id === drawLayerId &&
-                      activeLayer?.kind === "geo"
-                    }
-                    onDraw={() => useDrawStore.getState().start()}
-                    onPick={() => useDrawStore.getState().stop()}
-                  />
-                  <ToolsButton />
-                  <AddressSearch onFlyTo={handleFlyToAddress} />
-                </div>
-                <SceneButtons
-                  renderSun={(onClose) => <SunShadeSheet onClose={onClose} />}
-                  renderSettings={(onClose) => (
-                    <SceneSettingsSheet onClose={onClose} />
-                  )}
-                />
-              </div>
-            }
-            canOpenTable={
-              activeLayer?.kind === "city" ||
-              (activeLayer?.kind === "geo" &&
-                activeLayer.layer.kind === "geojson")
-            }
-            drawer={
-              drawerOpen ? (
-                <DataDrawer
-                  duckdbStatus={duckdbStatus}
-                  onRetryDuckDB={handleRetryDuckDB}
-                />
-              ) : null
-            }
-            right={
-              toolboxOpen ? (
-                <ProcessingPanel
-                  details={detailsNode}
-                  detailsTitle={detailsTitle}
-                />
-              ) : (
-                detailsNode
-              )
-            }
-            rightTitle={detailsTitle}
-            rightMode={toolboxOpen ? "tools" : "details"}
-            hasSelection={hasSelection}
-            attributionLines={viewportAttribution}
-            status={
-              <StatusBar
-                objectCount={totalObjects}
-                fps={fps}
-                cursorPosition={cursorPosition}
-                streamStatus={
-                  activeCityLayer?.isStreaming
-                    ? (activeStreamStatus ?? "idle")
-                    : null
+              <NavaraViewport
+                ref={attachScene}
+                onTriangleCount={() => {}}
+                onFps={setFps}
+                onCursorPosition={setCursorPosition}
+                onLayerError={handleLayerError}
+                onAttributionChange={setViewportAttribution}
+              />
+              <CameraCluster
+                onZoomIn={() => sceneRef.current?.zoomIn()}
+                onZoomOut={() => sceneRef.current?.zoomOut()}
+                onResetNorth={() => sceneRef.current?.resetNorth()}
+                onFit={handleFitActiveLayer}
+                fitDisabled={activeLayer === null}
+                fitTitle={
+                  activeLayer === null
+                    ? "Choose a layer to fit"
+                    : "Fit active layer"
                 }
-                streamMessage={
-                  activeCityLayer?.isStreaming
-                    ? (activeStreamMessage ?? null)
-                    : null
+                onFitSelection={handleFitSelection}
+                selectionPresent={
+                  selectedObjectIds.length > 0 || geoSelection !== null
                 }
-                residentCellCount={
-                  activeCityLayer?.isStreaming
-                    ? activeStream?.handle.getResidentModel().cellCount
-                    : undefined
+                selectionDisabled={
+                  selectedObjectIds.length === 0 && selectedGeoBounds === null
+                }
+                selectionTitle={
+                  geoSelection !== null
+                    ? selectedGeoBounds === null
+                      ? "Selected geo feature has no coordinates"
+                      : "Zoom to selected geo feature"
+                    : "Zoom to selection"
                 }
               />
-            }
-          />
+              {drawActive && <DrawOverlay scene={sceneRef} />}
+              <LegendOverlay />
+              <FilterChip />
+              <HoverTooltip />
+            </div>
+          }
+          toolbar={
+            <div
+              className="map-tool-header"
+              role="toolbar"
+              aria-label="Map tools"
+            >
+              <div className="map-tool-header__editing">
+                <SelectModeControl
+                  mode={mode}
+                  toolMode={toolMode}
+                  cityActive={activeCityLayer !== null}
+                  onSetMode={setMode}
+                  onSetToolMode={setToolMode}
+                  drawActive={drawActive}
+                  canDraw={
+                    activeLayer?.layer.id === drawLayerId &&
+                    activeLayer?.kind === "geo"
+                  }
+                  onDraw={() => useDrawStore.getState().start()}
+                  onPick={() => useDrawStore.getState().stop()}
+                />
+                <ToolsButton />
+                <AddressSearch onFlyTo={handleFlyToAddress} />
+              </div>
+              <SceneButtons
+                renderSun={(onClose) => <SunShadeSheet onClose={onClose} />}
+                renderSettings={(onClose) => (
+                  <SceneSettingsSheet onClose={onClose} />
+                )}
+              />
+            </div>
+          }
+          canOpenTable={
+            activeLayer?.kind === "city" ||
+            (activeLayer?.kind === "geo" &&
+              activeLayer.layer.kind === "geojson")
+          }
+          drawer={
+            drawerOpen ? (
+              <DataDrawer
+                duckdbStatus={duckdbStatus}
+                onRetryDuckDB={handleRetryDuckDB}
+              />
+            ) : null
+          }
+          right={
+            toolboxOpen ? (
+              <ProcessingPanel
+                details={detailsNode}
+                detailsTitle={detailsTitle}
+              />
+            ) : (
+              detailsNode
+            )
+          }
+          rightTitle={detailsTitle}
+          rightMode={toolboxOpen ? "tools" : "details"}
+          hasSelection={hasSelection}
+          attributionLines={viewportAttribution}
+          status={
+            <StatusBar
+              objectCount={totalObjects}
+              fps={fps}
+              cursorPosition={cursorPosition}
+              streamStatus={
+                activeCityLayer?.isStreaming
+                  ? (activeStreamStatus ?? "idle")
+                  : null
+              }
+              streamMessage={
+                activeCityLayer?.isStreaming
+                  ? (activeStreamMessage ?? null)
+                  : null
+              }
+              residentCellCount={
+                activeCityLayer?.isStreaming
+                  ? activeStream?.handle.getResidentModel().cellCount
+                  : undefined
+              }
+            />
+          }
+        />
 
-          {/* Keyed on the URL so a second Share click while the dialog is open
+        {/* Keyed on the URL so a second Share click while the dialog is open
             remounts it — the auto-copy effect must run again for the NEW
             link, not leave the old one on screen reporting an old result. */}
-          {shareUrl !== null && (
-            <ShareDialog
-              key={shareUrl}
-              url={shareUrl}
-              onClose={() => setShareUrl(null)}
-              copyToClipboard={copyShareText}
-            />
-          )}
+        {shareUrl !== null && (
+          <ShareDialog
+            key={shareUrl}
+            url={shareUrl}
+            onClose={() => setShareUrl(null)}
+            copyToClipboard={copyShareText}
+          />
+        )}
 
-          {toast && <div className="toast">{toast}</div>}
-        </div>
-      </>
-    );
-  }
-
-  // Landing / drop zone
-  return (
-    <main className="app-shell">
-      <div className="landing-preferences">
-        <PreferencesMenu />
-        <button
-          type="button"
-          className="tb-btn workspaces-trigger"
-          onClick={() => navigate("/workspaces")}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M3 7V4h7l2 3h9v13H3Z" />
-          </svg>
-          <span>Workspaces</span>
-        </button>
+        {!workspacePage && (
+          <Walkthrough
+            onLoadSample={handleLoadSample}
+            loading={loading}
+            loadError={loadError}
+          />
+        )}
+        {toast && <div className="toast">{toast}</div>}
       </div>
-
-      <div className="hero">
-        {/* The same lockup the toolbar wears, one size up — see the LANDING
-            section of app.css for the `.hero .eyebrow .roofy-lockup` size. The
-            `.eyebrow` wrapper stays so the hero's grid rhythm is unchanged. */}
-        <p className="eyebrow">
-          <RoofyLockup />
-        </p>
-        <h1>Your city, roof by roof.</h1>
-        <p className="summary">
-          Drop a city model or pick one from the open catalog.
-        </p>
-      </div>
-
-      {unavailableLayers.length > 0 && (
-        <UnavailableLayersBanner
-          layers={unavailableLayers}
-          onResolve={handleResolveUnavailableLayer}
-          onDismiss={handleDismissUnavailableLayer}
-        />
-      )}
-
-      {/* The page's one fork: bring your own data, or take one out of the
-          published catalog. Two doors, equal weight. */}
-      <div className="entry-section">
-        <div className="entry-paths">
-          <section className="entry-path">
-            <h2 className="entry-path-title">Open your data</h2>
-            {/* The same component the sidebar's Add Layer dialog renders — one
-                drop zone, one URL field, one set of words for both entry
-                points. Its format hint is the page's ONLY list of extensions,
-                so it stays on. */}
-            <SourcePicker
-              variant="hero"
-              onFile={handlePickedFile}
-              onFiles={handlePickedFiles}
-              loading={loading}
-            />
-            {/* The URL field is its own component now — a paste is a
-                different beat from a drop (see what it is, correct it, add) —
-                and it is the same one the dialog's URL tab renders. */}
-            <UrlSourceForm
-              variant="hero"
-              onSubmit={handleSubmitUrl}
-              loading={loading}
-            />
-          </section>
-
-          <section className="entry-path">
-            <h2 className="entry-path-title">Browse the catalog</h2>
-            <div className="catalog-entry">
-              <svg
-                viewBox="0 0 24 24"
-                width="24"
-                height="24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                aria-hidden="true"
-              >
-                <circle cx="11" cy="11" r="7" />
-                <line x1="16.5" y1="16.5" x2="21" y2="21" />
-              </svg>
-              <p>Pick a city model from the Open3D City catalog.</p>
-              <button
-                type="button"
-                className="catalog-entry-btn"
-                onClick={() => setCatalogOpen(true)}
-                disabled={loading}
-              >
-                Browse catalog
-              </button>
-            </div>
-          </section>
-        </div>
-
-        {/* The sample is a demo convenience, not a third door. Its label does
-            not change while loading: `disabled` and the loading indicator
-            below already say so. */}
-        <p className="sample-footnote">
-          or{" "}
-          <button
-            type="button"
-            className="sample-link"
-            onClick={handleLoadSample}
-            disabled={loading}
-          >
-            try the Delft sample
-          </button>
-        </p>
-      </div>
-
-      {savedSnapshots.length > 0 && (
-        <SnapshotList
-          snapshots={savedSnapshots}
-          onRestore={handleRestore}
-          onDelete={handleDeleteSnapshot}
-          loading={loading}
-        />
-      )}
-
-      {loading && (
-        <div className="loading-indicator">
-          <div className="loading-spinner" />
-          <span>Loading model...</span>
-        </div>
-      )}
-
-      {loadError && <p className="error-message">{loadError}</p>}
-
-      {/* The landing page has toasts of its own, and always did: a restore
-          that found no snapshot, a workspace whose layers all need a file
-          re-selected, a share link from an older version. Until Task C20 this
-          slot existed only in the viewer shell, so every one of those
-          messages was raised into a component that was not on screen. */}
-      {toast && <div className="toast">{toast}</div>}
-
-      {/* Adding does not close it, deliberately: the user queues several tiles
-          and watches them arrive. Nothing has to close it either — once the
-          first layer lands, `hasWorkspace` flips and this whole branch (dialog
-          included) is replaced by the viewer shell. */}
-      {catalogOpen && (
-        <StacBrowserDialog
-          onClose={() => setCatalogOpen(false)}
-          onAddUrl={handleAddUrl}
-        />
-      )}
-    </main>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Unavailable (file-backed, restored-from-a-snapshot) layers — a persistent
-// prompt, not a toast, per the explicit persistence requirement: "such a
-// layer must restore as an explicit unavailable local source state
-// prompting re-selection — not vanish with a toast."
-// ---------------------------------------------------------------------------
-
-function UnavailableLayersBanner({
-  layers,
-  onResolve,
-  onDismiss,
-}: {
-  readonly layers: ReadonlyArray<{
-    readonly id: string;
-    readonly name: string;
-    readonly fileName: string;
-  }>;
-  readonly onResolve: (entryId: string, file: File) => void;
-  readonly onDismiss: (entryId: string) => void;
-}) {
-  return (
-    <div className="unavailable-layers">
-      <div className="unavailable-layers-title">
-        {layers.length} layer{layers.length === 1 ? "" : "s"} need
-        {layers.length === 1 ? "s" : ""} a local file re-selected
-      </div>
-      {layers.map((entry) => (
-        <div key={entry.id} className="unavailable-layer-row">
-          <span className="unavailable-layer-name" title={entry.fileName}>
-            {entry.name}
-          </span>
-          <label className="unavailable-layer-choose">
-            Choose file
-            <input
-              type="file"
-              hidden
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) onResolve(entry.id, file);
-                e.target.value = "";
-              }}
-            />
-          </label>
-          <button
-            type="button"
-            className="unavailable-layer-dismiss"
-            title="Dismiss"
-            onClick={() => onDismiss(entry.id)}
-          >
-            ×
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Saved workspaces list
-// ---------------------------------------------------------------------------
-
-function SnapshotList({
-  snapshots,
-  onRestore,
-  onDelete,
-  loading,
-}: {
-  readonly snapshots: SnapshotSummary[];
-  readonly onRestore: (id: string) => void;
-  readonly onDelete: (id: string) => void;
-  readonly loading: boolean;
-}) {
-  return (
-    <div className="snapshot-list">
-      <div className="snapshot-list-title">Saved Workspaces</div>
-      {snapshots.map((s) => (
-        <div key={s.id} className="snapshot-row">
-          <div className="snapshot-info">
-            <span className="snapshot-label">{s.label}</span>
-            <span className="snapshot-date">
-              {new Date(s.savedAt).toLocaleDateString(undefined, {
-                month: "short",
-                day: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </span>
-          </div>
-          <div className="snapshot-actions">
-            <button
-              className="snapshot-btn"
-              onClick={() => onRestore(s.id)}
-              disabled={loading}
-            >
-              Restore
-            </button>
-            <button
-              className="snapshot-btn snapshot-btn-delete"
-              onClick={() => onDelete(s.id)}
-              disabled={loading}
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-      ))}
-    </div>
+    </>
   );
 }

@@ -253,18 +253,22 @@ function storeWith(snapshot: ProjectSnapshot): ProjectStateStore {
 
 /** The landing page's URL field: type, detect (Enter submits the form), add. */
 function addUrlFromLandingPage(url: string): void {
+  fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
+  fireEvent.click(screen.getByRole("tab", { name: "URL" }));
   const field = screen.getByLabelText("Source URL");
   fireEvent.change(field, { target: { value: url } });
   fireEvent.submit(screen.getByTestId("url-source-form"));
-  fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
+  fireEvent.click(screen.getAllByRole("button", { name: "Add layer" }).at(-1)!);
 }
 
 /** The landing page's drop zone, with the same hand-built `dataTransfer` the
  *  `SourcePicker` suite uses. */
 function dropOnLandingPage(file: File): void {
+  fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
   fireEvent.drop(screen.getByTestId("source-picker-drop-zone"), {
     dataTransfer: { files: [file], types: ["Files"], dropEffect: "" },
   });
+  fireEvent.click(screen.getAllByRole("button", { name: "Add layer" }).at(-1)!);
 }
 
 beforeEach(() => {
@@ -539,7 +543,16 @@ describe("a geospatial-only workspace", () => {
 
   it("keeps a restored camera: a geo-only restore applies its viewpoint and does not fit", async () => {
     render(<App persistenceStore={storeWith(geoOnlySnapshot())} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: useWorkspaceStore.getState().name }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open…" }));
+    await waitFor(() =>
+      expect(document.querySelector(".workspace-snapshot")).not.toBeNull(),
+    );
+    fireEvent.click(
+      document.querySelector<HTMLButtonElement>(".workspace-snapshot")!,
+    );
 
     await waitFor(() =>
       expect(useGeoLayerStore.getState().layers).toHaveLength(1),
@@ -558,7 +571,16 @@ describe("a geospatial-only workspace", () => {
 
   it("does not tell a geo-only restore to drop a file: the workspace is on screen", async () => {
     render(<App persistenceStore={storeWith(geoOnlySnapshot())} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: useWorkspaceStore.getState().name }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open…" }));
+    await waitFor(() =>
+      expect(document.querySelector(".workspace-snapshot")).not.toBeNull(),
+    );
+    fireEvent.click(
+      document.querySelector<HTMLButtonElement>(".workspace-snapshot")!,
+    );
 
     await waitFor(() =>
       expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),

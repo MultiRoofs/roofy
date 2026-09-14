@@ -255,8 +255,16 @@ function storeWith(snapshot: ProjectSnapshot | null): ProjectStateStore {
 
 /** Click the snapshot list's Restore button (landing page only). */
 async function clickRestore(): Promise<void> {
-  const button = await screen.findByRole("button", { name: "Restore" });
-  fireEvent.click(button);
+  fireEvent.click(
+    screen.getByRole("button", { name: useWorkspaceStore.getState().name }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open…" }));
+  await waitFor(() =>
+    expect(document.querySelector(".workspace-snapshot")).not.toBeNull(),
+  );
+  fireEvent.click(
+    document.querySelector<HTMLButtonElement>(".workspace-snapshot")!,
+  );
 }
 
 beforeEach(() => {
@@ -412,7 +420,7 @@ describe("App restore against CitySceneHandle.ready", () => {
         screen.getAllByText(/needs? a local file re-selected/).length,
       ).toBeGreaterThan(0),
     );
-    expect(screen.queryByTestId("navara-viewport")).toBeNull();
+    expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
     expect(setCameraState).not.toHaveBeenCalled();
   });
 
@@ -427,7 +435,7 @@ describe("App restore against CitySceneHandle.ready", () => {
     };
     render(<App persistenceStore={storeWith(localSnapshot)} />);
     await clickRestore();
-    const input = await screen.findByLabelText("Choose file");
+    const input = await screen.findByTestId("relink-input");
     fireEvent.change(input, {
       target: {
         files: [
@@ -927,7 +935,10 @@ describe("App toast timers", () => {
 
 it("does not prompt to add a layer when opening a populated saved workspace from management", async () => {
   render(<App persistenceStore={storeWith(snapshotWithUrlLayer())} />);
-  fireEvent.click(screen.getByRole("button", { name: "Workspaces" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: useWorkspaceStore.getState().name }),
+  );
+  fireEvent.click(screen.getByRole("link", { name: "Manage workspaces" }));
   fireEvent.click(await screen.findByRole("button", { name: "Open" }));
   await waitFor(() => expect(useLayerStore.getState().layers).toHaveLength(1));
   readyGate.resolve();

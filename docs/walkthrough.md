@@ -1,7 +1,9 @@
 # Delft walkthrough
 
-Checkpoint status: the approved wireframe is in `design/walkthrough-wireframe.html`.
-The implementation below is a draft, currently disconnected from App and Preferences.
+The approved wireframe is in `design/walkthrough-wireframe.html`.
+The app opens directly in the viewer. An empty workspace offers the Delft sample;
+File, URL, Catalog and Draw remain in Add layer. Saved projects are available in
+the workspace menu and Manage workspaces.
 
 Issue: https://github.com/MultiRoofs/roofy/issues/16
 

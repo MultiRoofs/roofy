@@ -6651,3 +6651,30 @@ button.file-label:disabled {
   background: var(--accent-soft);
   border-color: var(--accent);
 }
+
+.empty-workspace-start {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(320px, calc(100% - 32px));
+  padding: 20px;
+  border-radius: var(--control-radius);
+  background: var(--bg-panel);
+  color: var(--fg);
+  box-shadow: 0 4px 20px #0002;
+}
+.empty-workspace-start h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.empty-workspace-start p {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+.empty-workspace-start button {
+  margin: 0 8px 8px 0;
+}

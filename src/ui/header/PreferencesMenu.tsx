@@ -1,3 +1,4 @@
+import { walkthroughStore } from "../../features/walkthrough/walkthroughStore";
 /**
  * Preferences — the gear at the end of the header, and the ONE place the
  * interface's appearance is chosen.
@@ -34,7 +35,7 @@ const APPEARANCE_OPTIONS: ReadonlyArray<{
 
 export function PreferencesMenu({ tooltip = false }: { tooltip?: boolean }) {
   const { preference, setPreference } = useTheme();
-  const { open, toggle, rootRef, triggerRef } = useHeaderMenu();
+  const { open, setOpen, toggle, rootRef, triggerRef } = useHeaderMenu();
 
   return (
     <div className="header-menu" ref={rootRef}>
@@ -63,6 +64,15 @@ export function PreferencesMenu({ tooltip = false }: { tooltip?: boolean }) {
           role="dialog"
           aria-label="Preferences"
         >
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              walkthroughStore.getState().start();
+            }}
+          >
+            Start walkthrough
+          </button>
           <div className="attr-section">
             <div className="attr-section-title">Interface appearance</div>
             <div

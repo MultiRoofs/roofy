@@ -177,12 +177,14 @@ const emptyStore: ProjectStateStore = {
  *  field detects on blur), and add it — the two beats the redesigned form
  *  asks for. */
 function loadFromUrlBox(url: string): void {
+  fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
+  fireEvent.click(screen.getByRole("tab", { name: "URL" }));
   const input = screen.getByPlaceholderText(
     "https://example.com/model.city.json",
   );
   fireEvent.change(input, { target: { value: url } });
   fireEvent.blur(input);
-  fireEvent.click(screen.getByRole("button", { name: "Add layer" }));
+  fireEvent.click(screen.getAllByRole("button", { name: "Add layer" }).at(-1)!);
 }
 
 const model = {
@@ -230,7 +232,7 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
   it("mounts the viewport with ZERO layers and resolves the plugin once it publishes", async () => {
     render(<App persistenceStore={emptyStore} />);
     // Landing page: no viewport, so no engine and no FlatCityBuf plugin.
-    expect(screen.queryByTestId("navara-viewport")).toBeNull();
+    expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
 
     loadFromUrlBox(FCB_URL);
 
@@ -261,16 +263,11 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
     await waitFor(() =>
       expect(screen.getByTestId("navara-viewport")).toBeInTheDocument(),
     );
-    // The hold is released while the entered viewer retains its canvas.
-    await waitFor(() =>
-      expect(
-        screen.getByRole("dialog", { name: "Add layer" }),
-      ).toBeInTheDocument(),
-    );
-    expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
     expect(
-      screen.getByText("Streaming refused: non-metric CRS"),
+      await screen.findByText("Error · Streaming refused: non-metric CRS"),
     ).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Add layer" })).toBeNull();
+    expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
   });
 
   it("does NOT boot the engine for a non-streaming source", async () => {
@@ -291,7 +288,7 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
     );
     // Still parsing: a CityJSON layer mounts the viewport as a CONSEQUENCE of
     // existing, so there is nothing to boot early for.
-    expect(screen.queryByTestId("navara-viewport")).toBeNull();
+    expect(screen.getByTestId("navara-viewport")).toBeInTheDocument();
 
     release(loaded);
     await waitFor(() =>
@@ -320,7 +317,7 @@ describe("App engine-boot flag for a first-layer .fcb open", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          "The 3D viewport did not start. The .fcb layer could not be opened.",
+          "Error · The 3D viewport did not start. The .fcb layer could not be opened.",
         ),
       ).toBeInTheDocument(),
     );
