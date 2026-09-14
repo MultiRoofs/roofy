@@ -70,6 +70,8 @@ export const skipNoGeometry = (lod: string): string =>
   `no geometry at LoD ${lod}`;
 /** §6.2's caveat for a building measured with its volume withheld. */
 export const CAVEAT_INVALID_SOLIDS = "invalid solids (no volume)";
+/** Its singular, for §6.2's card at a count of one (gate defect F2). */
+export const CAVEAT_INVALID_SOLID = "invalid solid (no volume)";
 /**
  * The same sentence for a building measured with its ENVELOPE withheld —
  * `ST_3DSurfaceArea` raises on a degenerate face, so the statement's guard
@@ -79,6 +81,8 @@ export const CAVEAT_INVALID_SOLIDS = "invalid solids (no volume)";
  */
 export const CAVEAT_DEGENERATE_SOLIDS =
   "solids with degenerate faces (no area)";
+/** Its singular (gate defect F2). */
+export const CAVEAT_DEGENERATE_SOLID = "solid with degenerate faces (no area)";
 
 /**
  * §7's contributor rule, verbatim: "At the chosen LoD, if any part of the
@@ -238,11 +242,18 @@ export function rollUpSolids(
   };
 }
 
-/** `[]` when the count is zero, so an empty list means "nothing to report". */
+/**
+ * `[]` when the count is zero, so an empty list means "nothing to report".
+ *
+ * A third element is the cause's SINGULAR (gate defect F2); `summarise` is what
+ * chooses between the two, so nothing here renders a number.
+ */
 export function countsAsSkips(
-  entries: ReadonlyArray<readonly [string, number]>,
+  entries: ReadonlyArray<readonly [string, number, string?]>,
 ): ReadonlyArray<SkipCount> {
   return entries
     .filter(([, count]) => count > 0)
-    .map(([cause, count]) => ({ cause, count }));
+    .map(([cause, count, one]) =>
+      one === undefined ? { cause, count } : { cause, count, one },
+    );
 }

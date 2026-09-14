@@ -509,7 +509,11 @@ describe("aggregatePerArea", () => {
     // The card's own three scalars go through the same door already.
     expect(out.line).toBe("2 areas aggregated over 2 buildings");
     expect(out.caveats).toEqual([
-      { cause: "building counted in more than one area", count: 1 },
+      {
+        cause: "buildings counted in more than one area",
+        one: "building counted in more than one area",
+        count: 1,
+      },
     ]);
     expect(out.skipped).toEqual([{ cause: "no geometry", count: 1 }]);
   });
@@ -531,10 +535,15 @@ describe("aggregatePerArea", () => {
     });
     const out = await aggregatePerArea(run(params), ctx);
     expect(out.line).toBe("2 areas aggregated over 3 buildings");
-    // `summarise` renders "<count> <cause>", so the cause carries the NOUN —
-    // §7.6's own "14 buildings counted in more than one area".
+    // `summarise` renders "<count> <cause>" and picks the singular at a count
+    // of one (F2), so the cause carries BOTH nouns and no number — §7.6's own
+    // "14 buildings counted in more than one area".
     expect(out.caveats).toEqual([
-      { cause: "building counted in more than one area", count: 1 },
+      {
+        cause: "buildings counted in more than one area",
+        one: "building counted in more than one area",
+        count: 1,
+      },
     ]);
     expect(out.measured).toBe(3);
   });

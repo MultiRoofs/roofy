@@ -214,6 +214,17 @@ export interface LogEntry {
 export interface SkipCount {
   readonly cause: string;
   readonly count: number;
+  /**
+   * The same cause with its count noun in the SINGULAR, for a count of one
+   * (gate defect F2: the card read "1 invalid solids (no volume)" while the
+   * skip line beside it already said "1 not a solid").
+   *
+   * Optional, because most causes carry no count noun at all — "not a solid",
+   * "no geometry at LoD 2.2", "outside every area" read the same at any count.
+   * `summarise` is the ONE place that chooses between the two, so a cause
+   * cannot be pluralised in one destination and not in another.
+   */
+  readonly one?: string;
 }
 
 export interface RunSummary {

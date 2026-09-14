@@ -33,7 +33,9 @@ import {
   buildSourceIdsSql,
 } from "../solidSql";
 import {
+  CAVEAT_DEGENERATE_SOLID,
   CAVEAT_DEGENERATE_SOLIDS,
+  CAVEAT_INVALID_SOLID,
   CAVEAT_INVALID_SOLIDS,
   SKIP_NOT_A_SOLID,
   countsAsSkips,
@@ -260,8 +262,8 @@ export const measureSolids: ToolExecutor = async (run, ctx) => {
         [SKIP_NOT_A_SOLID, notASolid],
       ]),
       caveats: countsAsSkips([
-        [CAVEAT_INVALID_SOLIDS, invalid],
-        [CAVEAT_DEGENERATE_SOLIDS, degenerate],
+        [CAVEAT_INVALID_SOLIDS, invalid, CAVEAT_INVALID_SOLID],
+        [CAVEAT_DEGENERATE_SOLIDS, degenerate, CAVEAT_DEGENERATE_SOLID],
       ]),
     };
   } finally {

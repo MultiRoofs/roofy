@@ -405,6 +405,18 @@ function plural(n: number, one: string, many: string): string {
   return `${fmt(n)} ${n === 1 ? one : many}`;
 }
 
+/**
+ * A skip or caveat cause, singular at a count of one (gate defect F2).
+ *
+ * The ONE chooser, used by the head line's caveats and by the muted skip line
+ * alike: a cause that reads "1 invalid solids (no volume)" on the head while
+ * the line under it says "1 not a solid" is the inconsistency this closes.
+ * A cause with no `one` carries no count noun and reads the same either way.
+ */
+function causeOf(entry: SkipCount): string {
+  return entry.count === 1 ? (entry.one ?? entry.cause) : entry.cause;
+}
+
 /** Spec §10 scenario 4: a streaming run's card says what it ran over. */
 const RESIDENT_SET_NOTE =
   "Over the resident set: the buildings loaded when the run started.";
@@ -425,7 +437,7 @@ export function summarise(
   // measured count and the skipped count because it qualifies the first and is
   // not part of the second.
   for (const caveat of result.caveats ?? []) {
-    parts.push(`${fmt(caveat.count)} ${caveat.cause}`);
+    parts.push(`${fmt(caveat.count)} ${causeOf(caveat)}`);
   }
   if (skippedTotal > 0) parts.push(`${fmt(skippedTotal)} skipped`);
   parts.push(`${(elapsedMs / 1000).toFixed(1)} s`);
@@ -435,7 +447,7 @@ export function summarise(
   if (skippedTotal > 0) {
     detailParts.push(
       `${fmt(skippedTotal)} skipped: ${result.skipped
-        .map((s) => `${fmt(s.count)} ${s.cause}`)
+        .map((s) => `${fmt(s.count)} ${causeOf(s)}`)
         .join(" · ")}`,
     );
   }

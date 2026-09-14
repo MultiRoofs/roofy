@@ -390,13 +390,14 @@ export const aggregatePerArea: ToolExecutor = async (run, ctx) => {
         "buildings",
       )}`,
       // A `SkipCount` (Task 7's caveat channel). `summarise` renders "<count>
-      // <cause>", so the cause carries the NOUN only — picked by the same
-      // count, or a single match would read "1 buildings counted in …".
+      // <cause>" and picks the singular at a count of one (gate defect F2), so
+      // the cause carries both nouns and no number.
       caveats:
         multi > 0
           ? [
               {
-                cause: `${multi === 1 ? "building" : "buildings"} counted in more than one area`,
+                cause: "buildings counted in more than one area",
+                one: "building counted in more than one area",
                 count: multi,
               },
             ]

@@ -720,7 +720,12 @@ describe("measureSolids", () => {
     expect(result.measured).toBe(1);
     expect(result.skipped).toEqual([]);
     expect(result.caveats).toEqual([
-      { cause: "invalid solids (no volume)", count: 1 },
+      // Both nouns travel; `summarise` picks the singular at 1 (F2).
+      {
+        cause: "invalid solids (no volume)",
+        one: "invalid solid (no volume)",
+        count: 1,
+      },
     ]);
     expect(result.rows.get(id)).toMatchObject({
       solid_volume_m3: null,
@@ -785,9 +790,17 @@ describe("measureSolids", () => {
     expect(result.measured).toBe(1);
     expect(result.skipped).toEqual([]);
     expect(result.caveats).toEqual([
-      { cause: "invalid solids (no volume)", count: 1 },
+      {
+        cause: "invalid solids (no volume)",
+        one: "invalid solid (no volume)",
+        count: 1,
+      },
       // [adapted copy A18] — see the fix-wave report.
-      { cause: "solids with degenerate faces (no area)", count: 1 },
+      {
+        cause: "solids with degenerate faces (no area)",
+        one: "solid with degenerate faces (no area)",
+        count: 1,
+      },
     ]);
     expect(result.rows.get("B1")).toMatchObject({
       solid_volume_m3: null,

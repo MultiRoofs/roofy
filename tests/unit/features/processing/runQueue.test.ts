@@ -2327,6 +2327,65 @@ describe("summarise", () => {
     );
   });
 
+  it("singularises a caveat's count noun at ONE (F2)", () => {
+    // The gate defect: the head read "1 invalid solids (no volume)" while the
+    // skip line under it already said "1 not a solid". The rule lives HERE,
+    // once, so no tool can follow it on one card and not on another.
+    const summary = summarise(
+      {
+        ...result([["a", { solid_volume_m3: null }]], ["solid_volume_m3"]),
+        measured: 1,
+        skipped: [
+          { cause: "not a solid", count: 1 },
+          {
+            cause: "areas without a name",
+            one: "area without a name",
+            count: 1,
+          },
+        ],
+        caveats: [
+          {
+            cause: "invalid solids (no volume)",
+            one: "invalid solid (no volume)",
+            count: 1,
+          },
+        ],
+      },
+      8200,
+      { streaming: false },
+    );
+    expect(summary.line).toBe(
+      "1 building measured · 1 invalid solid (no volume) · 2 skipped · 8.2 s",
+    );
+    // The muted line follows the same rule, and a cause with NO count noun is
+    // left exactly as it is.
+    expect(summary.detail).toBe(
+      "2 skipped: 1 not a solid · 1 area without a name",
+    );
+  });
+
+  it("keeps the plural at any other count, including zero-free ones", () => {
+    const summary = summarise(
+      {
+        ...result([["a", { solid_volume_m3: null }]], ["solid_volume_m3"]),
+        measured: 1115,
+        skipped: [],
+        caveats: [
+          {
+            cause: "invalid solids (no volume)",
+            one: "invalid solid (no volume)",
+            count: 37,
+          },
+        ],
+      },
+      2400,
+      { streaming: false },
+    );
+    expect(summary.line).toBe(
+      "1,115 buildings measured · 37 invalid solids (no volume) · 2.4 s",
+    );
+  });
+
   it("prints a caveat between the measured count and the skipped count", () => {
     // §6.2, and the mockup's own card: "1,115 buildings measured · 37 invalid
     // solids (no volume) · 12 skipped · 2.4 s". A caveat qualifies the measured
