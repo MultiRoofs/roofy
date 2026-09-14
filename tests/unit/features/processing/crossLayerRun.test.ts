@@ -31,6 +31,13 @@ let featureTotal = 2;
 /** When set, the scope's COUNT statement waits here — so a test can read the
  *  card while scope resolution is holding the FIFO. */
 let scopeGate: { promise: Promise<void>; open: () => void } | null = null;
+/** When set, ANY statement containing `needle` waits here — so a test can land
+ *  a store change while the run is inside its write preparation. */
+let sqlGate: {
+  needle: string;
+  promise: Promise<void>;
+  open: () => void;
+} | null = null;
 
 function makeGate(): { promise: Promise<void>; open: () => void } {
   let open!: () => void;
@@ -62,6 +69,7 @@ function freshTable(name: string, columns: string[]) {
 vi.mock("../../../../src/insights/duckdb", () => {
   const run = async (statement: string) => {
     sql.push(statement);
+    if (sqlGate && statement.includes(sqlGate.needle)) await sqlGate.promise;
     if (statement.includes("COUNT(DISTINCT")) {
       if (scopeGate) await scopeGate.promise;
       return { ok: true as const, columns: ["n"], rows: [{ n: featureTotal }] };
@@ -322,6 +330,7 @@ beforeEach(() => {
   sql.length = 0;
   featureTotal = 2;
   scopeGate = null;
+  sqlGate = null;
   tables = {
     CITY: freshTable("layer_1", ["id", "feature_id"]),
   };
@@ -1337,6 +1346,70 @@ describe("a vector SOURCE replaced while the run is in flight", () => {
         error: "Layer changed while running; run again",
       });
       expectNothingPublished(id, destination);
+    },
+  );
+
+  it.each([["join-by-location"], ["distance-to-nearest"]] as const)(
+    "%s → new: a relink INSIDE the copy's preparation discards it",
+    async (toolId) => {
+      // The window a New-layer run has and a This-layer run does not: the copy
+      // is built — CREATE TABLE, ALTER, UPDATE — before anything is published,
+      // and each of those awaits. The relink lands while the copy's table is
+      // being cut, and the plan is discarded rather than published.
+      const zones = addZones();
+      const gate = makeGate();
+      sqlGate = { needle: "CREATE TABLE", ...gate };
+      registerExecutor(toolId, async (run) => ({
+        columns: [{ name: `${run.prefix}n`, type: "DOUBLE" as const }],
+        rows: new Map([["a", { [`${run.prefix}n`]: 1 }]]),
+        measured: 1,
+        skipped: [],
+      }));
+      const id = submitRun(sourced(toolId, zones, "new"));
+      await settle();
+      expect(sql.some((st) => st.startsWith("CREATE TABLE "))).toBe(true);
+      expect(runById(id)?.status).toBe("running");
+
+      relinkZones(zones);
+      sqlGate = null;
+      gate.open();
+      await settle();
+
+      expect(runById(id)).toMatchObject({
+        status: "failed",
+        error: "Layer changed while running; run again",
+      });
+      expectNothingPublished(id, "new");
+
+      const next = submitRun(sourced(toolId, zones, "layer"));
+      await settle();
+      expect(runById(next)?.status).toBe("done");
+    },
+  );
+
+  it.each([["join-by-location"], ["distance-to-nearest"]] as const)(
+    "%s: a relink is not a DONE run even when nothing matched",
+    async (toolId) => {
+      // The check sits ABOVE the no-rows exit: a run that matched nothing
+      // against a document the user has since replaced has not succeeded, and
+      // "0 buildings joined" about areas that are gone is the wrong answer.
+      const zones = addZones();
+      registerExecutor(toolId, async (run) => {
+        const out = {
+          columns: [{ name: `${run.prefix}n`, type: "DOUBLE" as const }],
+          rows: new Map<string, Record<string, unknown>>(),
+          measured: 0,
+          skipped: [],
+        };
+        relinkZones(zones);
+        return out;
+      });
+      const id = submitRun(sourced(toolId, zones, "layer"));
+      await settle();
+      expect(runById(id)).toMatchObject({
+        status: "failed",
+        error: "Layer changed while running; run again",
+      });
     },
   );
 

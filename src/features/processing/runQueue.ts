@@ -1897,20 +1897,15 @@ async function execute(
       useProcessingStore.getState().pushNotice(summary.line);
       return;
     }
-    // The table's spelling wins from here on, so the SQL, the rows' keys, the
-    // model, the registry, the card and Undo all name the same column.
-    const result = canonicalise(raw, table.columns);
-
-    if (result.rows.size === 0) {
-      // Nothing to write.
-      doneWithNothing(result, layer.isStreaming);
-      return;
-    }
-
-    // The SOURCE's re-validation, immediately before the write opens — the
-    // last moment at which "nothing has been published" is still true for a
-    // city target. A vector TARGET is checked the same way further up; this is
-    // the other half of §6.1's sentence.
+    // The SOURCE's re-validation, on the far side of the compute and before
+    // anything at all is decided from its results — the last moment at which
+    // "nothing has been published" is still true for a city target, and ABOVE
+    // the no-rows exit, because a run that matched nothing against a document
+    // the user has replaced is not a `done` run either. A vector TARGET is
+    // checked the same way further up; this is the other half of §6.1's
+    // sentence. (Nothing between here and the write awaits, so this covers the
+    // write preparation too; the executors have released their reader handle
+    // in their own `finally` by now.)
     const sourceMoved = vectorSourceMoved(source);
     if (sourceMoved !== null) {
       patch(id, {
@@ -1921,6 +1916,16 @@ async function execute(
       });
       return;
     }
+    // The table's spelling wins from here on, so the SQL, the rows' keys, the
+    // model, the registry, the card and Undo all name the same column.
+    const result = canonicalise(raw, table.columns);
+
+    if (result.rows.size === 0) {
+      // Nothing to write.
+      doneWithNothing(result, layer.isStreaming);
+      return;
+    }
+
     patch(id, { phase: "write" });
     // Which of THIS run's columns the table already has — matched the way
     // DuckDB matches them, without regard to case. A column classified as new
